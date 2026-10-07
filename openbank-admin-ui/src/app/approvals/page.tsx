@@ -40,6 +40,14 @@ const STATE_META: Record<string, { color: string; bg: string; border: string; Ic
   REJECTED: { color: 'var(--danger-text)', bg: 'var(--danger-bg)', border: 'var(--danger-border)', Icon: XCircle, cs: 'Zamítnuto', en: 'Rejected' },
 }
 
+const MAKER_KIND_LABELS: Record<NonNullable<DomainApprovalItem['makerActorKind']>, { cs: string; en: string }> = {
+  HUMAN: { cs: 'Člověk', en: 'Human' },
+  AI_AGENT: { cs: 'AI agent', en: 'AI agent' },
+  SERVICE_ACCOUNT: { cs: 'Servisní účet', en: 'Service account' },
+  CUSTOMER_PARTY: { cs: 'Zákaznická strana', en: 'Customer party' },
+  UNKNOWN: { cs: 'Původ neověřen', en: 'Origin unverified' },
+}
+
 export default function ApprovalsPage() {
   const { t, language } = useLanguage()
   const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
@@ -306,6 +314,9 @@ export default function ApprovalsPage() {
               <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 2 }}>
                 {item.resourceId && <span data-testid="approval-resource" style={{ fontFamily: 'var(--font-mono)' }}>{item.resourceId} · </span>}
                 {item.maker && <span data-testid="approval-maker">{t('navrhl', 'by')} {item.maker}</span>}
+                <span data-testid="approval-maker-kind" style={{ marginLeft: 6 }}>
+                  · {t(MAKER_KIND_LABELS[item.makerActorKind ?? 'UNKNOWN'].cs, MAKER_KIND_LABELS[item.makerActorKind ?? 'UNKNOWN'].en)}
+                </span>
                 {item.proposedAt && <time dateTime={item.proposedAt}> · {new Date(item.proposedAt).toLocaleString(dateLocale)}</time>}
               </div>
             </div>

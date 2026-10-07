@@ -122,7 +122,7 @@ jobs:
             21
             25
 
-      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
           # NEVER write the Actions cache from this job — restore only, on every ref
           # including main (#3299).
@@ -167,7 +167,7 @@ jobs:
           # org.gradle:github-dependency-graph-gradle-plugin:<version> onto the buildscript
           # classpath, and Gradle dependency verification checks it against
           # gradle/verification-metadata.xml. A setup-gradle bump that raises the plugin
-          # version (v6 line moved 1.4.1 -> 1.4.2) fails this job with "Dependency
+          # version (v6.4 moved 1.4.2 -> 1.5.0) fails this job with "Dependency
           # verification failed for configuration 'classpath'" until the matching
           # <component> entry is added to verification-metadata.xml — the version is not
           # declared anywhere in this repo, so the metadata entry IS the pin record.

@@ -3564,17 +3564,21 @@ class CustomerEdgeResource(
     /**
      * The caller's own notification feed. Ownership is implicit: the upstream query is scoped by the
      * JWT party (never a client-supplied id), so a customer can only ever read their own notifications.
-     * Read-only; `limit` maps to the upstream `size`, page 0 (cursor paging is a follow-up).
+     * Read-only; page and limit are bounded before they reach the upstream party-scoped query.
      */
     @GET
     @Path("/notifications")
     @Authorize(action = "customer.notifications.read")
     @Blocking
-    fun listNotifications(@QueryParam("limit") @DefaultValue("20") limit: Int): Response {
+    fun listNotifications(
+        @QueryParam("limit") @DefaultValue("20") limit: Int,
+        @QueryParam("page") @DefaultValue("0") page: Int,
+    ): Response {
         val customer = customer()
         val size = limit.coerceIn(1, 100)
+        val safePage = page.coerceAtLeast(0)
         return upstream.get(
-            "$notificationServiceUrl/api/v1/notifications?partyId=${customer.partyId}&page=0&size=$size",
+            "$notificationServiceUrl/api/v1/notifications?partyId=${customer.partyId}&page=$safePage&size=$size",
             customer.partyId.toString(),
         )
     }
