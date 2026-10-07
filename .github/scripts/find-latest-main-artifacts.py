@@ -92,6 +92,29 @@ class LookupTests(unittest.TestCase):
 
         self.assertEqual(resolve_artifacts(["first", "second"], lookup), ["FIRST", "SECOND"])
 
+    def test_lookup_pool_is_parallel_and_bounded(self) -> None:
+        from threading import Lock
+        from time import sleep
+
+        active = 0
+        peak = 0
+        lock = Lock()
+
+        def lookup(name: str) -> str:
+            nonlocal active, peak
+            with lock:
+                active += 1
+                peak = max(peak, active)
+            sleep(0.02)
+            with lock:
+                active -= 1
+            return name
+
+        names = [f"service-{index}" for index in range(MAX_WORKERS * 2)]
+        self.assertEqual(resolve_artifacts(names, lookup), names)
+        self.assertGreater(peak, 1)
+        self.assertLessEqual(peak, MAX_WORKERS)
+
     def test_parallel_api_failure_propagates(self) -> None:
         def lookup(name: str) -> str:
             if name == "bad":
