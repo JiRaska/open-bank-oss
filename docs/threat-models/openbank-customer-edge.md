@@ -295,3 +295,11 @@ Trust boundaries:
   chain; the grantor is the token party, and the optional filters can only narrow a set already
   scoped to the caller. Rollback: revert the `resolveDebitAuthority` call site — the route returns
   to owner-only.
+
+## Company payment drafts (slice 6)
+
+The edge requires a human customer token and `X-Acting-For` on every draft route, resolves the
+human's live representation mandate, and forwards only the verified company and human to the
+persisted domestic draft aggregate. A missing, invalid, foreign, or expired mandate fails closed.
+Batch IDs cannot switch company by changing the header because the owning service scopes reads
+and writes by company. The API has no submit or rail dispatch route in this slice.
