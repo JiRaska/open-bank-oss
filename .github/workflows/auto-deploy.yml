@@ -1207,6 +1207,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          TARGETED_RECONCILE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.reconcile == 'true' && github.event.inputs.services != '' }}
         run: |
           set -euo pipefail
           # Recompute against LIVE main (#3194). Same exposure admin-ui-deploy.yml has: the
@@ -1286,7 +1287,8 @@ jobs:
           # then land as ONE commit on main instead of one each. A pin is carried only while main
           # still holds the tag that PR replaced, so a service main has moved since is never
           # rewound; this run's own pins always win. An ARMED PR is left alone (already landing).
-          if [ -n "${GH_TOKEN:-}" ]; then
+          # A targeted recovery must not absorb unrelated deferred image pins.
+          if [ -n "${GH_TOKEN:-}" ] && [ "$TARGETED_RECONCILE" != "true" ]; then
             OWN_IMAGES="$(echo "$IMAGE_TAGS" | jq -r --arg r "$ECR_REGISTRY" 'keys[] | "\($r)/\(.)"' | tr '\n' ' ')"
             # Re-read the live hold after the main reset. Filtering this run's tags alone
             # is insufficient: an older unarmed PR may contain a held image pin.
@@ -1438,7 +1440,7 @@ jobs:
       # reached 7 of the repo's 23 open PRs. Runs BEFORE the signature guard so a run that later
       # fails the guard still leaves exactly one current deploy PR behind, not a growing pile.
       - name: Close superseded deploy PRs
-        if: steps.gitops_pr.outputs.pull-request-number != ''
+        if: steps.gitops_pr.outputs.pull-request-number != '' && !(github.event_name == 'workflow_dispatch' && github.event.inputs.reconcile == 'true' && github.event.inputs.services != '')
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
