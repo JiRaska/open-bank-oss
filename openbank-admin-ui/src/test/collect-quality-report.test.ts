@@ -110,6 +110,49 @@ describe('collect-quality-report contract classification (#7544)', () => {
     })
   })
 
+  it('uses an identical newer pact when the old matrix has a row but no verification', async () => {
+    const committedPact = {
+      consumer: { name: 'openbank-finrep-service' }, provider: { name: 'openbank-risk-engine' },
+      interactions: [{ description: 'reads a risk snapshot' }],
+    }
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/matrix')) {
+        const version = new URL(url).searchParams.get('q[][version]')
+        return jsonResponse(200, { matrix: version === 'new-main'
+          ? [{ providerVersion: { number: 'provider-main' }, verificationResult: { success: true, verifiedAt: '2026-10-07T00:00:00Z' } }]
+          : [{ providerVersion: { number: 'provider-main' }, verificationResult: null }] })
+      }
+      if (url.includes('/openbank-finrep-service/branches/main/latest-version')) return jsonResponse(200, { number: 'new-main' })
+      if (url.includes('/pacts/provider/')) return jsonResponse(200, { ...committedPact, _links: { self: { href: 'broker-link' } } })
+      throw new Error(`unexpected url ${url}`)
+    }))
+
+    const result = await fetchPairVerification(
+      'http://broker.example', null, 'openbank-finrep-service', 'old-file-commit', 'openbank-risk-engine', committedPact,
+    )
+    expect(result).toEqual({
+      status: 'passed', verifiedAt: '2026-10-07T00:00:00Z', providerVersion: 'provider-main', consumerVersion: 'new-main',
+    })
+  })
+
+  it('never replaces an explicit failed verdict with a newer equivalent pass', async () => {
+    const calls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      calls.push(url)
+      if (url.includes('/matrix')) return jsonResponse(200, { matrix: [
+        { verificationResult: { success: false, verifiedAt: '2026-10-07T00:00:00Z' } },
+      ] })
+      throw new Error(`unexpected fallback query ${url}`)
+    }))
+
+    const result = await fetchPairVerification(
+      'http://broker.example', null, 'openbank-finrep-service', 'old-file-commit', 'openbank-risk-engine',
+      { interactions: [{ description: 'reads a risk snapshot' }] },
+    )
+    expect(result).toMatchObject({ status: 'failed' })
+    expect(calls).toHaveLength(1)
+  })
+
   it('does not borrow a newer verdict when the published pact differs from the committed file', async () => {
     const calls: string[] = []
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
