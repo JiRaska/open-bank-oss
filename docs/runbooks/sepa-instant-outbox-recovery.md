@@ -9,8 +9,9 @@ transition exhausted the shared outbox's ten delivery attempts and reached termi
    Do not copy payment payloads into incident tickets or logs.
 2. Establish whether the broker acknowledged this event ID and whether downstream consumers
    processed it. A crash after broker acknowledgement but before `markSent` can produce a
-   duplicate on retry, including a duplicate audit record. Repair transport or per-row payload
-   errors before considering requeue.
+   duplicate on retry. The unchanged outbox `ce-id` lets a current audit consumer deduplicate
+   that retry; verify the consumer version and its stored event ID before assuming this happened.
+   Repair transport or per-row payload errors before considering requeue.
 3. The payment-domain owner and an independent reviewer decide disposition for each event ID:
    confirmed delivered, safe to requeue, or held for investigation. Requeue is an attributable
    data change through the approved operational process, preserving the original event ID and
@@ -21,6 +22,7 @@ transition exhausted the shared outbox's ten delivery attempts and reached termi
 
 The scheme-submission flag stays explicitly false until the settlement path and its recovery
 procedure have completed review. The outbox dispatcher remains enabled for ordinary submissions.
+Deploy and verify the audit consumer's `ce-id` handling before enabling this producer's relay.
 On application rollback, keep V5 and a compatible relay available until all recoverable rows
 have approved dispositions. Disabling dispatch or restoring an older binary does not empty the
 table; schema removal requires a verified empty recoverable set after writers stop.

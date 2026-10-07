@@ -319,8 +319,9 @@ and NetworkPolicy peer remain through Phase 5.
   `SepaInstantOutboxDeadLettered` alert make that terminal state visible; reviewed,
   per-event disposition is in `docs/runbooks/sepa-instant-outbox-recovery.md`.
   A successful Kafka acknowledgement can still precede a crash before `markSent`.
-  Until stable transport identity is carried and consumed, a retry may append a second
-  audit row; this remains a rollout blocker, not a risk accepted by this source candidate.
+  The unchanged outbox `ce-id` is now sent on each attempt and used by audit-service before
+  the Kafka offset when the body has no `eventId`. Deploy and verify that consumer first;
+  a retry against an older consumer can still append a second audit row.
   Historical transitions are not backfilled. The scheme-submission GitOps flag is
   explicitly false under its matching application env name until the settlement flow
   and recovery owner approve a rollout. The outbox dispatcher must stay enabled for

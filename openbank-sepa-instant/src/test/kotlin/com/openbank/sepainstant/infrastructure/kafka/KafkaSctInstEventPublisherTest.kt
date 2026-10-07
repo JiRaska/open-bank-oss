@@ -5,15 +5,50 @@ package com.openbank.sepainstant.infrastructure.kafka
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
+import com.openbank.libs.persistence.outbox.OutboxEntry
+import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
+import com.openbank.libs.persistence.outbox.OutboxStatus
 import com.openbank.sepainstant.domain.event.SctInstPaymentSubmitted
+import io.mockk.mockk
+import io.smallrye.reactive.messaging.MutinyEmitter
+import io.smallrye.reactive.messaging.kafka.api.OutgoingKafkaRecordMetadata
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
+import java.time.Instant
 import java.time.OffsetDateTime
 import java.util.UUID
 
 /** The durable writer stores the established four-field Kafka payload verbatim. */
 class KafkaSctInstEventPublisherTest {
+    @Test
+    fun `retry retains the outbox event ID header without changing the body or adding a key`() {
+        val eventId = UUID.randomUUID()
+        val payload = """{"type":"SctInstPaymentSubmitted","paymentId":"${UUID.randomUUID()}"}"""
+        val now = Instant.parse("2026-08-17T10:00:00Z")
+        val entry = OutboxEntry(
+            eventId = eventId,
+            aggregateId = UUID.randomUUID(),
+            eventType = "SctInstPaymentSubmitted",
+            payload = payload,
+            status = OutboxStatus.PENDING,
+            attemptCount = 0,
+            createdAt = now,
+            updatedAt = now,
+            sentAt = null,
+            lastError = null,
+        )
+        val publisher = KafkaSctInstEventPublisher(mockk<MutinyEmitter<String>>())
+
+        listOf(publisher.messageFor(entry), publisher.messageFor(entry.copy(attemptCount = 1))).forEach { message ->
+            assertThat(message.payload).isEqualTo(payload)
+            val metadata = message.getMetadata(OutgoingKafkaRecordMetadata::class.java).orElseThrow()
+            assertThat(metadata.key).isNull()
+            assertThat(metadata.headers.lastHeader(OutboxKafkaHeaders.HEADER_EVENT_ID).value().toString(Charsets.UTF_8))
+                .isEqualTo(eventId.toString())
+        }
+    }
+
     @Test
     fun `outbox payload carries the same sourceService attribution and identifiers`() {
         val mapper = ObjectMapper().registerModule(JavaTimeModule())

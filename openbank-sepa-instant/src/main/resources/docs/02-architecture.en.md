@@ -64,7 +64,7 @@ Opening the AML case is **best-effort** (`openCaseQuietly`): a case-store outage
 
 ## Kafka publishing
 
-The #12181 source candidate writes each event-producing payment transition and its outbox row in one PostgreSQL transaction. `SctInstOutboxDispatcher` later claims the row and retries delivery through `KafkaSctInstEventPublisher` to `openbank.sepa.instant.events`. This is at-least-once delivery: a broker acknowledgement followed by failure before `markSent` can replay the same event. The existing four-field Kafka payload remains unkeyed and headerless; this candidate does not establish consumer deduplication. This describes source behavior, not proof that the candidate was reviewed, merged, or deployed.
+The #12181 source candidate writes each event-producing payment transition and its outbox row in one PostgreSQL transaction. `SctInstOutboxDispatcher` later claims the row and retries delivery through `KafkaSctInstEventPublisher` to `openbank.sepa.instant.events`. This is at-least-once delivery: a broker acknowledgement followed by failure before `markSent` can replay the same event. The existing four-field Kafka payload and unkeyed record stay unchanged; standard outbox headers carry the durable `ce-id` on every attempt. Audit-service uses that ID before the Kafka offset when the body has no `eventId`, so the audit consumer must be deployed before this producer. This describes source behavior, not proof that the candidate was reviewed, merged, or deployed.
 
 ## Resilience & rate limiting
 

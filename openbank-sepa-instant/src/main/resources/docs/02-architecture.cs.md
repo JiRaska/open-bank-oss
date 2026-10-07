@@ -64,7 +64,7 @@ Otevření AML případu je **best-effort** (`openCaseQuietly`): výpadek case s
 
 ## Publikování do Kafky
 
-Zdrojový kandidát #12181 ukládá každý přechod platby s událostí a její outbox řádek v jedné PostgreSQL transakci. `SctInstOutboxDispatcher` pak řádek vyzvedne a opakuje doručení přes `KafkaSctInstEventPublisher` do `openbank.sepa.instant.events`. Doručení je at-least-once: potvrzení brokerem následované selháním před `markSent` může stejnou událost zopakovat. Dosavadní čtyřpolový Kafka payload zůstává bez klíče a hlaviček; kandidát nezajišťuje deduplikaci u konzumenta. Jde o popis zdrojového kódu, nikoli o důkaz schválení, merge či nasazení kandidáta.
+Zdrojový kandidát #12181 ukládá každý přechod platby s událostí a její outbox řádek v jedné PostgreSQL transakci. `SctInstOutboxDispatcher` pak řádek vyzvedne a opakuje doručení přes `KafkaSctInstEventPublisher` do `openbank.sepa.instant.events`. Doručení je at-least-once: potvrzení brokerem následované selháním před `markSent` může stejnou událost zopakovat. Dosavadní čtyřpolový Kafka payload a záznam bez klíče se nemění; standardní outbox hlavičky nesou trvalé `ce-id` při každém pokusu. Audit-service použije toto ID před Kafka offsetem, pokud tělo nemá `eventId`, a proto musí být auditní konzument nasazen před producentem. Jde o popis zdrojového kódu, nikoli o důkaz schválení, merge či nasazení kandidáta.
 
 ## Odolnost a rate limiting
 
