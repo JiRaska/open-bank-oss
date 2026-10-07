@@ -9,12 +9,14 @@ import os
 import sys
 import unittest
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 PER_PAGE = 100
 MAX_PAGES = 5
+MAX_WORKERS = 8
 
 
 class ArtifactApiError(RuntimeError):
@@ -71,7 +73,34 @@ def latest_main_artifact(
     )
 
 
+def resolve_artifacts(
+    names: list[str], lookup: Callable[[str], str | None]
+) -> list[str | None]:
+    """Bound concurrent lookups while preserving input order and propagating errors."""
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+        return list(pool.map(lookup, names))
+
+
 class LookupTests(unittest.TestCase):
+    def test_parallel_results_keep_input_order(self) -> None:
+        from time import sleep
+
+        def lookup(name: str) -> str:
+            if name == "first":
+                sleep(0.02)
+            return name.upper()
+
+        self.assertEqual(resolve_artifacts(["first", "second"], lookup), ["FIRST", "SECOND"])
+
+    def test_parallel_api_failure_propagates(self) -> None:
+        def lookup(name: str) -> str:
+            if name == "bad":
+                raise ArtifactApiError("quota exhausted")
+            return name
+
+        with self.assertRaisesRegex(ArtifactApiError, "quota exhausted"):
+            resolve_artifacts(["good", "bad"], lookup)
+
     def test_returns_newest_nonexpired_main_artifact(self) -> None:
         calls: list[int] = []
 
@@ -147,11 +176,14 @@ def main() -> int:
         parser.error("--repo, GH_TOKEN and at least one artifact name are required")
 
     try:
-        for name in args.artifact_names:
-            artifact_id = latest_main_artifact(
+        artifact_ids = resolve_artifacts(
+            args.artifact_names,
+            lambda name: latest_main_artifact(
                 name,
                 lambda artifact_name, page: github_page(args.repo, token, artifact_name, page),
-            )
+            ),
+        )
+        for artifact_id in artifact_ids:
             print(artifact_id or "")
     except ArtifactApiError as exc:
         print(f"artifact lookup failed closed: {exc}", file=sys.stderr)

@@ -477,17 +477,19 @@ jobs:
             exit 1
           fi
 
-          DOWNLOADED=0
-          for index in "${!SERVICES[@]}"; do
-            svc="${SERVICES[$index]}"
+          # Service archives have independent paths; bound the HTTP fan-out.
+          # xargs propagates any worker failure so incomplete evidence fails closed.
+          STAGED_MARKERS="$(mktemp -d)"
+          export STAGED_MARKERS
+          stage_one() {
+            local svc="$1" art_id="$2" art_name TMPDIR_ART RUN_JSON xml rel target
             art_name="test-intelligence-${svc}"
             # This image represents deployed main, not the newest PR candidate.
             # Keep branch provenance explicit: an unmerged artifact must never be
             # presented in the sandbox as evidence for the deployed revision.
-            art_id="${ARTIFACT_IDS[$index]:-}"
             if [ -z "${art_id}" ]; then
               echo "  ${svc}: no artifact (skip)"
-              continue
+              return 0
             fi
             if api "https://api.github.com/repos/${REPO}/actions/artifacts/${art_id}/zip" \
                 -L -o "/tmp/${art_name}.zip"; then
@@ -532,13 +534,22 @@ jobs:
                 mkdir -p "${svc}/build/reports/kover"
                 cp "${xml}" "${svc}/build/reports/kover/report.xml"
               done
-              DOWNLOADED=$((DOWNLOADED + 1))
+              : > "${STAGED_MARKERS}/${svc}"
               echo "  ${svc}: staged"
             else
               echo "  ${svc}: artifact download failed; refusing incomplete Test Intelligence image" >&2
               exit 1
             fi
-          done
+          }
+          export -f api stage_one
+          # shellcheck disable=SC2016  # positional parameters expand in worker bash
+          {
+            for index in "${!SERVICES[@]}"; do
+              printf '%s\0%s\0' "${SERVICES[$index]}" "${ARTIFACT_IDS[$index]:-}"
+            done
+          } | xargs -0 -P 8 -n 2 bash -e -o pipefail -c 'stage_one "$1" "$2"' _
+          DOWNLOADED=$(find "${STAGED_MARKERS}" -type f | wc -l | tr -d ' ')
+          rm -rf "${STAGED_MARKERS}"
           COUNT=$(find . -path "*/build/test-results/*/TEST-*.xml" | wc -l | tr -d ' ')
           RUN_COUNT=$(find . -path "*/build/test-intelligence/run.json" | wc -l | tr -d ' ')
           echo "Staged ${RUN_COUNT} run envelopes and ${COUNT} JUnit XML files from ${DOWNLOADED}/${#SERVICES[@]} services."
