@@ -2436,9 +2436,15 @@ class CustomerEdgeResource(
             val data = runCatching { objectMapper.readTree(enriched.entity?.toString() ?: "").path("data") }
                 .getOrNull()?.takeIf { it.isArray }
                 ?: return Response.status(Response.Status.SERVICE_UNAVAILABLE).build()
-            data.forEach { candidates.add(it) }
+            data.forEach { item ->
+                val match = item.deepCopy<JsonNode>() as? ObjectNode
+                    ?: return Response.status(Response.Status.SERVICE_UNAVAILABLE).build()
+                match.put("searchedAccountId", accountId.toString())
+                candidates.add(match)
+            }
         }
-        // An internal transfer can match both account searches; expose it once in the profile.
+        // An internal transfer can match both account searches. Keep the match from the first
+        // account in the sorted profile list so its searchedAccountId is deterministic.
         val sorted = candidates.distinctBy { it.path("id").asText() }.sortedWith(
             compareByDescending<JsonNode> { it.path("initiatedAt").asText("") }
                 .thenBy { it.path("id").asText("") },

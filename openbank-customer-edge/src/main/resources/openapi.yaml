@@ -1109,6 +1109,10 @@ paths:
       responses:
         '200':
           description: Bounded search results, ordered newest first across the active profile when accountId is omitted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionSearchResults'
         '400':
           description: Invalid search term or profile with more than 20 readable accounts
         '403':
@@ -6565,6 +6569,30 @@ components:
             $ref: '#/components/schemas/Transaction'
         pagination:
           $ref: '#/components/schemas/Pagination'
+
+    TransactionSearchResults:
+      type: object
+      description: >-
+        Profile search deduplicates internal transfers by transaction id. When a transaction
+        matches multiple accounts, searchedAccountId is the first matching account in ascending
+        account UUID order. Single-account search forwards the upstream transaction unchanged.
+      required: [data, count, limit, offset]
+      properties:
+        data:
+          type: array
+          items:
+            allOf:
+              - $ref: '#/components/schemas/Transaction'
+              - type: object
+                description: Profile-wide results include searchedAccountId.
+                properties:
+                  searchedAccountId:
+                    type: string
+                    format: uuid
+                    description: Authorized account whose search produced this profile result; absent for single-account search.
+        count: {type: integer}
+        limit: {type: integer}
+        offset: {type: integer}
 
     # Mirrors openbank-statement-service StatementPeriod. GET /api/v1/statements/{accountId}
     # returns the retained period-close records as an array.

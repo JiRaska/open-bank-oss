@@ -138,6 +138,7 @@ class CustomerTransactionSearchContractTest {
         val body = ObjectMapper().readTree(response.entity.toString())
         assertThat(body.path("data").size()).isEqualTo(1)
         assertThat(body.path("data")[0].path("id").asText()).isEqualTo("a")
+        assertThat(body.path("data")[0].path("searchedAccountId").asText()).isEqualTo(own.toString())
         verify(exactly = 2) {
             upstream.get(
                 match {
@@ -146,6 +147,31 @@ class CustomerTransactionSearchContractTest {
                 party.toString(),
             )
         }
+    }
+
+    @Test
+    fun `profile search deduplicates internal transfer with deterministic matched account`() {
+        val party = UUID.randomUUID()
+        val first = UUID.fromString("00000000-0000-0000-0000-000000000001")
+        val second = UUID.fromString("00000000-0000-0000-0000-000000000002")
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get("http://account/api/v1/accounts?partyId=$party", party.toString()) } returns
+            Response.ok("""[{"id":"$second","partyId":"$party"},{"id":"$first","partyId":"$party"}]""").build()
+        every { upstream.get("http://delegation/api/v1/delegations/grantee/$party", party.toString()) } returns
+            Response.ok("[]").build()
+        every { upstream.get(match { it.contains("accountId=$first") }, party.toString()) } returns
+            Response.ok("""{"data":[{"id":"transfer","sourceAccountId":"$first","targetAccountId":"$second","initiatedAt":"2026-01-01T00:00:00Z"}]}""").build()
+        every { upstream.get(match { it.contains("accountId=$second") }, party.toString()) } returns
+            Response.ok("""{"data":[{"id":"transfer","sourceAccountId":"$first","targetAccountId":"$second","initiatedAt":"2026-01-01T00:00:00Z"}]}""").build()
+
+        val response = resource(upstream, party).searchTransactions(null, "Alza", 20, 0)
+
+        assertThat(response.status).isEqualTo(200)
+        val data = ObjectMapper().readTree(response.entity.toString()).path("data")
+        assertThat(data.size()).isEqualTo(1)
+        assertThat(data[0].path("searchedAccountId").asText()).isEqualTo(first.toString())
+        assertThat(data[0].path("sourceAccountId").asText()).isEqualTo(first.toString())
+        assertThat(data[0].path("targetAccountId").asText()).isEqualTo(second.toString())
     }
 
     @Test
