@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.4.2](https://github.com/JiRaska/open-bank-oss/compare/loyalty-service-v0.4.1...loyalty-service-v0.4.2) (2026-10-04)
+
+
+### Bug Fixes
+
+* **docs:** keep every runnable service documentation current ([#11989](https://github.com/JiRaska/open-bank-oss/issues/11989)) ([88b6e08](https://github.com/JiRaska/open-bank-oss/commit/88b6e087386cd885badf22f75cc4694faa0f30bd))
+
+## [0.4.1](https://github.com/JiRaska/open-bank-oss/compare/loyalty-service-v0.4.0...loyalty-service-v0.4.1) (2026-10-03)
+
+
+### Performance
+
+* **loyalty,engagement,notification,aml,statement:** kernel outbox v2 repository (ADR-0327 phase 2) ([#11754](https://github.com/JiRaska/open-bank-oss/issues/11754)) ([3c804ab](https://github.com/JiRaska/open-bank-oss/commit/3c804ab9e0ec6cb46a1d6edaa472ee552d0a61c6))
+
+## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/loyalty-service-v0.3.1...loyalty-service-v0.4.0) (2026-10-02)
+
+
+### Features
+
+* **loyalty:** earn Lístky for a qualified referral, once per invite ([#10013](https://github.com/JiRaska/open-bank-oss/issues/10013)) ([2e5c44c](https://github.com/JiRaska/open-bank-oss/commit/2e5c44c6d97469c180c5ae8ce9a38191ca5be276))
+
 ## [0.3.1](https://github.com/JiRaska/open-bank-oss/compare/loyalty-service-v0.3.0...loyalty-service-v0.3.1) (2026-09-29)
 
 

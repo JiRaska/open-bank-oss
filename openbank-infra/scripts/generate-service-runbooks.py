@@ -120,7 +120,18 @@ def service_namespace(short: str) -> str:
     fallback stays (the commands need to render as something) and the banner now says the
     commands do not apply.
     """
-    return gitops_facts.service_namespace(short, GITOPS) or short
+    return declared_namespace(short, GITOPS) or short
+
+
+@lru_cache(maxsize=None)
+def declared_namespace(short: str, gitops: Path) -> str | None:
+    """Reuse the manifest scan within one generation; fixture roots remain separate."""
+    return gitops_facts.service_namespace(short, gitops)
+
+
+@lru_cache(maxsize=None)
+def declared_workload_name(short: str, gitops: Path) -> str | None:
+    return gitops_facts.workload_name(short, gitops)
 
 
 def zero_replica_workload(short: str) -> bool:
@@ -250,7 +261,7 @@ def application_automated(short: str) -> bool | None:
 
 def workload_live_unverified(short: str) -> bool:
     """True only for a declared workload whose owning Application is manual-sync."""
-    return gitops_facts.service_namespace(short, GITOPS) is not None and application_automated(short) is False
+    return declared_namespace(short, GITOPS) is not None and application_automated(short) is False
 
 
 def deployment_status(short: str) -> str:
@@ -273,7 +284,7 @@ def deployment_status(short: str) -> str:
             "the public HTTP port is not a health-evidence substitute.\n"
             "\n"
         )
-    if gitops_facts.service_namespace(short, GITOPS) is not None:
+    if declared_namespace(short, GITOPS) is not None:
         if workload_live_unverified(short):
             return (
                 "## Deployment status — WORKLOAD DESIRED — LIVE STATUS UNVERIFIED\n"
@@ -506,7 +517,7 @@ def ops_commands(short: str, ns: str) -> dict[str, str]:
     """
     # The workload's real name, not `<short>-service`: released modules without the suffix deploy
     # under their bare name (customer-edge, admin-ui), so the suffix would address nothing (#6253).
-    svc = gitops_facts.workload_name(short, GITOPS) or f"{short}-service"
+    svc = declared_workload_name(short, GITOPS) or f"{short}-service"
     if gitops_facts.workload_kind(short, GITOPS) == "Rollout":
         return {
             "logs_cmd": f"`kubectl logs -n {ns} -l app.kubernetes.io/name={svc} -f`",
@@ -658,7 +669,7 @@ def all_services() -> list[str]:
     for version_txt in REPO.glob("openbank-*/version.txt"):
         short = version_txt.parent.name.removeprefix("openbank-")
         short = short.removesuffix("-service")
-        if gitops_facts.workload_name(short, GITOPS) is not None:
+        if declared_workload_name(short, GITOPS) is not None:
             out.add(short)
     return sorted(out)
 
@@ -1002,27 +1013,33 @@ def orphan_runbooks(existing: set[str], population: set[str]) -> list[str]:
 
 def main():
     if "--self-test" in sys.argv:
-        sys.exit(self_test())
+        # Every fixture tree is fully written before it is first queried, so a snapshot is safe
+        # here too — and the self-test runs on every push to main, inside the gate's budget.
+        with gitops_facts.frozen_tree():
+            rc = self_test()
+        sys.exit(rc)
 
     ap = argparse.ArgumentParser()
     ap.add_argument("services", nargs="*")
     ap.add_argument("--force", action="store_true", help="overwrite existing runbooks")
     args = ap.parse_args()
     RUNBOOKS.mkdir(parents=True, exist_ok=True)
-    targets = args.services or all_services()
     created, skipped = 0, 0
-    for short in targets:
-        if not gitops_facts.module_dir(short, REPO).is_dir():
-            print(f"skip: no module directory for {short!r}", file=sys.stderr)
-            continue
-        out = RUNBOOKS / f"svc-{short}.md"
-        if out.exists() and not args.force:
-            skipped += 1
-            continue
-        if write_runbook(out, render(short)):
-            created += 1
-        else:
-            skipped += 1
+    # Nothing below writes under the gitops tree, so it is read once rather than ~600 times.
+    with gitops_facts.frozen_tree():
+        targets = args.services or all_services()
+        for short in targets:
+            if not gitops_facts.module_dir(short, REPO).is_dir():
+                print(f"skip: no module directory for {short!r}", file=sys.stderr)
+                continue
+            out = RUNBOOKS / f"svc-{short}.md"
+            if out.exists() and not args.force:
+                skipped += 1
+                continue
+            if write_runbook(out, render(short)):
+                created += 1
+            else:
+                skipped += 1
     print(f"runbooks: {created} written, {skipped} kept (existing)")
     # Only a FULL run knows the whole population; a run naming services cannot judge the rest.
     if not args.services:

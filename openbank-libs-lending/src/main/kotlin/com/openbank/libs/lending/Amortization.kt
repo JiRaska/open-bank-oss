@@ -25,6 +25,15 @@ import java.time.LocalDate
  *
  * Money is kept to the currency's minor-unit scale throughout; per-period rounding drift is absorbed
  * by the final installment so the schedule closes to exactly zero (no lost or phantom cents).
+ *
+ * Small-principal guard: when the amount repaid per period is only a few minor units, rounding the
+ * level payment (or the flat principal) can over-repay the loan before the last period (negative
+ * closing balances and a negative final payment) or under-repay it into a balloon. Such a schedule
+ * is detected and rebuilt by re-deriving the level amount from the OUTSTANDING balance and the
+ * REMAINING periods each period, with the principal portion clamped to the opening balance — so
+ * drift self-corrects instead of compounding. Ordinary schedules, where the classic construction
+ * already closes cleanly, are returned unchanged. A schedule whose regular amount is below one
+ * minor unit of the currency cannot be expressed at all and is rejected.
  */
 enum class AmortizationMethod { ANNUITY, EQUAL_PRINCIPAL, BULLET }
 
@@ -88,10 +97,43 @@ object Amortization {
         val monthsPerPeriod = 12L / periodsPerYear
         val periodRate = nominalAnnualRate.divide(BigDecimal(periodsPerYear), MC)
 
+        val unit = BigDecimal.ONE.movePointLeft(scale)
+        if (method != AmortizationMethod.BULLET) {
+            val regular = if (method == AmortizationMethod.ANNUITY) {
+                annuityRaw(principal.amount, periodRate, termPeriods)
+            } else {
+                principal.amount.divide(BigDecimal(termPeriods), MC)
+            }
+            require(regular >= unit) {
+                "Regular ${method.name.lowercase()} amount $regular ${principal.currency.code} is below one minor " +
+                    "unit ($unit) for $principal over $termPeriods periods — the schedule cannot be expressed"
+            }
+        }
+
+        val classic = classicSchedule(principal, periodRate, termPeriods, firstDueDate, monthsPerPeriod, method, scale)
+        val installments = if (classic != null && isWellFormed(classic, method, unit)) {
+            classic
+        } else {
+            reamortizedSchedule(principal, periodRate, termPeriods, firstDueDate, monthsPerPeriod, method, scale)
+        }
+        return RepaymentSchedule(method, nominalAnnualRate, periodsPerYear, installments)
+    }
+
+    /** The original fixed-amount construction; kept byte-identical for every ordinary schedule. */
+    @Suppress("LongParameterList")
+    private fun classicSchedule(
+        principal: Money,
+        periodRate: BigDecimal,
+        termPeriods: Int,
+        firstDueDate: LocalDate,
+        monthsPerPeriod: Long,
+        method: AmortizationMethod,
+        scale: Int,
+    ): List<Installment>? {
         val installments = ArrayList<Installment>(termPeriods)
         var opening = principal
         val fixedPayment = if (method == AmortizationMethod.ANNUITY) {
-            annuityPayment(principal, periodRate, termPeriods, scale)
+            money(annuityRaw(principal.amount, periodRate, termPeriods), principal, scale)
         } else {
             null
         }
@@ -113,28 +155,79 @@ object Amortization {
                 else -> fixedPayment!! - interest // ANNUITY: principal is payment net of interest
             }
 
+            // Rounding can put principal outside [0, opening]: a negative amount compounds
+            // the balance, while an overpayment makes it negative. Both can overflow Money
+            // before isWellFormed sees the completed schedule. Reamortize at the first line.
+            if (principalDue.amount.signum() < 0 || principalDue > opening) return null
             val closing = opening - principalDue
             val payment = principalDue + interest
             installments += Installment(n, dueDate, opening, principalDue, interest, payment, closing)
             opening = closing
         }
-        return RepaymentSchedule(method, nominalAnnualRate, periodsPerYear, installments)
+        return installments
+    }
+
+    /**
+     * A classic schedule is accepted when no line is negative and, for an annuity, the final
+     * payment stays within the rounding-drift bound (one minor unit per period) of the regular one.
+     */
+    private fun isWellFormed(installments: List<Installment>, method: AmortizationMethod, unit: BigDecimal): Boolean {
+        val noNegative = installments.none {
+            it.principal.amount.signum() < 0 || it.payment.amount.signum() < 0 || it.closingBalance.amount.signum() < 0
+        }
+        if (!noNegative || method != AmortizationMethod.ANNUITY) return noNegative
+        val drift = (installments.last().payment.amount - installments.first().payment.amount).abs()
+        return drift <= unit.multiply(BigDecimal(installments.size))
+    }
+
+    /**
+     * Degenerate-case construction: each period's level amount is re-derived from the outstanding
+     * balance over the remaining periods, the principal portion is clamped to `[0, opening]`, and
+     * the final period clears the residual. Principal parts therefore sum to exactly [principal].
+     */
+    @Suppress("LongParameterList")
+    private fun reamortizedSchedule(
+        principal: Money,
+        periodRate: BigDecimal,
+        termPeriods: Int,
+        firstDueDate: LocalDate,
+        monthsPerPeriod: Long,
+        method: AmortizationMethod,
+        scale: Int,
+    ): List<Installment> {
+        val installments = ArrayList<Installment>(termPeriods)
+        var opening = principal
+        for (n in 1..termPeriods) {
+            val remaining = termPeriods - n + 1
+            val dueDate = firstDueDate.plusMonths(monthsPerPeriod * (n - 1))
+            val interest = money(opening.amount.multiply(periodRate, MC), principal, scale)
+            val rawPrincipal: BigDecimal = when {
+                n == termPeriods -> opening.amount
+                method == AmortizationMethod.EQUAL_PRINCIPAL ->
+                    money(opening.amount.divide(BigDecimal(remaining), MC), principal, scale).amount
+                else -> // ANNUITY (BULLET never reaches here: it has no negative line to repair)
+                    money(annuityRaw(opening.amount, periodRate, remaining), principal, scale).amount - interest.amount
+            }
+            val principalDue = Money(rawPrincipal.max(BigDecimal.ZERO).min(opening.amount), principal.currency)
+            val closing = opening - principalDue
+            installments += Installment(n, dueDate, opening, principalDue, interest, principalDue + interest, closing)
+            opening = closing
+        }
+        return installments
     }
 
     /**
      * Annuity payment A = P·i / (1 − (1+i)^−n), degenerating to P/n when the rate is zero.
-     * Computed at DECIMAL128 then rounded to the currency minor unit.
+     * Computed at DECIMAL128; callers round to the currency minor unit.
      */
-    private fun annuityPayment(principal: Money, periodRate: BigDecimal, n: Int, scale: Int): Money {
-        val raw = if (periodRate.signum() == 0) {
-            principal.amount.divide(BigDecimal(n), MC)
+    private fun annuityRaw(principal: BigDecimal, periodRate: BigDecimal, n: Int): BigDecimal =
+        if (periodRate.signum() == 0) {
+            principal.divide(BigDecimal(n), MC)
         } else {
             val onePlusI = BigDecimal.ONE.add(periodRate)
             val discount = BigDecimal.ONE.divide(onePlusI.pow(n, MC), MC) // (1+i)^-n
-            principal.amount.multiply(periodRate, MC).divide(BigDecimal.ONE.subtract(discount), MC)
+            principal.multiply(periodRate, MC).divide(BigDecimal.ONE.subtract(discount), MC)
         }
-        return money(raw, principal, scale)
-    }
 
     private fun money(raw: BigDecimal, like: Money, scale: Int): Money =
         Money(raw.setScale(scale, RoundingMode.HALF_EVEN), like.currency)

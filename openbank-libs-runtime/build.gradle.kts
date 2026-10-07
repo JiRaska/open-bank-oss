@@ -77,7 +77,16 @@ dependencies {
     // Issue #5482.
     compileOnly("io.micrometer:micrometer-core:1.17.0")
     compileOnly("io.quarkus:quarkus-security:3.33.2")
+    compileOnly("org.eclipse.microprofile.jwt:microprofile-jwt-auth-api:2.1")
     compileOnly("io.quarkus:quarkus-arc:3.33.2")
+    // Startup warm-up (HibernateReactiveWarmup): VertxContextSupport supplies the Vert.x context
+    // Hibernate Reactive needs off the event loop. Every service already ships quarkus-vertx.
+    compileOnly("io.quarkus:quarkus-vertx:3.33.2")
+    // StartupWarmup (#11890): the readiness check implements MicroProfile Health, which every
+    // consuming service already ships via quarkus-smallrye-health. (The reactive Pool ping is
+    // reflective on purpose: the sql-client's transitive POMs are not in verification-metadata,
+    // and four services carry no reactive datasource at all.)
+    compileOnly("org.eclipse.microprofile.health:microprofile-health-api:4.0.1")
     // SyntheticTaintRequestFilter binds the trusted synthetic classification into OTel baggage
     // for the lifetime of an inbound request. Keep this compileOnly: Quarkus services already
     // supply the API at runtime, and libs-runtime must not bring an observability SDK with it.
@@ -116,9 +125,11 @@ dependencies {
     testImplementation("jakarta.ws.rs:jakarta.ws.rs-api:3.1.0")
     testImplementation("jakarta.persistence:jakarta.persistence-api:3.2.0")
     testImplementation("io.quarkus:quarkus-security:3.33.2")
+    testImplementation("org.eclipse.microprofile.jwt:microprofile-jwt-auth-api:2.1")
     // OpaPolicyDecisionPointProducerTest reads @IfBuildProperty reflectively; an annotation whose
     // class is absent at runtime is silently dropped, so the test needs arc itself.
     testImplementation("io.quarkus:quarkus-arc:3.33.2")
+    testImplementation("org.eclipse.microprofile.health:microprofile-health-api:4.0.1")
     testImplementation("org.eclipse.microprofile.config:microprofile-config-api:3.1")
     testImplementation("org.jboss.resteasy:resteasy-core:6.2.12.Final")
     // MultipartParser.MalformedMessageException lives in the reactive-server artifact; the

@@ -42,7 +42,9 @@ info:
   # 1.73.0 -> 1.74.0 (#9430): additive — approval-group management routes and the N-of-M grant
   # preview binding (scaReference, approval-group snapshot).
   # 1.74.0 -> 1.75.0 (#10016): additive — GET /capabilities (ADR-0310 D5).
-  version: 1.75.0
+  # 1.75.0 -> 1.76.0 (#11966): additive — /holdings, the customer write side of the declared
+  # holdings that GET /net-worth reads (ADR-0301 D1).
+  version: 1.76.1
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -77,6 +79,7 @@ tags:
   - name: Feedback
   - name: Cards
   - name: Lending
+  - name: Wealth
   - name: Delegation
   - name: External disclosures
   - name: Pockets
@@ -169,6 +172,145 @@ paths:
           description: The net-worth tree, possibly partial
         '401':
           description: Missing or invalid bearer token
+  /holdings:
+    get:
+      tags: [Wealth]
+      operationId: listDeclaredHoldings
+      summary: The caller's declared off-platform holdings
+      description: >-
+        Active and pledged holdings the caller declared (ADR-0301 D1). The owner is the token's
+        party, or the verified X-Acting-For entity. Withdrawn holdings are not listed.
+      security:
+        - customerOidc: [wealth:read]
+      responses:
+        '200':
+          description: Holdings
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/DeclaredHolding'}
+        '401': {description: Missing or invalid bearer token}
+        '502': {description: Wealth service unavailable}
+    post:
+      tags: [Wealth]
+      operationId: declareHolding
+      summary: Declare a holding the bank does not hold
+      description: >-
+        The valuation is always recorded as CUSTOMER_DECLARED. Any source, appraiser reference or
+        owner in the body is ignored, so a customer cannot label their own figure as an appraisal.
+      security:
+        - customerOidc: [wealth:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DeclareHoldingRequest'}
+      responses:
+        '201':
+          description: Declared
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DeclaredHolding'}
+        '400': {description: Invalid input; the message names the first invalid field}
+        '401': {description: Missing or invalid bearer token}
+        '409': {description: 'DUPLICATE_HOLDING: same holdingType and externalReference already declared'}
+        '502': {description: Wealth service unavailable}
+  /holdings/{holdingId}:
+    parameters:
+      - name: holdingId
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    get:
+      tags: [Wealth]
+      operationId: getDeclaredHolding
+      summary: One of the caller's holdings
+      security:
+        - customerOidc: [wealth:read]
+      responses:
+        '200':
+          description: The holding
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DeclaredHolding'}
+        '401': {description: Missing or invalid bearer token}
+        '404': {description: No such holding for this caller, including one owned by another party}
+        '502': {description: Wealth service unavailable}
+    delete:
+      tags: [Wealth]
+      operationId: withdrawDeclaredHolding
+      summary: Withdraw a holding from the caller's picture
+      security:
+        - customerOidc: [wealth:write]
+      responses:
+        '200':
+          description: Withdrawn
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DeclaredHolding'}
+        '401': {description: Missing or invalid bearer token}
+        '404': {description: No such holding for this caller}
+        '409': {description: 'HOLDING_LOCKED: pledged as lending collateral, or already withdrawn'}
+        '502': {description: Wealth service unavailable}
+  /holdings/{holdingId}/valuation:
+    put:
+      tags: [Wealth]
+      operationId: revalueDeclaredHolding
+      summary: Restate a holding's value
+      description: >-
+        Appends to the valuation history; the previous value is kept. The new value is recorded as
+        CUSTOMER_DECLARED even when the holding was appraised before.
+      security:
+        - customerOidc: [wealth:write]
+      parameters:
+        - name: holdingId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [valuation]
+              properties:
+                valuation: {$ref: '#/components/schemas/HoldingValuationInput'}
+      responses:
+        '200':
+          description: Revalued
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DeclaredHolding'}
+        '400': {description: Invalid valuation}
+        '401': {description: Missing or invalid bearer token}
+        '404': {description: No such holding for this caller}
+        '409': {description: 'HOLDING_LOCKED: the holding is withdrawn'}
+        '502': {description: Wealth service unavailable}
+  /holdings/{holdingId}/valuations:
+    get:
+      tags: [Wealth]
+      operationId: listHoldingValuations
+      summary: Every value ever asserted for the holding, newest first
+      security:
+        - customerOidc: [wealth:read]
+      parameters:
+        - name: holdingId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Valuation history
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/HoldingValuationEntry'}
+        '401': {description: Missing or invalid bearer token}
+        '404': {description: No such holding for this caller}
+        '502': {description: Wealth service unavailable}
   /products:
     get:
       tags: [Products]
@@ -2222,8 +2364,8 @@ paths:
       tags: [Payment Sessions]
       summary: Create a "nearby pay" (BLE proximity) session on the caller's own account (ADR-0095)
       description: >-
-        Entirely in-memory at the edge — no dedicated backend service. Sessions expire after
-        5 minutes and do not survive an edge restart (single-replica-only by design).
+        Held by the edge itself in its Redis — no dedicated backend service. Sessions expire
+        after 5 minutes and are shared by every edge replica.
       operationId: createPaymentSession
       security:
         - customerOidc: [payments:initiate]
@@ -7240,3 +7382,52 @@ components:
             - CARD_NETWORK_NOT_ALLOWED
             - SCA_REQUIRED
             - SCA_REJECTED
+    HoldingType:
+      type: string
+      enum: [REAL_ESTATE, COLLECTIBLE, EXTERNAL_SECURITIES, EXTERNAL_COMPANY_STAKE, VEHICLE, EXTERNAL_DEPOSIT, PRIVATE_CLAIM, MORTGAGE, CONSUMER_CREDIT, PRIVATE_DEBT, OTHER_LIABILITY]
+    HoldingValuationInput:
+      type: object
+      required: [amount, currency, valuedAt]
+      properties:
+        amount: {type: string, description: Non-negative decimal, example: '6500000'}
+        currency: {type: string, pattern: '^[A-Z]{3}$'}
+        valuedAt: {type: string, format: date, description: When the value was established; not in the future}
+    DeclareHoldingRequest:
+      type: object
+      required: [holdingType, label, valuation]
+      properties:
+        holdingType: {$ref: '#/components/schemas/HoldingType'}
+        label: {type: string, minLength: 1, maxLength: 200}
+        valuation: {$ref: '#/components/schemas/HoldingValuationInput'}
+        ownershipShare: {type: string, description: 'Greater than 0 and at most 1; default 1', example: '0.5'}
+        externalReference: {type: string, maxLength: 128}
+    DeclaredHolding:
+      type: object
+      properties:
+        holdingId: {type: string, format: uuid}
+        holdingType: {$ref: '#/components/schemas/HoldingType'}
+        isLiability: {type: boolean}
+        label: {type: string}
+        amount: {type: string}
+        currency: {type: string}
+        valuedAt: {type: string, format: date}
+        valuationSource:
+          type: string
+          enum: [CUSTOMER_DECLARED, EXPERT_APPRAISAL, MARKET_REFERENCE]
+          description: CUSTOMER_DECLARED means the customer typed the number and nobody checked it
+        valuationAgeDays: {type: integer, format: int64}
+        ownershipShare: {type: string}
+        attributableAmount: {type: string}
+        externalReference: {type: string, nullable: true}
+        status: {type: string, enum: [ACTIVE, PLEDGED, WITHDRAWN]}
+        pledged: {type: boolean}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+    HoldingValuationEntry:
+      type: object
+      properties:
+        amount: {type: string}
+        currency: {type: string}
+        valuedAt: {type: string, format: date}
+        valuationSource: {type: string, enum: [CUSTOMER_DECLARED, EXPERT_APPRAISAL, MARKET_REFERENCE]}
+        recordedAt: {type: string, format: date-time, description: When the bank learned the value}

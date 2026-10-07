@@ -78,3 +78,7 @@ Caused by a rewritten applied migration. Temporary fix: set `QUARKUS_FLYWAY_REPA
 
 ### Execution timeout
 Payments in `PROCESSING` past `execution_timeout_at` are surfaced by `findTimedOut` (partial index) and transitioned to `TIMEOUT` with a `SctInstPaymentTimeout` event.
+
+## AML service mTLS in production
+
+The production AML REST client uses the named `aml-authority` TLS configuration and the AML service's client-authenticated listener on port 8443. The deployment supplies a client certificate and the private CA trust bundle; TLS 1.3 is required. If AML calls fail after rollout, check the client certificate and CA mount, the production REST-client URL, and the network policy path to that listener together. Local development and tests continue to use their HTTP fixtures; a passing local HTTP test alone does not prove the deployed TLS handshake.

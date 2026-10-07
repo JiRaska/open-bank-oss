@@ -63,6 +63,10 @@ data class OriginationTransitionPolicy(
                 REFLECTION_PERIOD to setOf(READY_TO_DISBURSE, EXPIRED),
                 READY_TO_DISBURSE to setOf(DISBURSED, EXPIRED),
             ),
+            guards = mapOf(
+                OriginationTransitionKey(FOUR_EYES, OFFERED) to listOf(FourEyesDecision.guard),
+                OriginationTransitionKey(FOUR_EYES, DECLINED) to listOf(FourEyesDecision.guard),
+            ),
         )
     }
 }
@@ -77,3 +81,39 @@ fun interface OriginationGuard {
 
 /** Describes why a transition was rejected by a guard. */
 data class OriginationGuardFailure(val reason: String)
+
+/**
+ * The four-eyes decision that alone may move an application out of [FOUR_EYES] to
+ * [OFFERED] or [DECLINED]. The commanding transition must carry the decision and the
+ * proposer's identity in its metadata (see [metadata]), and the deciding actor must not
+ * be the proposer. A transition without that metadata — a generic forward drive — is
+ * refused by [guard], so no caller can reach the decision outcome by any other route.
+ */
+object FourEyesDecision {
+    const val DECISION_KEY: String = "fourEyesDecision"
+    const val PROPOSED_BY_KEY: String = "proposedBy"
+    const val APPROVE: String = "APPROVE"
+    const val DECLINE: String = "DECLINE"
+
+    /** The transition metadata recording a decision on an application proposed by [proposedBy]. */
+    fun metadata(approve: Boolean, proposedBy: String): Map<String, String> = mapOf(
+        DECISION_KEY to if (approve) APPROVE else DECLINE,
+        PROPOSED_BY_KEY to proposedBy,
+    )
+
+    val guard: OriginationGuard = OriginationGuard { t ->
+        val decision = t.metadata[DECISION_KEY]
+        val proposedBy = t.metadata[PROPOSED_BY_KEY]
+        when {
+            decision == null ->
+                OriginationGuardFailure("Leaving ${t.from} requires a four-eyes decision")
+            decision != (if (t.to == OFFERED) APPROVE else DECLINE) ->
+                OriginationGuardFailure("Decision $decision does not lead to ${t.to}")
+            proposedBy.isNullOrBlank() ->
+                OriginationGuardFailure("A four-eyes decision must name the proposer")
+            proposedBy == t.actor ->
+                OriginationGuardFailure("Four-eyes violation: approver must differ from proposer")
+            else -> null
+        }
+    }
+}

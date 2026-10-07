@@ -4,6 +4,9 @@
 
 package com.openbank.libs.approval
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -22,10 +25,42 @@ import org.junit.jupiter.api.Test
  * Subclass it for any new implementation. If a `PanacheApprovalStore` ever lands — the entity
  * already exists in this module — it belongs here on day one; otherwise the threat models keep
  * saying "the guard" as though there were only one.
+ *
+ * Beyond segregation of duties the contract fixes: every state transition is atomic under
+ * concurrency, a store sees only its own namespace's records even over a shared backend, the
+ * request binding round-trips unchanged, and one maker's open approvals per action are bounded.
  */
 abstract class ApprovalStoreContractTest {
 
-    protected abstract fun newStore(): ApprovalStore
+    /**
+     * A store over this test's backend. Two calls with different [namespace]s MUST share the same
+     * backend, so the namespace cases test isolation rather than two unrelated stores.
+     */
+    protected abstract fun newStore(namespace: String = "svc-a", maxPendingPerMakerAction: Int = 20): ApprovalStore
+
+    @Test
+    fun `maker actor kind survives the approval lifecycle`(): Unit = runBlocking {
+        val store = newStore()
+        val pending = store.create(
+            "sanctions.clear",
+            resourceId = "check-1",
+            makerId = "agent:reviewer",
+            makerActorKind = MakerActorKind.AI_AGENT,
+        )
+
+        assertThat(store.find(pending.id)?.makerActorKind).isEqualTo(MakerActorKind.AI_AGENT)
+        store.decide(pending.id, decidedBy = "operator-2", approve = true)
+        assertThat(store.find(pending.id)?.makerActorKind).isEqualTo(MakerActorKind.AI_AGENT)
+        store.markExecuted(pending.id)
+        assertThat(store.find(pending.id)?.makerActorKind).isEqualTo(MakerActorKind.AI_AGENT)
+    }
+
+    @Test
+    fun `maker actor kind is unknown when creation did not supply provenance`(): Unit = runBlocking {
+        val store = newStore()
+        val pending = store.create("sanctions.clear", resourceId = null, makerId = "maker-1")
+        assertThat(store.find(pending.id)?.makerActorKind).isEqualTo(MakerActorKind.UNKNOWN)
+    }
 
     @Test
     fun `a maker deciding their own pending approval is refused`(): Unit = runBlocking {
@@ -97,9 +132,94 @@ abstract class ApprovalStoreContractTest {
             runBlocking { store.decide(pending.id, decidedBy = "operator-3", approve = true) }
         }.isInstanceOf(InvalidApprovalStateException::class.java)
     }
+
+    @Test
+    fun `five concurrent markExecuted calls consume an approval exactly once`(): Unit = runBlocking {
+        val store = newStore()
+        val pending = store.create("interest.create", null, "maker-1")
+        store.decide(pending.id, "checker-1", approve = true)
+
+        val results = (1..CONCURRENT_CALLS).map {
+            async(Dispatchers.IO) { runCatching { store.markExecuted(pending.id) } }
+        }.awaitAll()
+
+        assertThat(results.count { it.isSuccess }).isEqualTo(1)
+        assertThat(results.mapNotNull { it.exceptionOrNull() }).allMatch { it is InvalidApprovalStateException }
+        assertThat(store.find(pending.id)?.status).isEqualTo(ApprovalStatus.EXECUTED)
+    }
+
+    @Test
+    fun `an approve racing a reject has exactly one winner and the loser gets a conflict`(): Unit = runBlocking {
+        val store = newStore()
+        repeat(RACE_ROUNDS) { round ->
+            val pending = store.create("interest.create", null, "maker-$round")
+            val results = listOf(true, false).map { approve ->
+                async(Dispatchers.IO) {
+                    runCatching { store.decide(pending.id, if (approve) "checker-a" else "checker-r", approve) }
+                }
+            }.awaitAll()
+
+            assertThat(results.count { it.isSuccess }).isEqualTo(1)
+            assertThat(results.single { it.isFailure }.exceptionOrNull())
+                .isInstanceOf(InvalidApprovalStateException::class.java)
+            val winner = results.single { it.isSuccess }.getOrThrow()
+            assertThat(store.find(pending.id)?.status).isEqualTo(winner?.status)
+        }
+    }
+
+    @Test
+    fun `a store in another namespace cannot list, find or decide this namespace's approvals`(): Unit = runBlocking {
+        val serviceA = newStore(namespace = "svc-a")
+        val serviceB = newStore(namespace = "svc-b")
+        val pending = serviceA.create("interest.create", null, "maker-1")
+
+        assertThat(serviceB.findPending(100)).isEmpty()
+        assertThat(serviceB.find(pending.id)).isNull()
+        assertThat(serviceB.decide(pending.id, "checker-1", approve = true)).isNull()
+        assertThat(serviceB.markExecuted(pending.id)).isNull()
+        assertThat(serviceA.find(pending.id)?.status).isEqualTo(ApprovalStatus.PENDING)
+        assertThat(serviceA.findPending(100).map { it.id }).containsExactly(pending.id)
+    }
+
+    @Test
+    fun `the request binding round-trips unchanged`(): Unit = runBlocking {
+        val store = newStore()
+        val binding = ApprovalRequestBinding("f".repeat(64), "action=interest.create args={\"rate\":\"0.5|x\"}")
+        val pending = store.create("interest.create", null, "maker-1", binding = binding)
+
+        val found = store.find(pending.id)
+        assertThat(found?.requestFingerprint).isEqualTo(binding.fingerprint)
+        assertThat(found?.summary).isEqualTo(binding.summary)
+        assertThat(store.create("interest.create", null, "maker-1").requestFingerprint).isNull()
+    }
+
+    @Test
+    fun `one maker's pending approvals per action are bounded, and a decision frees a slot`(): Unit = runBlocking {
+        val store = newStore(maxPendingPerMakerAction = 2)
+        val first = store.create("interest.create", null, "maker-1")
+        store.create("interest.create", null, "maker-1")
+
+        assertThatThrownBy { runBlocking { store.create("interest.create", null, "maker-1") } }
+            .isInstanceOf(ApprovalLimitExceededException::class.java)
+            .hasMessageContaining("interest.create")
+        // Other makers and other actions have their own allowance.
+        store.create("interest.create", null, "maker-2")
+        store.create("ledger.post", null, "maker-1")
+
+        store.decide(first.id, "checker-1", approve = false)
+        store.create("interest.create", null, "maker-1")
+    }
+
+    private companion object {
+        const val CONCURRENT_CALLS = 5
+        const val RACE_ROUNDS = 20
+    }
 }
 
-/** The production implementation's binding lives in `impl/RedisApprovalStoreTest`. */
+/** The production implementation's binding lives in `impl/RedisApprovalStoreIT`. */
 class InMemoryApprovalStoreTest : ApprovalStoreContractTest() {
-    override fun newStore(): ApprovalStore = InMemoryApprovalStore()
+    private val backing = java.util.concurrent.ConcurrentHashMap<String, PendingApproval>()
+
+    override fun newStore(namespace: String, maxPendingPerMakerAction: Int): ApprovalStore =
+        InMemoryApprovalStore(namespace, backing, maxPendingPerMakerAction)
 }

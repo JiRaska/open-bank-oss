@@ -11,6 +11,7 @@ vi.mock('@/auth', () => ({
 }))
 
 import { auth } from '@/auth'
+import { parseApprovalInbox } from '@/lib/approvals/evidence'
 
 const SESSION = { user: { accessToken: 'operator-token', roles: ['ROLE_ADMIN'] } }
 
@@ -35,6 +36,9 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
 
   it('merges every configured domain queue into canonical items, sorted by proposedAt', async () => {
     const mock = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/api/v1/sca/approvals') || url.includes('/api/v1/settlements/approvals')) {
+        return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }))
+      }
       if (url.includes('/api/v1/lending/ledger-backfill/requests')) {
         return Promise.resolve(new Response(JSON.stringify({ requests: [] }), { status: 200 }))
       }
@@ -188,6 +192,10 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
     expect(body.sources.campaign).toBe('ok')
     expect(body.sources.audience).toBe('ok')
     expect(body.sources['identity-case']).toBe('ok')
+    expect(body.sources.sca).toBe('ok')
+    expect(body.sources.settlement).toBe('ok')
+    // The UI's real consumer must accept the route's own output, not only a hand-built fixture.
+    expect(parseApprovalInbox(body)).toEqual(body)
   })
 
   it('reads distinct four-eyes queues without inventing timestamps or exposing identity-case PII', async () => {
@@ -217,16 +225,16 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
       expect(seen.find(call => call.url.includes(path))?.authorization).toBe('Bearer operator-token')
     }
     expect(body.items).toEqual([
-      { id: 'newcomers@3', domain: 'audience', action: 'campaign.audience.approve', resourceId: 'newcomers@3', maker: 'marketer.three', proposedAt: null },
-      { id: 'pack-7', domain: 'compliance-pack', action: 'lending.compliancePack.activate', resourceId: 'pack-7', maker: 'risk.officer', proposedAt: '2026-09-20T08:00:00Z' },
-      { id: 'campaign-7', domain: 'campaign', action: 'campaign.activate', resourceId: 'campaign-7', maker: 'marketer.one', proposedAt: '2026-09-20T09:00:00Z' },
-      { id: 'case-7', domain: 'identity-case', action: 'identity.case.secondApproval', resourceId: 'case-7', maker: 'checker.one', proposedAt: '2026-09-20T10:00:00Z' },
+      { id: 'newcomers@3', domain: 'audience', action: 'campaign.audience.approve', resourceId: 'newcomers@3', maker: 'marketer.three', makerActorKind: 'UNKNOWN', proposedAt: null },
+      { id: 'pack-7', domain: 'compliance-pack', action: 'lending.compliancePack.activate', resourceId: 'pack-7', maker: 'risk.officer', makerActorKind: 'UNKNOWN', proposedAt: '2026-09-20T08:00:00Z' },
+      { id: 'campaign-7', domain: 'campaign', action: 'campaign.activate', resourceId: 'campaign-7', maker: 'marketer.one', makerActorKind: 'UNKNOWN', proposedAt: '2026-09-20T09:00:00Z' },
+      { id: 'case-7', domain: 'identity-case', action: 'identity.case.secondApproval', resourceId: 'case-7', maker: 'checker.one', makerActorKind: 'UNKNOWN', proposedAt: '2026-09-20T10:00:00Z' },
     ])
     expect(JSON.stringify(body)).not.toContain('Sensitive')
     expect(JSON.stringify(body)).not.toContain('Private')
   })
 
-  it('preserves human makers and submission times for treasury and ledger backfill', async () => {
+  it('preserves maker IDs and submission times without guessing actor kind for treasury and ledger backfill', async () => {
     const seen: Array<{ url: string; authorization: string | null }> = []
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       seen.push({ url: String(url), authorization: new Headers(init?.headers).get('authorization') })
@@ -247,8 +255,8 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
     expect(body.sources.treasury).toBe('ok')
     expect(body.sources['ledger-backfill']).toBe('ok')
     expect(body.items).toEqual([
-      { id: 'deal-7', domain: 'treasury', action: 'treasury.MM_PLACEMENT', resourceId: 'deal-7', maker: 'dealer.two', proposedAt: '2026-09-20T10:00:00Z' },
-      { id: 'request-7', domain: 'ledger-backfill', action: 'lending.ledgerBackfill.decide', resourceId: 'request-7', maker: 'finance.one', proposedAt: '2026-09-20T11:00:00Z' },
+      { id: 'deal-7', domain: 'treasury', action: 'treasury.MM_PLACEMENT', resourceId: 'deal-7', maker: 'dealer.two', makerActorKind: 'UNKNOWN', proposedAt: '2026-09-20T10:00:00Z' },
+      { id: 'request-7', domain: 'ledger-backfill', action: 'lending.ledgerBackfill.decide', resourceId: 'request-7', maker: 'finance.one', makerActorKind: 'UNKNOWN', proposedAt: '2026-09-20T11:00:00Z' },
     ])
   })
 
@@ -525,6 +533,7 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
       action: 'billing.post',
       resourceId: 'fee-7',
       maker: 'operator.j',
+      makerActorKind: 'UNKNOWN',
       proposedAt: '2026-07-29T11:57:00Z',
     }])
   })
@@ -612,5 +621,41 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
     expect(body.sources.notification).toBe('unavailable')
     expect(body.sources.party).toBe('unavailable')
     expect(body.sources.agent).toBe('unavailable')
+  })
+
+  it('reads the SCA and settlement operator queues with the operator bearer and a bounded page', async () => {
+    const seen: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      const u = String(url)
+      if (u.includes('/api/v1/sca/approvals') || u.includes('/api/v1/settlements/approvals')) {
+        seen.push(u)
+        expect(new Headers(init?.headers).get('authorization')).toBe('Bearer operator-token')
+        expect(new URL(u).searchParams.get('limit')).toBe('50')
+        return u.includes('/sca/')
+          ? Response.json([{ id: 'sca-1', action: 'device.revoke', resourceId: 'party-1', makerId: 'maker.a', makerActorKind: 'CUSTOMER_PARTY', createdAt: '2026-09-13T10:00:00Z', status: 'PENDING', decidedBy: null }])
+          : Response.json([{ id: 'set-1', action: 'settlement.create', resourceId: null, makerId: 'maker.b', makerActorKind: 'HUMAN', createdAt: '2026-09-13T11:00:00Z', status: 'PENDING', decidedBy: null }])
+      }
+      return new Response('nope', { status: 503 })
+    }))
+    const body = await (await (await route()).GET()).json()
+    expect(seen).toHaveLength(2)
+    expect(body.sources.sca).toBe('ok')
+    expect(body.sources.settlement).toBe('ok')
+    expect(body.items).toContainEqual({ id: 'sca-1', domain: 'sca', action: 'device.revoke', resourceId: 'party-1', maker: 'maker.a', makerActorKind: 'CUSTOMER_PARTY', proposedAt: '2026-09-13T10:00:00Z' })
+    expect(body.items).toContainEqual({ id: 'set-1', domain: 'settlement', action: 'settlement.create', resourceId: null, maker: 'maker.b', makerActorKind: 'HUMAN', proposedAt: '2026-09-13T11:00:00Z' })
+  })
+
+  it('reports a forbidden operator queue (compliance caller) and a full page as not complete', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      const u = String(url)
+      if (u.includes('/api/v1/sca/approvals')) return new Response('', { status: 403 })
+      if (u.includes('/api/v1/settlements/approvals')) {
+        return Response.json(Array.from({ length: 50 }, (_, i) => ({ id: `s-${i}`, action: 'settlement.create', resourceId: null, makerId: 'm', createdAt: '2026-09-13T11:00:00Z' })))
+      }
+      return new Response('nope', { status: 503 })
+    }))
+    const body = await (await (await route()).GET()).json()
+    expect(body.sources.sca).toBe('forbidden')
+    expect(body.sources.settlement).toBe('unavailable')
   })
 })

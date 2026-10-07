@@ -48,7 +48,7 @@ spec:
       annotations:
         # Rolls the Deployment when the OPA policy bundle changes (subPath mounts don't
         # hot-reload). Kept in sync by gen-notification-opa-bundle.sh.
-        openbank.tech/policy-checksum: "98e83f6ee7414fde"
+        openbank.tech/policy-checksum: "a3a88304f4752918"
       labels:
         app.kubernetes.io/name: notification-service
         app.kubernetes.io/part-of: notifications
@@ -66,7 +66,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: notification-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-notification-service:sandbox-85a0be3e
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-notification-service:sandbox-58562e47
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -74,6 +74,10 @@ spec:
             - name: management
               containerPort: 8085
           env:
+            # The four-eyes approval queue uses RedisApprovalStore. The app's localhost
+            # default would address this pod, not the namespace-local Redis Service.
+            - name: QUARKUS_REDIS_HOSTS
+              value: redis://redis.notifications.svc:6379
             # JDBC leg: Hibernate ORM + Flyway (blocking) onto the CNPG primary.
             - name: QUARKUS_DATASOURCE_JDBC_URL
               value: jdbc:postgresql://notifications-db-rw.notifications.svc:5432/openbank_notifications
@@ -277,7 +281,7 @@ spec:
         # OpaSidecarPolicyDecisionPoint gets connection-refused on localhost:8181 →
         # 503 for the whole customer notification center + push-device registry.
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run

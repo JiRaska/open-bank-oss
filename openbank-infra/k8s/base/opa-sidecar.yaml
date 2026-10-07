@@ -52,7 +52,7 @@ spec:
         fsGroup: 65532
       containers:
         - name: opa
-          image: openpolicyagent/opa:1.17.0
+          image: openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - "run"

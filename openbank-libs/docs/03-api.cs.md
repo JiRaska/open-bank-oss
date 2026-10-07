@@ -1,5 +1,7 @@
 # 03 — API & contracts
 
+Sdílená doménová API jsou v `openbank-libs-domain`; adaptéry Quarkus a HTTP resource v `openbank-libs-runtime`. Kořenový `openbank-libs` je reexportuje kvůli kompatibilitě. Přesnou verzi v nasazené službě ukazují její `/q/openbank/docs` a `/q/openapi`.
+
 Jak služby konzumují každý balíček libs. Příklady jsou zkrácené ale spustitelné.
 
 ## domain/money — Money + CurrencyCode
@@ -16,6 +18,28 @@ require(total.currency == price.currency)  // type-safe; cross-currency add thro
 ```
 
 **Když použít:** všude, kde má kód operovat s monetary amount. Nikdy nepoužívej `BigDecimal amount + String currencyCode` páry — `Money` zabrání tomu, abys sečetl 100 EUR + 100 CZK.
+
+### Vstupní hranice — `Money.parseInbound`
+
+`Money` z požadavku stav na okraji API, **dřív** než se rezervuje idempotency key nebo se cokoli zapíše:
+
+```kotlin
+val amount = Money.parseInbound(req.amount, req.currency, requirePositive = true)
+```
+
+Měnu ořízne a převede na velká písmena a při chybě vyhodí `InvalidMoneyException` (pořád `IllegalArgumentException`).
+`InvalidMoneyExceptionMapper` z libs-runtime z ní udělá 400 RFC 9457 `ProblemDetail`, jehož `violations[]` jmenuje
+pole a nikdy neopakuje zaslanou hodnotu:
+
+| Důvod | Kód |
+|---|---|
+| víc desetinných míst, než měna dovoluje (`1.005 EUR`) | `AMOUNT_SCALE_EXCEEDED` |
+| není kód ISO 4217 s dílčí jednotkou (`XYZ`, `XAU`, prázdná hodnota) | `CURRENCY_UNSUPPORTED` |
+| víc než 19 celých číslic / přesnost nad 18 | `VALIDATION_ERROR` |
+| nula nebo záporná částka, je-li `requirePositive = true` | `AMOUNT_NOT_POSITIVE` |
+
+`requirePositive` je ve výchozím stavu `false`, takže dosavadní volání se chovají stejně; částky plateb, kreditů,
+debetů a blokací mají předávat `true`.
 
 ## domain/account — Iban
 

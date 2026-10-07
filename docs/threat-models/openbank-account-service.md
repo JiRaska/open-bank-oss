@@ -74,6 +74,7 @@ is a deliberate follow-up flip, not bundled here (see ADR-0155).
 | **E**oP | The maker approves their own freeze request (self-approval defeats maker-checker) | `ApprovalStore.decide` throws `SelfApprovalNotAllowedException` (mapped to 403) when `decidedBy == makerId` — enforced in the domain port itself, not just the REST layer, and `makerId`/`decidedBy` both resolve via the same `.principal.name` extraction (interceptor vs. `SecurityIdentity`) so the comparison can't silently mismatch for the same real person |
 | **T**ampering | A stale, mismatched, or already-consumed `X-Approval-Id` is replayed to unlock a different request | `AuthorizeInterceptor` requires the approval's `action` + `resourceId` + `makerId` to match the CURRENT request exactly, `status == APPROVED`, and marks it `EXECUTED` (one-time use) on success; any mismatch re-issues a fresh pending approval instead of proceeding |
 | **R**epudiation | No record of who approved a gated freeze | `PendingApproval.decidedBy` + `decidedAt` recorded in the approval record itself (Redis, TTL-bounded — see ADR-0155 Negative consequences: not yet a permanent audit trail) |
+| **R**epudiation / **S**poofing | A display name or legacy approval is presented as proof that its maker was human or an AI agent | `makerActorKind` is captured when the authenticated request creates the approval, not inferred by Admin UI from `makerId`. A service-account caller remains `SERVICE_ACCOUNT`; the delegated savings-proposal path records `CUSTOMER_PARTY` because its party id alone does not prove a human session. Existing Redis records without provenance read as `UNKNOWN`. This field is informational and never changes the maker-checker id comparison or approval decision. |
 | **I**nfo disclosure | Approval id enumeration reveals account/action metadata to an unauthorized caller | `find`/`decide` require the caller to already hold a valid, role-gated session; the id itself is a random id (`RedisApprovalStore`, not sequential) |
 | **D**oS | Flooding `POST /{accountId}/freeze` to exhaust Redis with pending approvals | Bounded by the same rate-limit/idempotency controls as the gated endpoint itself; each `PendingApproval` is TTL-bounded (86400s) so abandoned records expire |
 
@@ -110,6 +111,7 @@ not change any existing request's outcome until explicitly flipped.
   the blocked statuses, red against the old gate), `SanctionsScreeningAdapterTest` and the new
   consumer pact `AccountSanctionsScreenPactConsumerTest`, which pins `CLEAR` and `HIT` as exact
   values and is replayed by sanctions-service. No endpoint, edge or privilege changed.
+- **2026-09-30** — **Approval maker provenance (issue #11588).** The account approval response now exposes `makerActorKind` alongside `makerId`; the shared approval store keeps the original seven-field Redis value for old readers and stores provenance in a TTL-matched sidecar. A missing or unrecognized sidecar yields `UNKNOWN`, not a guessed human maker. The delegated savings-proposal path labels its verified party identifier `CUSTOMER_PARTY`, not `HUMAN`. The shared authorizer accepts `AI_AGENT` only when the authenticated JWT `sub` matches the `agent:` principal name; a display-name prefix without that claim no longer grants an agent policy type. An agent-looking name without a JWT becomes `UNKNOWN`, and a human JWT with a different subject remains `HUMAN`. This tightens the policy input but grants no new approver privilege, approval transition or money movement. The residual risk is that upstream identity systems may not attest an AI charter through the service-account token, so such requests must remain labeled as service accounts until a trusted claim is available. Rollback: old pods ignore the sidecar and continue reading the unchanged base record; sidecars expire with approvals.
 - **2026-09-28** — **pricing namespace admitted to product-catalog `:8104` (JiRaska/openbank-pricing#1).** The
   `pricing` namespace was adopted under GitOps and its NetworkPolicies are now generated from declared edges,
   which adds `pricing` to the product-catalog ingress allow-list in `accounts`. **Not a new flow:**
@@ -932,3 +934,32 @@ decision use first; the additive projection table may remain until its consumer 
   (reference, amount, currency) must match exactly and is restated on consume
   (`DecisionScaBindingTest`).
   Rollback: disable the delegation flag first; V31/V32 are additive.
+- **2026-10-01** — **Idempotency keys scoped per service and caller.** The create endpoint now
+  claims its `Idempotency-Key` through `IdempotencyScope("account-service", <authenticated principal>)`, so
+  the Redis record lives under `idempotency:v2:account-service:<sha256(principal)>:<key>`: the same key sent
+  by another principal, or reaching another service on a shared Redis, is a different key and never
+  replays this caller's stored response. The key is validated (1-128 chars of `[A-Za-z0-9._:-]`,
+  otherwise 400); a record without a fingerprint or with an undecodable status is never replayed;
+  a response above `openbank.idempotency.max-response-bytes` is not stored and a retry answers 409.
+  During the deploy window a same-fingerprint request still in flight under the previous unscoped
+  key answers 409 IN_PROGRESS, and a completed one answers 409 rather than replaying it. No new
+  endpoint, caller, privilege or event. Rollback: revert (records under the scoped keys expire
+  within the 24 h record TTL).
+
+## 2026-10-04 — Staged Envoy Gateway public edge (ADR-0324 Phase 4)
+
+`/api/v1/accounts` remains served through `accounts-api` on ingress-nginx while the new
+HTTPRoute is staged. The generated `account-service-ingress-allow-list` additionally admits
+`envoy-gateway-system` on TCP 8100; the nginx peer stays in place. This adds an internal
+network ingress peer now, and a public proxy path only after the shared Gateway listener,
+its connection policy and the DNS cutover are verified. Account-service still performs its
+own OIDC and OPA checks; neither the caller principal nor an account mutation grant changes.
+
+**D1 residual risk at cutover:** nginx's `limit-connections: 10` capped concurrent
+connections per client IP. Envoy Gateway has no equivalent. The staged route retains a
+per-client request rate of 20/s and adds a per-backend circuit breaker; the listener-wide
+connection limit belongs to the separate listener change. One slow client can consume more
+than ten connections and compete with other account clients for that shared limit. Keep DNS
+on nginx until the listener policy and 401/429 behavior have been checked on the Gateway
+address. Rollback is the coordinated DNS switch back to nginx; its Ingress and network
+allowance remain until Phase 5.

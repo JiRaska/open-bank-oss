@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.35.3](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.35.2...notification-service-v0.35.3) (2026-10-07)
+
+
+### Bug Fixes
+
+* **notification:** route Slack, Teams and FCM egress through SafeHttpClient ([#11727](https://github.com/JiRaska/open-bank-oss/issues/11727)) ([0967109](https://github.com/JiRaska/open-bank-oss/commit/096710996909a08026823e0e95e2b672b006d4b4))
+
+## [0.35.2](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.35.1...notification-service-v0.35.2) (2026-10-07)
+
+
+### Bug Fixes
+
+* **approval:** preserve verified maker actor kind ([#12159](https://github.com/JiRaska/open-bank-oss/issues/12159)) ([74cba34](https://github.com/JiRaska/open-bank-oss/commit/74cba348b75c0b318902c033bf81356ddba32393))
+
+## [0.35.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.35.0...notification-service-v0.35.1) (2026-10-03)
+
+
+### Performance
+
+* **loyalty,engagement,notification,aml,statement:** kernel outbox v2 repository (ADR-0327 phase 2) ([#11754](https://github.com/JiRaska/open-bank-oss/issues/11754)) ([3c804ab](https://github.com/JiRaska/open-bank-oss/commit/3c804ab9e0ec6cb46a1d6edaa472ee552d0a61c6))
+
 ## [0.35.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.34.2...notification-service-v0.35.0) (2026-10-02)
 
 

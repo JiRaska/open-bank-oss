@@ -4,6 +4,7 @@
 
 package com.openbank.clearing.domain.model
 
+import com.openbank.libs.domain.money.Money
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.OffsetDateTime
@@ -31,6 +32,22 @@ data class ClearingBatch(
     val updatedAt: OffsetDateTime,
 )
 
+/**
+ * What one clearing cycle produced (#11974). A clearing batch is per (rail, currency): the cycle
+ * partitions the rail's pending items by currency and nets each currency in its own [batches]
+ * entry, because netting and the net-settlement journal are only meaningful within one currency.
+ *
+ * [unsettleablePending] counts, per currency, items left PENDING because no settlement GL pair
+ * exists for that currency — they are not batched (a batch could never post its settlement leg),
+ * not failed (seeding the GL makes them settle on the next cycle), and are reported, not dropped.
+ */
+data class ClearingCycleResult(
+    val cycleId: String,
+    val rail: PaymentRail,
+    val batches: List<ClearingBatch>,
+    val unsettleablePending: Map<String, Long> = emptyMap(),
+)
+
 data class ClearingItem(
     val id: UUID = UUID.randomUUID(),
     val batchId: UUID,
@@ -42,6 +59,12 @@ data class ClearingItem(
     val creditorBic: String? = null,
     val amount: BigDecimal,
     val currency: String = "EUR",
+    /**
+     * The rail the payment was submitted for (#12004); a cycle for one rail selects only its own
+     * items. Null only on a row written before V12 — such an item is selected by NO cycle (it
+     * stays PENDING and is reported), because guessing its rail could settle it on the wrong one.
+     */
+    val rail: PaymentRail? = null,
     val status: ClearingStatus = ClearingStatus.PENDING,
     /** Monotonic aggregate revision used by outbox consumers for replay-safe evidence. */
     val revision: Long = 0,
@@ -67,16 +90,21 @@ data class SettlementPosition(
     val createdAt: OffsetDateTime,
 )
 
-data class SubmitPaymentRequest(
+/**
+ * A payment entering clearing, after the inbound boundary validated it (#11604): [amount] is a
+ * kernel [Money], so its scale already fits the currency's minor unit and the currency is an
+ * ISO 4217 code with one. The REST body is `SubmitPaymentRequest` in the REST adapter.
+ */
+data class SubmitPaymentCommand(
     val paymentId: UUID,
     val paymentReference: String,
     val debtorIban: String,
     val creditorIban: String,
     val debtorBic: String? = null,
     val creditorBic: String? = null,
-    val amount: BigDecimal,
-    val currency: String = "EUR",
-    val rail: PaymentRail = PaymentRail.SEPA_SCT,
+    val amount: Money,
+    /** Required (#12004): no default, so no caller can enter clearing on a rail it did not choose. */
+    val rail: PaymentRail,
     val valueDate: LocalDate? = null,
     val endToEndId: String? = null,
     val remittanceInfo: String? = null,

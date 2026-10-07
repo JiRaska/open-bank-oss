@@ -26,6 +26,8 @@ export type ApprovalDomain =
   | 'campaign'
   | 'audience'
   | 'identity-case'
+  | 'sca'
+  | 'settlement'
 
 export type DomainApprovalItem = {
   id: string
@@ -33,6 +35,7 @@ export type DomainApprovalItem = {
   action: string
   resourceId: string | null
   maker: string | null
+  makerActorKind?: 'HUMAN' | 'AI_AGENT' | 'SERVICE_ACCOUNT' | 'CUSTOMER_PARTY' | 'UNKNOWN'
   proposedAt: string | null
 }
 
@@ -73,6 +76,12 @@ export function approvalWorkbenchHref(item: DomainApprovalItem): string | null {
   }
   if (item.domain === 'delegation') {
     return `/approvals/delegation/${encodeURIComponent(item.id)}`
+  }
+  if (item.domain === 'sca') {
+    return `/approvals/sca/${encodeURIComponent(item.id)}`
+  }
+  if (item.domain === 'settlement') {
+    return `/approvals/settlement/${encodeURIComponent(item.id)}`
   }
   if (item.domain === 'communication') {
     return '/approvals/communication'

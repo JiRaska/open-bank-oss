@@ -17,6 +17,8 @@ import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.CsvSource
 import java.time.Instant
 import java.util.UUID
 
@@ -94,10 +96,28 @@ class SettlementAdapterTest {
         assertThat(outcome.settled).isTrue()
     }
 
+    @ParameterizedTest(name = "{0} {1} -> {2}")
+    @CsvSource("10000, EUR, 100.00", "1000, JPY, 1000", "1500, KWD, 1.500")
+    fun `settle books the amount at the currency's own minor unit`(
+        minorUnits: Long,
+        currency: String,
+        booked: String,
+    ): Unit = runBlocking {
+        // #11604: main shifted by a fixed two places and booked 1000 yen as 10.00 JPY.
+        every {
+            client.initiateTransaction(match { it.amount.toPlainString() == booked && it.currencyCode == currency })
+        } returns Uni.createFrom().item(
+            Response.status(201).entity(mapOf("id" to UUID.randomUUID().toString())).build(),
+        )
+
+        assertThat(adapter.settle(message(amountMinorUnits = minorUnits, currency = currency)).settled).isTrue()
+    }
+
     private fun message(
         id: UUID = UUID.fromString("55555555-5555-5555-5555-555555555555"),
         accountId: UUID? = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
         amountMinorUnits: Long = 1_000_00L,
+        currency: String = "EUR",
     ) = SwiftMessage(
         id = id,
         idempotencyKey = "test",
@@ -107,8 +127,7 @@ class SettlementAdapterTest {
         transactionReference = "TRX-001",
         relatedReference = null,
         valueDate = "20260622",
-        currency = "EUR",
-        amountMinorUnits = amountMinorUnits,
+        amount = SwiftMessage.moneyOfMinorUnits(amountMinorUnits, currency),
         orderingCustomerAccount = "DE89370400440532013000",
         orderingCustomerAccountId = accountId,
         orderingCustomerName = "Alice",

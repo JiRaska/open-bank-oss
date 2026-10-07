@@ -54,7 +54,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: agent-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-agent-service:sandbox-85a0be3e
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-agent-service:sandbox-40e14f7d
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -170,8 +170,10 @@ spec:
             # Extended MCP read coverage (aml/sanctions/clearing/sepa-instant are deployed;
             # fx/interest/dispute are not yet — their tools register and degrade to an honest
             # "Tool execution failed" until the service is onboarded).
+            # aml-service's private-CA mTLS listener (8443, client auth REQUIRED, %prod bucket
+            # aml-authority, client certificate agent-internal-tls mounted at /mnt/aml-tls).
             - name: QUARKUS_REST_CLIENT_AML_SERVICE_URL
-              value: http://aml-service.aml.svc:8117
+              value: https://aml-service.aml.svc:8443
             - name: QUARKUS_REST_CLIENT_SANCTIONS_SERVICE_URL
               value: http://sanctions-service.sanctions.svc:8123
             - name: QUARKUS_REST_CLIENT_CLEARING_SERVICE_URL
@@ -293,6 +295,9 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: aml-tls
+              mountPath: /mnt/aml-tls
+              readOnly: true
             - name: kafka-keystore
               mountPath: /mnt/kafka-keystore
               readOnly: true
@@ -313,7 +318,7 @@ spec:
         # agents.rego bundle (agent-opa-bundle ConfigMap) over localhost:8181. The
         # agent-service policy gate queries data.openbank.agents.decision per tool call.
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run
@@ -378,6 +383,10 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: aml-tls
+          secret:
+            secretName: agent-internal-tls
+            optional: false
         - name: opa-tmp
           emptyDir: {}
         - name: opa-bundle

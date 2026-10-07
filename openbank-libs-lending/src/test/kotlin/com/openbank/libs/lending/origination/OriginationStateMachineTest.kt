@@ -47,7 +47,53 @@ class OriginationStateMachineTest {
             OriginationState.READY_TO_DISBURSE to OriginationState.DISBURSED,
         )
         path.forEach { (from, to) ->
-            assertThat(machine.apply(transition(from, to)))
+            val command = transition(from, to).let {
+                if (from == OriginationState.FOUR_EYES) it.copy(metadata = decision(approve = true)) else it
+            }
+            assertThat(machine.apply(command)).isEqualTo(OriginationTransitionResult.Applied(to))
+        }
+    }
+
+    private fun decision(approve: Boolean, proposedBy: String = "proposer-1") =
+        FourEyesDecision.metadata(approve, proposedBy)
+
+    @Test
+    fun `leaving FOUR_EYES without a decision is refused by the standard policy`() {
+        listOf(OriginationState.OFFERED, OriginationState.DECLINED).forEach { to ->
+            val result = machine.apply(transition(OriginationState.FOUR_EYES, to))
+            assertThat(result).describedAs("FOUR_EYES -> %s", to)
+                .isEqualTo(OriginationTransitionResult.Rejected("Leaving FOUR_EYES requires a four-eyes decision"))
+        }
+    }
+
+    @Test
+    fun `the proposer cannot decide their own application in the standard policy`() {
+        val self = transition(OriginationState.FOUR_EYES, OriginationState.OFFERED, actor = "proposer-1")
+            .copy(metadata = decision(approve = true))
+        assertThat(machine.apply(self)).isEqualTo(
+            OriginationTransitionResult.Rejected("Four-eyes violation: approver must differ from proposer"),
+        )
+    }
+
+    @Test
+    fun `a decision must match its target and name the proposer`() {
+        val mismatched = transition(OriginationState.FOUR_EYES, OriginationState.OFFERED)
+            .copy(metadata = decision(approve = false))
+        assertThat(machine.apply(mismatched)).isInstanceOf(OriginationTransitionResult.Rejected::class.java)
+        val anonymous = transition(OriginationState.FOUR_EYES, OriginationState.DECLINED)
+            .copy(metadata = decision(approve = false, proposedBy = ""))
+        assertThat(machine.apply(anonymous)).isInstanceOf(OriginationTransitionResult.Rejected::class.java)
+    }
+
+    @Test
+    fun `a second person's decision leaves FOUR_EYES either way, and withdrawal or expiry need none`() {
+        assertThat(
+            machine.apply(
+                transition(OriginationState.FOUR_EYES, OriginationState.DECLINED).copy(metadata = decision(false)),
+            ),
+        ).isEqualTo(OriginationTransitionResult.Applied(OriginationState.DECLINED))
+        listOf(OriginationState.WITHDRAWN, OriginationState.EXPIRED).forEach { to ->
+            assertThat(machine.apply(transition(OriginationState.FOUR_EYES, to)))
                 .isEqualTo(OriginationTransitionResult.Applied(to))
         }
     }

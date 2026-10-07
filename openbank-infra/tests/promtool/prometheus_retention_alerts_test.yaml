@@ -1,0 +1,59 @@
+evaluation_interval: 1m
+rule_files:
+- prometheus-rules-prometheus-retention.yaml
+tests:
+# time() starts at the unix epoch in promtool, so lowest_timestamp is expressed relative to it:
+# 0 means "oldest sample is eval_time old" (well under 29d at these eval times).
+- name: size retention evicting a young store fires
+  interval: 1m
+  input_series:
+  - series: prometheus_tsdb_size_retentions_total{instance="p:9090"}
+    values: 0x10 1+1x50
+  - series: prometheus_tsdb_lowest_timestamp_seconds{instance="p:9090"}
+    values: 0x60
+  alert_rule_test:
+  - eval_time: 9m
+    alertname: PrometheusHistoryTruncatedBySize
+    exp_alerts: []
+  - eval_time: 40m
+    alertname: PrometheusHistoryTruncatedBySize
+    exp_alerts:
+    - exp_labels:
+        instance: p:9090
+        severity: warning
+        team: platform
+      exp_annotations:
+        subject_period: continuous
+        summary: "Prometheus is deleting history by size before 30d: SLO windows are short"
+        description: >-
+          retentionSize is evicting blocks while the oldest sample is under 29 days old, so
+          every `window: 30d` SLO, error budget and :increase30d series is computed over
+          less history than it claims. Measure the daily growth with
+          `deriv(prometheus_tsdb_storage_blocks_bytes[1d]) * 86400`, then raise
+          `retentionSize` and the PVC in gitops/apps/kube-prometheus-stack.yaml together (the
+          operator does not resize a live PVC; patch it once after merge). Or find the
+          cardinality regression that made the store grow.
+- name: time-based retention only stays quiet
+  interval: 1m
+  input_series:
+  - series: prometheus_tsdb_size_retentions_total{instance="p:9090"}
+    values: 0x60
+  - series: prometheus_tsdb_lowest_timestamp_seconds{instance="p:9090"}
+    values: 0x60
+  alert_rule_test:
+  - eval_time: 40m
+    alertname: PrometheusHistoryTruncatedBySize
+    exp_alerts: []
+# A store that already holds ~30d may be capped by size on purpose: lowest_timestamp is
+# 30 days before eval time (negative relative to the promtool epoch).
+- name: size eviction on a full 30d store stays quiet
+  interval: 1m
+  input_series:
+  - series: prometheus_tsdb_size_retentions_total{instance="p:9090"}
+    values: 0x10 1+1x50
+  - series: prometheus_tsdb_lowest_timestamp_seconds{instance="p:9090"}
+    values: -2592000x60
+  alert_rule_test:
+  - eval_time: 40m
+    alertname: PrometheusHistoryTruncatedBySize
+    exp_alerts: []

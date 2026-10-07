@@ -6,6 +6,7 @@ package com.openbank.libs.authz
 
 import com.openbank.libs.approval.ApprovalStatus
 import com.openbank.libs.approval.ApprovalStore
+import com.openbank.libs.approval.MakerActorKind
 import com.openbank.libs.approval.PendingApproval
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.security.SecurityTelemetry
@@ -23,6 +24,7 @@ import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.core.SecurityContext
 import kotlinx.coroutines.runBlocking
 import org.eclipse.microprofile.config.inject.ConfigProperty
+import org.eclipse.microprofile.jwt.JsonWebToken
 import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.Instant
@@ -87,8 +89,10 @@ import kotlin.reflect.jvm.kotlinFunction
  * see [requireFourEyes] — until a second, distinct principal decides a
  * [com.openbank.libs.approval.PendingApproval] via the service's own
  * approval-decide endpoint and the maker retries with `X-Approval-Id`.
- * Default off for services that have not opted in. Once enforcement is enabled,
- * a missing [ApprovalStore] fails closed with HTTP 503.
+ * Default off, so shipping this in the shared libs JAR does not retroactively
+ * change behavior for services that haven't opted in; once opted in, a missing
+ * [ApprovalStore] fails closed (503). An approval is bound to the request it was
+ * issued for and consumed atomically — see [requireFourEyes].
  */
 @Authorize(action = "")
 @Interceptor
@@ -153,6 +157,14 @@ class AuthorizeInterceptor {
     // never wire an ApprovalStore, so a hard @Inject would break their build.
     @Inject
     lateinit var approvalStore: Instance<ApprovalStore>
+
+    // Instance<> and nullable for the same reason as `approvalStore`: almost no service supplies an
+    // ApprovalSummaryRenderer, and a hand-built interceptor (unit tests) need not wire one.
+    @field:Inject
+    var summaryRenderer: Instance<ApprovalSummaryRenderer>? = null
+
+    private val summaryRendererOrNull: ApprovalSummaryRenderer?
+        get() = summaryRenderer?.takeIf { it.isResolvable }?.get()
 
     /**
      * Phase toggle (ADR-0034 D5). Default `true` so a service that adds
@@ -289,7 +301,7 @@ class AuthorizeInterceptor {
         }
         record(annotation.action, "allow", query.principal.type, decision.reason ?: "unspecified")
         m2mDecisionLine(annotation.action, query.principal.id, "allow", decision.reason)?.let(log::info)
-        requireFourEyes(annotation, query, decision)
+        if (decision.attributes["four_eyes_required"] == true) requireFourEyes(ctx, annotation, query)
     }
 
     /**
@@ -353,15 +365,19 @@ class AuthorizeInterceptor {
 
     /**
      * ADR-0155: gate an otherwise-allowed money-path action behind a second
-     * approver when OPA flagged it `four_eyes_required`. No-op (proceeds
-     * immediately) only while [fourEyesEnforce] is disabled. An opted-in service
-     * must wire an [ApprovalStore]; missing infrastructure fails closed.
+     * approver; called only when OPA flagged it `four_eyes_required`. No-op (proceeds
+     * immediately) unless the service opted in via [fourEyesEnforce]; once it has,
+     * a missing [ApprovalStore] fails closed with 503.
+     *
+     * The pending approval is bound to this exact call ([ApprovalRequestBindings]): the retry that
+     * carries `X-Approval-Id` must hit the same endpoint with the same arguments, or the approval
+     * does not apply and a fresh one is issued. Consumption is atomic in the store, so a
+     * concurrent second retry with the same id gets 409 rather than a second execution. A call
+     * whose arguments cannot be fingerprinted is refused with 503; a maker at the store's
+     * pending-approval limit gets [com.openbank.libs.approval.ApprovalLimitExceededException]
+     * (an IllegalStateException, so 422 with its message).
      */
-    private suspend fun requireFourEyes(annotation: Authorize, query: AuthzQuery, decision: AuthzDecision) {
-        val fourEyesRequired = decision.attributes["four_eyes_required"] == true
-        if (!fourEyesRequired) {
-            return
-        }
+    private suspend fun requireFourEyes(ctx: InvocationContext, annotation: Authorize, query: AuthzQuery) {
         if (!fourEyesEnforce) {
             // OPA asked for a second approver and we are about to proceed without one. Nothing
             // recorded this before, which made it indistinguishable from "four-eyes not required" —
@@ -383,16 +399,28 @@ class AuthorizeInterceptor {
         }
         if (!approvalStore.isResolvable) {
             meters?.authzFourEyes(annotation.action, "no_approval_store")
-            throw PolicyDecisionException("Four-eyes enforcement requires a configured ApprovalStore")
+            // Fails CLOSED (503, a wiring fault) like the missing-PDP branch: an enforced action
+            // must not execute without a place to record its approval. This used to proceed.
+            log.errorf(
+                "four-eyes: action=%s is flagged four_eyes_required with authz.four-eyes.enforce=true, " +
+                    "but no ApprovalStore bean is wired — refusing. Wire an ApprovalStore for this service " +
+                    "or set authz.four-eyes.enforce=false until it is.",
+                annotation.action,
+            )
+            throw PolicyDecisionException("four-eyes approval store not configured")
         }
         val store = approvalStore.get()
         val maker = query.principal.id
         val resourceId = query.resource?.id
+        val binding = ApprovalRequestBindings.of(ctx, annotation.action, resourceId, summaryRendererOrNull)
 
         val approvalId = resolveApprovalIdHeader()
         if (approvalId != null) {
             val approval = store.find(approvalId)
-            if (approval.satisfies(annotation.action, resourceId, maker) && store.markExecuted(approvalId) != null) {
+            if (
+                approval.satisfies(annotation.action, resourceId, maker, binding.fingerprint) &&
+                store.markExecuted(approvalId) != null
+            ) {
                 meters?.authzFourEyes(annotation.action, "approval_satisfied")
                 return
             }
@@ -405,7 +433,8 @@ class AuthorizeInterceptor {
             )
         }
 
-        val pending = store.create(annotation.action, resourceId, maker)
+        val actorKind = makerActorKind(query, identity.get())
+        val pending = store.create(annotation.action, resourceId, maker, binding = binding, makerActorKind = actorKind)
         meters?.authzFourEyes(annotation.action, "pending_approval")
         log.infof(
             "four-eyes: action=%s resource=%s maker=%s requires a second approver — approvalId=%s",
@@ -431,7 +460,7 @@ class AuthorizeInterceptor {
         val sc = securityContext.get()
         val principal = Principal(
             id = sc.userPrincipal?.name ?: "anonymous",
-            type = principalType(sc),
+            type = principalType(sc, identity.get()),
             roles = identity.get().roles.toList(),
         )
         val resource = annotation.resource.takeIf { it.isNotEmpty() }?.let { expr ->
@@ -485,12 +514,15 @@ class AuthorizeInterceptor {
         return ResourceRef(type = type, id = resolvedValue.toString())
     }
 
-    private fun principalType(sc: SecurityContext): String {
-        // Convention: agents present `sub` prefixed `agent:` (ADR-0031); any
-        // other authenticated principal is HUMAN. SERVICE-to-service uses a
-        // separate mTLS path and never hits this interceptor.
+    private fun principalType(sc: SecurityContext, authenticatedIdentity: SecurityIdentity): String {
+        // The agent convention is on the verified bearer token's `sub`, not on
+        // SecurityContext.name (which may be a display/preferred username).
+        // Keep the existing HUMAN policy type for service accounts; the approval
+        // record separately preserves their SERVICE_ACCOUNT provenance.
         val name = sc.userPrincipal?.name ?: return "ANONYMOUS"
-        return if (name.startsWith("agent:")) "AI_AGENT" else "HUMAN"
+        val subject = (authenticatedIdentity.principal as? JsonWebToken)?.subject
+        if (subject?.startsWith("agent:") == true) return "AI_AGENT"
+        return if (name.startsWith("agent:") && subject == null) "UNKNOWN" else "HUMAN"
     }
 
     private companion object {
@@ -562,14 +594,40 @@ internal fun m2mDecisionLine(action: String, principalId: String, outcome: Strin
  */
 
 /**
- * A supplied approval only unlocks THIS exact action, resource, and original maker.
+ * A supplied approval only unlocks THIS exact action, resource, original maker and request
+ * ([requestFingerprint], see [ApprovalRequestBindings]). An approval with no fingerprint was not
+ * issued by this interceptor and never satisfies it.
  *
  * Top-level rather than a class member because it reads no interceptor state, and
  * [AuthorizeInterceptor] sits at detekt's `TooManyFunctions` bound — which fires AT the threshold,
  * not above it.
  */
-private fun PendingApproval?.satisfies(action: String, resourceId: String?, maker: String): Boolean = this != null &&
+private fun makerActorKind(query: AuthzQuery, authenticatedIdentity: SecurityIdentity): MakerActorKind {
+    val jwt = authenticatedIdentity.principal as? JsonWebToken
+    val clientId = jwt?.getClaim<String>("azp")
+    val preferredUsername = jwt?.getClaim<String>("preferred_username")
+    val verifiedServiceAccount = jwt?.subject?.isNotBlank() == true &&
+        !clientId.isNullOrBlank() &&
+        preferredUsername == "$SERVICE_ACCOUNT_PREFIX$clientId"
+    return when {
+        query.principal.type == "AI_AGENT" -> MakerActorKind.AI_AGENT
+        verifiedServiceAccount -> MakerActorKind.SERVICE_ACCOUNT
+        preferredUsername?.startsWith(SERVICE_ACCOUNT_PREFIX) == true -> MakerActorKind.UNKNOWN
+        query.principal.id.startsWith(SERVICE_ACCOUNT_PREFIX) && jwt == null -> MakerActorKind.UNKNOWN
+        query.principal.type == "HUMAN" && "ROLE_CUSTOMER" in query.principal.roles -> MakerActorKind.CUSTOMER_PARTY
+        query.principal.type == "HUMAN" -> MakerActorKind.HUMAN
+        else -> MakerActorKind.UNKNOWN
+    }
+}
+
+private fun PendingApproval?.satisfies(
+    action: String,
+    resourceId: String?,
+    maker: String,
+    requestFingerprint: String,
+): Boolean = this != null &&
     status == ApprovalStatus.APPROVED &&
     this.action == action &&
     this.resourceId == resourceId &&
-    makerId == maker
+    makerId == maker &&
+    this.requestFingerprint == requestFingerprint

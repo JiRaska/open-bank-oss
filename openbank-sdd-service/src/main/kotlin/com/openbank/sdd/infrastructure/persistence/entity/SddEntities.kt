@@ -3,7 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.sdd.infrastructure.persistence.entity
 
-import com.openbank.libs.persistence.outbox.PanacheOutboxEntity
+import com.openbank.libs.persistence.outbox.PanacheOutboxEntityV2
 import com.openbank.sdd.domain.model.MandateStatus
 import com.openbank.sdd.domain.model.SddScheme
 import com.openbank.sdd.domain.model.SequenceType
@@ -75,10 +75,11 @@ class SddMandateEntity : PanacheEntityBase {
     var amendments: String = "[]"
 }
 
-/** Transactional outbox for `sdd.*` events — column definitions inherited from [PanacheOutboxEntity]. */
+/**
+ * Transactional outbox for `sdd.*` events on the kernel outbox v2 base (ADR-0327): `claimed_at` and
+ * `next_attempt_at` come from [PanacheOutboxEntityV2], written by `AbstractPanacheOutboxRepository`'s
+ * claim and backoff SQL (migration `V6__outbox_v2.sql`).
+ */
 @Entity
 @Table(name = "sdd_outbox")
-class SddOutboxEntity : PanacheOutboxEntity() {
-    @Column(name = "claimed_at")
-    var claimedAt: Instant? = null
-}
+class SddOutboxEntity : PanacheOutboxEntityV2()

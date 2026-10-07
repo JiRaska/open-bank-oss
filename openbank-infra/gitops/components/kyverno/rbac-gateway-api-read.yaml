@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Read access for the Kyverno admission controller to the Gateway API objects its tool-gate
+# policies list (cel-validating-policies.yaml: require-gated-or-declared-tool-httproute-cel and
+# protect-tool-httproute-gate-cel, ADR-0234 / ADR-0324 Phase 2).
+#
+# Measured before this file existed (2026-10-04):
+#   kubectl auth can-i list securitypolicies.gateway.envoyproxy.io -n observability \
+#     --as=system:serviceaccount:kyverno:kyverno-admission-controller   # no
+#   kubectl auth can-i list httproutes.gateway.networking.k8s.io -n observability \
+#     --as=system:serviceaccount:kyverno:kyverno-admission-controller   # no
+# Rollouts are listable only because the Argo Rollouts chart aggregates them into `view`;
+# neither Envoy Gateway nor the Gateway API CRDs do. With failurePolicy: Fail, a resource.List
+# the controller may not perform would deny every HTTPRoute CREATE/UPDATE in `observability`,
+# so this role must sync no later than the policies — same Argo app, wave -1.
+#
+# Aggregated into kyverno:admission-controller by the chart's own selector label. Read-only,
+# two resources, nothing else.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kyverno:admission-controller:gateway-api-read
+  labels:
+    app.kubernetes.io/part-of: kyverno-policies
+    rbac.kyverno.io/aggregate-to-admission-controller: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+rules:
+  - apiGroups: [gateway.envoyproxy.io]
+    resources: [securitypolicies]
+    verbs: [get, list, watch]
+  - apiGroups: [gateway.networking.k8s.io]
+    resources: [httproutes]
+    verbs: [get, list, watch]

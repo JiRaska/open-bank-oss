@@ -11,7 +11,8 @@
 #
 # The metrics are already served on the existing `tempo` Service (port `tempo-prom-metrics`:
 # 3200, verified live: `tempo_distributor_spans_received_total`, `tempo_receiver_accepted_spans`,
-# `tempo_ingester_traces_created_total` all present). Nothing needed to be turned on, only
+# `tempo_ingester_traces_created_total` all present; Tempo 3 renames the last one
+# `tempo_live_store_traces_created_total` — the ingester is gone, the distributor metric stays). Nothing needed to be turned on, only
 # scraped — and a ServiceMonitor here, rather than the chart's `serviceMonitor.enabled` value
 # on the Application, does not touch Tempo's pod template, so landing it rolls nothing.
 #

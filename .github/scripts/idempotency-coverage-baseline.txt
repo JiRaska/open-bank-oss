@@ -128,3 +128,7 @@ openbank-delegation-service POST /api/v1/entities/{entityId}/approval-requests/{
 openbank-delegation-service POST /api/v1/entities/{entityId}/approval-requests/{approvalId}/release-claim  # single-use by design: the DB compare-and-set IS the idempotency (second claim 409), rail Idempotency-Key = approvalId — ADR-0312
 openbank-delegation-service POST /api/v1/entities/{entityId}/approval-requests/{approvalId}/release-result  # idempotent for the same result, 409 for a different one — ADR-0312
 openbank-sca-service POST /api/v1/sca/challenges/{id}/consume  # lifecycle/action endpoint on an addressed resource — single-use by construction: atomic compare-and-consume (UPDATE ... WHERE consumed_at IS NULL), a replay is 409 already-consumed and never spends twice — ADR-0021 settlement gate; served since ADR-0021, first PUBLISHED in openapi.yaml by #10312
+
+# card-processing joined money_path_services with #11990's follow-up (its threat model always called it
+# money-path). Clearing and authorisation carry required keys; the reversal does not yet. Burn-down: #11995.
+openbank-card-processing-service POST /api/v1/card-authorizations/{id}/reversal  # lifecycle/action endpoint on an addressed resource — a sequential replay is refused by aggregate state (NOT_HOLDING_FUNDS, nothing released twice); a real DB-row key needs a Flyway version the card-processing namespace cannot take until #8864/#11990 land — burn-down #11995

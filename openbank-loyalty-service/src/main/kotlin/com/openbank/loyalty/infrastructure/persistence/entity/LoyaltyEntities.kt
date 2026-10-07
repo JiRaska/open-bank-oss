@@ -4,7 +4,7 @@
 
 package com.openbank.loyalty.infrastructure.persistence.entity
 
-import com.openbank.libs.persistence.outbox.PanacheOutboxEntity
+import com.openbank.libs.persistence.outbox.PanacheOutboxEntityV2
 import com.openbank.loyalty.domain.BenefitGrant
 import com.openbank.loyalty.domain.BenefitGrantStatus
 import com.openbank.loyalty.domain.LeafEarnSource
@@ -153,10 +153,10 @@ class BenefitGrantEntity {
     }
 }
 
-/** `claimed_at` is per-service, same reasoning as `AccountOutboxEntity` (#1201). */
+/**
+ * Outbox row on the kernel v2 base (ADR-0327): `claimed_at` and `next_attempt_at` come from
+ * [PanacheOutboxEntityV2]; the table gains them in `V4__outbox_v2.sql`.
+ */
 @Entity
 @Table(name = "loyalty_outbox")
-class LoyaltyOutboxEntity : PanacheOutboxEntity() {
-    @Column(name = "claimed_at")
-    var claimedAt: Instant? = null
-}
+class LoyaltyOutboxEntity : PanacheOutboxEntityV2()

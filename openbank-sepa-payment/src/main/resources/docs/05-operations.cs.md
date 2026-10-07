@@ -110,3 +110,7 @@ Rozřešeno z `libs.versions.toml` při buildu, vystaveno v `/api/v1/info`:
 ## Deploy / release
 
 Per-service CI pipeline + release-please (per-service komponenta, `version.txt`). Jako **money-path** služba vyžaduje merge **2 schválení + aktuální threat model**. Image se buildí jako fast-jar, host-side gradle pak Docker COPY `quarkus-app/`. CD přes ArgoCD vyzvedne nový image tag z GitOps manifestu.
+
+## Produkční mTLS volání AML služby
+
+Produkční REST klient AML používá pojmenovanou konfiguraci TLS `aml-authority` a listener AML služby na portu 8443, který vyžaduje klientský certifikát. Nasazení dodává klientský certifikát a svazek důvěryhodné privátní CA; vyžaduje se TLS 1.3. Pokud volání AML po nasazení selhává, zkontrolujte společně klientský certifikát a CA, produkční URL REST klienta a síťovou politiku k listeneru. Lokální vývoj a testy nadále používají HTTP fixture; úspěšný lokální HTTP test sám neprokazuje navázání TLS v nasazení.

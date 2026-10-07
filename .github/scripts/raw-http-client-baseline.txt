@@ -18,9 +18,6 @@ openbank-customer-edge/src/main/kotlin/com/openbank/customeredge/infrastructure/
 openbank-document-service/src/main/kotlin/com/openbank/document/infrastructure/render/HttpPdfRenderAdapter.kt	1
 openbank-document-service/src/main/kotlin/com/openbank/document/infrastructure/render/OpenBaoClientSignatureAdapter.kt	1
 openbank-notification-service/src/main/kotlin/com/openbank/notification/infrastructure/push/ApnsPushSender.kt	1
-openbank-notification-service/src/main/kotlin/com/openbank/notification/infrastructure/push/FcmPushSender.kt	1
-openbank-notification-service/src/main/kotlin/com/openbank/notification/infrastructure/webhook/SlackOversightWebhookPublisher.kt	1
-openbank-notification-service/src/main/kotlin/com/openbank/notification/infrastructure/webhook/TeamsOversightWebhookPublisher.kt	1
 openbank-sanctions-service/src/main/kotlin/com/openbank/sanctions/application/usecase/SanctionsImportService.kt	1
 openbank-security-scanner/src/main/kotlin/com/openbank/securityscanner/application/SecurityScannerService.kt	1
 openbank-transaction-service/src/main/kotlin/com/openbank/transaction/infrastructure/ingest/LogoFetcher.kt	1

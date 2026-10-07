@@ -53,6 +53,7 @@ import org.junit.jupiter.api.extension.ExtendWith
 @QuarkusTestResource(
     value = PostgresTestResource::class,
     initArgs = [ResourceArg(name = "db", value = "openbank_products")],
+    restrictToAnnotatedClass = true,
 )
 @TestSecurity(user = "pact-verifier", roles = ["ROLE_OPERATOR"])
 @Provider("openbank-product-catalog")
@@ -95,8 +96,10 @@ class ProductCatalogPactProviderVerificationTest {
      * catalogue already satisfies "no product exists with this code".
      */
     @State("no product exists with code NO_SUCH_CARD_PRODUCT")
-    fun unknownProductCodeIsAbsent() {
-        // Intentionally empty — see the KDoc above.
+    fun unknownProductCodeNotFound() {
+        // Assert the negative provider state before Pact replays its own 404 interaction.
+        io.restassured.RestAssured.given().get("/api/v1/products/by-code/NO_SUCH_CARD_PRODUCT")
+            .then().statusCode(404)
     }
 
     /**
@@ -115,7 +118,7 @@ class ProductCatalogPactProviderVerificationTest {
      * (`ProductCatalogLookupPactConsumerTest`, ADR-0264 Phase A).
      */
     @State("no product exists with id 00000000-0000-0000-0000-000000000fff")
-    fun unknownProductIdIsAbsent() {
+    fun unknownProductIdNotFound() {
         // Intentionally empty — see the KDoc above.
     }
 

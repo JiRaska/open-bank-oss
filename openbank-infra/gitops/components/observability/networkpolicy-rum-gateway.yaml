@@ -25,11 +25,16 @@ spec:
     - Ingress
     - Egress
   ingress:
-    # Only the nginx ingress controller may reach the OTLP-HTTP receiver.
+    # Only the edge may reach the OTLP-HTTP receiver: the nginx ingress controller, and
+    # the shared Gateway's Envoy proxy (ADR-0324 Phase 1, httproute-rum-gateway.yaml).
+    # The nginx peer goes when the chart's Ingress is removed after the DNS cutover.
     - from:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: ingress-nginx
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: envoy-gateway-system
       ports:
         - protocol: TCP
           port: 4318

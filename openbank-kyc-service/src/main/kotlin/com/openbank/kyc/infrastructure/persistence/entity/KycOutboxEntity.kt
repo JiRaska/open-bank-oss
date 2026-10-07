@@ -3,22 +3,15 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.kyc.infrastructure.persistence.entity
 
-import com.openbank.libs.persistence.outbox.PanacheOutboxEntity
-import jakarta.persistence.Column
+import com.openbank.libs.persistence.outbox.PanacheOutboxEntityV2
 import jakarta.persistence.Entity
 import jakarta.persistence.Table
-import java.time.Instant
 
 /**
- * `claimed_at` is kyc-only — added straight on this entity, not the shared
- * [PanacheOutboxEntity] (mapped by every outbox-bearing service — a shared-entity migration
- * would need every service migrated in lockstep). Stamped by
- * `KycOutboxRepositoryImpl.claimProcessable`'s atomic claim query on DISPATCHING; read back by
- * the same query to decide if a DISPATCHING row is stale enough to reclaim.
+ * Kyc's outbox row on the kernel outbox v2 base (ADR-0327): `claimed_at` and `next_attempt_at`
+ * come from [PanacheOutboxEntityV2], written by `AbstractPanacheOutboxRepository`'s claim and
+ * backoff SQL (migration `V11__outbox_v2.sql`).
  */
 @Entity
 @Table(name = "kyc_outbox")
-class KycOutboxEntity : PanacheOutboxEntity() {
-    @Column(name = "claimed_at")
-    var claimedAt: Instant? = null
-}
+class KycOutboxEntity : PanacheOutboxEntityV2()

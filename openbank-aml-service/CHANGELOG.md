@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.13.3](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.13.2...aml-service-v0.13.3) (2026-10-04)
+
+
+### Security
+
+* **aml:** add private-CA mTLS listener on 8443 ([#12089](https://github.com/JiRaska/open-bank-oss/issues/12089)) ([afe3153](https://github.com/JiRaska/open-bank-oss/commit/afe31531b683088362e68744c669c031f8bcabe8))
+
+## [0.13.2](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.13.1...aml-service-v0.13.2) (2026-10-03)
+
+
+### Bug Fixes
+
+* **libs:** scope idempotency keys per service and caller ([#11677](https://github.com/JiRaska/open-bank-oss/issues/11677)) ([f3a062a](https://github.com/JiRaska/open-bank-oss/commit/f3a062aba3d89a07d4a36b5118b1fda6d3012a93))
+
+
+### Performance
+
+* **loyalty,engagement,notification,aml,statement:** kernel outbox v2 repository (ADR-0327 phase 2) ([#11754](https://github.com/JiRaska/open-bank-oss/issues/11754)) ([3c804ab](https://github.com/JiRaska/open-bank-oss/commit/3c804ab9e0ec6cb46a1d6edaa472ee552d0a61c6))
+
 ## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.13.0...aml-service-v0.13.1) (2026-09-29)
 
 

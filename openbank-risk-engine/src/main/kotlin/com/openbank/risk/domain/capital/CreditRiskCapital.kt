@@ -202,7 +202,7 @@ object CreditRiskCapital {
                     } else {
                         CapitalFactor.RW_SOVEREIGN_UNRATED
                     }
-            CapitalGlClass.BANK -> ExposureClass.BANK to p.classification.bankScraGrade.factor
+            CapitalGlClass.BANK, CapitalGlClass.NOSTRO -> ExposureClass.BANK to p.classification.bankScraGrade.factor
             CapitalGlClass.RETAIL ->
                 p.classification.retailTreatment.exposureClass to p.classification.retailTreatment.factor
             CapitalGlClass.CASH -> ExposureClass.CASH to CapitalFactor.RW_CASH
@@ -279,6 +279,8 @@ object CreditRiskCapital {
                 p.amount.signum() == 0 || c == CapitalGlClass.NOT_AN_EXPOSURE -> Unit
                 c == null -> unclassify(p, "GL account not mapped in openbank.risk.capital.sa.classification")
                 c.isOwnFunds -> ownFundsAccount(p, c)
+                // An overdrawn nostro is owed TO the correspondent: a liability, not an exposure.
+                c == CapitalGlClass.NOSTRO && p.amount.signum() < 0 -> Unit
                 p.amount.signum() < 0 -> unclassify(p, NEGATIVE_EXPOSURE)
                 else -> {
                     val (ec, f) = weightOf(c, ccy, params)

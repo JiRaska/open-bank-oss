@@ -7,8 +7,9 @@
 #   workflow_dispatch / its own chaining, so no push event exists to fire on.
 #   Measured 2026-09-07/08: four consecutive auto-deploy failures over seven
 #   hours (pact REGRESSION blocks on sdd/vop/swift) surfaced only because a human
-#   went looking for whether two fixes had reached sandbox. A red run every 40
-#   minutes with nobody addressed is a broken pipeline reading as background
+#   went looking for whether two fixes had reached sandbox. Red runs were then
+#   roughly 40 minutes apart, with nobody addressed: a broken pipeline
+#   reading as background
 #   noise — and because deploys still PARTIALLY land, the estate looks healthy
 #   while three services sit pinned.
 #
@@ -40,15 +41,14 @@ name: auto-deploy red watch
 
 on:
   schedule:
-    # Off-peak minutes by convention; auto-deploy ticks roughly every 40 min,
-    # so ~30 min here sees a stuck pipeline within one tick of the threshold.
+    # Off-peak minutes by convention. Auto-deploy now schedules every three
+    # hours; this watcher checks twice an hour and rejects old verdicts.
     - cron: '11,41 * * * *'
   workflow_dispatch:
 
 permissions:
   contents: read
   actions: read
-  issues: write
 
 concurrency:
   group: auto-deploy-red-watch
@@ -56,6 +56,10 @@ concurrency:
 
 jobs:
   watch:
+    permissions:
+      contents: read
+      actions: read
+      issues: write  # github-script opens/refreshes/closes the one red-streak issue
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -65,10 +69,9 @@ jobs:
       - name: Self-test the watcher
         run: python3 .github/scripts/detect-auto-deploy-stuck.py --self-test
 
-      # One bounded API call (event=schedule, one page). The previous shape
-      # paginated the whole run history (~228 calls per tick to look at three
-      # runs) and was itself failing on the installation rate limit by 04:25Z
-      # on 2026-09-13.
+      # One bounded, unfiltered API page; the script selects the scheduled lane
+      # and rejects stale/incomplete pages (#12189). The older whole-history
+      # pagination made ~228 calls per tick and hit the installation rate limit.
       - name: Evaluate the scheduled lane
         id: verdict
         env:

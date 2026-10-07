@@ -139,6 +139,27 @@ mp:
           topic: openbank.dlq.risk-engine.fx-fixing-in
         value:
           deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      # fx-service's ČNB policy rates and minimum-reserve facts: the reserve ratio and its
+      # remuneration in effect on a snapshot's as-of date come from here, never from constants.
+      # Same rules as above: nested keys only, an explicit per-service DLQ (KafkaTopic CR + Write
+      # ACL in openbank-infra). The topic is COMPACTED on (instrument, effectiveFrom), so a new
+      # group reading from `earliest` rebuilds the full history however late it starts — the
+      # facts change a few times a year and would be long gone from a time-retained topic.
+      cnb-policy-rate-in:
+        connector: smallrye-kafka
+        topic: openbank.fx.cnb-policy-rate.published
+        client:
+          id: risk-engine-cnb-policy-rate-${quarkus.uuid}
+        group:
+          id: risk-engine-cnb-policy-rate
+        auto:
+          offset:
+            reset: earliest
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.risk-engine.cnb-policy-rate-in
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
       # treasury-service's `treasury.deal.*` events (ADR-0315 D6): the bank's own money-market deals,
       # kept in treasury_deal and carried into every snapshot as instruments. Same rules as above:
       # nested keys only, an explicit per-service DLQ (KafkaTopic CR + Write ACL in openbank-infra).
@@ -205,6 +226,13 @@ openbank:
       # itself (EodSnapshotScheduler) — same property-naming and Europe/Prague zone convention as
       # ledger-service's openbank.ledger.accounting-day.cron (AccountingDayScheduler). No key here
       # unless an environment needs to override it, same as that scheduler's own application.yaml.
+    reference-curves:
+      # ADR-0313 D4/D13: give every recent snapshot as-of date the sandbox reference curve set —
+      # illustrative demo quotes, provenance `synthetic`, source text "NOT market data" — so IRRBB,
+      # cash flows and the liquidity forecast have a curve set as of the run's own date. Off by
+      # default; the seeder refuses outright where openbank.risk.provenance is production.
+      # Cadence keys `every` (10m) and `delay` (30s) default in the @Scheduled annotation.
+      enabled: ${OPENBANK_RISK_REFERENCE_CURVES_ENABLED:false}
     # ADR-0313 phase 1: IRRBB supervisory shocks, `CCY=parallel/short/long` in bp, `;`-separated.
     # Shock sizes (parallel/short/long, bp) and the post-shock floor are the EU supervisory outlier
     # test values: Commission Delegated Regulation (EU) 2024/856 (RTS on SOT, Art. 98(5a) CRD),
@@ -237,7 +265,8 @@ openbank:
           # "2": treasury GL accounts classified (ADR-0315, #10618) — 1510 ČNB deposit facility as HQLA L1.
           # "3": ČNB lombard (GL 2320, #10896) — central-bank secured funding factors added.
           # "4": contract-level MM placements maturing ≤ 30 days are an LCR inflow (lcr-inflow-fi-placement-30d).
-          version: "4"
+          # "5": GL 1100, 1990, 1991, 1995, 2200 classified (#11107) — POLICY CHOICES, in classification below.
+          version: "5"
           regime: bcbs
           source: "BCBS d238 (Jan 2013) LCR and BCBS d295 (Oct 2014) NSFR, standard factors; EU CRR / Delegated Regulation 2015/61 deviations not applied"
           factors:
@@ -281,7 +310,8 @@ openbank:
         eu-2015-61-crr2:
           # "2": ČNB lombard (GL 2320, #10896) — central-bank secured funding factors added.
           # "3": contract-level MM placements maturing ≤ 30 days are an LCR inflow (lcr-inflow-fi-placement-30d).
-          version: "3"
+          # "4": GL 1100, 1990, 1991, 1995, 2200 classified (#11107) — POLICY CHOICES, in classification below.
+          version: "4"
           regime: eu
           source: "Delegated Regulation (EU) 2015/61 as amended by (EU) 2018/1620 (LCR) and Regulation (EU) 575/2013 Part Six Title IV as amended by (EU) 2019/876 (NSFR); UNVERIFIED factors keep the BCBS d238/d295 value"
           factors:
@@ -377,6 +407,34 @@ openbank:
           "6040": capital-deduction
           "6050": capital
           "6060": capital-tier2
+          # #11107 — these five were unclassified, so LCR and NSFR (and their limits) were NOT_EVALUABLE.
+          # Every choice is a POLICY CHOICE (#11107), made so that no ratio is better than the unknown
+          # facts permit. Accrued-interest rule (EU 2015/61 Art. 32 / follow-the-principal) does not
+          # apply: none of the five is accrued interest.
+          #
+          # 1100 "Customer Cash Clearing" (CZK; posted by transaction-service payments, domestic-payment
+          # settlement, clearing net settlement, lending funding): funds in transit, no counterparty or
+          # maturity recorded. Debit: not HQLA (not coins/banknotes or a central-bank reserve, EU 2015/61
+          # Art. 10(1)(a),(b)), no inflow claimed (Art. 32(1) needs a contractual claim; Art. 32(3)
+          # items in collection not evidenced), 100% RSF (CRR Art. 428ah, article UNVERIFIED). Credit:
+          # an obligation of unknown nature, 100% outflow (Art. 22(1), paragraph UNVERIFIED), 0% ASF
+          # (CRR Art. 428k). Same "no counterparty class" reasoning as its capital mapping (other-asset).
+          "1100": technical-or-clearing
+          # 1990 / 1991 "FX Position CZK / EUR" (treasury FX deals, customer currency conversions,
+          # ADR-0025) and 1995 "FX Position Counter-Value EUR (CZK)" (ledger daily ČNB revaluation,
+          # ADR-0031): currency-position bookkeeping legs, not a claim on or debt to anyone, and they do
+          # NOT net to zero per account by design (they stay open while customers hold FX). Not
+          # excludable, so the conservative two-sided treatment: a debit never counts as HQLA or an
+          # inflow and carries 100% RSF; a credit counts as a 100% outflow with 0% ASF — never as a
+          # negative RSF line (which `other-asset` would produce on a credit balance).
+          "1990": technical-or-clearing
+          "1991": technical-or-clearing
+          "1995": technical-or-clearing
+          # 2200 "Withholding Tax Payable" (CZK; interest-service capitalisation, remitted monthly to
+          # the tax office, ADR-0038): a liability falling due within the 30-day horizon -> 100%
+          # outflow (EU 2015/61 Art. 22(1), paragraph UNVERIFIED; d238 ¶141) and 0% ASF (CRR Art. 428k;
+          # d295 ¶25).
+          "2200": other-liability
         # Income / expense accounts not yet closed to equity: 0% ASF (d295 ¶25(a)); no LCR flow.
         gl-account-types:
           INCOME: current-year-result
@@ -399,8 +457,8 @@ openbank:
           # June 2011) ¶50. EU CRR Part Three Title II Chapter 2 is NOT applied in this set.
           bcbs-d424-sa:
             # "2": GL 1100-1113, 1400-1403, 1990-1997 classified (#10896, #11107) — POLICY CHOICES,
-            # in classification below (shared by every set).
-            version: "2"
+            # in classification below (shared by every set). "3": GL 1001/1002 nostro (#11107).
+            version: "3"
             regime: bcbs
             source: "BCBS d424 (Dec 2017) Part I standardised approach for credit risk; minima BCBS bcbs189 (rev. June 2011) ¶50. BCBS d424 SA weights; EU CRR Part Three Title II Chapter 2 not applied"
             # d424 ¶55's criteria (product, EUR 1m per obligor, 0.2% granularity) and ¶54's "individual
@@ -435,7 +493,8 @@ openbank:
           # Art. 121 (SCRA table), Art. 122 (unrated corporate), Art. 123 (retail 75%) and Art. 134
           # (which of (2)/(3) is cash in hand 0% and which cash items in collection 20%).
           eu-crr3-sa:
-            version: "1"
+            # "2": GL 1001/1002 classified nostro (#11107), in the shared classification below.
+            version: "2"
             regime: eu
             source: "Regulation (EU) 575/2013 as amended by (EU) 2019/876 and (EU) 2024/1623, Part Three Title II Chapter 2 (standardised approach) and Art. 92(1); paragraphs marked UNVERIFIED in the factor citations are not confirmed against the consolidated text"
             # CRR has NO "other retail" class: an exposure that does not meet ALL Art. 123 criteria
@@ -491,8 +550,12 @@ openbank:
           # COREP C 02.00 credit-risk row on the sandbox. Each is a POLICY CHOICE awaiting owner
           # sign-off; each is chosen so that RWA is never lower than the unknown facts permit.
           gl-accounts:
-            "1001": bank                         # nostro
-            "1002": bank                         # nostro EUR
+            # POLICY CHOICE (#11107): nostro at a correspondent bank. Debit = claim on an institution,
+            # weighted as "bank" (SCRA Grade C above: no counterparty rating is in the data); credit =
+            # the nostro is overdrawn, owed TO the correspondent, so no exposure (not listed as a
+            # credit balance on an exposure account, which would leave every ratio not evaluable).
+            "1001": nostro                       # nostro CZK
+            "1002": nostro                       # nostro EUR
             "1500": bank                         # money-market placements with banks
             "1501": bank
             "1520": bank                         # accrued interest follows its principal
@@ -572,10 +635,12 @@ openbank:
     # rounding of the requirement, and whether foreign-currency liabilities enter the base.
     min-reserves:
       parameter-set-id: cnb-pmr
-      parameter-set-version: "2"     # 2: GL 2320 (ČNB lombard borrowing) excluded-bank-or-cnb
-      source: "Opatření ČNB o povinných minimálních rezervách: 2 % of liabilities up to 2 years excl. banks subject to PMR and the ČNB; unremunerated since 2023-10-05"
-      rate: 0.02                     # the PMR ratio, 2 % of the reserve base
-      remuneration-rate: 0           # ČNB has not remunerated minimum reserves since 2023-10-05
+      parameter-set-version: "3"     # 3: ratio + remuneration from ČNB facts, not config; 2: GL 2320 excluded-bank-or-cnb
+      # The reserve RATIO and its REMUNERATION are not configured here (they were, as 2 % / 0 — and
+      # 2 % had been wrong since 2025-01-02, when the ratio became 4 %). They are ČNB facts read per
+      # as-of date from cnb_policy_rate_fact, fed by fx-service (fx.cnb-policy-rate.published.v1);
+      # with no fact in effect the requirement is NOT_EVALUABLE, never defaulted.
+      source: "Opatření ČNB o povinných minimálních rezervách: liabilities up to 2 years excl. banks subject to PMR and the ČNB; ratio and remuneration per ČNB fact in effect on the as-of date"
       holding-currency: CZK          # held on the bank's current account at the ČNB
       classification:
         # GL code -> class. Customer deposits need no entry: they are sub-ledger positions on
