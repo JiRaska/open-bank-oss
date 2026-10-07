@@ -1095,10 +1095,20 @@ jobs:
         id: check
         if: ${{ vars.PACT_BROKER_URL != '' }}
         run: |
+          python3 .github/scripts/write-can-i-deploy-verdicts.py --self-test
           # Extracted to .github/scripts/can-i-deploy-gate.sh (#4086). It sat at 18955 chars
           # against a 19000 ceiling whose breach makes the WHOLE workflow unparseable, so the
           # next comment anyone added here would have taken every contributor's deploy down.
           bash .github/scripts/can-i-deploy-gate.sh
+
+      - name: Publish per-service can-i-deploy verdicts
+        if: ${{ always() && steps.check.outputs.gate_ran == 'true' && github.event.inputs.codeploy != 'true' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: can-i-deploy-verdicts-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/can-i-deploy-verdicts.json
+          if-no-files-found: error
+          retention-days: 14
 
   # ── 3. Update gitops manifests + open auto-merge PR ──────────────────────────
   gitops-pr:

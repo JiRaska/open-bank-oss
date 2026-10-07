@@ -406,6 +406,22 @@ if [ "$BLOCKED_N" -gt 0 ]; then
   [ "$mp_blocked" = "1" ] && echo "::error::can-i-deploy left one or more MONEY-PATH services behind this run — see the job summary (issue #1420)"
   [ "$regression_blocked" = "1" ] && echo "::error::can-i-deploy: at least one block is a CONTRACT REGRESSION, which no reconcile tick can clear — see the job summary (issue #2549)"
 fi
+# Publish a bounded, machine-readable verdict for every selected service (#9898).
+# Do not put the raw Pact CLI transcript in an artifact: it can carry broker URLs
+# and authentication details. Missing or unclassified verdicts stay UNKNOWN and
+# cannot be interpreted by the subject watch as a successful deployment.
+VERDICT_CLASSES_FILE="$(mktemp)"
+VERDICT_MONEY_PATH_FILE="$(mktemp)"
+awk '/^money_path_services:/{f=1;next} f&&/^  - /{print $2} f&&/^[a-zA-Z]/{exit}' \
+  openbank-libs/governance/rules.yaml > "$VERDICT_MONEY_PATH_FILE"
+for svc in $(echo "$BLOCKED_JSON" | jq -r '.[]'); do
+  printf '%s\t%s\n' "$svc" "${block_class[$svc]:-UNKNOWN}" >> "$VERDICT_CLASSES_FILE"
+done
+python3 .github/scripts/write-can-i-deploy-verdicts.py \
+  --services "$SERVICES" --deployable "$deployable_json" \
+  --classes-file "$VERDICT_CLASSES_FILE" --money-path-file "$VERDICT_MONEY_PATH_FILE" \
+  --head-sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" \
+  --output "$RUNNER_TEMP/can-i-deploy-verdicts.json" || exit 1
 # On a scheduled reconcile tick an ordinary (non money-path) service still blocked by
 # the contract gate is EXPECTED — reconcile deliberately re-offers known strands and
 # leaves the still-blocked ones for a later tick; the deployable subset already
