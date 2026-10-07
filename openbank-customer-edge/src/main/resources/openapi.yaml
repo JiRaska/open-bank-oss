@@ -44,7 +44,8 @@ info:
   # 1.74.0 -> 1.75.0 (#10016): additive — GET /capabilities (ADR-0310 D5).
   # 1.75.0 -> 1.76.0 (#11966): additive — /holdings, the customer write side of the declared
   # holdings that GET /net-worth reads (ADR-0301 D1).
-  version: 1.77.0
+  # 1.77.0 -> 1.78.0: additive — account-scoped transaction search with ownership enforcement.
+  version: 1.78.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -1091,6 +1092,26 @@ paths:
                 $ref: '#/components/schemas/TransactionList'
         '403':
           description: Account does not belong to caller
+
+  /transactions/search:
+    get:
+      tags: [Transactions]
+      summary: Search one readable account's transactions by counterparty or IBAN
+      operationId: searchTransactions
+      security:
+        - customerOidc: [accounts:read]
+      parameters:
+        - {name: accountId, in: query, required: true, schema: {type: string, format: uuid}}
+        - {name: query, in: query, required: true, schema: {type: string, minLength: 2, maxLength: 80}}
+        - {name: limit, in: query, required: false, schema: {type: integer, default: 20, minimum: 1, maximum: 100}}
+        - {name: offset, in: query, required: false, schema: {type: integer, default: 0, minimum: 0, maximum: 10000}}
+      responses:
+        '200':
+          description: Bounded account-scoped search results from transaction-service
+        '400':
+          description: Missing account or invalid search term
+        '403':
+          description: Account is not readable by the caller
 
   /merchants/{descriptorKey}/logo:
     get:

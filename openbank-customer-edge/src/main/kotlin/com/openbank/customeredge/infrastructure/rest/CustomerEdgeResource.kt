@@ -2360,6 +2360,36 @@ class CustomerEdgeResource(
         return enrichWithCounterpartyIban(resp, accountId, customer.partyId)
     }
 
+    /** Search the upstream history of one account only after checking read access. */
+    @GET
+    @Path("/transactions/search")
+    @Authorize(action = "customer.transactions.read")
+    @Blocking
+    fun searchTransactions(
+        @QueryParam("accountId") accountIdOrNull: UUID?,
+        @QueryParam("query") queryOrNull: String?,
+        @QueryParam("limit") @DefaultValue("20") limit: Int,
+        @QueryParam("offset") @DefaultValue("0") offset: Int,
+    ): Response {
+        val customer = customer()
+        val accountId = accountIdOrNull ?: return badRequest("Missing required query parameter 'accountId'")
+        val query = queryOrNull?.trim().orEmpty()
+        if (query.length !in 2..80 || query.count(Char::isLetterOrDigit) < 2 || query.any(Char::isISOControl)) {
+            return badRequest("query must contain 2 to 80 characters and at least two letters or digits")
+        }
+        if (!mayReadAccount(accountId, customer.partyId, "ACCOUNT_READ_TRANSACTIONS")) {
+            return forbidden("Account does not belong to caller")
+        }
+        val compact = query.filterNot(Char::isWhitespace).uppercase()
+        val field = if (IBAN_SEARCH_PATTERN.matches(compact)) "iban" else "counterparty"
+        val term = if (field == "iban") compact else query
+        val url = "$transactionServiceUrl/api/v1/transactions/search?accountId=$accountId" +
+            "&$field=${java.net.URLEncoder.encode(term, Charsets.UTF_8)}" +
+            "&limit=${limit.coerceIn(1, 100)}&offset=${offset.coerceIn(0, 10_000)}"
+        val resp = upstream.get(url, customer.partyId.toString())
+        return enrichWithCounterpartyIban(resp, accountId, customer.partyId)
+    }
+
     /**
      * Point `merchant.logoUrl` at THIS edge instead of at transaction-service's own path.
      *
@@ -6205,6 +6235,8 @@ class CustomerEdgeResource(
                 append("&cursor=").append(java.net.URLEncoder.encode(cursor, Charsets.UTF_8))
             }
         }
+
+        private val IBAN_SEARCH_PATTERN = Regex("^[A-Z]{2}[A-Z0-9]{13,32}$")
 
         /**
          * Resolve the party UUID string from JWT claims (package-visible for unit tests).
