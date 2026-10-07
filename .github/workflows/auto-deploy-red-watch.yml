@@ -146,8 +146,9 @@ jobs:
               'Only the scheduled (reconcile) lane counts here: a green `push` run deploys the',
               'services one merge touched and says nothing about the services that are pinned.',
               '',
-              'A REGRESSION/PENDING_BUILD block does not clear on its own — the reconcile tick',
-              're-offers it forever (ADR-0092, #2549). Partial deploys still land, so the fleet',
+              'A REGRESSION block does not clear on its own — the reconcile tick',
+              're-offers it forever (ADR-0092, #2549). PENDING_BUILD can clear when CI catches up.',
+              'Partial deploys still land, so the fleet',
               'looks healthy while blocked services stay pinned. Read the can-i-deploy job of the',
               'newest run above for the per-service class and the failing pact verification.',
               'See #9130 for the first measured instance (four failures over seven hours, found',
@@ -172,3 +173,79 @@ jobs:
             }
             const created = await github.rest.issues.create({ ...context.repo, title, body, labels: [LABEL] })
             core.info(`opened #${created.data.number}`)
+
+      # #9898: the workflow-level streak above is retained as a fallback while
+      # per-service artifacts accumulate. Only this lane can identify a durable
+      # blocked service despite green runs for unrelated services.
+      - name: Self-test the per-service watch
+        run: python3 .github/scripts/detect-auto-deploy-subjects.py --self-test
+
+      - name: Evaluate per-service scheduled verdicts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 .github/scripts/detect-auto-deploy-subjects.py --evaluate \
+            --repo "$GITHUB_REPOSITORY" --json /tmp/auto-deploy-subjects.json
+
+      - name: Escalate durable service subjects
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const fs = require('fs')
+            const report = JSON.parse(fs.readFileSync('/tmp/auto-deploy-subjects.json', 'utf8'))
+            if (!report.ready) {
+              core.info('No per-service artifacts yet; retaining the existing lane watch.')
+              return
+            }
+            const LABEL = 'fleet-health'
+            const marker = service => `<!-- auto-deploy-subject:${service} -->`
+            const active = report.active
+            const open = await github.paginate(github.rest.issues.listForRepo, {
+              ...context.repo, state: 'open', labels: LABEL, per_page: 100,
+            })
+            const closedRecent = await github.rest.issues.listForRepo({
+              ...context.repo, state: 'closed', labels: LABEL, per_page: 100,
+              sort: 'updated', direction: 'desc',
+            })
+            const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000
+            for (const subject of active) {
+              const match = issue => (issue.body || '').includes(marker(subject.service))
+              const existing = open.find(match)
+              const closed = closedRecent.data.find(i =>
+                i.closed_at && Date.parse(i.closed_at) >= cutoff && match(i))
+              const pairs = (subject.blocked_on || []).map(p =>
+                `- \`${p.consumer}\` → \`${p.provider}\`: ` +
+                (p.verification_id ? `verification #${p.verification_id}` : 'verification missing'))
+              const title = `auto-deploy: ${subject.service} durably blocked [${subject.class}]`
+              const body = [
+                marker(subject.service),
+                `## ${subject.service} remains blocked by the contract gate`,
+                '',
+                `Class: \`${subject.class}\`; money path: \`${subject.money_path}\`; ` +
+                  `durable scheduled verdicts: ${subject.streak}/${subject.threshold}.`,
+                `Latest selected run: ${subject.run_id}, head \`${subject.head_sha}\`.`,
+                '',
+                ...(pairs.length ? pairs : ['Blocking pair/verification identity was not established.']),
+                '',
+                'A green run for another service, a transient verdict, or a passing contract',
+                'gate does not prove this service reached a healthy live rollout.',
+                'Keep this issue open until the running image and exact current source are',
+                'attested. This watch currently escalates and refreshes; it never auto-closes',
+                'on a proxy signal. Refs #9898.',
+              ].join('\n')
+              if (existing) {
+                await github.rest.issues.update({ ...context.repo,
+                  issue_number: existing.number, title, body })
+                core.info(`refreshed #${existing.number}: ${subject.service}`)
+              } else if (closed) {
+                await github.rest.issues.update({ ...context.repo,
+                  issue_number: closed.number, title, body, state: 'open' })
+                core.info(`reopened #${closed.number}: ${subject.service}`)
+              } else {
+                const created = await github.rest.issues.create({
+                  ...context.repo, title, body, labels: [LABEL],
+                })
+                core.info(`opened #${created.data.number}: ${subject.service}`)
+              }
+            }
+            core.info(`${active.length} durable service subject(s); existing subject issues are never closed without runtime proof.`)
