@@ -4,7 +4,7 @@ openapi: 3.1.0
 info:
   title: Notification Service API
   # 1.10 -> 1.11 (#11588): additive verified makerActorKind on approval responses.
-  version: 1.11.0
+  version: 1.12.0
   description: Notification delivery management — query sent/pending notifications, manage push device tokens.
   license:
     name: Apache-2.0
@@ -509,6 +509,11 @@ components:
         total:
           type: integer
           format: int64
+        unreadCount:
+          type: integer
+          format: int64
+          nullable: true
+          description: Exact unread count for the selected party; null for an unscoped operator list.
         page:
           type: integer
         size:

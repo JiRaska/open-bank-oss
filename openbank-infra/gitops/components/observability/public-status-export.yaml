@@ -1,0 +1,157 @@
+# The only bridge from private Prometheus to the public status service. It writes
+# two allowlisted verdicts, not metrics, labels, endpoints, or raw responses.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: public-status-export
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: public-status-export
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+data:
+  export.py: |
+    import json
+    import math
+    import os
+    import time
+    import urllib.parse
+    import urllib.request
+    from datetime import datetime, timezone
+
+    GROUPS = {
+        "core_services": {
+            "namespaces": "ledger|accounts|balances",
+            "containers": {"ledger-service", "account-service", "balance-service"},
+        },
+        "payment_services": {
+            "namespaces": "payments|fx",
+            "containers": {"transaction-service", "domestic-payment", "sepa-payment", "sepa-instant", "settlement-service"},
+        },
+    }
+
+    def query(expression):
+        host = os.environ["KUBE_PROMETHEUS_STACK_PROMETHEUS_SERVICE_HOST"]
+        url = "http://" + host + ":9090/api/v1/query?" + urllib.parse.urlencode({"query": expression})
+        with urllib.request.urlopen(url, timeout=8) as response:
+            document = json.load(response)
+        if document.get("status") != "success" or document.get("data", {}).get("resultType") != "vector":
+            raise RuntimeError("Prometheus query failed")
+        result = {}
+        for item in document["data"]["result"]:
+            name = item.get("metric", {}).get("container")
+            value = float(item["value"][1])
+            if name and math.isfinite(value):
+                result[name] = value
+        return result
+
+    def verdict(expected, observed):
+        if not expected <= observed.keys():
+            return "unknown"
+        if any(observed[name] < 1 for name in expected):
+            return "outage"
+        return "operational"
+
+    def collect():
+        components = {}
+        for key, group in GROUPS.items():
+            selector = 'up{job="observability/openbank-services",namespace=~"' + group["namespaces"] + '"}'
+            observed = query("max by (container) (" + selector + ")")
+            components[key] = verdict(group["containers"], observed)
+        return {
+            "schemaVersion": 1,
+            "checkedAt": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+            "components": components,
+        }
+
+    if __name__ == "__main__":
+        with open("/tmp/status-aggregate.json", "w", encoding="utf-8") as output:
+            json.dump(collect(), output, separators=(",", ":"))
+        print("Public status aggregate prepared", int(time.time()))
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: public-status-export
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+    app.kubernetes.io/component: public-status-export
+  annotations:
+    openbank.tech/max-success-age-seconds: "900"
+spec:
+  schedule: "*/2 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 120
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 90
+      ttlSecondsAfterFinished: 172800
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/component: public-status-export
+        spec:
+          serviceAccountName: public-status-export
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: export
+              image: docker.io/alpine/k8s:1.34.12@sha256:d50424976a0a888d2531f13035dce45c004ec2b6f877f233005ba35c0d61be5d
+              imagePullPolicy: IfNotPresent
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  python3 /app/export.py
+                  account_id="$(aws sts get-caller-identity --query Account --output text)"
+                  aws s3api put-object \
+                    --bucket "openbank-status-data-${account_id}" \
+                    --key internal-aggregate.json \
+                    --body /tmp/status-aggregate.json \
+                    --server-side-encryption AES256 \
+                    --region eu-north-1 >/dev/null
+              env:
+                - name: HOME
+                  value: /tmp
+                - name: PYTHONDONTWRITEBYTECODE
+                  value: "1"
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: 25m
+                  memory: 64Mi
+                limits:
+                  cpu: 250m
+                  memory: 256Mi
+              volumeMounts:
+                - name: script
+                  mountPath: /app
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: script
+              configMap:
+                name: public-status-export
+            - name: tmp
+              emptyDir: {}
