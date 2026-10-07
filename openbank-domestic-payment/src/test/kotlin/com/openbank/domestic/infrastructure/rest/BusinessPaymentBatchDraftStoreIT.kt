@@ -6,6 +6,7 @@ package com.openbank.domestic.infrastructure.rest
 
 import com.openbank.domestic.integration.DomesticPaymentBootSmokeIT
 import com.openbank.libs.testing.containers.PostgresRedisTestResource
+import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
@@ -32,11 +33,15 @@ class BusinessPaymentBatchDraftStoreIT {
     @Inject lateinit var store: BusinessPaymentBatchDraftStore
 
     private fun <T> db(block: suspend () -> T): T = VertxContextSupport.subscribeAndAwait {
-        uni(CoroutineScope(Dispatchers.Unconfined)) { block() }
+        Panache.withSession { uni(CoroutineScope(Dispatchers.Unconfined)) { block() } }
     }
 
-    private val summary = BusinessPaymentBatchDraftResource.Summary(0, 0)
-    private fun request() = BusinessPaymentBatchDraftResource.Create(UUID.randomUUID())
+    private val summary = BusinessPaymentBatchDraftResource.Summary(1, 125)
+    private fun request() = BusinessPaymentBatchDraftResource.Create(
+        UUID.randomUUID(),
+        listOf(BusinessPaymentBatchDraftResource.Item(UUID.randomUUID(), "123456789", "0800", "Supplier", 125, "CZK")),
+    )
+    private fun itemsJson() = com.fasterxml.jackson.module.kotlin.jacksonObjectMapper().writeValueAsString(request().items)
 
     @Test
     fun `company ownership and durable idempotency binding`() {
@@ -66,17 +71,32 @@ class BusinessPaymentBatchDraftStoreIT {
     }
 
     @Test
+    fun `replacement records the editing human and rejects stale revision`() {
+        val company = UUID.randomUUID()
+        val creator = UUID.randomUUID()
+        val editor = UUID.randomUUID()
+        val row = db {
+            store.create(company, creator, UUID.randomUUID().toString(), "d".repeat(64), request(), summary)
+        }.first
+        val edited = db { store.replace(company, row.id, editor, row.revision, itemsJson(), summary) }
+        assertEquals(editor, edited?.updatedByPartyId)
+        assertThrows(BatchDraftConflict::class.java) {
+            db { store.replace(company, row.id, creator, row.revision, itemsJson(), summary) }
+        }
+    }
+
+    @Test
     fun `only one concurrent replacement can consume a revision`() {
         val company = UUID.randomUUID()
         val row = db {
             store.create(company, UUID.randomUUID(), UUID.randomUUID().toString(), "c".repeat(64), request(), summary)
         }.first
-        val calls = (1..2).map { index ->
+        val calls = (1..2).map {
             CompletableFuture.supplyAsync {
                 runCatching {
                     db {
                         store.replace(
-                            company, row.id, row.revision, if (index == 1) "[]" else "[ ]",
+                            company, row.id, UUID.randomUUID(), row.revision, itemsJson(),
                             summary,
                         )
                     }
@@ -86,5 +106,6 @@ class BusinessPaymentBatchDraftStoreIT {
         val outcomes = calls.map { it.join() }
         assertEquals(1, outcomes.count { it.isSuccess })
         assertEquals(1, outcomes.count { it.exceptionOrNull() is BatchDraftConflict })
+        assertNotNull(db { store.get(company, row.id) }?.updatedByPartyId)
     }
 }

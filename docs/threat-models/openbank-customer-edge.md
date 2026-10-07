@@ -303,3 +303,6 @@ human's live representation mandate, and forwards only the verified company and 
 persisted domestic draft aggregate. A missing, invalid, foreign, or expired mandate fails closed.
 Batch IDs cannot switch company by changing the header because the owning service scopes reads
 and writes by company. The API has no submit or rail dispatch route in this slice.
+
+For item replacement, the edge forwards the human token identity as the editing actor; the
+backend persists it with the new revision. An unverified client header cannot name that actor.

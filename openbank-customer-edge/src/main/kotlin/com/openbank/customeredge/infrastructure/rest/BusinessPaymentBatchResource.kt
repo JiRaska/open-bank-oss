@@ -43,10 +43,10 @@ class BusinessPaymentBatchResource(
     fun create(
         @HeaderParam("X-Acting-For") header: String?,
         @HeaderParam("Idempotency-Key") key: String?,
-        body: String,
+        body: String?,
     ): Response {
         val (human, entity) = parties(header)
-        if (key.isNullOrBlank() || key.length > 128) return Response.status(400).build()
+        if (body.isNullOrBlank() || key.isNullOrBlank() || key.length > 128) return Response.status(400).build()
         return upstream.post(url(), entity.toString(), body, key, mapOf("X-Actor-Party-Id" to human.toString()))
     }
 
@@ -82,11 +82,15 @@ class BusinessPaymentBatchResource(
         @HeaderParam("X-Acting-For") header: String?,
         @PathParam("id") id: UUID,
         @HeaderParam("If-Match") revision: String?,
-        body: String,
+        body: String?,
     ): Response {
-        val (_, entity) = parties(header)
+        val (human, entity) = parties(header)
         if (revision?.trim('"')?.toLongOrNull() == null) return Response.status(428).build()
-        return upstream.put("${url()}/$id/items", entity.toString(), body, null, mapOf("If-Match" to revision))
+        if (body.isNullOrBlank()) return Response.status(400).build()
+        return upstream.put(
+            "${url()}/$id/items", entity.toString(), body, null,
+            mapOf("If-Match" to revision, "X-Actor-Party-Id" to human.toString()),
+        )
     }
 
     private fun url() = "$domesticUrl/api/v1/business-payment-batches"

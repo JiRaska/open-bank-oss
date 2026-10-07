@@ -24,6 +24,9 @@ class BusinessPaymentBatchDraftEntity {
     @Column(name = "actor_party_id", nullable = false)
     lateinit var actorPartyId: UUID
 
+    @Column(name = "updated_by_party_id", nullable = false)
+    lateinit var updatedByPartyId: UUID
+
     @Column(name = "idempotency_key", nullable = false)
     lateinit var idempotencyKey: String
 

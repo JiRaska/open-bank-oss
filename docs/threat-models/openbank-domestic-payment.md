@@ -674,3 +674,7 @@ reconcile ambiguous rail responses. Those controls are not implied by the draft 
 
 Rollback: remove the edge route, then the domestic route. Keep the table while draft retention is
 resolved; do not drop customer drafts during code rollback.
+
+Draft item replacement records the verified editing human alongside the company and revision. A
+replayed creation key is checked against its persisted fingerprint before item validation, so an
+altered parseable body cannot change a conflict into an unrelated validation response.

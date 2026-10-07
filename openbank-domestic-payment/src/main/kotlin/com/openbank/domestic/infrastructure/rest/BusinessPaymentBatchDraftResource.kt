@@ -4,6 +4,8 @@
 
 package com.openbank.domestic.infrastructure.rest
 
+import com.fasterxml.jackson.annotation.JsonAnySetter
+import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.domestic.application.usecase.CzechDomesticIban
 import com.openbank.domestic.infrastructure.persistence.entity.BusinessPaymentBatchDraftEntity
@@ -27,6 +29,7 @@ import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.jwt.JsonWebToken
+import io.quarkus.security.identity.SecurityIdentity
 import java.security.MessageDigest
 import java.time.Instant
 import java.util.UUID
@@ -41,9 +44,10 @@ class BusinessPaymentBatchDraftResource(
     private val mapper: ObjectMapper,
 ) {
     @Inject
-    lateinit var jwt: JsonWebToken
+    lateinit var identity: SecurityIdentity
 
     private fun trustedEdge() {
+        val jwt = identity.principal as? JsonWebToken ?: throw ForbiddenException("trusted edge required")
         if (jwt.getClaim<String>("preferred_username") != "service-account-openbank-edge" ||
             jwt.getClaim<String>("azp") != "openbank-edge"
         ) {
@@ -60,14 +64,32 @@ class BusinessPaymentBatchDraftResource(
         val currency: String,
         val variableSymbol: String? = null,
         val messageForPayee: String? = null,
-    )
+    ) {
+        @JsonAnySetter
+        fun rejectUnknown(name: String, ignored: Any?) {
+            throw IllegalArgumentException("unsupported item field $name")
+        }
+    }
 
-    data class Create(val debtorAccountId: UUID, val items: List<Item> = emptyList())
-    data class Replace(val items: List<Item>)
+    data class Create(val debtorAccountId: UUID, val items: List<Item>) {
+        @JsonAnySetter
+        fun rejectUnknown(name: String, ignored: Any?) {
+            throw IllegalArgumentException("unsupported batch field $name")
+        }
+    }
 
+    data class Replace(val items: List<Item>) {
+        @JsonAnySetter
+        fun rejectUnknown(name: String, ignored: Any?) {
+            throw IllegalArgumentException("unsupported replacement field $name")
+        }
+    }
+
+    // Read raw JSON so a reused key is compared to the complete canonical body before
+    // validation, including fields that a new request must reject.
     @POST
     suspend fun create(
-        request: Create,
+        body: String?,
         @HeaderParam("X-Customer-Party-Id") entity: UUID?,
         @HeaderParam("X-Actor-Party-Id") actor: UUID?,
         @HeaderParam("Idempotency-Key") key: String?,
@@ -78,8 +100,14 @@ class BusinessPaymentBatchDraftResource(
         val retryKey = requireNotNull(key?.takeIf { it.isNotBlank() && it.length <= 128 }) {
             "Idempotency-Key required (1..128)"
         }
+        val rawBody = requireNotNull(body) { "JSON body is required" }
+        require(rawBody.length <= MAX_BODY_CHARS) { "batch body is too large" }
+        val node = mapper.readTree(rawBody)
+        require(node != null && node.isObject) { "batch body must be a JSON object" }
+        val hash = sha256(mapper.writeValueAsBytes(canonical(node)))
+        store.replay(party, human, retryKey, hash)?.let { return Response.ok(view(it, 0)).build() }
+        val request = mapper.treeToValue(node, Create::class.java)
         val summary = validate(request.items)
-        val hash = sha256(mapper.writeValueAsBytes(request))
         val (saved, replayed) = store.create(party, human, retryKey, hash, request, summary)
         return Response.status(if (replayed) 200 else 201).entity(view(saved, 0)).build()
     }
@@ -120,13 +148,18 @@ class BusinessPaymentBatchDraftResource(
         @HeaderParam("X-Customer-Party-Id") entity: UUID?,
         @PathParam("id") id: UUID,
         @HeaderParam("If-Match") ifMatch: String?,
-        request: Replace,
+        @HeaderParam("X-Actor-Party-Id") actor: UUID?,
+        body: String?,
     ): Response {
         trustedEdge()
         val party = requireNotNull(entity) { "company context required" }
+        val human = requireNotNull(actor) { "human actor required" }
         val expected = ifMatch?.trim('"')?.toLongOrNull() ?: return Response.status(428).build()
+        val rawBody = requireNotNull(body) { "JSON body is required" }
+        require(rawBody.length <= MAX_BODY_CHARS) { "batch body is too large" }
+        val request = mapper.readValue(rawBody, Replace::class.java)
         val summary = validate(request.items)
-        val saved = store.replace(party, id, expected, mapper.writeValueAsString(request.items), summary)
+        val saved = store.replace(party, id, human, expected, mapper.writeValueAsString(request.items), summary)
             ?: return Response.status(404).build()
         return Response.ok(view(saved, 0)).build()
     }
@@ -144,7 +177,7 @@ class BusinessPaymentBatchDraftResource(
     data class Summary(val count: Int, val total: Long)
 
     internal fun validate(items: List<Item>): Summary {
-        require(items.size <= 100) { "at most 100 items" }
+        require(items.size in 1..100) { "between 1 and 100 items required" }
         require(items.map { it.itemId }.toSet().size == items.size) { "itemId must be unique" }
         var total = 0L
         items.forEach { item ->
@@ -155,6 +188,8 @@ class BusinessPaymentBatchDraftResource(
                 throw IllegalArgumentException("batch total exceeds supported range")
             }
             require(item.currency == "CZK") { "only CZK is supported" }
+            require(item.creditorAccountNumber.length in 1..17) { "creditor account is too long" }
+            require(item.creditorBankCode.matches(Regex("[0-9]{4}"))) { "invalid bank code" }
             require(CzechDomesticIban.fromAccountNumber(item.creditorAccountNumber, item.creditorBankCode) != null) {
                 "invalid Czech creditor account"
             }
@@ -167,19 +202,47 @@ class BusinessPaymentBatchDraftResource(
         return Summary(items.size, total)
     }
 
+    private fun canonical(node: JsonNode): JsonNode = when {
+        node.isObject -> mapper.createObjectNode().apply {
+            node.fieldNames().asSequence().sorted().forEach { name ->
+                set<JsonNode>(name, canonical(node.get(name)))
+            }
+        }
+        node.isArray -> mapper.createArrayNode().apply {
+            node.forEach { item -> add(canonical(item)) }
+        }
+        else -> node
+    }
+
     private fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256")
         .digest(bytes).joinToString("") { "%02x".format(it) }
+
+    private companion object {
+        const val MAX_BODY_CHARS = 64_000
+    }
 }
 
 @ApplicationScoped
 class BusinessPaymentBatchDraftStore(private val mapper: ObjectMapper) :
     PanacheRepository<BusinessPaymentBatchDraftEntity> {
+    suspend fun replay(entity: UUID, actor: UUID, key: String, hash: String): BusinessPaymentBatchDraftEntity? {
+        val existing = Panache.withSession {
+            find("entityPartyId = ?1 and idempotencyKey = ?2", entity, key).firstResult()
+        }.awaitSuspending()
+        if (existing != null && (existing.requestHash != hash || existing.actorPartyId != actor)) {
+            throw BatchDraftConflict()
+        }
+        return existing
+    }
+
     suspend fun create(
         entity: UUID, actor: UUID, key: String, hash: String,
         request: BusinessPaymentBatchDraftResource.Create,
         summary: BusinessPaymentBatchDraftResource.Summary,
     ): Pair<BusinessPaymentBatchDraftEntity, Boolean> {
-        val existing = find("entityPartyId = ?1 and idempotencyKey = ?2", entity, key).firstResult().awaitSuspending()
+        val existing = Panache.withSession {
+            find("entityPartyId = ?1 and idempotencyKey = ?2", entity, key).firstResult()
+        }.awaitSuspending()
         if (existing != null) {
             if (existing.requestHash != hash || existing.actorPartyId != actor) throw BatchDraftConflict()
             return existing to true
@@ -189,6 +252,7 @@ class BusinessPaymentBatchDraftStore(private val mapper: ObjectMapper) :
             id = UUID.randomUUID()
             entityPartyId = entity
             actorPartyId = actor
+            updatedByPartyId = actor
             idempotencyKey = key
             requestHash = hash
             debtorAccountId = request.debtorAccountId
@@ -202,7 +266,9 @@ class BusinessPaymentBatchDraftStore(private val mapper: ObjectMapper) :
             Panache.withTransaction { persist(row).replaceWith(row) }.awaitSuspending() to false
         } catch (e: RuntimeException) {
             if (!e.isBatchKeyViolation()) throw e
-            val winner = find("entityPartyId = ?1 and idempotencyKey = ?2", entity, key).firstResult().awaitSuspending()
+            val winner = Panache.withSession {
+                find("entityPartyId = ?1 and idempotencyKey = ?2", entity, key).firstResult()
+            }.awaitSuspending()
                 ?: throw e
             if (winner.requestHash != hash || winner.actorPartyId != actor) throw BatchDraftConflict()
             winner to true
@@ -216,15 +282,17 @@ class BusinessPaymentBatchDraftStore(private val mapper: ObjectMapper) :
                 cause.message?.contains("uq_business_batch_idempotency") == true
         }
 
-    suspend fun get(entity: UUID, id: UUID): BusinessPaymentBatchDraftEntity? =
-        find("entityPartyId = ?1 and id = ?2", entity, id).firstResult().awaitSuspending()
+    suspend fun get(entity: UUID, id: UUID): BusinessPaymentBatchDraftEntity? = Panache.withSession {
+        find("entityPartyId = ?1 and id = ?2", entity, id).firstResult()
+    }.awaitSuspending()
 
-    suspend fun list(entity: UUID, page: Int, size: Int): List<BusinessPaymentBatchDraftEntity> =
+    suspend fun list(entity: UUID, page: Int, size: Int): List<BusinessPaymentBatchDraftEntity> = Panache.withSession {
         find("entityPartyId = ?1 order by createdAt desc, id desc", entity)
-            .page(page, size).list().awaitSuspending()
+            .page(page, size).list()
+    }.awaitSuspending()
 
     suspend fun replace(
-        entity: UUID, id: UUID, expected: Long, itemsJson: String,
+        entity: UUID, id: UUID, actor: UUID, expected: Long, itemsJson: String,
         summary: BusinessPaymentBatchDraftResource.Summary,
     ): BusinessPaymentBatchDraftEntity? = Panache.withTransaction {
         find("entityPartyId = ?1 and id = ?2", entity, id)
@@ -234,6 +302,7 @@ class BusinessPaymentBatchDraftStore(private val mapper: ObjectMapper) :
                 row.itemsJson = itemsJson
                 row.itemCount = summary.count
                 row.amountMinor = summary.total
+                row.updatedByPartyId = actor
                 row.updatedAt = Instant.now()
                 row
             }
