@@ -118,17 +118,25 @@ class ContextApiIT {
         listOf(source, payments, transactions, ledger, clearing, sepaReturns)
             .forEach { it.runOnVertxContext(true) }
 
+        // The locked-writer test below covers channel races; this scenario checks the completed graph.
         repeat(2) { source.send(payload) }
         source.send(complaintEvent(complaintId, reference, accountId, transactionId, disputeId, version - 1))
+        awaitCount("context_projection_events", "aggregate_ref", "complaint:$reference", 2)
         val clearingItemId = sendRailEvidence(clearing, sepaReturns, transactionId, reversalId)
+        awaitCount("context_projection_events", "aggregate_ref", "return-evidence:sepa:$transactionId:4", 1)
         sendPaymentLifecycle(payments, transactionId)
+        awaitCount("context_projection_events", "aggregate_ref", "transaction:$transactionId", 3)
         val bookingTransactionId = UUID.randomUUID()
         val journalId = UUID.randomUUID()
         val reversalJournalId = UUID.randomUUID()
         ledger.send(ledgerPostedEvent(journalId, bookingTransactionId))
         ledger.send(ledgerPostedEvent(reversalJournalId, reversalId))
+        awaitCount("context_projection_events", "aggregate_ref", "ledger-booking:$journalId", 1)
+        awaitCount("context_projection_events", "aggregate_ref", "ledger-booking:$reversalJournalId", 1)
         transactions.send(transactionInitiatedEvent(bookingTransactionId, transactionId))
         transactions.send(transactionReversalEvent(reversalId, bookingTransactionId))
+        awaitCount("context_projection_events", "aggregate_ref", "booking-transaction:$bookingTransactionId", 1)
+        awaitCount("context_projection_events", "aggregate_ref", "booking-transaction:$reversalId", 1)
         assertProjectionState(
             reference,
             transactionId,
@@ -761,6 +769,7 @@ class ContextApiIT {
         reversalId: UUID,
     ): UUID = UUID.randomUUID().also { itemId ->
         clearing.send(clearingItemSettledEvent(itemId, UUID.randomUUID(), paymentId))
+        awaitCount("context_projection_events", "aggregate_ref", "clearing-item:$itemId", 1)
         sepaReturns.send(sepaReturnedEvent(paymentId, reversalId))
     }
 
