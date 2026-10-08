@@ -44,7 +44,7 @@ info:
   # 1.74.0 -> 1.75.0 (#10016): additive — GET /capabilities (ADR-0310 D5).
   # 1.75.0 -> 1.76.0 (#11966): additive — /holdings, the customer write side of the declared
   # holdings that GET /net-worth reads (ADR-0301 D1).
-  version: 1.78.0
+  version: 1.79.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,

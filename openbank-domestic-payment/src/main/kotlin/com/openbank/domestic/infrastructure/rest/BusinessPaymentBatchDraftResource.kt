@@ -35,6 +35,8 @@ import java.security.MessageDigest
 import java.time.Instant
 import java.util.UUID
 
+private const val DRAFT_PAGE_SIZE = 20
+
 /** Draft-only aggregate. It has no submit endpoint and cannot dispatch money. */
 @Path("/api/v1/business-payment-batches")
 @Produces(MediaType.APPLICATION_JSON)
@@ -224,7 +226,7 @@ class BusinessPaymentBatchDraftResource(
     private companion object {
         const val MAX_BODY_CHARS = 64_000
         const val MAX_KEY_CHARS = 128
-        const val PAGE_SIZE = 20
+        const val PAGE_SIZE = DRAFT_PAGE_SIZE
         const val MAX_LIST_PAGE = 1000
         const val MAX_ITEM_PAGE = 4
         const val MAX_ITEMS = 100
@@ -341,7 +343,7 @@ private fun originalDraftResponse(row: BusinessPaymentBatchDraftEntity, mapper: 
             "itemCount" to row.itemCount, "totalAmountMinor" to row.amountMinor,
             "currency" to "CZK", "revision" to row.revision,
             "createdAt" to row.createdAt, "updatedAt" to row.updatedAt,
-            "items" to mapper.readTree(row.itemsJson).take(20),
+            "items" to mapper.readTree(row.itemsJson).take(DRAFT_PAGE_SIZE),
         ),
     )
 
