@@ -8,7 +8,7 @@ is_inert_service_path() {
   case "$1" in
     openbank-admin-ui/*|openbank-infra/*|docs/*|*/version.txt|*/CHANGELOG.md|.release-please-manifest.json|release-please-config.json)
       return 0 ;;
-    .github/scripts/check-flyway-version-commit-order.py|.github/scripts/publish-admin-ui-pacts.py|.github/scripts/test-publish-admin-ui-pacts.py|.github/scripts/verify-dependabot-auto-merge.py|.github/scripts/test-verify-dependabot-auto-merge.py|.github/gates/workflow-write-permissions-baseline.txt)
+    .github/scripts/check-authz-enforce-money-path.py|.github/scripts/check-flyway-version-commit-order.py|.github/scripts/publish-admin-ui-pacts.py|.github/scripts/test-publish-admin-ui-pacts.py|.github/scripts/verify-dependabot-auto-merge.py|.github/scripts/test-verify-dependabot-auto-merge.py|.github/gates/workflow-write-permissions-baseline.txt)
       # Separate governance and Pact controls own these files; they do not build services.
       return 0 ;;
     .github/workflows/*)
@@ -46,6 +46,8 @@ pact_build_modules_self_test() {
     || { echo "selector self-test: unknown automation must retain safe fallback" >&2; return 1; }
   is_inert_service_path ".github/scripts/check-flyway-version-commit-order.py" \
     || { echo "selector self-test: Flyway order gate must be service-inert" >&2; return 1; }
+  is_inert_service_path ".github/scripts/check-authz-enforce-money-path.py" \
+    || { echo "selector self-test: authz governance gate must be service-inert" >&2; return 1; }
   is_inert_service_path ".github/scripts/verify-dependabot-auto-merge.py" \
     || { echo "selector self-test: Dependabot validator must be service-inert" >&2; return 1; }
   is_inert_service_path ".github/scripts/publish-admin-ui-pacts.py" \

@@ -2,8 +2,9 @@
 #
 #  changes  -> works out which Gradle modules a push/PR actually touched and emits
 #              a JSON matrix. Shared changes (openbank-libs, version catalog, root
-#              build, the reusable workflow itself) fan out to EVERY module because
-#              everything depends on them. Pushes to main always build everything.
+#              build) fan out to EVERY module because everything depends on them.
+#              Main pushes are also path-scoped; unattributable changes fall back
+#              to the full fleet. A CI recipe change uses one canary module.
 #  build    -> calls the reusable _service-ci.yml once per changed module (matrix),
 #              so each service reports its own green/red status check.
 #
@@ -364,11 +365,9 @@ jobs:
                  && ! grep -qE '(^| )openbank-client-product-catalog( |$)' <<< " $CHANGED "; then
                 CHANGED="$CHANGED openbank-client-product-catalog"
               fi
-              # Tests reading OTHER modules' trees escape the fan-out above (#10010 -> #11513).
-              # Derived from test sources; rationale in the script header.
-              if [ -n "${CHANGED// /}" ]; then
-                CHANGED="$CHANGED $(python3 .github/scripts/derive-fleet-scanning-test-modules.py --expand "$CHANGED")"
-              fi
+              # Derive cross-module test readers from filtered inputs (#11513, #11560).
+              CHANGED="$CHANGED $(python3 .github/scripts/derive-fleet-scanning-test-modules.py \
+                --expand "$CHANGED" --input-paths-stdin <<< "$FILES_GLOBAL")"
               # A change to the CI recipe itself (services-ci / _service-ci) can NOT
               # alter any service's compile/test inputs, so it does NOT warrant a
               # 28-module fan-out -- that is what turned the trivial #547 cache-flag
