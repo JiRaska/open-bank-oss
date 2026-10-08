@@ -36,6 +36,7 @@ data class DraftStyleVersionCommand(
     val signature: String?,
     val maker: String,
     val uiMessages: Map<String, String> = emptyMap(),
+    val basePublishedVersion: Int,
 )
 
 @ApplicationScoped
@@ -55,6 +56,7 @@ class CommunicationStyleService(
     suspend fun draft(command: DraftStyleVersionCommand): StyleVersion {
         val persona = personas.findByKey(command.personaKey)
             ?: throw PersonaNotFoundException("persona '${command.personaKey}' not found")
+        require(command.basePublishedVersion >= 0) { "basePublishedVersion must be non-negative" }
         com.openbank.communication.domain.UiMessages.validate(command.personaKey, command.uiMessages)
         val fields = buildMap {
             command.uiMessages.forEach { (k, v) -> put("uiMessages.$k", v) }
@@ -70,28 +72,29 @@ class CommunicationStyleService(
             throw StyleLintRejectedException(violations.map { "${it.rule} in ${it.field}" })
         }
         val now = Instant.now(clock)
-        val nextVersion = styleVersions.latestVersionNumber(persona.id) + 1
-        val draft = StyleVersion(
-            id = Ids.newId(),
-            personaId = persona.id,
-            version = nextVersion,
-            status = StyleVersionStatus.DRAFT,
-            tone = command.tone,
-            formality = command.formality,
-            formOfAddress = command.formOfAddress,
-            maxLength = command.maxLength,
-            preferredTerms = command.preferredTerms,
-            forbiddenTerms = command.forbiddenTerms,
-            signature = command.signature,
-            maker = command.maker,
-            uiMessages = command.uiMessages,
-            createdAt = now,
-            decidedBy = null,
-            decidedAt = null,
-            publishedAt = null,
-            retiredAt = null,
-        )
-        val created = styleVersions.create(draft)
+        val created = styleVersions.createNext(persona.id) { nextVersion ->
+            StyleVersion(
+                id = Ids.newId(),
+                personaId = persona.id,
+                version = nextVersion,
+                status = StyleVersionStatus.DRAFT,
+                tone = command.tone,
+                formality = command.formality,
+                formOfAddress = command.formOfAddress,
+                maxLength = command.maxLength,
+                preferredTerms = command.preferredTerms,
+                forbiddenTerms = command.forbiddenTerms,
+                signature = command.signature,
+                maker = command.maker,
+                uiMessages = command.uiMessages,
+                basePublishedVersion = command.basePublishedVersion,
+                createdAt = now,
+                decidedBy = null,
+                decidedAt = null,
+                publishedAt = null,
+                retiredAt = null,
+            )
+        }
         audit.append("STYLE_DRAFTED", created.id, command.maker, "${command.personaKey}@${created.version}", now)
         return created
     }
@@ -132,9 +135,9 @@ class CommunicationStyleService(
             throw StyleVersionConflictException("style version is not in review")
         }
         val now = Instant.now(clock)
-        val previouslyPublished = styleVersions.findPublished(existing.personaId)
-        if (previouslyPublished != null) {
-            styleVersions.retire(previouslyPublished.id, checker, now)
+        val publication = styleVersions.publishIfCurrent(id, checker, now)
+        val published = publication.published
+        publication.retired?.let { previouslyPublished ->
             audit.append(
                 "STYLE_RETIRED",
                 previouslyPublished.id,
@@ -143,8 +146,6 @@ class CommunicationStyleService(
                 now,
             )
         }
-        val published = styleVersions.publish(id, checker, now)
-            ?: throw StyleVersionConflictException("style version could not be published")
         audit.append("STYLE_PUBLISHED", id, checker, "version=${published.version}", now)
         val persona =
             personas.find(published.personaId)

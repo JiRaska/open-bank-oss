@@ -16,7 +16,7 @@ it('loads approved copy and saves edited copy with existing vocabulary in the re
   let saved: Record<string, unknown> | undefined
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     if (url.endsWith('/published')) return Response.json({
-      tone: 'warm', formality: 'informal', formOfAddress: 'tykání',
+      tone: 'warm', formality: 'informal', formOfAddress: 'tykání', styleVersion: 7,
       preferredTerms: { account: 'účet' }, forbiddenTerms: ['password'],
       uiMessages: { 'cs.status.loading': 'Původní text.', 'en.status.loading': 'Original text.' },
     })
@@ -31,9 +31,35 @@ it('loads approved copy and saves edited copy with existing vocabulary in the re
   fireEvent.change(input, { target: { value: 'Už hledám.' } })
   fireEvent.click(screen.getByRole('button', { name: 'Uložit koncept' }))
   await waitFor(() => expect(saved).toBeDefined())
+  expect(saved?.basePublishedVersion).toBe(7)
   expect(saved?.uiMessages).toEqual({ 'cs.status.loading': 'Už hledám.', 'en.status.loading': 'Original text.' })
   expect(saved?.preferredTerms).toEqual({ account: 'účet' })
   expect(saved?.forbiddenTerms).toEqual(['password'])
   expect(await screen.findByRole('button', { name: 'Odeslat ke schválení' })).toBeEnabled()
   expect(input).toBeDisabled()
+})
+
+it.each([
+  ['published style changed since this draft was created', 'Koncept vychází ze starší verze.'],
+  ['maker cannot publish their own style version', 'Publikace byla odmítnuta.'],
+])('shows the right publish conflict for %s', async (reason, expected) => {
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('/published')) return Response.json({ error: 'not found' }, { status: 404 })
+    if (url.endsWith('/style-versions') && init?.method === 'POST') {
+      return Response.json({ id: 'draft-1', version: 1, status: 'IN_REVIEW' }, { status: 201 })
+    }
+    if (url.endsWith('/publish')) return Response.json({ error: reason }, { status: 409 })
+    return Response.json([])
+  }))
+  render(<Page />)
+  fireEvent.change(screen.getByLabelText('Tón'), { target: { value: 'warm' } })
+  fireEvent.change(screen.getByLabelText('Formálnost'), { target: { value: 'formal' } })
+  fireEvent.change(screen.getByLabelText('Oslovení'), { target: { value: 'vykání' } })
+  const save = await screen.findByRole('button', { name: 'Uložit koncept' })
+  await waitFor(() => expect(save).toBeEnabled())
+  fireEvent.click(save)
+  const publish = await screen.findByRole('button', { name: 'Publikovat' })
+  await waitFor(() => expect(publish).toBeEnabled())
+  fireEvent.click(publish)
+  expect(await screen.findByText(new RegExp(expected))).toBeInTheDocument()
 })
