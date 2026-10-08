@@ -1,0 +1,80 @@
+{
+  "consumer": {
+    "name": "openbank-customer-edge"
+  },
+  "interactions": [
+    {
+      "description": "GET customer copilot copy after retirement",
+      "providerStates": [
+        {
+          "name": "customer copilot has no published style"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/personas/customer-copilot/published"
+      },
+      "response": {
+        "status": 404
+      }
+    },
+    {
+      "description": "GET published customer copilot copy",
+      "providerStates": [
+        {
+          "name": "customer copilot has published mobile copy"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/personas/customer-copilot/published"
+      },
+      "response": {
+        "body": {
+          "styleVersion": 2,
+          "uiMessages": {
+            "cs.status.loading": "Hled\u00E1m."
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json; charset=UTF-8"
+        },
+        "matchingRules": {
+          "body": {
+            "$.styleVersion": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json(;\\s?charset=[\\w\\-]+)?"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-communication-service"
+  }
+}
