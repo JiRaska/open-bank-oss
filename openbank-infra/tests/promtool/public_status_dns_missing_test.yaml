@@ -1,0 +1,65 @@
+# SPDX-License-Identifier: Apache-2.0
+# Each public status DNS resolver must keep producing its own probe_success series.
+rule_files:
+  - prometheus-rules-synthetic.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - name: first resolver disappears while the DNS job remains present
+    interval: 1m
+    input_series:
+      - series: 'probe_success{job="synthetic-status-dns",instance="8.8.8.8:53"}'
+        values: '1x10'
+      - series: 'probe_success{job="synthetic-status-page"}'
+        values: '1x10'
+      - series: 'probe_success{job="synthetic-status-api"}'
+        values: '1x10'
+      - series: 'probe_success{job="synthetic-status-freshness"}'
+        values: '1x10'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: PublicStatusDNSResolverProbeMissing
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: PublicStatusDNSResolverProbeMissing
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: synthetic-status-dns
+              instance: 1.1.1.1:53
+            exp_annotations:
+              summary: 'Public status DNS resolver probe missing: 1.1.1.1:53'
+              description: 'The public status DNS probe is not producing metrics for this resolver. Check the Probe target and blackbox exporter.'
+      - eval_time: 6m
+        alertname: PublicStatusProbeMissing
+        exp_alerts: []
+
+  - name: second resolver disappears while the DNS job remains present
+    interval: 1m
+    input_series:
+      - series: 'probe_success{job="synthetic-status-dns",instance="1.1.1.1:53"}'
+        values: '1x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: PublicStatusDNSResolverProbeMissing
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: synthetic-status-dns
+              instance: 8.8.8.8:53
+            exp_annotations:
+              summary: 'Public status DNS resolver probe missing: 8.8.8.8:53'
+              description: 'The public status DNS probe is not producing metrics for this resolver. Check the Probe target and blackbox exporter.'
+
+  - name: both resolvers present
+    interval: 1m
+    input_series:
+      - series: 'probe_success{job="synthetic-status-dns",instance="1.1.1.1:53"}'
+        values: '1x10'
+      - series: 'probe_success{job="synthetic-status-dns",instance="8.8.8.8:53"}'
+        values: '1x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: PublicStatusDNSResolverProbeMissing
+        exp_alerts: []
