@@ -24,6 +24,7 @@ openbank-infra/gitops/components/developer-portal/developer-portal.yaml: Deploym
 openbank-infra/gitops/components/keycloak/keycloak.yaml: Deployment/keycloak is publicly routed and does not spread its pods across nodes
 openbank-infra/gitops/components/keycloak/keycloak.yaml: Deployment/keycloak is publicly routed and no PodDisruptionBudget selects its pods
 openbank-infra/gitops/components/keycloak/keycloak.yaml: Deployment/keycloak is publicly routed and runs 1 replica(s), needs >= 2
+openbank-infra/gitops/components/observability/httproute-glitchtip.yaml: routes to Service observability/glitchtip-web, which no gitops manifest declares — cannot check
 openbank-infra/gitops/components/observability/httproute-rum-gateway.yaml: routes to Service observability/rum-gateway, which no gitops manifest declares — cannot check
 openbank-infra/gitops/components/observability/httproute-tools-gate.yaml: routes to Service observability/kube-prometheus-stack-alertmanager, which no gitops manifest declares — cannot check
 openbank-infra/gitops/components/observability/httproute-tools-gate.yaml: routes to Service observability/kube-prometheus-stack-grafana, which no gitops manifest declares — cannot check
