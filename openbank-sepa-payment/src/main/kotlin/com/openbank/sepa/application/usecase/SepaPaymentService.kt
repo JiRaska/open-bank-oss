@@ -125,15 +125,24 @@ class SepaPaymentService(
             updatedAt = now,
         )
 
-        val received = paymentRepository.save(
-            payment = payment,
-            outboxMessage = SepaPaymentOutboxMessage(
-                aggregateId = payment.id,
-                eventType = PAYMENT_CREATED_EVENT,
-                payload = eventPublisher.paymentCreatedPayload(payment),
-                createdAt = now,
-            ),
-        )
+        val received = try {
+            paymentRepository.save(
+                payment = payment,
+                outboxMessage = SepaPaymentOutboxMessage(
+                    aggregateId = payment.id,
+                    eventType = PAYMENT_CREATED_EVENT,
+                    payload = eventPublisher.paymentCreatedPayload(payment),
+                    createdAt = now,
+                ),
+            )
+        } catch (failure: org.hibernate.exception.ConstraintViolationException) {
+            if (!failure.isIdempotencyKeyConflict()) throw failure
+            // The losing transaction (including its outbox write) was rolled back. A concurrent
+            // caller may have committed between the initial lookup and this INSERT.
+            val winner = paymentRepository.findByIdempotencyKey(command.idempotencyKey) ?: throw failure
+            if (!matchesCreator(winner, command)) throw IdempotencyKeyReusedException()
+            return winner
+        }
 
         metrics.paymentSubmitted(payment.type.name.lowercase(), payment.currency)
 
@@ -162,6 +171,14 @@ class SepaPaymentService(
         if (existing.initiatingActorPartyId != command.initiatingActorPartyId) return false
         return existing.debtorAccountId == command.debtorAccountId
     }
+
+    private fun Throwable.isIdempotencyKeyConflict(): Boolean =
+        generateSequence(this) { it.cause.takeIf { cause -> cause !== it } }
+            .any { cause ->
+                (cause as? org.hibernate.exception.ConstraintViolationException)?.constraintName ==
+                    "sepa_payments_idempotency_key_key" ||
+                    cause.message.orEmpty().contains("sepa_payments_idempotency_key_key")
+            }
 
     override suspend fun findReceipt(
         idempotencyKey: String,

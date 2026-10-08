@@ -17,6 +17,9 @@ import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestMethodOrder
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import javax.sql.DataSource
 
 @QuarkusTest
@@ -103,6 +106,89 @@ class SepaPaymentReceiptIT {
         assertThat(otherPartyState).isEqualTo("UNKNOWN")
         assertThat(create(key, partyB, actorA).statusCode).isEqualTo(409)
         assertThat(create(key, partyA).statusCode).isEqualTo(400)
+    }
+
+    @Test
+    @Order(5)
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    fun `concurrent different actors sharing a key produce one payment and a deliberate conflict`() {
+        val key = UUID.randomUUID().toString()
+        val party = UUID.randomUUID()
+        val actorA = UUID.randomUUID()
+        val actorB = UUID.randomUUID()
+        // Hold both INSERTs briefly so both HTTP requests can pass their independent Redis
+        // reservations and the initial database read before the global UNIQUE index decides.
+        installRaceTrigger()
+        val executor = Executors.newFixedThreadPool(2)
+        try {
+            val start = CountDownLatch(1)
+            val first = executor.submit<Int> {
+                start.await()
+                create(key, party, actorA).statusCode
+            }
+            val second = executor.submit<Int> {
+                start.await()
+                create(key, party, actorB).statusCode
+            }
+            start.countDown()
+            assertThat(listOf(first.get(20, TimeUnit.SECONDS), second.get(20, TimeUnit.SECONDS)).sorted())
+                .containsExactly(201, 409)
+            assertThat(raceAttempts()).isEqualTo(2)
+            assertThat(countForKey("SELECT count(*) FROM sepa_payments WHERE idempotency_key = ?", key))
+                .isEqualTo(1)
+            assertThat(
+                countForKey(
+                    "SELECT count(*) FROM sepa_payment_outbox o JOIN sepa_payments p " +
+                        "ON o.aggregate_id = p.payment_id WHERE p.idempotency_key = ?",
+                    key,
+                ),
+            ).isEqualTo(1)
+        } finally {
+            executor.shutdownNow()
+            removeRaceTrigger()
+        }
+    }
+
+    private fun installRaceTrigger() = dataSource.connection.use { connection ->
+        connection.createStatement().use { statement ->
+            statement.execute("CREATE SEQUENCE sepa_receipt_race_attempt_seq START 1")
+            statement.execute(
+                "CREATE FUNCTION sepa_receipt_race_delay() RETURNS trigger LANGUAGE plpgsql AS " +
+                    "'BEGIN PERFORM nextval(''sepa_receipt_race_attempt_seq''); " +
+                    "PERFORM pg_sleep(0.5); RETURN NEW; END'",
+            )
+            statement.execute(
+                "CREATE TRIGGER sepa_receipt_race_delay BEFORE INSERT ON sepa_payments " +
+                    "FOR EACH ROW EXECUTE FUNCTION sepa_receipt_race_delay()",
+            )
+        }
+    }
+
+    private fun raceAttempts(): Long = dataSource.connection.use { connection ->
+        connection.createStatement().use { statement ->
+            statement.executeQuery("SELECT last_value FROM sepa_receipt_race_attempt_seq").use { result ->
+                result.next()
+                result.getLong(1)
+            }
+        }
+    }
+
+    private fun removeRaceTrigger() = dataSource.connection.use { connection ->
+        connection.createStatement().use { statement ->
+            statement.execute("DROP TRIGGER sepa_receipt_race_delay ON sepa_payments")
+            statement.execute("DROP FUNCTION sepa_receipt_race_delay()")
+            statement.execute("DROP SEQUENCE sepa_receipt_race_attempt_seq")
+        }
+    }
+
+    private fun countForKey(sql: String, key: String): Int = dataSource.connection.use { connection ->
+        connection.prepareStatement(sql).use { statement ->
+            statement.setString(1, key)
+            statement.executeQuery().use { result ->
+                result.next()
+                result.getInt(1)
+            }
+        }
     }
 
     private fun create(key: String = idempotencyKey, party: UUID? = null, actor: UUID? = null) = RestAssured.given()
