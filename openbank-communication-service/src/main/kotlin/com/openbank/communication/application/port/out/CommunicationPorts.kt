@@ -17,12 +17,14 @@ interface PersonaRepository {
     suspend fun find(id: UUID): Persona?
 }
 
+data class StylePublication(val published: StyleVersion, val retired: StyleVersion?)
+
 interface StyleVersionRepository {
     suspend fun create(styleVersion: StyleVersion): StyleVersion
     suspend fun find(id: UUID): StyleVersion?
     suspend fun latestVersionNumber(personaId: UUID): Int
     suspend fun submit(id: UUID, at: Instant): StyleVersion?
-    suspend fun publish(id: UUID, checker: String, at: Instant): StyleVersion?
+    suspend fun publishIfCurrent(id: UUID, checker: String, at: Instant): StylePublication
     suspend fun retire(id: UUID, checker: String, at: Instant): StyleVersion?
     suspend fun findPublished(personaId: UUID): StyleVersion?
 }

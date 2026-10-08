@@ -8,6 +8,7 @@ package com.openbank.communication.infrastructure.persistence
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.communication.application.port.out.CommunicationAuditRepository
 import com.openbank.communication.application.port.out.PersonaRepository
+import com.openbank.communication.application.port.out.StylePublication
 import com.openbank.communication.application.port.out.StyleVersionRepository
 import com.openbank.communication.domain.Persona
 import com.openbank.communication.domain.StyleVersion
@@ -22,6 +23,7 @@ import jakarta.enterprise.context.ApplicationScoped
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.Id
+import jakarta.persistence.LockModeType
 import jakarta.persistence.Table
 import java.time.Instant
 import java.util.UUID
@@ -45,6 +47,9 @@ class StyleVersionEntity : PanacheEntityBase() {
     @Id lateinit var id: UUID
     lateinit var personaId: UUID
     var version = 1
+
+    @Column(name = "base_published_version")
+    var basePublishedVersion: Int? = null
     lateinit var status: String
     lateinit var tone: String
     lateinit var formality: String
@@ -85,6 +90,7 @@ private fun StyleVersionEntity.toDomain() = StyleVersion(
     id = id,
     personaId = personaId,
     version = version,
+    basePublishedVersion = basePublishedVersion,
     status = StyleVersionStatus.valueOf(status),
     tone = tone,
     formality = formality,
@@ -124,6 +130,7 @@ class PanacheStyleVersionRepository :
                 id = s.id
                 personaId = s.personaId
                 version = s.version
+                basePublishedVersion = s.basePublishedVersion
                 status = s.status.name
                 tone = s.tone
                 formality = s.formality
@@ -154,30 +161,84 @@ class PanacheStyleVersionRepository :
         }
     }.awaitSuspending()
 
-    override suspend fun publish(id: UUID, checker: String, at: Instant) = Panache.withTransaction {
-        find(
-            "id = ?1 and status = ?2",
-            id,
-            StyleVersionStatus.IN_REVIEW.name,
-        ).firstResult<StyleVersionEntity>().map { e ->
-            requireNotNull(e)
-            if (e.maker == checker) throw StyleVersionConflictException("maker cannot publish their own style version")
-            e.status = StyleVersionStatus.PUBLISHED.name
-            e.decidedBy = checker
-            e.decidedAt = at
-            e.publishedAt = at
-            e.toDomain()
-        }
-    }.awaitSuspending()
+    /** Locks the persona before reading either style row, so publication and retire serialize. */
+    override suspend fun publishIfCurrent(id: UUID, checker: String, at: Instant): StylePublication =
+        Panache.withTransaction {
+            Panache.getSession().flatMap { session ->
+                session.createNativeQuery(
+                    "select persona_id from style_version where id = :id",
+                    UUID::class.java,
+                ).setParameter("id", id).singleResultOrNull.flatMap { personaId ->
+                    if (personaId == null) throw StyleVersionConflictException("style version could not be published")
+                    session.find(PersonaEntity::class.java, personaId, LockModeType.PESSIMISTIC_WRITE)
+                        .flatMap { persona ->
+                            if (persona == null) throw StyleVersionConflictException("persona no longer exists")
+                            session.find(StyleVersionEntity::class.java, id).flatMap { draft ->
+                                if (draft == null || draft.personaId != personaId) {
+                                    throw StyleVersionConflictException("style version could not be published")
+                                }
+                                if (draft.maker == checker) {
+                                    throw StyleVersionConflictException("maker cannot publish their own style version")
+                                }
+                                if (draft.status != StyleVersionStatus.IN_REVIEW.name) {
+                                    throw StyleVersionConflictException("style version is not in review")
+                                }
+                                find(
+                                    "personaId = ?1 and status = ?2",
+                                    personaId,
+                                    StyleVersionStatus.PUBLISHED.name,
+                                ).firstResult<StyleVersionEntity>().map { current ->
+                                    val base = draft.basePublishedVersion
+                                        ?: throw StyleVersionConflictException("draft has no known published base")
+                                    if (base != (current?.version ?: 0)) {
+                                        throw StyleVersionConflictException(
+                                            "published style changed since this draft was created",
+                                        )
+                                    }
+                                    val retired = current?.apply {
+                                        status = StyleVersionStatus.RETIRED.name
+                                        decidedBy = decidedBy ?: checker
+                                        decidedAt = decidedAt ?: at
+                                        retiredAt = at
+                                    }?.toDomain()
+                                    draft.status = StyleVersionStatus.PUBLISHED.name
+                                    draft.decidedBy = checker
+                                    draft.decidedAt = at
+                                    draft.publishedAt = at
+                                    StylePublication(draft.toDomain(), retired)
+                                }
+                            }
+                        }
+                }
+            }
+        }.awaitSuspending()
 
     override suspend fun retire(id: UUID, checker: String, at: Instant) = Panache.withTransaction {
-        find("id", id).firstResult<StyleVersionEntity>().map { e ->
-            requireNotNull(e)
-            e.status = StyleVersionStatus.RETIRED.name
-            e.decidedBy = e.decidedBy ?: checker
-            e.decidedAt = e.decidedAt ?: at
-            e.retiredAt = at
-            e.toDomain()
+        Panache.getSession().flatMap { session ->
+            session.createNativeQuery(
+                "select persona_id from style_version where id = :id",
+                UUID::class.java,
+            ).setParameter("id", id).singleResultOrNull.flatMap { personaId ->
+                if (personaId == null) throw StyleVersionConflictException("style version could not be retired")
+                session.find(PersonaEntity::class.java, personaId, LockModeType.PESSIMISTIC_WRITE)
+                    .flatMap { persona ->
+                        if (persona == null) throw StyleVersionConflictException("persona no longer exists")
+                        session.find(StyleVersionEntity::class.java, id).map { existing ->
+                            if (
+                                existing == null ||
+                                existing.personaId != personaId ||
+                                existing.status != StyleVersionStatus.PUBLISHED.name
+                            ) {
+                                throw StyleVersionConflictException("style version is not published")
+                            }
+                            existing.status = StyleVersionStatus.RETIRED.name
+                            existing.decidedBy = existing.decidedBy ?: checker
+                            existing.decidedAt = existing.decidedAt ?: at
+                            existing.retiredAt = at
+                            existing.toDomain()
+                        }
+                    }
+            }
         }
     }.awaitSuspending()
 
