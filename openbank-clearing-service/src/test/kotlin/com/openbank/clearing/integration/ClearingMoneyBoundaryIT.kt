@@ -36,6 +36,7 @@ import java.util.UUID
 @QuarkusTestResource(
     value = com.openbank.libs.testing.containers.PostgresRedpandaRedisTestResource::class,
     initArgs = [ResourceArg(name = "db", value = "openbank_clearing_money_it")],
+    restrictToAnnotatedClass = true,
 )
 class ClearingMoneyBoundaryIT {
 
