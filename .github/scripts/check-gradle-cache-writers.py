@@ -202,6 +202,12 @@ DECLARED: dict[str, tuple[str, str]] = {
         "on PR refs, not one shared entry. Its check also passes `--refresh-dependencies` "
         "deliberately, so a warm Gradle home is what it is designed not to lean on.",
     ),
+    "services-ci.yml::docs-sweep": (
+        "read-only",
+        "The docs-only generator sweep consumes the shared Gradle home but creates no "
+        "per-PR cache entry. Its outputs are checked at the exact source commit, and "
+        "the Quarkus packaging canary stays in the normal service build matrix.",
+    ),
     "perf-gate.yml::perf": (
         "read-only",
         "Consumer; restores fleet-lint's home. Weekly advisory k6 gate (ADR-0243) — "

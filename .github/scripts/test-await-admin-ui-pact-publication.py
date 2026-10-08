@@ -88,7 +88,7 @@ class PublicationWaitTest(unittest.TestCase):
         self.assertIn("needs.publication-ready.result == 'skipped'", build)
         self.assertIn("github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || ''", build)
         self.assertIn("github.event_name == 'push' || github.event_name == 'workflow_dispatch'", build)
-        self.assertIn("needs: [changes, publication-ready, build, verification-metadata]", all_green)
+        self.assertIn("needs: [changes, publication-ready, build, verification-metadata, docs-sweep]", all_green)
         self.assertIn('needs.publication-ready.result }}" != "success"', all_green)
         self.assertNotIn("verify-admin-ui-providers:", pact)
         self.assertIn("needs: drift-check", job(pact, "publish-admin-ui"))
@@ -101,21 +101,25 @@ class PublicationWaitTest(unittest.TestCase):
         common = {"needs.changes.result": "success", "needs.build.result": "success"}
         # The service aggregate also requires verification metadata for changed build files.
         # Exercise both independent prerequisites so a merge cannot make either gate vacuous.
-        for changed, publication, modules, metadata, admission, expected_success in [
-            ("true", "success", "", "skipped", "true", True),
-            ("true", "failure", "", "skipped", "true", False),
-            ("true", "skipped", "", "skipped", "true", False),
-            ("", "skipped", "", "skipped", "true", True),
-            ("", "skipped", "openbank-treasury-service", "skipped", "true", False),
-            ("", "skipped", "openbank-treasury-service", "success", "true", True),
-            ("", "skipped", "", "skipped", "false", False),
+        for changed, publication, modules, metadata, admission, docs_changed, docs_result, expected_success in [
+            ("true", "success", "", "skipped", "true", "false", "skipped", True),
+            ("true", "failure", "", "skipped", "true", "false", "skipped", False),
+            ("true", "skipped", "", "skipped", "true", "false", "skipped", False),
+            ("", "skipped", "", "skipped", "true", "false", "skipped", True),
+            ("", "skipped", "openbank-treasury-service", "skipped", "true", "false", "skipped", False),
+            ("", "skipped", "openbank-treasury-service", "success", "true", "false", "skipped", True),
+            ("", "skipped", "", "skipped", "false", "false", "skipped", False),
+            ("", "skipped", "", "skipped", "true", "true", "failure", False),
+            ("", "skipped", "", "skipped", "true", "true", "success", True),
         ]:
-            with self.subTest(changed=changed, publication=publication, modules=modules, metadata=metadata, admission=admission):
+            with self.subTest(changed=changed, publication=publication, modules=modules, metadata=metadata, admission=admission, docs_changed=docs_changed, docs_result=docs_result):
                 values = dict(common, **{"needs.changes.outputs.admission": admission,
                                          "needs.changes.outputs.admin-ui-pact-changed": changed,
                                          "needs.changes.outputs.verification-modules": modules,
                                          "needs.verification-metadata.result": metadata,
-                                         "needs.publication-ready.result": publication})
+                                         "needs.publication-ready.result": publication,
+                                         "needs.changes.outputs.docs-sweep": docs_changed,
+                                         "needs.docs-sweep.result": docs_result})
                 script = template
                 for key, value in values.items():
                     script = script.replace("${{ " + key + " }}", value)

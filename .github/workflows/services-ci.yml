@@ -3,7 +3,9 @@
 #  changes  -> works out which Gradle modules a push/PR actually touched and emits
 #              a JSON matrix. Shared changes (openbank-libs, version catalog, root
 #              build, the reusable workflow itself) fan out to EVERY module because
-#              everything depends on them. Pushes to main always build everything.
+#              everything depends on them. The isolated service-docs plugin gets a
+#              fleet generation sweep plus one packaging canary. Nightly builds
+#              still cover the full fleet.
 #  build    -> calls the reusable _service-ci.yml once per changed module (matrix),
 #              so each service reports its own green/red status check.
 #
@@ -80,6 +82,7 @@ jobs:
       verification-modules: ${{ steps.detect.outputs.verification-modules }}
       verification-modules-json: ${{ steps.detect.outputs.verification-modules-json }}
       admin-ui-pact-changed: ${{ steps.detect.outputs.admin-ui-pact-changed }}
+      docs-sweep: ${{ steps.detect.outputs.docs-sweep }}
     steps:
       # Read admission policy from the trusted base before checking out PR code.
       - if: github.event_name == 'pull_request'
@@ -128,6 +131,9 @@ jobs:
           source .github/scripts/service-ci-pact-modules.sh
           pact_build_modules_self_test
           python3 .github/scripts/coverage-floor-only-diff.py --self-test
+          python3 .github/scripts/service-ci-docs-scope.py --self-test
+          python3 .github/scripts/check-generated-service-docs.py --self-test
+          DOCS_SWEEP=false
 
           if [ "${{ github.event_name }}" = "schedule" ] \
              || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
@@ -162,7 +168,8 @@ jobs:
               # The safe direction is still over-build: the moment a changed path is NOT cleanly
               # attributable to a module or a pact pair, fall back to full-fleet. Never under-build
               # the Pact graph.
-              #   - code-global input (core libs, gradle, build-logic) -> full-fleet.
+              #   - code-global input (core libs, gradle, build-logic) -> full-fleet,
+              #     except the exact isolated service-docs plugin path.
               #     libs-lending and libs-iso20022 follow their declared Gradle consumers.
               #     Lib test-only paths excepted (filter-lib-test-only-paths.py).
               #   - pacts/<consumer>-<provider>.json changed -> build both Gradle modules. The
@@ -174,6 +181,10 @@ jobs:
               #   - anything else -> unattributable -> full-fleet (safety).
               FILES_CODE=$(grep -vE '^openbank-libs/governance/' <<< "$RELEVANT" || true)
               FILES_GLOBAL=$(python3 .github/scripts/filter-lib-test-only-paths.py <<< "$FILES_CODE")
+              DOCS_SCOPE=$(python3 .github/scripts/service-ci-docs-scope.py <<< "$FILES_GLOBAL")
+              DOCS_PLUGIN_CHANGED=$(jq -r '.docsPluginChanged' <<< "$DOCS_SCOPE")
+              DOCS_SWEEP=$DOCS_PLUGIN_CHANGED
+              FILES_GLOBAL=$(jq -r '.otherPaths[]' <<< "$DOCS_SCOPE")
               # An exact raised-floor-only diff stays local to libs-domain.
               if grep -Fxq 'openbank-libs-domain/build.gradle.kts' <<< "$FILES_GLOBAL" && python3 .github/scripts/coverage-floor-only-diff.py --base "$DIFF_BASE"; then
                 echo "Decision: shared domain build script changes only its raised coverage floor."
@@ -194,7 +205,8 @@ jobs:
                         if grep -qE "(^| )${p}( |$)" <<< " $ALL "; then CHANGED="$CHANGED $p"; else SCOPE_OK=0; fi
                       done <<< "$modules" ;;
                     openbank-libs/governance/*) : ;;
-                    .github/workflows/services-ci.yml|.github/workflows/_service-ci.yml|.github/scripts/service-ci-pact-modules.sh|.github/scripts/service-ci-library-dependents.py|.github/scripts/await-admin-ui-pact-publication.py|.github/scripts/test-await-admin-ui-pact-publication.py) : ;;
+                    build-logic/src/main/kotlin/openbank.service-docs.gradle.kts) : ;;
+                    .github/workflows/services-ci.yml|.github/workflows/_service-ci.yml|.github/scripts/service-ci-pact-modules.sh|.github/scripts/service-ci-library-dependents.py|.github/scripts/await-admin-ui-pact-publication.py|.github/scripts/test-await-admin-ui-pact-publication.py|.github/scripts/service-ci-docs-scope.py|.github/scripts/check-generated-service-docs.py) : ;;
                     openbank-*/*)
                       m="${f%%/*}"
                       if grep -qE "(^| )${m}( |$)" <<< " $ALL "; then CHANGED="$CHANGED $m"; else SCOPE_OK=0; fi ;;
@@ -223,8 +235,11 @@ jobs:
                   fi
                   # Recipe-only change -> one canary (same as the PR path).
                   if [ -z "${CHANGED// /}" ] \
-                     && grep -qE '^(\.github/workflows/(services-ci|_service-ci)\.yml|\.github/scripts/(service-ci-pact-modules\.sh|service-ci-library-dependents\.py|(test-)?await-admin-ui-pact-publication\.py))$' <<< "$FILES"; then
+                     && grep -qE '^(\.github/workflows/(services-ci|_service-ci)\.yml|\.github/scripts/(service-ci-pact-modules\.sh|service-ci-library-dependents\.py|(test-)?await-admin-ui-pact-publication\.py|service-ci-docs-scope\.py|check-generated-service-docs\.py))$' <<< "$FILES"; then
                     CHANGED="openbank-libs"
+                  fi
+                  if [ "$DOCS_PLUGIN_CHANGED" = true ]; then
+                    CHANGED="$CHANGED openbank-risk-engine"
                   fi
                   echo "Decision: scoped main-push build -> ${CHANGED:-<none>}"
                 fi
@@ -256,7 +271,8 @@ jobs:
             # Except a lib's own test sources (filter-lib-test-only-paths.py header).
             # (openbank-libs*, version catalog, root build, gradle.properties,
             # build-logic.) A change here can alter any service's compile or test
-            # inputs, so the whole fleet must rebuild.
+            # inputs, so the whole fleet must rebuild. The exact isolated docs
+            # convention plugin path instead gets a fleet docs sweep and canary.
             # NB: feed grep via a here-string, NOT `echo "$FILES" | grep -q`: under
             # pipefail the SIGPIPE (141) racily reads a match as FALSE and drops modules.
             # Governance catalogs (openbank-libs/governance/) are data for CI
@@ -294,6 +310,10 @@ jobs:
             # package.json one, both unconditionally in the gate job.
             FILES_CODE=$(grep -vE '^openbank-libs/governance/|(/version\.txt$)|(/CHANGELOG\.md$)|(^\.release-please-manifest\.json$)|(^release-please-config\.json$)' <<< "$FILES" || true)
             FILES_GLOBAL=$(python3 .github/scripts/filter-lib-test-only-paths.py <<< "$FILES_CODE")
+            DOCS_SCOPE=$(python3 .github/scripts/service-ci-docs-scope.py <<< "$FILES_GLOBAL")
+            DOCS_PLUGIN_CHANGED=$(jq -r '.docsPluginChanged' <<< "$DOCS_SCOPE")
+            DOCS_SWEEP=$DOCS_PLUGIN_CHANGED
+            FILES_GLOBAL=$(jq -r '.otherPaths[]' <<< "$DOCS_SCOPE")
             # Match the push selector: an exact raised-floor-only diff stays local.
             if grep -Fxq 'openbank-libs-domain/build.gradle.kts' <<< "$FILES_GLOBAL" && python3 .github/scripts/coverage-floor-only-diff.py --base "$DIFF_BASE"; then
               echo "Decision: shared domain build script changes only its raised coverage floor."
@@ -380,9 +400,12 @@ jobs:
               # Skip the canary if a real service is already in the matrix (it validates
               # the recipe too).
               if [ -z "${CHANGED// /}" ] \
-                 && grep -qE '^(\.github/workflows/(services-ci|_service-ci)\.yml|\.github/scripts/(service-ci-pact-modules\.sh|service-ci-library-dependents\.py|(test-)?await-admin-ui-pact-publication\.py))$' <<< "$FILES"; then
+                 && grep -qE '^(\.github/workflows/(services-ci|_service-ci)\.yml|\.github/scripts/(service-ci-pact-modules\.sh|service-ci-library-dependents\.py|(test-)?await-admin-ui-pact-publication\.py|service-ci-docs-scope\.py|check-generated-service-docs\.py))$' <<< "$FILES"; then
                 echo "Decision: recipe-only change -> build canary openbank-libs."
                 CHANGED="openbank-libs"
+              fi
+              if [ "$DOCS_PLUGIN_CHANGED" = true ]; then
+                CHANGED="$CHANGED openbank-risk-engine"
               fi
             fi
           fi
@@ -392,6 +415,7 @@ jobs:
           CHANGED=$(echo "$CHANGED" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ' || true)
           # Emit both module-plan formats from the same validated changed-file set.
           printf '%s\n' "${FILES:-}" | python3 .github/scripts/derive-verification-modules.py >> "$GITHUB_OUTPUT"
+          echo "docs-sweep=$DOCS_SWEEP" >> "$GITHUB_OUTPUT"
           echo "Modules to build: ${CHANGED:-<none>}"
           if [ -z "${CHANGED// /}" ]; then
             echo "services=[]" >> "$GITHUB_OUTPUT"
@@ -534,6 +558,35 @@ jobs:
           python3 .github/scripts/check-verification-metadata-complete.py \
             --modules "${{ matrix.module }}" --enforce
 
+  # A change isolated to the service documentation convention plugin does not
+  # change Kotlin or test inputs. Generate every service-plugin module's page
+  # in one job; the scoped build matrix also packages one Quarkus canary JAR.
+  # Any other shared build input retains the full-fleet matrix above.
+  docs-sweep:
+    name: Verify fleet generated docs
+    needs: [changes]
+    if: needs.changes.result == 'success' && needs.changes.outputs.docs-sweep == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: |
+            21
+            25
+      - uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-read-only: true
+          gradle-home-cache-strict-match: false
+      - name: Generate and verify all committed service pages
+        run: |
+          python3 .github/scripts/check-generated-service-docs.py --self-test
+          ./gradlew generateServiceDocs --console=plain
+          python3 .github/scripts/check-generated-service-docs.py --commit "$GITHUB_SHA"
+
   # SCOPE: this job is about SERVICE BUILDS ONLY — despite the name (#3955).
   #
   # `needs` is the whole story: `changes`, `publication-ready`, `build`, `verification-metadata`. It never observes
@@ -553,7 +606,7 @@ jobs:
   # change. #3955 tracks that decision.
   all-green:
     name: all-green
-    needs: [changes, publication-ready, build, verification-metadata]
+    needs: [changes, publication-ready, build, verification-metadata, docs-sweep]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -578,6 +631,10 @@ jobs:
           if [ -n "${{ needs.changes.outputs.verification-modules }}" ] \
              && [ "${{ needs.verification-metadata.result }}" != "success" ]; then
             echo "verification-metadata has no successful verdict for changed build files (#3218)."; exit 1
+          fi
+          if [ "${{ needs.changes.outputs.docs-sweep }}" = "true" ] \
+             && [ "${{ needs.docs-sweep.result }}" != "success" ]; then
+            echo "Fleet generated documentation has no successful exact-head verdict."; exit 1
           fi
           echo "All changed services built green (or nothing to build)."
       # `needs.build.result` can report success when a reusable matrix child was cancelled
