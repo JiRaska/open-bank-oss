@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.32.2](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.32.1...ledger-service-v1.32.2) (2026-10-07)
+
+
+### Bug Fixes
+
+* **approval:** preserve verified maker actor kind ([#12159](https://github.com/JiRaska/open-bank-oss/issues/12159)) ([74cba34](https://github.com/JiRaska/open-bank-oss/commit/74cba348b75c0b318902c033bf81356ddba32393))
+
 ## [1.32.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.32.0...ledger-service-v1.32.1) (2026-10-02)
 
 

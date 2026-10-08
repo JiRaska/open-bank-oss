@@ -51,8 +51,8 @@ CNPG_API_PREFIX = "postgresql.cnpg.io/"
 EXEMPT_ANNOTATION = "openbank.io/backup-exempt-reason"
 
 
-def cnpg_clusters(gitops_dir: pathlib.Path):
-    """Yield (name, namespace, relpath, destinationPath, exempt_reason) per CNPG Cluster."""
+def cnpg_resources(gitops_dir: pathlib.Path):
+    """Parse each manifest once and yield CNPG Clusters and ScheduledBackups."""
     for path in sorted(gitops_dir.rglob("*.yaml")):
         try:
             docs = list(yaml.safe_load_all(path.read_text()))
@@ -61,65 +61,17 @@ def cnpg_clusters(gitops_dir: pathlib.Path):
         for doc in docs:
             if not isinstance(doc, dict):
                 continue
-            if doc.get("kind") != "Cluster":
-                continue
             if not str(doc.get("apiVersion", "")).startswith(CNPG_API_PREFIX):
                 continue
-            meta = doc.get("metadata") or {}
-            spec = doc.get("spec") or {}
-            dest = (
-                ((spec.get("backup") or {}).get("barmanObjectStore") or {}).get("destinationPath", "")
-            )
-            reason = ((meta.get("annotations") or {}).get(EXEMPT_ANNOTATION) or "").strip()
-            yield (
-                meta.get("name", "<unnamed>"),
-                meta.get("namespace", "<no-namespace>"),
-                str(path),
-                dest,
-                reason,
-            )
-
-
-def scheduled_backups(gitops_dir: pathlib.Path):
-    """Yield (namespace, cluster name, relpath, immediate) per ScheduledBackup."""
-    for path in sorted(gitops_dir.rglob("*.yaml")):
-        try:
-            docs = list(yaml.safe_load_all(path.read_text()))
-        except yaml.YAMLError:
-            continue
-        for doc in docs:
-            if not isinstance(doc, dict) or doc.get("kind") != "ScheduledBackup":
-                continue
-            if not str(doc.get("apiVersion", "")).startswith(CNPG_API_PREFIX):
-                continue
-            meta = doc.get("metadata") or {}
-            spec = doc.get("spec") or {}
-            yield (
-                meta.get("namespace", "<no-namespace>"),
-                ((spec.get("cluster") or {}).get("name") or "<no-cluster>"),
-                str(path),
-                bool(spec.get("immediate")),
-            )
+            if doc.get("kind") in ("Cluster", "ScheduledBackup"):
+                yield doc, path
 
 
 def check(gitops_dir: pathlib.Path) -> tuple[int, int]:
     findings = 0
     subjects = 0
-    for name, ns, rel, dest, reason in cnpg_clusters(gitops_dir):
-        subjects += 1
-        if dest:
-            continue
-        if reason:
-            print(f"  exempt: {ns}/{name} — {reason}")
-            continue
-        findings += 1
-        print(
-            f"::error file={rel}::CNPG Cluster {ns}/{name} declares no "
-            f"spec.backup.barmanObjectStore, so it has no recovery point and nothing else "
-            f"reports it — check-db-backup-associations only inspects clusters that DO declare "
-            f"one. Either add a barmanObjectStore, or annotate the cluster with "
-            f'{EXEMPT_ANNOTATION}: "<why this database is disposable>".'
-        )
+    cluster_messages = []
+    scheduled_messages = []
 
     # SECOND RULE: a declared backup is not a recovery point until a BASE backup exists.
     #
@@ -135,17 +87,42 @@ def check(gitops_dir: pathlib.Path) -> tuple[int, int]:
     # it only on the first reconcile: an object whose `status.lastCheckTime` is already set never
     # evaluates it again, so patching one is inert (measured on two live ScheduledBackups, zero
     # new backups). It is a property of the object's birth, which makes it a gate's business.
-    for ns, cluster, rel, immediate in scheduled_backups(gitops_dir):
-        if immediate:
-            continue
-        findings += 1
-        print(
-            f"::error file={rel}::ScheduledBackup for {ns}/{cluster} does not set "
-            f"spec.immediate: true, so the cluster has no recovery point between its creation "
-            f"and the first scheduled run — up to a full schedule interval, during which Ready "
-            f"and ContinuousArchiving both read True. Set immediate: true; CNPG honours it only "
-            f"at creation, so it cannot be added later to a cluster that already exists."
-        )
+    for doc, path in cnpg_resources(gitops_dir):
+        meta = doc.get("metadata") or {}
+        spec = doc.get("spec") or {}
+        ns = meta.get("namespace", "<no-namespace>")
+        if doc["kind"] == "Cluster":
+            subjects += 1
+            name = meta.get("name", "<unnamed>")
+            dest = ((spec.get("backup") or {}).get("barmanObjectStore") or {}).get("destinationPath", "")
+            if dest:
+                continue
+            reason = ((meta.get("annotations") or {}).get(EXEMPT_ANNOTATION) or "").strip()
+            if reason:
+                cluster_messages.append(f"  exempt: {ns}/{name} — {reason}")
+                continue
+            findings += 1
+            cluster_messages.append(
+                f"::error file={path}::CNPG Cluster {ns}/{name} declares no "
+                f"spec.backup.barmanObjectStore, so it has no recovery point and nothing else "
+                f"reports it — check-db-backup-associations only inspects clusters that DO declare "
+                f"one. Either add a barmanObjectStore, or annotate the cluster with "
+                f'{EXEMPT_ANNOTATION}: "<why this database is disposable>".'
+            )
+        else:
+            if spec.get("immediate"):
+                continue
+            findings += 1
+            cluster = (spec.get("cluster") or {}).get("name") or "<no-cluster>"
+            scheduled_messages.append(
+                f"::error file={path}::ScheduledBackup for {ns}/{cluster} does not set "
+                f"spec.immediate: true, so the cluster has no recovery point between its creation "
+                f"and the first scheduled run — up to a full schedule interval, during which Ready "
+                f"and ContinuousArchiving both read True. Set immediate: true; CNPG honours it only "
+                f"at creation, so it cannot be added later to a cluster that already exists."
+            )
+    for message in cluster_messages + scheduled_messages:
+        print(message)
     return subjects, findings
 
 

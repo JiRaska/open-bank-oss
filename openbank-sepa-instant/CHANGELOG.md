@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.3](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.11.2...sepa-instant-v0.11.3) (2026-10-07)
+
+
+### Bug Fixes
+
+* **approval:** preserve verified maker actor kind ([#12159](https://github.com/JiRaska/open-bank-oss/issues/12159)) ([74cba34](https://github.com/JiRaska/open-bank-oss/commit/74cba348b75c0b318902c033bf81356ddba32393))
+
 ## [0.11.2](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.11.1...sepa-instant-v0.11.2) (2026-10-04)
 
 
