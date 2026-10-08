@@ -47,7 +47,9 @@ class BusinessPaymentBatchResource(
         body: String?,
     ): Response {
         val (human, entity) = parties(header)
-        if (body.isNullOrBlank() || key.isNullOrBlank() || key.length > 128) return Response.status(400).build()
+        if (body.isNullOrBlank() || key.isNullOrBlank() || key.length > MAX_KEY_CHARS) {
+            return Response.status(Response.Status.BAD_REQUEST).build()
+        }
         return upstream.post(url(), entity.toString(), body, key, mapOf("X-Actor-Party-Id" to human.toString()))
     }
 
@@ -59,8 +61,8 @@ class BusinessPaymentBatchResource(
     ): Response {
         val (_, entity) = parties(header)
         val p = page ?: 0
-        val s = size ?: 20
-        if (p !in 0..1000 || s !in 1..20) return Response.status(400).build()
+        val s = size ?: PAGE_SIZE
+        if (p !in 0..MAX_LIST_PAGE || s !in 1..PAGE_SIZE) return Response.status(Response.Status.BAD_REQUEST).build()
         return upstream.get("${url()}?page=$p&size=$s", entity.toString())
     }
 
@@ -73,7 +75,7 @@ class BusinessPaymentBatchResource(
     ): Response {
         val (_, entity) = parties(header)
         val p = page ?: 0
-        if (p !in 0..4) return Response.status(400).build()
+        if (p !in 0..MAX_ITEM_PAGE) return Response.status(Response.Status.BAD_REQUEST).build()
         return upstream.get("${url()}/$id?page=$p", entity.toString())
     }
 
@@ -86,8 +88,8 @@ class BusinessPaymentBatchResource(
         body: String?,
     ): Response {
         val (human, entity) = parties(header)
-        if (revision?.trim('"')?.toLongOrNull() == null) return Response.status(428).build()
-        if (body.isNullOrBlank()) return Response.status(400).build()
+        if (revision?.trim('"')?.toLongOrNull() == null) return Response.status(HTTP_PRECONDITION_REQUIRED).build()
+        if (body.isNullOrBlank()) return Response.status(Response.Status.BAD_REQUEST).build()
         return upstream.put(
             "${url()}/$id/items",
             entity.toString(),
@@ -99,6 +101,8 @@ class BusinessPaymentBatchResource(
 
     private fun url() = "$domesticUrl/api/v1/business-payment-batches"
 
+    // Every failure is explicit so an absent or revoked company mandate cannot fall back to the human party.
+    @Suppress("ThrowsCount")
     private fun parties(header: String?): Pair<UUID, UUID> {
         val raw = CustomerEdgeResource.resolvePartyIdClaim(jwt.getClaim<String>("party_id"), jwt.subject)
             ?: throw ForbiddenException("human party is required")
@@ -114,5 +118,13 @@ class BusinessPaymentBatchResource(
         }
         if (!company) throw ForbiddenException("active company mandate is required")
         return human to entity
+    }
+
+    private companion object {
+        const val MAX_KEY_CHARS = 128
+        const val PAGE_SIZE = 20
+        const val MAX_LIST_PAGE = 1000
+        const val MAX_ITEM_PAGE = 4
+        const val HTTP_PRECONDITION_REQUIRED = 428
     }
 }
