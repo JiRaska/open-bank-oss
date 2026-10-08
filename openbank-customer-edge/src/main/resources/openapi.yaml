@@ -1224,8 +1224,8 @@ paths:
                         recipient: {type: string}
                         subject: {type: string}
                         status: {type: string}
-                        sentAt: {type: string, format: date-time, nullable: true}
-                        readAt: {type: string, format: date-time, nullable: true}
+                        sentAt: {type: [string, 'null'], format: date-time}
+                        readAt: {type: [string, 'null'], format: date-time}
                         createdAt: {type: string, format: date-time}
                   total: {type: integer, format: int64, minimum: 0}
                   unreadCount: {type: integer, format: int64, minimum: 0}

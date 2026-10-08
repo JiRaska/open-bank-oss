@@ -52,6 +52,8 @@ class UnifiedNotificationInboxTest {
             .containsExactly(company.toString(), human.toString())
         assertThat(body.path("total").asInt()).isEqualTo(2)
         assertThat(body.path("unreadCount").asInt()).isEqualTo(3)
+        assertThat(body.path("items").first().path("sentAt").isNull).isTrue()
+        assertThat(body.path("items").first().path("readAt").isNull).isTrue()
     }
 
     @Test
@@ -313,6 +315,10 @@ class UnifiedNotificationInboxTest {
             .contains("items", "total", "unreadCount", "size", "page")
         assertThat(schema.path("properties").path("items").path("items").path("required").map { it.asText() })
             .contains("id", "partyId", "createdAt")
+        val itemProperties = schema.path("properties").path("items").path("items").path("properties")
+        for (field in listOf("sentAt", "readAt")) {
+            assertThat(itemProperties.path(field).path("type").map { it.asText() }).contains("string", "null")
+        }
         for (route in listOf("/notifications/{id}", "/notifications/{id}/read")) {
             val method = if (route.endsWith("read")) "patch" else "get"
             assertThat(spec.path("paths").path(route).path(method).path("parameters").map { it.path("name").asText() })
@@ -370,6 +376,6 @@ class UnifiedNotificationInboxTest {
     }
 
     private fun page(party: UUID, createdAt: String, unread: Int): Response = Response.ok(
-        """{"items":[{"id":"${UUID.randomUUID()}","partyId":"$party","createdAt":"$createdAt"}],"total":1,"unreadCount":$unread}""",
+        """{"items":[{"id":"${UUID.randomUUID()}","partyId":"$party","createdAt":"$createdAt","sentAt":null,"readAt":null}],"total":1,"unreadCount":$unread}""",
     ).build()
 }
