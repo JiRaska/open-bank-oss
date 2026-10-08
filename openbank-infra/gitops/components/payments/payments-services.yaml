@@ -838,7 +838,7 @@ spec:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-domestic-payment-opa-bundle.sh via the trailing marker
         # comment (do not hand-edit, do not drop the marker).
-        openbank.tech/policy-checksum: "4f2f4fc638814137" # domestic-payment-opa-bundle
+        openbank.tech/policy-checksum: "0c2b5a071ca46ec8" # domestic-payment-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true

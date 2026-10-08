@@ -133,15 +133,13 @@ class DomesticPaymentDelegationContractTest {
     }
 
     @Test
-    fun `REST contract does not advertise the trust seam before it is authorized and implemented`() {
-        // The persistence/event half is safe to expand independently. Accepting identity and
-        // delegation IDs from HTTP headers changes a money-path trust boundary and is intentionally
-        // blocked pending explicit authorization. This guard prevents publishing those headers in
-        // OpenAPI while the resource still cannot validate them.
+    fun `REST contract advertises only the implemented customer-edge trust seam`() {
+        // Customer party and actor are checked against the verified edge service identity.
+        // Delegation header handling remains outside this resource's accepted contract.
         val createOperation = openApi.substringAfter("  /api/v1/domestic-payments:")
             .substringBefore("    get:")
+        assertThat(createOperation).contains("X-Customer-Party-Id", "X-Customer-Actor-Id")
         assertThat(createOperation).doesNotContain(
-            "X-Customer-Party-Id",
             "X-Delegation-Id",
             "X-Delegation-Reservation-Id",
         )

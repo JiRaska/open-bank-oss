@@ -32,6 +32,7 @@ import rego.v1
 # endpoint — enforcing OPA must not silently disable a legitimate human role.
 allowed_reasons contains "operator-domestic-payment-write" if {
 	input.principal.type == "HUMAN"
+	not startswith(input.principal.id, "service-account-")
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS"}
 	role in input.principal.roles
 	startswith(input.action, "domestic-payment.")
@@ -44,6 +45,7 @@ allowed_reasons contains "operator-domestic-payment-write" if {
 # Strictly read/list — a viewer can never create or transition a payment.
 allowed_reasons contains "viewer-domestic-payment-read" if {
 	input.principal.type == "HUMAN"
+	not startswith(input.principal.id, "service-account-")
 	"ROLE_VIEWER" in input.principal.roles
 	input.action in {
 		"domestic-payment.read",
@@ -78,12 +80,20 @@ allowed_reasons contains "service-domestic-payment-m2m" if {
 	}
 }
 
-# Keycloak classifies client_credentials callers as HUMAN and several service accounts carry
-# ROLE_OPERATOR. The base operator-read-any and the broad role rule above therefore grant any
-# action ending in .read unless this receipt-specific veto runs in the allow head. Only the exact
-# edge service identity can carry customer-party provenance for this route.
+# Keycloak classifies client_credentials callers as HUMAN. The base role matrix can grant
+# actions by role even after the human-only extension rules above exclude service accounts.
+# Veto every domestic action for M2M except the edge's exact three operations.
 prohibited if {
-	input.action == "domestic-payment.receipt.read"
+	startswith(input.action, "domestic-payment.")
 	startswith(input.principal.id, "service-account-")
-	input.principal.id != "service-account-openbank-edge"
+	not domestic_edge_exception
+}
+
+domestic_edge_exception if {
+	input.principal.id == "service-account-openbank-edge"
+	input.action in {
+		"domestic-payment.create",
+		"domestic-payment.read",
+		"domestic-payment.receipt.read",
+	}
 }

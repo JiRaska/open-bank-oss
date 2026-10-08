@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: domestic-payment
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "4f2f4fc638814137"
+    openbank.tech/policy-checksum: "0c2b5a071ca46ec8"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -623,6 +623,7 @@ data:
     # endpoint — enforcing OPA must not silently disable a legitimate human role.
     allowed_reasons contains "operator-domestic-payment-write" if {
         input.principal.type == "HUMAN"
+        not startswith(input.principal.id, "service-account-")
         some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS"}
         role in input.principal.roles
         startswith(input.action, "domestic-payment.")
@@ -635,6 +636,7 @@ data:
     # Strictly read/list — a viewer can never create or transition a payment.
     allowed_reasons contains "viewer-domestic-payment-read" if {
         input.principal.type == "HUMAN"
+        not startswith(input.principal.id, "service-account-")
         "ROLE_VIEWER" in input.principal.roles
         input.action in {
             "domestic-payment.read",
@@ -669,14 +671,22 @@ data:
         }
     }
 
-    # Keycloak classifies client_credentials callers as HUMAN and several service accounts carry
-    # ROLE_OPERATOR. The base operator-read-any and the broad role rule above therefore grant any
-    # action ending in .read unless this receipt-specific veto runs in the allow head. Only the exact
-    # edge service identity can carry customer-party provenance for this route.
+    # Keycloak classifies client_credentials callers as HUMAN. The base role matrix can grant
+    # actions by role even after the human-only extension rules above exclude service accounts.
+    # Veto every domestic action for M2M except the edge's exact three operations.
     prohibited if {
-        input.action == "domestic-payment.receipt.read"
+        startswith(input.action, "domestic-payment.")
         startswith(input.principal.id, "service-account-")
-        input.principal.id != "service-account-openbank-edge"
+        not domestic_edge_exception
+    }
+
+    domestic_edge_exception if {
+        input.principal.id == "service-account-openbank-edge"
+        input.action in {
+            "domestic-payment.create",
+            "domestic-payment.read",
+            "domestic-payment.receipt.read",
+        }
     }
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
