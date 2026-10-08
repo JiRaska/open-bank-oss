@@ -321,10 +321,6 @@ class BusinessPaymentBatchDraftStore(private val mapper: ObjectMapper) :
             .withLock(LockModeType.PESSIMISTIC_WRITE).firstResult().onItem().transform { row ->
                 if (row == null) return@transform null
                 if (row.revision != expected) throw BatchDraftConflict()
-                if (row.originalResponseJson == null) {
-                    if (row.revision != 0L) throw BatchDraftConflict()
-                    row.originalResponseJson = originalDraftResponse(row, mapper)
-                }
                 row.itemsJson = itemsJson
                 row.itemCount = summary.count
                 row.amountMinor = summary.total
@@ -335,14 +331,8 @@ class BusinessPaymentBatchDraftStore(private val mapper: ObjectMapper) :
     }.awaitSuspending()
 }
 
-internal fun originalDraftView(row: BusinessPaymentBatchDraftEntity, mapper: ObjectMapper): JsonNode {
-    val original = row.originalResponseJson ?: if (row.revision == 0L) {
-        originalDraftResponse(row, mapper)
-    } else {
-        throw BatchDraftConflict()
-    }
-    return mapper.readTree(original)
-}
+internal fun originalDraftView(row: BusinessPaymentBatchDraftEntity, mapper: ObjectMapper): JsonNode =
+    mapper.readTree(row.originalResponseJson)
 
 private fun originalDraftResponse(row: BusinessPaymentBatchDraftEntity, mapper: ObjectMapper): String =
     mapper.writeValueAsString(

@@ -33,8 +33,8 @@ class BusinessPaymentBatchDraftEntity {
     @Column(name = "request_hash", nullable = false)
     lateinit var requestHash: String
 
-    @Column(name = "original_response_json", columnDefinition = "text")
-    var originalResponseJson: String? = null
+    @Column(name = "original_response_json", nullable = false, columnDefinition = "text")
+    lateinit var originalResponseJson: String
 
     @Column(name = "debtor_account_id", nullable = false)
     lateinit var debtorAccountId: UUID

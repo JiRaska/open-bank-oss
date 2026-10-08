@@ -7,6 +7,7 @@ CREATE TABLE business_payment_batch_drafts (
     updated_by_party_id UUID NOT NULL,
     idempotency_key VARCHAR(128) NOT NULL,
     request_hash VARCHAR(64) NOT NULL,
+    original_response_json TEXT NOT NULL,
     debtor_account_id UUID NOT NULL,
     items_json TEXT NOT NULL,
     amount_minor BIGINT NOT NULL,
