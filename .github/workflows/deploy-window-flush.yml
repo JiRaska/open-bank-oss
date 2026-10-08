@@ -38,6 +38,7 @@ jobs:
     # the App token. A GITHUB_TOKEN fallback would arm a merge whose commit triggers no workflows.
     permissions:
       contents: read
+      id-token: write
     env:
       GITOPS_APP_ID: ${{ secrets.GITOPS_APP_ID }}
       GITHUB_REPOSITORY: ${{ github.repository }}
@@ -73,6 +74,13 @@ jobs:
           python3 .github/scripts/deploy-window.py flush --prs-json "$d/prs.json" \
             --commits-json "$d/commits.json" --event-json "$GITHUB_EVENT_PATH" \
             --now "$(date -u +%s)" | tee -a "$GITHUB_OUTPUT"
+
+      - name: Configure read-only registry verification credentials
+        if: steps.pick.outputs.arm != '' && startsWith(steps.pick.outputs.arm_head, 'chore/admin-ui-deploy-')
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.ADMIN_UI_IMAGE_VERIFY_ROLE_ARN }}
+          aws-region: ${{ vars.ADMIN_UI_IMAGE_VERIFY_AWS_REGION }}
 
       - name: Verify deferred image source freshness
         if: steps.pick.outputs.arm != ''
