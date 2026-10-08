@@ -96,7 +96,7 @@ class OperatorMessageService {
         val handedOff = mailer.send(Mail.withHtml(request.recipient, subject, body))
             .replaceWith(true)
             .onFailure().invoke { e ->
-                log.warnf(e, "opsmessage.compose: handoff unresolved notificationId=%s", notificationId)
+                log.warnf("opsmessage.compose: handoff unresolved cause=%s", e.javaClass.simpleName)
             }
             .onFailure().recoverWithItem(false)
             .awaitSuspending()
@@ -108,9 +108,8 @@ class OperatorMessageService {
             .replaceWith(true)
             .onFailure().invoke { e ->
                 log.warnf(
-                    e,
-                    "opsmessage.compose: handoff accepted but status write failed notificationId=%s",
-                    notificationId,
+                    "opsmessage.compose: handoff accepted but status write failed cause=%s",
+                    e.javaClass.simpleName,
                 )
             }
             .onFailure().recoverWithItem(false)

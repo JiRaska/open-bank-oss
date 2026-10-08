@@ -438,18 +438,17 @@ class NotificationConsumer @Inject constructor(
                         when (existing?.status) {
                             null -> Uni.createFrom().failure(failure)
                             NotificationStatus.PENDING.name -> {
-                                log.errorf(
-                                    "notification.dispatch.in_doubt deduplicationKey=%s notificationId=%s " +
-                                        "— replay held for reconciliation; provider handoff may have happened",
-                                    deduplicationKey,
-                                    existing.notificationId,
+                                // Reconcile from the durable row; identifiers and provider errors may expose PII.
+                                log.error(
+                                    "notification.dispatch.in_doubt — replay held for reconciliation; " +
+                                        "provider handoff may have happened",
                                 )
                                 Uni.createFrom().failure(
                                     IllegalStateException("notification dispatch outcome is unresolved"),
                                 )
                             }
                             else -> {
-                                log.debugf("Skipping completed notification fact %s", deduplicationKey)
+                                log.debug("Skipping completed notification fact")
                                 Uni.createFrom().item(false)
                             }
                         }
@@ -786,7 +785,11 @@ class NotificationConsumer @Inject constructor(
             }
             emailMetrics.recordSend(req.template, sendOutcome)
             if (sendOutcome == EmailSendOutcome.IN_DOUBT) {
-                log.warnf(failure, "Email handoff in doubt: party=%s template=%s", req.partyId, req.template)
+                log.warnf(
+                    "Email handoff in doubt: template=%s cause=%s",
+                    req.template,
+                    failure?.javaClass?.simpleName ?: "unknown",
+                )
                 // A timeout or disconnect can happen after SMTP accepted the message. Terminal
                 // FAILED would invite a second contact on replay; keep PENDING and dead-letter.
                 Uni.createFrom().failure(failure ?: IllegalStateException("email handoff outcome is unresolved"))
@@ -794,9 +797,8 @@ class NotificationConsumer @Inject constructor(
                 // Not a warning: the sandbox mocks the mailer on purpose. Logged at INFO so the
                 // no-op is greppable, and counted as MOCKED so it is alertable.
                 log.infof(
-                    "Email NOT sent: mailer is mocked (quarkus.mailer.mock=true) — party=%s " +
+                    "Email NOT sent: mailer is mocked (quarkus.mailer.mock=true) — " +
                         "template=%s recorded SUPPRESSED/%s, never SENT (#4737)",
-                    req.partyId,
                     req.template,
                     NotificationOutcomeEvent.REASON_MAILER_MOCKED,
                 )

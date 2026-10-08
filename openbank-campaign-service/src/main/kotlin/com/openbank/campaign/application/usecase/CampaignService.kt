@@ -380,7 +380,8 @@ class CampaignService @Inject constructor(
                 // nothing to do with them. The count returned is what actually started.
                 failed++
                 metrics.enrolmentRecorded(EnrolmentAttempt.FAILED)
-                log.errorf(e, "campaign.enrol failed campaign=%s party=%s", campaign.id, partyId)
+                // The failed count is recorded; log no party id or exception text.
+                log.errorf("campaign.enrol failed campaign=%s cause=%s", campaign.id, e.javaClass.simpleName)
             }
         }
         metrics.enrolmentBatchCompleted(Duration.between(sweepStartedAt, Instant.now()))
@@ -440,7 +441,7 @@ class CampaignService @Inject constructor(
             } catch (e: Exception) {
                 record(partyId, RecipientAdmissionState.FAILED)
                 metrics.enrolmentRecorded(EnrolmentAttempt.FAILED)
-                log.errorf(e, "campaign.enrolPage failed campaign=%s party=%s", campaign.id, partyId)
+                log.errorf("campaign.enrolPage failed campaign=%s cause=%s", campaign.id, e.javaClass.simpleName)
                 return EnrolmentPageOutcome(started, 1, cursor, false)
             }
         }

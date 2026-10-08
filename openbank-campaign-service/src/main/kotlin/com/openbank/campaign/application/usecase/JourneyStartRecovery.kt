@@ -43,7 +43,7 @@ class JourneyStartRecovery(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            log.errorf(e, "journey start recovery failed campaign=%s party=%s", intent.campaignId, intent.partyId)
+            log.errorf("journey start recovery failed campaign=%s cause=%s", intent.campaignId, e.javaClass.simpleName)
         } finally {
             withContext(NonCancellable) { intents.releaseRecovery(owner, intent) }
         }

@@ -190,10 +190,10 @@ class BulkAdmissionService @Inject constructor(
         } catch (_: AudienceLimitExceededException) {
             runs.hold(claim, "AUDIENCE_LIMIT_EXCEEDED")
         } catch (e: TimeoutCancellationException) {
-            log.errorf(e, "bulk admission timed out run=%s", claim.run.id)
+            log.errorf("bulk admission timed out run=%s cause=%s", claim.run.id, e.javaClass.simpleName)
             runs.hold(claim, "ADMISSION_TIMEOUT")
         } catch (e: Exception) {
-            log.errorf(e, "bulk admission held run=%s", claim.run.id)
+            log.errorf("bulk admission held run=%s cause=%s", claim.run.id, e.javaClass.simpleName)
             runs.hold(claim, "ADMISSION_UNAVAILABLE")
         }
     }
