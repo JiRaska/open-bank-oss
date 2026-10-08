@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.90.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.89.0...customer-edge-v0.90.0) (2026-10-08)
+
+
+### Features
+
+* **communication:** publish editable app copy catalog ([#12276](https://github.com/JiRaska/open-bank-oss/issues/12276)) ([93a6479](https://github.com/JiRaska/open-bank-oss/commit/93a6479d28b56c57efb381b3f550e5c10aa92958))
+
 ## [0.89.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.88.0...customer-edge-v0.89.0) (2026-10-08)
 
 
