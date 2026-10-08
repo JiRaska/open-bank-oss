@@ -199,6 +199,16 @@ export default function CommunicationStyleEditorPage() {
         return
       }
       if (!res.ok) {
+        if (res.status === 409) {
+          setPublishResult({
+            ok: false,
+            text: t(
+              'Koncept vychází ze starší publikované verze. Obnovte stránku, zkontrolujte nové znění a vytvořte nový koncept.',
+              'This draft is based on older published copy. Reload, review the current copy, and create a new draft.',
+            ),
+          })
+          return
+        }
         setPublishResult({
           ok: false,
           text: t(

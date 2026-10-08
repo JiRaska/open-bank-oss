@@ -22,6 +22,9 @@ import org.junit.jupiter.api.Test
 import java.sql.Timestamp
 import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import javax.sql.DataSource
 
 /**
@@ -229,6 +232,50 @@ class CommunicationStyleRestContractIT {
         org.junit.jupiter.api.Assertions.assertEquals("RETIRED", styleStatus(firstPublished))
         org.junit.jupiter.api.Assertions.assertEquals("PUBLISHED", styleStatus(UUID.fromString(editorOne)))
         org.junit.jupiter.api.Assertions.assertEquals("IN_REVIEW", styleStatus(UUID.fromString(editorTwo)))
+        assertSimultaneousPublishOnlyOneWins(editorOne)
+    }
+
+    private fun assertSimultaneousPublishOnlyOneWins(previousPublished: String) {
+        val ids = listOf(draftForCollections(2, "Concurrent editor A"), draftForCollections(2, "Concurrent editor B"))
+        dataSource.connection.use { connection ->
+            connection.prepareStatement("update style_version set maker = 'editor-one' where id in (?, ?)").use { ps ->
+                ids.forEachIndexed { index, id -> ps.setObject(index + 1, UUID.fromString(id)) }
+                ps.executeUpdate()
+            }
+        }
+        ids.forEach { id ->
+            Given { this }.When { post("/api/v1/personas/style-versions/$id/submit") } Then { statusCode(200) }
+        }
+
+        val ready = CountDownLatch(2)
+        val start = CountDownLatch(1)
+        val executor = Executors.newFixedThreadPool(2)
+        val results = try {
+            val futures = ids.map { id ->
+                executor.submit<Pair<String, Int>> {
+                    ready.countDown()
+                    check(start.await(5, TimeUnit.SECONDS))
+                    id to io.restassured.RestAssured.given()
+                        .post("/api/v1/personas/style-versions/$id/publish").statusCode()
+                }
+            }
+            org.junit.jupiter.api.Assertions.assertTrue(ready.await(5, TimeUnit.SECONDS))
+            start.countDown()
+            futures.map { it.get(20, TimeUnit.SECONDS) }
+        } finally {
+            start.countDown()
+            executor.shutdownNow()
+        }
+        org.junit.jupiter.api.Assertions.assertEquals(listOf(200, 409), results.map { it.second }.sorted())
+        val winner = results.single { it.second == 200 }.first
+        val loser = results.single { it.second == 409 }.first
+        org.junit.jupiter.api.Assertions.assertEquals("PUBLISHED", styleStatus(UUID.fromString(winner)))
+        org.junit.jupiter.api.Assertions.assertEquals("IN_REVIEW", styleStatus(UUID.fromString(loser)))
+        org.junit.jupiter.api.Assertions.assertEquals("RETIRED", styleStatus(UUID.fromString(previousPublished)))
+        Given { this }.When { get("/api/v1/personas/collections/published") } Then {
+            statusCode(200)
+            body("tone", equalTo(if (winner == ids[0]) "Concurrent editor A" else "Concurrent editor B"))
+        }
     }
 
     private fun styleStatus(id: UUID): String = dataSource.connection.use { connection ->
