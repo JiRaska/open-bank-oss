@@ -3614,14 +3614,14 @@ class CustomerEdgeResource(
     @Authorize(action = "customer.notifications.mark-read", resource = "#id")
     @Blocking
     fun markNotificationRead(@PathParam("id") id: UUID, @QueryParam("partyId") originPartyId: UUID?): Response {
-        val party = notificationOrigin(originPartyId) ?: return forbidden("Notification not found")
+        val party = notificationOrigin(originPartyId) ?: return notFound("Notification not found")
         val detail = upstream.get(
             "$notificationServiceUrl/api/v1/notifications/$id/self?partyId=$party",
             party.toString(),
         )
         val node = runCatching { objectMapper.readTree(detail.entity?.toString() ?: "") }.getOrNull()
         if (detail.status != 200 || node?.path("partyId")?.asText() != party.toString()) {
-            return forbidden("Notification not found")
+            return notFound("Notification not found")
         }
         return upstream.patch(
             "$notificationServiceUrl/api/v1/notifications/$id/read?partyId=$party",

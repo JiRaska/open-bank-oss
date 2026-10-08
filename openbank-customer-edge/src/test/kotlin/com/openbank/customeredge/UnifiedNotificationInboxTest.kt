@@ -120,6 +120,20 @@ class UnifiedNotificationInboxTest {
     }
 
     @Test
+    fun `malformed timestamp inside otherwise scoped cursor returns bad request`() {
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(any(), human.toString(), any()) } returns page(human, "2026-10-08T10:00:00Z", 1)
+        val inbox = UnifiedNotificationInbox(upstream, mapper, "http://notifications")
+        val first = mapper.readTree(inbox.list(listOf(human), 1).entity as String)
+        val raw = String(java.util.Base64.getUrlDecoder().decode(first.path("nextCursor").asText()))
+        val malformed = java.util.Base64.getUrlEncoder().withoutPadding()
+            .encodeToString(raw.replaceBefore('|', "invalid-instant").toByteArray())
+        assertThatThrownBy { inbox.list(listOf(human), 1, malformed) }
+            .isInstanceOf(BadRequestException::class.java)
+        verify(exactly = 1) { upstream.get(any(), human.toString(), any()) }
+    }
+
+    @Test
     fun `malformed upstream instant fails the whole inbox closed`() {
         val upstream = mockk<UpstreamClient>()
         every { upstream.get(any(), human.toString(), any()) } returns page(human, "invalid", 1)
@@ -343,7 +357,7 @@ class UnifiedNotificationInboxTest {
         val upstream = mockk<UpstreamClient>()
         val resource = resource(upstream)
         assertThat(resource.getNotification(id, stranger).status).isEqualTo(403)
-        assertThat(resource.markNotificationRead(id, stranger).status).isEqualTo(403)
+        assertThat(resource.markNotificationRead(id, stranger).status).isEqualTo(404)
         verify(exactly = 0) { upstream.get(any(), any()) }
         verify(exactly = 0) { upstream.patch(any(), any()) }
     }
@@ -356,7 +370,18 @@ class UnifiedNotificationInboxTest {
         every { upstream.get(url, company.toString()) } returns
             Response.ok("""{"id":"$id","partyId":"$human"}""").build()
         val response = resource(upstream).markNotificationRead(id, company)
-        assertThat(response.status).isEqualTo(403)
+        assertThat(response.status).isEqualTo(404)
+        verify(exactly = 0) { upstream.patch(any(), any()) }
+    }
+
+    @Test
+    fun `missing notification cannot be marked read`() {
+        val id = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        val url = "http://notifications/api/v1/notifications/$id/self?partyId=$company"
+        every { upstream.get(url, company.toString()) } returns Response.status(404).build()
+        val response = resource(upstream).markNotificationRead(id, company)
+        assertThat(response.status).isEqualTo(404)
         verify(exactly = 0) { upstream.patch(any(), any()) }
     }
 

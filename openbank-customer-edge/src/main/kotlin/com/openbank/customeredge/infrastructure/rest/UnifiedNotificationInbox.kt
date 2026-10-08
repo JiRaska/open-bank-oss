@@ -13,6 +13,7 @@ import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.jboss.logging.MDC
 import java.security.MessageDigest
+import java.time.DateTimeException
 import java.time.Instant
 import java.util.Base64
 import java.util.UUID
@@ -68,11 +69,18 @@ internal class UnifiedNotificationInbox(
                 out.putNull("nextCursor")
             }
             Response.ok(out.toString()).type(MediaType.APPLICATION_JSON).build()
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+            unavailable(e)
         } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
-            Log.warn("Unified notification feed unavailable", e)
-            Response.status(Response.Status.BAD_GATEWAY)
-                .entity(mapOf("code" to "NOTIFICATIONS_UNAVAILABLE")).build()
+            unavailable(e)
         }
+    }
+
+    private fun unavailable(e: Exception): Response {
+        Log.warn("Unified notification feed unavailable", e)
+        return Response.status(Response.Status.BAD_GATEWAY)
+            .entity(mapOf("code" to "NOTIFICATIONS_UNAVAILABLE")).build()
     }
 
     private fun fetchAll(
@@ -159,6 +167,7 @@ internal class UnifiedNotificationInbox(
         return Base64.getUrlEncoder().withoutPadding().encodeToString(digest)
     }
 
+    @Suppress("ThrowsCount") // Every malformed component must produce the same client-visible 400.
     private fun decodeCursor(encoded: String?, expectedScope: String): Cursor? {
         if (encoded == null) return null
         if (encoded.length !in 1..MAX_CURSOR_LENGTH) throw BadRequestException("Invalid notification cursor")
@@ -167,6 +176,8 @@ internal class UnifiedNotificationInbox(
             require(raw.size == CURSOR_FIELD_COUNT && raw[CURSOR_SCOPE_INDEX] == expectedScope)
             Cursor(Instant.parse(raw[0]), UUID.fromString(raw[1]), raw[2])
         } catch (e: IllegalArgumentException) {
+            throw BadRequestException("Invalid notification cursor", e)
+        } catch (e: DateTimeException) {
             throw BadRequestException("Invalid notification cursor", e)
         }
     }
