@@ -44,7 +44,7 @@ info:
   # 1.74.0 -> 1.75.0 (#10016): additive — GET /capabilities (ADR-0310 D5).
   # 1.75.0 -> 1.76.0 (#11966): additive — /holdings, the customer write side of the declared
   # holdings that GET /net-worth reads (ADR-0301 D1).
-  version: 1.77.0
+  version: 1.78.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -1189,18 +1189,70 @@ paths:
         '200':
           description: Party-scoped notification page with total and exact unreadCount
 
+  /notifications/unified:
+    get:
+      tags: [Notifications]
+      summary: List notifications for the person and all currently mandated companies
+      operationId: listUnifiedNotifications
+      security:
+        - customerOidc: [accounts:read]
+      parameters:
+        - {name: limit, in: query, required: false, schema: {type: integer, default: 20, minimum: 1, maximum: 100}}
+        - {name: partyId, in: query, required: false, description: Filter to an authorized person or company, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: >-
+            Latest notifications across authorized profiles; each item carries its origin partyId.
+            total and unreadCount sum the party-scoped counts observed during this request;
+            concurrent writes can occur between party reads, so they are not one atomic snapshot.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, total, unreadCount, size, page]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, partyId, createdAt]
+                      properties:
+                        id: {type: string, format: uuid}
+                        partyId: {type: string, format: uuid}
+                        channel: {type: string}
+                        template: {type: string}
+                        recipient: {type: string}
+                        subject: {type: string}
+                        status: {type: string}
+                        sentAt: {type: [string, 'null'], format: date-time}
+                        readAt: {type: [string, 'null'], format: date-time}
+                        createdAt: {type: string, format: date-time}
+                  total: {type: integer, format: int64, minimum: 0}
+                  unreadCount: {type: integer, format: int64, minimum: 0}
+                  size: {type: integer, minimum: 1, maximum: 100}
+                  page: {type: integer, enum: [0]}
+        '403':
+          description: Requested party is not authorized
+        '502':
+          description: At least one notification feed failed; no partial inbox is returned
+        '503':
+          description: Profile discovery failed; no partial inbox is returned
+
   /notifications/{id}/read:
     patch:
       tags: [Notifications]
-      summary: Mark one notification as read (party-scoped, idempotent)
+      summary: Mark one notification as read for an authorized origin profile (idempotent)
       operationId: markNotificationRead
       security:
         - customerOidc: [accounts:read]
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: partyId, in: query, required: false, description: Origin partyId from the unified inbox; defaults to the selected profile, schema: {type: string, format: uuid}}
       responses:
         '204':
           description: Marked read
+        '403':
+          description: Origin party is not authorized
         '404':
           description: Not the caller's notification
 
@@ -1218,16 +1270,17 @@ paths:
   /notifications/{id}:
     get:
       tags: [Notifications]
-      summary: Read a single notification (party-scoped)
+      summary: Read one notification for an authorized origin profile
       description: >-
-        notification-service's read is not itself party-scoped, so the edge fetches it and
-        compares the returned partyId to the JWT; a mismatch and a missing id both collapse to
-        the same 403 (no existence oracle). partyId and recipient are stripped from the response.
+        An explicit origin partyId is checked against the current mandate inventory and sent to
+        notification-service's party-scoped detail route. Without partyId, the selected profile
+        is used. A returned partyId mismatch is refused. Recipient is stripped from the response.
       operationId: getNotification
       security:
         - customerOidc: [accounts:read]
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: partyId, in: query, required: false, description: Origin partyId from the unified inbox; defaults to the selected profile, schema: {type: string, format: uuid}}
       responses:
         '200':
           description: Notification detail, projected
@@ -1237,6 +1290,7 @@ paths:
                 type: object
                 properties:
                   id: {type: string, format: uuid}
+                  partyId: {type: string, format: uuid, description: Present when origin partyId was requested}
                   template: {type: string}
                   subject: {type: string}
                   body: {type: string}
@@ -1244,7 +1298,7 @@ paths:
                   readAt: {type: string, format: date-time, nullable: true}
                   createdAt: {type: string, format: date-time}
         '403':
-          description: Not found, or not the caller's notification
+          description: Origin party unavailable, or notification not found for that party
 
   /notification-preferences:
     get:
