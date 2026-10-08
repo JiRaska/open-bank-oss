@@ -345,20 +345,14 @@ spec:
             resources:
               requests:
                 cpu: 200m
-                # 512Mi → 1Gi → 2560Mi (issue #809): measured steady-state is ~2.4Gi
-                # with the current scrape fleet, so a 1Gi request under-declared
-                # ~1.4Gi of real usage to the scheduler — the single biggest
-                # request-vs-RSS gap in the cluster and a direct contributor to
-                # node memory exhaustion. Reserve what it actually uses.
-                memory: 2560Mi
+                # Reserve current 30d-retention usage so scheduling accounts for
+                # Prometheus rather than relying on unused node capacity.
+                memory: 3200Mi
               limits:
                 cpu: "1"
-                # 1536Mi → 3Gi: the server was OOMKilled (exit 137) during startup TSDB
-                # WAL replay / head compaction, CrashLooping for days and starving the
-                # money-path canary AnalysisRuns (error-rate query → connection refused),
-                # which aborted every Rollout. 3Gi clears the replay peak with headroom;
-                # nodes have the capacity at 12h retention.
-                memory: 3Gi
+                # Allow head compaction and WAL replay above steady-state usage
+                # without exhausting the limit at 30d retention.
+                memory: 4Gi
             storageSpec:
               volumeClaimTemplate:
                 spec:
