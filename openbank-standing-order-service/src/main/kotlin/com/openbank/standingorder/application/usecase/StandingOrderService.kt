@@ -15,6 +15,7 @@ import com.openbank.standingorder.domain.model.StandingOrder
 import com.openbank.standingorder.domain.model.StandingOrderStatus
 import jakarta.enterprise.context.ApplicationScoped
 import org.jboss.logging.Logger
+import java.security.MessageDigest
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
@@ -32,7 +33,13 @@ class StandingOrderService(
         // the idempotency lookup and before any row — so it covers both a new order and an edit
         // (replacesStandingOrderId), and never reaches a due date only to fail at sepa-payment.
         SepaCreditSchemeRules.requireRailCurrency(cmd.paymentType, cmd.currency)
-        repo.findByIdempotencyKey(cmd.idempotencyKey)?.let { return it }
+        val fingerprint = requestFingerprint(cmd)
+        repo.findByIdempotencyKey(cmd.idempotencyKey)?.let { existing ->
+            require(existing.requestFingerprint == fingerprint && existing.customerActorId == cmd.customerActorId) {
+                "Idempotency key is already bound to another request"
+            }
+            return existing
+        }
         val now = Instant.now(clock)
         val order = StandingOrder(
             id = Ids.newId(), idempotencyKey = cmd.idempotencyKey,
@@ -46,6 +53,9 @@ class StandingOrderService(
             nextExecutionDate = cmd.startDate,
             lastExecutionDate = null, executionCount = 0, failureCount = 0,
             status = StandingOrderStatus.ACTIVE, createdAt = now, updatedAt = now,
+            requestFingerprint = fingerprint,
+            customerActorId = cmd.customerActorId,
+            replacesStandingOrderId = cmd.replacesStandingOrderId,
         )
         val replaced = cmd.replacesStandingOrderId ?: return repo.save(order)
         // An edit: create the replacement and cancel the original atomically, so a customer is
@@ -54,6 +64,32 @@ class StandingOrderService(
             "Standing order $replaced is not an ACTIVE or PAUSED order of this party; nothing was changed"
         }
         return order
+    }
+
+    private fun requestFingerprint(cmd: CreateStandingOrderCommand): String {
+        // Explicit ordered fields avoid ambiguous string concatenation and never persist PII.
+        // Include the actor and replacement target: either changing under one key is a conflict.
+        val request = listOf(
+            cmd.idempotencyKey, cmd.partyId, cmd.debitAccountId, cmd.debtorIban, cmd.debtorName,
+            cmd.creditorIban, cmd.creditorName, cmd.creditorBic, cmd.amountMinorUnits, cmd.currency,
+            cmd.frequency.name, cmd.paymentType.name, cmd.remittanceInfo, cmd.startDate.toString(),
+            cmd.endDate?.toString(), cmd.replacesStandingOrderId, cmd.customerActorId,
+        )
+        return MessageDigest.getInstance("SHA-256")
+            .digest(objectMapper.writeValueAsBytes(request))
+            .joinToString("") { "%02x".format(it) }
+    }
+
+    override suspend fun findBoundReceipt(
+        key: String,
+        partyId: UUID,
+        debitAccountId: UUID,
+        actorId: UUID,
+    ): StandingOrder? = repo.findByIdempotencyKey(key)?.takeIf {
+        it.requestFingerprint != null &&
+            it.customerActorId == actorId &&
+            it.partyId == partyId &&
+            it.debitAccountId == debitAccountId
     }
 
     override suspend fun pause(id: UUID, operatorId: String) =

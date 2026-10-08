@@ -31,6 +31,15 @@ class StandingOrderEntity {
     @field:Column(name = "debit_account_id")
     var debitAccountId: UUID = UUID.randomUUID()
 
+    @field:Column(name = "request_fingerprint", length = 64)
+    var requestFingerprint: String? = null
+
+    @field:Column(name = "customer_actor_id")
+    var customerActorId: UUID? = null
+
+    @field:Column(name = "replaces_standing_order_id")
+    var replacesStandingOrderId: UUID? = null
+
     @field:Column(name = "debtor_iban")
     var debtorIban: String? = null
 

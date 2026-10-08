@@ -5,7 +5,7 @@ info:
   title: Standing Order Service API
   # 1.7 -> 1.8 (#11938): additive — create documents 400 CURRENCY_NOT_ALLOWED (a SEPA_CREDIT
   # order executes as an SCT, which is euro-only).
-  version: 1.8.0
+  version: 1.9.0
   description: Recurring payment orders — create, pause, resume, cancel.
   license:
     name: Apache-2.0
@@ -40,7 +40,8 @@ paths:
       description: >-
         With `replacesStandingOrderId` (an edit, #10281) the new order is created and the replaced
         one cancelled in ONE transaction: both run never, neither-runs never. A replay of the same
-        `idempotencyKey` returns the order already created and changes nothing.
+        `idempotencyKey` returns the order already created only when every original request field
+        and the customer actor still match. A conflicting or historically unbound key returns 400.
       responses:
         '201':
           description: Standing order created
@@ -58,6 +59,49 @@ paths:
           description: >-
             `replacesStandingOrderId` is not an ACTIVE or PAUSED order of the same party; nothing
             was created or cancelled.
+
+  /api/v1/standing-orders/receipt-lookup:
+    post:
+      tags: [Standing Orders]
+      summary: Look up a durable standing-order receipt by the original key
+      operationId: lookupStandingOrderReceipt
+      description: >-
+        The key travels in the JSON body, never the URL. X-Customer-Party-Id and
+        X-Customer-Actor-Id are supplied by the authenticated edge. UNKNOWN includes missing,
+        in-flight and historical unbound rows; it is never proof of no side effect.
+      parameters:
+        - name: X-Customer-Party-Id
+          in: header
+          required: true
+          schema: {type: string, format: uuid}
+        - name: X-Customer-Actor-Id
+          in: header
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [idempotencyKey, debitAccountId]
+              additionalProperties: false
+              properties:
+                idempotencyKey: {type: string, minLength: 1}
+                debitAccountId: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Bound durable receipt or UNKNOWN
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [outcome]
+                properties:
+                  outcome: {type: string, enum: [FOUND, UNKNOWN]}
+                  id: {type: string, format: uuid, nullable: true}
+                  status: {type: string, nullable: true}
+        '400': {description: Invalid lookup body or missing customer identity}
 
   /api/v1/standing-orders/{id}:
     get:

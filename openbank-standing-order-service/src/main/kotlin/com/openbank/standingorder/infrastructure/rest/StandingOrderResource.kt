@@ -31,7 +31,10 @@ class StandingOrderResource(private val useCase: StandingOrderUseCase) {
 
     @POST
     @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
-    suspend fun create(req: CreateStandingOrderRequest): Response {
+    suspend fun create(
+        req: CreateStandingOrderRequest,
+        @HeaderParam("X-Customer-Actor-Id") customerActorHeader: String? = null,
+    ): Response {
         val order = useCase.create(
             CreateStandingOrderCommand(
                 req.idempotencyKey, req.partyId, req.debitAccountId,
@@ -40,6 +43,10 @@ class StandingOrderResource(private val useCase: StandingOrderUseCase) {
                 req.amountMinorUnits, req.currency, req.frequency, req.paymentType,
                 req.remittanceInfo, req.startDate, req.endDate,
                 replacesStandingOrderId = req.replacesStandingOrderId,
+                customerActorId = customerActorHeader?.let {
+                    runCatching { UUID.fromString(it) }
+                        .getOrElse { throw IllegalArgumentException("Invalid customer actor") }
+                },
             ),
         )
         return Response.status(201).entity(order.toResponse()).build()

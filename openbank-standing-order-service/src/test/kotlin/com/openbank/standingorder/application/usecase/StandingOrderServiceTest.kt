@@ -13,12 +13,15 @@ import com.openbank.standingorder.domain.model.Frequency
 import com.openbank.standingorder.domain.model.PaymentType
 import com.openbank.standingorder.domain.model.StandingOrder
 import com.openbank.standingorder.domain.model.StandingOrderStatus
+import com.openbank.standingorder.infrastructure.persistence.mapper.toDomain
+import com.openbank.standingorder.infrastructure.persistence.mapper.toEntity
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
 import io.mockk.slot
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.time.Instant
@@ -33,14 +36,79 @@ class StandingOrderServiceTest {
 
     @Test
     fun `create() is idempotent`(): Unit = runBlocking {
+        val cmd = createCommand().copy(customerActorId = UUID.randomUUID())
+        var stored: StandingOrder? = null
+        coEvery { repo.findByIdempotencyKey(cmd.idempotencyKey) } answers { stored }
+        coEvery { repo.save(any()) } answers { firstArg<StandingOrder>().also { stored = it } }
+
+        val first = service.create(cmd)
+        val replay = service.create(cmd)
+
+        assertThat(replay).isEqualTo(first)
+        assertThat(first.requestFingerprint).hasSize(64)
+        assertThat(first.customerActorId).isEqualTo(cmd.customerActorId)
+        assertThat(first.toEntity().toDomain()).isEqualTo(first)
+        coVerify(exactly = 1) { repo.save(any()) }
+    }
+
+    @Test
+    fun `create() rejects same key with changed payload party actor or replacement target`(): Unit = runBlocking {
+        val cmd = createCommand().copy(customerActorId = UUID.randomUUID())
+        var stored: StandingOrder? = null
+        coEvery { repo.findByIdempotencyKey(cmd.idempotencyKey) } answers { stored }
+        coEvery { repo.save(any()) } answers { firstArg<StandingOrder>().also { stored = it } }
+        service.create(cmd)
+
+        val changed = listOf(
+            cmd.copy(amountMinorUnits = cmd.amountMinorUnits + 1),
+            cmd.copy(debitAccountId = UUID.randomUUID()),
+            cmd.copy(partyId = UUID.randomUUID()),
+            cmd.copy(customerActorId = UUID.randomUUID()),
+            cmd.copy(replacesStandingOrderId = UUID.randomUUID()),
+        )
+        changed.forEach { request ->
+            assertThatThrownBy { runBlocking { service.create(request) } }
+                .isInstanceOf(IllegalArgumentException::class.java)
+                .hasMessage("Idempotency key is already bound to another request")
+        }
+        coVerify(exactly = 1) { repo.save(any()) }
+    }
+
+    @Test
+    fun `legacy unbound row cannot be treated as a proven replay`(): Unit = runBlocking {
         val existing = standingOrder()
-        val cmd = createCommand()
+        val cmd = createCommand().copy(idempotencyKey = existing.idempotencyKey)
         coEvery { repo.findByIdempotencyKey(cmd.idempotencyKey) } returns existing
 
-        val result = service.create(cmd)
-
-        assertThat(result).isEqualTo(existing)
+        assertThatThrownBy { runBlocking { service.create(cmd) } }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessage("Idempotency key is already bound to another request")
         coVerify(exactly = 0) { repo.save(any()) }
+    }
+
+    @Test
+    fun `receipt returns only a durable order bound to party account and original actor`(): Unit = runBlocking {
+        val cmd = createCommand().copy(customerActorId = UUID.randomUUID())
+        val actor = requireNotNull(cmd.customerActorId)
+        coEvery { repo.findByIdempotencyKey(cmd.idempotencyKey) } returns null
+        coEvery { repo.save(any()) } answers { firstArg() }
+        val stored = service.create(cmd)
+        coEvery { repo.findByIdempotencyKey(cmd.idempotencyKey) } returns stored
+
+        assertThat(service.findBoundReceipt(cmd.idempotencyKey, cmd.partyId, cmd.debitAccountId, actor))
+            .isEqualTo(stored)
+        assertThat(service.findBoundReceipt(cmd.idempotencyKey, UUID.randomUUID(), cmd.debitAccountId, actor))
+            .isNull()
+        assertThat(service.findBoundReceipt(cmd.idempotencyKey, cmd.partyId, UUID.randomUUID(), actor))
+            .isNull()
+        assertThat(service.findBoundReceipt(cmd.idempotencyKey, cmd.partyId, cmd.debitAccountId, UUID.randomUUID()))
+            .isNull()
+        coEvery { repo.findByIdempotencyKey(cmd.idempotencyKey) } returns stored.copy(requestFingerprint = null)
+        assertThat(service.findBoundReceipt(cmd.idempotencyKey, cmd.partyId, cmd.debitAccountId, actor))
+            .isNull()
+        coEvery { repo.findByIdempotencyKey(cmd.idempotencyKey) } returns null
+        assertThat(service.findBoundReceipt(cmd.idempotencyKey, cmd.partyId, cmd.debitAccountId, actor))
+            .isNull()
     }
 
     @Test

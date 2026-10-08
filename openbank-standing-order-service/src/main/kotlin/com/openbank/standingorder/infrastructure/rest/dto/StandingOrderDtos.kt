@@ -42,6 +42,18 @@ data class CreateStandingOrderRequest(
     }
 }
 
+data class StandingOrderReceiptLookupRequest(val idempotencyKey: String, val debitAccountId: UUID) {
+    init {
+        require(idempotencyKey.isNotBlank()) { "idempotencyKey is required" }
+    }
+}
+
+data class StandingOrderReceiptLookupResponse(
+    val outcome: String,
+    val id: UUID? = null,
+    val status: StandingOrderStatus? = null,
+)
+
 data class StandingOrderResponse(
     val id: UUID,
     val partyId: UUID,

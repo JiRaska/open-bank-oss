@@ -26,10 +26,13 @@ data class CreateStandingOrderCommand(
     val endDate: LocalDate?,
     /** Atomic replace (#10281): cancel this order in the same transaction that creates the new one. */
     val replacesStandingOrderId: UUID? = null,
+    /** Verified customer principal forwarded by the authenticated edge; absent for legacy callers. */
+    val customerActorId: UUID? = null,
 )
 
 interface StandingOrderUseCase {
     suspend fun create(cmd: CreateStandingOrderCommand): StandingOrder
+    suspend fun findBoundReceipt(key: String, partyId: UUID, debitAccountId: UUID, actorId: UUID): StandingOrder?
     suspend fun pause(id: UUID, operatorId: String): StandingOrder
     suspend fun resume(id: UUID, operatorId: String): StandingOrder
     suspend fun cancel(id: UUID, operatorId: String): StandingOrder

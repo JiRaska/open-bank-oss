@@ -44,6 +44,10 @@ data class StandingOrder(
     val status: StandingOrderStatus,
     val createdAt: Instant,
     val updatedAt: Instant,
+    // Null on pre-binding rows: their original request and actor cannot be reconstructed safely.
+    val requestFingerprint: String? = null,
+    val customerActorId: UUID? = null,
+    val replacesStandingOrderId: UUID? = null,
 ) {
     fun pause(now: Instant) = also {
         require(status == StandingOrderStatus.ACTIVE) { "Only ACTIVE orders can be paused" }
