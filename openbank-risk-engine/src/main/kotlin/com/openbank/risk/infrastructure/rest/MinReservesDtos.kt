@@ -36,6 +36,16 @@ data class ExcludedReserveBalanceDto(val glAccountCode: String?, val amount: Big
 
 data class ReserveMappingDto(val key: String, val reserveClass: String, val description: String)
 
+/** A ČNB fact the result was computed with, and where it came from. */
+data class ReserveRateFactDto(
+    val instrument: String,
+    val effectiveFrom: String,
+    val rate: BigDecimal,
+    val sourceUrl: String,
+    val contentSha256: String,
+    val note: String?,
+)
+
 data class MinReservesAssumptionsDto(
     val parameterSetId: String,
     val parameterSetVersion: String,
@@ -45,6 +55,8 @@ data class MinReservesAssumptionsDto(
     val holdingCurrency: String,
     val glAccounts: List<ReserveMappingDto>,
     val glAccountTypes: List<ReserveMappingDto>,
+    /** The reserve ratio and remuneration facts in effect on the run's as-of date, with provenance. */
+    val rateFacts: List<ReserveRateFactDto>,
 )
 
 data class MinReservesResponse(
@@ -88,7 +100,7 @@ fun MinReservesAnalysis.toResponse(): MinReservesResponse = MinReservesResponse(
                 l.toDto()
             },
             it.base?.reserveMoney(),
-            it.rate,
+            checkNotNull(it.rate) { "min-reserves rendered without a ratio (MinReservesService refuses that)" },
             it.requirement?.reserveMoney(),
             it.requirementNotStated,
         )
@@ -99,8 +111,8 @@ fun MinReservesAnalysis.toResponse(): MinReservesResponse = MinReservesResponse(
     holdingsNotStated = result.holdingsNotStated,
     requirement = result.requirement?.reserveMoney(),
     surplus = result.surplus?.reserveMoney(),
-    remunerationRate = result.remunerationRate,
-    remuneration = result.remuneration.reserveMoney(),
+    remunerationRate = checkNotNull(result.remunerationRate) { "min-reserves rendered without a remuneration fact" },
+    remuneration = checkNotNull(result.remuneration).reserveMoney(),
     excluded = result.excluded.map {
         ExcludedReserveBalanceDto(it.glAccountCode, it.amount.reserveMoney(), it.reserveClass.wire)
     },
@@ -112,10 +124,20 @@ fun MinReservesAnalysis.toResponse(): MinReservesResponse = MinReservesResponse(
         parameterSetId = parameters.id,
         parameterSetVersion = parameters.version,
         source = parameters.source,
-        rate = parameters.rate,
-        remunerationRate = parameters.remunerationRate,
+        rate = checkNotNull(parameters.rate),
+        remunerationRate = checkNotNull(parameters.remunerationRate),
         holdingCurrency = parameters.holdingCurrency,
         glAccounts = parameters.glAccounts.toSortedMap().map { (k, v) -> v.mapping(k) },
         glAccountTypes = parameters.glAccountTypes.toSortedMap().map { (k, v) -> v.mapping(k) },
+        rateFacts = listOfNotNull(parameters.ratio, parameters.remuneration).map {
+            ReserveRateFactDto(
+                it.instrument,
+                it.effectiveFrom.toString(),
+                it.rate,
+                it.sourceUrl,
+                it.contentSha256,
+                it.note,
+            )
+        },
     ),
 )

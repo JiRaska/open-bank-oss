@@ -120,7 +120,18 @@ def service_namespace(short: str) -> str:
     fallback stays (the commands need to render as something) and the banner now says the
     commands do not apply.
     """
-    return gitops_facts.service_namespace(short, GITOPS) or short
+    return declared_namespace(short, GITOPS) or short
+
+
+@lru_cache(maxsize=None)
+def declared_namespace(short: str, gitops: Path) -> str | None:
+    """Reuse the manifest scan within one generation; fixture roots remain separate."""
+    return gitops_facts.service_namespace(short, gitops)
+
+
+@lru_cache(maxsize=None)
+def declared_workload_name(short: str, gitops: Path) -> str | None:
+    return gitops_facts.workload_name(short, gitops)
 
 
 def zero_replica_workload(short: str) -> bool:
@@ -250,7 +261,7 @@ def application_automated(short: str) -> bool | None:
 
 def workload_live_unverified(short: str) -> bool:
     """True only for a declared workload whose owning Application is manual-sync."""
-    return gitops_facts.service_namespace(short, GITOPS) is not None and application_automated(short) is False
+    return declared_namespace(short, GITOPS) is not None and application_automated(short) is False
 
 
 def deployment_status(short: str) -> str:
@@ -273,7 +284,7 @@ def deployment_status(short: str) -> str:
             "the public HTTP port is not a health-evidence substitute.\n"
             "\n"
         )
-    if gitops_facts.service_namespace(short, GITOPS) is not None:
+    if declared_namespace(short, GITOPS) is not None:
         if workload_live_unverified(short):
             return (
                 "## Deployment status — WORKLOAD DESIRED — LIVE STATUS UNVERIFIED\n"
@@ -506,7 +517,7 @@ def ops_commands(short: str, ns: str) -> dict[str, str]:
     """
     # The workload's real name, not `<short>-service`: released modules without the suffix deploy
     # under their bare name (customer-edge, admin-ui), so the suffix would address nothing (#6253).
-    svc = gitops_facts.workload_name(short, GITOPS) or f"{short}-service"
+    svc = declared_workload_name(short, GITOPS) or f"{short}-service"
     if gitops_facts.workload_kind(short, GITOPS) == "Rollout":
         return {
             "logs_cmd": f"`kubectl logs -n {ns} -l app.kubernetes.io/name={svc} -f`",
@@ -658,7 +669,7 @@ def all_services() -> list[str]:
     for version_txt in REPO.glob("openbank-*/version.txt"):
         short = version_txt.parent.name.removeprefix("openbank-")
         short = short.removesuffix("-service")
-        if gitops_facts.workload_name(short, GITOPS) is not None:
+        if declared_workload_name(short, GITOPS) is not None:
             out.add(short)
     return sorted(out)
 

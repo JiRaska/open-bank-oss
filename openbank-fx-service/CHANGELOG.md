@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.17.1](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.17.0...fx-service-v0.17.1) (2026-10-07)
+
+
+### Bug Fixes
+
+* **approval:** preserve verified maker actor kind ([#12159](https://github.com/JiRaska/open-bank-oss/issues/12159)) ([74cba34](https://github.com/JiRaska/open-bank-oss/commit/74cba348b75c0b318902c033bf81356ddba32393))
+
+## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.16.3...fx-service-v0.17.0) (2026-10-05)
+
+
+### Features
+
+* **fx:** ingest ČNB policy rates and minimum-reserve facts ([#12117](https://github.com/JiRaska/open-bank-oss/issues/12117)) ([35b73e9](https://github.com/JiRaska/open-bank-oss/commit/35b73e94db9d92265755e528cf0703899cb6d343))
+
 ## [0.16.3](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.16.2...fx-service-v0.16.3) (2026-10-04)
 
 

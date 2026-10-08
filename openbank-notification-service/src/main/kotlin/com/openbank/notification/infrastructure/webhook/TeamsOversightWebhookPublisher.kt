@@ -4,17 +4,17 @@
 
 package com.openbank.notification.infrastructure.webhook
 
+import com.openbank.libs.security.EgressRequest
+import com.openbank.libs.security.EgressResolver
+import com.openbank.libs.security.SafeHttpClient
 import com.openbank.notification.application.OversightSignal
 import com.openbank.notification.application.OversightWebhook
 import com.openbank.notification.application.port.out.OversightWebhookPublisher
+import com.openbank.notification.infrastructure.egress.NotificationEgress
 import io.quarkus.arc.Unremovable
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
 import org.jboss.logging.Logger
-import java.net.URI
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
 import java.time.Duration
 
 /**
@@ -46,8 +46,18 @@ class TeamsOversightWebhookPublisher : OversightWebhookPublisher {
 
     private val log = Logger.getLogger(TeamsOversightWebhookPublisher::class.java)
 
-    private val http: HttpClient by lazy {
-        HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(CONNECT_TIMEOUT_SECONDS.toLong())).build()
+    // ADR-0320 P1: the webhook URL is configurable, so the host must be on the egress allow-list.
+    @org.eclipse.microprofile.config.inject.ConfigProperty(
+        name = NotificationEgress.ALLOWED_HOSTS_PROPERTY,
+        defaultValue = NotificationEgress.DEFAULT_ALLOWED_HOSTS,
+    )
+    lateinit var allowedHosts: List<String>
+
+    /** Visible for testing: lets a unit test pin a stub host to loopback. */
+    internal var resolver: EgressResolver = EgressResolver.SYSTEM
+
+    private val http: SafeHttpClient by lazy {
+        NotificationEgress.client(allowedHosts, resolver, CONNECT_TIMEOUT, REQUEST_TIMEOUT, MAX_RESPONSE_BYTES)
     }
 
     override fun publish(signal: OversightSignal): Uni<Boolean> {
@@ -56,21 +66,21 @@ class TeamsOversightWebhookPublisher : OversightWebhookPublisher {
             return Uni.createFrom().item(false)
         }
         val body = OversightWebhook.renderSlackPayload(signal) // {"text":"..."} is valid for Teams too
-        val req = HttpRequest.newBuilder()
-            .uri(URI.create(target))
-            .timeout(Duration.ofSeconds(REQUEST_TIMEOUT_SECONDS.toLong()))
-            .header("Content-Type", "application/json")
-            .POST(HttpRequest.BodyPublishers.ofString(body))
-            .build()
+        val req = EgressRequest(
+            method = "POST",
+            url = target,
+            headers = mapOf("Content-Type" to "application/json"),
+            body = body.toByteArray(Charsets.UTF_8),
+        )
 
-        return Uni.createFrom().completionStage(http.sendAsync(req, HttpResponse.BodyHandlers.ofString()))
+        return NotificationEgress.send({ http }, req)
             .map { resp ->
-                val ok = resp.statusCode() in HTTP_OK_RANGE
+                val ok = resp.status in HTTP_OK_RANGE
                 log.infof(
                     "notification.webhook.sent provider=teams template=%s status=%s http=%d url=%s ok=%b",
                     signal.template.name,
                     signal.status.name,
-                    resp.statusCode(),
+                    resp.status,
                     OversightWebhook.maskUrl(target),
                     ok,
                 )
@@ -89,8 +99,9 @@ class TeamsOversightWebhookPublisher : OversightWebhookPublisher {
 
     companion object {
         private val HTTP_OK_RANGE = 200..299
-        private const val CONNECT_TIMEOUT_SECONDS = 3
-        private const val REQUEST_TIMEOUT_SECONDS = 3
+        private val CONNECT_TIMEOUT: Duration = Duration.ofSeconds(3)
+        private val REQUEST_TIMEOUT: Duration = Duration.ofSeconds(3)
+        private const val MAX_RESPONSE_BYTES = 64 * 1024
         private const val AWAIT_TIMEOUT_SECONDS = 4
     }
 }

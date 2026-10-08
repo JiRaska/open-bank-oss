@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.26.0](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.25.0...audit-service-v0.26.0) (2026-10-05)
+
+
+### Features
+
+* **fx:** ingest ČNB policy rates and minimum-reserve facts ([#12117](https://github.com/JiRaska/open-bank-oss/issues/12117)) ([35b73e9](https://github.com/JiRaska/open-bank-oss/commit/35b73e94db9d92265755e528cf0703899cb6d343))
+
 ## [0.25.0](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.24.1...audit-service-v0.25.0) (2026-10-04)
 
 
