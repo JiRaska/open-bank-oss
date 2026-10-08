@@ -81,6 +81,7 @@ class SepaPaymentResource(
         request: CreateSepaPaymentRequest,
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         @HeaderParam("X-Customer-Party-Id") customerPartyId: String?,
+        @HeaderParam("X-Customer-Actor-Id") customerActorPartyId: String?,
     ): Response {
         // #3104 — an ABSENT header injected null, so `null.isNotBlank()` threw NPE and this guard
         // answered 500 in exactly the case it was written for. A blank header was always a 400.
@@ -91,8 +92,9 @@ class SepaPaymentResource(
         // a concurrent duplicate answers 409 IDEMPOTENCY_REQUEST_IN_PROGRESS.
         // The Redis reservation is scoped by creator (and edge party); the durable row separately
         // verifies the same provenance before any replay is returned.
-        val partyId = trustedPartyId(customerPartyId)
-        val scope = IdempotencyScope(IDEMPOTENCY_SERVICE, callerScope(partyId))
+        val partyId = trustedEdgeUuid(customerPartyId, "X-Customer-Party-Id")
+        val actorPartyId = trustedEdgeUuid(customerActorPartyId, "X-Customer-Actor-Id")
+        val scope = IdempotencyScope(IDEMPOTENCY_SERVICE, callerScope(partyId, actorPartyId))
         val requestHash = RequestFingerprints.of(objectMapper, "POST", CREATE_PATH, request)
         // #11642: Money is built here, BEFORE the key is reserved — an amount or currency it cannot
         // hold is a 400 (kernel InvalidMoneyException: AMOUNT_SCALE_EXCEEDED / CURRENCY_UNSUPPORTED) that leaves no idempotency
@@ -101,6 +103,7 @@ class SepaPaymentResource(
         val command = request.toCommand(idempotencyKey, requestHash).copy(
             initiatingPrincipal = identity.principal.name,
             initiatingPartyId = partyId,
+            initiatingActorPartyId = actorPartyId,
         )
         when (
             val reservation = idempotencyStore.reserve(
@@ -160,17 +163,18 @@ class SepaPaymentResource(
     suspend fun lookupReceipt(
         request: SepaReceiptLookupRequest?,
         @HeaderParam("X-Customer-Party-Id") customerPartyId: String?,
+        @HeaderParam("X-Customer-Actor-Id") customerActorPartyId: String?,
     ): Response {
         requireNotNull(request) { "request body is required" }
         require(request.idempotencyKey.isNotBlank()) { "idempotencyKey is required" }
-        val partyId = trustedPartyId(customerPartyId)
-        val hash = RequestFingerprints.of(objectMapper, "POST", CREATE_PATH, request.payment)
+        val partyId = trustedEdgeUuid(customerPartyId, "X-Customer-Party-Id")
+        val actorPartyId = trustedEdgeUuid(customerActorPartyId, "X-Customer-Actor-Id")
         val payment = paymentUseCase.findReceipt(
             request.idempotencyKey,
-            hash,
-            request.payment.debtorAccountId,
+            request.debtorAccountId,
             identity.principal.name,
             partyId,
+            actorPartyId,
         )
         val result = if (payment == null) {
             SepaReceiptLookupResponse("UNKNOWN")
@@ -180,14 +184,14 @@ class SepaPaymentResource(
         return Response.ok(result).build()
     }
 
-    private fun callerScope(partyId: UUID?): String =
-        if (partyId == null) identity.principal.name else "${identity.principal.name}:$partyId"
+    private fun callerScope(partyId: UUID?, actorPartyId: UUID?): String =
+        if (partyId == null) identity.principal.name else "${identity.principal.name}:$partyId:$actorPartyId"
 
-    private fun trustedPartyId(header: String?): UUID? {
+    private fun trustedEdgeUuid(header: String?, name: String): UUID? {
         if (identity.principal.name != EDGE_PRINCIPAL) return null
-        require(!header.isNullOrBlank()) { "X-Customer-Party-Id is required for customer-edge" }
+        require(!header.isNullOrBlank()) { "$name is required for customer-edge" }
         return runCatching { UUID.fromString(header) }
-            .getOrElse { throw IllegalArgumentException("X-Customer-Party-Id must be a UUID") }
+            .getOrElse { throw IllegalArgumentException("$name must be a UUID") }
     }
 
     @GET

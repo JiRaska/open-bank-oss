@@ -51,7 +51,7 @@ value transfer — a primary fraud target; clears via batch/clearing rather than
 | **S**poofing | Forged initiation | OIDC + role; mTLS for service callers |
 | **S**poofing | Forged `pacs.002` ACSC from clearing-simulator (ADR-0104 D3) | clearing-simulator is cluster-internal only; OIDC CC verifies identity; `Pacs002Reader` validates XML schema before parsing; scheme accept moves payment to PROCESSING (money does not leave until settlement) |
 | **T**ampering | Alter amount/IBAN in flight | Server-validated, immutable once accepted; audit |
-| **T**ampering | Reuse an `Idempotency-Key` with a different payment body so the first payment's response is replayed for the second (#10916) | Key bound to a request fingerprint (method + path + canonical body, `RequestFingerprints`) and claimed atomically in Redis before the use case runs; mismatch refused 409 `IDEMPOTENCY_KEY_REUSED`, concurrent duplicate 409 `IDEMPOTENCY_REQUEST_IN_PROGRESS`, nothing created. Durable second check: `sepa_payments.request_hash` (V12) refuses a reused key after the Redis record expired. Rows/records written before this change carry no fingerprint and still replay by key alone |
+| **T**ampering | Reuse an `Idempotency-Key` with a different payment body | Key bound to a request fingerprint (method + path + canonical body, `RequestFingerprints`) and claimed atomically in Redis before the use case runs; mismatch refused 409 `IDEMPOTENCY_KEY_REUSED`, concurrent duplicate 409 `IDEMPOTENCY_REQUEST_IN_PROGRESS`, nothing created. Durable fallback requires matching fingerprint, authenticated principal, effective party, natural actor and debtor account; legacy rows without creator provenance cannot replay |
 | **R**epudiation | Deny initiating a transfer | AuditEvent + SCA evidence + correlation id |
 | **I**nfo disclosure | Payment history harvesting | AuthZ scoping; `ROLE_VIEWER` owner-scoped read |
 | **I**nfo disclosure | Domain metrics leak PII / enable per-payment inference via high-cardinality labels | `DomainMetrics` low-cardinality contract (ADR-0077): the `openbank.outbox.backlog` gauge is tagged only by `service` (`"sepa-payment"`) — never a payment id, debtor/creditor IBAN, amount, or any PII. The gauge exposes only a read-only **count** of processable (PENDING + FAILED) outbox rows, cached and refreshed off the scrape thread (no DB query on the Prometheus worker thread). `/q/metrics` is cluster-internal |
@@ -142,6 +142,24 @@ unreachable document-service fails only the download, never a payment transition
 **payment execution, settlement, and status-transition logic are entirely unchanged** by this ADR).
 **Rollback:** revert the endpoint + adapter commit; no DB schema change, no flag needed (the route
 simply stops existing).
+
+## 5c. Payment receipt lookup — STRIDE supplement
+
+`POST /api/v1/sepa-payments/receipts/lookup` accepts the idempotency key and debtor account in
+the JSON body. It returns only payment ID and status when the stored creator and account match;
+otherwise it returns `UNKNOWN`, which does not establish that the payment failed. The key is never
+placed in a path or query string.
+
+| STRIDE | Threat | Mitigation |
+|---|---|---|
+| **S**poofing | A caller supplies another customer or delegate's party/actor headers | Quarkus OIDC validates the bearer against the configured issuer; only the authenticated `service-account-openbank-edge` principal may supply `X-Customer-Party-Id` and `X-Customer-Actor-Id`. The edge derives the actor from its validated customer JWT and resolves any acting-for party through its mandate check. Other principals' supplied headers are ignored |
+| **I**nfo disclosure | Two people acting for one entity present the same key | Redis scope and durable row bind the effective party and natural actor separately. The receipt is `UNKNOWN` for a different actor, party, principal or debtor account, including rows created before those bindings were stored |
+| **T**ampering | Same key is retried with a changed payment body after Redis expiry | Create replay still compares the canonical request fingerprint stored in Postgres. Receipt lookup does not reconstruct historical debtor metadata, so a later legal-name or IBAN change does not invalidate a verified receipt |
+
+**Rollback:** revert the code before dropping `initiating_principal`, `initiating_party_id` and
+`initiating_actor_party_id` (V13/V14). Dropping them discards creator provenance; receipts for
+those rows then remain unverifiable. Keep the receipt response `UNKNOWN` during rollback rather
+than interpreting an absent row or metadata as a failed payment.
 
 ## 6. Change log
 

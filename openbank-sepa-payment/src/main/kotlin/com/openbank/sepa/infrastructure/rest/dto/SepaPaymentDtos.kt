@@ -47,7 +47,7 @@ data class CreateSepaPaymentRequest(
     )
 }
 
-data class SepaReceiptLookupRequest(val idempotencyKey: String, val payment: CreateSepaPaymentRequest)
+data class SepaReceiptLookupRequest(val idempotencyKey: String, val debtorAccountId: UUID)
 
 data class SepaReceiptLookupResponse(
     val state: String,

@@ -31,6 +31,7 @@ data class CreateSepaPaymentCommand(
     val requestHash: String? = null,
     val initiatingPrincipal: String? = null,
     val initiatingPartyId: UUID? = null,
+    val initiatingActorPartyId: UUID? = null,
 )
 
 data class ListSepaPaymentsQuery(
@@ -68,10 +69,10 @@ interface SepaPaymentUseCase {
     suspend fun createPayment(command: CreateSepaPaymentCommand): SepaPayment
     suspend fun findReceipt(
         idempotencyKey: String,
-        requestHash: String,
         debtorAccountId: UUID,
         initiatingPrincipal: String,
         initiatingPartyId: UUID?,
+        initiatingActorPartyId: UUID?,
     ): SepaPayment?
     suspend fun getPayment(paymentId: UUID): SepaPayment
     suspend fun listPayments(query: ListSepaPaymentsQuery): List<SepaPayment>

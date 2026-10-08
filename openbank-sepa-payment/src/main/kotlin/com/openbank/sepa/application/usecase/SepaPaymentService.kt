@@ -105,6 +105,7 @@ class SepaPaymentService(
             requestHash = command.requestHash,
             initiatingPrincipal = command.initiatingPrincipal,
             initiatingPartyId = command.initiatingPartyId,
+            initiatingActorPartyId = command.initiatingActorPartyId,
             type = command.type,
             status = SepaPaymentStatus.RECEIVED,
             debtorAccountId = command.debtorAccountId,
@@ -154,26 +155,28 @@ class SepaPaymentService(
     private fun matchesCreator(existing: SepaPayment, command: CreateSepaPaymentCommand): Boolean {
         if (existing.requestHash == null || command.requestHash == null) return false
         if (existing.initiatingPrincipal == null || command.initiatingPrincipal == null) return false
+        if (existing.initiatingPartyId != null && existing.initiatingActorPartyId == null) return false
         if (existing.requestHash != command.requestHash) return false
         if (existing.initiatingPrincipal != command.initiatingPrincipal) return false
         if (existing.initiatingPartyId != command.initiatingPartyId) return false
+        if (existing.initiatingActorPartyId != command.initiatingActorPartyId) return false
         return existing.debtorAccountId == command.debtorAccountId
     }
 
     override suspend fun findReceipt(
         idempotencyKey: String,
-        requestHash: String,
         debtorAccountId: UUID,
         initiatingPrincipal: String,
         initiatingPartyId: UUID?,
+        initiatingActorPartyId: UUID?,
     ): SepaPayment? {
         val payment = paymentRepository.findByIdempotencyKey(idempotencyKey) ?: return null
         return payment.takeIf {
-            it.requestHash != null &&
-                it.requestHash == requestHash &&
-                it.initiatingPrincipal != null &&
+            it.initiatingPrincipal != null &&
                 it.initiatingPrincipal == initiatingPrincipal &&
                 it.initiatingPartyId == initiatingPartyId &&
+                (it.initiatingPartyId == null || it.initiatingActorPartyId != null) &&
+                it.initiatingActorPartyId == initiatingActorPartyId &&
                 it.debtorAccountId == debtorAccountId
         }
     }

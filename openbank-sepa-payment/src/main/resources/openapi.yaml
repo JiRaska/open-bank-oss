@@ -46,11 +46,11 @@ paths:
   /api/v1/sepa-payments/receipts/lookup:
     post:
       tags: [SEPA Payments]
-      summary: Resolve a payment receipt from the authenticated creator and original request
+      summary: Resolve a payment receipt for the authenticated creator and debtor account
       operationId: lookupSepaPaymentReceipt
       description: >-
         The idempotency key is sent only in the JSON body. FOUND is returned only when the
-        stored creator, debtor account, and original request fingerprint match. Missing,
+        stored principal, actor, effective party, and debtor account match. Missing,
         mismatched, and legacy unverifiable records return UNKNOWN with no payment details.
       security:
         - bearerAuth: [ROLE_API, ROLE_OPERATOR, ROLE_ADMIN, ROLE_PAYMENTS]
@@ -382,13 +382,14 @@ components:
   schemas:
     SepaReceiptLookupRequest:
       type: object
-      required: [idempotencyKey, payment]
+      required: [idempotencyKey, debtorAccountId]
       properties:
         idempotencyKey:
           type: string
           maxLength: 128
-        payment:
-          $ref: '#/components/schemas/CreateSepaPaymentRequest'
+        debtorAccountId:
+          type: string
+          format: uuid
     SepaReceiptLookupResponse:
       type: object
       required: [state]
