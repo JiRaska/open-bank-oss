@@ -34,6 +34,7 @@ class StandingOrderResource(private val useCase: StandingOrderUseCase) {
     suspend fun create(
         req: CreateStandingOrderRequest,
         @HeaderParam("X-Customer-Actor-Id") customerActorHeader: String? = null,
+        @HeaderParam("X-Start-Date-Defaulted") startDateDefaultedHeader: String? = null,
     ): Response {
         val order = useCase.create(
             CreateStandingOrderCommand(
@@ -47,6 +48,7 @@ class StandingOrderResource(private val useCase: StandingOrderUseCase) {
                     runCatching { UUID.fromString(it) }
                         .getOrElse { throw IllegalArgumentException("Invalid customer actor") }
                 },
+                startDateDefaulted = startDateDefaultedHeader == "true",
             ),
         )
         return Response.status(201).entity(order.toResponse()).build()

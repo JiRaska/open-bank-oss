@@ -28,18 +28,14 @@ class StandingOrderService(
     private val objectMapper: ObjectMapper,
 ) : StandingOrderUseCase {
 
+    @Suppress("TooGenericExceptionCaught") // reactive transaction failures have several wrapped types
     override suspend fun create(cmd: CreateStandingOrderCommand): StandingOrder {
         // #11938: a SEPA_CREDIT order executes as an SCT, which is euro-only. Refused here — before
         // the idempotency lookup and before any row — so it covers both a new order and an edit
         // (replacesStandingOrderId), and never reaches a due date only to fail at sepa-payment.
         SepaCreditSchemeRules.requireRailCurrency(cmd.paymentType, cmd.currency)
         val fingerprint = requestFingerprint(cmd)
-        repo.findByIdempotencyKey(cmd.idempotencyKey)?.let { existing ->
-            require(existing.requestFingerprint == fingerprint && existing.customerActorId == cmd.customerActorId) {
-                "Idempotency key is already bound to another request"
-            }
-            return existing
-        }
+        repo.findByIdempotencyKey(cmd.idempotencyKey)?.let { return boundReplay(it, fingerprint, cmd.customerActorId) }
         val now = Instant.now(clock)
         val order = StandingOrder(
             id = Ids.newId(), idempotencyKey = cmd.idempotencyKey,
@@ -57,13 +53,28 @@ class StandingOrderService(
             customerActorId = cmd.customerActorId,
             replacesStandingOrderId = cmd.replacesStandingOrderId,
         )
-        val replaced = cmd.replacesStandingOrderId ?: return repo.save(order)
-        // An edit: create the replacement and cancel the original atomically, so a customer is
-        // never debited by both (#10281). A replay of the same idempotency key returned above.
-        check(repo.replace(order, replaced, now)) {
-            "Standing order $replaced is not an ACTIVE or PAUSED order of this party; nothing was changed"
+        try {
+            val replaced = cmd.replacesStandingOrderId ?: return repo.save(order)
+            // An edit: create replacement and cancel original in one transaction (#10281).
+            check(repo.replace(order, replaced, now)) {
+                "Standing order $replaced is not an ACTIVE or PAUSED order of this party; nothing was changed"
+            }
+            return order
+        } catch (failure: Exception) {
+            // A concurrent creator may have won the unique key after our initial read. Its
+            // committed row is authoritative; a fresh session distinguishes replay from conflict.
+            repo.findByIdempotencyKey(cmd.idempotencyKey)?.let {
+                return boundReplay(it, fingerprint, cmd.customerActorId)
+            }
+            throw failure
         }
-        return order
+    }
+
+    private fun boundReplay(existing: StandingOrder, fingerprint: String, actorId: UUID?): StandingOrder {
+        require(existing.requestFingerprint == fingerprint && existing.customerActorId == actorId) {
+            "Idempotency key is already bound to another request"
+        }
+        return existing
     }
 
     private fun requestFingerprint(cmd: CreateStandingOrderCommand): String {
@@ -72,7 +83,8 @@ class StandingOrderService(
         val request = listOf(
             cmd.idempotencyKey, cmd.partyId, cmd.debitAccountId, cmd.debtorIban, cmd.debtorName,
             cmd.creditorIban, cmd.creditorName, cmd.creditorBic, cmd.amountMinorUnits, cmd.currency,
-            cmd.frequency.name, cmd.paymentType.name, cmd.remittanceInfo, cmd.startDate.toString(),
+            cmd.frequency.name, cmd.paymentType.name, cmd.remittanceInfo,
+            cmd.startDateDefaulted, if (cmd.startDateDefaulted) null else cmd.startDate.toString(),
             cmd.endDate?.toString(), cmd.replacesStandingOrderId, cmd.customerActorId,
         )
         return MessageDigest.getInstance("SHA-256")

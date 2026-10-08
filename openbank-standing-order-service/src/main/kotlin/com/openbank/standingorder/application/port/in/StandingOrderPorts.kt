@@ -28,6 +28,8 @@ data class CreateStandingOrderCommand(
     val replacesStandingOrderId: UUID? = null,
     /** Verified customer principal forwarded by the authenticated edge; absent for legacy callers. */
     val customerActorId: UUID? = null,
+    /** Edge resolved a missing app date; exclude the changing resolution from retry identity. */
+    val startDateDefaulted: Boolean = false,
 )
 
 interface StandingOrderUseCase {

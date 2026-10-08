@@ -102,6 +102,16 @@ openbank-sdd-service.
 - **Scheduler single-writer:** the daily sweep relies on the outbox claim protocol
   (`StandingOrderOutboxClaimIT`) to avoid double-dispatch across replicas; idempotency at
   sepa-payment is the backstop if that ever regresses.
+- **Ambiguous create receipts (#12317):** the caller-chosen key is a correlation value, never
+  authority. The customer edge verifies debit-account access, forwards the authenticated actor,
+  and keeps the key in a POST body. The standing-order service persists a SHA-256 fingerprint of
+  every caller-defined create field (including actor and replacement target); when the edge
+  defaulted an omitted start date, it binds the default marker rather than tomorrow's new date.
+  It returns an ID/status only when the durable row matches party, debit account and original actor.
+  Absent or historical unbound rows answer UNKNOWN, which does not prove no payment occurred.
+  A concurrent insert losing the
+  unique-key race reads the committed winner through a fresh session and checks the same binding;
+  the app must keep its pending warning on UNKNOWN and on transport errors.
 
 ## 6. Change log
 

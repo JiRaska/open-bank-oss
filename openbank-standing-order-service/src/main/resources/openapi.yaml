@@ -31,6 +31,17 @@ paths:
       tags: [Standing Orders]
       summary: Create a standing order
       operationId: createStandingOrder
+      parameters:
+        - name: X-Customer-Actor-Id
+          in: header
+          required: false
+          schema: {type: string, format: uuid}
+          description: Verified original customer actor supplied by customer-edge for bound receipts.
+        - name: X-Start-Date-Defaulted
+          in: header
+          required: false
+          schema: {type: string, enum: ['true', 'false']}
+          description: Customer-edge marks a date it resolved from an omitted app field so retries remain stable.
       requestBody:
         required: true
         content:

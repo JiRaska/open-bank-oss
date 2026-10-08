@@ -9,10 +9,15 @@ import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured
+import io.restassured.response.Response
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.LocalDate
 import java.util.UUID
+import java.util.concurrent.Callable
+import java.util.concurrent.CyclicBarrier
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /** Real HTTP + Postgres proof of the migrated binding and fail-closed receipt lookup. */
 @QuarkusTest
@@ -57,6 +62,42 @@ class StandingOrderReceiptIT {
             .post("/api/v1/standing-orders")
         assertThat(changed.statusCode).isEqualTo(400)
         assertThat(lookup(key, party, account, actor).jsonPath().getString("id")).isEqualTo(id)
+    }
+
+    @Test
+    fun `simultaneous same-key submits replay or reject without a server error`() {
+        repeat(3) {
+            val sameKey = "concurrent-same-${UUID.randomUUID()}"
+            val same = concurrentPosts(sameKey, 2_500, 2_500)
+            assertThat(same.map { it.statusCode }).containsExactlyInAnyOrder(201, 201)
+            assertThat(same.map { it.jsonPath().getString("id") }.distinct()).hasSize(1)
+
+            val changedKey = "concurrent-changed-${UUID.randomUUID()}"
+            val changed = concurrentPosts(changedKey, 2_500, 2_501)
+            assertThat(changed.map { it.statusCode }).containsExactlyInAnyOrder(201, 400)
+            assertThat(lookup(changedKey, party, account, actor).jsonPath().getString("outcome"))
+                .isEqualTo("FOUND")
+        }
+    }
+
+    private fun concurrentPosts(key: String, firstAmount: Int, secondAmount: Int): List<Response> {
+        val executor = Executors.newFixedThreadPool(2)
+        val barrier = CyclicBarrier(2)
+        return try {
+            listOf(firstAmount, secondAmount).map { amount ->
+                executor.submit(
+                    Callable {
+                        barrier.await(10, TimeUnit.SECONDS)
+                        RestAssured.given().contentType("application/json")
+                            .header("X-Customer-Actor-Id", actor.toString())
+                            .body(body(key, amount))
+                            .post("/api/v1/standing-orders")
+                    },
+                )
+            }.map { it.get(30, TimeUnit.SECONDS) }
+        } finally {
+            executor.shutdownNow()
+        }
     }
 
     private fun lookup(key: String, partyId: UUID, accountId: UUID, actorId: UUID) =

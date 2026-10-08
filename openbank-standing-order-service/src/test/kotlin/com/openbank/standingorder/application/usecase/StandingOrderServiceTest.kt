@@ -75,6 +75,37 @@ class StandingOrderServiceTest {
     }
 
     @Test
+    fun `edge defaulted date has stable retry identity across midnight`(): Unit = runBlocking {
+        val cmd = createCommand().copy(startDateDefaulted = true, customerActorId = UUID.randomUUID())
+        var stored: StandingOrder? = null
+        coEvery { repo.findByIdempotencyKey(cmd.idempotencyKey) } answers { stored }
+        coEvery { repo.save(any()) } answers { firstArg<StandingOrder>().also { stored = it } }
+
+        val original = service.create(cmd)
+        assertThat(service.create(cmd.copy(startDate = cmd.startDate.plusDays(1)))).isEqualTo(original)
+        assertThatThrownBy { runBlocking { service.create(cmd.copy(startDateDefaulted = false)) } }
+            .isInstanceOf(IllegalArgumentException::class.java)
+        coVerify(exactly = 1) { repo.save(any()) }
+    }
+
+    @Test
+    fun `unique-key loser reads the committed winner before answering replay or conflict`(): Unit = runBlocking {
+        val cmd = createCommand().copy(customerActorId = UUID.randomUUID())
+        coEvery { repo.findByIdempotencyKey(cmd.idempotencyKey) } returns null
+        coEvery { repo.save(any()) } answers { firstArg() }
+        val winner = service.create(cmd)
+        coEvery { repo.save(any()) } throws IllegalStateException("concurrent unique key")
+        coEvery { repo.findByIdempotencyKey(cmd.idempotencyKey) } returnsMany listOf(null, winner)
+
+        assertThat(service.create(cmd)).isEqualTo(winner)
+
+        coEvery { repo.findByIdempotencyKey(cmd.idempotencyKey) } returnsMany listOf(null, winner)
+        assertThatThrownBy { runBlocking { service.create(cmd.copy(amountMinorUnits = 2_501)) } }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessage("Idempotency key is already bound to another request")
+    }
+
+    @Test
     fun `legacy unbound row cannot be treated as a proven replay`(): Unit = runBlocking {
         val existing = standingOrder()
         val cmd = createCommand().copy(idempotencyKey = existing.idempotencyKey)
