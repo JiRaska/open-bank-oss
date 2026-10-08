@@ -22,6 +22,7 @@ import argparse
 import json
 import subprocess
 import sys
+import tempfile
 from collections import Counter
 from pathlib import Path
 
@@ -181,6 +182,36 @@ def self_test() -> int:
           is_historical_admission_refusal({"run_id": 37614600361, "prev_attempt": 1,
                                            "final_attempt": 2, "job": "all-green"})
           and not is_historical_admission_refusal(r1))
+
+    historical = {**r1, "run_id": 37614600361, "job": "all-green", "service": None, "tests": []}
+    unproven = {**historical, "run_id": 37614600362}
+    with tempfile.TemporaryDirectory() as temp_dir:
+        comments_file = Path(temp_dir) / "comments.json"
+
+        def run_read_side(json_output: bool) -> str:
+            command = [sys.executable, __file__, "--comments-file", str(comments_file)]
+            if json_output:
+                command.append("--json")
+            result = subprocess.run(command, capture_output=True, text=True, check=True)
+            return result.stdout
+
+        comments_file.write_text(json.dumps([
+            f"<!-- flake-record:{json.dumps(historical)} -->",
+            f"<!-- flake-record:{json.dumps(r1)} -->",
+        ]), encoding="utf-8")
+        check("summary counts one genuine flake and excludes the historical refusal",
+              "1 flake record(s) total" in run_read_side(False))
+        check("JSON includes only the genuine flake",
+              json.loads(run_read_side(True)) == [r1])
+
+        comments_file.write_text(json.dumps([
+            f"<!-- flake-record:{json.dumps(historical)} -->",
+            f"<!-- flake-record:{json.dumps(r1)} -->",
+            f"<!-- flake-record:{json.dumps(unproven)} -->",
+        ]), encoding="utf-8")
+        check("an aggregate failure without the exact historical evidence remains counted",
+              "2 flake record(s) total" in run_read_side(False)
+              and json.loads(run_read_side(True)) == [r1, unproven])
 
     print()
     if failures:
