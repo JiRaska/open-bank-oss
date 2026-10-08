@@ -1111,7 +1111,7 @@ class CustomerEdgeResourceTest {
         assertThat(node.get("amount").asText()).isEqualTo("250.00")
         assertThat(node.get("currency").asText()).isEqualTo("CZK")
         assertThat(node.get("creditor").asText()).isEqualTo("2000145399/0800")
-        verify(exactly = 1) { upstream.post(match { it.contains("dompay") }, any(), any(), any()) }
+        verify(exactly = 1) { upstream.post(match { it.contains("dompay") }, any(), any(), any(), any()) }
     }
 
     @Test
