@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -62,7 +63,12 @@ def attestation_matches(record: dict, verified: list[dict]) -> bool:
 
 
 def verify(root: Path, repo: str, image: str, tag: str) -> None:
-    if not TAG.fullmatch(tag) or image.rsplit("/", 1)[-1] != "openbank-admin-ui":
+    trusted_registry = os.environ.get("ADMIN_UI_IMAGE_VERIFY_REGISTRY", "")
+    if not re.fullmatch(r"[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com(?:\.cn)?", trusted_registry):
+        raise ValueError("trusted Admin UI registry is unavailable or invalid")
+    if image != f"{trusted_registry}/openbank-admin-ui":
+        raise ValueError("Admin UI image is outside the trusted registry and repository")
+    if not TAG.fullmatch(tag):
         raise ValueError("unexpected Admin UI image reference")
     source = run("git", "-C", str(root), "rev-parse", "--verify", f"{TAG.fullmatch(tag)[1]}^{{commit}}")
     if not source.startswith(TAG.fullmatch(tag)[1]):

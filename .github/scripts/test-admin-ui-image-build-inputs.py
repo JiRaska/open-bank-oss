@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 def load(name: str, file: str):
@@ -67,8 +68,14 @@ class AdminUiImageInputsTest(unittest.TestCase):
                 self.assertTrue((context / "openbank-admin-ui" / name).is_file())
             changelog.write_text("new release\n")
             self.assertEqual((context / "openbank-notification-service/CHANGELOG.md").read_text(), "old release\n")
-            freeze_mod.freeze(repo, base / "context2", base / "manifest2.json")
-            self.assertNotEqual(original_manifest, (base / "manifest2.json").read_bytes())
+            with self.assertRaisesRegex(ValueError, "tracked source input differs"):
+                freeze_mod.freeze(repo, base / "context2", base / "manifest2.json")
+            blobs, object_format = freeze_mod.committed_blobs(repo)
+            with self.assertRaisesRegex(ValueError, "frozen tracked input differs"):
+                freeze_mod.require_committed_content(
+                    Path("openbank-notification-service/CHANGELOG.md"), b"new release\n",
+                    blobs, object_format)
+            changelog.write_text("old release\n")
 
             tag = "sandbox-" + source[:8]
             image = "example.invalid/openbank-admin-ui"
@@ -88,12 +95,29 @@ class AdminUiImageInputsTest(unittest.TestCase):
             signed[0]["verificationResult"]["statement"]["subject"][0]["digest"]["sha256"] = "b" * 64
             self.assertFalse(verify_mod.attestation_matches(record, signed))
             with self.assertRaises(ValueError):
-                verify_mod.validate(record, (base / "manifest2.json").read_bytes(), image, tag)
+                verify_mod.validate(record, b"{}\n", image, tag)
             with self.assertRaises(ValueError):
                 verify_mod.validate(record, original_manifest, image, "sandbox-deadbeef")
             (repo / "untracked-source.ts").write_text("unexpected\n")
             with self.assertRaisesRegex(ValueError, "unknown untracked"):
                 freeze_mod.freeze(repo, base / "context3", base / "manifest3.json")
+
+    def test_hostile_registry_is_refused_before_credentials_or_docker(self):
+        with patch.dict("os.environ", {"ADMIN_UI_IMAGE_VERIFY_REGISTRY":
+                                    "0" * 12 + ".dkr.ecr.example-1.amazonaws.com"}):
+            with patch.object(verify_mod.subprocess, "run") as calls:
+                with self.assertRaisesRegex(ValueError, "outside the trusted registry"):
+                    verify_mod.verify(Path("."), "JiRaska/open-bank-oss",
+                                      "attacker.invalid/openbank-admin-ui", "sandbox-aaaaaaaa")
+                calls.assert_not_called()
+
+    def test_missing_trusted_registry_fails_before_external_calls(self):
+        with patch.dict("os.environ", {}, clear=True):
+            with patch.object(verify_mod.subprocess, "run") as calls:
+                with self.assertRaisesRegex(ValueError, "trusted Admin UI registry"):
+                    verify_mod.verify(Path("."), "JiRaska/open-bank-oss",
+                                      "attacker.invalid/openbank-admin-ui", "sandbox-aaaaaaaa")
+                calls.assert_not_called()
 
 
 if __name__ == "__main__":

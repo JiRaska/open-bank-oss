@@ -88,6 +88,7 @@ jobs:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           ARM: ${{ steps.pick.outputs.arm }}
           ARM_HEAD: ${{ steps.pick.outputs.arm_head }}
+          ADMIN_UI_IMAGE_VERIFY_REGISTRY: ${{ vars.ADMIN_UI_IMAGE_VERIFY_REGISTRY }}
         run: |
           set -euo pipefail
           # A deferred image can predate a shallow checkout. Source resolution must
