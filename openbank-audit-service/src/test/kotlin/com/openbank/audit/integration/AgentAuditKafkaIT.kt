@@ -32,7 +32,7 @@ class AgentAuditKafkaIT {
     }
 
     @Test
-    @Suppress("NestedBlockDepth") // The table lock, broker clients, and cleanup form one scenario.
+    @Suppress("NestedBlockDepth", "LongMethod") // Lock, broker clients, and cleanup form one scenario.
     fun `offset follows durable insert and replay preserves one row while failed insert reaches DLQ`() {
         val bootstrap = config("kafka.bootstrap.servers")
         val first = UUID.randomUUID()
@@ -130,6 +130,7 @@ class AgentAuditKafkaIT {
         admin.listConsumerGroupOffsets(AgentAuditKafkaTestResource.GROUP)
             .partitionsToOffsetAndMetadata().get(5, TimeUnit.SECONDS)[partition]?.offset() ?: -1
 
+    @Suppress("NestedBlockDepth") // JDBC resources remain scoped to each bounded probe.
     private fun awaitBlockedInsert() {
         val deadline = System.nanoTime() + Duration.ofSeconds(30).toNanos()
         while (System.nanoTime() < deadline) {
@@ -161,6 +162,7 @@ class AgentAuditKafkaIT {
         error("Agent audit consumer did not commit offset $expected")
     }
 
+    @Suppress("NestedBlockDepth") // JDBC resources and assertions share one read transaction.
     private fun assertStored(id: UUID, aggregateId: String, expected: Int) {
         jdbc().use { connection ->
             connection.prepareStatement(
