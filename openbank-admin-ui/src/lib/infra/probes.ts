@@ -27,7 +27,7 @@ export interface InfraStatusResult {
 type InfraProbe =
   | { kind: 'http'; url: string; okCodes?: number[] }
   | { kind: 'tcp'; host: string; port: number }
-  | { kind: 'absent' } // not deployed in this topology → UNKNOWN, never a false DOWN
+  | { kind: 'absent' } // no probe in this topology → UNKNOWN, never a false DOWN
 
 export interface InfraDef {
   id: string
@@ -73,6 +73,14 @@ export const CLUSTER_INFRA: InfraDef[] = [
   { id: 'kyverno',         probe: { kind: 'tcp',  host: 'kyverno-svc-metrics.kyverno.svc',                    port: 8000 } },
   { id: 'cert-manager',    probe: { kind: 'tcp',  host: 'cert-manager.cert-manager.svc',                      port: 9402 } },
   { id: 'karpenter',       probe: { kind: 'tcp',  host: 'karpenter.kube-system.svc',                          port: 8080 } },
+  // Declared in GitOps, but this API has no authorized runtime probe for these
+  // namespaces. UNKNOWN is not evidence that a workload is absent or healthy.
+  { id: 'envoy-gateway',   probe: { kind: 'absent' } },
+  { id: 'litellm',         probe: { kind: 'absent' } },
+  { id: 'langfuse-web',    probe: { kind: 'absent' } },
+  { id: 'langfuse-worker', probe: { kind: 'absent' } },
+  { id: 'presidio-analyzer', probe: { kind: 'absent' } },
+  { id: 'presidio-anonymizer', probe: { kind: 'absent' } },
 ]
 
 // Off-cluster (local dev / docker-compose): legacy localhost/container probes.
@@ -101,6 +109,12 @@ export const LOCAL_INFRA: InfraDef[] = [
   { id: 'kyverno',         probe: { kind: 'absent' } },
   { id: 'cert-manager',    probe: { kind: 'absent' } },
   { id: 'karpenter',       probe: { kind: 'absent' } },
+  { id: 'envoy-gateway',   probe: { kind: 'absent' } },
+  { id: 'litellm',         probe: { kind: 'absent' } },
+  { id: 'langfuse-web',    probe: { kind: 'absent' } },
+  { id: 'langfuse-worker', probe: { kind: 'absent' } },
+  { id: 'presidio-analyzer', probe: { kind: 'absent' } },
+  { id: 'presidio-anonymizer', probe: { kind: 'absent' } },
 ]
 
 
@@ -123,8 +137,8 @@ export async function probeInfra(def: InfraDef): Promise<InfraStatusResult> {
   const now = new Date().toISOString()
   try {
     if (def.probe.kind === 'absent') {
-      // Not part of the current topology — report UNKNOWN so the UI shows a
-      // neutral state instead of a false outage.
+      // Not probed here — report UNKNOWN so the UI shows a neutral state
+      // instead of a false outage or invented readiness.
       return { id: def.id, status: 'UNKNOWN', latencyMs: null, checkedAt: now }
     }
     if (def.probe.kind === 'tcp') {

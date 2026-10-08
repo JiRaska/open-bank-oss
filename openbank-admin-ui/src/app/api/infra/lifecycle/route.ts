@@ -4,8 +4,8 @@
 
 // Infrastructure lifecycle & vulnerability intelligence (ADR-0079). Joins three honest
 // sources into a per-component verdict:
-//   1. running version  — live build-info probe (versionSource=probe) or the GitOps image
-//      tag baked into infra-lifecycle.json (versionSource=gitops);
+//   1. version evidence — live build-info probe (versionSource=probe) or a GitOps image
+//      tag/chart revision baked into infra-lifecycle.json (not proof of deployment);
 //   2. lifecycle         — endoflife.date cycles from the baked snapshot (eol/lts/latest);
 //   3. vulnerabilities   — Grype summary from infra-vulns.json (or the ConfigMap, future).
 // Every field carries a `source`; gaps are explicit, never faked.
@@ -33,7 +33,7 @@ interface EolCycle {
 interface LifecycleComponent {
   id: string
   eolProduct: string | null
-  versionSource: 'gitops' | 'probe' | 'unknown'
+  versionSource: 'gitops' | 'gitops-chart' | 'probe' | 'unknown'
   gitopsVersion: string | null
   releaseNotes: string | null
   lifecycle: { cycles?: EolCycle[]; error?: string } | null
@@ -167,9 +167,9 @@ export async function GET() {
     // 1. running version
     let running: string | null = null
     let versionSource: string
-    if (c.versionSource === 'gitops') {
+    if (c.versionSource === 'gitops' || c.versionSource === 'gitops-chart') {
       running = c.gitopsVersion
-      versionSource = 'gitops-image-tag'
+      versionSource = c.versionSource === 'gitops-chart' ? 'gitops-chart-version' : 'gitops-image-tag'
     } else if (c.versionSource === 'probe' && probeOn) {
       running = await probeVersion(c.id)
       versionSource = running ? 'build-info-probe' : 'unavailable'

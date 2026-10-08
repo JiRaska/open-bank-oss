@@ -20,4 +20,8 @@ it('reads Pyroscope and Alloy running versions from verified sandbox build-info 
   const body = await response.json() as { components: { id: string; running: { version: string | null; source: string } }[] }
   expect(body.components.find(component => component.id === 'pyroscope')?.running).toEqual({ version: '1.21.0', source: 'build-info-probe' })
   expect(body.components.find(component => component.id === 'alloy')?.running).toEqual({ version: '1.20.0', source: 'build-info-probe' })
+  expect(body.components.find(component => component.id === 'envoy-gateway')?.running).toEqual({ version: '1.9.2', source: 'gitops-chart-version' })
+  expect(body.components.find(component => component.id === 'litellm')?.running).toEqual({ version: '1.104.0', source: 'gitops-image-tag' })
+  expect(body.components.find(component => component.id === 'langfuse-web')?.running).toEqual({ version: '4.50.0', source: 'gitops-image-tag' })
+  expect(body.components.find(component => component.id === 'presidio-analyzer')?.running).toEqual({ version: '2.2.362', source: 'gitops-image-tag' })
 })

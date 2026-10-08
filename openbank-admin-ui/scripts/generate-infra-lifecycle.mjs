@@ -78,6 +78,18 @@ function resolveGitopsVersion(imageGrep, files) {
   return null
 }
 
+function resolveGitopsChartVersion(chartName, files) {
+  // Argo CD Helm Application: chart and targetRevision must occur in the same
+  // source block. This is the declared chart version, not a running image tag.
+  for (const f of files) {
+    let txt
+    try { txt = readFileSync(f, 'utf8') } catch { continue }
+    const match = txt.match(new RegExp(`\\bchart:\\s*${chartName}\\s*\\n\\s*targetRevision:\\s*['"]?v?(\\d+(?:\\.\\d+)+)`))
+    if (match) return match[1]
+  }
+  return null
+}
+
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 
 async function fetchEol(product) {
@@ -128,7 +140,9 @@ async function main() {
   for (const c of reg.components) {
     const gitopsVersion = c.versionSource === 'gitops' && c.imageGrep
       ? resolveGitopsVersion(c.imageGrep, files)
-      : null
+      : c.versionSource === 'gitops-chart' && c.chartName
+        ? resolveGitopsChartVersion(c.chartName, files)
+        : null
     let lifecycle = null
     if (c.eolProduct) {
       lifecycle = await fetchEol(c.eolProduct)

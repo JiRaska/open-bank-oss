@@ -56,6 +56,13 @@ const INFRA_COMPONENTS: InfraComponent[] = [
   { id: 'kyverno',         name: 'Kyverno',            probeNote: 'TCP :8000 · admission policy',          icon: <ShieldCheck size={20} /> },
   { id: 'cert-manager',    name: 'cert-manager',       probeNote: 'TCP :9402 · TLS certificate lifecycle', icon: <Lock size={20} /> },
   { id: 'karpenter',       name: 'Karpenter',          probeNote: 'TCP :8080 · node autoscaler (Spot/arm64)', icon: <Cpu size={20} /> },
+  // GitOps-declared platform. Runtime health stays UNKNOWN until a scoped probe exists.
+  { id: 'envoy-gateway',   name: 'Envoy Gateway',      probeNote: 'GitOps · runtime status not probed', icon: <GitBranch size={20} /> },
+  { id: 'litellm',         name: 'LiteLLM',            probeNote: 'GitOps · runtime status not probed', icon: <Cpu size={20} /> },
+  { id: 'langfuse-web',    name: 'Langfuse web',       probeNote: 'GitOps · runtime status not probed', icon: <Eye size={20} /> },
+  { id: 'langfuse-worker', name: 'Langfuse worker',    probeNote: 'GitOps · runtime status not probed', icon: <Workflow size={20} /> },
+  { id: 'presidio-analyzer', name: 'Presidio Analyzer', probeNote: 'GitOps · runtime status not probed', icon: <ShieldCheck size={20} /> },
+  { id: 'presidio-anonymizer', name: 'Presidio Anonymizer', probeNote: 'GitOps · runtime status not probed', icon: <ShieldCheck size={20} /> },
 ]
 
 type StatusResult = InfrastructureStatusResult

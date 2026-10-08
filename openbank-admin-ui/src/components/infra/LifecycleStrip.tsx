@@ -63,7 +63,8 @@ export function LifecycleStrip({ data, name, t, dateLocale = 'en-GB' }: { data: 
   const lc = data.lifecycle
   const has = lc.available
   const running = data.running.version
-  const declaredOnly = data.running.source === 'gitops-image-tag'
+  const declaredOnly = data.running.source === 'gitops-image-tag' || data.running.source === 'gitops-chart-version'
+  const chartOnly = data.running.source === 'gitops-chart-version'
   const releaseNotesUrl = trustedHttpsUrl(data.upgrade.releaseNotesUrl)
 
   const planUpgrade = async () => {
@@ -107,7 +108,7 @@ export function LifecycleStrip({ data, name, t, dateLocale = 'en-GB' }: { data: 
     <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border)', display: 'grid', gap: 6 }}>
       {/* version + urgency */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 11, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{declaredOnly ? t('Image v GitOps', 'GitOps image') : t('Běžící verze', 'Running version')}</span>
+        <span style={{ fontSize: 11, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{chartOnly ? t('Chart v GitOps', 'GitOps chart') : declaredOnly ? t('Image v GitOps', 'GitOps image') : t('Běžící verze', 'Running version')}</span>
         <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'monospace' }} title={data.running.source}>
           {running ?? t('nezjištěna', 'not detected')}
         </span>

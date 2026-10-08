@@ -25,12 +25,13 @@ type Bilingual = [string, string]
 //   planned = ADR-0027 target, not yet deployed
 // ---------------------------------------------------------------------------
 
-type Status = 'live' | 'partial' | 'planned'
+type Status = 'live' | 'partial' | 'planned' | 'declared'
 
 const STATUS_META: Record<Status, { label: Bilingual; color: string; bg: string; border: string; Icon: React.ElementType }> = {
   live:    { label: ['Dokumentováno jako zavedené', 'Documented as implemented'], color: 'var(--success-text)', bg: 'var(--success-bg)', border: 'var(--success-border)', Icon: CheckCircle2 },
   partial: { label: ['Dokumentováno jako neúplné', 'Documented as incomplete'], color: 'var(--warning-text)', bg: 'var(--warning-bg)', border: 'var(--warning-border)', Icon: CircleDashed },
   planned: { label: ['Plánováno (ADR-0027)', 'Planned (ADR-0027)'],          color: 'var(--text-primary)', bg: 'var(--surface-3)', border: 'var(--border-strong)', Icon: Circle },
+  declared: { label: ['Deklarováno v GitOps · běh neověřen', 'Declared in GitOps · runtime unverified'], color: 'var(--info-text)', bg: 'var(--info-bg)', border: 'var(--info-border)', Icon: CircleDashed },
 }
 
 // Maps architecture node IDs → infra probe IDs from /api/infra/status
@@ -46,6 +47,10 @@ const INFRA_PROBE_MAP: Record<string, string> = {
   tempo:      'tempo',
   // 'postgres' probe (accounts-db-rw TCP) maps to the cnpg operator node
   cnpg:       'postgres',
+  envoy:      'envoy-gateway',
+  litellm:    'litellm',
+  langfuse:   'langfuse-web',
+  presidio:   'presidio-analyzer',
 }
 
 const PROBE_META = {
@@ -93,11 +98,10 @@ type NS = { id: string; label: string; note?: Bilingual; nodes: Node[] }
 
 const NAMESPACES: NS[] = [
   {
-    id: 'mesh', label: 'ns: ingress-nginx',
-    note: ['Mesh odložen: používá se VPC-CNI, zatím žádné Istio/Cilium (portabilita na prvním místě dle ADR-0037).', 'Mesh deferred: VPC-CNI in use, no Istio/Cilium yet (portability-first per ADR-0037).'],
+    id: 'gateway', label: 'ns: envoy-gateway-system',
+    note: ['Gateway API a HTTPRoute jsou deklarovány v GitOps; aktuální běh ověřuje pouze samostatná sonda, pokud existuje.', 'Gateway API and HTTPRoutes are declared in GitOps; only an available separate probe can verify runtime state.'],
     nodes: [
-      node('nginx', ['nginx ingress', 'nginx ingress'], 'live', ['In-cluster ingress controller. ArgoCD app ingress-nginx Synced + Healthy. (Kong z ADR-0027 nebyl použit — gateway je nginx.)', 'In-cluster ingress controller. ArgoCD app ingress-nginx Synced + Healthy. (Kong from ADR-0027 was not used — nginx is the gateway.)']),
-      node('istio', ['Istio (STRICT mTLS)', 'Istio (STRICT mTLS)'], 'planned', ['Service mesh, STRICT mTLS napříč clusterem. Base manifest existuje v k8s/base; nenasazeno.', 'Service mesh, cluster-wide STRICT mTLS. Base manifest exists in k8s/base; not deployed.']),
+      node('envoy', ['Envoy Gateway', 'Envoy Gateway'], 'declared', ['ArgoCD aplikace, GatewayClass, Gateway a HTTPRoute jsou v GitOps. Verze chartu je deklarace, nikoli důkaz běžícího controlleru.', 'ArgoCD application, GatewayClass, Gateway, and HTTPRoutes are in GitOps. Chart revision is a declaration, not proof of a running controller.']),
       node('cilium', ['Cilium (default-deny)', 'Cilium (default-deny)'], 'planned', ['CNI + default-deny NetworkPolicy. Cíl ADR-0027; dnes se používá VPC-CNI.', 'CNI + default-deny NetworkPolicy. ADR-0027 target; today VPC-CNI is used.']),
     ],
   },
@@ -112,7 +116,16 @@ const NAMESPACES: NS[] = [
       node('keycloak', ['Keycloak', 'Keycloak'], 'live', ['OIDC identity provider + keycloak-db Running v ns iam. ArgoCD app keycloak Synced + Healthy.', 'OIDC identity provider + keycloak-db Running in ns iam. ArgoCD app keycloak Synced + Healthy.']),
       node('valkey', ['Valkey / Redis', 'Valkey / Redis'], 'live', ['Cache/zámky (redis) Running v ns accounts vedle služby, která ji používá.', 'Cache/locks (redis) Running in ns accounts alongside the service that uses it.']),
       node('vault', ['OpenBao + ESO (KMS unseal)', 'OpenBao + ESO (KMS unseal)'], 'live', ['ArgoCD app openbao Synced + Healthy. Pod OpenBao (openbao-0) běží v ns vault; AWS KMS auto-unseal zapojen (stejný klíč, jaký používal Vault). Nasazen External Secrets Operator (ArgoCD app external-secrets Synced). ESO → OpenBao živé: vault-kv ClusterSecretStore čte KV přes eso k8s-auth roli; 16 ExternalSecrets SecretSynced. Migrováno z HashiCorp Vaultu na LF/MPL fork OpenBao (runbook 0005).', 'ArgoCD app openbao Synced + Healthy. OpenBao pod (openbao-0) running in ns vault; AWS KMS auto-unseal wired (same key Vault used). External Secrets Operator deployed (ArgoCD app external-secrets Synced). ESO → OpenBao live: the vault-kv ClusterSecretStore reads KV via the eso k8s-auth role; 16 ExternalSecrets SecretSynced. Migrated off HashiCorp Vault to the LF/MPL OpenBao fork (runbook 0005).']),
-      node('clickhouse', ['ClickHouse', 'ClickHouse'], 'planned', ['Analytický sloupcový store. Cíl ADR-0027; nenasazeno.', 'Analytics columnar store. ADR-0027 target; not deployed.']),
+      node('clickhouse', ['ClickHouse', 'ClickHouse'], 'declared', ['Úložiště Langfuse je deklarované v GitOps; běžící stav není v tomto diagramu ověřen.', 'Langfuse backing store is declared in GitOps; this diagram does not verify runtime state.']),
+    ],
+  },
+  {
+    id: 'ai', label: 'ns: ai-platform',
+    note: ['Deklarovaný AI stack; štítky sond bez běhového důkazu zůstávají UNKNOWN.', 'Declared AI stack; probe badges remain UNKNOWN without runtime evidence.'],
+    nodes: [
+      node('litellm', ['LiteLLM', 'LiteLLM'], 'declared', ['AI gateway deklarovaná v GitOps; běh není ověřen.', 'AI gateway declared in GitOps; runtime is unverified.']),
+      node('langfuse', ['Langfuse web + worker', 'Langfuse web + worker'], 'declared', ['AI observabilita a worker deklarované v GitOps; běh není ověřen.', 'AI observability UI and worker declared in GitOps; runtime is unverified.']),
+      node('presidio', ['Presidio Analyzer + Anonymizer', 'Presidio Analyzer + Anonymizer'], 'declared', ['Zpracování PII deklarované v GitOps; běh není ověřen.', 'PII processing declared in GitOps; runtime is unverified.']),
     ],
   },
   {
