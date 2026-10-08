@@ -4,6 +4,7 @@
 
 package com.openbank.domestic.infrastructure.rest
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.domestic.integration.DomesticPaymentBootSmokeIT
 import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
@@ -14,6 +15,7 @@ import io.quarkus.test.security.oidc.Claim
 import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.RestAssured
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.util.UUID
 
@@ -87,6 +89,7 @@ class BusinessPaymentBatchHttpIT {
             .body(body)
             .post(BATCH_BASE)
         assertEquals(201, created.statusCode, created.asString())
+        assertDraftResponse(created.asString())
         assertEquals("DRAFT", created.jsonPath().getString("state"))
         assertEquals(125L, created.jsonPath().getLong("totalAmountMinor"))
         val id = created.jsonPath().getString("id")
@@ -99,6 +102,7 @@ class BusinessPaymentBatchHttpIT {
             .body(body)
             .post(BATCH_BASE)
         assertEquals(200, replay.statusCode)
+        assertDraftResponse(replay.asString())
         assertEquals(id, replay.jsonPath().getString("id"))
 
         val changedInvalid = body.replace("\"amountMinor\":125", "\"amountMinor\":0")
@@ -126,9 +130,14 @@ class BusinessPaymentBatchHttpIT {
         assertEquals(0, foreignList.jsonPath().getList<Any>("data").size)
         val listing = RestAssured.given().header("X-Customer-Party-Id", COMPANY).get(BATCH_BASE)
         assertEquals(200, listing.statusCode)
+        assertEquals(
+            setOf("data", "page", "size"),
+            ObjectMapper().readTree(listing.asString()).fieldNames().asSequence().toSet(),
+        )
         assertEquals(id, listing.jsonPath().getString("data[0].id"))
         val detail = RestAssured.given().header("X-Customer-Party-Id", COMPANY).get("$BATCH_BASE/$id")
         assertEquals(200, detail.statusCode)
+        assertDraftResponse(detail.asString())
         assertEquals(1, detail.jsonPath().getInt("itemCount"))
         val replace = RestAssured.given()
             .header("X-Customer-Party-Id", COMPANY)
@@ -138,7 +147,26 @@ class BusinessPaymentBatchHttpIT {
             .body("""{"items":${com.fasterxml.jackson.databind.ObjectMapper().readTree(body).get("items")}}""")
             .put("$BATCH_BASE/$id/items")
         assertEquals(200, replace.statusCode)
+        assertDraftResponse(replace.asString())
         assertEquals(1, replace.jsonPath().getInt("itemCount"))
         assertEquals("DRAFT", replace.jsonPath().getString("state"))
+    }
+
+    private fun assertDraftResponse(body: String) {
+        val node = ObjectMapper().readTree(body)
+        assertEquals(
+            setOf(
+                "id", "state", "debtorAccountId", "itemCount", "totalAmountMinor",
+                "currency", "revision", "createdAt", "updatedAt", "items",
+            ),
+            node.fieldNames().asSequence().toSet(),
+        )
+        assertTrue(node.path("items").isArray)
+        val itemFields = node.path("items").first().fieldNames().asSequence().toSet()
+        assertTrue(
+            itemFields.containsAll(
+                setOf("itemId", "creditorAccountNumber", "creditorBankCode", "creditorName", "amountMinor", "currency"),
+            ),
+        )
     }
 }

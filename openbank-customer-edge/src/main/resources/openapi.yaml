@@ -5343,7 +5343,11 @@ paths:
           in: query
           schema: {type: integer, minimum: 1, maximum: 20}
       responses:
-        '200': {description: Company scoped draft page}
+        '200':
+          description: Company scoped draft page
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BusinessPaymentBatchDraftPage'}
         '403': {description: Human mandate or trusted edge missing}
     post:
       summary: Create a company payment draft without dispatch
@@ -5384,8 +5388,16 @@ paths:
                       variableSymbol: {type: string, maxLength: 10}
                       messageForPayee: {type: string, maxLength: 140}
       responses:
-        '201': {description: Draft created}
-        '200': {description: Exact idempotent replay}
+        '201':
+          description: Draft created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BusinessPaymentBatchDraft'}
+        '200':
+          description: Exact idempotent replay
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BusinessPaymentBatchDraft'}
         '403': {description: Human mandate or trusted edge missing}
         '409': {description: Idempotency key conflict}
   /business/payment-batches/{id}:
@@ -5404,7 +5416,11 @@ paths:
           in: query
           schema: {type: integer, minimum: 0, maximum: 4}
       responses:
-        '200': {description: Draft and server computed summary}
+        '200':
+          description: Draft and server computed summary
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BusinessPaymentBatchDraft'}
         '404': {description: Draft absent from this company}
   /business/payment-batches/{id}/items:
     put:
@@ -5449,7 +5465,11 @@ paths:
                       variableSymbol: {type: string, maxLength: 10}
                       messageForPayee: {type: string, maxLength: 140}
       responses:
-        '200': {description: Replaced draft and new server summary}
+        '200':
+          description: Replaced draft and new server summary
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BusinessPaymentBatchDraft'}
         '404': {description: Draft absent from this company}
         '409': {description: Revision conflict}
         '428': {description: If-Match required}
@@ -5460,6 +5480,47 @@ components:
       openIdConnectUrl: https://kc.open-bank.tech/realms/openbank-customers/.well-known/openid-configuration
 
   schemas:
+    BusinessPaymentBatchDraftItem:
+      type: object
+      additionalProperties: false
+      required: [itemId, creditorAccountNumber, creditorBankCode, creditorName, amountMinor, currency]
+      properties:
+        itemId: {type: string, format: uuid}
+        creditorAccountNumber: {type: string, maxLength: 17}
+        creditorBankCode: {type: string, pattern: '^[0-9]{4}$'}
+        creditorName: {type: string, minLength: 1, maxLength: 140}
+        amountMinor: {type: integer, format: int64, minimum: 1}
+        currency: {type: string, enum: [CZK]}
+        variableSymbol: {type: string, maxLength: 10, nullable: true}
+        messageForPayee: {type: string, maxLength: 140, nullable: true}
+    BusinessPaymentBatchDraft:
+      type: object
+      additionalProperties: false
+      required: [id, state, debtorAccountId, itemCount, totalAmountMinor, currency, revision, createdAt, updatedAt]
+      properties:
+        id: {type: string, format: uuid}
+        state: {type: string, enum: [DRAFT]}
+        debtorAccountId: {type: string, format: uuid}
+        itemCount: {type: integer, minimum: 1, maximum: 100}
+        totalAmountMinor: {type: integer, format: int64, minimum: 1}
+        currency: {type: string, enum: [CZK]}
+        revision: {type: integer, format: int64, minimum: 0}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+        items:
+          type: array
+          nullable: true
+          items: {$ref: '#/components/schemas/BusinessPaymentBatchDraftItem'}
+    BusinessPaymentBatchDraftPage:
+      type: object
+      additionalProperties: false
+      required: [data, page, size]
+      properties:
+        data:
+          type: array
+          items: {$ref: '#/components/schemas/BusinessPaymentBatchDraft'}
+        page: {type: integer, minimum: 0, maximum: 1000}
+        size: {type: integer, minimum: 1, maximum: 20}
     CapabilityId:
       type: string
       description: >-

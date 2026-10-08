@@ -130,6 +130,20 @@ SETTLED / REJECTED / RETURNED / CANCELLED → (terminal)
 
 `REJECTED` requires a `rejectReason` (e.g. `SANCTIONS_HIT`, `AML_HOLD`, `INSUFFICIENT_FUNDS`, `AMOUNT_LIMIT_EXCEEDED`, …). `submittedAt` is stamped on first non-`RECEIVED` transition; `settledAt` on `SETTLED`/`RETURNED`/`CANCELLED`.
 
+### Company payment batch drafts
+
+`/api/v1/business-payment-batches` stores draft-only aggregates for one company. The trusted
+customer edge calls it with a service token plus `X-Customer-Party-Id`; writes also carry the
+human `X-Actor-Party-Id`. This service rejects other callers. A draft has 1–100 CZK items,
+server-computed item count and total minor units, a revision and timestamps. It has no submit
+endpoint and cannot dispatch funds.
+
+Creation requires `Idempotency-Key` and persists a canonical-body hash: an exact retry returns
+200 with the original draft; a conflicting body returns 409. List pages contain at most 20
+drafts. Detail pages contain at most 20 items. Replacing all items requires `If-Match` with the
+current revision; a stale revision returns 409. The successful response structures are declared
+in `openapi.yaml`.
+
 ## Error model
 
 Errors use `openbank-libs` `ApiError` (`{ correlationId, status, code, message }`):
