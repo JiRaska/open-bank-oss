@@ -21,10 +21,19 @@ internal class UnifiedNotificationInbox(
     private data class PartyPage(val items: List<ObjectNode>, val total: Long, val unread: Long)
 
     fun list(parties: List<UUID>, limit: Int): Response {
-        val workers = Executors.newFixedThreadPool(minOf(MAX_CONCURRENT_FEEDS, parties.size))
+        // Synthetic taint lives in request-thread MDC/baggage. Keep those reads on the caller
+        // thread so the existing UpstreamClient propagates the trusted taint to every service.
+        val workers = if (currentRequestIsSynthetic()) {
+            null
+        } else {
+            Executors.newFixedThreadPool(minOf(MAX_CONCURRENT_FEEDS, parties.size))
+        }
         return try {
-            val pending = parties.map { party -> workers.submit<PartyPage> { fetch(party, limit) } }
-            val pages = pending.map { it.get() }
+            val pages = if (workers == null) {
+                parties.map { fetch(it, limit) }
+            } else {
+                parties.map { party -> workers.submit<PartyPage> { fetch(party, limit) } }.map { it.get() }
+            }
             val ordered = pages.flatMap { it.items }.sortedWith(
                 compareByDescending<ObjectNode> { it.path("createdAt").asText() }
                     .thenByDescending { it.path("id").asText() },
@@ -41,7 +50,7 @@ internal class UnifiedNotificationInbox(
             Response.status(Response.Status.BAD_GATEWAY)
                 .entity(mapOf("code" to "NOTIFICATIONS_UNAVAILABLE")).build()
         } finally {
-            workers.shutdownNow()
+            workers?.shutdownNow()
         }
     }
 

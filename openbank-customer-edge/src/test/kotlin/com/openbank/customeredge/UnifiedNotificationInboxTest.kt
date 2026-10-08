@@ -14,6 +14,7 @@ import jakarta.ws.rs.ServiceUnavailableException
 import jakarta.ws.rs.core.Response
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.jboss.logging.MDC
 import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.util.UUID
@@ -90,6 +91,26 @@ class UnifiedNotificationInboxTest {
         assertThat(body.path("unreadCount").asInt()).isEqualTo(parties.size)
         assertThat(body.path("items").size()).isEqualTo(20)
         verify(exactly = parties.size) { upstream.get(any(), any()) }
+    }
+
+    @Test
+    fun `synthetic requests keep upstream reads on the tainted request thread`() {
+        val upstream = mockk<UpstreamClient>()
+        val callerThread = Thread.currentThread().threadId()
+        val observedThreads = java.util.Collections.synchronizedList(mutableListOf<Long>())
+        every { upstream.get(any(), any()) } answers {
+            observedThreads += Thread.currentThread().threadId()
+            page(UUID.fromString(secondArg()), "2026-10-08T09:00:00Z", 1)
+        }
+        MDC.put("synthetic", "true")
+        try {
+            val response = UnifiedNotificationInbox(upstream, mapper, "http://notifications")
+                .list(listOf(human, company), 20)
+            assertThat(response.status).isEqualTo(200)
+            assertThat(observedThreads).containsExactly(callerThread, callerThread)
+        } finally {
+            MDC.remove("synthetic")
+        }
     }
 
     @Test
