@@ -177,6 +177,13 @@ class AuditRepository : PanacheRepository<AuditEntryEntity> {
                             "Context audit commitment event ID reused with different evidence"
                         }
                     }
+                    if (entry.sourceService == "agent-service" || existing.sourceService == "agent-service") {
+                        require(
+                            existing.sourceService == entry.sourceService &&
+                                existing.eventType == entry.eventType &&
+                                existing.payload == entry.payload,
+                        ) { "Agent audit event ID reused with different evidence" }
+                    }
                     Uni.createFrom().voidItem()
                 } else {
                     find("ORDER BY id DESC").page(0, 1).firstResult().flatMap { head ->
