@@ -269,7 +269,11 @@ equivalent() {
     # whitespace or Git's C-quoted characters could be split into nonexistent paths, then fall
     # through the Gradle-module classifier as irrelevant. Refuse unhandled names until the whole
     # proof uses NUL-delimited paths end to end; never claim byte equivalence for such a path.
-    case "$p" in *[!A-Za-z0-9_./-]*) differs "changed path ${p} has a name this proof cannot compare safely" ;; esac
+    # Next.js route segments use literal [ and ]; they remain one shell word and Git
+    # does not C-quote them. Keep refusing whitespace and Git-quoted names.
+    local safe_name="${p//\[/}"
+    safe_name="${safe_name//\]/}"
+    case "$safe_name" in *[!A-Za-z0-9_./-]*) differs "changed path ${p} has a name this proof cannot compare safely" ;; esac
     # Overlay mode: the caller replaces exactly this subtree from the later commit.
     if [ "${OWN_TEST_OVERLAY:-0}" = 1 ]; then
       case "$p" in "$svc"/src/test/*) continue ;; esac
@@ -388,6 +392,12 @@ selftest() {
   s="$(_commit README.md changed)"
   _expect "unrelated service + docs + gitops + root markdown" EQUIVALENT svc-a "$base" "$s"
 
+  # Next.js route names are literal bracketed paths, not unsafe shell words. They must
+  # be classified by scope, while the space-containing production path below still fails.
+  local route_base="$s"
+  s="$(_commit 'openbank-admin-ui/src/app/[id]/page.tsx' changed)"
+  _expect "unrelated bracketed Next.js route" EQUIVALENT svc-a "$route_base" "$s"
+
   # Every later case compares against its IMMEDIATE predecessor, so each one isolates exactly one
   # changed path. Chaining them all back to `base` would make every case DIFFERENT for the reason
   # the previous case introduced, and the assertions would pass while proving nothing.
@@ -418,6 +428,8 @@ selftest() {
   # from those tests, so a change there is a change to what was published.
   local s4d; s4d="$(_commit svc-a/src/test/T.kt changed)"
   _expect "the service's own test source changed" DIFFERENT svc-a "$s4c" "$s4d"
+  local bracket_test; bracket_test="$(_commit 'svc-a/src/test/[id].kt' changed)"
+  _expect "own bracketed test source changed" DIFFERENT svc-a "$s4d" "$bracket_test"
 
   # 5. Root build configuration.
   local s5; s5="$(_commit settings.gradle.kts changed)"
@@ -505,7 +517,7 @@ selftest() {
   local c10; c10="$(_commit .github/scripts/pact-broker-post.sh changed)"
   _expect "contract mode refuses a Pact publish helper change" DIFFERENT --contract-inputs svc-a "$c9" "$c10"
 
-  [ "$fail" -eq 0 ] && echo "selftest OK: 40 cases (20 default + 8 --own-test-overlay + 10 --contract-inputs + 2 incompatible-mode refusals) on real git trees — release metadata changes only contract scope, while source, test, shared-library, committed Pact, workflow, root-build, ancestry and unknown-path guards remain fail-closed."
+  [ "$fail" -eq 0 ] && echo "selftest OK: 42 cases (22 default + 8 --own-test-overlay + 10 --contract-inputs + 2 incompatible-mode refusals) on real git trees — release metadata changes only contract scope, while source, test, shared-library, committed Pact, workflow, root-build, ancestry and unknown-path guards remain fail-closed."
   return "$fail"
 }
 
