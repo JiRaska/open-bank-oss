@@ -35,7 +35,7 @@ RECORD_MARKER = "<!-- flake-record:"
 # Reviewed corrections stay in source, not in issue comments that anyone can author.
 # #12296: run 37614600361 changed from admission 4/3 to 3/3 between attempts;
 # the original #5285 ledger comment remains intact for audit.
-CORRECTED_RECORDS = {(37614600361, 2)}
+CORRECTED_RECORDS = {("Services CI", "all-green", 37614600361, 1, 2)}
 
 
 def extract_records_from_comments(bodies: list[str]) -> list[dict]:
@@ -52,7 +52,8 @@ def extract_records_from_comments(bodies: list[str]) -> list[dict]:
         raw = body[start:end].strip()
         try:
             record = json.loads(raw)
-            if (record.get("run_id"), record.get("final_attempt")) not in CORRECTED_RECORDS:
+            identity = tuple(record.get(key) for key in ("workflow", "job", "run_id", "prev_attempt", "final_attempt"))
+            if identity not in CORRECTED_RECORDS:
                 out.append(record)
         except (json.JSONDecodeError, AttributeError):
             continue
@@ -165,11 +166,13 @@ def self_test() -> int:
 
     records = extract_records_from_comments(bodies)
     check("recovers exactly the two machine-readable records, skipping the human comment", len(records) == 2)
-    misclassified = dict(r1, run_id=37614600361, final_attempt=2)
+    misclassified = dict(r1, job="all-green", service=None, run_id=37614600361, final_attempt=2)
+    same_run_real_build = dict(r1, run_id=37614600361, final_attempt=2)
     corrected = extract_records_from_comments(
-        bodies + [f"### Flake recorded\n<!-- flake-record:{json.dumps(misclassified)} -->\n"]
+        bodies
+        + [f"### Flake recorded\n<!-- flake-record:{json.dumps(record)} -->\n" for record in (misclassified, same_run_real_build)]
     )
-    check("reviewed correction removes only its matching historical record", corrected == [r1, r2])
+    check("reviewed correction removes only its matching historical record", corrected == [r1, r2, same_run_real_build])
 
     summary = summarize(records)
     check("summary counts 2 total", "2 flake record(s) total" in summary)
