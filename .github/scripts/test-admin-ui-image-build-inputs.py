@@ -62,6 +62,12 @@ class AdminUiImageInputsTest(unittest.TestCase):
             generated_evidence = repo / "openbank-admin-ui/client-test-evidence/run.json"
             generated_evidence.parent.mkdir()
             generated_evidence.write_text('{"completed":true}\n')
+            sbom = repo / "openbank-notification-service/build/reports/bom.json"
+            sbom.parent.mkdir(parents=True)
+            sbom.write_text('{"bom":true}\n')
+            flat_sbom = repo / "sbom-staging/openbank-notification-service.json"
+            flat_sbom.parent.mkdir()
+            flat_sbom.write_bytes(sbom.read_bytes())
             for name in ("governance.json", "cost-footprints.json", "cluster-topology.json"):
                 (repo / "openbank-admin-ui" / name).write_text('{"generated":true}\n')
             context = base / "context"
@@ -74,6 +80,14 @@ class AdminUiImageInputsTest(unittest.TestCase):
                              '{"completed":true}\n')
             self.assertTrue(any(item["path"] == "openbank-admin-ui/client-test-evidence/run.json"
                                 for item in inventory))
+            self.assertTrue(any(item["path"] == "openbank-notification-service/build/reports/bom.json"
+                                for item in inventory))
+            self.assertTrue(any(item["path"] == "sbom-staging/openbank-notification-service.json"
+                                for item in inventory))
+            self.assertEqual((context / "openbank-notification-service/build/reports/bom.json").read_bytes(),
+                             sbom.read_bytes())
+            self.assertEqual((context / "sbom-staging/openbank-notification-service.json").read_bytes(),
+                             sbom.read_bytes())
             for name in ("governance.json", "cost-footprints.json", "cluster-topology.json"):
                 self.assertTrue(any(item["path"] == "openbank-admin-ui/" + name for item in inventory))
                 self.assertTrue((context / "openbank-admin-ui" / name).is_file())
@@ -104,6 +118,11 @@ class AdminUiImageInputsTest(unittest.TestCase):
             generated_evidence.write_text('{"completed":false}\n')
             self.assertFalse(verify_mod.materialized_context_matches(record, repo))
             generated_evidence.write_text('{"completed":true}\n')
+            sbom.write_text('{"bom":false}\n')
+            self.assertFalse(verify_mod.materialized_context_matches(record, repo))
+            with self.assertRaisesRegex(ValueError, "flat SBOM differs"):
+                freeze_mod.paths(repo)
+            sbom.write_text('{"bom":true}\n')
             pin.write_text("image: example.invalid/openbank-admin-ui:sandbox-new\n")
             subprocess.run(["git", "-C", str(repo), "add", "--",
                             "openbank-infra/gitops/components/admin-ui/admin-ui.yaml"], check=True)

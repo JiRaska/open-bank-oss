@@ -119,9 +119,9 @@ attic/
 # NOTE: Docker .dockerignore cannot re-include a file whose parent directory
 # was already excluded by an earlier rule. `!openbank-*/build` was previously
 # used here, but it re-included the ENTIRE build/ tree (~400MB × 30 services
-# = ~12GB extra context). The sbom-collector stage in the Dockerfile handles
-# 0 bom.json files gracefully. SBOM injection must be done by pre-staging
-# the files to a flat directory before the docker build (tracked separately).
+# = ~12GB extra context). build-push-admin-ui.sh copies only staged bom.json
+# files to sbom-staging/ before freezing the context; the Dockerfile collector
+# reads that flat directory and handles zero files gracefully.
 *.png
 *.jpg
 *.jpeg

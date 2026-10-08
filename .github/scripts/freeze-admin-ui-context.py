@@ -12,6 +12,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -22,6 +23,7 @@ GENERATED_DIRS = (
     "openbank-admin-ui/perf-artifacts",
     "openbank-admin-ui/test-intelligence-history",
     "openbank-admin-ui/test-run-history",
+    "sbom-staging",
 )
 GENERATED_ROOT_JSON = (
     "ai-governance-snapshot.json", "app-status.json", "card-capabilities.json",
@@ -32,6 +34,7 @@ GENERATED_ROOT_JSON = (
     "quality-report.json", "security-graph.json", "service-graph.json",
     "test-intelligence.json", "test-results.json",
 )
+SBOM_PATH = re.compile(r"openbank-[^/]+/build/reports/bom\.json\Z")
 
 
 def paths(root: Path) -> set[Path]:
@@ -44,7 +47,21 @@ def paths(root: Path) -> set[Path]:
     for name in GENERATED_DIRS:
         directory = root / name
         if directory.exists():
-            found.update(p.relative_to(root) for p in directory.rglob("*") if p.is_file())
+            for p in directory.rglob("*"):
+                if not p.is_file():
+                    continue
+                if name == "sbom-staging":
+                    if p.parent != directory or not re.fullmatch(r"openbank-[^/]+\.json", p.name):
+                        raise ValueError(f"unexpected flat SBOM input: {p.relative_to(root)}")
+                    original = root / p.name.removesuffix(".json") / "build/reports/bom.json"
+                    if not original.is_file() or p.read_bytes() != original.read_bytes():
+                        raise ValueError(f"flat SBOM differs from staged source: {p.relative_to(root)}")
+                found.add(p.relative_to(root))
+    # admin-ui-deploy.yml stages per-service CycloneDX reports before the build.
+    # They are normally untracked, yet Dockerfile's sbom-collector copies them
+    # into the runtime image. Freeze exactly that path shape and hash the bytes.
+    found.update(p.relative_to(root) for p in root.glob("openbank-*/build/reports/bom.json")
+                 if p.is_file() and SBOM_PATH.fullmatch(p.relative_to(root).as_posix()))
     others = subprocess.run(["git", "ls-files", "--others", "--exclude-standard", "-z"],
                             cwd=root, check=True, capture_output=True)
     non_inputs = (".app-src/", "sbom-downloads/")
@@ -96,6 +113,8 @@ def require_committed_content(relative: Path, content: bytes, blobs: dict[Path, 
     # have Git objects. Their bytes still enter the signed frozen inventory.
     if expected is None and any(relative.is_relative_to(Path(directory))
                                 and relative != Path(directory) for directory in GENERATED_DIRS):
+        return
+    if expected is None and SBOM_PATH.fullmatch(relative.as_posix()):
         return
     digest = hashlib.new(object_format, b"blob " + str(len(content)).encode() + b"\0" + content).hexdigest()
     if expected != digest:

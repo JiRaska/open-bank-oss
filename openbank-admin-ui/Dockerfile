@@ -34,13 +34,13 @@ RUN set -e; \
     find /docs-bundle -name '*.md' | sort
 
 # ──────────────────────────────────────────────────────────────────────
-# Stage 1b: Collect CycloneDX SBOMs (build/reports/bom.json) for every
+# Stage 1b: Collect CycloneDX SBOMs staged as sbom-staging/<service>.json for every
 # service that has been built locally with `./gradlew sbomAll`. Bundles
 # them at /sbom-bundle/<service>/bom.json so the admin-ui can serve from
 # the image without a host fs mount. Services without a generated SBOM
 # are simply absent from the bundle — the API surfaces "not generated".
 # Re-uses the root .dockerignore exception added for SBOM coverage:
-#   !openbank-*/build/reports/bom.json
+#   sbom-staging/ is the narrow flat copy made before the context is frozen.
 # ──────────────────────────────────────────────────────────────────────
 FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS sbom-collector
 WORKDIR /collect
@@ -48,9 +48,9 @@ COPY . /repo
 RUN set -e; \
     mkdir -p /sbom-bundle; \
     found=0; \
-    for f in /repo/openbank-*/build/reports/bom.json; do \
+    for f in /repo/sbom-staging/openbank-*.json; do \
       [ -f "$f" ] || continue; \
-      svc=$(basename "$(dirname "$(dirname "$(dirname "$f")")")"); \
+      svc=$(basename "$f" .json); \
       mkdir -p "/sbom-bundle/$svc"; \
       cp "$f" "/sbom-bundle/$svc/bom.json"; \
       found=$((found + 1)); \

@@ -323,10 +323,26 @@ else
   echo "    WARN: app-status.json missing/garbled; baked available:false stub." >&2
 fi
 
+# Docker ignores build/ trees, including the staged per-service SBOMs. Copy
+# only their bom.json files to a flat transient context path consumed by the
+# SBOM collector; the freezer inventories both the source and this exact copy.
+SBOM_STAGE_DIR="${REPO_ROOT}/sbom-staging"
+if [ -e "$SBOM_STAGE_DIR" ]; then
+  echo "ERROR: sbom-staging already exists; refusing ambiguous build inputs." >&2
+  exit 1
+fi
+mkdir "$SBOM_STAGE_DIR"
+trap 'rm -f "${TR_TMP}"; rm -rf "${SBOM_STAGE_DIR}"' EXIT
+for bom in openbank-*/build/reports/bom.json; do
+  [ -f "$bom" ] || continue
+  svc="${bom%%/*}"
+  cp "$bom" "${SBOM_STAGE_DIR}/${svc}.json"
+done
+
 # Freeze the post-collector tree before BuildKit sees it. The same context is
 # hashed and built; subsequent writes to the checkout cannot change this image.
 FREEZE_DIR="$(mktemp -d)"
-trap 'rm -f "${TR_TMP}"; rm -rf "${FREEZE_DIR}"' EXIT
+trap 'rm -f "${TR_TMP}"; rm -rf "${FREEZE_DIR}" "${SBOM_STAGE_DIR}"' EXIT
 FROZEN_CONTEXT="${FREEZE_DIR}/context"
 CONTEXT_MANIFEST="${FREEZE_DIR}/context-manifest.json"
 python3 .github/scripts/freeze-admin-ui-context.py --root "$REPO_ROOT" \
