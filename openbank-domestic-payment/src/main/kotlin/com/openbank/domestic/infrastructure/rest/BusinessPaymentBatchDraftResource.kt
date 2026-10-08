@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.domestic.application.usecase.CzechDomesticIban
 import com.openbank.domestic.infrastructure.persistence.entity.BusinessPaymentBatchDraftEntity
+import com.openbank.libs.domain.identifiers.Ids
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.quarkus.security.identity.SecurityIdentity
@@ -265,7 +266,7 @@ class BusinessPaymentBatchDraftStore(private val mapper: ObjectMapper) :
         }
         val now = Instant.now()
         val row = BusinessPaymentBatchDraftEntity().apply {
-            id = UUID.randomUUID()
+            id = Ids.newId()
             entityPartyId = entity
             actorPartyId = actor
             updatedByPartyId = actor

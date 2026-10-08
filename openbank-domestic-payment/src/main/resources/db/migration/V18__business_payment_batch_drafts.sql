@@ -1,4 +1,5 @@
 -- DRAFT storage only. No rail dispatch or signature state is represented here.
+-- Rollback: disable the customer route and retain drafts for reconciliation; after the table is empty, DROP TABLE business_payment_batch_drafts.
 CREATE TABLE business_payment_batch_drafts (
     id UUID PRIMARY KEY,
     entity_party_id UUID NOT NULL,

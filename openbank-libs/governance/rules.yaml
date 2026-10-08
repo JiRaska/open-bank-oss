@@ -3959,6 +3959,7 @@ security_sensitive_paths:
       - "src/main/kotlin/com/openbank/domestic/infrastructure/client/FraudScoreClient.kt"
       - "src/main/kotlin/com/openbank/domestic/infrastructure/client/SanctionsServiceClient.kt"
       - "src/main/kotlin/com/openbank/domestic/infrastructure/rest/DomesticPaymentResource.kt"
+      - "src/main/kotlin/com/openbank/domestic/infrastructure/rest/BusinessPaymentBatchDraftResource.kt"
     pii:
       - "src/main/kotlin/**/*Party*.kt"
       - "src/main/kotlin/**/*Customer*.kt"
