@@ -152,6 +152,23 @@ class CommunicationStyleServiceTest {
     }
 
     @Test
+    fun `customer error and status copy spans core journeys`() {
+        val copy = mapOf(
+            "cs.app.sessionExpired" to "Přihlaste se prosím znovu.",
+            "en.home.acctLoadFailed" to "Accounts are temporarily unavailable.",
+            "cs.cards.err.network" to "Ke kartám se nyní nelze připojit.",
+            "en.loanApply.failed" to "We could not submit your application.",
+            "cs.sdd.statusSuspended" to "Inkaso je pozastavené.",
+            "en.deleg.err.NETWORK" to "Sharing is temporarily unavailable.",
+            "cs.fx.history.error" to "Historii kurzů nyní nelze načíst.",
+            "en.so.err.create" to "We could not create the standing order.",
+            "cs.msig.err.sign" to "Schválení se nepovedlo.",
+        )
+        draft(uiMessages = copy)
+        assertThat(styleVersions.rows.values.single().uiMessages).isEqualTo(copy)
+    }
+
+    @Test
     fun `a lint-rejected draft is never persisted`() {
         assertThatThrownBy {
             runBlocking {

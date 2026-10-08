@@ -30,4 +30,13 @@ describe('mobile message editor', () => {
     expect(screen.queryByRole('img')).not.toBeInTheDocument()
     expect(screen.getAllByRole('textbox')[0]).toBeDisabled()
   })
+
+  it('finds a payment or approval message by its customer wording or key', () => {
+    render(<Editor />)
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'msig.err.sign' } })
+    expect(screen.getAllByRole('textbox')).toHaveLength(1)
+    expect(screen.getByText('(msig.err.sign)')).toBeInTheDocument()
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'neexistující hláška' } })
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+  })
 })
