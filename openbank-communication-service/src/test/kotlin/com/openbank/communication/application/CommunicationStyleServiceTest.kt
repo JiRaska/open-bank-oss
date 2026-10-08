@@ -37,13 +37,13 @@ private class InMemoryPersonaRepository(personas: List<Persona>) : PersonaReposi
 
 private class InMemoryStyleVersionRepository : StyleVersionRepository {
     val rows = ConcurrentHashMap<UUID, StyleVersion>()
-    override suspend fun create(styleVersion: StyleVersion): StyleVersion {
-        rows[styleVersion.id] = styleVersion
-        return styleVersion
+    override suspend fun createNext(personaId: UUID, make: (Int) -> StyleVersion): StyleVersion = synchronized(rows) {
+        val next = (rows.values.filter { it.personaId == personaId }.maxOfOrNull { it.version } ?: 0) + 1
+        val created = make(next)
+        rows[created.id] = created
+        created
     }
     override suspend fun find(id: UUID) = rows[id]
-    override suspend fun latestVersionNumber(personaId: UUID) =
-        rows.values.filter { it.personaId == personaId }.maxOfOrNull { it.version } ?: 0
     override suspend fun submit(id: UUID, at: Instant): StyleVersion? {
         val existing = rows[id] ?: return null
         val updated = existing.copy(status = StyleVersionStatus.IN_REVIEW)

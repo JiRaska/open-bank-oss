@@ -124,34 +124,42 @@ class PanacheStyleVersionRepository :
     StyleVersionRepository,
     PanacheRepository<StyleVersionEntity> {
 
-    override suspend fun create(s: StyleVersion) = Panache.withTransaction {
-        persist(
-            StyleVersionEntity().apply {
-                id = s.id
-                personaId = s.personaId
-                version = s.version
-                basePublishedVersion = s.basePublishedVersion
-                status = s.status.name
-                tone = s.tone
-                formality = s.formality
-                formOfAddress = s.formOfAddress
-                maxLength = s.maxLength
-                uiMessages = jsonMapper.writeValueAsString(s.uiMessages)
-                preferredTerms = jsonMapper.writeValueAsString(s.preferredTerms)
-                forbiddenTerms = jsonMapper.writeValueAsString(s.forbiddenTerms)
-                signature = s.signature
-                maker = s.maker
-                createdAt = s.createdAt
-            },
-        )
-    }.awaitSuspending().let { s }
+    override suspend fun createNext(personaId: UUID, make: (Int) -> StyleVersion): StyleVersion =
+        Panache.withTransaction {
+            Panache.getSession().flatMap { session ->
+                session.find(PersonaEntity::class.java, personaId, LockModeType.PESSIMISTIC_WRITE)
+                    .flatMap { persona ->
+                        if (persona == null) throw StyleVersionConflictException("persona no longer exists")
+                        find("personaId = ?1 order by version desc", personaId)
+                            .firstResult<StyleVersionEntity>().flatMap { latest ->
+                                val s = make((latest?.version ?: 0) + 1)
+                                require(s.personaId == personaId) { "draft persona does not match locked persona" }
+                                persist(
+                                    StyleVersionEntity().apply {
+                                        id = s.id
+                                        this.personaId = s.personaId
+                                        version = s.version
+                                        basePublishedVersion = s.basePublishedVersion
+                                        status = s.status.name
+                                        tone = s.tone
+                                        formality = s.formality
+                                        formOfAddress = s.formOfAddress
+                                        maxLength = s.maxLength
+                                        uiMessages = jsonMapper.writeValueAsString(s.uiMessages)
+                                        preferredTerms = jsonMapper.writeValueAsString(s.preferredTerms)
+                                        forbiddenTerms = jsonMapper.writeValueAsString(s.forbiddenTerms)
+                                        signature = s.signature
+                                        maker = s.maker
+                                        createdAt = s.createdAt
+                                    },
+                                ).replaceWith(s)
+                            }
+                    }
+            }
+        }.awaitSuspending()
 
     override suspend fun find(id: UUID) =
         Panache.withSession { find("id", id).firstResult<StyleVersionEntity>() }.awaitSuspending()?.toDomain()
-
-    override suspend fun latestVersionNumber(personaId: UUID) = Panache.withSession {
-        find("personaId", personaId).list<StyleVersionEntity>()
-    }.awaitSuspending().maxOfOrNull { it.version } ?: 0
 
     override suspend fun submit(id: UUID, at: Instant) = Panache.withTransaction {
         find("id = ?1 and status = ?2", id, StyleVersionStatus.DRAFT.name).firstResult<StyleVersionEntity>().map { e ->

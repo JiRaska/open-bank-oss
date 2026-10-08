@@ -20,9 +20,9 @@ interface PersonaRepository {
 data class StylePublication(val published: StyleVersion, val retired: StyleVersion?)
 
 interface StyleVersionRepository {
-    suspend fun create(styleVersion: StyleVersion): StyleVersion
+    /** Allocate the next per-persona version and create it while holding the persona row lock. */
+    suspend fun createNext(personaId: UUID, make: (Int) -> StyleVersion): StyleVersion
     suspend fun find(id: UUID): StyleVersion?
-    suspend fun latestVersionNumber(personaId: UUID): Int
     suspend fun submit(id: UUID, at: Instant): StyleVersion?
     suspend fun publishIfCurrent(id: UUID, checker: String, at: Instant): StylePublication
     suspend fun retire(id: UUID, checker: String, at: Instant): StyleVersion?

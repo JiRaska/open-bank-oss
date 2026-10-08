@@ -22,6 +22,10 @@ import org.junit.jupiter.api.Test
 import java.sql.Timestamp
 import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.Callable
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import javax.sql.DataSource
 
 /**
@@ -201,8 +205,9 @@ class CommunicationStyleRestContractIT {
     @Test
     @TestSecurity(user = "checker@openbank.test", roles = ["ROLE_COMMS_EDITOR", "ROLE_COMMS_APPROVER", "ROLE_API"])
     fun `later publication of a stale draft conflicts and preserves the winning copy`() {
-        val first = draftAsEditor("collections", "warm")
-        val second = draftAsEditor("collections", "calm")
+        val (first, second) = concurrentDrafts()
+        val versions = draftVersions(first, second)
+        org.junit.jupiter.api.Assertions.assertEquals(setOf(1, 2), versions.values.toSet())
         dataSource.connection.use { connection ->
             connection.prepareStatement("update style_version set maker = ? where id = ?").use { statement ->
                 statement.setString(1, "editor-a@openbank.test")
@@ -227,7 +232,7 @@ class CommunicationStyleRestContractIT {
         Given { this }.When { get("/api/v1/personas/collections/published") } Then {
             statusCode(200)
             body("tone", equalTo("warm"))
-            body("styleVersion", equalTo(1))
+            body("styleVersion", equalTo(versions.getValue(first)))
         }
         dataSource.connection.use { connection ->
             connection.prepareStatement("select status from style_version where id = ?").use { statement ->
@@ -239,6 +244,37 @@ class CommunicationStyleRestContractIT {
             }
         }
     }
+
+    private fun concurrentDrafts(): Pair<String, String> = Executors.newFixedThreadPool(2).use { executor ->
+        val start = CountDownLatch(1)
+        val firstDraft = executor.submit(
+            Callable {
+                start.await()
+                draftAsEditor("collections", "warm")
+            },
+        )
+        val secondDraft = executor.submit(
+            Callable {
+                start.await()
+                draftAsEditor("collections", "calm")
+            },
+        )
+        start.countDown()
+        firstDraft.get(30, TimeUnit.SECONDS) to secondDraft.get(30, TimeUnit.SECONDS)
+    }
+
+    private fun draftVersions(first: String, second: String): Map<String, Int> =
+        dataSource.connection.use { connection ->
+            connection.prepareStatement("select id, version from style_version where id in (?, ?)").use { statement ->
+                statement.setObject(1, UUID.fromString(first))
+                statement.setObject(2, UUID.fromString(second))
+                statement.executeQuery().use { rows ->
+                    buildMap {
+                        while (rows.next()) put(rows.getObject(1, UUID::class.java).toString(), rows.getInt(2))
+                    }
+                }
+            }
+        }
 
     private fun draftAsEditor(persona: String, tone: String): String = Given {
         contentType("application/json")

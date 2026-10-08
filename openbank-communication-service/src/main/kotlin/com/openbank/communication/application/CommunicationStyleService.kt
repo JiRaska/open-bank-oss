@@ -72,29 +72,29 @@ class CommunicationStyleService(
             throw StyleLintRejectedException(violations.map { "${it.rule} in ${it.field}" })
         }
         val now = Instant.now(clock)
-        val nextVersion = styleVersions.latestVersionNumber(persona.id) + 1
-        val draft = StyleVersion(
-            id = Ids.newId(),
-            personaId = persona.id,
-            version = nextVersion,
-            status = StyleVersionStatus.DRAFT,
-            tone = command.tone,
-            formality = command.formality,
-            formOfAddress = command.formOfAddress,
-            maxLength = command.maxLength,
-            preferredTerms = command.preferredTerms,
-            forbiddenTerms = command.forbiddenTerms,
-            signature = command.signature,
-            maker = command.maker,
-            uiMessages = command.uiMessages,
-            basePublishedVersion = command.basePublishedVersion,
-            createdAt = now,
-            decidedBy = null,
-            decidedAt = null,
-            publishedAt = null,
-            retiredAt = null,
-        )
-        val created = styleVersions.create(draft)
+        val created = styleVersions.createNext(persona.id) { nextVersion ->
+            StyleVersion(
+                id = Ids.newId(),
+                personaId = persona.id,
+                version = nextVersion,
+                status = StyleVersionStatus.DRAFT,
+                tone = command.tone,
+                formality = command.formality,
+                formOfAddress = command.formOfAddress,
+                maxLength = command.maxLength,
+                preferredTerms = command.preferredTerms,
+                forbiddenTerms = command.forbiddenTerms,
+                signature = command.signature,
+                maker = command.maker,
+                uiMessages = command.uiMessages,
+                basePublishedVersion = command.basePublishedVersion,
+                createdAt = now,
+                decidedBy = null,
+                decidedAt = null,
+                publishedAt = null,
+                retiredAt = null,
+            )
+        }
         audit.append("STYLE_DRAFTED", created.id, command.maker, "${command.personaKey}@${created.version}", now)
         return created
     }

@@ -26,7 +26,7 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag
 
 /**
  * Checker-facing endpoint for the four-eyes gate on `commstyle.publish` (ADR-0285 D3). A
- * maker's `POST /api/v1/personas/style-versions/{id}/publish` call is paused by
+ * maker's `POST /api/v2/personas/style-versions/{id}/publish` call is paused by
  * [com.openbank.libs.authz.AuthorizeInterceptor] with HTTP 202 and a `PendingApproval` id; a
  * DIFFERENT `ROLE_COMMS_APPROVER` decides it here, then the maker (or any `ROLE_COMMS_APPROVER`)
  * retries the original call with an `X-Approval-Id` header. This is also the read side of the
