@@ -1,0 +1,185 @@
+openapi: 3.1.0
+info:
+  title: OpenBank Public Status API
+  version: 1.0.0
+  description: External checks, sanitized internal service-reachability verdicts, and public incident history. Payment completion and mobile-app health are not measured. All timestamps are UTC.
+servers:
+  - url: https://status.open-bank.tech
+paths:
+  /api/v1/status:
+    get:
+      summary: Current status, history, and incidents
+      operationId: getStatus
+      responses:
+        '200':
+          description: Current public snapshot, including an explicit unknown state when stale.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusSnapshot'
+  /api/v1/health:
+    get:
+      summary: Machine-readable health of monitored components
+      operationId: getHealth
+      responses:
+        '200':
+          description: Fresh and operational.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+        '503':
+          description: Impacted, pending confirmation, or stale data.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+  /api/v1/history:
+    get:
+      summary: Observed website probe history
+      operationId: getHistory
+      responses:
+        '200':
+          description: 24-hour and 30-day buckets. Missing samples are excluded.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [schemaVersion, checkedAt, history]
+                properties:
+                  schemaVersion: {type: integer, const: 1}
+                  checkedAt: {type: [string, 'null'], format: date-time}
+                  history:
+                    type: object
+                    required: [24h, 30d]
+                    properties:
+                      24h: {$ref: '#/components/schemas/HistoryWindow'}
+                      30d: {$ref: '#/components/schemas/HistoryWindow'}
+  /api/v1/incidents:
+    get:
+      summary: Confirmed incident timeline
+      operationId: getIncidents
+      responses:
+        '200':
+          description: Newest incidents first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [schemaVersion, checkedAt, incidents]
+                properties:
+                  schemaVersion: {type: integer, const: 1}
+                  checkedAt: {type: [string, 'null'], format: date-time}
+                  incidents:
+                    type: array
+                    items: {$ref: '#/components/schemas/Incident'}
+  /api/v1/healthz:
+    get:
+      summary: Status API health, independent of upstream services
+      operationId: getStatusApiHealth
+      responses:
+        '200':
+          description: Status API handler is responding.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, service]
+                properties:
+                  status: {type: string, const: ok}
+                  service: {type: string, const: openbank-public-status-api}
+  /api/v1/freshness:
+    get:
+      summary: Scheduled checker freshness, independent of upstream service state
+      operationId: getCheckerFreshness
+      responses:
+        '200':
+          description: Latest scheduled result is recent.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Freshness'}
+        '503':
+          description: Result is stale or unavailable.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Freshness'}
+components:
+  schemas:
+    Freshness:
+      type: object
+      required: [status, checkedAt]
+      properties:
+        status: {type: string, enum: [fresh, stale]}
+        checkedAt: {type: [string, 'null'], format: date-time}
+    Component:
+      type: object
+      required: [id, name, description, coverage, status, lastResult]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        description: {type: string}
+        coverage: {type: string}
+        status: {type: string, enum: [operational, pending, outage, unknown]}
+        lastResult: {type: string, enum: [Pass, Fail, Unverified]}
+    Measurement:
+      type: object
+      required: [intervalSeconds, staleAfterSeconds, timeZone, scope]
+      properties:
+        intervalSeconds: {type: integer}
+        staleAfterSeconds: {type: integer}
+        timeZone: {type: string, const: UTC}
+        scope: {type: string}
+    Health:
+      type: object
+      required: [schemaVersion, checkedAt, status, components, measurement]
+      properties:
+        schemaVersion: {type: integer, const: 1}
+        checkedAt: {type: [string, 'null'], format: date-time}
+        status: {type: string, enum: [operational, partial_outage, major_outage, unknown]}
+        components:
+          type: array
+          items: {$ref: '#/components/schemas/Component'}
+        measurement: {$ref: '#/components/schemas/Measurement'}
+    HistoryBucket:
+      type: object
+      required: [start, success, total]
+      properties:
+        start: {type: string, format: date-time}
+        success: {type: integer, minimum: 0}
+        total: {type: integer, minimum: 0}
+    HistoryWindow:
+      type: object
+      required: [availabilityPercent, totalSamples, successfulSamples, buckets]
+      properties:
+        availabilityPercent: {type: [number, 'null'], minimum: 0, maximum: 100}
+        totalSamples: {type: integer, minimum: 0}
+        successfulSamples: {type: integer, minimum: 0}
+        buckets:
+          type: array
+          items: {$ref: '#/components/schemas/HistoryBucket'}
+    Incident:
+      type: object
+      required: [id, component, title, summary, startedAt, resolvedAt]
+      properties:
+        id: {type: string}
+        component: {type: string}
+        title: {type: string}
+        summary: {type: string}
+        startedAt: {type: string, format: date-time}
+        resolvedAt: {type: [string, 'null'], format: date-time}
+    StatusSnapshot:
+      allOf:
+        - {$ref: '#/components/schemas/Health'}
+        - type: object
+          required: [history, incidents]
+          properties:
+            message: {type: [string, 'null']}
+            history:
+              type: object
+              required: [24h, 30d]
+              properties:
+                24h: {$ref: '#/components/schemas/HistoryWindow'}
+                30d: {$ref: '#/components/schemas/HistoryWindow'}
+            incidents:
+              type: array
+              items: {$ref: '#/components/schemas/Incident'}
