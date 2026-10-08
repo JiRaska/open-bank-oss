@@ -9,6 +9,7 @@ import com.openbank.communication.application.port.out.CommunicationAuditReposit
 import com.openbank.communication.application.port.out.CommunicationEventPublisher
 import com.openbank.communication.application.port.out.PersonaRepository
 import com.openbank.communication.application.port.out.StylePublication
+import com.openbank.communication.application.port.out.StylePublicationState
 import com.openbank.communication.application.port.out.StyleVersionRepository
 import com.openbank.communication.domain.Persona
 import com.openbank.communication.domain.PersonaPublishOutcome
@@ -44,6 +45,12 @@ private class InMemoryStyleVersionRepository : StyleVersionRepository {
     override suspend fun find(id: UUID) = rows[id]
     override suspend fun latestVersionNumber(personaId: UUID) =
         rows.values.filter { it.personaId == personaId }.maxOfOrNull { it.version } ?: 0
+    override suspend fun latestPublishedVersionNumber(personaId: UUID) =
+        rows.values.filter { it.personaId == personaId && it.publishedAt != null }.maxOfOrNull { it.version } ?: 0
+    override suspend fun publicationState(personaId: UUID) = StylePublicationState(
+        latestVersion = latestPublishedVersionNumber(personaId),
+        published = rows.values.firstOrNull { it.personaId == personaId && it.status == StyleVersionStatus.PUBLISHED },
+    )
     override suspend fun submit(id: UUID, at: Instant): StyleVersion? {
         val existing = rows[id] ?: return null
         val updated = existing.copy(status = StyleVersionStatus.IN_REVIEW)
@@ -55,7 +62,7 @@ private class InMemoryStyleVersionRepository : StyleVersionRepository {
         val current = rows.values.firstOrNull {
             it.personaId == existing.personaId && it.status == StyleVersionStatus.PUBLISHED
         }
-        if (existing.basePublishedVersion != (current?.version ?: 0)) {
+        if (existing.basePublishedVersion != latestPublishedVersionNumber(existing.personaId)) {
             throw StyleVersionConflictException("stale style draft")
         }
         if (current != null) rows[current.id] = current.copy(status = StyleVersionStatus.RETIRED, retiredAt = at)

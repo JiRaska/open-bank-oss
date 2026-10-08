@@ -9,6 +9,7 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.communication.application.port.out.CommunicationAuditRepository
 import com.openbank.communication.application.port.out.PersonaRepository
 import com.openbank.communication.application.port.out.StylePublication
+import com.openbank.communication.application.port.out.StylePublicationState
 import com.openbank.communication.application.port.out.StyleVersionRepository
 import com.openbank.communication.domain.Persona
 import com.openbank.communication.domain.StyleVersion
@@ -151,6 +152,19 @@ class PanacheStyleVersionRepository :
         find("personaId", personaId).list<StyleVersionEntity>()
     }.awaitSuspending().maxOfOrNull { it.version } ?: 0
 
+    override suspend fun latestPublishedVersionNumber(personaId: UUID) = Panache.withSession {
+        find("personaId = ?1 and publishedAt is not null", personaId).list<StyleVersionEntity>()
+    }.awaitSuspending().maxOfOrNull { it.version } ?: 0
+
+    override suspend fun publicationState(personaId: UUID): StylePublicationState = Panache.withSession {
+        find("personaId", personaId).list<StyleVersionEntity>()
+    }.awaitSuspending().let { versions ->
+        StylePublicationState(
+            latestVersion = versions.filter { it.publishedAt != null }.maxOfOrNull { it.version } ?: 0,
+            published = versions.firstOrNull { it.status == StyleVersionStatus.PUBLISHED.name }?.toDomain(),
+        )
+    }
+
     override suspend fun submit(id: UUID, at: Instant) = Panache.withTransaction {
         find("id = ?1 and status = ?2", id, StyleVersionStatus.DRAFT.name).firstResult<StyleVersionEntity>().map { e ->
             requireNotNull(e)
@@ -172,18 +186,20 @@ class PanacheStyleVersionRepository :
             Panache.getSession().flatMap { session ->
                 session.find(PersonaEntity::class.java, e.personaId, LockModeType.PESSIMISTIC_WRITE)
             }.flatMap {
-                find(
-                    "personaId = ?1 and status = ?2",
-                    e.personaId,
-                    StyleVersionStatus.PUBLISHED.name,
-                ).firstResult<StyleVersionEntity>()
-            }.flatMap { current ->
-                val currentVersion = current?.version ?: 0
-                if (e.basePublishedVersion != currentVersion) {
+                // Retiring a publication does not erase its generation. A draft based on
+                // the pre-publication state must remain stale even when no row is PUBLISHED.
+                find("personaId = ?1 and publishedAt is not null", e.personaId)
+                    .list<StyleVersionEntity>()
+            }.flatMap { publishedVersions ->
+                val latestPublishedVersion = publishedVersions.maxOfOrNull { it.version } ?: 0
+                if (e.basePublishedVersion != latestPublishedVersion) {
                     throw StyleVersionConflictException(
-                        "stale style draft: based on published version ${e.basePublishedVersion}, current is $currentVersion",
+                        "stale style draft: based on published version ${e.basePublishedVersion}, latest is $latestPublishedVersion",
                     )
                 }
+                find("personaId = ?1 and status = ?2", e.personaId, StyleVersionStatus.PUBLISHED.name)
+                    .firstResult<StyleVersionEntity>()
+            }.flatMap { current ->
                 val retiredId = current?.id
                 if (current != null) {
                     current.status = StyleVersionStatus.RETIRED.name

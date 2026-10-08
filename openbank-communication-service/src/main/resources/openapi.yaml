@@ -13,7 +13,7 @@ paths:
   /api/v1/personas/{personaKey}/style-versions:
     post:
       summary: Draft a new style version for a persona (D3 lint runs before persistence)
-      description: Optional uiMessages map contains approved mobile copy keys prefixed cs. or en., up to 332 plain-text values of 240 characters. Only customer-copilot supports UI copy. Omitted keys use bundled client defaults. The field is persisted and returned in the published style. Send basePublishedVersion from GET published (or 0 if it returned 404); an omitted value captures the current publication at draft creation for older clients. Publication compares this saved base atomically and rejects a stale draft with 409.
+      description: Optional uiMessages map contains approved mobile copy keys prefixed cs. or en., up to 332 plain-text values of 240 characters. Only customer-copilot supports UI copy. Omitted keys use bundled client defaults. The field is persisted and returned in the published style. Send basePublishedVersion from GET style-editor-state; an omitted value captures the latest-ever publication at draft creation for older clients. Publication compares this saved base atomically and rejects a stale draft with 409.
       parameters: [{name: personaKey, in: path, required: true, schema: {type: string}}]
       requestBody:
         content:
@@ -32,7 +32,7 @@ paths:
                 basePublishedVersion:
                   type: integer
                   minimum: 0
-                  description: Published styleVersion seen by the editor; use 0 if GET published returned 404. Omission captures the current publication when the draft is created.
+                  description: Latest-ever publication version seen by the editor, including retired versions. Obtain it from GET style-editor-state; omission captures the latest publication when the draft is created.
       responses: {"201": {description: Created}, "400": {description: Rejected by lint or validation}}
   /api/v1/personas/style-versions/{id}/submit:
     post:
@@ -54,6 +54,22 @@ paths:
       summary: The composed, published style a consumer caches (D5)
       parameters: [{name: personaKey, in: path, required: true, schema: {type: string}}]
       responses: {"200": {description: The published style}, "404": {description: No published version}}
+  /api/v1/personas/{personaKey}/style-editor-state:
+    get:
+      summary: Current published copy and durable publication generation for an editor
+      parameters: [{name: personaKey, in: path, required: true, schema: {type: string}}]
+      responses:
+        "200":
+          description: One snapshot of the current copy and latest-ever publication version
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [basePublishedVersion]
+                properties:
+                  basePublishedVersion: {type: integer, minimum: 0}
+                  published: {type: object, nullable: true}
+        "404": {description: No such persona}
   /api/v1/communications/approvals:
     get:
       summary: Checker's pending four-eyes approval queue (ADR-0227 D2), oldest first

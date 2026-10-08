@@ -276,6 +276,96 @@ class CommunicationStyleRestContractIT {
             statusCode(200)
             body("tone", equalTo(if (winner == ids[0]) "Concurrent editor A" else "Concurrent editor B"))
         }
+
+        assertRetirementKeepsPublicationGeneration(winner)
+    }
+
+    private fun assertRetirementKeepsPublicationGeneration(winner: String) {
+        val winnerVersion = styleVersionNumber(UUID.fromString(winner))
+        Given { this }.When { get("/api/v1/personas/collections/style-editor-state") } Then {
+            statusCode(200)
+            body("basePublishedVersion", equalTo(winnerVersion))
+            body("published.styleVersion", equalTo(winnerVersion))
+        }
+        Given { this }.When { post("/api/v1/personas/style-versions/$winner/retire") } Then { statusCode(200) }
+        Given { this }.When { get("/api/v1/personas/collections/style-editor-state") } Then {
+            statusCode(200)
+            body("basePublishedVersion", equalTo(winnerVersion))
+            body("published", org.hamcrest.Matchers.nullValue())
+        }
+        val staleAfterRetirement = draftForCollections(0, "Copy from before any publication")
+        val freshAfterRetirement = draftForCollections(winnerVersion, "Copy based on last publication")
+        val legacyPending = draftForCollections(winnerVersion, "Legacy pending copy")
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "update style_version set maker = 'editor-one' where id in (?, ?, ?)",
+            ).use { ps ->
+                listOf(staleAfterRetirement, freshAfterRetirement, legacyPending).forEachIndexed { index, id ->
+                    ps.setObject(index + 1, UUID.fromString(id))
+                }
+                ps.executeUpdate()
+            }
+            connection.prepareStatement("update style_version set base_published_version = -1 where id = ?").use { ps ->
+                ps.setObject(1, UUID.fromString(legacyPending))
+                ps.executeUpdate()
+            }
+        }
+        listOf(staleAfterRetirement, freshAfterRetirement, legacyPending).forEach { id ->
+            Given { this }.When { post("/api/v1/personas/style-versions/$id/submit") } Then { statusCode(200) }
+        }
+        listOf(staleAfterRetirement, legacyPending).forEach { id ->
+            Given { this }.When { post("/api/v1/personas/style-versions/$id/publish") } Then {
+                statusCode(409)
+                body("error", containsString("stale style draft"))
+            }
+        }
+        Given { this }.When { post("/api/v1/personas/style-versions/$freshAfterRetirement/publish") } Then {
+            statusCode(200)
+            body("tone", equalTo("Copy based on last publication"))
+        }
+    }
+
+    @Test
+    fun `migration invalidates pending drafts with unknowable publication base`() {
+        val schema = "style_migration_${UUID.randomUUID().toString().replace("-", "")}"
+        dataSource.connection.use { connection ->
+            connection.createStatement().use { it.execute("create schema $schema") }
+            try {
+                assertPendingDraftMigration(connection, schema)
+            } finally {
+                connection.createStatement().use { it.execute("set search_path to public") }
+                connection.createStatement().use { it.execute("drop schema $schema cascade") }
+            }
+        }
+    }
+
+    private fun assertPendingDraftMigration(connection: java.sql.Connection, schema: String) {
+        connection.createStatement().use { it.execute("set search_path to $schema") }
+        connection.createStatement().use {
+            it.execute("create table style_version (id uuid primary key, status varchar(16) not null)")
+            it.execute(
+                "insert into style_version (id, status) values " +
+                    "('${UUID.randomUUID()}', 'PUBLISHED'), " +
+                    "('${UUID.randomUUID()}', 'DRAFT'), " +
+                    "('${UUID.randomUUID()}', 'IN_REVIEW')",
+            )
+        }
+        val migration = requireNotNull(
+            javaClass.classLoader.getResourceAsStream("db/migration/V5__style_publication_base.sql"),
+        ).bufferedReader().use { it.readText() }
+        migration.lineSequence().filterNot { it.trimStart().startsWith("--") }
+            .joinToString("\n").split(';').map { it.trim() }.filter { it.isNotEmpty() }
+            .forEach { statement -> connection.createStatement().use { it.execute(statement) } }
+        val bases = connection.createStatement().use { statement ->
+            statement.executeQuery("select status, base_published_version from style_version").use { rows ->
+                buildMap {
+                    while (rows.next()) put(rows.getString(1), rows.getInt(2))
+                }
+            }
+        }
+        org.junit.jupiter.api.Assertions.assertEquals(0, bases["PUBLISHED"])
+        org.junit.jupiter.api.Assertions.assertEquals(-1, bases["DRAFT"])
+        org.junit.jupiter.api.Assertions.assertEquals(-1, bases["IN_REVIEW"])
     }
 
     private fun styleStatus(id: UUID): String = dataSource.connection.use { connection ->
@@ -284,6 +374,16 @@ class CommunicationStyleRestContractIT {
             ps.executeQuery().use { rows ->
                 org.junit.jupiter.api.Assertions.assertTrue(rows.next())
                 rows.getString(1)
+            }
+        }
+    }
+
+    private fun styleVersionNumber(id: UUID): Int = dataSource.connection.use { connection ->
+        connection.prepareStatement("select version from style_version where id = ?").use { ps ->
+            ps.setObject(1, id)
+            ps.executeQuery().use { rows ->
+                org.junit.jupiter.api.Assertions.assertTrue(rows.next())
+                rows.getInt(1)
             }
         }
     }
@@ -333,6 +433,12 @@ class CommunicationStyleRestContractIT {
                 statement.setString(5, maker)
                 statement.setTimestamp(6, Timestamp.from(Instant.now()))
                 statement.executeUpdate()
+            }
+            if (status == "PUBLISHED") {
+                connection.prepareStatement("update style_version set published_at = now() where id = ?").use { ps ->
+                    ps.setObject(1, id)
+                    ps.executeUpdate()
+                }
             }
             if (!connection.autoCommit) connection.commit()
         }

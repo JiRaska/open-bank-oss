@@ -78,13 +78,14 @@ export default function CommunicationStyleEditorPage() {
     setTone(''); setFormality(''); setFormOfAddress(''); setSignature(''); setMaxLength('')
     setUiMessages({}); setPreferredTerms({}); setForbiddenTerms([])
     setBasePublishedVersion(0)
-    fetch(`${PROXY_BASE}/${encodeURIComponent(personaKey)}/published`, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(8_000)]) })
+    fetch(`${PROXY_BASE}/${encodeURIComponent(personaKey)}/style-editor-state`, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(8_000)]) })
       .then(async res => {
-        if (res.status === 404) { if (!controller.signal.aborted) setPublishedLoaded(true); return }
-        if (!res.ok) throw new Error('Published style unavailable')
-        const published = await res.json()
+        if (!res.ok) throw new Error('Style editor state unavailable')
+        const state = await res.json()
         if (controller.signal.aborted) return
-        setBasePublishedVersion(published.styleVersion)
+        setBasePublishedVersion(state.basePublishedVersion)
+        const published = state.published
+        if (!published) { setPublishedLoaded(true); return }
         setTone(published.tone ?? '')
         setFormality(published.formality ?? '')
         setFormOfAddress(published.formOfAddress ?? '')

@@ -59,6 +59,12 @@ class CommunicationStyleResource(
 ) {
     private fun actor() = identity.principal.name
 
+    @GET
+    @Path("/{personaKey}/style-editor-state")
+    @RolesAllowed("ROLE_COMMS_EDITOR", "ROLE_COMMS_APPROVER", "ROLE_ADMIN")
+    suspend fun editorState(@PathParam("personaKey") personaKey: String): Response =
+        Response.ok(service.editorState(personaKey)).build()
+
     @POST
     @Path("/{personaKey}/style-versions")
     @RolesAllowed("ROLE_COMMS_EDITOR", "ROLE_ADMIN")

@@ -39,6 +39,8 @@ data class DraftStyleVersionCommand(
     val basePublishedVersion: Int? = null,
 )
 
+data class StyleEditorState(val basePublishedVersion: Int, val published: PublishedStyle?)
+
 @ApplicationScoped
 class CommunicationStyleService(
     private val personas: PersonaRepository,
@@ -73,7 +75,7 @@ class CommunicationStyleService(
         val now = Instant.now(clock)
         val nextVersion = styleVersions.latestVersionNumber(persona.id) + 1
         val basePublishedVersion = command.basePublishedVersion
-            ?: (styleVersions.findPublished(persona.id)?.version ?: 0)
+            ?: styleVersions.latestPublishedVersionNumber(persona.id)
         require(basePublishedVersion >= 0) { "basePublishedVersion must be non-negative" }
         val draft = StyleVersion(
             id = Ids.newId(),
@@ -186,6 +188,14 @@ class CommunicationStyleService(
         val published = styleVersions.findPublished(persona.id)
             ?: throw StyleVersionNotFoundException("persona '$personaKey' has no published style version")
         return published.toPublishedStyle(personaKey)
+    }
+
+    /** A single database snapshot of the visible copy and last publication generation. */
+    suspend fun editorState(personaKey: String): StyleEditorState {
+        val persona = personas.findByKey(personaKey)
+            ?: throw PersonaNotFoundException("persona '$personaKey' not found")
+        val state = styleVersions.publicationState(persona.id)
+        return StyleEditorState(state.latestVersion, state.published?.toPublishedStyle(personaKey))
     }
 
     private fun StyleVersion.toPublishedStyle(personaKey: String) = PublishedStyle(
