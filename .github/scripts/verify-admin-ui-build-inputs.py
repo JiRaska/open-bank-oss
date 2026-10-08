@@ -105,7 +105,7 @@ def main() -> None:
     parser.add_argument("--tag", required=True)
     args = parser.parse_args()
     verify(args.root, args.repo, args.image, args.tag)
-    print(f"verified signed Admin UI build inputs for {args.image}:{args.tag}")
+    print("verified signed Admin UI build inputs")
 
 
 if __name__ == "__main__":

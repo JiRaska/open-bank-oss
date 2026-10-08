@@ -24,9 +24,11 @@ GENERATED_DIRS = (
     "openbank-admin-ui/test-run-history",
 )
 GENERATED_ROOT_JSON = (
-    "ai-governance-snapshot.json", "app-status.json", "catalog.json",
-    "cost-report.json", "dora.json", "gate-catalog.json", "gate-health.json",
-    "infra-lifecycle.json", "infra-vulns.json", "prod-readiness.json",
+    "ai-governance-snapshot.json", "app-status.json", "card-capabilities.json",
+    "catalog.json", "cluster-topology.json", "cost-footprints.json",
+    "cost-report.json", "dora.json", "events.json", "gate-catalog.json",
+    "gate-health.json", "governance.json", "infra-lifecycle.json",
+    "infra-vulns.json", "origination-graph.json", "prod-readiness.json",
     "quality-report.json", "security-graph.json", "service-graph.json",
     "test-intelligence.json", "test-results.json",
 )
