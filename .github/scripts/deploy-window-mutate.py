@@ -61,8 +61,11 @@ def action(pr: dict, head: str, base: str, required: list[str], reviews: int) ->
         raise ValueError("selected deploy PR is no longer open and ready")
     if pr.get("headRefOid") != head or pr.get("baseRefOid") != base:
         raise ValueError("selected deploy PR head or base changed; retry selection")
-    if not str(pr.get("headRefName", "")).startswith(DEPLOY_PREFIXES):
-        raise ValueError("selected PR no longer has a deploy branch")
+    head_name = str(pr.get("headRefName", ""))
+    if head_name.startswith(DEPLOY_PREFIXES[1]):
+        raise ValueError("Admin UI deploy held until #12211 image provenance is verified")
+    if not head_name.startswith(DEPLOY_PREFIXES[0]):
+        raise ValueError("selected PR no longer has a service deploy branch")
     state = pr.get("mergeStateStatus")
     if state in ("BLOCKED", "PENDING", "UNSTABLE"):
         return "ARM"
@@ -126,7 +129,13 @@ def self_test() -> None:
     assert action({**pr, "mergeStateStatus": "BLOCKED"}, sha, base, checks, reviews) == "ARM"
     assert action({**pr, "mergeStateStatus": "PENDING"}, sha, base, checks, reviews) == "ARM"
     admin_pr = {**pr, "headRefName": DEPLOY_PREFIXES[1] + base}
-    assert action(admin_pr, sha, base, checks, reviews) == "MERGE"
+    for state in ("CLEAN", "BLOCKED", "PENDING"):
+        try:
+            action({**admin_pr, "mergeStateStatus": state}, sha, base, checks, reviews)
+        except ValueError as exc:
+            assert "#12211" in str(exc)
+        else:
+            raise AssertionError(f"Admin UI deploy {state} bypassed provenance hold")
     try:
         verify_source("example/open-bank", 1, admin_pr["headRefName"], base)
     except ValueError as exc:
@@ -169,7 +178,7 @@ def self_test() -> None:
         verify_signatures("example/open-bank", [{"oid": sha}])
     finally:
         globals()["gh"] = original_gh
-    print("deploy-window-mutate: CLEAN/BLOCKED/PENDING, review, checks and SHA guards OK")
+    print("deploy-window-mutate: CLEAN/BLOCKED/PENDING, Admin UI hold, review, checks and SHA guards OK")
 
 
 def main(args: argparse.Namespace) -> None:

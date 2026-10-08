@@ -7,9 +7,10 @@
 # window, because each one makes every open PR `behind` under the strict up-to-date rule and
 # restarts its required checks. A deploy they DEFER stays open and unarmed — this workflow is
 # what lands it. A workflow_run trigger handles new PRs and the schedule recovers missed runs.
-# Each run picks the OLDEST deferred deploy PR once the window has elapsed
-# and nothing else is armed, re-runs supersede-deploy-prs.sh on it (ancestry + coverage — a
-# rollback PR is refused), then verifies current policy, checks, signatures and exact SHAs.
+# Each run holds Admin UI deploy PRs until #12211 proves image provenance, and selects the
+# newest eligible service PR after the window while nothing else is armed. It re-runs
+# supersede-deploy-prs.sh (ancestry + coverage — a rollback PR is refused), then verifies
+# current policy, checks, signatures and exact SHAs.
 # A CLEAN PR merges normally; pending checks or reviews arm auto-merge with the GitOps App token.
 # A successful manual dispatch of either producer expedites only its matching PR.
 
@@ -32,7 +33,7 @@ concurrency:
 
 jobs:
   flush:
-    name: Flush the oldest deferred deploy PR
+    name: Flush an eligible deferred deploy PR
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # Read-only GITHUB_TOKEN: every write (arming auto-merge, closing a superseded PR) goes through
@@ -63,7 +64,7 @@ jobs:
           echo "::error::GITOPS_APP_ID/GITOPS_APP_PRIVATE_KEY unavailable - refusing to arm deploy PRs with GITHUB_TOKEN (its merge would trigger no workflows)."
           exit 1
 
-      - name: Pick the deferred deploy PR to arm
+      - name: Pick an eligible deferred deploy PR
         id: pick
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
