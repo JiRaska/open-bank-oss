@@ -12,11 +12,139 @@ import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.sql.Connection
 import java.sql.DriverManager
+import java.time.Instant
 import java.util.UUID
 
 class AgentAuditInventoryTest {
     private val first = UUID.fromString("00000000-0000-0000-0000-000000000001")
     private val second = UUID.fromString("00000000-0000-0000-0000-000000000002")
+
+    @Test
+    @Suppress("LongMethod") // One two-database fixture exercises the approved-window and destination mismatch path.
+    fun `campaign matches approved half-open window without claiming destination extras`() {
+        PostgreSQLContainer<Nothing>("postgres:16-alpine").use { pg ->
+            pg.start()
+            createDestinationDatabase(pg)
+            sourceConnection(pg).use { setup ->
+                setup.createStatement().use {
+                    it.execute(
+                        "CREATE TABLE agent_audit_outbox " +
+                            "(event_id UUID PRIMARY KEY, payload TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL, " +
+                            "published_at TIMESTAMPTZ)",
+                    )
+                }
+                insertCampaignSource(setup, first, "one", "2026-01-01T00:00:00Z", true)
+                insertCampaignSource(setup, second, "two", "2026-01-01T00:00:00Z", true)
+                insertCampaignSource(setup, UUID(0, 3), "outside", "2026-01-02T00:00:00Z", true)
+            }
+            destinationConnection(pg).use { setup ->
+                setup.createStatement().use {
+                    it.execute(
+                        "CREATE TABLE audit_entries " +
+                            "(entry_id UUID PRIMARY KEY, payload TEXT NOT NULL, source_service TEXT NOT NULL)",
+                    )
+                }
+                insertDestination(setup, first, "one")
+                insertDestination(setup, second, "two")
+                insertDestination(setup, UUID(0, 3), "outside")
+            }
+            val window = campaignWindow()
+            val result = AgentAuditInventory.reconcileCampaign(
+                { sourceConnection(pg) },
+                { destinationConnection(pg) },
+                window,
+                pageSize = 1,
+            )
+            assertThat(result.matched.count).isEqualTo(2)
+            assertThat(result.destinationExtraCompletenessProven).isFalse()
+            assertThatThrownBy {
+                AgentAuditInventory.reconcileCampaign(
+                    { sourceConnection(pg) },
+                    { destinationConnection(pg) },
+                    window.copy(expectedCount = 1),
+                    pageSize = 1,
+                )
+            }.hasMessageContaining("approved count or manifest")
+            assertThatThrownBy {
+                AgentAuditInventory.reconcileCampaign(
+                    { sourceConnection(pg) },
+                    { destinationConnection(pg) },
+                    window.copy(sourceManifestSha256 = "0".repeat(64)),
+                    pageSize = 1,
+                )
+            }.hasMessageContaining("approved count or manifest")
+            destinationConnection(pg).use { changed ->
+                changed.prepareStatement("UPDATE audit_entries SET payload = ? WHERE entry_id = ?").use {
+                    it.setString(1, "changed")
+                    it.setObject(2, second)
+                    it.executeUpdate()
+                }
+            }
+            assertThatThrownBy {
+                AgentAuditInventory.reconcileCampaign(
+                    { sourceConnection(pg) },
+                    { destinationConnection(pg) },
+                    window,
+                    pageSize = 1,
+                )
+            }.hasMessageContaining("identities or payload digests differ")
+        }
+    }
+
+    @Test
+    fun `campaign rejects unpublished source row inside window`() {
+        PostgreSQLContainer<Nothing>("postgres:16-alpine").use { pg ->
+            pg.start()
+            sourceConnection(pg).use { setup ->
+                setup.createStatement().use {
+                    it.execute(
+                        "CREATE TABLE agent_audit_outbox " +
+                            "(event_id UUID PRIMARY KEY, payload TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL, " +
+                            "published_at TIMESTAMPTZ)",
+                    )
+                }
+                insertCampaignSource(setup, first, "one", "2026-01-01T00:00:00Z", false)
+            }
+            assertThatThrownBy {
+                AgentAuditInventory.reconcileCampaign(
+                    { sourceConnection(pg) },
+                    { sourceConnection(pg) },
+                    campaignWindow(),
+                    pageSize = 1,
+                )
+            }.hasMessageContaining("unpublished rows")
+        }
+    }
+
+    private fun campaignWindow(): AgentAuditInventory.CampaignWindow {
+        val time = Instant.parse("2026-01-01T00:00:00Z")
+        val lines = listOf(first to "one", second to "two")
+            .joinToString("") { (id, payload) -> "$time:$id:${sha(payload)}\n" }
+        return AgentAuditInventory.CampaignWindow(
+            time,
+            Instant.parse("2026-01-02T00:00:00Z"),
+            2,
+            sha(lines),
+        )
+    }
+
+    private fun insertCampaignSource(
+        connection: Connection,
+        id: UUID,
+        payload: String,
+        time: String,
+        published: Boolean,
+    ) {
+        connection.prepareStatement(
+            "INSERT INTO agent_audit_outbox VALUES (?, ?, ?::timestamptz, ?::timestamptz)",
+        ).use {
+            it.setObject(1, id)
+            it.setString(2, payload)
+            it.setString(3, time)
+            it.setString(4, if (published) time else null)
+            it.executeUpdate()
+        }
+    }
 
     @Test
     fun `keyset export retains equal timestamp rows and hashes exact UTF-8 text`() {
