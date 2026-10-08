@@ -37,6 +37,8 @@ private const val FOREIGN = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
 )
 class BusinessPaymentBatchHttpIT {
     @Test
+    // One transaction lifecycle exercises create, durable replay, company isolation and optimistic replacement.
+    @Suppress("LongMethod")
     fun `draft HTTP contract scopes company and preserves idempotency`() {
         val key = UUID.randomUUID().toString()
         val itemId = UUID.randomUUID()

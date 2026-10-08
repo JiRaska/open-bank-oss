@@ -11,6 +11,7 @@ import com.openbank.domestic.application.usecase.CzechDomesticIban
 import com.openbank.domestic.infrastructure.persistence.entity.BusinessPaymentBatchDraftEntity
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
+import io.quarkus.security.identity.SecurityIdentity
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.annotation.security.RolesAllowed
 import jakarta.enterprise.context.ApplicationScoped
@@ -29,7 +30,6 @@ import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.jwt.JsonWebToken
-import io.quarkus.security.identity.SecurityIdentity
 import java.security.MessageDigest
 import java.time.Instant
 import java.util.UUID
@@ -66,23 +66,20 @@ class BusinessPaymentBatchDraftResource(
         val messageForPayee: String? = null,
     ) {
         @JsonAnySetter
-        fun rejectUnknown(name: String, ignored: Any?) {
+        fun rejectUnknown(name: String, ignored: Any?): Nothing =
             throw IllegalArgumentException("unsupported item field $name")
-        }
     }
 
     data class Create(val debtorAccountId: UUID, val items: List<Item>) {
         @JsonAnySetter
-        fun rejectUnknown(name: String, ignored: Any?) {
+        fun rejectUnknown(name: String, ignored: Any?): Nothing =
             throw IllegalArgumentException("unsupported batch field $name")
-        }
     }
 
     data class Replace(val items: List<Item>) {
         @JsonAnySetter
-        fun rejectUnknown(name: String, ignored: Any?) {
+        fun rejectUnknown(name: String, ignored: Any?): Nothing =
             throw IllegalArgumentException("unsupported replacement field $name")
-        }
     }
 
     // Read raw JSON so a reused key is compared to the complete canonical body before
@@ -97,7 +94,7 @@ class BusinessPaymentBatchDraftResource(
         trustedEdge()
         val party = requireNotNull(entity) { "company context required" }
         val human = requireNotNull(actor) { "human actor required" }
-        val retryKey = requireNotNull(key?.takeIf { it.isNotBlank() && it.length <= 128 }) {
+        val retryKey = requireNotNull(key?.takeIf { it.isNotBlank() && it.length <= MAX_KEY_CHARS }) {
             "Idempotency-Key required (1..128)"
         }
         val rawBody = requireNotNull(body) { "JSON body is required" }
@@ -109,7 +106,9 @@ class BusinessPaymentBatchDraftResource(
         val request = mapper.treeToValue(node, Create::class.java)
         val summary = validate(request.items)
         val (saved, replayed) = store.create(party, human, retryKey, hash, request, summary)
-        return Response.status(if (replayed) 200 else 201).entity(view(saved, 0)).build()
+        return Response.status(
+            if (replayed) Response.Status.OK else Response.Status.CREATED,
+        ).entity(view(saved, 0)).build()
     }
 
     @GET
@@ -121,8 +120,8 @@ class BusinessPaymentBatchDraftResource(
         trustedEdge()
         val party = requireNotNull(entity) { "company context required" }
         val p = page ?: 0
-        val s = size ?: 20
-        require(p in 0..1000 && s in 1..20) { "page or size out of range" }
+        val s = size ?: PAGE_SIZE
+        require(p in 0..MAX_LIST_PAGE && s in 1..PAGE_SIZE) { "page or size out of range" }
         val body = mapOf("data" to store.list(party, p, s).map { view(it, null) }, "page" to p, "size" to s)
         return Response.ok(body).build()
     }
@@ -137,8 +136,8 @@ class BusinessPaymentBatchDraftResource(
         trustedEdge()
         val party = requireNotNull(entity) { "company context required" }
         val p = page ?: 0
-        require(p in 0..4) { "page out of range" }
-        val saved = store.get(party, id) ?: return Response.status(404).build()
+        require(p in 0..MAX_ITEM_PAGE) { "page out of range" }
+        val saved = store.get(party, id) ?: return Response.status(Response.Status.NOT_FOUND).build()
         return Response.ok(view(saved, p)).build()
     }
 
@@ -154,18 +153,18 @@ class BusinessPaymentBatchDraftResource(
         trustedEdge()
         val party = requireNotNull(entity) { "company context required" }
         val human = requireNotNull(actor) { "human actor required" }
-        val expected = ifMatch?.trim('"')?.toLongOrNull() ?: return Response.status(428).build()
+        val expected = ifMatch?.trim('"')?.toLongOrNull() ?: return Response.status(HTTP_PRECONDITION_REQUIRED).build()
         val rawBody = requireNotNull(body) { "JSON body is required" }
         require(rawBody.length <= MAX_BODY_CHARS) { "batch body is too large" }
         val request = mapper.readValue(rawBody, Replace::class.java)
         val summary = validate(request.items)
         val saved = store.replace(party, id, human, expected, mapper.writeValueAsString(request.items), summary)
-            ?: return Response.status(404).build()
+            ?: return Response.status(Response.Status.NOT_FOUND).build()
         return Response.ok(view(saved, 0)).build()
     }
 
     private fun view(row: BusinessPaymentBatchDraftEntity, page: Int?): Map<String, Any?> {
-        val items = if (page == null) null else mapper.readTree(row.itemsJson).drop(page * 20).take(20)
+        val items = if (page == null) null else mapper.readTree(row.itemsJson).drop(page * PAGE_SIZE).take(PAGE_SIZE)
         return mapOf(
             "id" to row.id, "state" to "DRAFT", "debtorAccountId" to row.debtorAccountId,
             "itemCount" to row.itemCount, "totalAmountMinor" to row.amountMinor,
@@ -177,7 +176,7 @@ class BusinessPaymentBatchDraftResource(
     data class Summary(val count: Int, val total: Long)
 
     internal fun validate(items: List<Item>): Summary {
-        require(items.size in 1..100) { "between 1 and 100 items required" }
+        require(items.size in 1..MAX_ITEMS) { "between 1 and 100 items required" }
         require(items.map { it.itemId }.toSet().size == items.size) { "itemId must be unique" }
         var total = 0L
         items.forEach { item ->
@@ -188,16 +187,20 @@ class BusinessPaymentBatchDraftResource(
                 throw IllegalArgumentException("batch total exceeds supported range")
             }
             require(item.currency == "CZK") { "only CZK is supported" }
-            require(item.creditorAccountNumber.length in 1..17) { "creditor account is too long" }
+            require(item.creditorAccountNumber.length in 1..MAX_ACCOUNT_CHARS) { "creditor account is too long" }
             require(item.creditorBankCode.matches(Regex("[0-9]{4}"))) { "invalid bank code" }
             require(CzechDomesticIban.fromAccountNumber(item.creditorAccountNumber, item.creditorBankCode) != null) {
                 "invalid Czech creditor account"
             }
-            require(item.creditorName.isNotBlank() && item.creditorName.length <= 140) { "invalid creditor name" }
+            require(item.creditorName.isNotBlank() && item.creditorName.length <= MAX_TEXT_CHARS) {
+                "invalid creditor name"
+            }
             require(item.variableSymbol == null || item.variableSymbol.matches(Regex("[0-9]{1,10}"))) {
                 "invalid variable symbol"
             }
-            require(item.messageForPayee == null || item.messageForPayee.length <= 140) { "message too long" }
+            require(item.messageForPayee == null || item.messageForPayee.length <= MAX_TEXT_CHARS) {
+                "message too long"
+            }
         }
         return Summary(items.size, total)
     }
@@ -219,6 +222,14 @@ class BusinessPaymentBatchDraftResource(
 
     private companion object {
         const val MAX_BODY_CHARS = 64_000
+        const val MAX_KEY_CHARS = 128
+        const val PAGE_SIZE = 20
+        const val MAX_LIST_PAGE = 1000
+        const val MAX_ITEM_PAGE = 4
+        const val MAX_ITEMS = 100
+        const val MAX_ACCOUNT_CHARS = 17
+        const val MAX_TEXT_CHARS = 140
+        const val HTTP_PRECONDITION_REQUIRED = 428
     }
 }
 
@@ -235,8 +246,13 @@ class BusinessPaymentBatchDraftStore(private val mapper: ObjectMapper) :
         return existing
     }
 
+    // Constraint failures arrive wrapped by Hibernate Reactive; inspect only the named unique key before replaying.
+    @Suppress("TooGenericExceptionCaught", "ThrowsCount")
     suspend fun create(
-        entity: UUID, actor: UUID, key: String, hash: String,
+        entity: UUID,
+        actor: UUID,
+        key: String,
+        hash: String,
         request: BusinessPaymentBatchDraftResource.Create,
         summary: BusinessPaymentBatchDraftResource.Summary,
     ): Pair<BusinessPaymentBatchDraftEntity, Boolean> {
@@ -292,7 +308,11 @@ class BusinessPaymentBatchDraftStore(private val mapper: ObjectMapper) :
     }.awaitSuspending()
 
     suspend fun replace(
-        entity: UUID, id: UUID, actor: UUID, expected: Long, itemsJson: String,
+        entity: UUID,
+        id: UUID,
+        actor: UUID,
+        expected: Long,
+        itemsJson: String,
         summary: BusinessPaymentBatchDraftResource.Summary,
     ): BusinessPaymentBatchDraftEntity? = Panache.withTransaction {
         find("entityPartyId = ?1 and id = ?2", entity, id)
@@ -313,7 +333,7 @@ class BatchDraftConflict : RuntimeException("Draft revision or idempotency key c
 
 @jakarta.ws.rs.ext.Provider
 class BatchDraftConflictMapper : jakarta.ws.rs.ext.ExceptionMapper<BatchDraftConflict> {
-    override fun toResponse(exception: BatchDraftConflict): Response = Response.status(409)
+    override fun toResponse(exception: BatchDraftConflict): Response = Response.status(Response.Status.CONFLICT)
         .entity(mapOf("code" to "BATCH_DRAFT_CONFLICT", "error" to exception.message))
         .build()
 }

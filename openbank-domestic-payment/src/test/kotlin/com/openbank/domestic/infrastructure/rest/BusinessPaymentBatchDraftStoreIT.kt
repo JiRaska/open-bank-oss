@@ -39,9 +39,12 @@ class BusinessPaymentBatchDraftStoreIT {
     private val summary = BusinessPaymentBatchDraftResource.Summary(1, 125)
     private fun request() = BusinessPaymentBatchDraftResource.Create(
         UUID.randomUUID(),
-        listOf(BusinessPaymentBatchDraftResource.Item(UUID.randomUUID(), "123456789", "0800", "Supplier", 125, "CZK")),
+        listOf(
+            BusinessPaymentBatchDraftResource.Item(UUID.randomUUID(), "123456789", "0800", "Supplier", 125, "CZK"),
+        ),
     )
-    private fun itemsJson() = com.fasterxml.jackson.module.kotlin.jacksonObjectMapper().writeValueAsString(request().items)
+    private fun itemsJson() =
+        com.fasterxml.jackson.module.kotlin.jacksonObjectMapper().writeValueAsString(request().items)
 
     @Test
     fun `company ownership and durable idempotency binding`() {
@@ -96,7 +99,11 @@ class BusinessPaymentBatchDraftStoreIT {
                 runCatching {
                     db {
                         store.replace(
-                            company, row.id, UUID.randomUUID(), row.revision, itemsJson(),
+                            company,
+                            row.id,
+                            UUID.randomUUID(),
+                            row.revision,
+                            itemsJson(),
                             summary,
                         )
                     }

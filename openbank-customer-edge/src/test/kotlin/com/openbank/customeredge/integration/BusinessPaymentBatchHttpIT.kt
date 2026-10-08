@@ -32,7 +32,8 @@ class BusinessPaymentBatchHttpIT {
     fun stubs() {
         BusinessApprovalStubs.reset()
         BusinessApprovalStubs.stub(
-            "GET", "/api/v1/parties/$BATCH_HUMAN/acting-for",
+            "GET",
+            "/api/v1/parties/$BATCH_HUMAN/acting-for",
             body = """[{"partyId":"$BATCH_COMPANY","partyType":"COMPANY","status":"ACTIVE"}]""",
         )
     }

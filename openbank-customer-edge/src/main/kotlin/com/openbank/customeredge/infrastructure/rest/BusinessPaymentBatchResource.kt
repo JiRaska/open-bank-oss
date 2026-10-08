@@ -36,6 +36,7 @@ class BusinessPaymentBatchResource(
 ) {
     @Inject
     lateinit var jwt: JsonWebToken
+
     @ConfigProperty(name = "openbank.edge.domestic-payment-service-url")
     lateinit var domesticUrl: String
 
@@ -88,7 +89,10 @@ class BusinessPaymentBatchResource(
         if (revision?.trim('"')?.toLongOrNull() == null) return Response.status(428).build()
         if (body.isNullOrBlank()) return Response.status(400).build()
         return upstream.put(
-            "${url()}/$id/items", entity.toString(), body, null,
+            "${url()}/$id/items",
+            entity.toString(),
+            body,
+            null,
             mapOf("If-Match" to revision, "X-Actor-Party-Id" to human.toString()),
         )
     }
@@ -98,8 +102,10 @@ class BusinessPaymentBatchResource(
     private fun parties(header: String?): Pair<UUID, UUID> {
         val raw = CustomerEdgeResource.resolvePartyIdClaim(jwt.getClaim<String>("party_id"), jwt.subject)
             ?: throw ForbiddenException("human party is required")
-        val human = merged.resolve(runCatching { UUID.fromString(raw) }.getOrNull()
-            ?: throw ForbiddenException("human party is invalid"))
+        val human = merged.resolve(
+            runCatching { UUID.fromString(raw) }.getOrNull()
+                ?: throw ForbiddenException("human party is invalid"),
+        )
         if (header.isNullOrBlank()) throw ForbiddenException("X-Acting-For is required")
         val entity = actingFor.resolve(human, header)
         if (entity == human) throw ForbiddenException("company mandate is required")

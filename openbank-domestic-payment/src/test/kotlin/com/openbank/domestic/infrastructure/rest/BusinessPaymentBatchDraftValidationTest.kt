@@ -14,10 +14,16 @@ import java.util.UUID
 
 class BusinessPaymentBatchDraftValidationTest {
     private val resource = BusinessPaymentBatchDraftResource(
-        BusinessPaymentBatchDraftStore(ObjectMapper()), ObjectMapper(),
+        BusinessPaymentBatchDraftStore(ObjectMapper()),
+        ObjectMapper(),
     )
     private val first = BusinessPaymentBatchDraftResource.Item(
-        UUID.randomUUID(), "123456789", "0800", "Supplier", 125, "CZK",
+        UUID.randomUUID(),
+        "123456789",
+        "0800",
+        "Supplier",
+        125,
+        "CZK",
     )
 
     @Test
