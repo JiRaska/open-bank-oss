@@ -23,6 +23,8 @@ import java.security.KeyStore
 import java.time.Duration
 import java.util.Optional
 import java.util.UUID
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.locks.ReentrantLock
 import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManagerFactory
 
@@ -161,24 +163,39 @@ class UpstreamClient {
 
     @Volatile private var tokenExpiresAt: Long = 0L
 
-    @Synchronized
-    private fun serviceToken(): String {
-        val now = System.currentTimeMillis() / 1000L
-        val cached = cachedToken
-        if (cached != null && tokenExpiresAt - now > TOKEN_REFRESH_BUFFER_SECONDS) return cached
-        return fetchToken().also { (token, expiry) ->
-            cachedToken = token
-            tokenExpiresAt = now + expiry
-        }.first
+    private val tokenLock = ReentrantLock()
+
+    private fun serviceToken(deadlineNanos: Long? = null): String {
+        if (deadlineNanos == null) {
+            tokenLock.lock()
+        } else {
+            check(tokenLock.tryLock(remainingNanos(deadlineNanos), TimeUnit.NANOSECONDS)) {
+                "Upstream request deadline exceeded waiting for service token"
+            }
+        }
+        return try {
+            val now = System.currentTimeMillis() / 1000L
+            val cached = cachedToken
+            if (cached != null && tokenExpiresAt - now > TOKEN_REFRESH_BUFFER_SECONDS) {
+                cached
+            } else {
+                fetchToken(deadlineNanos?.let(::remainingMillis) ?: requestTimeoutMs).also { (token, expiry) ->
+                    cachedToken = token
+                    tokenExpiresAt = now + expiry
+                }.first
+            }
+        } finally {
+            tokenLock.unlock()
+        }
     }
 
-    private fun fetchToken(): Pair<String, Long> {
+    private fun fetchToken(timeoutMs: Long): Pair<String, Long> {
         val tokenUrl = "$tokenEndpointBase/protocol/openid-connect/token"
         val body = "grant_type=client_credentials&client_id=$clientId&client_secret=$clientSecret"
         val request = HttpRequest.newBuilder() // token endpoint: never tainted, see upstreamRequest()
             .uri(URI.create(tokenUrl))
             .header("Content-Type", "application/x-www-form-urlencoded")
-            .timeout(Duration.ofMillis(requestTimeoutMs))
+            .timeout(Duration.ofMillis(timeoutMs.coerceIn(1, requestTimeoutMs)))
             .POST(HttpRequest.BodyPublishers.ofString(body))
             .build()
         val response = http.send(request, HttpResponse.BodyHandlers.ofString())
@@ -191,6 +208,14 @@ class UpstreamClient {
             ?: error("Token endpoint response missing access_token")
         val expiresIn = tree.get("expires_in")?.asLong() ?: 300L
         return token to expiresIn
+    }
+
+    private fun remainingNanos(deadlineNanos: Long): Long = (deadlineNanos - System.nanoTime()).coerceAtLeast(0)
+
+    private fun remainingMillis(deadlineNanos: Long): Long {
+        val nanos = remainingNanos(deadlineNanos)
+        check(nanos > 0) { "Upstream request deadline exceeded" }
+        return TimeUnit.NANOSECONDS.toMillis(nanos).coerceAtLeast(1)
     }
 
     /**
@@ -224,13 +249,17 @@ class UpstreamClient {
         return builder.build()
     }
 
-    fun get(url: String, partyId: String): Response = try {
+    fun get(url: String, partyId: String): Response = get(url, partyId, requestTimeoutMs)
+
+    /** Cap a single call by the caller's remaining aggregate budget. */
+    fun get(url: String, partyId: String, timeoutMs: Long): Response = try {
+        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs.coerceIn(1, requestTimeoutMs))
         val request = upstreamRequest()
             .uri(validatedUri(url))
-            .header("Authorization", "Bearer ${serviceToken()}")
+            .header("Authorization", "Bearer ${serviceToken(deadline)}")
             .header(PARTY_HEADER, partyId)
             .header("Accept", "application/json")
-            .timeout(Duration.ofMillis(requestTimeoutMs))
+            .timeout(Duration.ofMillis(remainingMillis(deadline)))
             .GET().build()
         val r = http.send(request, HttpResponse.BodyHandlers.ofString())
         Response.status(r.statusCode()).entity(r.body()).type(MediaType.APPLICATION_JSON).build()
