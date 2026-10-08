@@ -374,6 +374,8 @@ def classify_run(run: dict, jobs: list[dict]) -> dict:
         "html_url": run.get("html_url"),
         "conclusion": conclusion,
         "failing": [],
+        "successful_jobs": [j.get("name") for j in jobs
+                            if j.get("conclusion") == "success" and isinstance(j.get("name"), str)],
         "status": None,
     }
 
@@ -550,6 +552,7 @@ def self_test() -> int:
     check("a green run classifies green", green["status"] == "green")
     check("exit code for green is 0", STATUS_EXIT[green["status"]] == 0)
     check("a green run escalates nothing", green["failing"] == [])
+    check("a green run names only jobs it actually ran successfully", green["successful_jobs"] == ["build"])
 
     # THE log-grep trap, made unreachable by construction. This job carries a `_log` body full of
     # the exact strings a naive grep would match -- including a step's own `run:` script echoing

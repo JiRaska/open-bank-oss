@@ -214,7 +214,7 @@ jobs:
         with:
           script: |
             const fs = require('fs')
-            const { eventIsSuperseded } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/main-red-watch-order.cjs`)
+            const { eventIsSuperseded, failedJobsCovered } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/main-red-watch-order.cjs`)
             const v = JSON.parse(fs.readFileSync('/tmp/main-red.json', 'utf8'))
             const LABEL = 'main-red'
             const slug = (v.workflow || 'unknown').toLowerCase().replace(/[^a-z0-9]+/g, '-')
@@ -260,8 +260,11 @@ jobs:
             }
 
             if (v.status === 'green') {
-              // Green closes this workflow's issue. Only THIS
-              // workflow's — Services CI going green says nothing about Trivy.
+              // A path-scoped green run can omit the job that made main red (#12314).
+              if (!failedJobsCovered(openIssue.body, v.successful_jobs)) {
+                core.info(`${v.workflow} green, but the previously failing jobs did not all run successfully; keeping #${openIssue.number} open.`)
+                return
+              }
               await github.rest.issues.createComment({
                 ...context.repo, issue_number: openIssue.number,
                 body: `\`${v.workflow}\` is green again on main at \`${(v.head_sha||'').slice(0,9)}\` — closing. _(\`${context.workflow}\` run ${context.runId})_`,
@@ -300,7 +303,7 @@ jobs:
               'never executed.',
               '',
               'This issue is refreshed in place while main stays red and is closed by the watch',
-              'itself the next time `' + v.workflow + '` goes green on main. Closing it by hand',
+              'only after a later main run succeeds on every job listed above. Closing it by hand',
               'does not fix main — the watch reopens it. To accept the red knowingly, say so in',
               'a comment; a silent red main is the only unacceptable state.',
               '',

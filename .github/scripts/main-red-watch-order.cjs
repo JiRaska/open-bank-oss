@@ -19,4 +19,17 @@ function eventIsSuperseded(verdict, latest) {
   return latestId > runId || latestAttempt > attempt
 }
 
-module.exports = { eventIsSuperseded }
+/** A scoped green run heals an incident only if it reran every formerly failing job. */
+function failedJobsCovered(issueBody, successfulJobs) {
+  if (typeof issueBody !== 'string' || !Array.isArray(successfulJobs)) return false
+  const section = issueBody.match(/### Every failing job in this attempt\r?\n\r?\n([^]*?)(?:\r?\n\r?\n|$)/)
+  if (!section) return false
+  const lines = section[1].split(/\r?\n/).filter(Boolean)
+  if (!lines.length || lines.some(line => !line.startsWith('- '))) return false
+  const names = lines.map(line => line.match(/^- `([^`]+)` \[(?:failure|timed_out)\](?: |$)/)?.[1])
+  if (names.some(name => !name)) return false
+  const passed = new Set(successfulJobs)
+  return names.every(name => passed.has(name))
+}
+
+module.exports = { eventIsSuperseded, failedJobsCovered }
