@@ -64,6 +64,7 @@ class StandingOrderServiceTest {
             cmd.copy(debitAccountId = UUID.randomUUID()),
             cmd.copy(partyId = UUID.randomUUID()),
             cmd.copy(customerActorId = UUID.randomUUID()),
+            cmd.copy(startDate = requireNotNull(cmd.startDate).plusDays(1)),
             cmd.copy(replacesStandingOrderId = UUID.randomUUID()),
         )
         changed.forEach { request ->
@@ -75,15 +76,26 @@ class StandingOrderServiceTest {
     }
 
     @Test
-    fun `edge defaulted date has stable retry identity across midnight`(): Unit = runBlocking {
-        val cmd = createCommand().copy(startDateDefaulted = true, customerActorId = UUID.randomUUID())
+    fun `missing original date resolves once and replays across midnight`(): Unit = runBlocking {
+        val cmd = createCommand().copy(startDate = null, customerActorId = UUID.randomUUID())
         var stored: StandingOrder? = null
         coEvery { repo.findByIdempotencyKey(cmd.idempotencyKey) } answers { stored }
         coEvery { repo.save(any()) } answers { firstArg<StandingOrder>().also { stored = it } }
+        val before = StandingOrderService(
+            repo,
+            Clock.fixed(Instant.parse("2026-10-08T23:59:00Z"), java.time.ZoneOffset.UTC),
+            mapper,
+        )
+        val after = StandingOrderService(
+            repo,
+            Clock.fixed(Instant.parse("2026-10-09T00:01:00Z"), java.time.ZoneOffset.UTC),
+            mapper,
+        )
 
-        val original = service.create(cmd)
-        assertThat(service.create(cmd.copy(startDate = cmd.startDate.plusDays(1)))).isEqualTo(original)
-        assertThatThrownBy { runBlocking { service.create(cmd.copy(startDateDefaulted = false)) } }
+        val original = before.create(cmd)
+        assertThat(original.startDate).isEqualTo(LocalDate.of(2026, 10, 8))
+        assertThat(after.create(cmd)).isEqualTo(original)
+        assertThatThrownBy { runBlocking { after.create(cmd.copy(startDate = LocalDate.of(2026, 10, 9))) } }
             .isInstanceOf(IllegalArgumentException::class.java)
         coVerify(exactly = 1) { repo.save(any()) }
     }

@@ -80,6 +80,26 @@ class StandingOrderReceiptIT {
         }
     }
 
+    @Test
+    fun `direct caller cannot alter an explicit date by claiming it was defaulted`() {
+        val key = "date-${UUID.randomUUID()}"
+        val originalDate = LocalDate.now().plusDays(1)
+        val first = RestAssured.given().contentType("application/json")
+            .header("X-Customer-Actor-Id", actor.toString())
+            .body(body(key, 2_500, originalDate))
+            .post("/api/v1/standing-orders")
+        assertThat(first.statusCode).isEqualTo(201)
+
+        val changed = RestAssured.given().contentType("application/json")
+            .header("X-Customer-Actor-Id", actor.toString())
+            .header("X-Start-Date-Defaulted", "true")
+            .body(body(key, 2_500, originalDate.plusDays(1)))
+            .post("/api/v1/standing-orders")
+        assertThat(changed.statusCode).isEqualTo(400)
+        assertThat(lookup(key, party, account, actor).jsonPath().getString("id"))
+            .isEqualTo(first.jsonPath().getString("id"))
+    }
+
     private fun concurrentPosts(key: String, firstAmount: Int, secondAmount: Int): List<Response> {
         val executor = Executors.newFixedThreadPool(2)
         val barrier = CyclicBarrier(2)
@@ -107,7 +127,7 @@ class StandingOrderReceiptIT {
             .body("""{"idempotencyKey":"$key","debitAccountId":"$accountId"}""")
             .post("/api/v1/standing-orders/receipt-lookup")
 
-    private fun body(key: String, amount: Int) = """
+    private fun body(key: String, amount: Int, startDate: LocalDate? = LocalDate.now().plusDays(1)) = """
         {
           "idempotencyKey": "$key",
           "partyId": "$party",
@@ -120,7 +140,7 @@ class StandingOrderReceiptIT {
           "frequency": "MONTHLY",
           "paymentType": "DOMESTIC",
           "remittanceInfo": null,
-          "startDate": "${LocalDate.now().plusDays(1)}",
+          ${startDate?.let { "\"startDate\": \"$it\"," }.orEmpty()}
           "endDate": null
         }
     """.trimIndent()

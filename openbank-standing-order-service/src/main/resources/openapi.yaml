@@ -37,11 +37,6 @@ paths:
           required: false
           schema: {type: string, format: uuid}
           description: Verified original customer actor supplied by customer-edge for bound receipts.
-        - name: X-Start-Date-Defaulted
-          in: header
-          required: false
-          schema: {type: string, enum: ['true', 'false']}
-          description: Customer-edge marks a date it resolved from an omitted app field so retries remain stable.
       requestBody:
         required: true
         content:
@@ -229,7 +224,7 @@ components:
       # a client following it could never succeed. Corrected under ADR-0048 D5 'correction'
       # (#8351 burn-down: idempotencyKey was already enforced by the code and the dedup
       # replay is covered by StandingOrderServiceTest).
-      required: [idempotencyKey, partyId, debitAccountId, creditorIban, creditorName, creditorBic, amountMinorUnits, currency, frequency, paymentType, remittanceInfo, startDate, endDate]
+      required: [idempotencyKey, partyId, debitAccountId, creditorIban, creditorName, creditorBic, amountMinorUnits, currency, frequency, paymentType, remittanceInfo, endDate]
       properties:
         idempotencyKey:
           description: >-
@@ -279,6 +274,7 @@ components:
         startDate:
           type: string
           format: date
+          description: Optional original date; service resolves today only on first creation.
         endDate:
           type: string
           format: date

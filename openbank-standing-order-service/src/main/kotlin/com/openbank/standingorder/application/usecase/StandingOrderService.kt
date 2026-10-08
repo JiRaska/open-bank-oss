@@ -37,6 +37,7 @@ class StandingOrderService(
         val fingerprint = requestFingerprint(cmd)
         repo.findByIdempotencyKey(cmd.idempotencyKey)?.let { return boundReplay(it, fingerprint, cmd.customerActorId) }
         val now = Instant.now(clock)
+        val startDate = cmd.startDate ?: LocalDate.now(clock)
         val order = StandingOrder(
             id = Ids.newId(), idempotencyKey = cmd.idempotencyKey,
             partyId = cmd.partyId, debitAccountId = cmd.debitAccountId,
@@ -45,8 +46,8 @@ class StandingOrderService(
             amountMinorUnits = cmd.amountMinorUnits, currency = cmd.currency,
             frequency = cmd.frequency, paymentType = cmd.paymentType,
             remittanceInfo = cmd.remittanceInfo,
-            startDate = cmd.startDate, endDate = cmd.endDate,
-            nextExecutionDate = cmd.startDate,
+            startDate = startDate, endDate = cmd.endDate,
+            nextExecutionDate = startDate,
             lastExecutionDate = null, executionCount = 0, failureCount = 0,
             status = StandingOrderStatus.ACTIVE, createdAt = now, updatedAt = now,
             requestFingerprint = fingerprint,
@@ -84,7 +85,7 @@ class StandingOrderService(
             cmd.idempotencyKey, cmd.partyId, cmd.debitAccountId, cmd.debtorIban, cmd.debtorName,
             cmd.creditorIban, cmd.creditorName, cmd.creditorBic, cmd.amountMinorUnits, cmd.currency,
             cmd.frequency.name, cmd.paymentType.name, cmd.remittanceInfo,
-            cmd.startDateDefaulted, if (cmd.startDateDefaulted) null else cmd.startDate.toString(),
+            cmd.startDate?.toString(),
             cmd.endDate?.toString(), cmd.replacesStandingOrderId, cmd.customerActorId,
         )
         return MessageDigest.getInstance("SHA-256")

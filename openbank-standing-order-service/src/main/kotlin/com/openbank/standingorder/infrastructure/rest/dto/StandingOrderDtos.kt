@@ -23,7 +23,7 @@ data class CreateStandingOrderRequest(
     val frequency: Frequency,
     val paymentType: PaymentType,
     val remittanceInfo: String?,
-    val startDate: LocalDate,
+    val startDate: LocalDate? = null,
     val endDate: LocalDate?,
     /**
      * An EDIT (#10281): the order this one replaces. The replacement is created and the old order

@@ -22,14 +22,12 @@ data class CreateStandingOrderCommand(
     val frequency: Frequency,
     val paymentType: PaymentType,
     val remittanceInfo: String?,
-    val startDate: LocalDate,
+    val startDate: LocalDate?,
     val endDate: LocalDate?,
     /** Atomic replace (#10281): cancel this order in the same transaction that creates the new one. */
     val replacesStandingOrderId: UUID? = null,
     /** Verified customer principal forwarded by the authenticated edge; absent for legacy callers. */
     val customerActorId: UUID? = null,
-    /** Edge resolved a missing app date; exclude the changing resolution from retry identity. */
-    val startDateDefaulted: Boolean = false,
 )
 
 interface StandingOrderUseCase {
