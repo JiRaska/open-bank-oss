@@ -25,5 +25,8 @@ class DomesticPaymentCurrencyOpenApiTest {
 
         val refusal = create.path("responses").path("400").path("description").asText()
         assertThat(refusal).contains("CURRENCY_NOT_ALLOWED", "before spend reservation or SCA")
+
+        val denied = create.path("responses").path("403").path("description").asText()
+        assertThat(denied).contains("Caller may not debit this account", "not an oracle")
     }
 }
