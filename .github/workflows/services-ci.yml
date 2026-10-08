@@ -2,8 +2,9 @@
 #
 #  changes  -> works out which Gradle modules a push/PR actually touched and emits
 #              a JSON matrix. Shared changes (openbank-libs, version catalog, root
-#              build, the reusable workflow itself) fan out to EVERY module because
-#              everything depends on them. Pushes to main always build everything.
+#              build) fan out to EVERY module because everything depends on them.
+#              Main pushes are also path-scoped; unattributable changes fall back
+#              to the full fleet. A CI recipe change uses one canary module.
 #  build    -> calls the reusable _service-ci.yml once per changed module (matrix),
 #              so each service reports its own green/red status check.
 #
