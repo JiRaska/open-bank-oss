@@ -26,7 +26,7 @@ info:
   # 1.13 -> 1.14 (#11931): additive — create documents 400 CURRENCY_NOT_ALLOWED (SCT is
   # euro-only; any non-EUR currency is refused at the boundary).
   # 1.14 -> 1.15 (#11588): additive verified makerActorKind on approval responses.
-  version: 1.15.0
+  version: 1.16.0
   description: >-
     SEPA credit transfer lifecycle — create, query, status transitions. On create, debtor and
     creditor names are synchronously screened against the sanctions lists (ADR-0032): a clean payment
@@ -43,6 +43,34 @@ tags:
   - name: SEPA Payments
 
 paths:
+  /api/v1/sepa-payments/receipts/lookup:
+    post:
+      tags: [SEPA Payments]
+      summary: Resolve a payment receipt from the authenticated creator and original request
+      operationId: lookupSepaPaymentReceipt
+      description: >-
+        The idempotency key is sent only in the JSON body. FOUND is returned only when the
+        stored creator, debtor account, and original request fingerprint match. Missing,
+        mismatched, and legacy unverifiable records return UNKNOWN with no payment details.
+      security:
+        - bearerAuth: [ROLE_API, ROLE_OPERATOR, ROLE_ADMIN, ROLE_PAYMENTS]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SepaReceiptLookupRequest'
+      responses:
+        '200':
+          description: Verified receipt or UNKNOWN
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SepaReceiptLookupResponse'
+        '400':
+          $ref: '#/components/responses/InvalidMoney'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /api/v1/sepa-payments:
     post:
       tags: [SEPA Payments]
@@ -352,6 +380,28 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
+    SepaReceiptLookupRequest:
+      type: object
+      required: [idempotencyKey, payment]
+      properties:
+        idempotencyKey:
+          type: string
+          maxLength: 128
+        payment:
+          $ref: '#/components/schemas/CreateSepaPaymentRequest'
+    SepaReceiptLookupResponse:
+      type: object
+      required: [state]
+      properties:
+        state:
+          type: string
+          enum: [FOUND, UNKNOWN]
+        paymentId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [RECEIVED, VALIDATED, PROCESSING, COMPLETED, REJECTED, RETURNED, CANCELLED]
     ApprovalResponse:
       type: object
       description: >-

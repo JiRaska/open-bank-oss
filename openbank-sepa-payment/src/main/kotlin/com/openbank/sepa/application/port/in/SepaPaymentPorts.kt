@@ -29,6 +29,8 @@ data class CreateSepaPaymentCommand(
      * even after the Redis record has expired or been evicted. `null` for callers with no request.
      */
     val requestHash: String? = null,
+    val initiatingPrincipal: String? = null,
+    val initiatingPartyId: UUID? = null,
 )
 
 data class ListSepaPaymentsQuery(
@@ -64,6 +66,13 @@ data class HandlePaymentReturnCommand(
 
 interface SepaPaymentUseCase {
     suspend fun createPayment(command: CreateSepaPaymentCommand): SepaPayment
+    suspend fun findReceipt(
+        idempotencyKey: String,
+        requestHash: String,
+        debtorAccountId: UUID,
+        initiatingPrincipal: String,
+        initiatingPartyId: UUID?,
+    ): SepaPayment?
     suspend fun getPayment(paymentId: UUID): SepaPayment
     suspend fun listPayments(query: ListSepaPaymentsQuery): List<SepaPayment>
     suspend fun transitionStatus(command: TransitionSepaPaymentStatusCommand): SepaPayment

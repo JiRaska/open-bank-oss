@@ -6,6 +6,7 @@
 # Actions gated (SepaPaymentResource):
 #   sepaPayment.create           — create a SEPA credit transfer (POST /)
 #   sepaPayment.read             — get payment by id (#paymentId)
+#   sepaPayment.lookupReceipt    — resolve only the caller's own verified create receipt
 #   sepaPayment.list             — list payments
 #   sepaPayment.transitionStatus — ops status transition (#paymentId, PATCH /{id}/status)
 #   sepaPayment.handleReturn     — inbound pacs.004 return from clearing (POST /returns)
@@ -70,6 +71,7 @@ allowed_reasons contains "service-sepa-payment-edge-m2m" if {
 	input.action in {
 		"sepaPayment.create",
 		"sepaPayment.read",
+		"sepaPayment.lookupReceipt",
 	}
 }
 
@@ -88,7 +90,7 @@ allowed_reasons contains "service-sepa-payment-shared-client-m2m" if {
 allowed_reasons contains "service-standing-order-sepa-payment-create" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-standing-order"
-	input.action == "sepaPayment.create"
+	input.action in {"sepaPayment.create", "sepaPayment.lookupReceipt"}
 }
 
 # Edge prohibition (2026-08-05, #3734): veto the customer-facing edge client on every sepaPayment.*

@@ -91,13 +91,10 @@ class SepaPaymentService(
     override suspend fun createPayment(command: CreateSepaPaymentCommand): SepaPayment {
         // #10916: the durable half of the Idempotency-Key check. The Redis record can expire or be
         // evicted while this UNIQUE row lives forever, so a key reused for a DIFFERENT payment must
-        // be refused here too, not answered with the first payment. A legacy row (no stored hash)
-        // or a caller without one keeps the plain replay.
+        // be refused here too, not answered with the first payment. Rows without durable creator
+        // provenance cannot be safely replayed.
         paymentRepository.findByIdempotencyKey(command.idempotencyKey)?.let { existing ->
-            val stored = existing.requestHash
-            if (stored != null && command.requestHash != null && stored != command.requestHash) {
-                throw IdempotencyKeyReusedException()
-            }
+            if (!matchesCreator(existing, command)) throw IdempotencyKeyReusedException()
             return existing
         }
 
@@ -106,6 +103,8 @@ class SepaPaymentService(
             id = UUID.randomUUID(),
             idempotencyKey = command.idempotencyKey,
             requestHash = command.requestHash,
+            initiatingPrincipal = command.initiatingPrincipal,
+            initiatingPartyId = command.initiatingPartyId,
             type = command.type,
             status = SepaPaymentStatus.RECEIVED,
             debtorAccountId = command.debtorAccountId,
@@ -150,6 +149,33 @@ class SepaPaymentService(
         )
         WorkflowClient.start(stub::process, received.id)
         return received
+    }
+
+    private fun matchesCreator(existing: SepaPayment, command: CreateSepaPaymentCommand): Boolean {
+        if (existing.requestHash == null || command.requestHash == null) return false
+        if (existing.initiatingPrincipal == null || command.initiatingPrincipal == null) return false
+        if (existing.requestHash != command.requestHash) return false
+        if (existing.initiatingPrincipal != command.initiatingPrincipal) return false
+        if (existing.initiatingPartyId != command.initiatingPartyId) return false
+        return existing.debtorAccountId == command.debtorAccountId
+    }
+
+    override suspend fun findReceipt(
+        idempotencyKey: String,
+        requestHash: String,
+        debtorAccountId: UUID,
+        initiatingPrincipal: String,
+        initiatingPartyId: UUID?,
+    ): SepaPayment? {
+        val payment = paymentRepository.findByIdempotencyKey(idempotencyKey) ?: return null
+        return payment.takeIf {
+            it.requestHash != null &&
+                it.requestHash == requestHash &&
+                it.initiatingPrincipal != null &&
+                it.initiatingPrincipal == initiatingPrincipal &&
+                it.initiatingPartyId == initiatingPartyId &&
+                it.debtorAccountId == debtorAccountId
+        }
     }
 
     /**

@@ -76,6 +76,12 @@ class SepaPaymentEntity : PanacheEntity() {
     @Column(name = "request_hash", length = 64)
     var requestHash: String? = null
 
+    @Column(name = "initiating_principal")
+    var initiatingPrincipal: String? = null
+
+    @Column(name = "initiating_party_id")
+    var initiatingPartyId: java.util.UUID? = null
+
     @Column(name = "created_at", nullable = false)
     lateinit var createdAt: Instant
 

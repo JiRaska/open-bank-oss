@@ -85,10 +85,16 @@ class SepaPaymentServiceTest {
     @Test
     fun `create payment replays existing payment for idempotency key without dispatching a workflow`(): Unit =
         runBlocking {
-            val existing = payment()
+            val existing = payment().copy(requestHash = "hash", initiatingPrincipal = "operator")
             coEvery { paymentRepository.findByIdempotencyKey(existing.idempotencyKey) } returns existing
 
-            val result = service.createPayment(createCommand(idempotencyKey = existing.idempotencyKey))
+            val result = service.createPayment(
+                createCommand(idempotencyKey = existing.idempotencyKey).copy(
+                    debtorAccountId = existing.debtorAccountId,
+                    requestHash = "hash",
+                    initiatingPrincipal = "operator",
+                ),
+            )
 
             assertThat(result).isEqualTo(existing)
             coVerify(exactly = 0) { paymentRepository.save(any(), any()) }

@@ -47,6 +47,14 @@ data class CreateSepaPaymentRequest(
     )
 }
 
+data class SepaReceiptLookupRequest(val idempotencyKey: String, val payment: CreateSepaPaymentRequest)
+
+data class SepaReceiptLookupResponse(
+    val state: String,
+    val paymentId: UUID? = null,
+    val status: SepaPaymentStatus? = null,
+)
+
 data class TransitionSepaPaymentStatusRequest(
     val targetStatus: String,
     val rejectReason: String? = null,

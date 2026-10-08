@@ -59,6 +59,8 @@ data class SepaPayment(
     val transactionId: UUID? = null,
     /** Request fingerprint the payment was created under (#10916); `null` for legacy rows. */
     val requestHash: String? = null,
+    val initiatingPrincipal: String? = null,
+    val initiatingPartyId: UUID? = null,
 ) {
     /** ISO 4217 code of [amount], the spelling every outbound contract carries. */
     val currency: String get() = amount.currency.code

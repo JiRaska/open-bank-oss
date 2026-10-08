@@ -55,6 +55,11 @@ test_edge_may_read_via_identity_rule if {
 		with data.rules as rules_mock
 }
 
+test_edge_may_lookup_receipt_via_identity_rule if {
+	rest.allow with input as {"principal": edge, "action": "sepaPayment.lookupReceipt"}
+		with data.rules as rules_mock
+}
+
 # --- edge: everything else on the rail is closed (exclusion + prohibition over the matrix) ---
 
 test_edge_denied_handle_return if {
@@ -111,6 +116,13 @@ test_standing_order_may_create_via_its_identity_rule if {
 		with data.rules as rules_mock
 }
 
+test_standing_order_may_lookup_receipt_but_not_general_read if {
+	rest.allow with input as {"principal": standing_order_m2m, "action": "sepaPayment.lookupReceipt"}
+		with data.rules as rules_mock
+	not rest.allow with input as {"principal": standing_order_m2m, "action": "sepaPayment.read"}
+		with data.rules as rules_mock
+}
+
 test_standing_order_denied_every_other_sepa_payment_action if {
 	every action in {
 		"sepaPayment.read", "sepaPayment.list", "sepaPayment.handleReturn",
@@ -125,6 +137,11 @@ test_standing_order_denied_every_other_sepa_payment_action if {
 # ROLE_API holder. Remove the principal.id line from the rule and this goes red.
 test_other_role_api_sa_may_not_create if {
 	rest.allow == false with input as {"principal": other_role_api_sa, "action": "sepaPayment.create"}
+		with data.rules as rules_mock
+}
+
+test_other_role_api_sa_may_not_lookup_receipt if {
+	not rest.allow with input as {"principal": other_role_api_sa, "action": "sepaPayment.lookupReceipt"}
 		with data.rules as rules_mock
 }
 

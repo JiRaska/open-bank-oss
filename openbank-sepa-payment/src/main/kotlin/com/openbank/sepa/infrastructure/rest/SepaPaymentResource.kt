@@ -21,6 +21,8 @@ import com.openbank.sepa.application.port.`in`.PaymentConfirmationUseCase
 import com.openbank.sepa.application.port.`in`.SepaPaymentUseCase
 import com.openbank.sepa.domain.model.SepaPaymentStatus
 import com.openbank.sepa.infrastructure.rest.dto.CreateSepaPaymentRequest
+import com.openbank.sepa.infrastructure.rest.dto.SepaReceiptLookupRequest
+import com.openbank.sepa.infrastructure.rest.dto.SepaReceiptLookupResponse
 import com.openbank.sepa.infrastructure.rest.dto.TransitionSepaPaymentStatusRequest
 import com.openbank.sepa.infrastructure.rest.dto.toResponse
 import io.quarkus.security.identity.SecurityIdentity
@@ -51,6 +53,7 @@ import java.util.UUID
 
 private const val CREATE_PATH = "/api/v1/sepa-payments"
 private const val IDEMPOTENCY_SERVICE = "sepa-payment"
+private const val EDGE_PRINCIPAL = "service-account-openbank-edge"
 private val log = Logger.getLogger(SepaPaymentResource::class.java)
 
 @Path("/api/v1/sepa-payments")
@@ -77,6 +80,7 @@ class SepaPaymentResource(
     suspend fun createPayment(
         request: CreateSepaPaymentRequest,
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        @HeaderParam("X-Customer-Party-Id") customerPartyId: String?,
     ): Response {
         // #3104 — an ABSENT header injected null, so `null.isNotBlank()` threw NPE and this guard
         // answered 500 in exactly the case it was written for. A blank header was always a 400.
@@ -85,14 +89,19 @@ class SepaPaymentResource(
         // #10916: the key is bound to this request's fingerprint and claimed ATOMICALLY before any
         // side effect runs — a different body under the same key answers 409 IDEMPOTENCY_KEY_REUSED,
         // a concurrent duplicate answers 409 IDEMPOTENCY_REQUEST_IN_PROGRESS.
-        // Keys are per service and caller: another principal reusing this key is a different key.
-        val scope = IdempotencyScope(IDEMPOTENCY_SERVICE, identity.principal.name)
+        // The Redis reservation is scoped by creator (and edge party); the durable row separately
+        // verifies the same provenance before any replay is returned.
+        val partyId = trustedPartyId(customerPartyId)
+        val scope = IdempotencyScope(IDEMPOTENCY_SERVICE, callerScope(partyId))
         val requestHash = RequestFingerprints.of(objectMapper, "POST", CREATE_PATH, request)
         // #11642: Money is built here, BEFORE the key is reserved — an amount or currency it cannot
         // hold is a 400 (kernel InvalidMoneyException: AMOUNT_SCALE_EXCEEDED / CURRENCY_UNSUPPORTED) that leaves no idempotency
         // record, row, outbox event or downstream call behind. #11931: the same step refuses a
         // non-EUR currency (SCT is euro-only) as 400 CURRENCY_NOT_ALLOWED, equally before the key.
-        val command = request.toCommand(idempotencyKey, requestHash)
+        val command = request.toCommand(idempotencyKey, requestHash).copy(
+            initiatingPrincipal = identity.principal.name,
+            initiatingPartyId = partyId,
+        )
         when (
             val reservation = idempotencyStore.reserve(
                 scope,
@@ -141,6 +150,44 @@ class SepaPaymentResource(
         return Response.created(URI.create("/api/v1/sepa-payments/${payment.id}"))
             .entity(responseBody)
             .build()
+    }
+
+    @POST
+    @Path("/receipts/lookup")
+    @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS")
+    @Authorize(action = "sepaPayment.lookupReceipt")
+    @Operation(summary = "Resolve a SEPA create receipt for the authenticated caller")
+    suspend fun lookupReceipt(
+        request: SepaReceiptLookupRequest?,
+        @HeaderParam("X-Customer-Party-Id") customerPartyId: String?,
+    ): Response {
+        requireNotNull(request) { "request body is required" }
+        require(request.idempotencyKey.isNotBlank()) { "idempotencyKey is required" }
+        val partyId = trustedPartyId(customerPartyId)
+        val hash = RequestFingerprints.of(objectMapper, "POST", CREATE_PATH, request.payment)
+        val payment = paymentUseCase.findReceipt(
+            request.idempotencyKey,
+            hash,
+            request.payment.debtorAccountId,
+            identity.principal.name,
+            partyId,
+        )
+        val result = if (payment == null) {
+            SepaReceiptLookupResponse("UNKNOWN")
+        } else {
+            SepaReceiptLookupResponse("FOUND", payment.id, payment.status)
+        }
+        return Response.ok(result).build()
+    }
+
+    private fun callerScope(partyId: UUID?): String =
+        if (partyId == null) identity.principal.name else "${identity.principal.name}:$partyId"
+
+    private fun trustedPartyId(header: String?): UUID? {
+        if (identity.principal.name != EDGE_PRINCIPAL) return null
+        require(!header.isNullOrBlank()) { "X-Customer-Party-Id is required for customer-edge" }
+        return runCatching { UUID.fromString(header) }
+            .getOrElse { throw IllegalArgumentException("X-Customer-Party-Id must be a UUID") }
     }
 
     @GET
