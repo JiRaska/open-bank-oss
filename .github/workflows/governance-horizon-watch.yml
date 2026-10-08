@@ -29,6 +29,13 @@
 # The PR-side half lives in the enforcing guard itself, which now annotates every
 # date within 14 days with a `::warning` on every PR.
 #
+# READINESS ATTESTATIONS (2026-10-04). The third timer of the same shape:
+# `readiness-attestation-format` turns an attestation that expired more than 30 days
+# ago into an ERROR on every PR. consent.pentest froze the queue that way once (#8449)
+# and ledger.pentest was scheduled to on 2026-10-09 -- the entries are hand-transcribed
+# from fuzz runs, so a 21-day TTL lapses whenever nobody transcribes. Its `--warn-days`
+# lane reports each entry's ERROR cliff here, beside the other two.
+#
 # WHY IT IS NOT A REQUIRED CHECK. Scheduled workflows cannot be required contexts
 # here. The PR lane below is what a PR sees, and it only runs the two self-tests —
 # which is the load-bearing half: a warner that reports "0 due" is indistinguishable
@@ -47,6 +54,8 @@ on:
       - ".github/workflows/governance-horizon-watch.yml"
       - ".github/scripts/check-gate-graduation.sh"
       - ".github/scripts/validate-flags.py"
+      - ".github/scripts/check-readiness-attestations.py"
+      - "openbank-libs/governance/attestations.yaml"
   workflow_dispatch:
     inputs:
       warn_days:
@@ -79,12 +88,16 @@ jobs:
       - name: Self-test the flag validator
         run: python3 .github/scripts/validate-flags.py --self-test
 
+      - name: Self-test the attestation guard
+        run: python3 .github/scripts/check-readiness-attestations.py --self-test
+
       # The enforcing lanes must still be exactly what CI ran before this workflow
       # existed. Warn mode is additive or it is a regression.
       - name: The enforcing lanes are unchanged
         run: |
           bash .github/scripts/check-gate-graduation.sh
           python3 .github/scripts/validate-flags.py
+          python3 .github/scripts/check-readiness-attestations.py
 
   watch:
     name: governance horizon watch
@@ -103,6 +116,7 @@ jobs:
         run: |
           bash .github/scripts/check-gate-graduation.sh --self-test
           python3 .github/scripts/validate-flags.py --self-test
+          python3 .github/scripts/check-readiness-attestations.py --self-test
 
       - name: Scan the horizon
         id: scan
@@ -122,6 +136,12 @@ jobs:
             echo
             echo '```'
             python3 .github/scripts/validate-flags.py --warn-days "$WARN_DAYS"
+            echo '```'
+            echo
+            echo "### Readiness attestations (ERROR cliff = expiry + 30d grace)"
+            echo
+            echo '```'
+            python3 .github/scripts/check-readiness-attestations.py --warn-days "$WARN_DAYS"
             echo '```'
           } > /tmp/horizon.md
           cat /tmp/horizon.md
@@ -197,7 +217,9 @@ jobs:
               'Each of these fails **every PR in the repository** on the day it passes, regardless',
               'of the PR\'s diff — that is what happened on 2026-09-01 (#7897, #7919). Either ship',
               'the producer and flip the rule to `enforce`/`block`, retire the flag, or move the',
-              'date forward with a one-line reason in the commit body (ADR-0144).',
+              'date forward with a one-line reason in the commit body (ADR-0144). For a readiness',
+              'attestation: re-attest from a real passing run (date, run URL, `ops` from its',
+              '`fuzz-reports/<svc>-ops*.json`) or delete the entry -- never extend a date.',
               '',
               report,
               '',
@@ -231,7 +253,7 @@ jobs:
                 await github.rest.issues.createComment({
                   ...context.repo, issue_number: number,
                   body: `${tag}\n@${context.repo.owner} ${urgent} governance deadline(s) land within ${urgentDays} days. ` +
-                    'The day after each date, `gate-graduation-guard` / `validate-flags` fail **every open PR**. ' +
+                    'The day after each date, `gate-graduation-guard` / `validate-flags` / `readiness-attestation-format` fail **every open PR**. ' +
                     'Graduate the rule, retire the flag, or move the date forward now.',
                 })
               }

@@ -36,10 +36,10 @@ DST_REGISTRY="public.ecr.aws/d7v4f3x6"   # our ECR Public registry alias
 #   SRC on Docker Hub                       DST repo:tag on our mirror
 MIRRORS=(
   "apache/kafka:3.7.0                       kafka:3.7.0"
-  "grafana/alloy:v1.20.0                    alloy:v1.20.0"
-  "grafana/grafana:13.0.2                   grafana:13.0.2"
-  "falcosecurity/falco:0.44.1               falco:0.44.1"
-  "falcosecurity/falcoctl:0.13.0            falcoctl:0.13.0"
+  "grafana/alloy:v1.20.1                    alloy:v1.20.1"
+  "grafana/grafana:13.2.3                   grafana:13.2.3"
+  "falcosecurity/falco:0.45.0               falco:0.45.0"
+  "falcosecurity/falcoctl:0.14.2            falcoctl:0.14.2"
 )
 
 echo ">> Logging in to ECR Public (${REGION})..."

@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.21.8](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.21.7...domestic-payment-v0.21.8) (2026-10-07)
+
+
+### Bug Fixes
+
+* **approval:** preserve verified maker actor kind ([#12159](https://github.com/JiRaska/open-bank-oss/issues/12159)) ([74cba34](https://github.com/JiRaska/open-bank-oss/commit/74cba348b75c0b318902c033bf81356ddba32393))
+
+## [0.21.7](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.21.6...domestic-payment-v0.21.7) (2026-10-04)
+
+
+### Bug Fixes
+
+* **domestic-payment:** build kernel Money at the inbound boundary ([#12060](https://github.com/JiRaska/open-bank-oss/issues/12060)) ([119f830](https://github.com/JiRaska/open-bank-oss/commit/119f83064de831daa5427d5d1b3a9497ad9673f2)), closes [#11604](https://github.com/JiRaska/open-bank-oss/issues/11604)
+* **domestic-payment:** report an unrecognised fraud verdict as UNKNOWN, not ALLOW ([#11614](https://github.com/JiRaska/open-bank-oss/issues/11614)) ([f6676f5](https://github.com/JiRaska/open-bank-oss/commit/f6676f5f31f058d939c58cd7a4321e8053e3d994))
+
 ## [0.21.6](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.21.5...domestic-payment-v0.21.6) (2026-10-02)
 
 

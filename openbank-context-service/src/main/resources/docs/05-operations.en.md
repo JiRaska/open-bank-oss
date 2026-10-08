@@ -26,3 +26,7 @@ binds the `postgres` superuser that CloudNativePG uses for backups. On the prima
 the primary failed.
 
 Rollback: `ALTER ROLE <app role> IN DATABASE <db> RESET statement_timeout;`
+
+## AML service mTLS in production
+
+The production AML REST client uses the named `aml-authority` TLS configuration and the AML service's client-authenticated listener on port 8443. The deployment supplies a client certificate and the private CA trust bundle; TLS 1.3 is required. If AML calls fail after rollout, check the client certificate and CA mount, the production REST-client URL, and the network policy path to that listener together. Local development and tests continue to use their HTTP fixtures; a passing local HTTP test alone does not prove the deployed TLS handshake.

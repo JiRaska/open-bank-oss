@@ -82,3 +82,7 @@ Nastavte `AGENT_POLICY_ENFORCEMENT=block` v env deploye, jakmile je v cíli př�
 ## Verze & release
 
 Vydávaná komponenta (přítomen `version.txt`) — aktuálně `1.5.0`. Verzování vlastní release-please z Conventional Commits; neupravujte ručně `version.txt` ani `CHANGELOG.md`. API-kontraktové bumpy (`openapi.yaml: info.version`) se klasifikují z OpenAPI diffu, nezávisle na release verzi (ADR-0048).
+
+## Produkční mTLS volání AML služby
+
+Produkční REST klient AML používá pojmenovanou konfiguraci TLS `aml-authority` a listener AML služby na portu 8443, který vyžaduje klientský certifikát. Nasazení dodává klientský certifikát a svazek důvěryhodné privátní CA; vyžaduje se TLS 1.3. Pokud volání AML po nasazení selhává, zkontrolujte společně klientský certifikát a CA, produkční URL REST klienta a síťovou politiku k listeneru. Lokální vývoj a testy nadále používají HTTP fixture; úspěšný lokální HTTP test sám neprokazuje navázání TLS v nasazení.

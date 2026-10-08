@@ -85,6 +85,27 @@ bao token capabilities openbank/data/some-other-service              # deny
 `tofu plan` on a clean main must report no changes. Anything else means someone edited OpenBao
 by hand. Reconcile it here, not there.
 
+## Upgrading the server
+
+The StatefulSet uses `updateStrategy: OnDelete`. An ArgoCD sync changes the spec, but the pod keeps
+running the old binary until someone deletes it. That deletion is the controlled step.
+
+1. **Snapshot first.** Log in with your own SSO identity and take a snapshot:
+   `bao operator raft snapshot save openbao-$(date -u +%Y%m%dT%H%M%SZ).snap`.
+   If that returns 403, use the privileged identity from Bootstrap. Keep the file off the cluster.
+   It is encrypted by the barrier, and only the same KMS key can unseal it.
+2. **Merge, let ArgoCD sync, then roll:** `kubectl -n vault delete pod openbao-0`. KMS auto-unseal
+   brings the new pod up unsealed. Expect a short outage for the single replica.
+3. **Verify:** `bao status` must show the new `Version`, `Sealed false`, `Seal Type awskms`.
+   Then run the checks under *Verify by effect* and `tofu plan` (no changes).
+4. **Rollback:** revert the PR, sync, and delete the pod again. If the old binary cannot read the
+   data, run `bao operator raft snapshot restore -force <file>`.
+
+**Since 2.7 the `awskms` seal is not built in.** It is the `plugin "kms" "awskms"` stanza in
+`gitops/apps/openbao.yaml`. Without that stanza the server exits at startup with
+`unknown wrapper: awskms` and stays sealed. The plugin binary is downloaded once into
+`/openbao/data/plugins` on the PVC. Every later start reuses that copy.
+
 ## What this does NOT cover
 
 - The `oidc` mount itself, the `openbank-sso` policy and the ESO/Kubernetes auth roles are

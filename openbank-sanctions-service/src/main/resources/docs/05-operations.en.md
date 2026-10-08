@@ -95,6 +95,22 @@ _These are design-target SLOs for a production-shaped deployment — they are no
 3. Trigger a manual refresh via API: `POST /api/v1/sanctions/lists/{listType}/refresh`
 4. If source URL is unreachable, update it via `PUT /api/v1/sanctions/lists/{id}` with a new `sourceUrl`.
 
+An active refresh holds a per-list PostgreSQL advisory lock and records an active generation in
+`sanctions_change_publication`. Every batch and the final publication verify that generation in
+their own transaction. Other publishers defer without changing the journal while it is active.
+If the owning connection closes, the lock is released but the active marker remains; the next
+refresh takes the lock, advances the generation, and supersedes any stale writer. Until then,
+publication stays deferred. A failed or empty import keeps its committed batches in the journal
+and requests a retry on the next scheduler tick. Background publication remains deferred until a
+complete refresh evaluates the retained and new batches together. A storm withholds the change
+event and retains the journal for investigation.
+If a previous import was incomplete, a later seed fallback or non-entity skip does not count as
+that complete refresh: it keeps the journal fenced and requests another retry. A normal seed or
+non-entity refresh with no inherited partial import still completes as before.
+Waiting for the per-list lock or generation row is limited to 30 seconds. A timed-out refresh
+leaves journal evidence intact. The scheduler continues to the other lists and retries pending
+publication on its next tick; the import itself runs at its next due time or on a new request.
+
 ### Large backlog of POTENTIAL_HIT reviews
 
 1. Check the pending queue: `GET /api/v1/sanctions/pending`
@@ -146,3 +162,7 @@ Per-service CI pipeline (`.github/workflows/ci-sanctions-service.yml`):
 ## Startup warm-up (#11890)
 
 sanctions sets `openbank.warmup.protected-path: /api/v1/sanctions/pending`, so the libs-runtime warm-up (see openbank-libs docs, 05-operations) exercises this endpoint's security path before the pod reports ready. Measured on this service: first authenticated `GET /api/v1/sanctions/pending` after readiness, median 2622 ms without the warm-up, 967 ms with it; later requests 15–60 ms either way.
+
+## XML feed rejection
+
+OFAC and EU FSF imports now parse through the shared hardened `SecureXml` SAX parser. A feed containing a DOCTYPE is rejected, including external DTDs and entity declarations. On parse failure the import keeps the previously stored list and reports `FAILED_KEPT_EXISTING`; investigate the upstream feed and do not disable the parser guard to force a refresh. `SanctionsImportServiceTest` and `EuFsfSaxParserTest` exercise the rejection.

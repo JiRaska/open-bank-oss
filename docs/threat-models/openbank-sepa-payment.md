@@ -104,7 +104,7 @@ from clearing-simulator (cluster-internal, `ROLE_SERVICE`). New trust boundary:
 | STRIDE | Threat | Mitigation |
 |---|---|---|
 | **S**poofing | Rogue caller posts a forged pacs.004 to `/returns` | Endpoint requires `ROLE_SERVICE` (OIDC client-credentials); cluster-internal only (NetworkPolicy); clearing-simulator identity verified by OIDC CC token |
-| **T**ampering | Malformed or XXE-injected pacs.004 XML | `Pacs004Reader` (openbank-libs) configures `XMLInputFactory.IS_SUPPORTING_EXTERNAL_ENTITIES = false` and `IS_RESOLVING_ENTITY_REFERENCES = false` before parsing |
+| **T**ampering | Malformed or XXE-injected pacs.004 XML | `Pacs004Reader` (openbank-libs-iso20022) parses only through the fleet-wide hardened `SecureXml` factory (openbank-libs-domain): DOCTYPE disallowed, external entities and DTDs off, secure processing on; `XxeRejectionTest` proves the refusal and the `xml-factory-hardened` gate forbids a raw JAXP factory anywhere in `src/main` |
 | **R**epudiation | Denial of having processed a return | Every `/returns` invocation writes a `sepa.payment.returned` non-repudiation record into `sepa_payment_outbox` **in the same transaction as the `RETURNED` transition** (`SepaPaymentService.handlePaymentReturn` -> `SepaPaymentRepository.updateWithEvidence`), carrying the `OrgnlEndToEndId`, the pacs.004 reason code, the correlation id, whether the ledger reversal actually happened, and the **authenticated** actor — `SecurityContext.actorName`/`actorType`, derived server-side in `SepaPaymentResource`, never read from the pacs.004 body. The outbox dispatcher (`openbank.outbox.dispatch-enabled: true`) publishes it to `openbank.sepa.payment.events`, which openbank-audit-service already consumes into the append-only, hash-chained `audit_entries` store. Proved end to end by `SepaPaymentReturnAuditEvidenceIT` — real HTTP + real Postgres, row read back over an independent JDBC connection (issue #6056; before it, this row credited an `AuditService` present in no source file, and the service had no audit publisher of any kind) |
 | **I**nfo disclosure | Return reason codes (AC04, AM09, etc.) visible to unauthorised parties | Reason codes and return details accessible to `ROLE_OPERATOR`/`ROLE_ADMIN` only; `ROLE_VIEWER` sees payment status (`RETURNED`) but not raw reason code |
 | **D**oS | Replay of the same pacs.004 | `RETURNED` transition is idempotent — a second call with the same `OrgnlEndToEndId` returns 409 (already RETURNED), no double-reversal |
@@ -534,3 +534,36 @@ simply stops existing).
   an unsettleable payment. Sandbox data re-checked read-only before the change: 20 rows, all EUR, so
   no stored row is affected. No new endpoint, caller, privilege or event. Rollback: revert the
   commit.
+
+## 2026-10-04 — Staged Envoy Gateway public edge (ADR-0324 Phase 4)
+
+The `payments-api` HTTPRoute stages `/api/v1/sepa-payments` beside the existing nginx
+Ingress. The generated `sepa-payment-ingress-allow-list` admits `envoy-gateway-system` on
+TCP 8115 while retaining the nginx peer. DNS has not moved, so this change adds an internal
+proxy peer now; the public route changes only in the coordinated cutover. Service-side OIDC,
+OPA, idempotency, SCA and payment controls remain the authority for initiation.
+
+**D1 residual risk at cutover:** the nginx per-client-IP concurrency cap of ten has no
+Envoy Gateway equivalent. A 20/s per-client request limit, the route's per-backend circuit
+breaker and the separately staged listener-wide connection limit bound load, but a client
+holding slow connections can consume more than ten and reduce capacity for other payment
+initiators. Verify the listener policy, unauthenticated 401 and rate-limit 429 on the
+Gateway address before DNS moves. Roll back DNS for all four `api.open-bank.tech` routes
+together; the nginx Ingress and network allowance remain through Phase 5.
+
+- **2026-10-04** — **AML outbound mTLS boundary (#12106).** The production AML REST client in `sepa-payment` now selects
+  the named `aml-authority` TLS bucket: it presents a client certificate, trusts the AML
+  private CA and uses TLS 1.3 to the client-authenticated AML listener on port 8443.
+  The deployment changes the client's URL and mounts the certificate material; dev and
+  test HTTP fixtures retain their old transport. **STRIDE-S/T/I:** the TLS handshake
+  authenticates the caller and server and protects requests and responses in transit;
+  a missing, expired or wrong-CA certificate must fail the connection rather than fall
+  back to plaintext. **Residual boundary:** AML keeps HTTP 8117 for readiness, Admin UI discovery and
+  the security scanner. Its opt-in per-port NetworkPolicy admits migrated caller
+  namespaces only on 8443; Admin UI and the scanner still reach 8117, and same-namespace
+  traffic remains permitted. This enforces the migrated cross-namespace path but does
+  not make every AML HTTP access mTLS. A successful readiness probe or local HTTP test
+  therefore does not prove the production handshake.
+  Rollout verification must exercise this caller against 8443 with valid and invalid
+  client certificates and check that failures do not reroute to HTTP. Rollback restores
+  the previous client URL/configuration while the AML listener remains available.

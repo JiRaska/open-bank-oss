@@ -42,7 +42,7 @@ spec:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-transaction-opa-bundle.sh via the trailing marker comment
         # (do not hand-edit, do not drop the marker).
-        openbank.tech/policy-checksum: "c075dabe6fa92581" # transaction-opa-bundle
+        openbank.tech/policy-checksum: "e09e20bbff0ed5e5" # transaction-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -53,7 +53,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: transaction-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-transaction-service:sandbox-49bf3545
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-transaction-service:sandbox-bea35d6a
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -240,7 +240,7 @@ spec:
         # @Authorize-annotated endpoints in transaction-service (transaction.*). Bundle
         # mounted from transaction-opa-bundle ConfigMap (gen-transaction-opa-bundle.sh).
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run
@@ -464,7 +464,7 @@ spec:
         - name: sepa-payment
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-payment:sandbox-6b42d4de
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-payment:sandbox-bea35d6a
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -533,8 +533,10 @@ spec:
               value: redis://redis.payments.svc:6379
             - name: SANCTIONS_SERVICE_URL
               value: http://sanctions-service.sanctions.svc:8123
+            # aml-service's private-CA mTLS listener (8443, client auth REQUIRED, %prod bucket
+            # aml-authority, client certificate mounted at /mnt/aml-tls).
             - name: AML_SERVICE_URL
-              value: http://aml-service.aml.svc:8117
+              value: https://aml-service.aml.svc:8443
             # #8505: the AML case adapter resolves debtorAccountId → owning party via
             # account-service (the SEPA port of domestic's #3274). Without this the @ConfigProperty
             # default already points at the in-cluster Service, but the explicit edge matches every
@@ -624,6 +626,9 @@ spec:
             - name: document-tls
               mountPath: /mnt/document-tls
               readOnly: true
+            - name: aml-tls
+              mountPath: /mnt/aml-tls
+              readOnly: true
             - name: tmp
               mountPath: /tmp
             - name: kafka-keystore
@@ -646,7 +651,7 @@ spec:
         # all @Authorize-annotated endpoints in sepa-payment (sepaPayment.*).
         # Bundle mounted from sepa-payment-opa-bundle ConfigMap (gen-sepa-payment-opa-bundle.sh).
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run
@@ -717,6 +722,10 @@ spec:
               cpu: 100m
               memory: 64Mi
       volumes:
+        - name: aml-tls
+          secret:
+            secretName: sepa-payment-internal-tls
+            optional: false
         - name: document-tls
           secret:
             secretName: sepa-payment-internal-tls
@@ -842,7 +851,7 @@ spec:
         - name: domestic-payment
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-domestic-payment:sandbox-3e9ab3c6
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-domestic-payment:sandbox-bea35d6a
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -911,8 +920,10 @@ spec:
               value: redis://redis.payments.svc:6379
             - name: SANCTIONS_SERVICE_URL
               value: http://sanctions-service.sanctions.svc:8123
+            # aml-service's private-CA mTLS listener (8443, client auth REQUIRED, %prod bucket
+            # aml-authority, client certificate mounted at /mnt/aml-tls).
             - name: AML_SERVICE_URL
-              value: http://aml-service.aml.svc:8117
+              value: https://aml-service.aml.svc:8443
             # createPayment derives transferScope server-side (#2261) via an account-service
             # IBAN lookup. Defaulted to the in-cluster URL in application.yaml, but the edge was
             # never declared here, so gen-network-policies.py never opened accounts→payments —
@@ -989,6 +1000,9 @@ spec:
             - name: document-tls
               mountPath: /mnt/document-tls
               readOnly: true
+            - name: aml-tls
+              mountPath: /mnt/aml-tls
+              readOnly: true
             - name: tmp
               mountPath: /tmp
             - name: kafka-keystore
@@ -1009,7 +1023,7 @@ spec:
         # Bundle mounted from domestic-payment-opa-bundle ConfigMap
         # (gen-domestic-payment-opa-bundle.sh).
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run
@@ -1080,6 +1094,10 @@ spec:
               cpu: 100m
               memory: 64Mi
       volumes:
+        - name: aml-tls
+          secret:
+            secretName: domestic-payment-internal-tls
+            optional: false
         - name: document-tls
           secret:
             secretName: domestic-payment-internal-tls
@@ -1202,7 +1220,7 @@ spec:
         - name: sepa-instant
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-instant:sandbox-3e9ab3c6
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-instant:sandbox-bea35d6a
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -1270,8 +1288,10 @@ spec:
               value: "0.1"
             - name: SANCTIONS_SERVICE_URL
               value: http://sanctions-service.sanctions.svc:8123
+            # aml-service's private-CA mTLS listener (8443, client auth REQUIRED, %prod bucket
+            # aml-authority, client certificate mounted at /mnt/aml-tls).
             - name: AML_SERVICE_URL
-              value: http://aml-service.aml.svc:8117
+              value: https://aml-service.aml.svc:8443
             # Fraud scoring in SHADOW mode (ADR-0084 §4.1, issue #4221).
             # This block previously read "no FRAUD_SERVICE_URL — sepa-instant does not consume
             # fraud scoring yet (zero `fraud` refs in src)", and named the conditions for re-adding
@@ -1326,6 +1346,9 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: aml-tls
+              mountPath: /mnt/aml-tls
+              readOnly: true
             - name: kafka-keystore
               mountPath: /mnt/kafka/keystore
               readOnly: true
@@ -1343,7 +1366,7 @@ spec:
         # all @Authorize-annotated endpoints in sepa-instant (sctInstPayment.*).
         # Bundle mounted from sepa-instant-opa-bundle ConfigMap (gen-sepa-instant-opa-bundle.sh).
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run
@@ -1416,6 +1439,10 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: aml-tls
+          secret:
+            secretName: sepa-instant-internal-tls
+            optional: false
         - name: opa-tmp
           emptyDir: {}
         - name: opa-bundle
@@ -1531,7 +1558,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: clearing-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-service:sandbox-6da79798
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-service:sandbox-bea35d6a
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -1654,7 +1681,7 @@ spec:
         # all @Authorize-annotated endpoints in clearing-service (clearingBatch.*).
         # Bundle mounted from clearing-opa-bundle ConfigMap (gen-clearing-opa-bundle.sh).
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run
@@ -1855,7 +1882,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: standing-order-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-standing-order-service:sandbox-4ab038d9
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-standing-order-service:sandbox-43215314
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -1995,7 +2022,7 @@ spec:
         # endpoint). Bundle mounted from standing-order-opa-bundle ConfigMap
         # (gen-standing-order-opa-bundle.sh).
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run
@@ -2144,7 +2171,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: card-issuance-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-issuance-service:sandbox-49bf3545
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-issuance-service:sandbox-43215314
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -2289,7 +2316,7 @@ spec:
         # card-issuance-service (card.*). Bundle mounted from card-issuance-opa-bundle
         # ConfigMap (gen-card-issuance-opa-bundle.sh).
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run
@@ -2443,7 +2470,7 @@ spec:
           # is UNVERIFIABLE forever rather than merely stale. No image carries this tag yet; the
           # first auto-deploy run rewrites the line, and until then the Deployment does not admit,
           # which is the honest state for a service whose image has never been built.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-processing-service:sandbox-1851c09a
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-processing-service:sandbox-35b73e94
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -2562,7 +2589,7 @@ spec:
         # cardprocessing.* actions. Bundle from the card-processing-opa-bundle ConfigMap
         # (gen-card-processing-opa-bundle.sh).
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run
@@ -2700,7 +2727,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: settlement-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-settlement-service:sandbox-db41b33c
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-settlement-service:sandbox-bea35d6a
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -2856,7 +2883,7 @@ spec:
         # the @Authorize-annotated endpoint in settlement-service (settlement.create).
         # Bundle mounted from settlement-opa-bundle ConfigMap (gen-settlement-opa-bundle.sh).
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run
@@ -3047,7 +3074,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: clearing-simulator
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-simulator:sandbox-d5c8c73c
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-simulator:sandbox-133bed15
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -3166,7 +3193,7 @@ spec:
         - name: swift-service
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-swift-service:sandbox-7d9286c6
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-swift-service:sandbox-bea35d6a
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -3292,7 +3319,7 @@ spec:
         # all @Authorize-annotated endpoints in swift-service (swift.*). Bundle
         # mounted from swift-opa-bundle ConfigMap (gen-swift-opa-bundle.sh).
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run
@@ -3489,7 +3516,7 @@ spec:
       containers:
         - name: vop-service
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-vop-service:sandbox-49bf3545
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-vop-service:sandbox-43215314
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -3588,7 +3615,7 @@ spec:
         # OPA policy-decision sidecar (ADR-0034). Serves data.openbank.rest.allow for
         # vop.verify. Bundle mounted from vop-opa-bundle ConfigMap (gen-vop-opa-bundle.sh).
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run

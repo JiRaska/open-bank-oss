@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.6](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.14.5...flaky-test-hunter-v0.14.6) (2026-10-04)
+
+
+### Bug Fixes
+
+* **docs:** keep every runnable service documentation current ([#11989](https://github.com/JiRaska/open-bank-oss/issues/11989)) ([88b6e08](https://github.com/JiRaska/open-bank-oss/commit/88b6e087386cd885badf22f75cc4694faa0f30bd))
+
 ## [0.14.5](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.14.4...flaky-test-hunter-v0.14.5) (2026-09-29)
 
 

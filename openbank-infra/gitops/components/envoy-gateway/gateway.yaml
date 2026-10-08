@@ -14,6 +14,9 @@
 # (observability/httproute-tools-gate.yaml). Their DNS cannot move on its own: the tools share
 # the host with the console, so admin.open-bank.tech moves in Phase 3 with the admin-ui route.
 #
+# PHASE 3 — kc.open-bank.tech (keycloak/httproute.yaml, both nginx Ingresses in one route, the
+# operator-only paths a direct 403) on listener https-keycloak, held out of DNS the same way.
+#
 # ATTACHMENT. Each HTTPS listener names ONE hostname and admits routes from ONE namespace,
 # selected by `kubernetes.io/metadata.name` — a label the API server sets and nobody can
 # put on another namespace. So a route for pact.open-bank.tech can only come from
@@ -161,6 +164,26 @@ spec:
           selector:
             matchLabels:
               kubernetes.io/metadata.name: pact-broker
+    # pricing.open-bank.tech (ADR-0324 Phase 4, pricing/httproute.yaml). Its own Certificate
+    # `pricing-edge-tls` (no key pinning on this host), admitted by the ReferenceGrant in
+    # pricing/httproute.yaml, which landed in an EARLIER change on purpose (the Phase-1
+    # RefNotPermitted lesson).
+    - name: https-pricing
+      protocol: HTTPS
+      port: 443
+      hostname: pricing.open-bank.tech
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: pricing-edge-tls
+            namespace: pricing
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              kubernetes.io/metadata.name: pricing
     - name: https-langfuse
       protocol: HTTPS
       port: 443
@@ -177,6 +200,27 @@ spec:
           selector:
             matchLabels:
               kubernetes.io/metadata.name: ai-platform
+    # copilot.open-bank.tech (ADR-0324 Phase 4, copilot/httproute.yaml). Its own Certificate
+    # `copilot-edge-tls` (the host is not pinned), admitted by the ReferenceGrant
+    # copilot-edge-gateway-tls, which landed in an EARLIER change on purpose (the Phase-1
+    # RefNotPermitted lesson). `platform` also hosts agent, ap2 and mcp; the hostname pins this
+    # listener to the copilot route's host, and no other host is served from it.
+    - name: https-copilot
+      protocol: HTTPS
+      port: 443
+      hostname: copilot.open-bank.tech
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: copilot-edge-tls
+            namespace: platform
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              kubernetes.io/metadata.name: platform
     - name: https-rum
       protocol: HTTPS
       port: 443
@@ -193,6 +237,27 @@ spec:
           selector:
             matchLabels:
               kubernetes.io/metadata.name: observability
+    # customer.open-bank.tech (ADR-0324 Phase 4, customer-edge/httproute.yaml). Serves the SAME
+    # Secret the nginx Ingress does, `customer-edge-tls`: the mobile app pins this host's SPKI
+    # (ADR-0066 S3, rotation Never), so a new certificate would break every installed app.
+    # Admitted by the ReferenceGrant in customer-edge/httproute.yaml, which landed in an EARLIER
+    # change on purpose (the Phase-1 RefNotPermitted lesson).
+    - name: https-customer-edge
+      protocol: HTTPS
+      port: 443
+      hostname: customer.open-bank.tech
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: customer-edge-tls
+            namespace: customer-edge
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              kubernetes.io/metadata.name: customer-edge
     # admin.open-bank.tech (ADR-0324 Phase 2). TWO namespaces, because the host is shared: the
     # ADR-0234 tool routes (/tools/*) live in `observability` next to the tools they front, and
     # Phase 3 attaches the console itself from `admin-ui`. Every HTTPRoute in `observability`
@@ -219,3 +284,45 @@ spec:
               - key: kubernetes.io/metadata.name
                 operator: In
                 values: [admin-ui, observability]
+    # glitchtip.open-bank.tech (ADR-0324 Phase 4, observability/httproute-glitchtip.yaml). Its
+    # own Certificate `glitchtip-edge-tls` (not pinned), admitted by the ReferenceGrant
+    # glitchtip-edge-gateway-tls, which landed in an EARLIER change on purpose. Admits
+    # `observability`, where Kyverno requires every HTTPRoute to be extAuth-gated or to declare
+    # its ungated machine callers, as the glitchtip route does.
+    - name: https-glitchtip
+      protocol: HTTPS
+      port: 443
+      hostname: glitchtip.open-bank.tech
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: glitchtip-edge-tls
+            namespace: observability
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+    # kc.open-bank.tech (ADR-0324 Phase 3). Serves the SAME Secret the nginx Ingress does,
+    # `keycloak-tls`: the mobile app pins this host's SPKI (ADR-0066 S3, rotation Never), so a
+    # new certificate would break every installed app. Admitted by the ReferenceGrant in
+    # keycloak/httproute.yaml, which landed in an EARLIER change on purpose (the Phase-1
+    # RefNotPermitted lesson).
+    - name: https-keycloak
+      protocol: HTTPS
+      port: 443
+      hostname: kc.open-bank.tech
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: keycloak-tls
+            namespace: iam
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              kubernetes.io/metadata.name: iam

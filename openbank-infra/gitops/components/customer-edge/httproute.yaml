@@ -1,0 +1,117 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# customer.open-bank.tech on the shared Gateway (ADR-0324 Phase 4), the Gateway API translation
+# of the `customer-edge` Ingress in customer-edge.yaml. The service's own OIDC check is unchanged
+# and is what authenticates every request; this file carries only the edge controls.
+#
+# HELD OUT OF DNS. The route carries `external-dns.kubernetes.io/controller:
+# gateway-api-cutover-pending`, which external-dns skips, so customer.open-bank.tech keeps
+# resolving to ingress-nginx. Three steps, each its own change, in this order:
+#   1. this file — the ReferenceGrant, the route and its policy (no listener names them yet);
+#   2. the Gateway's https-customer-edge listener (envoy-gateway/gateway.yaml), once the grant
+#      is live — switching a listener in the same sync as its grant left langfuse's listener
+#      RefNotPermitted (2026-10-03), because the two are different Argo apps with no ordering;
+#   3. the DNS cutover: the annotation moves from this route to the Ingress.
+#
+# TLS PINNING: the mobile app pins this host's SPKI (ADR-0066 S3, ADR-0086), so the listener
+# serves the SAME Secret the Ingress does, `customer-edge-tls` (private-key-rotation-policy:
+# Never), through the grant below. Never point the listener at a newly issued certificate.
+# Caveat for the later Ingress deletion: cert-manager runs with --enable-certificate-owner-ref,
+# so the live `customer-edge-tls` Certificate is owned by the `customer-edge` Ingress. Deleting
+# that Ingress would garbage-collect the pinned key. Before it is removed, declare the
+# Certificate in git under the same name with `rotationPolicy: Never` and drop the
+# cert-manager annotation from the Ingress.
+#
+# Annotation mapping from customer-edge.yaml:
+#   ssl-redirect              -> the Gateway's http listener redirects every host (301)
+#   limit-rps 20 x burst 3    -> local rate limit PER CLIENT IP (sourceCIDR Distinct), 20/s. Envoy's
+#                                local limit is a token bucket whose size equals its refill, so the
+#                                burst is 20 where nginx allowed 60; the sustained rate is the
+#                                same. Per client because the Gateway Service runs
+#                                externalTrafficPolicy: Local, so Envoy sees the device address.
+#                                Like nginx's, the bucket is per proxy replica.
+#   controller HSTS (2y, includeSubDomains, preload), nosniff, hide-headers X-Powered-By
+#                             -> ResponseHeaderModifier below, same values
+#   cert-manager annotations  -> unchanged; the listener reuses `customer-edge-tls` (above)
+#   (nginx default) client_max_body_size 1m, proxy_read_timeout 60s
+#                             -> BackendTrafficPolicy below; Envoy otherwise has no body cap
+#                                and a 15s route timeout
+#   path /customer/v1 Prefix  -> PathPrefix /customer/v1, nothing else routes on this host
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: edge-gateway-tls
+  namespace: customer-edge
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      namespace: envoy-gateway-system
+  to:
+    - group: ""
+      kind: Secret
+      name: customer-edge-tls
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: customer-edge
+  namespace: customer-edge
+  annotations:
+    # Held out of DNS until the cutover change (step 3 above).
+    external-dns.kubernetes.io/controller: gateway-api-cutover-pending
+spec:
+  parentRefs:
+    - name: edge
+      namespace: envoy-gateway-system
+      sectionName: https-customer-edge
+  hostnames:
+    - customer.open-bank.tech
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /customer/v1
+      filters:
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - name: Strict-Transport-Security
+                value: "max-age=63072000; includeSubDomains; preload"
+              - name: X-Content-Type-Options
+                value: nosniff
+            remove:
+              - X-Powered-By
+      backendRefs:
+        - name: customer-edge
+          port: 8128
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: customer-edge
+  namespace: customer-edge
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: customer-edge
+  requestBuffer:
+    limit: 1Mi
+  timeout:
+    http:
+      requestTimeout: 60s
+  rateLimit:
+    local:
+      rules:
+        # One bucket per distinct client address. No rule without clientSelectors, so there is
+        # no route-wide ceiling: a shared bucket would let one noisy client starve every other.
+        - clientSelectors:
+            - sourceCIDR:
+                type: Distinct
+                value: 0.0.0.0/0
+          limit:
+            requests: 20
+            unit: Second

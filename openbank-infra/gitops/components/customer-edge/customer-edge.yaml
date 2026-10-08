@@ -106,7 +106,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: customer-edge
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-customer-edge:sandbox-db41b33c
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-customer-edge:sandbox-133bed15
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -122,6 +122,12 @@ spec:
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
               value: "0.1"
+            # ADR-0331 / ADR-0252: the only callers whose x-openbank-synthetic header this edge
+            # honours. A bank-owned canary customer, never anyone else; the identity gate
+            # (check-synthetic-customer-identity.py) holds this list to the declared
+            # openbank-synthetic-* clients. Inert until that client is provisioned live.
+            - name: OPENBANK_SYNTHETIC_TRUSTED_PRINCIPALS
+              value: "service-account-openbank-synthetic-retail"
             # Customer audit trail -> Strimzi bus (EdgeAuditPublisher, best-effort) and the
             # ADR-0072 onboarding-resume consumer.
             #
@@ -398,7 +404,7 @@ spec:
         # @Authorize CustomerEdgeResource endpoint. Without it, authz.enforce=true fails
         # closed (503 on /accounts etc.). Bundle mounted from customer-edge-opa-bundle.
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run

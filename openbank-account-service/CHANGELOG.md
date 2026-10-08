@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.33.2](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.33.1...account-service-v0.33.2) (2026-10-07)
+
+
+### Bug Fixes
+
+* **approval:** preserve verified maker actor kind ([#12159](https://github.com/JiRaska/open-bank-oss/issues/12159)) ([74cba34](https://github.com/JiRaska/open-bank-oss/commit/74cba348b75c0b318902c033bf81356ddba32393))
+
 ## [0.33.1](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.33.0...account-service-v0.33.1) (2026-10-03)
 
 

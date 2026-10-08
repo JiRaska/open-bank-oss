@@ -28,10 +28,14 @@ class NotificationRepository : PanacheRepository<NotificationEntity> {
     // Page + total in a SINGLE reactive session. A request must not chain two separate
     // Panache.withSession calls (list, then count): the second reuses the now-closed session
     // bound to the Vert.x context and throws — which 500'd the notification list endpoint.
-    suspend fun pageByParty(partyId: UUID, page: Int, size: Int): Pair<List<NotificationEntity>, Long> =
+    suspend fun pageByParty(partyId: UUID, page: Int, size: Int): Triple<List<NotificationEntity>, Long, Long> =
         Panache.withSession {
-            val query = find("partyId", partyId)
-            query.count().flatMap { total -> query.page(page, size).list().map { items -> items to total } }
+            val query = find("partyId = ?1 order by createdAt desc, notificationId desc", partyId)
+            query.count().flatMap { total ->
+                find("partyId = ?1 and readAt is null", partyId).count().flatMap { unread ->
+                    query.page(page, size).list().map { items -> Triple(items, total, unread) }
+                }
+            }
         }.awaitSuspending()
 
     suspend fun pageAll(page: Int, size: Int): Pair<List<NotificationEntity>, Long> = Panache.withSession {

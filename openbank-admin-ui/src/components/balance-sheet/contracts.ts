@@ -141,6 +141,11 @@ export const irrbbDataGapSchema = z.object({
   count: z.number().int().nullable().optional(), detail: z.string(),
 })
 export type IrrbbDataGap = z.infer<typeof irrbbDataGapSchema>
+export const irrbbTreasurySchema = z.object({
+  currency: z.string(), deals: z.number().int(), placements: money, borrowings: money, basePv: nullableMoney.optional(),
+  scenarios: z.array(z.object({ scenario: z.enum(SCENARIOS), deltaEve: money })),
+})
+export type IrrbbTreasury = z.infer<typeof irrbbTreasurySchema>
 export const irrbbSchema = z.object({
   runId: z.string(), asOf: z.string(), provenance, curveSetId: z.string(), curveSetProvenance: provenance, curveSetSource: z.string(),
   gaps: z.array(currencyGapSchema),
@@ -160,6 +165,8 @@ export const irrbbSchema = z.object({
   }),
   // risk-engine openapi 1.23.0: what the figures do not capture (never silently).
   dataGaps: z.array(irrbbDataGapSchema).optional(),
+  // risk-engine openapi 1.24.0: the treasury money-market deals' share, already inside gaps/scenarios.
+  treasury: z.array(irrbbTreasurySchema).optional(),
   shockNotConfigured: z.array(z.string()),
   unpriced: z.array(z.string()),
   // risk-engine openapi 1.22.0: a multi-currency book's d368 aggregate in CZK at ČNB fixings.

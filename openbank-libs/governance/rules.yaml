@@ -17,6 +17,17 @@ schema_version: 1
 source_of_truth: true
 related_adrs: [ADR-0005, ADR-0014, ADR-0020, ADR-0029, ADR-0030, ADR-0031, ADR-0040, ADR-0043, ADR-0052, ADR-0053, ADR-0054, ADR-0060, ADR-0082, ADR-0088]
 
+# A hold blocks only image pins for the named service. It does not freeze source,
+# other services, or unrelated GitOps edits. Remove a hold in a separately reviewed
+# PR after its release condition is met; the gate also reads the base rules so a
+# single PR cannot remove a hold and advance the image together.
+deploy_holds:
+  services:
+    openbank-sanctions-service:
+      issue: "#11492"
+      reason: "Pause deployment while the sanctions image and review evidence are resolved."
+      release_condition: "Verify the fixed image and required reviews for #11492, then remove this hold in a separate PR."
+
 # ---------------------------------------------------------------------------------------
 # Conventional Commits — the vocabulary (mirrors CONTRIBUTING.md, authoritative here).
 # ---------------------------------------------------------------------------------------
@@ -1573,8 +1584,8 @@ coverage:
     # number here; these move.
     blocked_on: "blocking flip requires each service to sustain >=70% mutation kill score on the weekly run; balance 60, interest 60, ledger 63, sanctions 69 and sepa-payment 69 are below it as of run 33289385445 (2026-08-30)"
   dast:
-    tool: "OWASP ZAP baseline (zaproxy/action-baseline)"   # ADR-0030 D3
-    enforced: advisory                  # report-only first cut; no fail_action, no PR gate
+    tool: "OWASP ZAP API scan (zaproxy/action-api-scan), authenticated, OpenAPI-driven"   # ADR-0030 D3, #12097
+    enforced: advisory                  # FINDINGS are report-only; a NON-SCAN (no token, never ready, 0 ops, >=95% 401/403) fails the run
     target_enforce_date: "2026-12-31"   # revisit once findings are triaged via the D1 lifecycle
     ci_producer: .github/workflows/dast-zap-baseline.yml
     # Scope decision (2026-07-07, issue #265 D3): customer-edge is the true internet-facing edge
@@ -1584,7 +1595,11 @@ coverage:
     # docker-compose target instead: ledger-service (postgres + kafka deps only), against its
     # documented unauthenticated public paths (QUARKUS_HTTP_AUTH_PERMISSION__PUBLIC__PATHS).
     # Scheduled weekly, not per-PR (cost + expected finding volume on a fresh banking-API scan).
-    blocked_on: "unauthenticated-surface only; an authenticated crawl needs Keycloak token issuance wired into the CI job, and a customer-edge / fleet-wide target needs either the real cluster or a much heavier compose boot — both deferred"
+    # #12097 replaced that cut: the service boots with OIDC on against the CI Keycloak realm
+    # (api-fuzz-authenticated.yml's mechanism), ZAP imports its committed openapi.yaml with a
+    # client_credentials bearer token, and dast-zap-coverage.py counts operations from the
+    # service's own access log into zap-reports/<svc>-ops.json (`exercised` = attestation `ops:`).
+    blocked_on: "findings not yet triaged through the D1 lifecycle; scope is ledger-service on schedule (dispatch widens it to any authz.enforce=false service); customer-edge still needs the real cluster"
 
 # ---------------------------------------------------------------------------------------
 # API deprecation policy — drives ApiVersionResponseFilter.isDeprecatedPath() (ADR-0029 D2).
@@ -4120,6 +4135,7 @@ security_sensitive_paths:
     cardholder: []
   openbank-fx-service:
     auth_crypto_payment:
+      - "src/main/kotlin/com/openbank/fx/application/usecase/CnbPolicyRateService.kt"
       - "src/main/kotlin/**/ApprovalResource.kt"
       - "src/main/kotlin/**/approval/**"
       - "src/main/kotlin/**/security/**"
