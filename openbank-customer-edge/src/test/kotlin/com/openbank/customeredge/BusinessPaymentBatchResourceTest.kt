@@ -24,7 +24,7 @@ class BusinessPaymentBatchResourceTest {
     private val acting = mockk<ActingForResolver>()
     private val merged = mockk<PartyMergeResolver>()
     private val jwt = mockk<JsonWebToken>()
-    private val resource = BusinessPaymentBatchResource(upstream, acting, merged).apply {
+    private val resource = BusinessPaymentBatchResource(upstream, acting, merged, true).apply {
         this.jwt = this@BusinessPaymentBatchResourceTest.jwt
         domesticUrl = "http://localhost:8116"
     }

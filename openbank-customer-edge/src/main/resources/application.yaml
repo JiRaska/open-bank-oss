@@ -155,6 +155,9 @@ openbank:
     # that API is deployed would stop every business payment. Flip per environment in GitOps.
     business-approvals:
       enforce: ${BUSINESS_APPROVALS_ENFORCE:false}
+    # Draft storage stays inaccessible to customers until the signed batch release path is reviewed.
+    business-payment-batches:
+      enabled: ${BUSINESS_PAYMENT_BATCHES_ENABLED:false}
     # Client-visible feature flags, published as X-Edge-Features (#10281). standingorders-replace lets an
     # edit name replacesStandingOrderId; turn it on only after standing-order-service (which does the
     # atomic swap) is rolled out — an older one would create a second order and cancel nothing.

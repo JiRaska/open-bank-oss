@@ -11,6 +11,7 @@ import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.ForbiddenException
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
+import jakarta.ws.rs.NotFoundException
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.PUT
 import jakarta.ws.rs.Path
@@ -33,6 +34,8 @@ class BusinessPaymentBatchResource(
     private val upstream: UpstreamClient,
     private val actingFor: ActingForResolver,
     private val merged: PartyMergeResolver,
+    @ConfigProperty(name = "openbank.edge.business-payment-batches.enabled", defaultValue = "false")
+    private val enabled: Boolean,
 ) {
     @Inject
     lateinit var jwt: JsonWebToken
@@ -46,6 +49,7 @@ class BusinessPaymentBatchResource(
         @HeaderParam("Idempotency-Key") key: String?,
         body: String?,
     ): Response {
+        requireEnabled()
         val (human, entity) = parties(header)
         if (body.isNullOrBlank() || key.isNullOrBlank() || key.length > MAX_KEY_CHARS) {
             return Response.status(Response.Status.BAD_REQUEST).build()
@@ -59,6 +63,7 @@ class BusinessPaymentBatchResource(
         @QueryParam("page") page: Int?,
         @QueryParam("size") size: Int?,
     ): Response {
+        requireEnabled()
         val (_, entity) = parties(header)
         val p = page ?: 0
         val s = size ?: PAGE_SIZE
@@ -73,6 +78,7 @@ class BusinessPaymentBatchResource(
         @PathParam("id") id: UUID,
         @QueryParam("page") page: Int?,
     ): Response {
+        requireEnabled()
         val (_, entity) = parties(header)
         val p = page ?: 0
         if (p !in 0..MAX_ITEM_PAGE) return Response.status(Response.Status.BAD_REQUEST).build()
@@ -87,6 +93,7 @@ class BusinessPaymentBatchResource(
         @HeaderParam("If-Match") revision: String?,
         body: String?,
     ): Response {
+        requireEnabled()
         val (human, entity) = parties(header)
         if (revision?.trim('"')?.toLongOrNull() == null) return Response.status(HTTP_PRECONDITION_REQUIRED).build()
         if (body.isNullOrBlank()) return Response.status(Response.Status.BAD_REQUEST).build()
@@ -100,6 +107,10 @@ class BusinessPaymentBatchResource(
     }
 
     private fun url() = "$domesticUrl/api/v1/business-payment-batches"
+
+    private fun requireEnabled() {
+        if (!enabled) throw NotFoundException()
+    }
 
     // Every failure is explicit so an absent or revoked company mandate cannot fall back to the human party.
     @Suppress("ThrowsCount")

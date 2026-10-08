@@ -6,6 +6,8 @@ package com.openbank.customeredge.integration
 
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.junit.QuarkusTestProfile
+import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.test.security.oidc.Claim
 import io.quarkus.test.security.oidc.OidcSecurity
@@ -24,6 +26,7 @@ private const val BATCH_ID = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
 private const val BATCH_BASE = "/api/v1/business-payment-batches"
 
 @QuarkusTest
+@TestProfile(BusinessPaymentBatchEnabledProfile::class)
 @QuarkusTestResource(BusinessApprovalStubs::class, restrictToAnnotatedClass = true)
 @TestSecurity(user = "customer:$BATCH_HUMAN", roles = ["ROLE_CUSTOMER"])
 @OidcSecurity(claims = [Claim(key = "party_id", value = BATCH_HUMAN)])
@@ -92,4 +95,9 @@ class BusinessPaymentBatchHttpIT {
         } When { get("/customer/v1/business/payment-batches") } Then { statusCode(403) }
         assertTrue(BusinessApprovalStubs.requests("GET", BATCH_BASE).isEmpty())
     }
+}
+
+class BusinessPaymentBatchEnabledProfile : QuarkusTestProfile {
+    override fun getConfigOverrides(): Map<String, String> =
+        mapOf("openbank.edge.business-payment-batches.enabled" to "true")
 }
