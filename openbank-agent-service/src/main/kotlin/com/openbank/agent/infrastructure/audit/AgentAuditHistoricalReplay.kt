@@ -238,7 +238,7 @@ class AgentAuditReplayStore(private val dataSource: DataSource) {
 
 /** Disabled until a bounded, reviewed campaign is deliberately configured. Dry-run is the default. */
 @ApplicationScoped
-// LongParameterList: the ten injected arguments keep each opt-in replay control explicit.
+// LongParameterList: the injected arguments keep each opt-in replay control explicit.
 @Suppress("LongParameterList")
 class AgentAuditHistoricalReplay @Inject constructor(
     private val store: AgentAuditReplayStore,
@@ -251,6 +251,9 @@ class AgentAuditHistoricalReplay @Inject constructor(
     @ConfigProperty(name = "agent.audit.replay.from") private val from: java.util.Optional<String>,
     @ConfigProperty(name = "agent.audit.replay.until") private val until: java.util.Optional<String>,
     @ConfigProperty(name = "agent.audit.replay.max-events", defaultValue = "25") private val maxEvents: Int,
+    @ConfigProperty(name = "agent.audit.replay.expected-count") private val expectedCount: java.util.Optional<Int>,
+    @ConfigProperty(name = "agent.audit.replay.expected-manifest-sha256")
+    private val expectedManifestSha256: java.util.Optional<String>,
 ) {
     private val log = Logger.getLogger(AgentAuditHistoricalReplay::class.java)
     private val dryRunReported = AtomicBoolean(false)
@@ -285,11 +288,20 @@ class AgentAuditHistoricalReplay @Inject constructor(
         if (!execute) {
             if (dryRunReported.compareAndSet(false, true)) {
                 log.infof(
-                    "Replay dry-run validated %d source rows; destination not reconciled",
+                    "Replay dry-run count=%d manifest-sha256=%s",
                     inventory.total,
+                    manifest,
                 )
             }
             return
+        }
+        val approvedCount = expectedCount.orElseThrow { IllegalStateException("Replay expected count is required") }
+        val approvedManifest = expectedManifestSha256.orElseThrow {
+            IllegalStateException("Replay expected manifest SHA-256 is required")
+        }
+        check(approvedManifest.matches(Regex("[0-9a-f]{64}"))) { "Replay expected manifest SHA-256 is invalid" }
+        check(approvedCount == inventory.total && approvedManifest == manifest) {
+            "Replay source does not match approved count and manifest"
         }
         val campaign = store.campaign(
             connection,
