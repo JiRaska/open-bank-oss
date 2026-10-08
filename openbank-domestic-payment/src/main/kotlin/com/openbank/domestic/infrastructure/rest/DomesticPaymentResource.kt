@@ -5,10 +5,12 @@
 package com.openbank.domestic.infrastructure.rest
 
 import com.openbank.domestic.application.port.`in`.DomesticPaymentUseCase
+import com.openbank.domestic.application.port.`in`.DomesticPaymentReceiptQuery
 import com.openbank.domestic.application.port.`in`.ListDomesticPaymentsQuery
 import com.openbank.domestic.application.port.`in`.PaymentConfirmationUseCase
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.domestic.infrastructure.rest.dto.CreateDomesticPaymentRequest
+import com.openbank.domestic.infrastructure.rest.dto.DomesticPaymentReceiptRequest
 import com.openbank.domestic.infrastructure.rest.dto.TransitionDomesticPaymentStatusRequest
 import com.openbank.domestic.infrastructure.rest.dto.toResponse
 import com.openbank.libs.authz.Authorize
@@ -108,6 +110,17 @@ class DomesticPaymentResource(
     @Operation(summary = "Get a domestic payment by ID")
     suspend fun getPayment(@PathParam("paymentId") paymentId: UUID): Response =
         Response.ok(paymentUseCase.getPayment(paymentId).toResponse()).build()
+
+    @POST
+    @Path("/receipt-lookup")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS")
+    @Authorize(action = "domestic-payment.receipt.read")
+    @Operation(summary = "Look up a domestic payment receipt after a lost create response")
+    suspend fun findReceipt(request: DomesticPaymentReceiptRequest): Response = Response.ok(
+        paymentUseCase.findReceipt(
+            DomesticPaymentReceiptQuery(request.idempotencyKey, request.debtorAccountId, actorId, actorScope),
+        ),
+    ).build()
 
     @GET
     @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS", "ROLE_API")

@@ -8,6 +8,8 @@ import com.openbank.domestic.application.port.`in`.CreateDomesticPaymentCommand
 import com.openbank.domestic.application.port.`in`.CreateDomesticPaymentResult
 import com.openbank.domestic.application.port.`in`.DelegatedDomesticPaymentResult
 import com.openbank.domestic.application.port.`in`.DelegatedDomesticPaymentUseCase
+import com.openbank.domestic.application.port.`in`.DomesticPaymentReceipt
+import com.openbank.domestic.application.port.`in`.DomesticPaymentReceiptQuery
 import com.openbank.domestic.application.port.`in`.DomesticPaymentUseCase
 import com.openbank.domestic.application.port.`in`.ListDomesticPaymentsQuery
 import com.openbank.domestic.application.port.`in`.TransitionDomesticPaymentStatusCommand
@@ -314,6 +316,7 @@ class DomesticPaymentService(
             endToEndId = command.endToEndId ?: generateEndToEndId(command.priority),
             initiatedByPartyId = command.actorId,
             requestFingerprint = requestFingerprint,
+            receiptActorScopeHash = command.actorScope?.takeIf { '\u001f' in it }?.let(ReceiptActorScope::hash),
             delegationId = command.delegationId,
             reservationId = command.reservationId,
             rejectReason = null,
@@ -327,6 +330,25 @@ class DomesticPaymentService(
 
     override suspend fun getPayment(paymentId: UUID): DomesticPayment =
         paymentRepository.findById(paymentId) ?: throw DomesticPaymentNotFoundException(paymentId)
+
+    override suspend fun findReceipt(query: DomesticPaymentReceiptQuery): DomesticPaymentReceipt {
+        require(query.idempotencyKey.isNotBlank() && query.idempotencyKey.length <= IDEMPOTENCY_KEY_MAX_LENGTH) {
+            "Idempotency-Key must contain 1 to $IDEMPOTENCY_KEY_MAX_LENGTH characters"
+        }
+        val unknown = DomesticPaymentReceipt(null, null)
+        val actorId = query.actorId ?: return unknown
+        // A bare subject does not prove issuer identity. Old rows have no independent scope binding.
+        if ('\u001f' !in query.actorScope) return unknown
+        val payment = paymentRepository.findByIdempotencyKey(query.idempotencyKey) ?: return unknown
+        if (payment.debtorAccountId != query.debtorAccountId) return unknown
+        if (payment.initiatedByPartyId != actorId) return unknown
+        if (payment.delegationId != null || payment.reservationId != null) return unknown
+        if (payment.requestFingerprint == null) return unknown
+        if (payment.receiptActorScopeHash != ReceiptActorScope.hash(query.actorScope)) return unknown
+        // Ownership is checked again at read time. Null means unavailable or no longer owned.
+        if (accountLookupPort.findPartyByAccountId(query.debtorAccountId) != actorId) return unknown
+        return DomesticPaymentReceipt(payment.id, payment.status)
+    }
 
     override suspend fun listPayments(query: ListDomesticPaymentsQuery): List<DomesticPayment> = paymentRepository.list(
         status = query.status,

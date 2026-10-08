@@ -4,12 +4,18 @@
 
 package com.openbank.domestic.e2e
 
+import com.openbank.domestic.infrastructure.client.AccountServiceClient
 import com.openbank.libs.testing.containers.PostgresRedisTestResource
+import io.mockk.coEvery
+import io.mockk.mockk
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.common.ResourceArg
+import io.quarkus.test.junit.QuarkusMock
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.jwt.Claim
+import io.quarkus.test.security.jwt.JwtSecurity
 import io.restassured.RestAssured
 import io.restassured.response.Response
 import io.smallrye.reactive.messaging.memory.InMemoryConnector
@@ -146,6 +152,54 @@ class DomesticPaymentJourneyE2E {
             RestAssured.given().get("/api/v1/domestic-payments/${UUID.randomUUID()}").statusCode,
         ).isEqualTo(404)
     }
+
+    @Test
+    @TestSecurity(user = ACTOR, roles = ["ROLE_PAYMENTS"])
+    fun `receipt lookup over real HTTP and Postgres gives UNKNOWN for an absent key without echoing it`() {
+        val key = "absent-${UUID.randomUUID()}"
+        val response = RestAssured.given()
+            .contentType("application/json")
+            .body("""{"idempotencyKey":"$key","debtorAccountId":"${UUID.randomUUID()}"}""")
+            .post("/api/v1/domestic-payments/receipt-lookup")
+        assertThat(response.statusCode).isEqualTo(200)
+        assertThat(response.jsonPath().getString("outcome")).isEqualTo("UNKNOWN")
+        assertThat(response.body.asString()).doesNotContain(key)
+    }
+
+    @Test
+    @TestSecurity(user = ACTOR, roles = ["ROLE_PAYMENTS"])
+    @JwtSecurity(
+        claims = [
+            Claim(key = "iss", value = "https://issuer.example"),
+            Claim(key = "sub", value = ACTOR),
+        ],
+    )
+    fun `lost response receipt resolves only for same issuer actor and owned debit account`() {
+        val account = UUID.randomUUID()
+        val key = "receipt-${UUID.randomUUID()}"
+        val accounts = mockk<AccountServiceClient>()
+        coEvery { accounts.findPartyByAccountId(account) } returns UUID.fromString(ACTOR)
+        coEvery { accounts.findPartyByIban(any()) } returns null
+        QuarkusMock.installMockForType(accounts, AccountServiceClient::class.java)
+
+        val created = post(key, requestBody(account, AMOUNT, "E2E-${UUID.randomUUID()}"))
+        assertThat(created.statusCode).isEqualTo(201)
+        val receipt = lookupReceipt(key, account)
+        assertThat(receipt.statusCode).isEqualTo(200)
+        assertThat(receipt.jsonPath().getString("outcome")).isEqualTo("FOUND")
+        assertThat(receipt.jsonPath().getString("paymentId")).isEqualTo(created.jsonPath().getString("id"))
+        assertThat(receipt.jsonPath().getString("status")).isEqualTo("RECEIVED")
+        assertThat(receipt.body.asString()).doesNotContain(key)
+        assertThat(lookupReceipt(key, UUID.randomUUID()).jsonPath().getString("outcome")).isEqualTo("UNKNOWN")
+
+        coEvery { accounts.findPartyByAccountId(account) } returns null
+        assertThat(lookupReceipt(key, account).jsonPath().getString("outcome")).isEqualTo("UNKNOWN")
+    }
+
+    private fun lookupReceipt(key: String, account: UUID): Response = RestAssured.given()
+        .contentType("application/json")
+        .body("""{"idempotencyKey":"$key","debtorAccountId":"$account"}""")
+        .post("/api/v1/domestic-payments/receipt-lookup")
 
     private fun post(key: String, body: String): Response = RestAssured.given()
         .contentType("application/json")

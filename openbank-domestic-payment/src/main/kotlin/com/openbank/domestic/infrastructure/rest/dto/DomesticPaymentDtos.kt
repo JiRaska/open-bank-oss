@@ -72,6 +72,8 @@ data class CreateDomesticPaymentRequest(
     )
 }
 
+data class DomesticPaymentReceiptRequest(val idempotencyKey: String, val debtorAccountId: UUID)
+
 /** A domestic payment moves a strictly positive amount; Money itself admits zero and negatives. */
 internal fun inboundAmount(amount: BigDecimal?, currency: String?): Money = Money.parseInbound(amount, currency).also {
     requireValid(it.isPositive(), "amount") { "amount must be greater than zero" }

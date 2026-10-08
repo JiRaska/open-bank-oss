@@ -6,7 +6,7 @@ info:
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.5 -> 1.6): additive
   # machine-readable 409 for unsafe Idempotency-Key reuse. No request/response field was removed.
   # 1.9.0 -> 1.10.0 (#11588): additive verified makerActorKind on approval responses.
-  version: 1.10.0
+  version: 1.11.0
   description: >-
     Czech domestic payment lifecycle (CZ-specific rails, SIPO). On create, debtor and creditor names
     are synchronously screened against the sanctions lists (ADR-0032): a clean payment is returned
@@ -23,6 +23,31 @@ tags:
   - name: Domestic Payments
 
 paths:
+  /api/v1/domestic-payments/receipt-lookup:
+    post:
+      tags: [Domestic Payments]
+      summary: Recover the identity and current status of a domestic payment after a lost create response
+      description: >-
+        Read-only lookup. Submit the original Idempotency-Key in the JSON body, never in a URL.
+        FOUND requires the same issuer-qualified actor, debit account, and current account ownership.
+        Missing, in-flight, delegated, or legacy-unverifiable records return UNKNOWN; UNKNOWN does
+        not mean the key is safe to reuse with a changed payment request.
+      operationId: findDomesticPaymentReceipt
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DomesticPaymentReceiptRequest'
+      responses:
+        '200':
+          description: Receipt found or outcome unknown
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DomesticPaymentReceipt'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /api/v1/domestic-payments:
     post:
       tags: [Domestic Payments]
@@ -303,6 +328,33 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
+    DomesticPaymentReceiptRequest:
+      type: object
+      required: [idempotencyKey, debtorAccountId]
+      properties:
+        idempotencyKey:
+          type: string
+          minLength: 1
+          maxLength: 128
+          writeOnly: true
+        debtorAccountId:
+          type: string
+          format: uuid
+    DomesticPaymentReceipt:
+      type: object
+      required: [outcome]
+      properties:
+        outcome:
+          type: string
+          enum: [FOUND, UNKNOWN]
+        paymentId:
+          type: string
+          format: uuid
+          nullable: true
+        status:
+          type: string
+          nullable: true
+          enum: [RECEIVED, VALIDATED, SENT_TO_CLEARING, SETTLED, REJECTED, RETURNED, CANCELLED]
     CreateDomesticPaymentRequest:
       type: object
       # Property names and optionality mirror the DTO the resource deserializes into

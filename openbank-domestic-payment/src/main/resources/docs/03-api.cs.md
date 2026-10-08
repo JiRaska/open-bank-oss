@@ -143,6 +143,16 @@ Chyby používají `ApiError` z `openbank-libs` (`{ correlationId, status, code,
 | 404 | `NOT_FOUND` | id platby neexistuje (`DomesticPaymentNotFoundException`) |
 | 409 | `CONFLICT` | nelegální přechod stavu (`InvalidDomesticPaymentStateTransitionException`) |
 
+### Dohledání platby po ztracené odpovědi
+
+`POST /api/v1/domestic-payments/receipt-lookup` přijímá JSON s původním `idempotencyKey` a
+`debtorAccountId`. Požadavek nic nezapisuje. `FOUND` vrátí `paymentId` a aktuální `status` jen
+tehdy, když souhlasí uložený vydavatel a aktér tokenu, účet plátce a account-service potvrdí
+aktuální vlastnictví účtu. V ostatních případech vrací `UNKNOWN` bez identifikátoru platby,
+včetně dosud probíhajícího založení, chybějícího klíče, starších neověřitelných záznamů a
+delegovaných plateb. `UNKNOWN` neopravňuje změnit údaje platby pod stejným klíčem: založení
+nadále odmítá změněný nebo neověřitelný replay kódem 409.
+
 
 ### Škála částky při čtení (#11604)
 

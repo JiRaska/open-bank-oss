@@ -143,6 +143,16 @@ Errors use `openbank-libs` `ApiError` (`{ correlationId, status, code, message }
 | 404 | `NOT_FOUND` | payment id does not exist (`DomesticPaymentNotFoundException`) |
 | 409 | `CONFLICT` | illegal status transition (`InvalidDomesticPaymentStateTransitionException`) |
 
+### Recovering a lost domestic-payment response
+
+`POST /api/v1/domestic-payments/receipt-lookup` accepts JSON with the original
+`idempotencyKey` and `debtorAccountId`. It is read-only. `FOUND` returns `paymentId` and the
+current `status` only when the authenticated issuer and actor match the durable binding and
+account-service confirms current ownership of the debit account. Otherwise it returns `UNKNOWN`
+without a payment identifier. This includes an in-flight create, a missing key, historical rows
+without the actor binding, and delegated payments. `UNKNOWN` is not permission to change the
+payload under the same key: create still rejects changed or unverifiable replay with 409.
+
 ### Amount scale on reads (#11604)
 
 The `amount` column stays `NUMERIC(20,6)`; the service reads it into a kernel `Money` at the

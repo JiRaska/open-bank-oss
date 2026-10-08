@@ -111,6 +111,9 @@ class DomesticPaymentEntity : PanacheEntity() {
     @Column(name = "request_fingerprint", length = 64)
     var requestFingerprint: String? = null
 
+    @Column(name = "receipt_actor_scope_hash", length = 64)
+    var receiptActorScopeHash: String? = null
+
     @Column(name = "delegation_id")
     var delegationId: UUID? = null
 

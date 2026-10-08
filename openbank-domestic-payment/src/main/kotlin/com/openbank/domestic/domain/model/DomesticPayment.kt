@@ -87,6 +87,8 @@ data class DomesticPayment(
     val initiatedByPartyId: UUID? = null,
     /** SHA-256 of the normalized create command and authenticated actor scope; null only on legacy rows. */
     val requestFingerprint: String? = null,
+    /** Issuer-qualified authenticated actor binding; null means receipt lookup cannot prove ownership. */
+    val receiptActorScopeHash: String? = null,
     /** Delegation grant that authorized this payment; null for an owner-initiated payment. */
     val delegationId: UUID? = null,
     /** Spend reservation bound one-to-one to this payment; null for an owner-initiated payment. */

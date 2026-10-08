@@ -55,6 +55,17 @@ data class CreateDomesticPaymentCommand(
 /** Result of create-or-replay; lets the REST edge preserve the replay signal without trusting a cache. */
 data class CreateDomesticPaymentResult(val payment: DomesticPayment, val replayed: Boolean)
 
+data class DomesticPaymentReceiptQuery(
+    val idempotencyKey: String,
+    val debtorAccountId: UUID,
+    val actorId: UUID?,
+    val actorScope: String,
+)
+
+data class DomesticPaymentReceipt(val paymentId: UUID?, val status: DomesticPaymentStatus?) {
+    val outcome: String get() = if (paymentId == null) "UNKNOWN" else "FOUND"
+}
+
 data class ListDomesticPaymentsQuery(
     val status: DomesticPaymentStatus? = null,
     val debtorAccountId: UUID? = null,
@@ -71,6 +82,7 @@ data class TransitionDomesticPaymentStatusCommand(
 
 interface DomesticPaymentUseCase {
     suspend fun createPayment(command: CreateDomesticPaymentCommand): CreateDomesticPaymentResult
+    suspend fun findReceipt(query: DomesticPaymentReceiptQuery): DomesticPaymentReceipt
     suspend fun getPayment(paymentId: UUID): DomesticPayment
     suspend fun listPayments(query: ListDomesticPaymentsQuery): List<DomesticPayment>
     suspend fun transitionStatus(command: TransitionDomesticPaymentStatusCommand): DomesticPayment
