@@ -20,6 +20,8 @@ data class CustomerIdentity(
      * challenges, device enrolment and decisions bind to this, with the entity only as context.
      */
     val human: UUID = partyId,
+    /** Immutable UUID asserted by the authenticated token, before party-merge resolution. */
+    val authenticatedActor: UUID = human,
 ) {
     /** The entity being acted for, or null when the request is the human's own. */
     val actingFor: UUID? get() = partyId.takeIf { it != human }

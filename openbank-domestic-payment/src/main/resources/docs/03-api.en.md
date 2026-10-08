@@ -152,6 +152,10 @@ account-service confirms current ownership of the debit account. Otherwise it re
 without a payment identifier. This includes an in-flight create, a missing key, historical rows
 without the actor binding, and delegated payments. `UNKNOWN` is not permission to change the
 payload under the same key: create still rejects changed or unverifiable replay with 409.
+When customer-edge calls the rail, it supplies the effective party through `X-Customer-Party-Id`
+and the authenticated human through `X-Customer-Actor-Id` under its verified service token.
+The rail binds both at creation and checks them again on receipt and create replay; two delegates
+of the same company cannot recover each other's receipt.
 
 ### Amount scale on reads (#11604)
 

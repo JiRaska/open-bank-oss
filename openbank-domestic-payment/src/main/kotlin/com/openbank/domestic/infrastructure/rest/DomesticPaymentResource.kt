@@ -20,6 +20,7 @@ import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DefaultValue
+import jakarta.ws.rs.ForbiddenException
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.PATCH
@@ -69,6 +70,21 @@ class DomesticPaymentResource(
             return listOfNotNull(issuer, subject).joinToString("\u001f")
         }
 
+    private fun trustedCustomerProvenance(partyHeader: String?, actorHeader: String?): Pair<UUID?, UUID?> {
+        val jwt = identity.principal as? JsonWebToken
+        val edge = jwt?.getClaim<String>("preferred_username") == EDGE_SERVICE_NAME &&
+            jwt.getClaim<String>("azp") == EDGE_CLIENT_ID
+        if (partyHeader == null && actorHeader == null && !edge) return null to null
+        val missingProvenance = partyHeader.isNullOrBlank() || actorHeader.isNullOrBlank()
+        if (!edge || missingProvenance || '\u001f' !in actorScope) {
+            throw ForbiddenException("Customer provenance requires the authenticated customer edge")
+        }
+        val party = runCatching { UUID.fromString(partyHeader) }.getOrNull()
+        val actor = runCatching { UUID.fromString(actorHeader) }.getOrNull()
+        if (party == null || actor == null) throw ForbiddenException("Customer provenance is invalid")
+        return party to actor
+    }
+
     @POST
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS")
     @Authorize(action = "domestic-payment.create")
@@ -76,6 +92,8 @@ class DomesticPaymentResource(
     suspend fun createPayment(
         request: CreateDomesticPaymentRequest,
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        @HeaderParam("X-Customer-Party-Id") customerPartyHeader: String?,
+        @HeaderParam("X-Customer-Actor-Id") customerActorHeader: String?,
         @Context requestContext: ContainerRequestContext,
     ): Response {
         // #3104 — the guard below could not run when the header was ABSENT: JAX-RS injected null,
@@ -87,11 +105,14 @@ class DomesticPaymentResource(
         // SyntheticTaintRequestFilter accepts this flag only after authenticating a configured
         // canary principal. Read its request property, never the caller's header or coroutine MDC,
         // then persist it through the outbox boundary for asynchronous consumers.
+        val (customerPartyId, customerActorId) = trustedCustomerProvenance(customerPartyHeader, customerActorHeader)
         val result = paymentUseCase.createPayment(
             request.toCommand(
                 idempotencyKey,
                 actorId,
                 actorScope,
+                customerPartyId,
+                customerActorId,
                 requestContext.getProperty(SYNTHETIC_TAINT_PROPERTY) == true,
             ),
         )
@@ -116,11 +137,30 @@ class DomesticPaymentResource(
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS")
     @Authorize(action = "domestic-payment.receipt.read")
     @Operation(summary = "Look up a domestic payment receipt after a lost create response")
-    suspend fun findReceipt(request: DomesticPaymentReceiptRequest): Response = Response.ok(
-        paymentUseCase.findReceipt(
-            DomesticPaymentReceiptQuery(request.idempotencyKey, request.debtorAccountId, actorId, actorScope),
-        ),
-    ).build()
+    suspend fun findReceipt(
+        request: DomesticPaymentReceiptRequest,
+        @HeaderParam("X-Customer-Party-Id") customerPartyHeader: String?,
+        @HeaderParam("X-Customer-Actor-Id") customerActorHeader: String?,
+    ): Response {
+        val (customerPartyId, customerActorId) = trustedCustomerProvenance(customerPartyHeader, customerActorHeader)
+        return Response.ok(
+            paymentUseCase.findReceipt(
+                DomesticPaymentReceiptQuery(
+                    request.idempotencyKey,
+                    request.debtorAccountId,
+                    actorId,
+                    actorScope,
+                    customerPartyId,
+                    customerActorId,
+                ),
+            ),
+        ).build()
+    }
+
+    private companion object {
+        const val EDGE_SERVICE_NAME = "service-account-openbank-edge"
+        const val EDGE_CLIENT_ID = "openbank-edge"
+    }
 
     @GET
     @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS", "ROLE_API")

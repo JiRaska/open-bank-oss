@@ -1098,7 +1098,7 @@ class CustomerEdgeResourceTest {
             consumeBody = thirdArg()
             Response.ok("""{"id":"$challengeId","status":"COMPLETED"}""").build()
         }
-        every { upstream.post(match { it.contains("dompay") }, any(), any(), any()) } returns
+        every { upstream.post(match { it.contains("dompay") }, any(), any(), any(), any()) } returns
             Response.status(201).entity("""{"id":"${UUID.randomUUID()}","status":"RECEIVED"}""").build()
 
         val resp = paymentResourceFor(upstream, caller)
@@ -1180,6 +1180,84 @@ class CustomerEdgeResourceTest {
 
     private fun paymentJson(paymentId: UUID, debtor: UUID, status: String) =
         Response.ok("""{"id":"$paymentId","status":"$status","debtorAccountId":"$debtor"}""").build()
+
+    @Test
+    fun `domestic receipt lookup forwards the original key only after current account ownership proof`() {
+        val caller = UUID.randomUUID()
+        val account = UUID.randomUUID()
+        val key = "receipt-${UUID.randomUUID()}"
+        val upstream = mockk<UpstreamClient>()
+        val forwarded = slot<String>()
+        val headers = slot<Map<String, String>>()
+        every { upstream.get("http://account/api/v1/accounts/$account", caller.toString()) } returns
+            accountJson(account, caller)
+        every {
+            upstream.post(
+                "http://dompay/api/v1/domestic-payments/receipt-lookup",
+                caller.toString(),
+                capture(forwarded),
+                null,
+                capture(headers),
+            )
+        } returns Response.ok("""{"outcome":"FOUND"}""").build()
+
+        val response = statusResourceFor(upstream, caller).findDomesticPaymentReceipt(
+            """{"idempotencyKey":"$key","debtorAccountId":"$account"}""",
+        )
+
+        assertThat(response.status).isEqualTo(200)
+        val sent = ObjectMapper().readTree(forwarded.captured)
+        assertThat(sent.path("idempotencyKey").asText()).isEqualTo(key)
+        assertThat(sent.path("debtorAccountId").asText()).isEqualTo(account.toString())
+        assertThat(sent.size()).isEqualTo(2)
+        assertThat(headers.captured["X-Customer-Actor-Id"]).isEqualTo(caller.toString())
+    }
+
+    @Test
+    fun `domestic receipt actor remains the authenticated UUID after party merge`() {
+        val caller = UUID.randomUUID()
+        val merged = UUID.randomUUID()
+        val account = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get("http://account/api/v1/accounts/$account", merged.toString()) } returns
+            accountJson(account, merged)
+        val headers = slot<Map<String, String>>()
+        every {
+            upstream.post(
+                "http://dompay/api/v1/domestic-payments/receipt-lookup",
+                merged.toString(),
+                any(),
+                null,
+                capture(headers),
+            )
+        } returns Response.ok("""{"outcome":"UNKNOWN"}""").build()
+        val resource = statusResourceFor(upstream, caller)
+        resource.partyMergeResolver = mockk { every { resolve(caller) } returns merged }
+
+        val response = resource.findDomesticPaymentReceipt(
+            """{"idempotencyKey":"merge-key","debtorAccountId":"$account"}""",
+        )
+
+        assertThat(response.status).isEqualTo(200)
+        assertThat(headers.captured["X-Customer-Actor-Id"]).isEqualTo(caller.toString())
+    }
+
+    @Test
+    fun `domestic receipt lookup conceals foreign or unavailable account without calling payment rail`() {
+        val caller = UUID.randomUUID()
+        val account = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get("http://account/api/v1/accounts/$account", caller.toString()) } returns
+            accountJson(account, UUID.randomUUID())
+
+        val response = statusResourceFor(upstream, caller).findDomesticPaymentReceipt(
+            """{"idempotencyKey":"opaque","debtorAccountId":"$account"}""",
+        )
+
+        assertThat(response.status).isEqualTo(200)
+        assertThat(response.entity.toString()).contains("UNKNOWN").doesNotContain("opaque")
+        verify(exactly = 0) { upstream.post(any(), any(), any(), any()) }
+    }
 
     @Test
     fun `getDomesticPaymentStatus returns the status for the caller's own payment`() {

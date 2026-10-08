@@ -89,6 +89,9 @@ data class DomesticPayment(
     val requestFingerprint: String? = null,
     /** Issuer-qualified authenticated actor binding; null means receipt lookup cannot prove ownership. */
     val receiptActorScopeHash: String? = null,
+    /** End-user party asserted by the verified customer edge; null for other origins and old rows. */
+    val receiptCustomerPartyId: UUID? = null,
+    val receiptCustomerActorId: UUID? = null,
     /** Delegation grant that authorized this payment; null for an owner-initiated payment. */
     val delegationId: UUID? = null,
     /** Spend reservation bound one-to-one to this payment; null for an owner-initiated payment. */

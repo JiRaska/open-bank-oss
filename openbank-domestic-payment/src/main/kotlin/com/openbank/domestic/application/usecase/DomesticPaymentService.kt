@@ -184,6 +184,8 @@ class DomesticPaymentService(
         )
     }
 
+    // Keep the fast-path and concurrent-winner replay checks in the same flow as the atomic save.
+    @Suppress("LongMethod")
     private suspend fun createPaymentInternal(
         command: CreateDomesticPaymentCommand,
         delegated: Boolean,
@@ -197,7 +199,12 @@ class DomesticPaymentService(
         val requestFingerprint = DomesticPaymentRequestFingerprint.sha256(normalized)
 
         paymentRepository.findByIdempotencyKey(normalized.idempotencyKey)?.let { existing ->
-            verifyReplay(existing, requestFingerprint)
+            verifyReplay(
+                existing,
+                requestFingerprint,
+                normalized.receiptCustomerPartyId,
+                normalized.receiptCustomerActorId,
+            )
             return DelegatedDomesticPaymentResult.Accepted(CreateDomesticPaymentResult(existing, replayed = true))
         }
 
@@ -244,7 +251,12 @@ class DomesticPaymentService(
         // no duplicate outbox entry exists. It is still a replay only when the durable fingerprints
         // match; a different or legacy-null binding fails closed.
         if (received.id != payment.id) {
-            verifyReplay(received, requestFingerprint)
+            verifyReplay(
+                received,
+                requestFingerprint,
+                normalized.receiptCustomerPartyId,
+                normalized.receiptCustomerActorId,
+            )
             return DelegatedDomesticPaymentResult.Accepted(CreateDomesticPaymentResult(received, replayed = true))
         }
 
@@ -279,8 +291,16 @@ class DomesticPaymentService(
     private fun DelegatedDomesticPaymentResult.acceptedOrNull(): CreateDomesticPaymentResult? =
         (this as? DelegatedDomesticPaymentResult.Accepted)?.result
 
-    private fun verifyReplay(existing: DomesticPayment, requestFingerprint: String) {
-        if (existing.requestFingerprint != requestFingerprint) {
+    private fun verifyReplay(
+        existing: DomesticPayment,
+        requestFingerprint: String,
+        customerPartyId: UUID?,
+        customerActorId: UUID?,
+    ) {
+        if (existing.requestFingerprint != requestFingerprint ||
+            existing.receiptCustomerPartyId != customerPartyId ||
+            existing.receiptCustomerActorId != customerActorId
+        ) {
             throw DomesticPaymentIdempotencyConflictException()
         }
     }
@@ -317,6 +337,8 @@ class DomesticPaymentService(
             initiatedByPartyId = command.actorId,
             requestFingerprint = requestFingerprint,
             receiptActorScopeHash = command.actorScope?.takeIf { '\u001f' in it }?.let(ReceiptActorScope::hash),
+            receiptCustomerPartyId = command.receiptCustomerPartyId,
+            receiptCustomerActorId = command.receiptCustomerActorId,
             delegationId = command.delegationId,
             reservationId = command.reservationId,
             rejectReason = null,
@@ -331,22 +353,26 @@ class DomesticPaymentService(
     override suspend fun getPayment(paymentId: UUID): DomesticPayment =
         paymentRepository.findById(paymentId) ?: throw DomesticPaymentNotFoundException(paymentId)
 
+    // Each guard represents an independent disclosure boundary; keep their fail-closed order visible.
+    @Suppress("CyclomaticComplexMethod")
     override suspend fun findReceipt(query: DomesticPaymentReceiptQuery): DomesticPaymentReceipt {
         require(query.idempotencyKey.isNotBlank() && query.idempotencyKey.length <= IDEMPOTENCY_KEY_MAX_LENGTH) {
             "Idempotency-Key must contain 1 to $IDEMPOTENCY_KEY_MAX_LENGTH characters"
         }
         val unknown = DomesticPaymentReceipt(null, null)
-        val actorId = query.actorId ?: return unknown
         // A bare subject does not prove issuer identity. Old rows have no independent scope binding.
         if ('\u001f' !in query.actorScope) return unknown
         val payment = paymentRepository.findByIdempotencyKey(query.idempotencyKey) ?: return unknown
         if (payment.debtorAccountId != query.debtorAccountId) return unknown
-        if (payment.initiatedByPartyId != actorId) return unknown
         if (payment.delegationId != null || payment.reservationId != null) return unknown
         if (payment.requestFingerprint == null) return unknown
         if (payment.receiptActorScopeHash != ReceiptActorScope.hash(query.actorScope)) return unknown
+        val owner = query.customerPartyId ?: query.actorId ?: return unknown
+        if (query.customerPartyId != null && payment.receiptCustomerPartyId != query.customerPartyId) return unknown
+        if (query.customerPartyId != null && payment.receiptCustomerActorId != query.customerActorId) return unknown
+        if (query.customerPartyId == null && payment.initiatedByPartyId != query.actorId) return unknown
         // Ownership is checked again at read time. Null means unavailable or no longer owned.
-        if (accountLookupPort.findPartyByAccountId(query.debtorAccountId) != actorId) return unknown
+        if (accountLookupPort.findPartyByAccountId(query.debtorAccountId) != owner) return unknown
         return DomesticPaymentReceipt(payment.id, payment.status)
     }
 

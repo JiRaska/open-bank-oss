@@ -38,6 +38,10 @@ data class CreateDomesticPaymentCommand(
     val actorId: UUID? = null,
     /** Stable authenticated-principal scope (issuer + subject where available), used only for replay binding. */
     val actorScope: String? = null,
+    /** Trusted edge-only party provenance; never copied from the payment JSON body. */
+    val receiptCustomerPartyId: UUID? = null,
+    /** Natural human authenticated at the edge, distinct from the effective party. */
+    val receiptCustomerActorId: UUID? = null,
     /** Delegation grant that authorized this payment; present only together with [reservationId]. */
     val delegationId: UUID? = null,
     /** Spend reservation durably bound to this payment; present only together with [delegationId]. */
@@ -60,6 +64,8 @@ data class DomesticPaymentReceiptQuery(
     val debtorAccountId: UUID,
     val actorId: UUID?,
     val actorScope: String,
+    val customerPartyId: UUID? = null,
+    val customerActorId: UUID? = null,
 )
 
 data class DomesticPaymentReceipt(val paymentId: UUID?, val status: DomesticPaymentStatus?) {

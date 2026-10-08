@@ -6,7 +6,7 @@ info:
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.5 -> 1.6): additive
   # machine-readable 409 for unsafe Idempotency-Key reuse. No request/response field was removed.
   # 1.9.0 -> 1.10.0 (#11588): additive verified makerActorKind on approval responses.
-  version: 1.11.0
+  version: 1.12.0
   description: >-
     Czech domestic payment lifecycle (CZ-specific rails, SIPO). On create, debtor and creditor names
     are synchronously screened against the sanctions lists (ADR-0032): a clean payment is returned
@@ -29,10 +29,23 @@ paths:
       summary: Recover the identity and current status of a domestic payment after a lost create response
       description: >-
         Read-only lookup. Submit the original Idempotency-Key in the JSON body, never in a URL.
-        FOUND requires the same issuer-qualified actor, debit account, and current account ownership.
-        Missing, in-flight, delegated, or legacy-unverifiable records return UNKNOWN; UNKNOWN does
-        not mean the key is safe to reuse with a changed payment request.
+        FOUND requires the same issuer-qualified actor or a party bound by the verified customer
+        edge, the original debit account, and current account ownership. Customer party and natural
+        actor headers are accepted only together from the verified customer-edge service principal. Missing, in-flight,
+        delegated, or legacy-unverifiable records return UNKNOWN; UNKNOWN does not mean the key is
+        safe to reuse with a changed payment request.
       operationId: findDomesticPaymentReceipt
+      parameters:
+        - name: X-Customer-Party-Id
+          in: header
+          required: false
+          description: Required for the verified customer-edge service; forbidden from other callers.
+          schema: {type: string, format: uuid}
+        - name: X-Customer-Actor-Id
+          in: header
+          required: false
+          description: Authenticated natural actor. Required with customer party for verified customer-edge calls.
+          schema: {type: string, format: uuid}
       requestBody:
         required: true
         content:
@@ -58,6 +71,8 @@ paths:
         X-Idempotency-Replayed=true. Reusing the key for a different normalized payment command,
         actor scope, delegation or reservation is refused with 409 IDEMPOTENCY_KEY_REUSED. A
         pre-upgrade row without a durable request fingerprint also fails closed with that response.
+        When called by customer-edge, separately stored customer party and natural actor bindings are required and
+        checked again on replay; other callers cannot supply customer provenance.
       operationId: createDomesticPayment
       parameters:
         - name: Idempotency-Key
@@ -65,6 +80,16 @@ paths:
           required: true
           schema:
             type: string
+        - name: X-Customer-Party-Id
+          in: header
+          required: false
+          description: Required for the verified customer-edge service; forbidden from other callers.
+          schema: {type: string, format: uuid}
+        - name: X-Customer-Actor-Id
+          in: header
+          required: false
+          description: Authenticated natural actor. Required with customer party for verified customer-edge calls.
+          schema: {type: string, format: uuid}
       requestBody:
         required: true
         content:

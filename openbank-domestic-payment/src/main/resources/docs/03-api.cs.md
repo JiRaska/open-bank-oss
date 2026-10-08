@@ -152,6 +152,10 @@ aktuální vlastnictví účtu. V ostatních případech vrací `UNKNOWN` bez id
 včetně dosud probíhajícího založení, chybějícího klíče, starších neověřitelných záznamů a
 delegovaných plateb. `UNKNOWN` neopravňuje změnit údaje platby pod stejným klíčem: založení
 nadále odmítá změněný nebo neověřitelný replay kódem 409.
+Zákaznický edge předává efektivní stranu v `X-Customer-Party-Id` a ověřenou fyzickou osobu
+v `X-Customer-Actor-Id` pod svým ověřeným služebním tokenem. Platební služba obě identity
+sváže s novou platbou a znovu ověří při dohledání i opakovaném založení. Dva zástupci stejné
+společnosti si proto nemohou navzájem dohledat potvrzení.
 
 
 ### Škála částky při čtení (#11604)

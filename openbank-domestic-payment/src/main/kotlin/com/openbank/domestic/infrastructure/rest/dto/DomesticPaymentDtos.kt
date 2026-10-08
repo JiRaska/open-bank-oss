@@ -43,6 +43,8 @@ data class CreateDomesticPaymentRequest(
         idempotencyKey: String,
         actorId: UUID? = null,
         actorScope: String? = null,
+        receiptCustomerPartyId: UUID? = null,
+        receiptCustomerActorId: UUID? = null,
         synthetic: Boolean = false,
     ): CreateDomesticPaymentCommand = CreateDomesticPaymentCommand(
         idempotencyKey = idempotencyKey,
@@ -68,6 +70,8 @@ data class CreateDomesticPaymentRequest(
         endToEndId = endToEndId,
         actorId = actorId,
         actorScope = actorScope,
+        receiptCustomerPartyId = receiptCustomerPartyId,
+        receiptCustomerActorId = receiptCustomerActorId,
         synthetic = synthetic,
     )
 }

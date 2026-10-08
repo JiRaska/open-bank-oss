@@ -2962,6 +2962,7 @@ class CustomerEdgeResource(
             customer.partyId.toString(),
             enriched,
             idempotencyKey,
+            mapOf("X-Customer-Actor-Id" to customer.authenticatedActor.toString()),
         )
         settleDelegatedSpend(
             reservation,
@@ -2979,6 +2980,36 @@ class CustomerEdgeResource(
         }
         auditPayment(resp, customer, "payments.domestic", amount, currency, creditorRaw, scaChallengeId, debit)
         return resp
+    }
+
+    /** Recover a lost create response without putting the original key in a URL or log. */
+    @POST
+    @Path("/domestic-payments/receipt-lookup")
+    @Authorize(action = "customer.payments.read")
+    @Blocking
+    fun findDomesticPaymentReceipt(body: String): Response {
+        val customer = customer()
+        val key = extractTextField(objectMapper, body, "idempotencyKey")
+            ?.takeIf { it.isNotBlank() && it.length <= MAX_DOMESTIC_RECEIPT_KEY_LENGTH }
+            ?: return badRequest("idempotencyKey is required and must be at most 128 characters")
+        val accountId = parseDebtorAccountId(objectMapper, body)
+            ?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+            ?: return badRequest("debtorAccountId is required")
+        if (!ownsAccount(accountId, customer.partyId)) {
+            return Response.ok("""{"outcome":"UNKNOWN","paymentId":null,"status":null}""")
+                .type(MediaType.APPLICATION_JSON)
+                .build()
+        }
+        val request = objectMapper.writeValueAsString(
+            mapOf("idempotencyKey" to key, "debtorAccountId" to accountId.toString()),
+        )
+        return upstream.post(
+            "$domesticPaymentServiceUrl/api/v1/domestic-payments/receipt-lookup",
+            customer.partyId.toString(),
+            request,
+            null,
+            mapOf("X-Customer-Actor-Id" to customer.authenticatedActor.toString()),
+        )
     }
 
     /**
@@ -5441,7 +5472,7 @@ class CustomerEdgeResource(
         } else {
             human
         }
-        return CustomerIdentity(effective, human)
+        return CustomerIdentity(effective, human, claimed)
     }
 
     /** Audit context for an SCA action: the entity acted for, when there is one. */
@@ -5777,6 +5808,7 @@ class CustomerEdgeResource(
         private const val MIN_PROMO_CODE_LENGTH = 8
         private const val MAX_PROMO_CODE_LENGTH = 128
         private const val MAX_IDEMPOTENCY_KEY_LENGTH = 255
+        private const val MAX_DOMESTIC_RECEIPT_KEY_LENGTH = 128
 
         // A ThemeSpec is a small token document; 8 KiB leaves headroom for future fields
         // while keeping Redis abuse-proof (ADR-0190).

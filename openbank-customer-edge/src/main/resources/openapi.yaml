@@ -2315,6 +2315,47 @@ paths:
             Under X-Acting-For only: the company's signing policy could not be evaluated, so the
             payment is refused rather than sent with a single signature.
 
+  /domestic-payments/receipt-lookup:
+    post:
+      tags: [Payments]
+      summary: Recover a domestic payment after a lost create response
+      description: >-
+        Send the original idempotency key in the JSON body with the original debit account ID.
+        The edge authenticates the customer and checks current debit-account ownership before
+        forwarding through its service identity. FOUND returns the durable payment ID and current
+        status. UNKNOWN covers absence, in-flight creation, unverifiable legacy rows and failed
+        ownership proof; it never means a changed payment payload may reuse the key.
+      operationId: findDomesticPaymentReceipt
+      security:
+        - customerOidc: [payments:read]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [idempotencyKey, debtorAccountId]
+              properties:
+                idempotencyKey: {type: string, minLength: 1, maxLength: 128, writeOnly: true}
+                debtorAccountId: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Found receipt or unknown outcome
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [outcome]
+                properties:
+                  outcome: {type: string, enum: [FOUND, UNKNOWN]}
+                  paymentId: {type: string, format: uuid, nullable: true}
+                  status:
+                    type: string
+                    nullable: true
+                    enum: [RECEIVED, VALIDATED, SENT_TO_CLEARING, SETTLED, REJECTED, RETURNED, CANCELLED]
+        '400': {description: Missing or malformed request}
+        '401': {description: Unauthenticated customer}
+
   /domestic-payments/{paymentId}:
     get:
       tags: [Payments]

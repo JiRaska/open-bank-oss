@@ -23,6 +23,9 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
 
 /**
  * End-to-end journey for a Czech domestic credit transfer: **submit the payment, read it back,
@@ -196,6 +199,139 @@ class DomesticPaymentJourneyE2E {
         assertThat(lookupReceipt(key, account).jsonPath().getString("outcome")).isEqualTo("UNKNOWN")
     }
 
+    @Test
+    @TestSecurity(user = EDGE_SUBJECT, roles = ["ROLE_OPERATOR"])
+    @JwtSecurity(
+        claims = [
+            Claim(key = "iss", value = "https://issuer.example"),
+            Claim(key = "sub", value = EDGE_SUBJECT),
+            Claim(key = "preferred_username", value = EDGE_SUBJECT),
+            Claim(key = "azp", value = "openbank-edge"),
+        ],
+    )
+    fun `verified edge binds customer party on create and checks it on receipt and replay`() {
+        val account = UUID.randomUUID()
+        val party = UUID.randomUUID()
+        val actor = UUID.randomUUID()
+        val key = "edge-receipt-${UUID.randomUUID()}"
+        val accounts = mockk<AccountServiceClient>()
+        coEvery { accounts.findPartyByAccountId(account) } returns party
+        QuarkusMock.installMockForType(accounts, AccountServiceClient::class.java)
+        val body = requestBody(account, AMOUNT, "E2E-${UUID.randomUUID()}")
+
+        val created = RestAssured.given().contentType("application/json")
+            .header("Idempotency-Key", key)
+            .header("X-Customer-Party-Id", party.toString())
+            .header("X-Customer-Actor-Id", actor.toString())
+            .body(body)
+            .post("/api/v1/domestic-payments")
+        assertThat(created.statusCode).isEqualTo(201)
+
+        val found = RestAssured.given().contentType("application/json")
+            .header("X-Customer-Party-Id", party.toString())
+            .header("X-Customer-Actor-Id", actor.toString())
+            .body("""{"idempotencyKey":"$key","debtorAccountId":"$account"}""")
+            .post("/api/v1/domestic-payments/receipt-lookup")
+        assertThat(found.jsonPath().getString("outcome")).isEqualTo("FOUND")
+        assertThat(found.jsonPath().getString("paymentId")).isEqualTo(created.jsonPath().getString("id"))
+
+        val otherParty = RestAssured.given().contentType("application/json")
+            .header("X-Customer-Party-Id", UUID.randomUUID().toString())
+            .header("X-Customer-Actor-Id", actor.toString())
+            .body("""{"idempotencyKey":"$key","debtorAccountId":"$account"}""")
+            .post("/api/v1/domestic-payments/receipt-lookup")
+        assertThat(otherParty.jsonPath().getString("outcome")).isEqualTo("UNKNOWN")
+        val otherActor = RestAssured.given().contentType("application/json")
+            .header("X-Customer-Party-Id", party.toString())
+            .header("X-Customer-Actor-Id", UUID.randomUUID().toString())
+            .body("""{"idempotencyKey":"$key","debtorAccountId":"$account"}""")
+            .post("/api/v1/domestic-payments/receipt-lookup")
+        assertThat(otherActor.jsonPath().getString("outcome")).isEqualTo("UNKNOWN")
+        val changedPartyReplay = RestAssured.given().contentType("application/json")
+            .header("Idempotency-Key", key)
+            .header("X-Customer-Party-Id", UUID.randomUUID().toString())
+            .header("X-Customer-Actor-Id", actor.toString())
+            .body(body)
+            .post("/api/v1/domestic-payments")
+        assertThat(changedPartyReplay.statusCode).isEqualTo(409)
+        val changedActorReplay = RestAssured.given().contentType("application/json")
+            .header("Idempotency-Key", key)
+            .header("X-Customer-Party-Id", party.toString())
+            .header("X-Customer-Actor-Id", UUID.randomUUID().toString())
+            .body(body)
+            .post("/api/v1/domestic-payments")
+        assertThat(changedActorReplay.statusCode).isEqualTo(409)
+        val missingActor = RestAssured.given().contentType("application/json")
+            .header("X-Customer-Party-Id", party.toString())
+            .body("""{"idempotencyKey":"$key","debtorAccountId":"$account"}""")
+            .post("/api/v1/domestic-payments/receipt-lookup")
+        assertThat(missingActor.statusCode).isEqualTo(403)
+    }
+
+    @Test
+    @TestSecurity(user = EDGE_SUBJECT, roles = ["ROLE_OPERATOR"])
+    @JwtSecurity(
+        claims = [
+            Claim(key = "iss", value = "https://issuer.example"),
+            Claim(key = "sub", value = EDGE_SUBJECT),
+            Claim(key = "preferred_username", value = EDGE_SUBJECT),
+            Claim(key = "azp", value = "openbank-edge"),
+        ],
+    )
+    fun `concurrent edge creates with one key and different humans reject the loser`() {
+        val account = UUID.randomUUID()
+        val party = UUID.randomUUID()
+        val key = "edge-race-${UUID.randomUUID()}"
+        val body = requestBody(account, AMOUNT, "E2E-${UUID.randomUUID()}")
+        val accounts = mockk<AccountServiceClient>()
+        coEvery { accounts.findPartyByAccountId(account) } returns party
+        QuarkusMock.installMockForType(accounts, AccountServiceClient::class.java)
+        val start = CountDownLatch(1)
+        val executor = Executors.newFixedThreadPool(2)
+        try {
+            val responses = (1..2).map {
+                CompletableFuture.supplyAsync(
+                    {
+                        start.await()
+                        RestAssured.given().contentType("application/json")
+                            .header("Idempotency-Key", key)
+                            .header("X-Customer-Party-Id", party.toString())
+                            .header("X-Customer-Actor-Id", UUID.randomUUID().toString())
+                            .body(body)
+                            .post("/api/v1/domestic-payments")
+                    },
+                    executor,
+                )
+            }
+            start.countDown()
+            assertThat(responses.map { it.join().statusCode }).containsExactlyInAnyOrder(201, 409)
+        } finally {
+            executor.shutdownNow()
+        }
+    }
+
+    @Test
+    @TestSecurity(user = ACTOR, roles = ["ROLE_PAYMENTS"])
+    @JwtSecurity(claims = [Claim(key = "iss", value = "https://issuer.example"), Claim(key = "sub", value = ACTOR)])
+    fun `non-edge caller cannot forge customer provenance on create or lookup`() {
+        val account = UUID.randomUUID()
+        val party = UUID.randomUUID()
+        val key = "forged-${UUID.randomUUID()}"
+        val create = RestAssured.given().contentType("application/json")
+            .header("Idempotency-Key", key)
+            .header("X-Customer-Party-Id", party.toString())
+            .header("X-Customer-Actor-Id", UUID.randomUUID().toString())
+            .body(requestBody(account, AMOUNT, "E2E-${UUID.randomUUID()}"))
+            .post("/api/v1/domestic-payments")
+        assertThat(create.statusCode).isEqualTo(403)
+        val lookup = RestAssured.given().contentType("application/json")
+            .header("X-Customer-Party-Id", party.toString())
+            .header("X-Customer-Actor-Id", UUID.randomUUID().toString())
+            .body("""{"idempotencyKey":"$key","debtorAccountId":"$account"}""")
+            .post("/api/v1/domestic-payments/receipt-lookup")
+        assertThat(lookup.statusCode).isEqualTo(403)
+    }
+
     private fun lookupReceipt(key: String, account: UUID): Response = RestAssured.given()
         .contentType("application/json")
         .body("""{"idempotencyKey":"$key","debtorAccountId":"$account"}""")
@@ -234,6 +370,7 @@ class DomesticPaymentJourneyE2E {
 
     private companion object {
         const val ACTOR = "00000000-0000-0000-0000-000000000099"
+        const val EDGE_SUBJECT = "service-account-openbank-edge"
         val AMOUNT: BigDecimal = BigDecimal("1500.00")
     }
 }

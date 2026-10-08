@@ -114,6 +114,12 @@ class DomesticPaymentEntity : PanacheEntity() {
     @Column(name = "receipt_actor_scope_hash", length = 64)
     var receiptActorScopeHash: String? = null
 
+    @Column(name = "receipt_customer_party_id")
+    var receiptCustomerPartyId: UUID? = null
+
+    @Column(name = "receipt_customer_actor_id")
+    var receiptCustomerActorId: UUID? = null
+
     @Column(name = "delegation_id")
     var delegationId: UUID? = null
 

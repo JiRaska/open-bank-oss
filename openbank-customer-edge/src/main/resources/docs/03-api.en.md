@@ -52,6 +52,7 @@ All paths are under `/customer/v1`. Scopes are the OAuth scopes declared in `ope
 | `PATCH /notifications/{id}/read?partyId=` | `accounts:read` | mark an authorized origin notification read |
 | `GET /profile` | `accounts:read` | the caller's own party profile |
 | `POST /domestic-payments` | `payments:initiate` | enriched; `Idempotency-Key` required |
+| `POST /domestic-payments/receipt-lookup` | `payments:read` | original key in JSON body; debit ownership checked before lookup |
 | `POST /sepa-payments` | `payments:initiate` | enriched; `Idempotency-Key` required |
 | `POST /sca/parties/{partyId}/devices` | `sca:enroll-device` | 403 if partyId ≠ JWT party |
 | `POST /sca/challenges` | `sca:decide` | partyId injected from JWT |

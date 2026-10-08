@@ -48,6 +48,7 @@ Všechny cesty jsou pod `/customer/v1`. Scopy jsou OAuth scopy deklarované v `o
 | `PATCH /notifications/{id}/read?partyId=` | `accounts:read` | označí notifikaci oprávněného profilu jako přečtenou |
 | `GET /profile` | `accounts:read` | vlastní profil party volajícího |
 | `POST /domestic-payments` | `payments:initiate` | obohaceno; `Idempotency-Key` vyžadován |
+| `POST /domestic-payments/receipt-lookup` | `payments:read` | původní klíč v těle JSON; před dohledáním se ověří vlastnictví účtu |
 | `POST /sepa-payments` | `payments:initiate` | obohaceno; `Idempotency-Key` vyžadován |
 | `POST /sca/parties/{partyId}/devices` | `sca:enroll-device` | 403 pokud partyId ≠ party z JWT |
 | `POST /sca/challenges` | `sca:decide` | partyId injektován z JWT |
