@@ -4,7 +4,7 @@ openapi: 3.1.0
 info:
   title: Notification Service API
   # 1.10 -> 1.11 (#11588): additive verified makerActorKind on approval responses.
-  version: 1.12.0
+  version: 1.13.0
   description: Notification delivery management — query sent/pending notifications, manage push device tokens.
   license:
     name: Apache-2.0
@@ -131,6 +131,14 @@ paths:
             default: 20
             minimum: 1
             maximum: 100
+        - name: beforeCreatedAt
+          in: query
+          description: With beforeId, return rows strictly older than this key (partyId required).
+          schema: {type: string, format: date-time}
+        - name: beforeId
+          in: query
+          description: UUID tie-breaker for beforeCreatedAt (partyId required).
+          schema: {type: string, format: uuid}
       responses:
         '200':
           description: A page of notifications

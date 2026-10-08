@@ -143,6 +143,21 @@ class NotificationResourceRedactionTest {
     }
 
     @Test
+    fun `party keyset list uses strict before key and retains exact counts`(): Unit = runBlocking {
+        val before = java.time.Instant.parse("2026-10-08T10:00:00Z")
+        val beforeId = UUID.randomUUID()
+        coEvery { repo.pageByPartyBefore(partyId, before, beforeId, 20) } returns
+            Triple(emptyList(), 135L, 42L)
+
+        val view = body(resource.listNotifications(0, 20, partyId, before.toString(), beforeId))
+
+        assertThat(view["total"]).isEqualTo(135L)
+        assertThat(view["unreadCount"]).isEqualTo(42L)
+        coVerify(exactly = 1) { repo.pageByPartyBefore(partyId, before, beforeId, 20) }
+        coVerify(exactly = 0) { repo.pageByParty(any(), any(), any()) }
+    }
+
+    @Test
     fun `markRead - missing partyId is 400 and the update is never attempted`(): Unit = runBlocking {
         val response = resource.markRead(id, null)
 
