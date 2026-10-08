@@ -40,6 +40,7 @@ import javax.sql.DataSource
 @QuarkusTestResource(
     value = PostgresTestResource::class,
     initArgs = [ResourceArg(name = "db", value = "openbank_catalog_concurrency")],
+    restrictToAnnotatedClass = true,
 )
 @TestProfile(BankV1CompatibilityConcurrencyIT.ConcurrentReconciliationProfile::class)
 @TestSecurity(user = "concurrency-operator", roles = ["ROLE_OPERATOR"])
