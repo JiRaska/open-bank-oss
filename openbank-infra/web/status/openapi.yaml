@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: OpenBank Public Status API
   version: 1.0.0
-  description: External checks and public incident history. All timestamps are UTC.
+  description: External checks, sanitized internal service-reachability verdicts, and public incident history. Payment completion and mobile-app health are not measured. All timestamps are UTC.
 servers:
   - url: https://status.open-bank.tech
 paths:

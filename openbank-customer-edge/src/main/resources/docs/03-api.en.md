@@ -47,6 +47,9 @@ All paths are under `/customer/v1`. Scopes are the OAuth scopes declared in `ope
 | `GET /statements/{accountId}` | `accounts:read` | period-close list |
 | `GET /statements/{accountId}/{currency}/{legalSequence}?format=` | `accounts:read` | render camt.053 / MT940 / PDF; format & currency allow-listed |
 | `GET /notifications?limit=&page=` | `accounts:read` | party-scoped page, total and exact unread count |
+| `GET /notifications/unified?limit=&partyId=` | `accounts:read` | latest 1–100 items across the person and current company mandates; optional authorized origin filter |
+| `GET /notifications/{id}?partyId=` | `accounts:read` | notification detail; origin `partyId` from unified items selects an authorized profile |
+| `PATCH /notifications/{id}/read?partyId=` | `accounts:read` | mark an authorized origin notification read |
 | `GET /profile` | `accounts:read` | the caller's own party profile |
 | `POST /domestic-payments` | `payments:initiate` | enriched; `Idempotency-Key` required |
 | `POST /sepa-payments` | `payments:initiate` | enriched; `Idempotency-Key` required |
@@ -67,6 +70,10 @@ All paths are under `/customer/v1`. Scopes are the OAuth scopes declared in `ope
 | `PUT /holdings/{holdingId}/valuation` | `wealth:write` | revalue; the previous value stays in the history |
 | `GET /holdings/{holdingId}/valuations` | `wealth:read` | valuation history, newest first |
 | `DELETE /holdings/{holdingId}` | `wealth:write` | withdraw; 409 `HOLDING_LOCKED` while pledged |
+
+### Unified notification inbox
+
+Omitting `partyId` merges the authenticated person and every company in the current mandate inventory. Each item carries its origin `partyId`; pass that value to the detail and mark-read routes when opening a company item. An explicit `partyId` filter must belong to the person or a current mandate. The response contains the latest 1–100 items with `page: 0`; use the existing selected-profile list for older history. `total` and `unreadCount` sum the party responses seen during this request, so concurrent writes do not form one atomic snapshot. A failed mandate inventory returns 503; an unauthorized filter returns 403; a failed or mismatched party feed returns 502 without partial items.
 
 ## Selected requests
 
@@ -144,3 +151,9 @@ The edge returns small JSON error envelopes of the shape `{"error":"…"}` it ge
 - **Customer API version in URL** (`/customer/v1`). The OpenAPI `info.version` (`1.6.0`) is the API-contract axis (ADR-0048), independent of the release `version.txt` (`0.9.0`).
 - Upstream calls target each service's own `/api/v1`.
 - **OpenAPI diff** in CI guards against breaking changes without a contract bump.
+
+## Public mobile status copy
+
+`GET /customer/v1/app-copy` is anonymous and returns only `{version, messages}` projected from the published customer communication style. It exposes no customer information or internal persona instructions. Successful published responses are cacheable for 60 seconds. An absent or retired publication returns version zero and an empty map, explicitly clearing client overrides.
+
+The communication upstream is supplied through `COMMUNICATION_SERVICE_URL` at runtime. A missing configuration or unavailable upstream returns 503; an invalid upstream document returns 502. Clients retain validated cached or bundled copy on either error and must not delay startup waiting for this optional request. The upstream read uses the edge service identity without a customer party header.

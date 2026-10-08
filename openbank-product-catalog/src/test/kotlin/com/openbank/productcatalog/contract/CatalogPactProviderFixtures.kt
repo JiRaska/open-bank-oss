@@ -43,10 +43,14 @@ class CatalogPactProviderFixtures(private val dataSource: DataSource) {
 
     fun independentlyCheckableDraftExists(): Map<String, Any> = dataSource.connection.use { connection ->
         // Broker verification may replay this interaction. A published revision cannot be
-        // deleted or turned back into a draft, so give each replay its own aggregate.
+        // deleted or turned back into a draft, so give each current replay its own aggregate.
+        // Historical Admin UI Pacts have no path generator and still request these fixed IDs.
+        // Keep their draft available without resetting an already published revision.
+        insertSpecification(connection, PUBLISH_SPECIFICATION_ID, "PACT_PUBLISH_PREREQUISITE")
+        insertOffering(connection, PUBLISH_OFFERING_ID, PUBLISH_SPECIFICATION_ID, "PACT_PUBLISH_OFFERING")
+        insertDraft(connection, PUBLISH_REVISION_ID, PUBLISH_OFFERING_ID, "pact-independent-author")
         val offeringId = UUID.randomUUID()
         val revisionId = UUID.randomUUID()
-        insertSpecification(connection, PUBLISH_SPECIFICATION_ID, "PACT_PUBLISH_PREREQUISITE")
         val offeringCode = "PACT_PUBLISH_OFFERING_${offeringId.toString().replace("-", "").uppercase()}"
         insertOffering(connection, offeringId, PUBLISH_SPECIFICATION_ID, offeringCode)
         insertDraft(connection, revisionId, offeringId, "pact-independent-author")
