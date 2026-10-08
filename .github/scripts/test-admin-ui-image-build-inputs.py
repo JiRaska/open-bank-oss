@@ -1,0 +1,86 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+"""Regression fixtures for frozen Admin UI context and immutable image binding."""
+from __future__ import annotations
+
+import hashlib
+import importlib.util
+import json
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+
+
+def load(name: str, file: str):
+    spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name(file))
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader
+    spec.loader.exec_module(module)
+    return module
+
+
+freeze_mod = load("freeze_context", "freeze-admin-ui-context.py")
+verify_mod = load("verify_build", "verify-admin-ui-build-inputs.py")
+
+
+class AdminUiImageInputsTest(unittest.TestCase):
+    def test_frozen_context_and_digest_binding(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            repo = base / "repo"
+            repo.mkdir()
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            subprocess.run(["git", "-C", str(repo), "config", "user.email", "test@example.invalid"], check=True)
+            subprocess.run(["git", "-C", str(repo), "config", "user.name", "Test"], check=True)
+            dockerfile = repo / "openbank-admin-ui/Dockerfile"
+            changelog = repo / "openbank-notification-service/CHANGELOG.md"
+            dockerfile.parent.mkdir()
+            changelog.parent.mkdir()
+            dockerfile.write_text("FROM scratch\n")
+            changelog.write_text("old release\n")
+            subprocess.run(["git", "-C", str(repo), "add", "--", "openbank-admin-ui/Dockerfile",
+                            "openbank-notification-service/CHANGELOG.md"], check=True)
+            subprocess.run(["git", "-C", str(repo), "-c", "commit.gpgsign=false", "commit", "-qm", "fixture"], check=True)
+            source = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
+                                    check=True, capture_output=True, text=True).stdout.strip()
+            generated = repo / "openbank-admin-ui/catalog.json"
+            generated.write_text('{"generated":true}\n')
+            context = base / "context"
+            manifest_path = base / "manifest.json"
+            freeze_mod.freeze(repo, context, manifest_path)
+            original_manifest = manifest_path.read_bytes()
+            self.assertEqual((context / "openbank-notification-service/CHANGELOG.md").read_text(), "old release\n")
+            changelog.write_text("new release\n")
+            self.assertEqual((context / "openbank-notification-service/CHANGELOG.md").read_text(), "old release\n")
+            freeze_mod.freeze(repo, base / "context2", base / "manifest2.json")
+            self.assertNotEqual(original_manifest, (base / "manifest2.json").read_bytes())
+
+            tag = "sandbox-" + source[:8]
+            image = "example.invalid/openbank-admin-ui"
+            record = {"schema": "openbank.admin-ui.image-build/v1", "image": image, "tag": tag,
+                      "digest": "sha256:" + "a" * 64, "sourceCommit": source,
+                      "contextManifestSha256": hashlib.sha256(original_manifest).hexdigest(),
+                      "contextManifest": json.loads(original_manifest),
+                      "buildArgs": {"BUILD_VERSION": "1.0.0", "BUILD_GIT_SHA": source[:8],
+                                    "BUILD_DATE": "2026-10-08T00:00:00Z"}, "platform": "linux/arm64"}
+            self.assertEqual(verify_mod.validate(record, original_manifest, image, tag), source)
+            verify_mod.check_tag_digest(record, record["digest"])
+            with self.assertRaises(ValueError):
+                verify_mod.check_tag_digest(record, "sha256:" + "b" * 64)
+            signed = [{"verificationResult": {"statement": {"predicate": record,
+                       "subject": [{"name": image, "digest": {"sha256": "a" * 64}}]}}}]
+            self.assertTrue(verify_mod.attestation_matches(record, signed))
+            signed[0]["verificationResult"]["statement"]["subject"][0]["digest"]["sha256"] = "b" * 64
+            self.assertFalse(verify_mod.attestation_matches(record, signed))
+            with self.assertRaises(ValueError):
+                verify_mod.validate(record, (base / "manifest2.json").read_bytes(), image, tag)
+            with self.assertRaises(ValueError):
+                verify_mod.validate(record, original_manifest, image, "sandbox-deadbeef")
+            (repo / "untracked-source.ts").write_text("unexpected\n")
+            with self.assertRaisesRegex(ValueError, "unknown untracked"):
+                freeze_mod.freeze(repo, base / "context3", base / "manifest3.json")
+
+
+if __name__ == "__main__":
+    unittest.main()

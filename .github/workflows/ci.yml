@@ -617,8 +617,51 @@ jobs:
     needs: [agent-admission, gates, ui]
     if: always()
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read
+      id-token: write
     steps:
+      - name: Detect Admin UI image pin proposal
+        id: admin_image
+        if: github.event_name == 'pull_request' || github.event_name == 'pull_request_review'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          gh pr diff "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --name-only \
+            > "$RUNNER_TEMP/admin-ui-pr-files"
+          if grep -Fxq 'openbank-infra/gitops/components/admin-ui/admin-ui.yaml' \
+              "$RUNNER_TEMP/admin-ui-pr-files"; then
+            echo 'check=true' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Check out trusted main for Admin UI image provenance
+        if: steps.admin_image.outputs.check == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Configure read-only registry verification credentials
+        if: steps.admin_image.outputs.check == 'true'
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.ADMIN_UI_IMAGE_VERIFY_ROLE_ARN }}
+          aws-region: ${{ vars.ADMIN_UI_IMAGE_VERIFY_AWS_REGION }}
+      - name: Verify signed Admin UI image inputs before merge
+        if: steps.admin_image.outputs.check == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          if [ "$(git rev-parse --is-shallow-repository)" = true ]; then
+            git fetch --unshallow origin main
+          fi
+          gh pr diff "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            | python3 .github/scripts/deploy-window.py verify --root .
       - name: Verify agent PR admission
         env:
           RESULT: ${{ needs.agent-admission.result }}
