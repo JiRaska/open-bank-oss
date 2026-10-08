@@ -20,6 +20,7 @@ import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.CsvSource
 import java.math.BigDecimal
 import java.time.LocalDate
+import kotlin.random.Random
 
 /**
  * Small-principal defects of [Amortization] (principal repaid per period ≈ a few minor units).
@@ -102,9 +103,20 @@ class AmortizationSmallPrincipalTest {
 
     @Test
     fun `random schedules never go negative and repay exactly the principal`(): Unit = runBlocking {
+        // Explicit seed, named in the failure, so a CI failure replays locally:
+        // AMORTIZATION_PROPERTY_SEED=<seed> ./gradlew :openbank-libs-lending:test --tests '*SmallPrincipal*'
+        val seed = System.getenv(SEED_ENV)?.takeIf { it.isNotBlank() }?.toLong() ?: Random.nextLong()
         val ccyArb = Arb.element("EUR", "CZK", "JPY", "KWD")
+        try {
+            randomSchedulesHold(ccyArb, seed)
+        } catch (e: AssertionError) {
+            throw AssertionError("Property failed with seed $seed (replay with $SEED_ENV=$seed): ${e.message}", e)
+        }
+    }
+
+    private suspend fun randomSchedulesHold(ccyArb: Arb<String>, seed: Long) {
         checkAll(
-            PropTestConfig(iterations = 2000),
+            PropTestConfig(seed = seed, iterations = 2000),
             ccyArb,
             Arb.long(1L, 5_000_000L),
             Arb.int(1, 360),
@@ -118,12 +130,19 @@ class AmortizationSmallPrincipalTest {
             val s = try {
                 Amortization.schedule(Money.of(principal, ccy), rate, n, firstDue, py, m)
             } catch (e: IllegalArgumentException) {
-                assertThat(e).hasMessageContaining("below one minor unit")
+                // Only the documented rejection is an expected outcome. InvalidMoneyException is
+                // also an IllegalArgumentException (the Money-range overflow fixed in #12159), and
+                // must surface as itself, not as a message mismatch.
+                if (e.message?.contains("below one minor unit") != true) throw AssertionError("unexpected rejection", e)
                 assertThat(m).isNotEqualTo(AmortizationMethod.BULLET)
                 return@checkAll
             }
             assertThat(s.installments).hasSize(n)
             assertClean(s, principal.toPlainString())
         }
+    }
+
+    private companion object {
+        const val SEED_ENV = "AMORTIZATION_PROPERTY_SEED"
     }
 }
