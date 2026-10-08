@@ -494,8 +494,11 @@ jobs:
           PREV_ATTEMPT=$((FINAL_ATTEMPT - 1))
           echo "prev-attempt=${PREV_ATTEMPT}" >> "${GITHUB_OUTPUT}"
 
-          gh api "repos/${GH_REPO}/actions/runs/${RUN_ID}/attempts/${PREV_ATTEMPT}/jobs?per_page=100" \
-            --jq '.jobs' > "${RUNNER_TEMP}/prev-jobs.json"
+          gh api --paginate --slurp \
+            "repos/${GH_REPO}/actions/runs/${RUN_ID}/attempts/${PREV_ATTEMPT}/jobs?per_page=100" \
+            > "${RUNNER_TEMP}/prev-job-pages.json"
+          python3 .github/scripts/record-rerun-flake.py flatten-jobs \
+            --pages-file "${RUNNER_TEMP}/prev-job-pages.json" > "${RUNNER_TEMP}/prev-jobs.json"
 
           python3 .github/scripts/record-rerun-flake.py classify \
             --jobs-file "${RUNNER_TEMP}/prev-jobs.json" > "${RUNNER_TEMP}/candidates.json"

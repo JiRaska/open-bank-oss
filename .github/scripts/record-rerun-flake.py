@@ -78,6 +78,27 @@ def has_spot_kill_signature(job: dict) -> bool:
     return cancelled > 0 and failed == 0
 
 
+def flatten_job_pages(pages: list[dict]) -> list[dict]:
+    """Require a complete, unique attempt-scoped Jobs API inventory before classification."""
+    if not pages or not isinstance(pages[0], dict):
+        raise ValueError("no Jobs API pages")
+    expected = pages[0].get("total_count")
+    if not isinstance(expected, int) or isinstance(expected, bool) or expected < 0:
+        raise ValueError("invalid Jobs API total_count")
+    jobs: list[dict] = []
+    for page in pages:
+        if not isinstance(page, dict) or page.get("total_count") != expected:
+            raise ValueError("inconsistent Jobs API page total_count")
+        batch = page.get("jobs")
+        if not isinstance(batch, list) or not all(isinstance(job, dict) for job in batch):
+            raise ValueError("malformed Jobs API page")
+        jobs.extend(batch)
+    ids = [job.get("id") for job in jobs]
+    if len(jobs) != expected or any(not isinstance(id_, int) for id_ in ids) or len(set(ids)) != len(ids):
+        raise ValueError("incomplete or duplicate Jobs API inventory")
+    return jobs
+
+
 def find_flake_candidates(prev_jobs: list[dict]) -> list[dict]:
     """Jobs from the PRIOR attempt that failed for a real reason (not a spot kill).
 
@@ -259,6 +280,9 @@ def main(argv: list[str]) -> int:
     p_classify = sub.add_parser("classify")
     p_classify.add_argument("--jobs-file", required=True, type=Path)
 
+    p_flatten = sub.add_parser("flatten-jobs")
+    p_flatten.add_argument("--pages-file", required=True, type=Path)
+
     p_junit = sub.add_parser("parse-junit")
     p_junit.add_argument("--path", required=True, type=Path)
 
@@ -282,6 +306,11 @@ def main(argv: list[str]) -> int:
     if args.cmd == "classify":
         jobs = json.loads(args.jobs_file.read_text(encoding="utf-8"))
         print(json.dumps(find_flake_candidates(jobs), indent=2))
+        return 0
+
+    if args.cmd == "flatten-jobs":
+        pages = json.loads(args.pages_file.read_text(encoding="utf-8"))
+        print(json.dumps(flatten_job_pages(pages), indent=2))
         return 0
 
     if args.cmd == "parse-junit":
@@ -327,6 +356,22 @@ def self_test() -> int:
         print(f"  [{'ok ' if cond else 'FAIL'}] {label}")
 
     print("has_spot_kill_signature / find_flake_candidates")
+    pages = [
+        {"total_count": 158, "jobs": [{"id": i} for i in range(100)]},
+        {"total_count": 158, "jobs": [{"id": i} for i in range(100, 158)]},
+    ]
+    check("all 158 jobs survive both API pages", len(flatten_job_pages(pages)) == 158)
+    for label, invalid in [
+        ("missing page", pages[:1]),
+        ("duplicate job", [pages[0], {"total_count": 158, "jobs": [{"id": 0} for _ in range(58)]}]),
+        ("inconsistent total", [pages[0], {"total_count": 159, "jobs": pages[1]["jobs"]}]),
+    ]:
+        try:
+            flatten_job_pages(invalid)
+        except ValueError:
+            check(f"{label} fails closed", True)
+        else:
+            check(f"{label} fails closed", False)
     spot_killed = _job(
         "build (openbank-billing-service)",
         "failure",
