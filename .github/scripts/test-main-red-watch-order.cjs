@@ -3,7 +3,10 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 const assert = require('node:assert/strict')
-const { eventIsSuperseded, failedJobsCovered, waitForCurrentVerdict, LatestRunLagError } = require('./main-red-watch-order.cjs')
+const {
+  eventIsSuperseded, failedJobsCovered, remainingFailureLines, withFailureLines,
+  mergeFailureLines, unresolvedAfterLaterRuns, waitForCurrentVerdict, LatestRunLagError,
+} = require('./main-red-watch-order.cjs')
 
 const event = { run_id: 100, attempt: 1 }
 assert.equal(eventIsSuperseded(event, { id: 101, run_attempt: 1 }), true)
@@ -37,6 +40,28 @@ async function main() {
   assert.equal(failedJobsCovered(issue.replace('[failure]', '[unknown]'), [leaf, 'all-green']), false)
   assert.equal(failedJobsCovered(issue.replace('- `all-green`', 'unparseable job\n- `all-green`'), [leaf, 'all-green']), false)
   assert.equal(failedJobsCovered(issue, null), false)
+
+  // Red R1 fails A. Red R2 fails B without running A. Green R3 runs B only.
+  // A must survive both the red refresh and the partial green.
+  const a = '- `A` [failure] — `Test A`'
+  const b = '- `B` [failure] — `Test B`'
+  const r1 = ['<!-- main-red:services-ci -->', '### Unresolved failing jobs', '', a, '', 'Context.'].join('\n')
+  const r2 = withFailureLines(r1, mergeFailureLines(remainingFailureLines(r1, ['C']), [b]))
+  assert.deepEqual(remainingFailureLines(r2, []), [a, b])
+  assert.equal(failedJobsCovered(r2, ['B']), false)
+  const r3 = withFailureLines(r2, remainingFailureLines(r2, ['B']))
+  assert.deepEqual(remainingFailureLines(r3, []), [a])
+  assert.equal(failedJobsCovered(r3, ['A']), true)
+  assert.equal(remainingFailureLines(r3, ['A']).length, 0)
+  assert.equal(mergeFailureLines([a], ['- `A` [timed_out] — latest failure'])[0], '- `A` [timed_out] — latest failure')
+  assert.throws(() => withFailureLines('malformed issue', [a]), /malformed/)
+  // A newer green that built B only must not erase a slow red A completion.
+  assert.deepEqual(unresolvedAfterLaterRuns([a], [[{ name: 'B', conclusion: 'success' }]]), [a])
+  assert.deepEqual(unresolvedAfterLaterRuns([a], [[{ name: 'A', conclusion: 'success' }]]), [])
+  assert.deepEqual(unresolvedAfterLaterRuns([a], [
+    [{ name: 'A', conclusion: 'success' }], [{ name: 'A', conclusion: 'failure' }],
+  ]), [a])
+
   const delays = []
   const runs = [{ id: 99, run_attempt: 1 }, null, { id: 100, run_attempt: 1 }]
   const current = await waitForCurrentVerdict(

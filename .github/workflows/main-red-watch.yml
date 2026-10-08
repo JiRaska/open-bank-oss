@@ -214,7 +214,7 @@ jobs:
         with:
           script: |
             const fs = require('fs')
-            const { waitForCurrentVerdict, failedJobsCovered } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/main-red-watch-order.cjs`)
+            const { waitForCurrentVerdict, remainingFailureLines, withFailureLines, mergeFailureLines, unresolvedAfterLaterRuns } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/main-red-watch-order.cjs`)
             const v = JSON.parse(fs.readFileSync('/tmp/main-red.json', 'utf8'))
             const LABEL = 'main-red'
             const slug = (v.workflow || 'unknown').toLowerCase().replace(/[^a-z0-9]+/g, '-')
@@ -247,27 +247,70 @@ jobs:
             if (!Number.isSafeInteger(workflowId) || workflowId < 1) {
               throw new Error('workflow_run has no valid workflow_id; refusing issue mutation')
             }
+            let completedRuns = []
             const { latest, superseded } = await waitForCurrentVerdict(
               v,
               async () => {
                 const completed = await github.rest.actions.listWorkflowRuns({
                   ...context.repo, workflow_id: workflowId, branch: 'main', event: 'push',
-                  status: 'completed', per_page: 10,
+                  status: 'completed', per_page: 100,
                 })
-                return (completed.data.workflow_runs || []).reduce(
+                completedRuns = completed.data.workflow_runs || []
+                return completedRuns.reduce(
                   (newest, run) => !newest || run.id > newest.id ? run : newest, null,
                 )
               },
               ms => new Promise(resolve => setTimeout(resolve, ms)),
             )
-            if (superseded) {
+            let currentFailures = v.failing.map(f =>
+              `- \`${f.job}\` [${f.conclusion}] — ${f.steps.length ? f.steps.map(s => `\`${s}\``).join(', ') : '_no step-level failure reported_'} ([log](${f.job_url}))`)
+            if (superseded && v.status !== 'red') {
               core.info(`Ignoring superseded ${v.workflow} run ${v.run_id} attempt ${v.attempt}; latest completed is ${latest.id} attempt ${latest.run_attempt}.`)
               return
+            }
+            if (superseded) {
+              // A newer path-scoped run may never have executed this red run's failed jobs.
+              if (completedRuns.length === 100 && !completedRuns.some(r => r.id === v.run_id)) {
+                throw new Error('Cannot prove recovery: red run fell outside the completed-runs page')
+              }
+              const laterRuns = completedRuns.filter(r =>
+                r.id > v.run_id || (r.id === v.run_id && r.run_attempt > v.attempt))
+                .sort((a, b) => a.id - b.id || a.run_attempt - b.run_attempt)
+              const laterJobs = []
+              for (const run of laterRuns) {
+                laterJobs.push(await github.paginate(github.rest.actions.listJobsForWorkflowRunAttempt, {
+                  ...context.repo, run_id: run.id, attempt_number: run.run_attempt, per_page: 100,
+                }))
+              }
+              currentFailures = unresolvedAfterLaterRuns(currentFailures, laterJobs)
+              if (!currentFailures.length) {
+                core.info(`All jobs from superseded red run ${v.run_id} have since succeeded.`)
+                return
+              }
+              const newerIssue = await findByMarker('open')
+              if (newerIssue) {
+                const prior = remainingFailureLines(newerIssue.body, [])
+                if (prior === null) throw new Error('Cannot read open main-red failure inventory')
+                await github.rest.issues.update({
+                  ...context.repo, issue_number: newerIssue.number,
+                  body: withFailureLines(newerIssue.body, mergeFailureLines(prior, currentFailures)),
+                })
+                core.info(`Added unresolved jobs from late red run ${v.run_id} to #${newerIssue.number}.`)
+                return
+              }
             }
 
             if (v.status === 'green') {
               // A path-scoped green run can omit the job that made main red (#12314).
-              if (!failedJobsCovered(openIssue.body, v.successful_jobs)) {
+              const remaining = remainingFailureLines(openIssue.body, v.successful_jobs)
+              if (remaining === null) throw new Error('Cannot read open main-red failure inventory')
+              if (remaining.length) {
+                if (remaining.length !== remainingFailureLines(openIssue.body, []).length) {
+                  await github.rest.issues.update({
+                    ...context.repo, issue_number: openIssue.number,
+                    body: withFailureLines(openIssue.body, remaining),
+                  })
+                }
                 core.info(`${v.workflow} green, but the previously failing jobs did not all run successfully; keeping #${openIssue.number} open.`)
                 return
               }
@@ -282,11 +325,11 @@ jobs:
               return
             }
 
-            const first = v.failing[0]
+            const first = v.failing.find(f => currentFailures.some(line => line.startsWith(`- \`${f.job}\` `)))
             const gate = first.steps.length ? `${first.job} / ${first.steps[0]}` : first.job
             const sha = (v.head_sha || '').slice(0, 9)
             const title = `main is red: ${v.workflow} — ${gate} @ ${sha}`
-            const body = [
+            let body = [
               marker,
               `## \`main\` is red — nothing else would have told you`,
               '',
@@ -297,10 +340,9 @@ jobs:
               `| head sha | \`${v.head_sha}\` |`,
               `| run | [${v.run_id} attempt ${v.attempt}](${v.html_url}) |`,
               '',
-              '### Every failing job in this attempt',
+              '### Unresolved failing jobs',
               '',
-              ...v.failing.map(f =>
-                `- \`${f.job}\` [${f.conclusion}] — ${f.steps.length ? f.steps.map(s => `\`${s}\``).join(', ') : '_no step-level failure reported_'} ([log](${f.job_url}))`),
+              ...currentFailures,
               '',
               'Read this as: **every PR that runs this workflow from now on inherits a red it',
               'did not cause**, and a PR merged onto this commit merges onto a broken tree.',
@@ -309,7 +351,7 @@ jobs:
               'never executed.',
               '',
               'This issue is refreshed in place while main stays red and is closed by the watch',
-              'only after a later main run succeeds on every job listed above. Closing it by hand',
+              'once each listed job has succeeded on a later main run. Closing it by hand',
               'does not fix main — the watch reopens it. To accept the red knowingly, say so in',
               'a comment; a silent red main is the only unacceptable state.',
               '',
@@ -318,6 +360,9 @@ jobs:
 
             const open = await findByMarker('open')
             if (open) {
+              const prior = remainingFailureLines(open.body, v.successful_jobs)
+              if (prior === null) throw new Error('Cannot read open main-red failure inventory')
+              body = withFailureLines(body, mergeFailureLines(prior, currentFailures))
               await github.rest.issues.update({
                 ...context.repo, issue_number: open.number, title, body,
               })

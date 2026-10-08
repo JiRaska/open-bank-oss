@@ -29,17 +29,62 @@ function eventIsSuperseded(verdict, latest) {
   return latestId > runId || latestAttempt > attempt
 }
 
-/** A scoped green run heals an incident only if it reran every formerly failing job. */
-function failedJobsCovered(issueBody, successfulJobs) {
-  if (typeof issueBody !== 'string' || !Array.isArray(successfulJobs)) return false
-  const section = issueBody.match(/### Every failing job in this attempt\r?\n\r?\n([^]*?)(?:\r?\n\r?\n|$)/)
-  if (!section) return false
-  const lines = section[1].split(/\r?\n/).filter(Boolean)
-  if (!lines.length || lines.some(line => !line.startsWith('- '))) return false
-  const names = lines.map(line => line.match(/^- `([^`]+)` \[(?:failure|timed_out)\](?: |$)/)?.[1])
-  if (names.some(name => !name)) return false
+const FAILURE_HEADING = '### Unresolved failing jobs'
+const FAILURE_SECTION = /(### (?:Unresolved failing jobs|Every failing job in this attempt)\r?\n\r?\n)([^]*?)(?=\r?\n\r?\n|$)/
+
+function failureName(line) {
+  return line.match(/^- `([^`]+)` \[(?:failure|timed_out)\](?: |$)/)?.[1]
+}
+
+/** Keep failures until the same named job has actually succeeded in a later attempt. */
+function remainingFailureLines(issueBody, successfulJobs) {
+  if (typeof issueBody !== 'string' || !Array.isArray(successfulJobs)) return null
+  const section = issueBody.match(FAILURE_SECTION)
+  if (!section) return null
+  const lines = section[2].split(/\r?\n/).filter(Boolean)
+  if (!lines.length || lines.some(line => !failureName(line))) return null
   const passed = new Set(successfulJobs)
-  return names.every(name => passed.has(name))
+  return lines.filter(line => !passed.has(failureName(line)))
+}
+
+function failedJobsCovered(issueBody, successfulJobs) {
+  const remaining = remainingFailureLines(issueBody, successfulJobs)
+  return remaining !== null && remaining.length === 0
+}
+
+/** Replace only the job ledger; retain the issue's other diagnostic context. */
+function withFailureLines(issueBody, lines) {
+  if (remainingFailureLines(issueBody, []) === null || !lines.length || lines.some(line => !failureName(line))) {
+    throw new Error('Cannot update malformed main-red failure inventory')
+  }
+  return issueBody.replace(FAILURE_SECTION, () => `${FAILURE_HEADING}\n\n${lines.join('\n')}`)
+}
+
+function mergeFailureLines(priorLines, currentLines) {
+  const byName = new Map()
+  for (const line of [...priorLines, ...currentLines]) {
+    const name = failureName(line)
+    if (!name) throw new Error('Cannot merge malformed main-red failure inventory')
+    byName.set(name, line)
+  }
+  return [...byName.values()]
+}
+
+/** Replay later executions per job, so a partial green cannot erase an older failure. */
+function unresolvedAfterLaterRuns(failingLines, laterRuns) {
+  const original = new Map(failingLines.map(line => [failureName(line), line]))
+  if (original.has(undefined)) throw new Error('Cannot replay malformed main-red failure inventory')
+  const unresolved = new Map(original)
+  for (const jobs of laterRuns) {
+    for (const job of jobs) {
+      if (!original.has(job.name)) continue
+      if (job.conclusion === 'success') unresolved.delete(job.name)
+      if (job.conclusion === 'failure' || job.conclusion === 'timed_out') {
+        unresolved.set(job.name, original.get(job.name))
+      }
+    }
+  }
+  return [...unresolved.values()]
 }
 
 /** Retry only GitHub's lagging completed-runs index; malformed data and API errors fail closed. */
@@ -56,4 +101,7 @@ async function waitForCurrentVerdict(verdict, fetchLatest, sleep,
   }
 }
 
-module.exports = { eventIsSuperseded, failedJobsCovered, waitForCurrentVerdict, LatestRunLagError }
+module.exports = {
+  eventIsSuperseded, failedJobsCovered, remainingFailureLines, withFailureLines,
+  mergeFailureLines, unresolvedAfterLaterRuns, waitForCurrentVerdict, LatestRunLagError,
+}
