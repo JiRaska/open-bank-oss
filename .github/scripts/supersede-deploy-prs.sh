@@ -44,6 +44,15 @@
 #     — they exist, see record-deployment-on-merge.yml — is never touched.
 #   * Only same-repo heads, never a fork.
 #   * Never the PR just opened.
+#   * A HELD PR passes its hold to the survivor (issue #11503). A draft deploy PR, or one labelled
+#     `blocked`, is an owner's deployment hold. On 2026-09-29 sanctions #11491 was drafted for an
+#     unresolved regression (#11492), this script closed it as superseded by #11499 (a descendant
+#     pin), and #11499 — never drafted — merged and promoted the held code. Ancestry transfers the
+#     image, never the safety decision, so before a held PR is closed the survivor is converted to
+#     draft and labelled `blocked` (deploy-window-flush only arms non-draft PRs), and the step
+#     exits non-zero so no `Enable auto-merge` step after it runs. If the hold cannot be transferred
+#     the held PR is left OPEN. The durable, service-scoped hold remains `rules.yaml: deploy_holds`
+#     (check-deploy-holds.py); this closes the gap for a hold expressed only on the PR.
 #   * A comment is left on every PR it closes. A silent close of someone's PR is not acceptable even
 #     when the PR is bot-generated: the next person to look must find out why from the PR itself.
 #
@@ -137,7 +146,7 @@ classify_coverage() {
 # ── main ────────────────────────────────────────────────────────────────────────────────────────
 run() {
   local PREFIX="$1" KEEP="$2" KEEP_SHA="$3" PAIRS="$4"
-  local n ref other_sha verdict failed=0 stale_keep=0 closed=0 skipped=0
+  local n ref held other_sha verdict failed=0 stale_keep=0 closed=0 skipped=0 inherited=0
   local KEEP_FILES other_files cov_verdict
 
   if [ -z "$PAIRS" ]; then
@@ -149,7 +158,7 @@ run() {
   # then refuses to close anything against it — never treated as "covers everything".
   KEEP_FILES="$(changed_files "$KEEP")"
 
-  while IFS=$'\t' read -r n ref; do
+  while IFS=$'\t' read -r n ref held; do
     [ -n "$n" ] || continue
     other_sha="$(sha_of_branch "$ref" "$PREFIX")"
     verdict="$(classify "$KEEP_SHA" "$other_sha")"
@@ -178,6 +187,29 @@ run() {
         echo "::warning::supersede: cannot establish that #$KEEP supersedes #$n (keep=${KEEP_SHA:-?} other=${other_sha:-?}, unrelated or unparsable) — leaving #$n OPEN."
         ;;
       CLOSE)
+        if [ "${held:-0}" = "1" ]; then
+          # Transfer the hold BEFORE closing anything; a failed transfer leaves the held PR open.
+          if [ "${DRY_RUN:-}" = "true" ]; then
+            echo "supersede: DRY_RUN — would inherit hold: #$KEEP -> draft + 'blocked' (from held #$n)."
+          elif ! { gh pr ready "$KEEP" --repo "$REPO" --undo \
+                   && gh pr edit "$KEEP" --repo "$REPO" --add-label blocked \
+                   && gh pr comment "$KEEP" --repo "$REPO" --body \
+"Deployment hold inherited from #$n, which was draft or labelled \`blocked\` when this PR superseded it.
+
+A descendant image pin does not clear an owner's hold (issue #11503): this PR is now draft and
+\`blocked\`, so the deploy window will not arm auto-merge on it. Release it only once the reason for
+the hold on #$n is resolved — mark it ready for review and remove the label deliberately.
+
+(\`.github/scripts/supersede-deploy-prs.sh\`)"; }; then
+            echo "::error::supersede: could not transfer #$n's deployment hold to #$KEEP — leaving #$n OPEN."
+            inherited=1
+            failed=1
+            continue
+          fi
+          inherited=1
+          echo "::error::supersede: #$n carried a deployment hold (draft or 'blocked'); #$KEEP inherits it" \
+               "and is not to be armed (issue #11503)."
+        fi
         if [ "${DRY_RUN:-}" = "true" ]; then
           echo "supersede: DRY_RUN — would close #$n (${other_sha:0:8} is an ancestor of ${KEEP_SHA:0:8})."
           closed=$((closed + 1))
@@ -214,11 +246,15 @@ If you believe otherwise, reopen it and say what it carries that #$KEEP does not
 $PAIRS
 EOF
 
-  echo "supersede: #$KEEP (${KEEP_SHA:0:8}) — closed=$closed skipped=$skipped stale_keep=$stale_keep"
+  echo "supersede: #$KEEP (${KEEP_SHA:0:8}) — closed=$closed skipped=$skipped stale_keep=$stale_keep inherited_hold=$inherited"
 
   # A stale KEEP is the one condition that must be loud. Everything else is tidiness: the image is
   # already built and pushed, and a leftover stale PR does not break a deploy.
   if [ "$stale_keep" -ne 0 ]; then
+    return 1
+  fi
+  # A held survivor must not be armed: fail the step so `Enable auto-merge` after it never runs.
+  if [ "$inherited" -ne 0 ]; then
     return 1
   fi
   if [ "$failed" -ne 0 ]; then
@@ -272,6 +308,7 @@ HOOK
 #!/usr/bin/env bash
 pr="$1"
 case "$pr" in
+  11491|11499) echo "openbank-infra/gitops/components/sanctions-service/sanctions-service.yaml" ;;
   6222|6225|1|2) echo "openbank-infra/gitops/components/shared/shared-service.yaml" ;;
   7313) printf '%s\n' "openbank-infra/gitops/components/balances/balance-service.yaml" ;;
   7319) printf '%s\n' "openbank-infra/gitops/components/accounts/account-service.yaml" ;;
@@ -358,11 +395,32 @@ HOOK
     echo "self-test case 6 OK (ancestor and superset files -> #7320 closed)"
   fi
 
+  # case 7 — the #11491 -> #11499 replay (issue #11503): the older sanctions PR is DRAFT (held),
+  # the newer descendant pin covers it. It may be closed, but only with the hold transferred and a
+  # non-zero exit so the survivor is never armed.
+  out="$(run "$P" 11499 "$NEW" "$(printf '11491\t%s%s\t1' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    echo "SELF-TEST FAIL case 7: held predecessor superseded with rc=0 — survivor would be armed; got: $out"; ok=1; dump_out "$out"
+  elif ! printf '%s' "$out" | grep -q 'would inherit hold: #11499'; then
+    echo "SELF-TEST FAIL case 7: #11499 did not inherit #11491's hold; got: $out"; ok=1; dump_out "$out"
+  else
+    echo "self-test case 7 OK (held #11491 superseded -> #11499 inherits hold, rc=$rc)"
+  fi
+
+  # case 8 — the same pair WITHOUT a hold is ordinary: closed, rc 0, nothing inherited.
+  out="$(run "$P" 11499 "$NEW" "$(printf '11491\t%s%s\t0' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -ne 0 ] || printf '%s' "$out" | grep -q 'inherit hold' \
+     || ! printf '%s' "$out" | grep -q 'would close #11491'; then
+    echo "SELF-TEST FAIL case 8: unheld supersede was not ordinary; got: $out"; ok=1; dump_out "$out"
+  else
+    echo "self-test case 8 OK (unheld -> closed, rc=0, no hold)"
+  fi
+
   if [ "$ok" -ne 0 ]; then
     echo "self-test: FAILED"
     return 1
   fi
-  echo "self-test: all 6 cases OK"
+  echo "self-test: all 8 cases OK"
   return 0
 }
 
@@ -391,13 +449,13 @@ fi
 # script would then print "nothing to close" and exit 0 — a broken probe reporting a clean result,
 # which is the failure mode this repo has been bitten by repeatedly.
 PAIRS="$(gh pr list --repo "$REPO" --state open --limit 200 \
-    --json number,headRefName,headRepositoryOwner,createdAt \
+    --json number,headRefName,headRepositoryOwner,createdAt,isDraft,labels \
     --jq "[.[]
            | select(.headRefName | startswith(\"$PREFIX\"))
            | select(.number != ($KEEP | tonumber))
            | select(.headRepositoryOwner.login == \"${REPO%%/*}\")]
           | sort_by(.createdAt)
-          | .[] | \"\(.number)\t\(.headRefName)\"")"
+          | .[] | \"\(.number)\t\(.headRefName)\t\(if .isDraft or ([.labels[].name] | index(\"blocked\")) then 1 else 0 end)\"")"
 
 run "$PREFIX" "$KEEP" "$KEEP_SHA" "$PAIRS"
 exit $?
