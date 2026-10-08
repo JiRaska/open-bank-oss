@@ -56,6 +56,9 @@ class StyleVersionEntity : PanacheEntityBase() {
 
     @Column(columnDefinition = "text")
     lateinit var forbiddenTerms: String
+
+    @Column(columnDefinition = "text")
+    var uiMessages: String = "{}"
     var signature: String? = null
     lateinit var maker: String
     lateinit var createdAt: Instant
@@ -89,6 +92,7 @@ private fun StyleVersionEntity.toDomain() = StyleVersion(
     maxLength = maxLength,
     preferredTerms = jsonMapper.readValue(preferredTerms, Map::class.java) as Map<String, String>,
     forbiddenTerms = jsonMapper.readValue(forbiddenTerms, List::class.java) as List<String>,
+    uiMessages = jsonMapper.readValue(uiMessages, Map::class.java) as Map<String, String>,
     signature = signature,
     maker = maker,
     createdAt = createdAt,
@@ -125,6 +129,7 @@ class PanacheStyleVersionRepository :
                 formality = s.formality
                 formOfAddress = s.formOfAddress
                 maxLength = s.maxLength
+                uiMessages = jsonMapper.writeValueAsString(s.uiMessages)
                 preferredTerms = jsonMapper.writeValueAsString(s.preferredTerms)
                 forbiddenTerms = jsonMapper.writeValueAsString(s.forbiddenTerms)
                 signature = s.signature
