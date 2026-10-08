@@ -87,6 +87,27 @@ class AuditDurabilityTest {
     }
 
     @Test
+    fun `legacy message without ce-id keeps the record-address identity`(): Unit = runBlocking {
+        val entries = mutableListOf<AuditEntry>()
+        coEvery { repository.save(capture(entries)) } returns Unit
+        consumer.consume(message(payload, offset = 11))
+        consumer.consume(message(payload, offset = 11))
+        consumer.consume(message(payload, offset = 12))
+        assertThat(entries[0].id).isEqualTo(entries[1].id)
+        assertThat(entries[2].id).isNotEqualTo(entries[0].id)
+    }
+
+    @Test
+    fun `malformed ce-id falls back to the record address instead of failing`(): Unit = runBlocking {
+        val entries = mutableListOf<AuditEntry>()
+        coEvery { repository.save(capture(entries)) } returns Unit
+        consumer.consume(message(payload, offset = 21, ceIdRaw = "not-a-uuid"))
+        consumer.consume(message(payload, offset = 21))
+        assertThat(entries).hasSize(2)
+        assertThat(entries[0].id).isEqualTo(entries[1].id)
+    }
+
+    @Test
     fun `failed nack propagates and never acknowledges the unstored record`() {
         coEvery { repository.save(any()) } throws IllegalStateException("store unavailable")
         val message = message(payload)
@@ -116,11 +137,11 @@ class AuditDurabilityTest {
         verify(exactly = 1) { message.nack(any()) }
     }
 
-    private fun message(body: String, offset: Long = 0, ceId: UUID? = null): Message<String> {
+    private fun message(body: String, offset: Long = 0, ceId: UUID? = null, ceIdRaw: String? = null): Message<String> {
         val message = mockk<Message<String>>()
         val record = ConsumerRecord("openbank.party.events", 0, offset, null as String?, body)
-        if (ceId != null) {
-            record.headers().add(OutboxKafkaHeaders.HEADER_EVENT_ID, ceId.toString().toByteArray(Charsets.UTF_8))
+        (ceIdRaw ?: ceId?.toString())?.let {
+            record.headers().add(OutboxKafkaHeaders.HEADER_EVENT_ID, it.toByteArray(Charsets.UTF_8))
         }
         val metadata = IncomingKafkaRecordMetadata(record, "audit-events-in")
         every { message.payload } returns body

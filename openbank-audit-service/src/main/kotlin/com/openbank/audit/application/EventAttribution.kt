@@ -35,7 +35,10 @@ data class EventAddress(
     val offset: Long? = null,
 ) {
     fun entryId(producerId: String?): UUID =
-        producerId?.let(UUID::fromString) ?: ceId?.let(UUID::fromString) ?: recordId() ?: Ids.newId()
+        producerId?.let(UUID::fromString) ?: ceIdAsUuid() ?: recordId() ?: Ids.newId()
+
+    /** A malformed ce-id falls back to the record address instead of failing the consumer. */
+    private fun ceIdAsUuid(): UUID? = ceId?.let { runCatching { UUID.fromString(it) }.getOrNull() }
 
     /** Stable within the original Kafka address; body-only replays need a producer event ID. */
     fun recordId(): UUID? {
