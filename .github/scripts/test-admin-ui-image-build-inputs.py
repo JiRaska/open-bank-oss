@@ -44,12 +44,16 @@ class AdminUiImageInputsTest(unittest.TestCase):
             subprocess.run(["git", "-C", str(repo), "config", "user.name", "Test"], check=True)
             dockerfile = repo / "openbank-admin-ui/Dockerfile"
             changelog = repo / "openbank-notification-service/CHANGELOG.md"
+            pin = repo / "openbank-infra/gitops/components/admin-ui/admin-ui.yaml"
             dockerfile.parent.mkdir()
             changelog.parent.mkdir()
+            pin.parent.mkdir(parents=True)
             dockerfile.write_text("FROM scratch\n")
             changelog.write_text("old release\n")
+            pin.write_text("image: example.invalid/openbank-admin-ui:sandbox-old\n")
             subprocess.run(["git", "-C", str(repo), "add", "--", "openbank-admin-ui/Dockerfile",
-                            "openbank-notification-service/CHANGELOG.md"], check=True)
+                            "openbank-notification-service/CHANGELOG.md",
+                            "openbank-infra/gitops/components/admin-ui/admin-ui.yaml"], check=True)
             subprocess.run(["git", "-C", str(repo), "-c", "commit.gpgsign=false", "commit", "-qm", "fixture"], check=True)
             source = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
                                     check=True, capture_output=True, text=True).stdout.strip()
@@ -93,6 +97,19 @@ class AdminUiImageInputsTest(unittest.TestCase):
                       "buildArgs": {"BUILD_VERSION": "1.0.0", "BUILD_GIT_SHA": source[:8],
                                     "BUILD_DATE": "2026-10-08T00:00:00Z"}, "platform": "linux/arm64"}
             self.assertEqual(verify_mod.validate(record, original_manifest, image, tag), source)
+            self.assertTrue(verify_mod.materialized_context_matches(record, repo))
+            generated.write_text('{"generated":false}\n')
+            self.assertFalse(verify_mod.materialized_context_matches(record, repo))
+            generated.write_text('{"generated":true}\n')
+            generated_evidence.write_text('{"completed":false}\n')
+            self.assertFalse(verify_mod.materialized_context_matches(record, repo))
+            generated_evidence.write_text('{"completed":true}\n')
+            pin.write_text("image: example.invalid/openbank-admin-ui:sandbox-new\n")
+            subprocess.run(["git", "-C", str(repo), "add", "--",
+                            "openbank-infra/gitops/components/admin-ui/admin-ui.yaml"], check=True)
+            subprocess.run(["git", "-C", str(repo), "-c", "commit.gpgsign=false", "commit", "-qm",
+                            "chore(admin-ui): deploy sandbox-new"], check=True)
+            self.assertTrue(verify_mod.materialized_context_matches(record, repo))
             verify_mod.check_tag_digest(record, record["digest"])
             with self.assertRaises(ValueError):
                 verify_mod.check_tag_digest(record, "sha256:" + "b" * 64)

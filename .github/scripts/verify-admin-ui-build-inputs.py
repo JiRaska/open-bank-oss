@@ -5,14 +5,67 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 TAG = re.compile(r"sandbox-([0-9a-f]{8,40})(?:-run[0-9]+)?")
 DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
+ADMIN_UI_MANIFEST = "openbank-infra/gitops/components/admin-ui/admin-ui.yaml"
+
+
+def materialized_context_matches(record: dict, root: Path) -> bool:
+    """Compare every signed build input with the current materialized context.
+
+    The Admin UI image pin is the sole permitted byte change after the source
+    commit. Unknown or absent generated evidence fails closed: a Git comparison
+    alone cannot establish that EOL, Grype or client artifacts stayed the same.
+    """
+    spec = importlib.util.spec_from_file_location(
+        "freeze_admin_ui_context", Path(__file__).with_name("freeze-admin-ui-context.py"))
+    if spec is None or spec.loader is None:
+        return False
+    freeze = importlib.util.module_from_spec(spec)
+    # Importing the helper must not create an untracked __pycache__ in the
+    # checkout: its own strict input inventory would correctly reject it.
+    write_bytecode = sys.dont_write_bytecode
+    try:
+        sys.dont_write_bytecode = True
+        spec.loader.exec_module(freeze)
+    finally:
+        sys.dont_write_bytecode = write_bytecode
+    try:
+        expected = {entry["path"]: entry for entry in record["contextManifest"]["files"]}
+        entries = record["contextManifest"]["files"]
+        if len(expected) != len(entries) or not all(isinstance(path, str) for path in expected):
+            return False
+        actual = {path.as_posix() for path in freeze.paths(root)}
+        if actual != set(expected):
+            return False
+        for rel, entry in expected.items():
+            path = root / rel
+            if not path.resolve().is_relative_to(root.resolve()):
+                return False
+            if rel == ADMIN_UI_MANIFEST:
+                continue  # ancestry + exact one-line image-pin proof is checked by the caller
+            if path.is_symlink():
+                if entry.get("symlink") != os.readlink(path):
+                    return False
+            elif path.is_file():
+                content = path.read_bytes()
+                if (entry.get("sha256") != hashlib.sha256(content).hexdigest()
+                        or entry.get("size") != len(content)
+                        or entry.get("executable") != bool(path.stat().st_mode & 0o111)):
+                    return False
+            else:
+                return False
+    except (OSError, KeyError, TypeError, ValueError):
+        return False
+    return True
 
 
 def validate(record: dict, manifest: bytes, image: str, tag: str) -> str:
@@ -99,7 +152,8 @@ def verify(root: Path, repo: str, image: str, tag: str) -> None:
         except (KeyError, TypeError, ValueError):
             continue
         if attestation_matches(record, [item]):
-            return
+            if materialized_context_matches(record, root):
+                return
     raise ValueError("no verified digest-bound attestation contains the image's frozen inputs")
 
 
