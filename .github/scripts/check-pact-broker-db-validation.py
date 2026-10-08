@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Keep the Pact Broker's pooled PostgreSQL connections failover-safe (#7376)."""
 
 from __future__ import annotations
@@ -8,7 +7,6 @@ import copy
 from pathlib import Path
 
 import yaml
-
 
 ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = ROOT / "openbank-infra/gitops/components/pact-broker/pact-broker.yaml"
