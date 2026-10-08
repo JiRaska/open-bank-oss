@@ -61,8 +61,15 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          ISSUE=$(gh issue list --label deps-freshness --state open --limit 1 --json number --jq '.[0].number' || true)
-          if [ -n "$ISSUE" ]; then
+          # The label also appears on dependency work items. Never edit one by accident.
+          MATCHES=$(gh issue list --label deps-freshness --state open --limit 1000 \
+            --json number,title --jq '[.[] | select(.title == "Dependency freshness report") | .number]')
+          COUNT=$(jq 'length' <<<"$MATCHES")
+          if [ "$COUNT" -gt 1 ]; then
+            echo "multiple standing dependency freshness reports; refusing to edit" >&2
+            exit 1
+          elif [ "$COUNT" -eq 1 ]; then
+            ISSUE=$(jq -r '.[0]' <<<"$MATCHES")
             gh issue edit "$ISSUE" --body-file freshness.md
             echo "updated standing issue #$ISSUE"
           else
