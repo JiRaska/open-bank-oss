@@ -7,6 +7,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.testcontainers.containers.PostgreSQLContainer
+import java.io.File
 import java.lang.reflect.Proxy
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
@@ -26,24 +27,13 @@ class AgentAuditInventoryTest {
             pg.start()
             createDestinationDatabase(pg)
             sourceConnection(pg).use { setup ->
-                setup.createStatement().use {
-                    it.execute(
-                        "CREATE TABLE agent_audit_outbox " +
-                            "(event_id UUID PRIMARY KEY, payload TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL, " +
-                            "published_at TIMESTAMPTZ)",
-                    )
-                }
+                migrateSource(setup)
                 insertCampaignSource(setup, first, "one", "2026-01-01T00:00:00Z", true)
                 insertCampaignSource(setup, second, "two", "2026-01-01T00:00:00Z", true)
                 insertCampaignSource(setup, UUID(0, 3), "outside", "2026-01-02T00:00:00Z", true)
             }
             destinationConnection(pg).use { setup ->
-                setup.createStatement().use {
-                    it.execute(
-                        "CREATE TABLE audit_entries " +
-                            "(entry_id UUID PRIMARY KEY, payload TEXT NOT NULL, source_service TEXT NOT NULL)",
-                    )
-                }
+                migrateDestination(setup)
                 insertDestination(setup, first, "one")
                 insertDestination(setup, second, "two")
                 insertDestination(setup, UUID(0, 3), "outside")
@@ -74,9 +64,25 @@ class AgentAuditInventoryTest {
                 )
             }.hasMessageContaining("approved count or manifest")
             destinationConnection(pg).use { changed ->
+                changed.createStatement().use { it.execute("DROP RULE no_update_audit ON audit_entries") }
                 changed.prepareStatement("UPDATE audit_entries SET payload = ? WHERE entry_id = ?").use {
                     it.setString(1, "changed")
                     it.setObject(2, second)
+                    it.executeUpdate()
+                }
+            }
+            assertThatThrownBy {
+                AgentAuditInventory.reconcileCampaign(
+                    { sourceConnection(pg) },
+                    { destinationConnection(pg) },
+                    window,
+                    pageSize = 1,
+                )
+            }.hasMessageContaining("identities or payload digests differ")
+            destinationConnection(pg).use { changed ->
+                changed.createStatement().use { it.execute("DROP RULE no_delete_audit ON audit_entries") }
+                changed.prepareStatement("DELETE FROM audit_entries WHERE entry_id = ?").use {
+                    it.setObject(1, second)
                     it.executeUpdate()
                 }
             }
@@ -96,13 +102,7 @@ class AgentAuditInventoryTest {
         PostgreSQLContainer<Nothing>("postgres:16-alpine").use { pg ->
             pg.start()
             sourceConnection(pg).use { setup ->
-                setup.createStatement().use {
-                    it.execute(
-                        "CREATE TABLE agent_audit_outbox " +
-                            "(event_id UUID PRIMARY KEY, payload TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL, " +
-                            "published_at TIMESTAMPTZ)",
-                    )
-                }
+                migrateSource(setup)
                 insertCampaignSource(setup, first, "one", "2026-01-01T00:00:00Z", false)
             }
             assertThatThrownBy {
@@ -136,7 +136,8 @@ class AgentAuditInventoryTest {
         published: Boolean,
     ) {
         connection.prepareStatement(
-            "INSERT INTO agent_audit_outbox VALUES (?, ?, ?::timestamptz, ?::timestamptz)",
+            "INSERT INTO agent_audit_outbox (event_id, payload, created_at, published_at) " +
+                "VALUES (?, ?, ?::timestamptz, ?::timestamptz)",
         ).use {
             it.setObject(1, id)
             it.setString(2, payload)
@@ -152,22 +153,12 @@ class AgentAuditInventoryTest {
             pg.start()
             createDestinationDatabase(pg)
             sourceConnection(pg).use { setup ->
-                setup.createStatement().use { sql ->
-                    sql.execute(
-                        "CREATE TABLE agent_audit_outbox " +
-                            "(event_id UUID PRIMARY KEY, payload TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL)",
-                    )
-                }
+                migrateSource(setup)
                 insertSource(setup, first, "  {\"note\":\"žluťoučký 🐈\"}  ")
                 insertSource(setup, second, "{\"note\":\"two\"}")
             }
             destinationConnection(pg).use { setup ->
-                setup.createStatement().use { sql ->
-                    sql.execute(
-                        "CREATE TABLE audit_entries " +
-                            "(entry_id UUID PRIMARY KEY, payload TEXT NOT NULL, source_service TEXT NOT NULL)",
-                    )
-                }
+                migrateDestination(setup)
                 insertDestination(setup, first, "  {\"note\":\"žluťoučký 🐈\"}  ")
                 insertDestination(setup, second, "{\"note\":\"two\"}")
             }
@@ -185,6 +176,7 @@ class AgentAuditInventoryTest {
             ).isEqualTo(2)
 
             destinationConnection(pg).use { changed ->
+                changed.createStatement().use { it.execute("DROP RULE no_update_audit ON audit_entries") }
                 changed.prepareStatement("UPDATE audit_entries SET payload = ? WHERE entry_id = ?").use {
                     it.setString(1, "{\"note\":\"two\"} ")
                     it.setObject(2, second)
@@ -205,22 +197,12 @@ class AgentAuditInventoryTest {
             pg.start()
             createDestinationDatabase(pg)
             sourceConnection(pg).use { setup ->
-                setup.createStatement().use { sql ->
-                    sql.execute(
-                        "CREATE TABLE agent_audit_outbox " +
-                            "(event_id UUID PRIMARY KEY, payload TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL)",
-                    )
-                }
+                migrateSource(setup)
                 insertSource(setup, first, "one")
                 insertSource(setup, second, "two")
             }
             destinationConnection(pg).use { setup ->
-                setup.createStatement().use { sql ->
-                    sql.execute(
-                        "CREATE TABLE audit_entries " +
-                            "(entry_id UUID PRIMARY KEY, payload TEXT NOT NULL, source_service TEXT NOT NULL)",
-                    )
-                }
+                migrateDestination(setup)
                 insertDestination(setup, first, "one")
                 insertDestination(setup, UUID(0, 3), "three")
                 insertDestination(setup, UUID(0, 4), "not agent", "other-service")
@@ -249,22 +231,15 @@ class AgentAuditInventoryTest {
             pg.start()
             createDestinationDatabase(pg)
             sourceConnection(pg).use { setup ->
-                setup.createStatement().use { sql ->
-                    sql.execute("CREATE TABLE agent_audit_outbox (event_id UUID PRIMARY KEY, payload TEXT NOT NULL)")
-                }
-                setup.prepareStatement("INSERT INTO agent_audit_outbox VALUES (?, ?)").use {
+                migrateSource(setup)
+                setup.prepareStatement("INSERT INTO agent_audit_outbox (event_id, payload) VALUES (?, ?)").use {
                     it.setObject(1, first)
                     it.setString(2, "payload")
                     it.executeUpdate()
                 }
             }
             destinationConnection(pg).use { setup ->
-                setup.createStatement().use { sql ->
-                    sql.execute(
-                        "CREATE TABLE audit_entries " +
-                            "(entry_id UUID PRIMARY KEY, payload TEXT NOT NULL, source_service TEXT NOT NULL)",
-                    )
-                }
+                migrateDestination(setup)
                 insertDestination(setup, first, "payload", "other-service")
             }
             assertThatThrownBy {
@@ -282,10 +257,8 @@ class AgentAuditInventoryTest {
         PostgreSQLContainer<Nothing>("postgres:16-alpine").use { pg ->
             pg.start()
             sourceConnection(pg).use { setup ->
-                setup.createStatement().use {
-                    it.execute("CREATE TABLE agent_audit_outbox (event_id UUID PRIMARY KEY, payload TEXT NOT NULL)")
-                }
-                setup.prepareStatement("INSERT INTO agent_audit_outbox VALUES (?, ?)").use {
+                migrateSource(setup)
+                setup.prepareStatement("INSERT INTO agent_audit_outbox (event_id, payload) VALUES (?, ?)").use {
                     it.setObject(1, first)
                     it.setString(2, "payload")
                     it.executeUpdate()
@@ -354,6 +327,23 @@ class AgentAuditInventoryTest {
     private fun sourceConnection(pg: PostgreSQLContainer<Nothing>): Connection =
         DriverManager.getConnection(pg.jdbcUrl, pg.username, pg.password)
 
+    private fun migrateSource(connection: Connection) {
+        listOf(4, 6, 7).forEach { version ->
+            val migration = File("src/main/resources/db/migration").listFiles()!!
+                .single { it.name.startsWith("V${version}__") }
+            connection.createStatement().use { it.execute(migration.readText()) }
+        }
+    }
+
+    private fun migrateDestination(connection: Connection) {
+        connection.createStatement().use { it.execute("CREATE ROLE openbank") }
+        listOf(1, 2, 5).forEach { version ->
+            val migration = File("../openbank-audit-service/src/main/resources/db/migration").listFiles()!!
+                .single { it.name.startsWith("V${version}__") }
+            connection.createStatement().use { it.execute(migration.readText()) }
+        }
+    }
+
     private fun destinationConnection(pg: PostgreSQLContainer<Nothing>): Connection = DriverManager.getConnection(
         pg.jdbcUrl.substringBeforeLast('/') + "/audit_inventory_destination",
         pg.username,
@@ -367,7 +357,9 @@ class AgentAuditInventoryTest {
     }
 
     private fun insertSource(connection: Connection, id: UUID, payload: String) {
-        connection.prepareStatement("INSERT INTO agent_audit_outbox VALUES (?, ?, '2026-01-01T00:00:00Z')").use {
+        connection.prepareStatement(
+            "INSERT INTO agent_audit_outbox (event_id, payload, created_at) VALUES (?, ?, '2026-01-01T00:00:00Z')",
+        ).use {
             it.setObject(1, id)
             it.setString(2, payload)
             it.executeUpdate()
@@ -375,7 +367,10 @@ class AgentAuditInventoryTest {
     }
 
     private fun insertDestination(connection: Connection, id: UUID, payload: String, source: String = "agent-service") {
-        connection.prepareStatement("INSERT INTO audit_entries VALUES (?, ?, ?)").use {
+        connection.prepareStatement(
+            "INSERT INTO audit_entries (entry_id, event_type, aggregate_type, aggregate_id, payload, " +
+                "source_service, occurred_at) VALUES (?, 'agent.audit', 'agent', 'test', ?, ?, NOW())",
+        ).use {
             it.setObject(1, id)
             it.setString(2, payload)
             it.setString(3, source)
