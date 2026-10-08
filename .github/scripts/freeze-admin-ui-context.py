@@ -92,6 +92,11 @@ def require_committed_content(relative: Path, content: bytes, blobs: dict[Path, 
     if relative in {Path("openbank-admin-ui") / name for name in GENERATED_ROOT_JSON}:
         return
     expected = blobs.get(relative)
+    # These four evidence directories are produced after checkout and need not
+    # have Git objects. Their bytes still enter the signed frozen inventory.
+    if expected is None and any(relative.is_relative_to(Path(directory))
+                                and relative != Path(directory) for directory in GENERATED_DIRS):
+        return
     digest = hashlib.new(object_format, b"blob " + str(len(content)).encode() + b"\0" + content).hexdigest()
     if expected != digest:
         raise ValueError(f"frozen tracked input differs from source commit: {relative}")

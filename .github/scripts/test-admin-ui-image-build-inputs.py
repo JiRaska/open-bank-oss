@@ -55,6 +55,9 @@ class AdminUiImageInputsTest(unittest.TestCase):
                                     check=True, capture_output=True, text=True).stdout.strip()
             generated = repo / "openbank-admin-ui/catalog.json"
             generated.write_text('{"generated":true}\n')
+            generated_evidence = repo / "openbank-admin-ui/client-test-evidence/run.json"
+            generated_evidence.parent.mkdir()
+            generated_evidence.write_text('{"completed":true}\n')
             for name in ("governance.json", "cost-footprints.json", "cluster-topology.json"):
                 (repo / "openbank-admin-ui" / name).write_text('{"generated":true}\n')
             context = base / "context"
@@ -63,6 +66,10 @@ class AdminUiImageInputsTest(unittest.TestCase):
             original_manifest = manifest_path.read_bytes()
             self.assertEqual((context / "openbank-notification-service/CHANGELOG.md").read_text(), "old release\n")
             inventory = json.loads(original_manifest)["files"]
+            self.assertEqual((context / "openbank-admin-ui/client-test-evidence/run.json").read_text(),
+                             '{"completed":true}\n')
+            self.assertTrue(any(item["path"] == "openbank-admin-ui/client-test-evidence/run.json"
+                                for item in inventory))
             for name in ("governance.json", "cost-footprints.json", "cluster-topology.json"):
                 self.assertTrue(any(item["path"] == "openbank-admin-ui/" + name for item in inventory))
                 self.assertTrue((context / "openbank-admin-ui" / name).is_file())
