@@ -111,3 +111,10 @@ kover {
 // build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
 // (ADR-0250 Phase 2, issue #4414) — this module's copy was byte-identical in substance to the
 // fleet-standard block, so nothing service-specific remains here.
+
+tasks.test {
+    // Quarkus and Testcontainers exhaust the default 512 MiB heap once the annual-summary
+    // idempotency IT adds a fourth test-profile restart (#12187): QuarkusTestExtension OOMs
+    // in RawBytecodeHelper during bootstrap of a later IT, both on CI and locally.
+    maxHeapSize = "2g"
+}
