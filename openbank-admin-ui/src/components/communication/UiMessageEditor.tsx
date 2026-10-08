@@ -52,7 +52,7 @@ export const UI_MESSAGE_KEYS = [
   ["deleg.empty.byMe.hint", "Můžete dát někomu blízkému náhled do účtu, aniž byste mu dali své přihlášení.", "You can give someone close a view of an account without giving them your sign-in."],
   ["deleg.empty.withMe", "Nikdo s vámi zatím nic nesdílí.", "Nobody is sharing anything with you yet."],
   ["deleg.err.ELIGIBILITY", "Druhá strana zatím nesplňuje podmínky pro sdílení.", "The other person does not meet the conditions for sharing yet."],
-  ["deleg.err.NETWORK", "Nedaří se spojit s bankou.", "We cannot reach the bank."],
+  ["deleg.err.NETWORK", "Nedaří se spojit s bankou.", "Connection to the bank is unavailable right now."],
   ["deleg.err.NOT_ALLOWED", "Tuhle akci teď provést nelze.", "That action is not possible right now."],
   ["deleg.err.SCA", "Ověření se nepodařilo dokončit. Zkuste to prosím znovu.", "The approval could not be completed. Please try again."],
   ["deleg.err.SERVER", "Něco se nepovedlo. Zkuste to prosím znovu.", "Something went wrong. Please try again."],
