@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.277.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.276.2...admin-ui-v0.277.0) (2026-10-08)
+
+
+### Features
+
+* **communication:** publish editable app copy catalog ([#12276](https://github.com/JiRaska/open-bank-oss/issues/12276)) ([93a6479](https://github.com/JiRaska/open-bank-oss/commit/93a6479d28b56c57efb381b3f550e5c10aa92958))
+
+## [0.276.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.276.1...admin-ui-v0.276.2) (2026-10-07)
+
+
+### Bug Fixes
+
+* **approval:** preserve verified maker actor kind ([#12159](https://github.com/JiRaska/open-bank-oss/issues/12159)) ([74cba34](https://github.com/JiRaska/open-bank-oss/commit/74cba348b75c0b318902c033bf81356ddba32393))
+
+## [0.276.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.276.0...admin-ui-v0.276.1) (2026-10-07)
+
+
+### Security
+
+* **admin-ui:** remediate source-map-js and refresh CI actions ([ac03f98](https://github.com/JiRaska/open-bank-oss/commit/ac03f98211e8b5bdc68ecb19dc2c092403081d06))
+
 ## [0.276.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.275.0...admin-ui-v0.276.0) (2026-10-04)
 
 

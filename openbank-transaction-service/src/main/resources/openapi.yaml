@@ -17,7 +17,7 @@ info:
   # 1.17.0 -> 1.18.0 (#9145): additive — the shared spend-category vocabulary, plus
   # `category`/`categorySource` on TransactionResponse. This branch still carried 1.16.0, which
   # #8838 and then #9115 have both since passed.
-  version: 1.18.0
+  version: 1.19.0
   description: BIAN-aligned transaction history, search and retrieval.
   license:
     name: Apache-2.0
@@ -881,6 +881,10 @@ components:
         makerId:
           type: string
           nullable: true
+        makerActorKind:
+          type: string
+          enum: [HUMAN, AI_AGENT, SERVICE_ACCOUNT, CUSTOMER_PARTY, UNKNOWN]
+          description: Origin captured at creation; UNKNOWN for legacy records.
         createdAt:
           type: string
           description: >-

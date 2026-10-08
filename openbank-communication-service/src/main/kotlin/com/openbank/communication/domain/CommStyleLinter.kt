@@ -29,8 +29,9 @@ package com.openbank.communication.domain
  */
 object CommStyleLinter {
 
-    /** Total characters across every editable field, before retrieval trims it further (D3). */
+    /** Budget for persona instructions; UI copy has a separately bounded, non-prompt catalog. */
     const val MAX_TOTAL_CHARS = 4000
+    private const val MAX_UI_MESSAGE_LENGTH = 240
 
     // (?:all |the |previous |above |prior )* — zero or more modifiers, in any combination
     // ("ignore all previous instructions" stacks two), not a single either/or choice.
@@ -95,7 +96,8 @@ object CommStyleLinter {
 
     /**
      * Runs every rule against every field in [fields] (field name -> free text) plus the
-     * combined length against [MAX_TOTAL_CHARS]. Returns the empty list when clean.
+     * persona instruction length against [MAX_TOTAL_CHARS]. UI copy is separately bounded by
+     * [UiMessages] key validation, so a complete approved catalog cannot exhaust the prompt budget.
      */
     fun lint(fields: Map<String, String>): List<Violation> {
         val violations = mutableListOf<Violation>()
@@ -118,9 +120,14 @@ object CommStyleLinter {
                 }
             }
         }
-        val total = fields.values.sumOf { it.length }
+        val total = fields.filterKeys { !it.startsWith("uiMessages.") }.values.sumOf { it.length }
         if (total > MAX_TOTAL_CHARS) {
             violations += Violation("size-cap-exceeded ($total/$MAX_TOTAL_CHARS chars)", "*")
+        }
+        val uiTotal = fields.filterKeys { it.startsWith("uiMessages.") }.values.sumOf { it.length }
+        val uiCap = UiMessages.keys.size * 2 * MAX_UI_MESSAGE_LENGTH
+        if (uiTotal > uiCap) {
+            violations += Violation("ui-copy-size-cap-exceeded ($uiTotal/$uiCap chars)", "uiMessages")
         }
         return violations
     }

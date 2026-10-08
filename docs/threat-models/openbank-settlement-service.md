@@ -520,3 +520,17 @@ Policy tests assert reservation admission, deny other balance actions and unrela
 and reject the wrong principal type. They do not prove token issuance or the full distributed
 workflow. Roll back this grant only after disabling new ledger-projection originations and
 draining their workflows; otherwise the cover step will be denied again.
+
+## Approval maker provenance (#11588)
+
+The operator approval REST read now exposes the maker kind stored with each approval. The trust
+boundary is authenticated maker identity → approval creation → PostgreSQL record → read-only
+response. The reader must return the stored kind, not infer it from a display name or maker ID;
+records predating this field remain `UNKNOWN`. A forged actor-looking display name must not become
+evidence that an agent or service account made the request.
+
+This field is contextual evidence for the checker, not a new permission. The existing policy gate,
+distinct maker/checker identity check, and approval status transitions remain authoritative. The
+additive migration defaults older rows to `UNKNOWN` and should be retained on application rollback
+so historical approval evidence is not discarded. Local integration tests cover persistence and
+decision transitions; they do not establish live token issuance or sandbox end-to-end behavior.
