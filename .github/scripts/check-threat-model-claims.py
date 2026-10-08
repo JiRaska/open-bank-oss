@@ -174,8 +174,6 @@ ALLOWED_UNRESOLVED: dict[str, str] = {
         'test for the outbox dropped by `V4__drop_sct_inst_outbox.sql` (#5126); no such class',
     'openbank-sepa-instant|6. Change log|KafkaSctInstOutboxEventPublisher':
         'dropped by `V4__drop_sct_inst_outbox.sql` (#5126); only the migration comment names it',
-    'openbank-sepa-instant|6. Change log|SctInstOutboxDispatcher':
-        'dropped by `V4__drop_sct_inst_outbox.sql` (#5126); only the migration comment names it',
     'openbank-sepa-instant|6. Change log|SctInstOutboxPort':
         'dropped by `V4__drop_sct_inst_outbox.sql` (#5126); only the migration comment names it',
     'openbank-sepa-payment|6. Change log|settleProcessingPayment':

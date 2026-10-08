@@ -4,6 +4,7 @@
 
 package com.openbank.sepainstant.infrastructure.persistence.repository
 
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.outbox.OutboxStatus
 import com.openbank.sepainstant.application.port.out.SctInstPaymentRepository
 import com.openbank.sepainstant.domain.event.SctInstEvent
@@ -74,7 +75,7 @@ class SctInstPaymentRepositoryImpl @Inject constructor(
 
     private fun outboxEntity(event: SctInstEvent): SctInstOutboxEntity = SctInstOutboxEntity().also {
         val now = clock.instant()
-        it.eventId = UUID.randomUUID()
+        it.eventId = Ids.newId()
         it.aggregateId = event.paymentId
         it.eventType = event::class.simpleName ?: error("Unnamed SCT Inst event")
         it.payload = codec.encode(event)
