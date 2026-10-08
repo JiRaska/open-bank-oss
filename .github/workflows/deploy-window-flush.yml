@@ -87,6 +87,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           ARM: ${{ steps.pick.outputs.arm }}
+          ARM_HEAD: ${{ steps.pick.outputs.arm_head }}
         run: |
           set -euo pipefail
           # A deferred image can predate a shallow checkout. Source resolution must
@@ -97,8 +98,12 @@ jobs:
             git fetch origin main
           fi
           git reset --hard origin/main
+          verify_args=()
+          if [[ "$ARM_HEAD" == chore/admin-ui-deploy-* ]]; then
+            verify_args+=(--expect-admin-ui)
+          fi
           gh pr diff "$ARM" --repo "$GITHUB_REPOSITORY" \
-            | python3 .github/scripts/deploy-window.py verify --root .
+            | python3 .github/scripts/deploy-window.py verify --root . "${verify_args[@]}"
 
       - name: Close superseded deploy PRs (refuses a rollback)
         if: steps.pick.outputs.arm != ''

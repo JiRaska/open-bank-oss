@@ -300,6 +300,36 @@ def verify_pins(diff: str, fresh: Callable[[str, str], bool]) -> list[str]:
     return []
 
 
+def admin_ui_pin_only_diff(diff: str) -> bool:
+    """Require one Admin UI image replacement and no other PR change.
+
+    A signed image built from main becomes stale if its own pin PR also changes
+    the Dockerfile or any other image input. `pins_from_diff` intentionally
+    extracts only image lines, so it cannot prove this PR-wide invariant.
+    """
+    expected_header = f"diff --git a/{ADMIN_UI_MANIFEST} b/{ADMIN_UI_MANIFEST}"
+    headers = [line for line in diff.splitlines() if line.startswith("diff --git ")]
+    if headers != [expected_header]:
+        return False
+    removed, added = [], []
+    for line in diff.splitlines():
+        if line.startswith(("--- ", "+++ ", "diff --git ", "index ", "@@ ", " ", "\\ No newline")):
+            continue
+        if line.startswith("-"):
+            removed.append(line[1:])
+        elif line.startswith("+"):
+            added.append(line[1:])
+        else:
+            # A mode change, rename, binary patch or unknown diff feature is
+            # not an image-only pin and must not be silently ignored.
+            return False
+    if len(removed) != 1 or len(added) != 1:
+        return False
+    old_pin, new_pin = (ADMIN_UI_PIN_RE.fullmatch(line) for line in (removed[0], added[0]))
+    return bool(old_pin and new_pin and old_pin["image"] == new_pin["image"]
+                and removed[0] != added[0])
+
+
 def last_deploy_from_commits(commits: list[dict]) -> int | None:
     """commits: [{message, epoch}] newest-first, as the caller reads them from main."""
     for c in commits:
@@ -441,6 +471,33 @@ def self_test() -> int:
         check("verify accepts current GitOps pins", verify_pins(older, lambda image, tag: True) == [])
         check("verify refuses a diff without image pins", verify_pins("", lambda image, tag: True) != [])
 
+    admin_pin_diff = (f"diff --git a/{ADMIN_UI_MANIFEST} b/{ADMIN_UI_MANIFEST}\n"
+                      f"--- a/{ADMIN_UI_MANIFEST}\n+++ b/{ADMIN_UI_MANIFEST}\n@@ -1 +1 @@\n"
+                      f"-image: {reg}/openbank-admin-ui:sandbox-aaaaaaaa\n"
+                      f"+image: {reg}/openbank-admin-ui:sandbox-bbbbbbbb\n")
+    check("Admin UI image-only PR has complete pin coverage", admin_ui_pin_only_diff(admin_pin_diff))
+    check("Admin UI PR with changed Dockerfile is refused",
+          not admin_ui_pin_only_diff(admin_pin_diff +
+              "diff --git a/openbank-admin-ui/Dockerfile b/openbank-admin-ui/Dockerfile\n"
+              "--- a/openbank-admin-ui/Dockerfile\n+++ b/openbank-admin-ui/Dockerfile\n"
+              "@@ -1 +1 @@\n-FROM scratch\n+FROM busybox\n"))
+    check("Admin UI deploy verifier refuses mixed PR before image lookup",
+          subprocess.run([sys.executable, __file__, "verify", "--expect-admin-ui"],
+                         input=admin_pin_diff +
+                         "diff --git a/openbank-admin-ui/Dockerfile b/openbank-admin-ui/Dockerfile\n"
+                         "--- a/openbank-admin-ui/Dockerfile\n+++ b/openbank-admin-ui/Dockerfile\n"
+                         "@@ -1 +1 @@\n-FROM scratch\n+FROM busybox\n",
+                         text=True, capture_output=True, check=False).returncode == 1)
+    check("Admin UI PR with added image line is refused",
+          not admin_ui_pin_only_diff(admin_pin_diff + "@@ -3,0 +4 @@\n"
+              "+image: example.invalid/openbank-unverified:sandbox-cccccccc\n"))
+    check("Admin UI PR with manifest semantic change is refused",
+          not admin_ui_pin_only_diff(admin_pin_diff + "@@ -4 +4 @@\n-replicas: 1\n+replicas: 2\n"))
+    check("Admin UI PR with mode change is refused",
+          not admin_ui_pin_only_diff(admin_pin_diff.replace(
+              f"--- a/{ADMIN_UI_MANIFEST}", "old mode 100644\nnew mode 100755\n"
+              f"--- a/{ADMIN_UI_MANIFEST}")))
+
     # Admin UI is built from the root Docker context, with service changelogs and
     # other repository paths copied into collector stages. Exercise real Git
     # ancestry and tag resolution rather than mocking the path comparator.
@@ -549,6 +606,8 @@ def main() -> int:
     c.add_argument("--skip-images", default="", help="space-separated images this run pins itself")
     v = sub.add_parser("verify")
     v.add_argument("--root", default=".")
+    v.add_argument("--expect-admin-ui", action="store_true",
+                   help="require an Admin UI image-only pin PR")
     au = sub.add_parser("admin-ui-source-current")
     au.add_argument("--root", default=".")
     au.add_argument("--source", required=True)
@@ -578,7 +637,11 @@ def main() -> int:
             print(f"  [carried] {line}")
         return 0
     if a.cmd == "verify":
-        stale = verify_pins(sys.stdin.read(),
+        diff = sys.stdin.read()
+        if a.expect_admin_ui and not admin_ui_pin_only_diff(diff):
+            print("::error::Admin UI deploy PR changes more than its sole image pin", file=sys.stderr)
+            return 1
+        stale = verify_pins(diff,
                             lambda image, tag: image_source_is_current(a.root, image, tag))
         for pin in stale:
             print(f"::error::stale GitOps image pin: {pin}", file=sys.stderr)
