@@ -10,7 +10,6 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import kotlinx.coroutines.runBlocking
-import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.eclipse.microprofile.reactive.messaging.Message
 import org.junit.jupiter.api.Test
 import java.util.concurrent.CompletableFuture
@@ -37,10 +36,12 @@ class AgentAuditConsumerTest {
     fun `does not acknowledge a failed audit-store write`(): Unit = runBlocking {
         val message = mockk<Message<String>>()
         every { message.payload } returns "broken"
-        coEvery { auditConsumer.persist(any(), any()) } throws IllegalStateException("store unavailable")
+        val failure = IllegalStateException("store unavailable")
+        coEvery { auditConsumer.persist(any(), any()) } throws failure
+        every { message.nack(failure) } returns CompletableFuture.completedFuture(null)
 
-        assertThatThrownBy { runBlocking { consumer.consume(message) } }
-            .isInstanceOf(IllegalStateException::class.java)
+        consumer.consume(message)
+        verify(exactly = 1) { message.nack(failure) }
         verify(exactly = 0) { message.ack() }
     }
 }

@@ -22,8 +22,16 @@ class AgentAuditConsumer {
     @Inject lateinit var auditConsumer: AuditConsumer
 
     @Incoming("agent-audit-events-in")
+    @Suppress("TooGenericExceptionCaught") // Any audit-store failure must reach the Kafka channel's DLQ strategy.
     suspend fun consume(message: Message<String>) {
-        auditConsumer.persist(message.payload)
+        try {
+            auditConsumer.persist(message.payload)
+        } catch (failure: Exception) {
+            // Message<String> is manually acknowledged. An exception alone does not tell the
+            // Kafka connector to apply this channel's dead-letter-queue failure strategy.
+            Uni.createFrom().completionStage(message.nack(failure)).awaitSuspending()
+            return
+        }
         Uni.createFrom().completionStage(message.ack()).awaitSuspending()
     }
 }
