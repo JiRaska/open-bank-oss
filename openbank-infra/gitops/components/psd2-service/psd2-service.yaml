@@ -116,21 +116,16 @@ spec:
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
               value: "0.1"
-            # ADR-0034 Phase 5 / issue #1797: the OPA sidecar (below) is now wired, so the 21
-            # @Authorize methods on the AIS/PIS/consent surfaces actually reach a PDP. Before
-            # this, psd2-service ran with the app default AUTHZ_ENFORCE=true (application.yaml:
-            # authz.enforce: "${AUTHZ_ENFORCE:true}") and NO sidecar — so every PDP call to
-            # localhost:8181 failed and the interceptor failed closed for every caller,
-            # including a real eIDAS-authenticated TPP. Kept ADVISORY (false) for this rollout:
-            # the interceptor evaluates and records every decision but does NOT block while
-            # false, so the "would DENY" population can be confirmed empty in the live decision
-            # log (openbank.authz.decisions, outcome=deny enforced=false) before the enforce
-            # flip — a separate, deliberate follow-up per the rules.yaml AUTHZ_ENFORCE
-            # guardrail. The app default is `true`, so this explicit `false` is load-bearing.
-            # Dated per #8470: flip target 2026-10-05, once the decision log shows an empty
-            # "would DENY" population for real eIDAS-authenticated TPP traffic.
+            # ADR-0034 Phase 5 / issue #1797, flipped by #12302: ENFORCED. The 22 @Authorize
+            # methods on the AIS/PIS/consent surfaces are decided by the OPA sidecar below and a
+            # deny is a 403 (PDP unreachable = 503, fail closed). The only real caller, an
+            # eIDAS-authenticated TPP, reaches OPA as ANONYMOUS and is granted by
+            # psd2_rest_ext.rego (psd2-tpp-eidas-qwac) after EidasMtlsFilter has authenticated it.
+            # Rollback: set this back to "false" (advisory: decisions still computed and counted
+            # in openbank.authz.decisions, none blocks) and restore the allowlist entry in
+            # .github/scripts/check-authz-enforce-money-path.py.
             - name: AUTHZ_ENFORCE
-              value: "false"
+              value: "true"
           startupProbe: {tcpSocket: {port: management}, initialDelaySeconds: 10, periodSeconds: 5, failureThreshold: 30}
           readinessProbe: {tcpSocket: {port: http}, periodSeconds: 10, failureThreshold: 3}
           livenessProbe: {httpGet: {path: /q/health/live, port: management}, periodSeconds: 15, failureThreshold: 3}
