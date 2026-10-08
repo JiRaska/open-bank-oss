@@ -56,6 +56,7 @@ from xml.etree import ElementTree as ET
 
 RECORD_MARKER = "<!-- flake-record:"
 RECORD_ID_MARKER = "<!-- flake-record-id:"
+ADMISSION_STEP = re.compile(r"^Verify no service failed \(admission=(true|false)\)$")
 
 
 # --------------------------------------------------------------------------------------------
@@ -87,8 +88,27 @@ def find_flake_candidates(prev_jobs: list[dict]) -> list[dict]:
     return [
         j
         for j in prev_jobs
-        if (j.get("conclusion") or "").lower() == "failure" and not has_spot_kill_signature(j)
+        if (j.get("conclusion") or "").lower() == "failure"
+        and not has_spot_kill_signature(j)
+        and not admission_refusal_or_unknown(j)
     ]
+
+
+def admission_refusal_or_unknown(job: dict) -> bool:
+    """Do not call an all-green policy refusal a test flake.
+
+    The Services CI verifier step carries the evaluated admission output in its name.
+    Missing or conflicting evidence is unknown, so it is omitted from flake incidence
+    rather than silently classified as a genuine failed test.
+    """
+    if job.get("name") != "all-green":
+        return False
+    values = [
+        match.group(1)
+        for step in job.get("steps") or []
+        if (match := ADMISSION_STEP.fullmatch(step.get("name") or ""))
+    ]
+    return values != ["true"]
 
 
 SERVICE_RE = re.compile(r"build \(([^)]+)\)")
@@ -336,6 +356,13 @@ def self_test() -> int:
         "find_flake_candidates keeps only the genuinely-failed jobs, dropping the spot kill and "
         "the green job",
         names == {genuine["name"], mixed_but_still_genuine["name"]},
+    )
+    denied = _job("all-green", "failure", [("Verify no service failed (admission=false)", "failure")])
+    admitted_failure = _job("all-green", "failure", [("Verify no service failed (admission=true)", "failure")])
+    unknown = _job("all-green", "failure", [("Verify no service failed", "failure")])
+    check(
+        "admission refusal and missing evidence are not reported as test flakes",
+        find_flake_candidates([denied, admitted_failure, unknown]) == [admitted_failure],
     )
 
     print("extract_service")

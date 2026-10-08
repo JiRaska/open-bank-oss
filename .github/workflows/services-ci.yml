@@ -560,7 +560,10 @@ jobs:
     permissions:
       actions: read
     steps:
-      - name: Verify no service failed
+      # The evaluated admission output is retained in the Jobs API step name. A rerun
+      # can change 4/3 -> 3/3 without any source/test change (#12296); the flake
+      # recorder must not count that deliberate policy refusal as a flaky test.
+      - name: Verify no service failed (admission=${{ needs.changes.outputs.admission }})
         run: |
           if [ "${{ needs.changes.result }}" != 'success' ] || [ "${{ needs.changes.outputs.admission }}" != 'true' ]; then
             echo "Agent PR admission refused or failed; service builds did not run."; exit 1
