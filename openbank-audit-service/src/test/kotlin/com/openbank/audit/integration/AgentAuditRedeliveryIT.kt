@@ -52,10 +52,14 @@ class AgentAuditRedeliveryIT {
 
         assertThat(onEventLoop { repository.findByAggregateId("agent:rca") }.map { it.id })
             .containsExactly(eventId)
-        assertThatThrownBy { onEventLoop { repository.save(entry.copy(payload = "{\"conflict\":true}")) } }
-            .isInstanceOf(IllegalArgumentException::class.java)
-        assertThatThrownBy { onEventLoop { repository.save(entry.copy(sourceService = "other-service")) } }
-            .isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy {
+            onEventLoop {
+                repository.save(entry.copy(payload = "{\"eventId\":\"$eventId\",\"result\":\"different\"}"))
+            }
+        }.isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy {
+            onEventLoop { repository.save(entry.copy(sourceService = "different-service")) }
+        }.isInstanceOf(IllegalArgumentException::class.java)
         assertThat(onEventLoop { repository.findByAggregateId("agent:rca") }.map { it.id })
             .containsExactly(eventId)
     }
