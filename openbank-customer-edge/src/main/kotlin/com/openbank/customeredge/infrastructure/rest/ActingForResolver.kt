@@ -14,6 +14,7 @@ import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
 
 /**
  * Profile switching (ADR-0284 D4). A customer request may carry `X-Acting-For: <entityPartyId>`;
@@ -97,11 +98,24 @@ class ActingForResolver(
     }
 
     /** Inbox aggregation must never turn a mandate lookup outage into a false empty company feed. */
+    fun profilesOfStrict(agent: UUID): List<Map<String, Any?>> = profilesOfStrictWithin(agent, null)
+
+    /** The inventory read and parsing share the caller's aggregate deadline. */
+    fun profilesOfStrict(agent: UUID, deadlineNanos: Long): List<Map<String, Any?>> =
+        profilesOfStrictWithin(agent, deadlineNanos)
+
     @Suppress("ThrowsCount") // Each malformed mandate response must fail the aggregate closed.
-    fun profilesOfStrict(agent: UUID): List<Map<String, Any?>> {
+    private fun profilesOfStrictWithin(agent: UUID, deadlineNanos: Long?): List<Map<String, Any?>> {
         if (!enabled) return emptyList()
         val response = try {
-            upstream.get("$partyServiceUrl/api/v1/parties/$agent/acting-for", agent.toString())
+            val url = "$partyServiceUrl/api/v1/parties/$agent/acting-for"
+            if (deadlineNanos == null) {
+                upstream.get(url, agent.toString())
+            } else {
+                val remaining = deadlineNanos - System.nanoTime()
+                if (remaining <= 0) throw jakarta.ws.rs.ServiceUnavailableException("Notification profiles unavailable")
+                upstream.get(url, agent.toString(), TimeUnit.NANOSECONDS.toMillis(remaining).coerceAtLeast(1))
+            }
         } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
             Log.warn("Notification mandate inventory unavailable", e)
             throw jakarta.ws.rs.ServiceUnavailableException("Notification profiles unavailable")
@@ -113,6 +127,9 @@ class ActingForResolver(
             ?.takeIf { it.isArray }
             ?: throw jakarta.ws.rs.ServiceUnavailableException("Notification profiles unavailable")
         return node.map { profile ->
+            if (deadlineNanos != null && System.nanoTime() >= deadlineNanos) {
+                throw jakarta.ws.rs.ServiceUnavailableException("Notification profiles unavailable")
+            }
             val id = runCatching { UUID.fromString(profile.path("partyId").asText()) }.getOrNull()
                 ?: throw jakarta.ws.rs.ServiceUnavailableException("Notification profiles unavailable")
             mapOf("partyId" to id)

@@ -224,13 +224,16 @@ class UpstreamClient {
         return builder.build()
     }
 
-    fun get(url: String, partyId: String): Response = try {
+    fun get(url: String, partyId: String): Response = get(url, partyId, requestTimeoutMs)
+
+    /** Cap a single call by the caller's remaining aggregate budget. */
+    fun get(url: String, partyId: String, timeoutMs: Long): Response = try {
         val request = upstreamRequest()
             .uri(validatedUri(url))
             .header("Authorization", "Bearer ${serviceToken()}")
             .header(PARTY_HEADER, partyId)
             .header("Accept", "application/json")
-            .timeout(Duration.ofMillis(requestTimeoutMs))
+            .timeout(Duration.ofMillis(timeoutMs.coerceIn(1, requestTimeoutMs)))
             .GET().build()
         val r = http.send(request, HttpResponse.BodyHandlers.ofString())
         Response.status(r.statusCode()).entity(r.body()).type(MediaType.APPLICATION_JSON).build()
