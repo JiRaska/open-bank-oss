@@ -11,6 +11,7 @@ import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.vertx.VertxContextSupport
+import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.smallrye.mutiny.coroutines.uni
 import jakarta.inject.Inject
 import kotlinx.coroutines.CoroutineScope
@@ -31,6 +32,8 @@ import java.util.concurrent.CompletableFuture
 )
 class BusinessPaymentBatchDraftStoreIT {
     @Inject lateinit var store: BusinessPaymentBatchDraftStore
+
+    @Inject lateinit var mapper: com.fasterxml.jackson.databind.ObjectMapper
 
     private fun <T> db(block: suspend () -> T): T = VertxContextSupport.subscribeAndAwait {
         Panache.withSession { uni(CoroutineScope(Dispatchers.Unconfined)) { block() } }
@@ -143,5 +146,47 @@ class BusinessPaymentBatchDraftStoreIT {
         assertEquals(1, results.count { it.second })
         assertEquals(results[0].first.id, results[1].first.id)
         assertEquals(results[0].first.originalResponseJson, results[1].first.originalResponseJson)
+    }
+
+    @Test
+    fun `legacy unedited draft is reconstructed and captured before replacement`() {
+        val company = UUID.randomUUID()
+        val actor = UUID.randomUUID()
+        val row = db {
+            store.create(company, actor, UUID.randomUUID().toString(), "f".repeat(64), request(), summary)
+        }.first
+        val original = row.originalResponseJson
+        db {
+            Panache.withTransaction {
+                store.update("originalResponseJson = null where id = ?1", row.id)
+            }.awaitSuspending()
+        }
+        val legacy = db { store.get(company, row.id) }!!
+        assertEquals(null, legacy.originalResponseJson)
+        assertEquals(
+            com.fasterxml.jackson.databind.ObjectMapper().readTree(original),
+            originalDraftView(legacy, mapper),
+        )
+        db { store.replace(company, row.id, actor, 0, itemsJson(), summary.copy(total = 250)) }
+        val edited = db { store.get(company, row.id) }!!
+        assertEquals(original, edited.originalResponseJson)
+        assertEquals(250, edited.amountMinor)
+    }
+
+    @Test
+    fun `edited legacy draft without snapshot fails closed`() {
+        val company = UUID.randomUUID()
+        val actor = UUID.randomUUID()
+        val row = db {
+            store.create(company, actor, UUID.randomUUID().toString(), "g".repeat(64), request(), summary)
+        }.first
+        db { store.replace(company, row.id, actor, 0, itemsJson(), summary.copy(total = 250)) }
+        db {
+            Panache.withTransaction {
+                store.update("originalResponseJson = null where id = ?1", row.id)
+            }.awaitSuspending()
+        }
+        val edited = db { store.get(company, row.id) }!!
+        assertThrows(BatchDraftConflict::class.java) { originalDraftView(edited, mapper) }
     }
 }
