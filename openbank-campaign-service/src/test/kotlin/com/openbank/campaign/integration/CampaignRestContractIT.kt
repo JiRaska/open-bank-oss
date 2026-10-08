@@ -4,6 +4,7 @@
 
 package com.openbank.campaign.integration
 
+import com.openbank.campaign.application.port.out.SegmentPage
 import com.openbank.campaign.domain.model.IncentiveOfferRef
 import com.openbank.campaign.infrastructure.incentive.LiveIncentiveOfferRegistry
 import com.openbank.campaign.infrastructure.segment.SilverSegmentEvaluator
@@ -30,6 +31,7 @@ import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.nullValue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import java.time.Duration
 import java.time.OffsetDateTime
 import java.util.UUID
 
@@ -67,7 +69,9 @@ class CampaignRestContractIT {
         every { audienceJwt.name } returns "maker@openbank.test"
         every { audienceJwt.subject } returns "maker@openbank.test"
         QuarkusMock.installMockForType(audienceJwt, JsonWebToken::class.java)
-        coEvery { segmentEvaluator.evaluate(any()) } returns emptyList()
+        coEvery { segmentEvaluator.count(any()) } returns 0L
+        coEvery { segmentEvaluator.page(any(), null, any()) } returns SegmentPage(emptyList(), null)
+        coEvery { segmentEvaluator.stream(any(), any()) } returns Unit
         QuarkusMock.installMockForType(segmentEvaluator, SilverSegmentEvaluator::class.java)
         QuarkusMock.installMockForType(incentiveRegistry, LiveIncentiveOfferRegistry::class.java)
     }
@@ -78,11 +82,38 @@ class CampaignRestContractIT {
      */
     class NoBrokerNoWorkerResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> {
-            val props = InMemoryConnector.switchOutgoingChannelsToInMemory("notification-requests-out").toMutableMap()
-            props.putAll(InMemoryConnector.switchIncomingChannelsToInMemory("consent-events-in"))
+            val props = InMemoryConnector.switchOutgoingChannelsToInMemory(
+                "notification-requests-out",
+                "campaign-banner-placements-out",
+            ).toMutableMap()
+            props.putAll(
+                InMemoryConnector.switchIncomingChannelsToInMemory(
+                    "incentive-events-in",
+                    "engagement-events-in",
+                    "notification-outcomes-in",
+                    "account-conversions-in",
+                    "card-conversions-in",
+                    "account-triggers-in",
+                    "card-triggers-in",
+                    "consent-events-in",
+                ),
+            )
             props["campaign.worker.enabled"] = "false"
             props["openbank.campaign.worker.enabled"] = "false"
             props["openbank.temporal.enabled"] = "false"
+            props["quarkus.oidc-client.enabled"] = "false"
+            props["quarkus.oidc-client.m2m.enabled"] = "false"
+            props["quarkus.oidc-client.discovery-enabled"] = "false"
+            props["quarkus.oidc-client.token-path"] = "/protocol/openid-connect/token"
+            props["quarkus.oidc-client.m2m.discovery-enabled"] = "false"
+            props["quarkus.oidc-client.m2m.token-path"] = "/protocol/openid-connect/token"
+            props["openbank.campaign.bulk-admission-per-minute"] = "1"
+            props["openbank.campaign.mass-activation-enabled"] = "true"
+            props["openbank.campaign.mass-completion-deadline-minutes"] = "10"
+            props["openbank.campaign.mass-dispatch-capacity-per-minute"] = "500"
+            props["openbank.campaign.mass-landing-capacity-rps"] = "100"
+            props["openbank.campaign.mass-click-fraction"] = "0.1"
+            props["openbank.campaign.mass-click-burst-factor"] = "2"
             return props
         }
 
@@ -470,6 +501,224 @@ class CampaignRestContractIT {
                 statement.executeUpdate()
             }
         }
+    }
+
+    @Test
+    fun `bulk run is persisted and served over the operator API`() {
+        val campaignId = UUID.randomUUID()
+        insertCampaignForSendLog(campaignId)
+        releaseAdmissionBudgetForContract()
+
+        val runId = When {
+            post("/api/v1/campaigns/$campaignId/bulk-runs")
+        } Then {
+            statusCode(201)
+            body("campaignId", equalTo(campaignId.toString()))
+            body("pageSize", equalTo(1))
+            body("state", equalTo("PREPARING"))
+        } Extract {
+            path<String>("id")
+        }
+
+        When {
+            get("/api/v1/campaigns/$campaignId/bulk-runs/$runId")
+        } Then {
+            statusCode(200)
+            body("id", equalTo(runId))
+        }
+
+        When {
+            get("/api/v1/campaigns/$campaignId/bulk-runs")
+        } Then {
+            statusCode(200)
+            body("findAll { it.id == '$runId' }.size()", equalTo(1))
+        }
+
+        dataSource.connection.use { connection ->
+            connection.prepareStatement("SELECT page_size FROM campaign_bulk_runs WHERE id = ?").use { statement ->
+                statement.setObject(1, UUID.fromString(runId))
+                statement.executeQuery().use { rows ->
+                    assertThat(rows.next()).isTrue()
+                    assertThat(rows.getInt(1)).isEqualTo(1)
+                }
+            }
+        }
+
+        // Let the real cron freeze an empty audience through the mocked ClickHouse port, then
+        // admit from PostgreSQL. This proves the scheduler's Vert.x context and the state split.
+        val runUuid = UUID.fromString(runId)
+        assertThat(awaitBulkStateChange(runUuid, "PREPARING")).isEqualTo("RUNNING")
+        releaseAdmissionBudgetForContract()
+        assertThat(awaitBulkStateChange(runUuid, "RUNNING")).isEqualTo("COMPLETED")
+
+        val conflictCampaignId = UUID.randomUUID()
+        insertCampaignForSendLog(conflictCampaignId)
+        val heldRunId = insertHeldBulkRun(conflictCampaignId)
+        When {
+            post("/api/v1/campaigns/$conflictCampaignId/bulk-runs")
+        } Then {
+            statusCode(409)
+            body("error", equalTo("campaign already has an active bulk run"))
+        }
+        assertResumedAudit(conflictCampaignId, heldRunId)
+        finishContractRun(heldRunId)
+    }
+
+    @Test
+    fun `bulk snapshot persists a recipient before any journey starts`() {
+        val campaignId = UUID.randomUUID()
+        val partyId = UUID.randomUUID()
+        insertCampaignForSendLog(campaignId)
+        coEvery { segmentEvaluator.stream(any(), any()) } coAnswers {
+            secondArg<suspend (List<UUID>) -> Unit>()(listOf(partyId))
+        }
+        releaseAdmissionBudgetForContract()
+        val runId = When {
+            post("/api/v1/campaigns/$campaignId/bulk-runs")
+        } Then {
+            statusCode(201)
+            body("state", equalTo("PREPARING"))
+        } Extract {
+            path<String>("id")
+        }
+        val runUuid = UUID.fromString(runId)
+        assertThat(awaitBulkStateChange(runUuid, "PREPARING")).isEqualTo("RUNNING")
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "SELECT state FROM campaign_bulk_recipients WHERE run_id = ? AND party_id = ?",
+            ).use { statement ->
+                statement.setObject(1, runUuid)
+                statement.setObject(2, partyId)
+                statement.executeQuery().use { rows ->
+                    assertThat(rows.next()).isTrue()
+                    assertThat(rows.getString(1)).isEqualTo("PENDING")
+                }
+            }
+        }
+        finishContractRun(runUuid)
+    }
+
+    @Test
+    fun `infeasible deadline holds frozen audience with no enrolments`() {
+        val campaignId = UUID.randomUUID()
+        insertCampaignForSendLog(campaignId)
+        coEvery { segmentEvaluator.stream(any(), any()) } coAnswers {
+            secondArg<suspend (List<UUID>) -> Unit>()(List(11) { UUID.randomUUID() })
+        }
+        releaseAdmissionBudgetForContract()
+        val runId = When {
+            post("/api/v1/campaigns/$campaignId/bulk-runs")
+        } Then {
+            statusCode(201)
+        } Extract {
+            path<String>("id")
+        }
+        val runUuid = UUID.fromString(runId)
+        assertThat(awaitBulkStateChange(runUuid, "PREPARING")).isEqualTo("RUNNING")
+        releaseAdmissionBudgetForContract()
+
+        assertThat(awaitBulkStateChange(runUuid, "RUNNING")).isEqualTo("HELD")
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "SELECT audience_count, last_error FROM campaign_bulk_runs WHERE id = ?",
+            ).use { statement ->
+                statement.setObject(1, runUuid)
+                statement.executeQuery().use { rows ->
+                    assertThat(rows.next()).isTrue()
+                    assertThat(rows.getLong(1)).isEqualTo(11)
+                    assertThat(rows.getString(2)).isEqualTo("ADMISSION_DEADLINE_INFEASIBLE")
+                }
+            }
+            connection.prepareStatement("SELECT count(*) FROM enrolments WHERE campaign_id = ?").use { statement ->
+                statement.setObject(1, campaignId)
+                statement.executeQuery().use { rows ->
+                    assertThat(rows.next()).isTrue()
+                    assertThat(rows.getLong(1)).isZero()
+                }
+            }
+        }
+    }
+
+    private fun finishContractRun(runId: UUID) {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "UPDATE campaign_bulk_runs SET state = 'COMPLETED' WHERE id = ? AND lease_owner IS NULL",
+            ).use { statement ->
+                statement.setObject(1, runId)
+                assertThat(statement.executeUpdate()).isEqualTo(1)
+            }
+        }
+    }
+
+    private fun bulkRunState(runId: UUID): String = dataSource.connection.use { connection ->
+        connection.prepareStatement("SELECT state FROM campaign_bulk_runs WHERE id = ?").use { statement ->
+            statement.setObject(1, runId)
+            statement.executeQuery().use { rows ->
+                assertThat(rows.next()).isTrue()
+                rows.getString(1)
+            }
+        }
+    }
+
+    private fun awaitBulkStateChange(runId: UUID, initialState: String): String {
+        val deadline = System.nanoTime() + Duration.ofSeconds(45).toNanos()
+        var state = bulkRunState(runId)
+        while (state == initialState && System.nanoTime() < deadline) {
+            Thread.sleep(250)
+            state = bulkRunState(runId)
+        }
+        return state
+    }
+
+    private fun releaseAdmissionBudgetForContract() {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "UPDATE campaign_admission_budget SET next_available_at = now() WHERE id = 1",
+            ).use { statement ->
+                statement.executeUpdate()
+            }
+        }
+    }
+
+    private fun assertResumedAudit(campaignId: UUID, runId: UUID) {
+        When {
+            post("/api/v1/campaigns/$campaignId/bulk-runs/$runId/resume")
+        } Then {
+            statusCode(200)
+            body("state", equalTo("RUNNING"))
+            body("lastResumedBy", equalTo("maker@openbank.test"))
+        }
+        dataSource.connection.use { connection ->
+            connection.prepareStatement("SELECT last_resumed_by, last_resumed_at FROM campaign_bulk_runs WHERE id = ?")
+                .use { statement ->
+                    statement.setObject(1, runId)
+                    statement.executeQuery().use { rows ->
+                        assertThat(rows.next()).isTrue()
+                        assertThat(rows.getString(1)).isEqualTo("maker@openbank.test")
+                        assertThat(rows.getObject(2)).isNotNull()
+                    }
+                }
+        }
+    }
+
+    private fun insertHeldBulkRun(campaignId: UUID): UUID {
+        val runId = UUID.randomUUID()
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                """
+                INSERT INTO campaign_bulk_runs
+                    (id, campaign_id, state, page_size, created_by, created_at, updated_at,
+                     snapshot_at, audience_count)
+                VALUES (?, ?, 'HELD', 1, ?, now(), now(), now(), 0)
+                """.trimIndent(),
+            ).use { statement ->
+                statement.setObject(1, runId)
+                statement.setObject(2, campaignId)
+                statement.setString(3, "test-maker")
+                statement.executeUpdate()
+            }
+        }
+        return runId
     }
 
     /**

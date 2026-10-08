@@ -4,7 +4,7 @@ openapi: 3.1.0
 info:
   title: Notification Service API
   # 1.10 -> 1.11 (#11588): additive verified makerActorKind on approval responses.
-  version: 1.12.0
+  version: 1.13.0
   description: Notification delivery management — query sent/pending notifications, manage push device tokens.
   license:
     name: Apache-2.0
@@ -18,8 +18,92 @@ tags:
   - name: Ops — Dispatch Control
   - name: Operator Messages
   - name: Notification Approvals
+  - name: Managed Notification Templates
 
 paths:
+  /api/v1/notification-templates:
+    get:
+      tags: [Managed Notification Templates]
+      summary: List the latest 100 revisions for one code-owned template
+      operationId: listManagedNotificationTemplates
+      parameters:
+        - name: template
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Revisions ordered newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ManagedTemplateRevision' }
+    post:
+      tags: [Managed Notification Templates]
+      summary: Create an immutable draft of plain-text customer copy
+      operationId: createManagedNotificationTemplate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ManagedTemplateDraft' }
+      responses:
+        '201':
+          description: Draft created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ManagedTemplateRevision' }
+
+  /api/v1/notification-templates/preview:
+    post:
+      tags: [Managed Notification Templates]
+      summary: Validate and render a draft without publishing it
+      operationId: previewManagedNotificationTemplate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ManagedTemplatePreview' }
+      responses:
+        '200': { description: Rendered subject and escaped body }
+
+  /api/v1/notification-templates/{id}:
+    get:
+      tags: [Managed Notification Templates]
+      summary: Read one draft or published revision
+      operationId: getManagedNotificationTemplate
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Revision
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ManagedTemplateRevision' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/notification-templates/{id}/publish:
+    post:
+      tags: [Managed Notification Templates]
+      summary: Publish a draft after independent operator review
+      operationId: publishManagedNotificationTemplate
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Published revision
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ManagedTemplateRevision' }
+        '409': { description: Same actor, non-draft revision, or concurrent publication }
+
   /api/v1/devices:
     post:
       tags: [Devices]
@@ -248,6 +332,8 @@ paths:
         paused with `202` and a pending-approval id; the maker retries with `X-Approval-Id` once a
         different operator decides it via `PATCH /api/v1/notifications/approvals/{id}`.
         `AUTHZ_FOUR_EYES_ENFORCE` defaults `false`, so a `201` is the common response today.
+        An SMTP or status-write ambiguity returns `202` with the notification id and
+        `dispatchStatus=IN_DOUBT`; operators must reconcile that id before any new send.
       operationId: composeOperatorMessage
       requestBody:
         required: true
@@ -257,13 +343,23 @@ paths:
               $ref: '#/components/schemas/ComposeMessageRequest'
       responses:
         '201':
-          description: Message persisted and sent (or, once four-eyes enforcement is on, approved and sent)
+          description: Message persisted and SMTP handoff accepted
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ComposeMessageResponse'
         '202':
-          description: Four-eyes enforcement is on — paused pending a different operator's approval
+          description: Either paused for four-eyes approval or persisted with unresolved transport outcome
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ComposeMessageResponse'
+                  - type: object
+                    required: [status, approvalId]
+                    properties:
+                      status: { type: string, const: PENDING_APPROVAL }
+                      approvalId: { type: string }
         '400':
           description: Unknown/missing template variables, or a malformed recipient
           content:
@@ -460,6 +556,34 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
+    ManagedTemplateDraft:
+      type: object
+      required: [template, language, channel, subject, body]
+      properties:
+        template: { type: string }
+        language: { type: string, enum: [CS, EN] }
+        channel: { type: string, enum: [EMAIL, PUSH, INBOX] }
+        subject: { type: string, maxLength: 120 }
+        body: { type: string, maxLength: 2000 }
+    ManagedTemplatePreview:
+      type: object
+      required: [draft, variables]
+      properties:
+        draft: { $ref: '#/components/schemas/ManagedTemplateDraft' }
+        variables: { type: object, additionalProperties: { type: string } }
+    ManagedTemplateRevision:
+      allOf:
+        - { $ref: '#/components/schemas/ManagedTemplateDraft' }
+        - type: object
+          required: [id, revision, state, createdBy, createdAt]
+          properties:
+            id: { type: string, format: uuid }
+            revision: { type: integer, format: int64 }
+            state: { type: string, enum: [DRAFT, PUBLISHED] }
+            createdBy: { type: string }
+            createdAt: { type: string, format: date-time }
+            publishedBy: { type: string, nullable: true }
+            publishedAt: { type: string, format: date-time, nullable: true }
     NotificationSummary:
       type: object
       description: Notification metadata, as returned by the list endpoint. Carries no rendered body.
@@ -475,6 +599,11 @@ components:
         template:
           type: string
           description: Template enum name the body was rendered from.
+        templateRevision:
+          type: integer
+          format: int64
+          nullable: true
+          description: Null for reviewed built-in copy; otherwise the immutable published revision.
         recipient:
           type: string
           description: Email address, phone number, or — for PUSH — the party id (delivery is by registered device token).
@@ -490,6 +619,11 @@ components:
           type: string
           format: date-time
           nullable: true
+        visibleAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: When an INBOX row and its VISIBLE outcome committed together.
         readAt:
           type: string
           format: date-time
@@ -538,6 +672,11 @@ components:
         template:
           type: string
           description: Template enum name the body was rendered from.
+        templateRevision:
+          type: integer
+          format: int64
+          nullable: true
+          description: Null for reviewed built-in copy; otherwise the immutable published revision.
         recipient:
           type: string
           description: Email address, phone number, or — for PUSH — the party id (delivery is by registered device token).
@@ -559,6 +698,11 @@ components:
           type: string
           format: date-time
           nullable: true
+        visibleAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: When an INBOX row became visible; no transport acceptance is implied.
         readAt:
           type: string
           format: date-time
@@ -570,13 +714,14 @@ components:
 
     NotificationChannel:
       type: string
-      enum: [EMAIL, PUSH]
+      x-extensible-enum: [EMAIL, PUSH, INBOX]
+      description: Clients must tolerate future notification channels.
 
     NotificationStatus:
       type: string
-      enum: [PENDING, SENT, FAILED, BOUNCED]
+      x-extensible-enum: [PENDING, SENT, FAILED, BOUNCED, VISIBLE]
       description: |
-        Delivery state. Read-state is tracked separately by `readAt`, not by this field.
+        Delivery state. VISIBLE is an inbox commit, not provider delivery. Read-state is separate.
         BOUNCED is declared by the domain model but not currently assigned by any code path.
 
     ApiError:
@@ -734,11 +879,16 @@ components:
 
     ComposeMessageResponse:
       type: object
+      required: [id, dispatchStatus]
       properties:
         id:
           type: string
           format: uuid
           description: The new notification's id.
+        dispatchStatus:
+          type: string
+          enum: [SENT, IN_DOUBT]
+          description: SENT means SMTP handoff and terminal write succeeded; IN_DOUBT requires reconciliation.
 
     DecideApprovalRequest:
       type: object

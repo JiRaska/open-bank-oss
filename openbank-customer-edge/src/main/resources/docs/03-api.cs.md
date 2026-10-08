@@ -39,6 +39,7 @@ Všechny cesty jsou pod `/customer/v1`. Scopy jsou OAuth scopy deklarované v `o
 | `GET /accounts` | `accounts:read` | vypsat účty volajícího |
 | `GET /accounts/{accountId}` | `accounts:read` | 403 pokud není vlastník |
 | `GET /balances/{accountId}` | `accounts:read` | 403 pokud není vlastník |
+| `GET, PUT /balances/{accountId}/{currency}/low-balance-alert` | `accounts:read` / `accounts:write` | Jen vlastník; PUT nastaví `enabled`, `threshold`, `rearmMargin`; GET je 404 do nastavení. Odesílání je ve výchozím stavu vypnuté a používá jen zprávu v aplikaci. |
 | `GET /transactions?accountId=&limit=&cursor=` | `accounts:read` | vlastnictví vynuceno; `cursor` URL-enkódovaný |
 | `GET /statements/{accountId}` | `accounts:read` | seznam období uzávěrek |
 | `GET /statements/{accountId}/{currency}/{legalSequence}?format=` | `accounts:read` | render camt.053 / MT940 / PDF; format & currency v allow-listu |

@@ -144,6 +144,7 @@ class CampaignDraftRevisionTest {
             journeys = mockk<JourneySignaller>(),
             scheduler = mockk<CampaignScheduler>(),
             metrics = mockk(relaxed = true),
+            startIntents = InMemoryJourneyStartIntentStore(),
             consentCheck = object : ConsentCheckPort {
                 override suspend fun hasActiveConsent(partyId: java.util.UUID, scope: String) = true
             },

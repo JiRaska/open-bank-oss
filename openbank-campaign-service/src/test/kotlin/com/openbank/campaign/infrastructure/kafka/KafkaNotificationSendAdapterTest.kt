@@ -25,6 +25,7 @@ class KafkaNotificationSendAdapterTest {
         val payload = slot<String>()
         every { emitter.send(capture(payload)) } returns CompletableFuture.completedFuture(null)
         val interactionRef = UUID.randomUUID()
+        val sendLogId = UUID.randomUUID()
 
         KafkaNotificationSendAdapter(emitter, mapper).requestSend(
             NotificationSendRequest(
@@ -33,7 +34,7 @@ class KafkaNotificationSendAdapterTest {
                 template = "MARKETING_PRODUCT_OFFER_PUSH",
                 recipient = "party-id",
                 variables = mapOf("offerTitle" to "Savings"),
-                correlationId = UUID.randomUUID(),
+                correlationId = sendLogId,
                 deepLink = "openbank://savings",
                 interactionRef = interactionRef,
             ),
@@ -41,6 +42,8 @@ class KafkaNotificationSendAdapterTest {
 
         val node = mapper.readTree(payload.captured)
         assertThat(node.path("interactionRef").asText()).isEqualTo(interactionRef.toString())
+        assertThat(node.path("deduplicationKey").asText()).isEqualTo(sendLogId.toString())
+        assertThat(node.path("correlationId").asText()).isEqualTo(sendLogId.toString())
         assertThat(node.path("variables").has("interactionRef")).isFalse()
     }
 

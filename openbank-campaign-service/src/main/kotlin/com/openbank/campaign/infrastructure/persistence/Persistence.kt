@@ -632,22 +632,38 @@ class PanacheSendLogRepository :
     SendLogRepository,
     PanacheRepository<SendLogEntity> {
 
+    override suspend fun wasHandedOff(sendId: UUID): Boolean = Panache.withSession {
+        find("id = ?1 and outcome = ?2", sendId, SendOutcome.SENT.name).count()
+    }.awaitSuspending() > 0
+
     override suspend fun record(send: SendRecord) {
         Panache.withTransaction {
-            persist(
-                SendLogEntity().apply {
-                    id = send.id
-                    campaignId = send.campaignId
-                    partyId = send.partyId
-                    stepOrder = send.stepOrder
-                    outcome = send.outcome.name
-                    occurredAt = send.occurredAt
-                    deliveryStatus = send.deliveryStatus.name
-                    deliveryReason = send.deliveryReason
-                    deliveryUpdatedAt = send.deliveryUpdatedAt
-                    channel = send.channel?.name
-                },
-            )
+            find("id", send.id).firstResult<SendLogEntity>().flatMap { existing ->
+                if (existing != null) {
+                    // A retried Temporal activity uses the same id. Never turn an observed handoff
+                    // back into FAILED; a later successful retry may resolve an earlier failure.
+                    if (existing.outcome == SendOutcome.FAILED.name && send.outcome == SendOutcome.SENT) {
+                        existing.outcome = SendOutcome.SENT.name
+                        existing.occurredAt = send.occurredAt
+                    }
+                    io.smallrye.mutiny.Uni.createFrom().voidItem()
+                } else {
+                    persist(
+                        SendLogEntity().apply {
+                            id = send.id
+                            campaignId = send.campaignId
+                            partyId = send.partyId
+                            stepOrder = send.stepOrder
+                            outcome = send.outcome.name
+                            occurredAt = send.occurredAt
+                            deliveryStatus = send.deliveryStatus.name
+                            deliveryReason = send.deliveryReason
+                            deliveryUpdatedAt = send.deliveryUpdatedAt
+                            channel = send.channel?.name
+                        },
+                    )
+                }
+            }
         }.awaitSuspending()
     }
 

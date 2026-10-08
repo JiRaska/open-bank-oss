@@ -19,6 +19,7 @@ import com.openbank.notification.infrastructure.persistence.entity.NotificationO
 import com.openbank.notification.infrastructure.persistence.repository.DeviceTokenRepository
 import com.openbank.notification.infrastructure.persistence.repository.NotificationOutboxRepositoryImpl
 import com.openbank.notification.infrastructure.persistence.repository.NotificationRepository
+import io.agroal.api.AgroalDataSource
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.mailer.MockMailbox
 import io.quarkus.test.common.QuarkusTestResource
@@ -66,6 +67,7 @@ import java.util.function.Supplier
 @QuarkusTest
 @QuarkusTestResource(NotificationConsumerIT.InMemoryKafkaResource::class)
 @QuarkusTestResource(com.openbank.notification.it.PostgresTestResource::class)
+@Suppress("LargeClass") // One real-DB consumer fixture keeps all ack, persistence, and delivery assertions together.
 class NotificationConsumerIT {
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
@@ -85,6 +87,9 @@ class NotificationConsumerIT {
 
     @Inject
     lateinit var repository: NotificationRepository
+
+    @Inject
+    lateinit var dataSource: AgroalDataSource
 
     @Inject
     lateinit var objectMapper: ObjectMapper
@@ -110,6 +115,14 @@ class NotificationConsumerIT {
         Panache.withSession { repository.find("partyId", partyId).firstResult() }
     }?.body
 
+    private fun templateRevisionFor(partyId: UUID): Long? = VertxContextSupport.subscribeAndAwait {
+        Panache.withSession { repository.find("partyId", partyId).firstResult() }
+    }?.templateRevision
+
+    private fun visibleAtFor(partyId: UUID): Instant? = VertxContextSupport.subscribeAndAwait {
+        Panache.withSession { repository.find("partyId", partyId).firstResult() }
+    }?.visibleAt
+
     private fun failureReasonFor(partyId: UUID): String? = VertxContextSupport.subscribeAndAwait {
         Panache.withSession { repository.find("partyId", partyId).firstResult() }
     }?.failureReason
@@ -128,6 +141,108 @@ class NotificationConsumerIT {
 
     private fun notificationsFor(partyId: UUID) = VertxContextSupport.subscribeAndAwait {
         Panache.withSession { repository.find("partyId", partyId).list() }
+    }
+
+    @Test
+    fun `published Czech copy is pinned to the notification and keeps push payload generic`() {
+        val partyId = UUID.randomUUID()
+        val token = "managed-copy-${UUID.randomUUID()}"
+        val revision = dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                """
+                INSERT INTO managed_notification_templates
+                    (id, template, language, channel, state, subject, body,
+                     created_by, created_at, published_by, published_at)
+                VALUES (?, 'TRANSACTION_COMPLETED', 'CS', 'PUSH', 'PUBLISHED',
+                        'Pohyb na účtu', 'Přijato {{amount}} {{currency}}', 'maker', now(), 'checker', now())
+                RETURNING revision
+                """.trimIndent(),
+            ).use { statement ->
+                statement.setObject(1, UUID.randomUUID())
+                statement.executeQuery().use { rows ->
+                    assertThat(rows.next()).isTrue()
+                    rows.getLong(1)
+                }
+            }
+        }
+        OffContextPushSender.SENT.clear()
+        seedActiveDevice(partyId, token)
+
+        consumeAndAwait(
+            NotificationRequest(
+                partyId = partyId,
+                channel = NotificationChannel.PUSH,
+                template = NotificationTemplate.TRANSACTION_COMPLETED,
+                recipient = partyId.toString(),
+                variables = mapOf("amount" to "10.00", "currency" to "CZK"),
+                language = com.openbank.notification.domain.model.NotificationLanguage.CS,
+            ),
+        )
+
+        assertThat(bodyFor(partyId)).isEqualTo("<p>Přijato 10.00 CZK</p>")
+        assertThat(templateRevisionFor(partyId)).isEqualTo(revision)
+        val delivered = OffContextPushSender.SENT.single { it.token == token }
+        assertThat(delivered.title).isEqualTo("Pohyb na účtu")
+        assertThat(delivered.body).isEqualTo(GENERIC_PUSH_BODY)
+    }
+
+    @Test
+    fun `inbox-only row and VISIBLE outcome commit together and replay is idempotent`() {
+        val partyId = UUID.randomUUID()
+        val request = NotificationRequest(
+            partyId = partyId,
+            channel = NotificationChannel.INBOX,
+            template = NotificationTemplate.ACCOUNT_OPENED,
+            recipient = partyId.toString(),
+            variables = mapOf("accountNumber" to "CZ1234"),
+            deduplicationKey = UUID.randomUUID(),
+        )
+        consumeAndAwait(request)
+        consumeAndAwait(request)
+
+        assertThat(countFor(partyId)).isEqualTo(1)
+        assertThat(statusFor(partyId)).isEqualTo("VISIBLE")
+        assertThat(visibleAtFor(partyId)).isNotNull()
+        assertThat(sentAtFor(partyId)).isNull()
+        val event = objectMapper.readTree(outcomeRowsFor(notificationIdFor(partyId)!!).single().payload)
+        assertThat(event.path("outcome").asText()).isEqualTo("VISIBLE")
+    }
+
+    @Test
+    fun `low balance alert is visible with generic copy and no amount`() {
+        val partyId = UUID.randomUUID()
+        val request = NotificationRequest(
+            partyId = partyId,
+            channel = NotificationChannel.INBOX,
+            template = NotificationTemplate.LOW_BALANCE_ALERT,
+            recipient = partyId.toString(),
+            variables = emptyMap(),
+            deduplicationKey = UUID.randomUUID(),
+        )
+        consumeAndAwait(request)
+        consumeAndAwait(request)
+
+        assertThat(countFor(partyId)).isEqualTo(1)
+        assertThat(statusFor(partyId)).isEqualTo("VISIBLE")
+        assertThat(bodyFor(partyId)).contains("threshold you set")
+        assertThat(bodyFor(partyId)).doesNotContain("CZK", "100")
+    }
+
+    @Test
+    fun `inbox rejects a request without a stable idempotency key`() {
+        val partyId = UUID.randomUUID()
+        assertThat(
+            sendAndAwaitOutcome(
+                NotificationRequest(
+                    partyId = partyId,
+                    channel = NotificationChannel.INBOX,
+                    template = NotificationTemplate.ACCOUNT_OPENED,
+                    recipient = partyId.toString(),
+                    variables = mapOf("accountNumber" to "CZ1234"),
+                ),
+            ),
+        ).isEqualTo("nacked")
+        assertThat(countFor(partyId)).isZero()
     }
 
     /** Drive one request through the in-memory inbound channel and wait for the ack. */
@@ -201,6 +316,9 @@ class NotificationConsumerIT {
         )
 
         assertThat(outcome).isEqualTo("nacked")
+        assertThat(countFor(partyId)).isEqualTo(1L)
+        assertThat(statusFor(partyId)).isEqualTo("PENDING")
+        assertThat(outcomeRowsFor(notificationIdFor(partyId)!!)).isEmpty()
     }
 
     @Test
@@ -271,6 +389,52 @@ class NotificationConsumerIT {
         assertThat(countFor(partyId)).isEqualTo(rowsAfterFirstDelivery)
         assertThat(notificationsFor(partyId).count { it.deduplicationKey == grantId }).isEqualTo(1)
         assertThat(correlationIdFor(partyId)).isEqualTo(grantId)
+    }
+
+    @Test
+    fun `replay of an unresolved provider handoff is nacked for reconciliation`() {
+        val partyId = UUID.randomUUID()
+        val key = UUID.randomUUID()
+        val notificationId = UUID.randomUUID()
+        val cutoff = Instant.now().minusSeconds(15 * 60)
+        val staleBefore = VertxContextSupport.subscribeAndAwait { repository.countStalePending(cutoff) }
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                """
+                INSERT INTO notifications
+                    (id, notification_id, party_id, channel, template, recipient, body, status,
+                     deduplication_key, created_at)
+                VALUES (?, ?, ?, 'PUSH', 'ACCOUNT_OPENED', ?, 'stored copy', 'PENDING', ?,
+                        now() - interval '1 hour')
+                """.trimIndent(),
+            ).use { statement ->
+                // Keep a JDBC fixture outside Hibernate's pooled positive-id sequence.
+                statement.setLong(1, -System.currentTimeMillis())
+                statement.setObject(2, notificationId)
+                statement.setObject(3, partyId)
+                statement.setString(4, partyId.toString())
+                statement.setObject(5, key)
+                statement.executeUpdate()
+            }
+        }
+
+        val result = sendAndAwaitOutcome(
+            NotificationRequest(
+                partyId = partyId,
+                channel = NotificationChannel.PUSH,
+                template = NotificationTemplate.ACCOUNT_OPENED,
+                recipient = partyId.toString(),
+                variables = mapOf("accountNumber" to "CZ1234"),
+                deduplicationKey = key,
+            ),
+        )
+
+        assertThat(result).isEqualTo("nacked")
+        assertThat(countFor(partyId)).isEqualTo(1)
+        assertThat(statusFor(partyId)).isEqualTo("PENDING")
+        assertThat(outcomeRowsFor(notificationId)).isEmpty()
+        assertThat(VertxContextSupport.subscribeAndAwait { repository.countStalePending(cutoff) })
+            .isEqualTo(staleBefore + 1)
     }
 
     /**

@@ -21,5 +21,5 @@ Self-published at `/q/openbank/docs` (Docs-as-Service — see [ADR 0019](../../.
 - **Port:** 8103 (app), 8085 (mgmt)
 - **Schema:** `balance` in the openbank cluster; tables `balances`, `balance_holds`, `balance_outbox`
 - **Outbox:** `balance_outbox` → Kafka `openbank.balance.events`
-- **Consumers:** account-service (cache update), notification-service (low-balance alerts)
+- **Consumers:** account-service (cache update). Low-balance customer alerts are planned in ADR-0333; notification-service does not currently consume this event.
 - **Producers for us:** transaction-service event-driven balance update after every accepted transaction

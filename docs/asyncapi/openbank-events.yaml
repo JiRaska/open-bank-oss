@@ -1913,7 +1913,7 @@ components:
           format: uuid
         channel:
           type: string
-          enum: [EMAIL, PUSH]
+          enum: [EMAIL, PUSH, INBOX]
         template:
           type: string
           description: Closed notification-service template identifier.

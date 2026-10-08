@@ -7,13 +7,10 @@ package com.openbank.notification.domain.model
 import java.time.Instant
 import java.util.UUID
 
-// SMS and IN_APP were declared but never implemented — the dispatch `when` in NotificationConsumer
-// only logged and returned success for either, so a caller requesting them got silent non-delivery
-// with no error (issue #2372). Removed rather than fixed: IN_APP needs a terminal status transition
-// and a wake-signal design, SMS needs a real provider port — both are real builds, not something
-// this narrowing should speculatively half-do.
-enum class NotificationChannel { EMAIL, PUSH }
-enum class NotificationStatus { PENDING, SENT, FAILED, BOUNCED }
+// INBOX is a committed, customer-visible row with its own VISIBLE outcome. It does not claim a
+// push handoff. SMS still has no provider and therefore is not an accepted channel.
+enum class NotificationChannel { EMAIL, PUSH, INBOX }
+enum class NotificationStatus { PENDING, SENT, FAILED, BOUNCED, VISIBLE }
 
 /**
  * A message template and — inseparably — the complete set of variables it accepts.
@@ -38,6 +35,7 @@ enum class NotificationTemplate(val variables: Set<String>) {
     ACCOUNT_FROZEN(setOf("accountNumber", "reason")),
     TRANSACTION_COMPLETED(setOf("amount", "currency")),
     TRANSACTION_FAILED(setOf("amount", "currency", "reason")),
+    LOW_BALANCE_ALERT(emptySet()),
     KYC_APPROVED(emptySet()),
     KYC_REJECTED(setOf("reason")),
     CONSENT_GRANTED(setOf("scope")),
@@ -158,6 +156,7 @@ enum class NotificationTemplate(val variables: Set<String>) {
             ACCOUNT_OPENED,
             ACCOUNT_CLOSED,
             TRANSACTION_COMPLETED,
+            LOW_BALANCE_ALERT,
             KYC_APPROVED,
             CONSENT_GRANTED,
             CONSENT_REVOKED,
@@ -199,7 +198,7 @@ enum class NotificationTemplate(val variables: Set<String>) {
             // muting it would silently stall every payment that needs this person's signature.
             APPROVAL_REQUIRED,
             -> NotificationCategory.SECURITY
-            TRANSACTION_COMPLETED, TRANSACTION_FAILED,
+            TRANSACTION_COMPLETED, TRANSACTION_FAILED, LOW_BALANCE_ALERT,
             APPROVAL_COMPLETED, APPROVAL_REJECTED, APPROVAL_EXPIRED, PAYMENT_RELEASE_FAILED,
             -> NotificationCategory.PAYMENTS
             ACCOUNT_OPENED, ACCOUNT_CLOSED, WELCOME -> NotificationCategory.PRODUCT

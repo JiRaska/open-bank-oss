@@ -101,6 +101,7 @@ class TriggeredEnrolmentTest {
         segmentPresent: Boolean = true,
         creditConsent: (UUID) -> Boolean = { true },
     ) = TriggeredEnrolmentService(
+        startIntents = InMemoryJourneyStartIntentStore(),
         campaigns = object : CampaignRepository {
             override suspend fun findById(id: UUID) = stored?.takeIf { it.id == id }
             override suspend fun list() = listOfNotNull(stored)
@@ -115,7 +116,9 @@ class TriggeredEnrolmentTest {
             override suspend fun list() = listOf(segment)
         },
         segmentEvaluation = object : SegmentEvaluationPort {
-            override suspend fun evaluate(segment: Segment) = members.toList()
+            override suspend fun count(segment: Segment) = members.size.toLong()
+            override suspend fun page(segment: Segment, after: UUID?, limit: Int) =
+                com.openbank.campaign.application.port.out.SegmentPage(emptyList(), null)
             override suspend fun matches(segment: Segment, partyId: UUID) = partyId in members
         },
         journeys = journeys,

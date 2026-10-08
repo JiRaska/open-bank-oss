@@ -39,6 +39,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import org.eclipse.microprofile.config.inject.ConfigProperty
+import java.nio.charset.StandardCharsets
 import java.time.Instant
 import java.util.UUID
 
@@ -150,9 +151,20 @@ open class CampaignJourneyActivitiesImpl(
     @Suppress("TooGenericExceptionCaught")
     @MarketingCallSite
     internal suspend fun deliverStepGated(campaignId: UUID, partyId: UUID, stepOrder: Int): StepOutcome {
+        // A previous attempt may have handed off and committed its row before Temporal lost the
+        // activity completion. Do not re-evaluate the gate or publish a second message then.
+        if (!dryRun && sendLog.wasHandedOff(logicalSendId(campaignId, partyId, stepOrder))) {
+            return StepOutcome.SENT
+        }
         val campaign = campaigns.findById(campaignId)
             ?: return resolved(StepResolution.CAMPAIGN_CLOSED, StepOutcome.CAMPAIGN_CLOSED)
         campaign.deliveryStateOutcome()?.let { return resolved(resolutionFor(it), it) }
+        // Temporal may start executing before enrolParty commits its ACTIVE row. A missing or
+        // terminal enrolment is not authority to contact this party; retry while the start/write
+        // boundary is being reconciled, and never emit a message from an orphan workflow.
+        check(enrolments.findByCampaignAndParty(campaignId, partyId)?.state == EnrolmentState.ACTIVE) {
+            "active campaign enrolment is unavailable"
+        }
         if (sendLog.conversionContextFor(campaignId, partyId).alreadyConverted) {
             return resolved(StepResolution.GOAL_REACHED, StepOutcome.GOAL_REACHED)
         }
@@ -211,9 +223,10 @@ open class CampaignJourneyActivitiesImpl(
     // then be rethrown so Temporal retries. Narrowing this catch would re-open that audit gap.
     @Suppress("TooGenericExceptionCaught")
     private suspend fun handoff(context: StepDeliveryContext, delivery: CampaignDelivery): StepOutcome {
-        // The send-log row id is minted BEFORE the handoff: it is the wire correlation id and
-        // joins asynchronous delivery outcome to precisely this attempt (ADR-0239 D1).
-        val sendId = Ids.newId()
+        // Temporal can retry this activity after the broker accepted a request but before the
+        // activity completed. Keep the wire identity stable across those retries so the downstream
+        // deduplication key and app placement reference still name the same logical step.
+        val sendId = logicalSendId(context.campaignId, context.partyId, context.stepOrder)
         if (dryRun) {
             sendLog.record(
                 sendId,
@@ -273,6 +286,10 @@ open class CampaignJourneyActivitiesImpl(
         metrics.sendAttempted(delivery.channel, SendHandoffOutcome.HANDED_OFF)
         return StepOutcome.SENT
     }
+
+    private fun logicalSendId(campaignId: UUID, partyId: UUID, stepOrder: Int): UUID = UUID.nameUUIDFromBytes(
+        "campaign-send:v1:$campaignId:$partyId:$stepOrder:$dryRun".toByteArray(StandardCharsets.UTF_8),
+    )
 
     private suspend fun recordSuppressed(context: StepDeliveryContext, decision: ContactGateDecision): StepOutcome {
         sendLog.record(

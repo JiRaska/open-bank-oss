@@ -21,7 +21,7 @@ data class SegmentSummary(val name: String, val version: Int, val rules: List<St
  * cohort that is sent to are "the same set or provably a different version". The silver layer moves
  * underneath both, so a preview without a timestamp is a number with no claim attached.
  */
-data class SegmentPreview(val name: String, val version: Int, val size: Int, val asOf: Instant)
+data class SegmentPreview(val name: String, val version: Int, val size: Long, val asOf: Instant)
 
 /**
  * Read side of the segment catalogue, for the operator console (#2895).
@@ -36,15 +36,15 @@ class SegmentQuery(private val evaluation: SegmentEvaluationPort, private val cl
     fun list(): List<SegmentSummary> = SegmentCatalog.ALL.map { it.toSummary() }
 
     /**
-     * How many parties this segment currently matches. Runs the real evaluation — the same call
-     * enrolment makes — so a preview cannot disagree with the send for any reason other than time.
+     * How many parties this segment currently matches. The source counts in SQL; a preview must
+     * never pull every matching party into the JVM merely to display one number.
      */
     suspend fun preview(name: String, version: Int): SegmentPreview? {
         val segment = SegmentCatalog.find(name, version) ?: return null
         return SegmentPreview(
             name = segment.name,
             version = segment.version,
-            size = evaluation.evaluate(segment).size,
+            size = evaluation.count(segment),
             asOf = clock.instant(),
         )
     }

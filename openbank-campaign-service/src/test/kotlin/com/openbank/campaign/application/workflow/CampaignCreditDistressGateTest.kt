@@ -16,6 +16,8 @@ import com.openbank.campaign.domain.model.CampaignProductKind
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
+import com.openbank.campaign.domain.model.Enrolment
+import com.openbank.campaign.domain.model.EnrolmentState
 import com.openbank.campaign.domain.model.SegmentRef
 import com.openbank.campaign.domain.model.SendOutcome
 import com.openbank.campaign.domain.model.SendRecord
@@ -107,9 +109,19 @@ class CampaignCreditDistressGateTest {
             updatedAt = Instant.now(),
         )
         coEvery { sendLog.countRecentForParty(partyId, any()) } returns 0
+        coEvery { enrolments.findByCampaignAndParty(campaignId, partyId) } returns Enrolment(
+            id = UUID.randomUUID(),
+            campaignId = campaignId,
+            partyId = partyId,
+            state = EnrolmentState.ACTIVE,
+            currentStep = 1,
+            startedAt = Instant.now(),
+            completedAt = null,
+        )
         coEvery { sendLog.conversionContextFor(campaignId, partyId) } returns ConversionContext(null, false)
         coEvery { consentCheck.hasActiveConsent(partyId, any()) } returns true
         coEvery { sendLog.record(any()) } just Runs
+        coEvery { sendLog.wasHandedOff(any()) } returns false
         coEvery { notificationSend.requestSend(any()) } just Runs
     }
 

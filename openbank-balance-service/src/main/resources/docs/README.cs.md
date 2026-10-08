@@ -21,5 +21,5 @@ Self-publish přes `/q/openbank/docs` (Docs-as-Service — viz [ADR 0019](../../
 - **Port:** 8103 (app), 8085 (mgmt)
 - **Schema:** `balance` v openbank cluster; tabulky `balances`, `balance_holds`, `balance_outbox`
 - **Outbox:** `balance_outbox` → Kafka `openbank.balance.events`
-- **Konzumenty:** account-service (cache update), notification-service (low-balance alerty)
+- **Konzumenti:** account-service (aktualizace cache). Zákaznické upozornění na nízký zůstatek je plánované v ADR-0333; notification-service tento event zatím nekonzumuje.
 - **Producenty pro nás:** transaction-service event-driven update zůstatku po každé transakci

@@ -169,6 +169,9 @@ data class CampaignInteractionAttribution(
 @Suppress("TooManyFunctions") // One aggregate port; see PanacheSendLogRepository's matching rationale.
 interface SendLogRepository {
     suspend fun record(send: SendRecord)
+
+    /** A completed logical delivery step must not hand off again when Temporal retries its activity. */
+    suspend fun wasHandedOff(sendId: UUID): Boolean = false
     suspend fun countRecentForParty(partyId: UUID, sinceEpochSeconds: Long): Int
 
     /**
@@ -284,15 +287,36 @@ interface AudienceRegistry {
     suspend fun save(audience: Audience): Audience
 }
 
-/** ADR-0210: evaluates a segment against the silver layer and returns matching party ids. */
+/** A bounded, ordered page. The cursor is the last id seen, even when enrolment skips that id. */
+data class SegmentPage(val partyIds: List<UUID>, val nextCursor: UUID?) {
+    init {
+        require(partyIds.size <= MAX_PAGE_SIZE) { "segment page exceeds $MAX_PAGE_SIZE parties" }
+        require(nextCursor == partyIds.lastOrNull()) { "segment cursor must name the last party" }
+    }
+
+    companion object {
+        const val MAX_PAGE_SIZE = 500
+    }
+}
+
+/** Streams one bounded-memory, single-query audience snapshot before any journey is admitted. */
+interface AudienceSnapshotPort {
+    suspend fun stream(segment: Segment, accept: suspend (List<UUID>) -> Unit)
+}
+
+/** ADR-0210: evaluates a segment against the silver layer. */
 interface SegmentEvaluationPort {
-    suspend fun evaluate(segment: Segment): List<UUID>
+    /** Count at the data source; never transfer an entire audience for a preview. */
+    suspend fun count(segment: Segment): Long
+
+    /** Must be bounded at the data source; a full-list fallback would defeat admission control. */
+    suspend fun page(segment: Segment, after: UUID?, limit: Int): SegmentPage
 
     /**
      * Whether [partyId] is in [segment] right now — the membership check on the trigger path.
      *
-     * Its own method rather than `evaluate(segment).contains(partyId)`: that would pull an entire
-     * audience out of ClickHouse to answer a yes/no question, once per product event. The
+     * Its own method rather than scanning pages: that would pull an audience out of ClickHouse
+     * to answer a yes/no question once per product event. The
      * implementation adds one predicate to the same generated WHERE clause, so the two can never
      * disagree about what the segment means.
      */
@@ -313,6 +337,8 @@ data class NotificationSendRequest(
     val variables: Map<String, String>,
     /** Send-log row id; campaign needs this mandatory to join a delivery outcome back. */
     val correlationId: UUID,
+    /** Same logical send identity on Temporal retry and Kafka replay. */
+    val deduplicationKey: UUID = correlationId,
     /** Closed mobile-app route, present only on a PUSH delivery. */
     val deepLink: String? = null,
     /**
@@ -324,7 +350,16 @@ data class NotificationSendRequest(
      * validate ownership against that row before it attributes anything (issue #4480).
      */
     val interactionRef: UUID? = null,
-)
+) {
+    init {
+        require(deduplicationKey == correlationId) { "campaign deduplication key must equal its send-log id" }
+    }
+
+    companion object {
+        /** AsyncAPI's published message name for this command's wire shape. */
+        const val EVENT_TYPE = "NotificationRequest"
+    }
+}
 
 /** ADR-0200 D3: delivery goes through notification-service, never direct. */
 interface NotificationSendPort {

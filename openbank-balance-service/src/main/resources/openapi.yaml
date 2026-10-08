@@ -7,7 +7,8 @@ info:
   # 400 AMOUNT_SCALE_EXCEEDED / CURRENCY_UNSUPPORTED / VALIDATION_ERROR (amount + currency are built
   # into a kernel Money at the boundary, never rounded).
   # 1.11.0 -> 1.12.0 (#11588): additive verified makerActorKind on approval responses.
-  version: 1.12.0
+  # 1.12.0 -> 1.13.0 (#12165): additive low-balance alert setting API.
+  version: 1.13.0
   description: >-
     Account balance management — holds, credits, debits, multi-currency. Per ADR-0039 (Phase A) a
     read-only reconciliation ties out, per currency, the ledger deposit-control balance against the
@@ -120,6 +121,46 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+
+  /api/v1/balances/{accountId}/{currency}/low-balance-alert:
+    parameters:
+      - $ref: '#/components/parameters/accountId'
+      - name: currency
+        in: path
+        required: true
+        schema: {type: string, minLength: 3, maxLength: 3}
+      - name: X-Customer-Party-Id
+        in: header
+        required: true
+        schema: {type: string, format: uuid}
+    get:
+      tags: [Balances]
+      summary: Read the owner's optional low-balance alert setting
+      operationId: getLowBalanceAlert
+      responses:
+        '200':
+          description: Current setting
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LowBalanceAlert'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    put:
+      tags: [Balances]
+      summary: Set an account owner's low-balance alert threshold
+      operationId: setLowBalanceAlert
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/LowBalanceAlertRequest'}
+      responses:
+        '200':
+          description: Updated setting
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LowBalanceAlert'}
+        '400': {$ref: '#/components/responses/InvalidMoney'}
+        '403': {$ref: '#/components/responses/Forbidden'}
 
   /api/v1/balances/{accountId}/holds:
     post:
@@ -411,6 +452,22 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
+    LowBalanceAlertRequest:
+      type: object
+      required: [enabled, threshold, rearmMargin]
+      properties:
+        enabled: {type: boolean}
+        threshold: {type: number, minimum: 0}
+        rearmMargin: {type: number, exclusiveMinimum: 0}
+    LowBalanceAlert:
+      type: object
+      required: [accountId, currency, enabled, threshold, rearmMargin]
+      properties:
+        accountId: {type: string, format: uuid}
+        currency: {type: string}
+        enabled: {type: boolean}
+        threshold: {type: number}
+        rearmMargin: {type: number}
     ApprovalResponse:
       type: object
       description: >-
