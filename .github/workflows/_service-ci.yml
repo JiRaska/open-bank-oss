@@ -844,7 +844,10 @@ jobs:
         env:
           BRANCH: ${{ github.head_ref || github.ref_name }}
         run: |
-          ./gradlew :${{ inputs.service }}:providerPactTest --build-cache \
+          # The same Testcontainers ETXTBSY startup race can hit this separate JVM
+          # after the build step passed (#4195). Retry only its exact code-126 signature.
+          bash .github/scripts/retry-testcontainers-ebusy.sh -- \
+            ./gradlew :${{ inputs.service }}:providerPactTest --build-cache \
             --console=plain --stacktrace \
             -Dpactbroker.url="${PACT_BROKER_URL:-}" \
             -Dpactbroker.auth.username="${PACT_BROKER_USERNAME:-}" \
