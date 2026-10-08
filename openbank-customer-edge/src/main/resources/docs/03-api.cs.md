@@ -43,7 +43,7 @@ Všechny cesty jsou pod `/customer/v1`. Scopy jsou OAuth scopy deklarované v `o
 | `GET /statements/{accountId}` | `accounts:read` | seznam období uzávěrek |
 | `GET /statements/{accountId}/{currency}/{legalSequence}?format=` | `accounts:read` | render camt.053 / MT940 / PDF; format & currency v allow-listu |
 | `GET /notifications?limit=&page=` | `accounts:read` | stránkovaný feed podle party, celkový a přesný nepřečtený počet |
-| `GET /notifications/unified?limit=&partyId=` | `accounts:read` | posledních 1–100 položek osoby a aktuálně zastupovaných firem; volitelný filtr oprávněného profilu |
+| `GET /notifications/unified?limit=&partyId=&cursor=` | `accounts:read` | nejnovějších 1–100 položek osoby a zastupovaných firem; filtr profilu a stabilní kurzor |
 | `GET /notifications/{id}?partyId=` | `accounts:read` | detail; původní `partyId` z jednotného seznamu vybere oprávněný profil |
 | `PATCH /notifications/{id}/read?partyId=` | `accounts:read` | označí notifikaci oprávněného profilu jako přečtenou |
 | `GET /profile` | `accounts:read` | vlastní profil party volajícího |

@@ -25,6 +25,7 @@ import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
+import java.time.Instant
 import java.util.UUID
 
 @Path("/api/v1/notifications")
@@ -43,11 +44,24 @@ class NotificationResource {
         @QueryParam("page") @DefaultValue("0") page: Int,
         @QueryParam("size") @DefaultValue("20") size: Int,
         @QueryParam("partyId") partyId: UUID?,
+        @QueryParam("beforeCreatedAt") beforeCreatedAt: String? = null,
+        @QueryParam("beforeId") beforeId: UUID? = null,
     ): Response {
+        if ((beforeCreatedAt == null) != (beforeId == null) || beforeCreatedAt != null && partyId == null) {
+            return Response.status(Response.Status.BAD_REQUEST).build()
+        }
+        val beforeInstant = beforeCreatedAt?.let { raw ->
+            val parsed = runCatching { Instant.parse(raw) }.getOrNull()
+            parsed ?: return Response.status(Response.Status.BAD_REQUEST).build()
+        }
         val boundedPage = page.coerceAtLeast(0)
         val boundedSize = size.coerceIn(1, 100)
         val (items, total, unreadCount) = if (partyId != null) {
-            repo.pageByParty(partyId, boundedPage, boundedSize)
+            if (beforeInstant != null && beforeId != null) {
+                repo.pageByPartyBefore(partyId, beforeInstant, beforeId, boundedSize)
+            } else {
+                repo.pageByParty(partyId, boundedPage, boundedSize)
+            }
         } else {
             val (allItems, allTotal) = repo.pageAll(boundedPage, boundedSize)
             Triple(allItems, allTotal, null)

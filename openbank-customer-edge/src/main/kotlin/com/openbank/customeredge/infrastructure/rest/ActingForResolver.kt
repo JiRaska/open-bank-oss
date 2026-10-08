@@ -100,7 +100,6 @@ class ActingForResolver(
     /** Inbox aggregation must never turn a mandate lookup outage into a false empty company feed. */
     fun profilesOfStrict(agent: UUID): List<Map<String, Any?>> = profilesOfStrictWithin(agent, null)
 
-    /** The inventory read and parsing share the caller's aggregate deadline. */
     fun profilesOfStrict(agent: UUID, deadlineNanos: Long): List<Map<String, Any?>> =
         profilesOfStrictWithin(agent, deadlineNanos)
 
