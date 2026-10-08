@@ -193,7 +193,7 @@ def verify_signed_admin_ui_build(root: str, image: str, tag: str) -> bool:
         cwd=root, capture_output=True, text=True, check=False,
     )
     if signed.returncode != 0:
-        print(signed.stderr or signed.stdout, file=sys.stderr)
+        print("Admin UI image build-input attestation verification failed", file=sys.stderr)
     return signed.returncode == 0
 
 

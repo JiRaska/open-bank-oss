@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import re
 import subprocess
 import tempfile
 import unittest
@@ -25,6 +26,13 @@ verify_mod = load("verify_build", "verify-admin-ui-build-inputs.py")
 
 
 class AdminUiImageInputsTest(unittest.TestCase):
+    def test_every_host_collector_output_is_allowlisted(self):
+        root = Path(__file__).resolve().parents[2]
+        producer = (root / "openbank-infra/scripts/build-push-admin-ui.sh").read_text()
+        outputs = set(re.findall(r'^\w+_OUT="openbank-admin-ui/([\w-]+\.json)"', producer, re.M))
+        self.assertGreaterEqual(len(outputs), 15)
+        self.assertEqual(outputs - set(freeze_mod.GENERATED_ROOT_JSON), set())
+
     def test_frozen_context_and_digest_binding(self):
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp)
@@ -46,11 +54,17 @@ class AdminUiImageInputsTest(unittest.TestCase):
                                     check=True, capture_output=True, text=True).stdout.strip()
             generated = repo / "openbank-admin-ui/catalog.json"
             generated.write_text('{"generated":true}\n')
+            for name in ("governance.json", "cost-footprints.json", "cluster-topology.json"):
+                (repo / "openbank-admin-ui" / name).write_text('{"generated":true}\n')
             context = base / "context"
             manifest_path = base / "manifest.json"
             freeze_mod.freeze(repo, context, manifest_path)
             original_manifest = manifest_path.read_bytes()
             self.assertEqual((context / "openbank-notification-service/CHANGELOG.md").read_text(), "old release\n")
+            inventory = json.loads(original_manifest)["files"]
+            for name in ("governance.json", "cost-footprints.json", "cluster-topology.json"):
+                self.assertTrue(any(item["path"] == "openbank-admin-ui/" + name for item in inventory))
+                self.assertTrue((context / "openbank-admin-ui" / name).is_file())
             changelog.write_text("new release\n")
             self.assertEqual((context / "openbank-notification-service/CHANGELOG.md").read_text(), "old release\n")
             freeze_mod.freeze(repo, base / "context2", base / "manifest2.json")
