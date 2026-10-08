@@ -10,6 +10,7 @@ import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured
+import io.restassured.response.Response
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.MethodOrderer
@@ -122,17 +123,20 @@ class SepaPaymentReceiptIT {
         val executor = Executors.newFixedThreadPool(2)
         try {
             val start = CountDownLatch(1)
-            val first = executor.submit<Int> {
+            val first = executor.submit<Response> {
                 start.await()
-                create(key, party, actorA).statusCode
+                create(key, party, actorA)
             }
-            val second = executor.submit<Int> {
+            val second = executor.submit<Response> {
                 start.await()
-                create(key, party, actorB).statusCode
+                create(key, party, actorB)
             }
             start.countDown()
-            assertThat(listOf(first.get(20, TimeUnit.SECONDS), second.get(20, TimeUnit.SECONDS)).sorted())
+            val responses = listOf(first.get(20, TimeUnit.SECONDS), second.get(20, TimeUnit.SECONDS))
+            assertThat(responses.map { it.statusCode }.sorted())
                 .containsExactly(201, 409)
+            assertThat(responses.single { it.statusCode == 409 }.jsonPath().getString("code"))
+                .isEqualTo("IDEMPOTENCY_KEY_REUSED")
             assertThat(raceAttempts()).isEqualTo(2)
             assertThat(countForKey("SELECT count(*) FROM sepa_payments WHERE idempotency_key = ?", key))
                 .isEqualTo(1)

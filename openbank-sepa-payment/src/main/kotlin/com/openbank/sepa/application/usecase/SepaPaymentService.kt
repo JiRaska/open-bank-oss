@@ -88,6 +88,7 @@ class SepaPaymentService(
         private const val ALERT_SCREENING_UNAVAILABLE = "SCREENING_UNAVAILABLE"
     }
 
+    @Suppress("TooGenericExceptionCaught") // reactive transaction adapters may wrap the exact DB constraint
     override suspend fun createPayment(command: CreateSepaPaymentCommand): SepaPayment {
         // #10916: the durable half of the Idempotency-Key check. The Redis record can expire or be
         // evicted while this UNIQUE row lives forever, so a key reused for a DIFFERENT payment must
@@ -135,7 +136,7 @@ class SepaPaymentService(
                     createdAt = now,
                 ),
             )
-        } catch (failure: org.hibernate.exception.ConstraintViolationException) {
+        } catch (failure: RuntimeException) {
             if (!failure.isIdempotencyKeyConflict()) throw failure
             // The losing transaction (including its outbox write) was rolled back. A concurrent
             // caller may have committed between the initial lookup and this INSERT.
