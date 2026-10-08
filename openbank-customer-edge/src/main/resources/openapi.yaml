@@ -44,7 +44,7 @@ info:
   # 1.74.0 -> 1.75.0 (#10016): additive — GET /capabilities (ADR-0310 D5).
   # 1.75.0 -> 1.76.0 (#11966): additive — /holdings, the customer write side of the declared
   # holdings that GET /net-worth reads (ADR-0301 D1).
-  version: 1.79.0
+  version: 1.80.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -2345,6 +2345,61 @@ paths:
                     enum: [RECEIVED, VALIDATED, SENT_TO_CLEARING, SETTLED, REJECTED, RETURNED, CANCELLED]
         '404':
           description: Payment not found, or not owned by the caller (no existence oracle)
+
+  /sepa-payments/receipts/lookup:
+    post:
+      tags: [Payments]
+      summary: Resolve an authenticated customer's SEPA payment receipt
+      description: >-
+        The edge verifies debtor account ownership, reconstructs the original rail request,
+        and asks the SEPA service for a durable receipt. UNKNOWN means the receipt could not
+        be verified; it does not establish that the payment failed.
+      operationId: lookupSepaPaymentReceipt
+      security:
+        - customerOidc: [payments:read]
+      parameters:
+        - name: X-Acting-For
+          in: header
+          required: false
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [idempotencyKey, payment]
+              properties:
+                idempotencyKey: {type: string}
+                payment:
+                  type: object
+                  required: [debtorAccountId, amount, creditorIban, creditorName]
+                  properties:
+                    debtorAccountId: {type: string, format: uuid}
+                    amount: {type: string, example: '120.00'}
+                    currency: {type: string, default: EUR}
+                    creditorIban: {type: string}
+                    creditorName: {type: string}
+                    creditorBic: {type: string, nullable: true}
+                    reference: {type: string, nullable: true}
+      responses:
+        '200':
+          description: Verified receipt or UNKNOWN
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [state]
+                properties:
+                  state: {type: string, enum: [FOUND, UNKNOWN]}
+                  paymentId: {type: string, format: uuid}
+                  status:
+                    type: string
+                    enum: [RECEIVED, VALIDATED, PROCESSING, COMPLETED, REJECTED, RETURNED, CANCELLED]
+        '400':
+          description: Malformed lookup request
+        '403':
+          description: Debtor account does not belong to the caller
 
   /sepa-payments:
     post:
