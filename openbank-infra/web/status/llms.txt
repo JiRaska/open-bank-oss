@@ -1,0 +1,14 @@
+# OpenBank public status
+> Independent, read-only public checks for the OpenBank reference platform at https://status.open-bank.tech/.
+
+The page reports observed website, customer sign-in discovery, API edge, and selected service reachability checks. It also shows confirmed incidents and observed website-check history. Unknown, stale, or missing results are not evidence of uptime. Payment completion, customer journeys, mobile availability, and contractual SLA attainment are outside this status page's measured scope. OpenBank is an early-stage open-source reference platform, not a licensed bank or production banking service.
+
+## Public resources
+- [Status page](https://status.open-bank.tech/): Human-readable current checks, incidents, history, and reliability terms.
+- [Status API contract](https://status.open-bank.tech/openapi.yaml): Exact paths and response schemas.
+- [Current status](https://status.open-bank.tech/api/v1/status): Public snapshot with scope and timestamps.
+- [Incident timeline](https://status.open-bank.tech/api/v1/incidents): Confirmed incidents and recoveries.
+- [Observed history](https://status.open-bank.tech/api/v1/history): 24-hour and 30-day website probe buckets; unobserved time is not counted as successful.
+- [Source and limitations](https://github.com/JiRaska/open-bank-oss/tree/main/openbank-infra/web/status): Implementation and operational scope.
+
+For automated decisions, read the JSON API and its timestamps. A green result applies only to its stated probe. `GET /api/v1/health` returns 503 for impact, stale data, or pending verification; `GET /api/v1/healthz` checks only the status API itself.
