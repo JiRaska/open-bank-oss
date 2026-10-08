@@ -12,7 +12,11 @@
 # missing traces. The maxmemory value stays below the container limit so Valkey refuses writes
 # before the kernel OOM-kills it.
 #
-# No AUTH, like every fleet Valkey: the generated NetworkPolicy admits same-namespace callers only.
+# Require authentication: the BullMQ queue contains trace payloads before ingestion.
+# The NetworkPolicy also limits network reachability.
+# Stage 2 prerequisite: an owner seeds a nonempty credential, verifies ExternalSecret Ready
+# and the target Secret key is nonempty without logging it, then drains/reconciles queued work.
+# This emptyDir pod restarts on both rollout and rollback, losing any work still queued.
 #
 # Placement: `stateful` NodePool (see langfuse-clickhouse.yaml for why).
 apiVersion: apps/v1
@@ -54,6 +58,31 @@ spec:
         fsGroup: 1000
         seccompProfile:
           type: RuntimeDefault
+      initContainers:
+        # A present but empty Secret key would turn --requirepass into no authentication.
+        # Fail before Valkey starts; never print the credential.
+        - name: require-nonempty-password
+          image: docker.io/valkey/valkey:8.1.10-alpine@sha256:081c2f5cb575efc901aa80ff9cdbd1ec6a301682fd35e1ebb4b0990a4a4a8507
+          command: ["/bin/sh", "-ec"]
+          args: ['test -n "${VALKEY_PASSWORD:-}"']
+          env:
+            - name: VALKEY_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-valkey-auth
+                  key: VALKEY_PASSWORD
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 5m
+              memory: 8Mi
+            limits:
+              cpu: 50m
+              memory: 32Mi
       containers:
         - name: valkey
           image: docker.io/valkey/valkey:8.1.10-alpine@sha256:081c2f5cb575efc901aa80ff9cdbd1ec6a301682fd35e1ebb4b0990a4a4a8507
@@ -66,6 +95,14 @@ spec:
             - 160mb
             - --maxmemory-policy
             - noeviction
+            - --requirepass
+            - $(VALKEY_PASSWORD)
+          env:
+            - name: VALKEY_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-valkey-auth
+                  key: VALKEY_PASSWORD
           ports:
             - name: redis
               containerPort: 6379
@@ -100,6 +137,12 @@ spec:
         - name: exporter
           image: docker.io/oliver006/redis_exporter:v1.92.1@sha256:7fbc93d30f0f91eed1b2fe6968a956259cc5d260a984dd9071f1d1e9c2692ecd
           args: ["--redis.addr=redis://localhost:6379"]
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-valkey-auth
+                  key: VALKEY_PASSWORD
           ports:
             - name: redis-metrics
               containerPort: 9121
