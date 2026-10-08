@@ -4,7 +4,7 @@
 
 - **Veřejná báze:** `https://customer.open-bank.tech/customer/v1` (sandbox)
 - **In-cluster app port:** 8128
-- **OpenAPI spec:** [`/q/openapi`](http://localhost:8128/q/openapi) — zdroj: `src/main/resources/openapi.yaml` (`info.version: 1.6.0`)
+- **OpenAPI spec:** [`/q/openapi`](http://localhost:8128/q/openapi) — zdroj: `src/main/resources/openapi.yaml` (`info.version: 1.79.0`)
 
 Kontrakt **je** formalizován v `openapi.yaml`. URL prefix je `/customer/v1` (pozn.: jde o vlastní zákaznickou verzní osu edge, odlišnou od `/api/v1` jednotlivých upstreamů).
 
@@ -46,6 +46,7 @@ Všechny cesty jsou pod `/customer/v1`. Scopy jsou OAuth scopy deklarované v `o
 | `GET /notifications/unified?limit=&partyId=&cursor=` | `accounts:read` | nejnovějších 1–100 položek osoby a zastupovaných firem; filtr profilu a stabilní kurzor |
 | `GET /notifications/{id}?partyId=` | `accounts:read` | detail; původní `partyId` z jednotného seznamu vybere oprávněný profil |
 | `PATCH /notifications/{id}/read?partyId=` | `accounts:read` | označí notifikaci oprávněného profilu jako přečtenou |
+| `PATCH /notifications/read-all?partyId=` | `accounts:read` | označí všechny notifikace vybraného nebo oprávněného profilu jako přečtené |
 | `GET /profile` | `accounts:read` | vlastní profil party volajícího |
 | `POST /domestic-payments` | `payments:initiate` | obohaceno; `Idempotency-Key` vyžadován |
 | `POST /sepa-payments` | `payments:initiate` | obohaceno; `Idempotency-Key` vyžadován |
@@ -144,6 +145,6 @@ Edge vrací malé JSON chybové obálky tvaru `{"error":"…"}`, které sám gen
 
 ## Verzování
 
-- **Zákaznická verze API v URL** (`/customer/v1`). OpenAPI `info.version` (`1.6.0`) je osa API kontraktu (ADR-0048), nezávislá na release verzi `version.txt` (`0.9.0`).
+- **Zákaznická verze API v URL** (`/customer/v1`). OpenAPI `info.version` (`1.79.0`) je osa API kontraktu (ADR-0048), nezávislá na release verzi `version.txt` (`0.89.0`).
 - Upstream volání míří na vlastní `/api/v1` každé služby.
 - **OpenAPI diff** v CI hlídá breaking změny bez bumpu kontraktu.
