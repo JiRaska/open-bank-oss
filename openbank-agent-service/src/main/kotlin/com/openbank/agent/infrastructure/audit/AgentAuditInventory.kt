@@ -8,6 +8,8 @@ import java.sql.Connection
 import java.util.UUID
 
 /** Read-only, database-independent evidence collection. The caller supplies two distinct connections. */
+// MagicNumber: ResultSet/PreparedStatement positions are fixed by the SQL projections above.
+@Suppress("MagicNumber")
 object AgentAuditInventory {
     enum class Side { SOURCE, DESTINATION }
 
@@ -74,6 +76,8 @@ object AgentAuditInventory {
      * The caller configures read-only repeatable-read before the transaction's first query and
      * owns its lifecycle; this method never commits or changes it.
      */
+    // NestedBlockDepth: the connection, statement, SQL array, and result set must close in order.
+    @Suppress("NestedBlockDepth")
     fun collect(
         connection: Connection,
         side: Side,
