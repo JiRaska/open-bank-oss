@@ -9,6 +9,7 @@ import com.openbank.customeredge.infrastructure.rest.CustomerEdgeResource
 import com.openbank.customeredge.infrastructure.rest.PaymentSessionStore
 import com.openbank.customeredge.infrastructure.rest.UpstreamClient
 import com.openbank.customeredge.infrastructure.rest.inMemoryPaymentSessionStore
+import com.openbank.libs.authz.Authorize
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
@@ -56,6 +57,126 @@ class CustomerEdgeResourceTest {
 
     private fun accountJson(accountId: UUID, ownerParty: UUID) =
         Response.ok("""{"id":"$accountId","partyId":"$ownerParty"}""").build()
+
+    @Test
+    fun `category routes reject missing account before upstream access`() {
+        val caller = UUID.randomUUID()
+        val transaction = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        val resource = resourceFor(upstream, caller)
+
+        assertThat(resource.listTransactionCategoryOverrides(null).status).isEqualTo(400)
+        assertThat(resource.setTransactionCategory(transaction, null, """{"category":"GROCERIES"}""").status)
+            .isEqualTo(400)
+        assertThat(resource.clearTransactionCategory(transaction, null).status).isEqualTo(400)
+        verify(exactly = 0) { upstream.get(any(), any()) }
+        verify(exactly = 0) { upstream.put(any(), any(), any()) }
+        verify(exactly = 0) { upstream.delete(any(), any()) }
+    }
+
+    @Test
+    fun `category writes reject foreign account without touching transaction service`() {
+        val caller = UUID.randomUUID()
+        val account = UUID.randomUUID()
+        val transaction = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get("http://account/api/v1/accounts/$account", caller.toString()) } returns
+            accountJson(account, UUID.randomUUID())
+        val resource = resourceFor(upstream, caller)
+
+        assertThat(resource.setTransactionCategory(transaction, account, """{"category":"GROCERIES"}""").status)
+            .isEqualTo(403)
+        assertThat(resource.clearTransactionCategory(transaction, account).status).isEqualTo(403)
+        verify(exactly = 0) { upstream.put(any(), any(), any()) }
+        verify(exactly = 0) { upstream.delete(any(), any()) }
+    }
+
+    @Test
+    fun `category list rejects foreign account without reading overrides`() {
+        val caller = UUID.randomUUID()
+        val account = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get("http://account/api/v1/accounts/$account", caller.toString()) } returns
+            accountJson(account, UUID.randomUUID())
+        val resource = resourceFor(upstream, caller)
+
+        assertThat(resource.listTransactionCategoryOverrides(account).status).isEqualTo(403)
+        verify(exactly = 0) { upstream.get(match { it.contains("category-overrides") }, any()) }
+    }
+
+    @Test
+    fun `category write rejects caller supplied counterparty key`() {
+        val caller = UUID.randomUUID()
+        val account = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get("http://account/api/v1/accounts/$account", caller.toString()) } returns
+            accountJson(account, caller)
+        val resource = resourceFor(upstream, caller)
+
+        val response = resource.setTransactionCategory(
+            UUID.randomUUID(),
+            account,
+            """{"category":"GROCERIES","counterpartyKey":"FORGED"}""",
+        )
+
+        assertThat(response.status).isEqualTo(400)
+        verify(exactly = 0) { upstream.put(any(), any(), any()) }
+    }
+
+    @Test
+    fun `category mutations use a distinct write authorization action`() {
+        val resource = CustomerEdgeResource::class.java
+        val set = resource.getDeclaredMethod(
+            "setTransactionCategory",
+            UUID::class.java,
+            UUID::class.java,
+            String::class.java,
+        )
+        val clear = resource.getDeclaredMethod("clearTransactionCategory", UUID::class.java, UUID::class.java)
+        assertThat(set.getAnnotation(Authorize::class.java).action).isEqualTo("customer.transactions.categorise")
+        assertThat(clear.getAnnotation(Authorize::class.java).action).isEqualTo("customer.transactions.categorise")
+    }
+
+    @Test
+    fun `category write rejects unknown category before transaction service`() {
+        val caller = UUID.randomUUID()
+        val account = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get("http://account/api/v1/accounts/$account", caller.toString()) } returns
+            accountJson(account, caller)
+        val resource = resourceFor(upstream, caller)
+
+        val response = resource.setTransactionCategory(UUID.randomUUID(), account, """{"category":"RENT"}""")
+
+        assertThat(response.status).isEqualTo(400)
+        verify(exactly = 0) { upstream.put(any(), any(), any()) }
+    }
+
+    @Test
+    fun `category routes forward only server compatible paths body and statuses`() {
+        val caller = UUID.randomUUID()
+        val account = UUID.randomUUID()
+        val transaction = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        val path = "http://transaction/api/v1/transactions/$transaction/category?accountId=$account"
+        every { upstream.get("http://account/api/v1/accounts/$account", caller.toString()) } returns
+            accountJson(account, caller)
+        every {
+            upstream.get(
+                "http://transaction/api/v1/transactions/category-overrides?accountId=$account",
+                caller.toString(),
+            )
+        } returns Response.ok("""{"data":[]}""").build()
+        every { upstream.put(path, caller.toString(), """{"category":"GROCERIES"}""") } returns
+            Response.ok("""{"counterpartyKey":"EXAMPLE","category":"GROCERIES"}""").build()
+        every { upstream.delete(path, caller.toString()) } returns Response.noContent().build()
+        val resource = resourceFor(upstream, caller).apply { transactionServiceUrl = "http://transaction" }
+
+        assertThat(resource.listTransactionCategoryOverrides(account).status).isEqualTo(200)
+        assertThat(resource.setTransactionCategory(transaction, account, """{"category":"groceries"}""").status)
+            .isEqualTo(200)
+        assertThat(resource.clearTransactionCategory(transaction, account).status).isEqualTo(204)
+    }
 
     private fun termDepositProduct(id: UUID, public: Boolean = true, status: String = "ACTIVE"): String = """{
         "id":"$id", "code":"TERM_DEPOSIT_6M_CZK", "name":"Termínovaný vklad 6 měsíců",

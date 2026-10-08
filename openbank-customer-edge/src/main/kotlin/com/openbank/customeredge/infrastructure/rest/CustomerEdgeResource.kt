@@ -16,6 +16,7 @@ import com.openbank.customeredge.infrastructure.onboarding.PendingOnboarding
 import com.openbank.customeredge.infrastructure.onboarding.PendingOnboardingStore
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.libs.spend.SpendCategory
 import io.quarkus.logging.Log
 import io.smallrye.common.annotation.Blocking
 import jakarta.annotation.security.PermitAll
@@ -44,6 +45,7 @@ import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 import java.util.UUID
 
 /**
@@ -2358,6 +2360,66 @@ class CustomerEdgeResource(
         val query = buildTransactionsQuery(accountId, limit, cursor)
         val resp = upstream.get("$transactionServiceUrl/api/v1/transactions$query", customer.partyId.toString())
         return enrichWithCounterpartyIban(resp, accountId, customer.partyId)
+    }
+
+    /** Read the categories attached to an account, after the same account gate as its statement. */
+    @GET
+    @Path("/transactions/category-overrides")
+    @Authorize(action = "customer.transactions.read")
+    @Blocking
+    fun listTransactionCategoryOverrides(@QueryParam("accountId") accountIdOrNull: UUID?): Response {
+        val customer = customer()
+        val accountId = accountIdOrNull ?: return badRequest("Missing required query parameter 'accountId'")
+        if (!mayReadAccount(accountId, customer.partyId, "ACCOUNT_READ_TRANSACTIONS")) {
+            return forbidden("Account does not belong to caller")
+        }
+        return upstream.get(
+            "$transactionServiceUrl/api/v1/transactions/category-overrides?accountId=$accountId",
+            customer.partyId.toString(),
+        )
+    }
+
+    /** The transaction service derives the counterparty key; callers supply only a category. */
+    @PUT
+    @Path("/transactions/{transactionId}/category")
+    @Authorize(action = "customer.transactions.categorise", resource = "#transactionId")
+    @Blocking
+    fun setTransactionCategory(
+        @PathParam("transactionId") transactionId: UUID,
+        @QueryParam("accountId") accountIdOrNull: UUID?,
+        body: String,
+    ): Response {
+        val customer = customer()
+        val accountId = accountIdOrNull ?: return badRequest("Missing required query parameter 'accountId'")
+        if (!ownsAccount(accountId, customer.partyId)) return forbidden("Account does not belong to caller")
+        val category = runCatching { objectMapper.readTree(body) }.getOrNull()
+            ?.takeIf { it.isObject && it.size() == 1 }
+            ?.path("category")?.takeIf { it.isTextual }?.asText()
+            ?: return badRequest("category is required")
+        val categoryId = category.uppercase(Locale.ROOT)
+        if (!SpendCategory.isKnown(categoryId)) return badRequest("Unknown category")
+        return upstream.put(
+            "$transactionServiceUrl/api/v1/transactions/$transactionId/category?accountId=$accountId",
+            customer.partyId.toString(),
+            objectMapper.createObjectNode().put("category", categoryId).toString(),
+        )
+    }
+
+    @DELETE
+    @Path("/transactions/{transactionId}/category")
+    @Authorize(action = "customer.transactions.categorise", resource = "#transactionId")
+    @Blocking
+    fun clearTransactionCategory(
+        @PathParam("transactionId") transactionId: UUID,
+        @QueryParam("accountId") accountIdOrNull: UUID?,
+    ): Response {
+        val customer = customer()
+        val accountId = accountIdOrNull ?: return badRequest("Missing required query parameter 'accountId'")
+        if (!ownsAccount(accountId, customer.partyId)) return forbidden("Account does not belong to caller")
+        return upstream.delete(
+            "$transactionServiceUrl/api/v1/transactions/$transactionId/category?accountId=$accountId",
+            customer.partyId.toString(),
+        )
     }
 
     /**

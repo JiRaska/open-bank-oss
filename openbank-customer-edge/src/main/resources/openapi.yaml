@@ -44,7 +44,8 @@ info:
   # 1.74.0 -> 1.75.0 (#10016): additive — GET /capabilities (ADR-0310 D5).
   # 1.75.0 -> 1.76.0 (#11966): additive — /holdings, the customer write side of the declared
   # holdings that GET /net-worth reads (ADR-0301 D1).
-  version: 1.77.0
+  # 1.77.0 -> 1.78.0 (#8573): customer transaction category overrides.
+  version: 1.78.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -1091,6 +1092,79 @@ paths:
                 $ref: '#/components/schemas/TransactionList'
         '403':
           description: Account does not belong to caller
+
+  /transactions/category-overrides:
+    get:
+      tags: [Transactions]
+      summary: List customer categories set for an account
+      operationId: listTransactionCategoryOverrides
+      security:
+        - customerOidc: [accounts:read]
+      parameters:
+        - {name: accountId, in: query, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Account-scoped category overrides
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: {$ref: '#/components/schemas/TransactionCategoryOverride'}
+        '400': {description: Missing accountId}
+        '403': {description: Caller cannot read the account}
+
+  /transactions/{transactionId}/category:
+    put:
+      tags: [Transactions]
+      summary: Set the category for this transaction's counterparty on the selected account
+      operationId: setTransactionCategory
+      description: >-
+        The caller supplies a transaction and owned account, never a counterparty key.
+        Transaction-service derives the key from the stored transaction and applies the
+        category to that counterparty on this account, including future transactions.
+        Category IDs are case-insensitive on input and returned in uppercase.
+      security:
+        - customerOidc: [accounts:read]
+      parameters:
+        - {name: transactionId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: accountId, in: query, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [category]
+              properties:
+                category: {$ref: '#/components/schemas/SpendCategory'}
+      responses:
+        '200':
+          description: The resolved counterparty category
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TransactionCategoryOverride'}
+        '400': {description: Missing accountId, invalid category, or account unrelated to transaction}
+        '403': {description: Caller does not own the account}
+        '404': {description: Transaction not found}
+        '422': {description: Transaction has no identifiable counterparty}
+    delete:
+      tags: [Transactions]
+      summary: Clear the customer category for this transaction's counterparty
+      operationId: clearTransactionCategory
+      security:
+        - customerOidc: [accounts:read]
+      parameters:
+        - {name: transactionId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: accountId, in: query, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '204': {description: Override removed or already absent}
+        '400': {description: Missing accountId or account unrelated to transaction}
+        '403': {description: Caller does not own the account}
+        '404': {description: Transaction not found}
 
   /merchants/{descriptorKey}/logo:
     get:
@@ -6480,6 +6554,15 @@ components:
           type: string
           nullable: true
           description: MCC-derived merchant category for card spend (ADR-0103).
+        category:
+          type: string
+          nullable: true
+          description: Resolved display category, with customer override taking precedence.
+        categorySource:
+          type: string
+          nullable: true
+          enum: [CUSTOMER, MCC, CATALOGUE]
+          description: Source of the resolved display category.
         merchant:
           type: object
           nullable: true
@@ -6529,6 +6612,17 @@ components:
               type: string
               enum: [ENRICHED]
           required: [cleanName, source]
+
+    SpendCategory:
+      type: string
+      enum: [GAMBLING, GROCERIES, DINING, TRANSPORT, TRAVEL, SHOPPING, ENTERTAINMENT, HEALTH, SERVICES, CASH, OTHER]
+
+    TransactionCategoryOverride:
+      type: object
+      required: [counterpartyKey, category]
+      properties:
+        counterpartyKey: {type: string, description: Server-derived normalized counterparty key.}
+        category: {$ref: '#/components/schemas/SpendCategory'}
 
     # Mirrors openbank-transaction-service TransactionPage (GET /api/v1/transactions is
     # cursor-paginated, not a bare array).
