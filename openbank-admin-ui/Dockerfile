@@ -1,8 +1,8 @@
 # Multi-stage build for openbank-admin-ui.
 #
 # Build context: project root (..). The whole repo is visible to BuildKit
-# but a tight .dockerignore (see openbank-admin-ui/.dockerignore-context)
-# limits what enters the image. NO host paths are mounted at runtime —
+# and the root .dockerignore filters Docker's context. The producer freezes
+# tracked and allowlisted generated inputs before buildx receives them. NO host paths are mounted at runtime —
 # everything the FE serves at runtime is baked in as an immutable layer.
 #
 # What gets baked:
