@@ -350,7 +350,9 @@ spec:
                 # ~1.4Gi of real usage to the scheduler — the single biggest
                 # request-vs-RSS gap in the cluster and a direct contributor to
                 # node memory exhaustion. Reserve what it actually uses.
-                memory: 2560Mi
+                # 2560Mi -> 4Gi (2026-10-08): see the limit below; the request
+                # now covers the measured steady state instead of sitting under it.
+                memory: 4Gi
               limits:
                 cpu: "1"
                 # 1536Mi → 3Gi: the server was OOMKilled (exit 137) during startup TSDB
@@ -358,7 +360,23 @@ spec:
                 # money-path canary AnalysisRuns (error-rate query → connection refused),
                 # which aborted every Rollout. 3Gi clears the replay peak with headroom;
                 # nodes have the capacity at 12h retention.
-                memory: 3Gi
+                #
+                # 3Gi -> 5Gi (2026-10-08). 3Gi was sized at 12h retention; the 30d
+                # store above (since 2026-09-30) made it wrong without changing a
+                # single series. Measured live: head series 0.8-1.35M (stable over
+                # 14d -- no cardinality jump), working set pinned at 2.87-3.05 GiB
+                # every 6h window since 10-01, i.e. at the operator-derived
+                # GOMEMLIMIT (90% of the limit, 2.70 GiB), so the GC ran flat out
+                # and every 2h head compaction pushed it over: 12 OOMKills since
+                # 10-04, the one on 10-08 during a head-block write. Each restart
+                # costs ~2-3 min of WAL replay, during which canary AnalysisRuns
+                # get connection refused and abort the Rollout. 1.35M peak series
+                # x ~3 KiB (head + postings + compaction buffers) is ~4 GiB, so
+                # 4Gi request / 5Gi limit leaves ~1 GiB above the observed peak
+                # for compaction of the larger 30d blocks. Does not fit beside the
+                # current neighbours on an 8 GiB observability node; Karpenter
+                # provisions in the PVC's zone (pool allows m/r, >7.5 GiB).
+                memory: 5Gi
             storageSpec:
               volumeClaimTemplate:
                 spec:
@@ -656,6 +674,18 @@ spec:
         # permanent false-positive criticals. Disabling each component drops both
         # its ServiceMonitor and the matching default alert rules (ADR-0088 D1 —
         # found while wiring ntfy last-mile, 2026-06-13).
+        # kubelet /metrics/probes: prober_probe_duration_seconds_bucket is the
+        # second-largest metric in the head (16.1k series from the kubelet job,
+        # 18.9k total; measured 2026-10-08) -- a per-pod, per-probe histogram no
+        # rule, alert or dashboard in this repo reads. prober_probe_total (the
+        # probe result counter) is kept. The chart default for this list is []
+        # (kps 91.9.0), so setting it removes nothing the chart ships.
+        kubelet:
+          serviceMonitor:
+            probesMetricRelabelings:
+              - sourceLabels: [__name__]
+                regex: prober_probe_duration_seconds_(bucket|sum|count)
+                action: drop
         kubeControllerManager:
           enabled: false
         kubeScheduler:
