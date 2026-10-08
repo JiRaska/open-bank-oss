@@ -15,6 +15,11 @@ The edges are DERIVED from the test sources, never hand-listed:
              path. The reader must build when the target changes.
   --expand "<modules>"  print the modules to ADD to that build set (one per line), with a
              `Decision:` line per addition on stderr. Used by services-ci.yml.
+  --input-paths-stdin  with --expand, read the filtered changed paths from stdin. A
+             library's own src/test is removed by filter-lib-test-only-paths.py:
+             with no remaining Gradle-module input, its test cannot change a
+             sibling's source tree. Omit this flag to preserve conservative
+             expansion for other callers.
   --self-test  known-positive + known-negative fixtures.
 
 An empty fleet-scanner set on the real repo exits 1: today libs-runtime is one, so
@@ -56,6 +61,11 @@ def scan(root: Path) -> tuple[set[str], set[tuple[str, str]]]:
     return fleet, edges
 
 
+def has_module_input(root: Path, paths: list[str]) -> bool:
+    """Whether a filtered path belongs to a real Gradle module, not docs or GitOps."""
+    return any("/" in path and is_module(root, path.split("/", 1)[0]) for path in paths)
+
+
 def self_test() -> int:
     with tempfile.TemporaryDirectory() as d:
         r = Path(d)
@@ -83,6 +93,16 @@ def self_test() -> int:
         if edges != {("openbank-pinner", "openbank-target")}:
             print(f"FAIL: edges {sorted(edges)} != [('openbank-pinner', 'openbank-target')]")
             ok = False
+        cases = [
+            ([], False),
+            (["docs/runbook.md", "openbank-infra/gitops/x.yaml"], False),
+            (["openbank-target/src/main/kotlin/X.kt"], True),
+            (["openbank-target/src/test/kotlin/XTest.kt"], True),
+        ]
+        for paths, want in cases:
+            if has_module_input(r, paths) != want:
+                print(f"FAIL: module input for {paths} != {want}")
+                ok = False
     print("self-test:", "PASS" if ok else "FAIL")
     return 0 if ok else 1
 
@@ -96,6 +116,12 @@ def main(argv: list[str]) -> int:
         if not fleet:
             print("ERROR: empty fleet-scanner set; the probe is broken.", file=sys.stderr)
             return 1
+        if "--input-paths-stdin" in argv:
+            paths = [line.strip() for line in sys.stdin if line.strip()]
+            if not has_module_input(root, paths):
+                print("Decision: no changed Gradle-module input after test-only filtering; "
+                      "skip cross-module test readers.", file=sys.stderr)
+                return 0
         changed = set(argv[argv.index("--expand") + 1].split())
         added: list[str] = []
         for m in sorted(fleet):
