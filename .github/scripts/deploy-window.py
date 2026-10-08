@@ -172,7 +172,9 @@ def image_source_is_current(root: str, image: str, tag: str) -> bool:
     if ancestor.returncode != 0:
         return False
     if service == "openbank-admin-ui":
-        return admin_ui_image_inputs_unchanged(root, source_sha)
+        if not admin_ui_image_inputs_unchanged(root, source_sha):
+            return False
+        return verify_signed_admin_ui_build(root, image, tag)
     if not global_build_inputs_unchanged(root, source.stdout.strip()):
         return False
     equivalent = subprocess.run(
@@ -181,6 +183,18 @@ def image_source_is_current(root: str, image: str, tag: str) -> bool:
         cwd=root, capture_output=True, text=True, check=False,
     )
     return equivalent.returncode == 0
+
+
+def verify_signed_admin_ui_build(root: str, image: str, tag: str) -> bool:
+    signed = subprocess.run(
+        [sys.executable, os.path.join(os.path.dirname(__file__), "verify-admin-ui-build-inputs.py"),
+         "--root", root, "--repo", os.environ.get("GITHUB_REPOSITORY", ""),
+         "--image", image, "--tag", tag],
+        cwd=root, capture_output=True, text=True, check=False,
+    )
+    if signed.returncode != 0:
+        print(signed.stderr or signed.stdout, file=sys.stderr)
+    return signed.returncode == 0
 
 
 def admin_ui_image_inputs_unchanged(root: str, source: str, head: str = "HEAD") -> bool:
@@ -330,6 +344,10 @@ def self_test() -> int:
           flush(prs + [{"number": 13, "head": "chore/admin-ui-deploy-c", "created_at": "z", "armed": True}], T, None, W) is None)
     # Exercise the same CLI and event file that the serialized workflow uses. An unrelated
     # older PR must not steal a manual run's exemption, and routine events keep the window.
+    # The semantic fixture has no registry or GitHub attestation. The signed
+    # digest path is exercised independently by verify-admin-ui-build-inputs tests.
+    original_signed_verifier = verify_signed_admin_ui_build
+    globals()["verify_signed_admin_ui_build"] = lambda _root, _image, _tag: True
     with tempfile.TemporaryDirectory() as d:
         sha = "a" * 40
         manual_pr = {"number": 21, "head": DEPLOY_PREFIXES[0] + sha,
@@ -506,6 +524,7 @@ def self_test() -> int:
         check("own pin displayed by lifecycle registry is stale",
               not image_source_is_current(d, image, tag))
 
+    globals()["verify_signed_admin_ui_build"] = original_signed_verifier
     if fails:
         print(f"self-test: FAILED ({len(fails)})")
         return 1
