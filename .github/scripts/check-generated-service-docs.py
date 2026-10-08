@@ -31,6 +31,13 @@ def check(root: Path, commit: str) -> int:
             raise ValueError(f"{module.name}: generated page has wrong module, release version, or source commit")
         if properties.read_text() != f"git.commit={commit}\n":
             raise ValueError(f"{module.name}: generated properties have wrong source commit")
+        generated_files = [path for path in generated.rglob("*") if path.is_file()]
+        if not generated_files:
+            raise ValueError(f"{module.name}: no generated resources")
+        for source in generated_files:
+            copied = module / "build/resources/main" / source.relative_to(generated)
+            if not copied.is_file() or copied.read_bytes() != source.read_bytes():
+                raise ValueError(f"{module.name}: {source.relative_to(generated)} was not copied unchanged into resources")
     return len(modules)
 
 
@@ -50,6 +57,11 @@ def self_test() -> None:
         facts.write_text(f"`openbank-test-service` `1.2.3` `{commit}`\n")
         properties = facts.parent.parent / "openbank-service-build.properties"
         properties.write_text(f"git.commit={commit}\n")
+        copied_facts = module / "build/resources/main/docs/00-build.md"
+        copied_facts.parent.mkdir(parents=True)
+        copied_facts.write_bytes(facts.read_bytes())
+        copied_properties = module / "build/resources/main/openbank-service-build.properties"
+        copied_properties.write_bytes(properties.read_bytes())
         inline = root / "openbank-inline-service"
         inline.mkdir()
         (inline / "build.gradle.kts").write_text('plugins { id("openbank.quarkus-service") }\n')
@@ -57,8 +69,21 @@ def self_test() -> None:
         inline_facts = inline / "build/generated/service-docs/docs/00-build.md"
         inline_facts.parent.mkdir(parents=True)
         inline_facts.write_text(f"`openbank-inline-service` `1.2.3` `{commit}`\n")
-        (inline_facts.parent.parent / "openbank-service-build.properties").write_text(f"git.commit={commit}\n")
+        inline_properties = inline_facts.parent.parent / "openbank-service-build.properties"
+        inline_properties.write_text(f"git.commit={commit}\n")
+        inline_copied_facts = inline / "build/resources/main/docs/00-build.md"
+        inline_copied_facts.parent.mkdir(parents=True)
+        inline_copied_facts.write_bytes(inline_facts.read_bytes())
+        (inline / "build/resources/main/openbank-service-build.properties").write_bytes(inline_properties.read_bytes())
         assert check(root, commit) == 2
+        copied_facts.write_text("stale copy\n")
+        try:
+            check(root, commit)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("stale copied resources were accepted")
+        copied_facts.write_bytes(facts.read_bytes())
         properties.write_text("git.commit=" + "b" * 40 + "\n")
         try:
             check(root, commit)

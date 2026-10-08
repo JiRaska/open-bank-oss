@@ -559,8 +559,8 @@ jobs:
             --modules "${{ matrix.module }}" --enforce
 
   # A change isolated to the service documentation convention plugin does not
-  # change Kotlin or test inputs. Generate every service-plugin module's page
-  # in one job; the scoped build matrix also packages one Quarkus canary JAR.
+  # change Kotlin or test inputs. Generate and copy every service-plugin module's
+  # page in one job; the scoped build matrix also packages one Quarkus canary JAR.
   # Any other shared build input retains the full-fleet matrix above.
   docs-sweep:
     name: Verify fleet generated docs
@@ -581,10 +581,10 @@ jobs:
         with:
           cache-read-only: true
           gradle-home-cache-strict-match: false
-      - name: Generate and verify all committed service pages
+      - name: Generate, copy and verify all committed service pages
         run: |
           python3 .github/scripts/check-generated-service-docs.py --self-test
-          ./gradlew generateServiceDocs --console=plain
+          ./gradlew processResources --console=plain
           python3 .github/scripts/check-generated-service-docs.py --commit "$GITHUB_SHA"
 
   # SCOPE: this job is about SERVICE BUILDS ONLY — despite the name (#3955).
