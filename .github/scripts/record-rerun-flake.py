@@ -77,17 +77,41 @@ def has_spot_kill_signature(job: dict) -> bool:
     return cancelled > 0 and failed == 0
 
 
-def find_flake_candidates(prev_jobs: list[dict]) -> list[dict]:
+ADMISSION_REFUSAL = re.compile(
+    r"Agent PRs: (\d+)/(\d+); finish existing work before opening another PR"
+)
+ALL_GREEN_REFUSAL = "Agent PR admission refused or failed; service builds did not run."
+
+
+def is_policy_admission_refusal(prev_jobs: list[dict], changes_log: str, all_green_log: str) -> bool:
+    """Require both job results and both log signals before excluding the aggregate gate."""
+    changes = [j for j in prev_jobs if j.get("name") == "Detect changed services"]
+    aggregate = [j for j in prev_jobs if j.get("name") == "all-green"]
+    if len(changes) != 1 or len(aggregate) != 1:
+        return False
+    if changes[0].get("conclusion") != "success" or aggregate[0].get("conclusion") != "failure":
+        return False
+    if not any(s.get("name") == "Verify no service failed" and s.get("conclusion") == "failure"
+               for s in aggregate[0].get("steps") or []):
+        return False
+    if ALL_GREEN_REFUSAL not in all_green_log:
+        return False
+    return any(int(count) > int(limit) for count, limit in ADMISSION_REFUSAL.findall(changes_log))
+
+
+def find_flake_candidates(prev_jobs: list[dict], changes_log: str = "", all_green_log: str = "") -> list[dict]:
     """Jobs from the PRIOR attempt that failed for a real reason (not a spot kill).
 
     Called once the run's FINAL attempt has concluded `success` -- by construction, every job
     returned here went from a genuine failure to a green run. That transition is the flake
     signal; this function only identifies which prior-attempt jobs qualify.
     """
+    admission_refusal = is_policy_admission_refusal(prev_jobs, changes_log, all_green_log)
     return [
         j
         for j in prev_jobs
         if (j.get("conclusion") or "").lower() == "failure" and not has_spot_kill_signature(j)
+        and not (admission_refusal and j.get("name") == "all-green")
     ]
 
 
@@ -238,6 +262,8 @@ def main(argv: list[str]) -> int:
 
     p_classify = sub.add_parser("classify")
     p_classify.add_argument("--jobs-file", required=True, type=Path)
+    p_classify.add_argument("--changes-log", type=Path)
+    p_classify.add_argument("--all-green-log", type=Path)
 
     p_junit = sub.add_parser("parse-junit")
     p_junit.add_argument("--path", required=True, type=Path)
@@ -261,7 +287,9 @@ def main(argv: list[str]) -> int:
 
     if args.cmd == "classify":
         jobs = json.loads(args.jobs_file.read_text(encoding="utf-8"))
-        print(json.dumps(find_flake_candidates(jobs), indent=2))
+        changes_log = args.changes_log.read_text(errors="replace") if args.changes_log and args.changes_log.exists() else ""
+        all_green_log = args.all_green_log.read_text(errors="replace") if args.all_green_log and args.all_green_log.exists() else ""
+        print(json.dumps(find_flake_candidates(jobs, changes_log, all_green_log), indent=2))
         return 0
 
     if args.cmd == "parse-junit":
@@ -337,6 +365,24 @@ def self_test() -> int:
         "the green job",
         names == {genuine["name"], mixed_but_still_genuine["name"]},
     )
+
+    changes = _job("Detect changed services", "success", [("admit", "success")])
+    all_green = _job("all-green", "failure", [("Verify no service failed", "failure")])
+    refusal = "Agent PRs: 4/3; finish existing work before opening another PR"
+    gate_log = ALL_GREEN_REFUSAL
+    check("4/3 admission refusal is not a flake when both logs prove it",
+          find_flake_candidates([changes, all_green], refusal, gate_log) == [])
+    check("missing either admission log retains the aggregate failure",
+          find_flake_candidates([changes, all_green], "", gate_log) == [all_green]
+          and find_flake_candidates([changes, all_green], refusal, "") == [all_green])
+    check("3/3 capacity available is not a refusal",
+          find_flake_candidates([changes, all_green],
+                                "Agent PRs: 3/3; capacity available", gate_log) == [all_green])
+    check("a recovered build remains a flake even when admission was refused",
+          find_flake_candidates([changes, all_green, genuine], refusal, gate_log) == [genuine])
+    check("an aggregate failure without admission refusal remains a flake",
+          find_flake_candidates([changes, all_green], refusal,
+                                "One or more service builds failed.") == [all_green])
 
     print("extract_service")
     check(

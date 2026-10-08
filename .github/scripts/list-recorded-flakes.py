@@ -33,6 +33,18 @@ from pathlib import Path
 # importlib.util.spec_from_file_location workaround for one function.
 RECORD_MARKER = "<!-- flake-record:"
 
+# #12296: Services CI run 37614600361 attempt 1 refused autonomous PR admission
+# at 4/3; attempt 2 passed at 3/3. Preserve the original #5285 comment as evidence,
+# but do not count its all-green aggregate row as a test/job flake.
+HISTORICAL_ADMISSION_REFUSAL = (37614600361, 1, 2, "all-green")
+
+
+def is_historical_admission_refusal(record: dict) -> bool:
+    return (
+        record.get("run_id"), record.get("prev_attempt"),
+        record.get("final_attempt"), record.get("job")
+    ) == HISTORICAL_ADMISSION_REFUSAL
+
 
 def extract_records_from_comments(bodies: list[str]) -> list[dict]:
     """The read-side of `record_rerun_flake.render_comment` -- pulls the JSON payload back out."""
@@ -109,7 +121,7 @@ def main(argv: list[str]) -> int:
         parser.error("one of --issue or --comments-file is required (or --self-test)")
         return 2
 
-    records = extract_records_from_comments(bodies)
+    records = [r for r in extract_records_from_comments(bodies) if not is_historical_admission_refusal(r)]
     if args.json:
         print(json.dumps(records, indent=2))
     else:
@@ -165,6 +177,10 @@ def self_test() -> int:
     check("summary lists both services", "openbank-transaction-service" in summary and "openbank-standing-order-service" in summary)
 
     check("summarize on an empty list says so rather than crashing", summarize([]) == "No flakes recorded yet.")
+    check("proven historical admission refusal is excluded by exact identity",
+          is_historical_admission_refusal({"run_id": 37614600361, "prev_attempt": 1,
+                                           "final_attempt": 2, "job": "all-green"})
+          and not is_historical_admission_refusal(r1))
 
     print()
     if failures:
