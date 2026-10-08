@@ -15,7 +15,7 @@ import jakarta.ws.rs.ext.Provider
 
 /**
  * Renders the kernel's typed money failure (ADR-0326) through [DomainExceptionMapper], so it carries
- * its own code — `AMOUNT_SCALE_EXCEEDED`, `CURRENCY_UNSUPPORTED` or `VALIDATION_ERROR` — instead of the
+ * its own code — `AMOUNT_SCALE_EXCEEDED`, `CURRENCY_UNSUPPORTED`, `AMOUNT_NOT_POSITIVE` or `VALIDATION_ERROR` — instead of the
  * generic one [IllegalArgumentExceptionMapper] would give it.
  *
  * Status is unchanged (400, the VALIDATION category, exactly what the generic mapper answered) and the

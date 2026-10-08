@@ -10,3 +10,4 @@ resources:
   - httproute-redirect.yaml
   - podmonitors.yaml
   - network-policies.yaml
+  - api-edge-tls.yaml

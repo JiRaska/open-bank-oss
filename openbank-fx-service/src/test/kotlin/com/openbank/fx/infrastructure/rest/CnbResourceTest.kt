@@ -32,7 +32,7 @@ class CnbResourceTest {
     @BeforeEach
     fun setUp() {
         ingestion = mockk()
-        resource = CnbResource(ingestion)
+        resource = CnbResource(ingestion, mockk(), java.time.Clock.systemUTC())
     }
 
     private fun rate(base: String = "EUR") = FxRate(

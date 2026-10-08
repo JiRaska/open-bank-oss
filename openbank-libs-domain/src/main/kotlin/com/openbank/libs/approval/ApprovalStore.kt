@@ -23,6 +23,9 @@ import java.time.OffsetDateTime
  */
 enum class ApprovalStatus { PENDING, APPROVED, REJECTED, EXECUTED }
 
+/** Provenance captured at creation, not inferred later from the displayed maker id. */
+enum class MakerActorKind { HUMAN, AI_AGENT, SERVICE_ACCOUNT, CUSTOMER_PARTY, UNKNOWN }
+
 data class PendingApproval(
     val id: String,
     val action: String,
@@ -36,6 +39,7 @@ data class PendingApproval(
     val requestFingerprint: String? = null,
     /** Bounded, human-readable description of the paused request for the checker; `null` when unbound. */
     val summary: String? = null,
+    val makerActorKind: MakerActorKind = MakerActorKind.UNKNOWN,
 )
 
 /**
@@ -91,6 +95,7 @@ interface ApprovalStore {
         makerId: String,
         ttlSeconds: Long = 86400,
         binding: ApprovalRequestBinding? = null,
+        makerActorKind: MakerActorKind = MakerActorKind.UNKNOWN,
     ): PendingApproval
 
     suspend fun find(id: String): PendingApproval?
