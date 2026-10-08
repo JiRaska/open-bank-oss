@@ -87,7 +87,7 @@ export function LifecycleStrip({ data, name, t, dateLocale = 'en-GB' }: { data: 
             name: 'draft_ticket',
             arguments: {
               title: `Upgrade ${name} ${running ?? '?'}${target ? ` → ${target}` : ''}`,
-              rationale: `${name} ${declaredOnly ? 'has GitOps image version' : 'reports version'} ${running ?? 'unknown'}.${eolBit}${cveBit}`.trim(),
+              rationale: `${name} ${chartOnly ? 'has a declared GitOps chart version' : declaredOnly ? 'has a declared GitOps image version' : 'reports version'} ${running ?? 'unknown'}.${eolBit}${cveBit}`.trim(),
               suggested_action: target
                 ? `Plan and roll out the upgrade to ${target}. Review release notes, test in staging, then schedule a maintenance window.`
                 : `Review the current version against its support lifecycle and plan remediation.`,
