@@ -3073,6 +3073,7 @@ class CustomerEdgeResource(
             customer.partyId.toString(),
             enriched,
             idempotencyKey,
+            mapOf("X-Customer-Actor-Id" to customer.human.toString()),
         )
         auditPayment(resp, customer, "payments.sepa", amount, currency, creditorIban, scaChallengeId)
         return resp
@@ -3089,8 +3090,7 @@ class CustomerEdgeResource(
             ?: return badRequest("Malformed receipt request")
         val key = request.path("idempotencyKey").takeIf { it.isTextual }?.asText()?.takeIf { it.isNotBlank() }
             ?: return badRequest("idempotencyKey is required")
-        val payment = request.path("payment") as? ObjectNode ?: return badRequest("payment is required")
-        val debtor = parseDebtorAccountId(objectMapper, payment.toString())
+        val debtor = parseDebtorAccountId(objectMapper, request.toString())
             ?.let { runCatching { UUID.fromString(it) }.getOrNull() }
             ?: return badRequest("debtorAccountId is required")
         val accountJson = fetchAccount(debtor, customer.partyId)
@@ -3098,20 +3098,16 @@ class CustomerEdgeResource(
         if (extractOwnerPartyId(accountJson) != customer.partyId.toString()) {
             return forbidden("Debtor account does not belong to caller")
         }
-        val debtorIban = extractTextField(objectMapper, accountJson, "accountNumber")
-            ?: return badRequest("Cannot resolve debtor IBAN")
-        val debtorName = fetchPartyLegalName(customer.partyId)
-            ?: return badRequest("Cannot resolve debtor name")
-        val enriched = buildSepaRequest(objectMapper, payment.toString(), debtor.toString(), debtorIban, debtorName)
-            ?: return badRequest("Malformed or incomplete payment body")
         val upstreamBody = objectMapper.createObjectNode().apply {
             put("idempotencyKey", key)
-            set<JsonNode>("payment", objectMapper.readTree(enriched))
+            put("debtorAccountId", debtor.toString())
         }
         return upstream.post(
             "$sepaPaymentServiceUrl/api/v1/sepa-payments/receipts/lookup",
             customer.partyId.toString(),
             upstreamBody.toString(),
+            null,
+            mapOf("X-Customer-Actor-Id" to customer.human.toString()),
         )
     }
 

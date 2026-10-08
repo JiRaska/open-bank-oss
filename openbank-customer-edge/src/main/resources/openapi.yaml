@@ -2351,8 +2351,8 @@ paths:
       tags: [Payments]
       summary: Resolve an authenticated customer's SEPA payment receipt
       description: >-
-        The edge verifies debtor account ownership, reconstructs the original rail request,
-        and asks the SEPA service for a durable receipt. UNKNOWN means the receipt could not
+        The edge verifies debtor account ownership, passes the authenticated human and effective
+        party to the SEPA service, and asks for a durable receipt. UNKNOWN means the receipt could not
         be verified; it does not establish that the payment failed.
       operationId: lookupSepaPaymentReceipt
       security:
@@ -2368,20 +2368,10 @@ paths:
           application/json:
             schema:
               type: object
-              required: [idempotencyKey, payment]
+              required: [idempotencyKey, debtorAccountId]
               properties:
                 idempotencyKey: {type: string}
-                payment:
-                  type: object
-                  required: [debtorAccountId, amount, creditorIban, creditorName]
-                  properties:
-                    debtorAccountId: {type: string, format: uuid}
-                    amount: {type: string, example: '120.00'}
-                    currency: {type: string, default: EUR}
-                    creditorIban: {type: string}
-                    creditorName: {type: string}
-                    creditorBic: {type: string, nullable: true}
-                    reference: {type: string, nullable: true}
+                debtorAccountId: {type: string, format: uuid}
       responses:
         '200':
           description: Verified receipt or UNKNOWN

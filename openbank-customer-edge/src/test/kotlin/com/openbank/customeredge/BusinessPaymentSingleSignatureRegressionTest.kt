@@ -37,7 +37,14 @@ class BusinessPaymentSingleSignatureRegressionTest {
     private val sca = UUID.randomUUID()
     private val base = "http://127.0.0.1:1"
 
-    private data class Call(val verb: String, val url: String, val party: String, val body: String?, val key: String?)
+    private data class Call(
+        val verb: String,
+        val url: String,
+        val party: String,
+        val body: String?,
+        val key: String?,
+        val headers: Map<String, String> = emptyMap(),
+    )
 
     private fun upstream(calls: MutableList<Call>): UpstreamClient = mockk<UpstreamClient>(relaxed = true).also { u ->
         every { u.get(any(), any()) } answers {
@@ -61,6 +68,11 @@ class BusinessPaymentSingleSignatureRegressionTest {
                 url.endsWith("/consume") -> Response.ok("""{"status":"COMPLETED"}""").build()
                 else -> Response.status(201).entity("""{"id":"pay-1","status":"RECEIVED"}""").build()
             }
+        }
+        every { u.post(any(), any(), any(), any(), any()) } answers {
+            val url = firstArg<String>()
+            calls += Call("POST", url, secondArg(), thirdArg(), arg(3), arg(4))
+            Response.status(201).entity("""{"id":"pay-1","status":"RECEIVED"}""").build()
         }
     }
 
@@ -129,6 +141,8 @@ class BusinessPaymentSingleSignatureRegressionTest {
             "$base/api/v1/sepa-instant",
             "$base/api/v1/swift",
         )
+        assertThat(before.single { it.url.endsWith("/api/v1/sepa-payments") }.headers)
+            .containsEntry("X-Customer-Actor-Id", human.toString())
     }
 
     @Test
