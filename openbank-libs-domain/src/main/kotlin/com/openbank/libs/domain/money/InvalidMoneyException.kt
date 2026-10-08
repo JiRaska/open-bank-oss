@@ -21,6 +21,9 @@ enum class InvalidMoneyReason(val errorCode: ErrorCode) {
 
     /** Outside the kernel's magnitude bound ([Money.MAX_INTEGER_DIGITS] / [Money.MAX_INPUT_SCALE]). */
     AMOUNT_OUT_OF_RANGE(PlatformErrorCode.VALIDATION_ERROR),
+
+    /** Zero or negative where a strictly positive amount is required (`Money.parseInbound(requirePositive = true)`). */
+    NOT_POSITIVE(PlatformErrorCode.AMOUNT_NOT_POSITIVE),
 }
 
 /**

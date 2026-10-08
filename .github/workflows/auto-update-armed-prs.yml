@@ -1,7 +1,7 @@
 # Keep ARMED PRs up to date with `main` (strict required-status-checks policy).
 #
-# `main-protection` requires a PR to be up to date with `main` before it merges, and auto-merge
-# never updates a branch. So a PR with auto-merge armed and every required check green goes
+# When `main-protection` requires up-to-date checks, auto-merge never updates a branch. A PR
+# with auto-merge armed and every required check green then goes
 # `behind` the moment anything else lands, and waits for a human to press "Update branch".
 # This does that for armed PRs only; the decision logic and its self-test live in
 # .github/scripts/auto-update-armed-prs.py, and gate `auto-update-armed-prs-declaration` holds
@@ -59,4 +59,4 @@ jobs:
           # shellcheck disable=SC2086  # DRY_RUN is empty or a single flag
           python3 .github/scripts/auto-update-armed-prs.py \
             --repo "${GITHUB_REPOSITORY}" --branch main \
-            --max-updates 5 --debounce-minutes 20 ${DRY_RUN}
+            --max-updates 5 --max-updates-per-pr 2 --debounce-minutes 20 ${DRY_RUN}

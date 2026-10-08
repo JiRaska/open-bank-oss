@@ -9,6 +9,14 @@
 # skips, so the routes are reachable only on this Gateway's own NLB address (curl
 # --resolve) until a cutover PR removes that annotation. See httproute-redirect.yaml.
 #
+# PHASE 2 — the ADR-0234 gated tools (/tools/grafana, /tools/alertmanager, /tools/pyrra on
+# admin.open-bank.tech) on listener https-admin, held out of DNS the same way
+# (observability/httproute-tools-gate.yaml). Their DNS cannot move on its own: the tools share
+# the host with the console, so admin.open-bank.tech moves in Phase 3 with the admin-ui route.
+#
+# PHASE 3 — kc.open-bank.tech (keycloak/httproute.yaml, both nginx Ingresses in one route, the
+# operator-only paths a direct 403) on listener https-keycloak, held out of DNS the same way.
+#
 # ATTACHMENT. Each HTTPS listener names ONE hostname and admits routes from ONE namespace,
 # selected by `kubernetes.io/metadata.name` — a label the API server sets and nobody can
 # put on another namespace. So a route for pact.open-bank.tech can only come from
@@ -156,6 +164,26 @@ spec:
           selector:
             matchLabels:
               kubernetes.io/metadata.name: pact-broker
+    # pricing.open-bank.tech (ADR-0324 Phase 4, pricing/httproute.yaml). Its own Certificate
+    # `pricing-edge-tls` (no key pinning on this host), admitted by the ReferenceGrant in
+    # pricing/httproute.yaml, which landed in an EARLIER change on purpose (the Phase-1
+    # RefNotPermitted lesson).
+    - name: https-pricing
+      protocol: HTTPS
+      port: 443
+      hostname: pricing.open-bank.tech
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: pricing-edge-tls
+            namespace: pricing
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              kubernetes.io/metadata.name: pricing
     - name: https-langfuse
       protocol: HTTPS
       port: 443
@@ -172,6 +200,27 @@ spec:
           selector:
             matchLabels:
               kubernetes.io/metadata.name: ai-platform
+    # copilot.open-bank.tech (ADR-0324 Phase 4, copilot/httproute.yaml). Its own Certificate
+    # `copilot-edge-tls` (the host is not pinned), admitted by the ReferenceGrant
+    # copilot-edge-gateway-tls, which landed in an EARLIER change on purpose (the Phase-1
+    # RefNotPermitted lesson). `platform` also hosts agent, ap2 and mcp; the hostname pins this
+    # listener to the copilot route's host, and no other host is served from it.
+    - name: https-copilot
+      protocol: HTTPS
+      port: 443
+      hostname: copilot.open-bank.tech
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: copilot-edge-tls
+            namespace: platform
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              kubernetes.io/metadata.name: platform
     - name: https-rum
       protocol: HTTPS
       port: 443
@@ -188,3 +237,139 @@ spec:
           selector:
             matchLabels:
               kubernetes.io/metadata.name: observability
+    # customer.open-bank.tech (ADR-0324 Phase 4, customer-edge/httproute.yaml). Serves the SAME
+    # Secret the nginx Ingress does, `customer-edge-tls`: the mobile app pins this host's SPKI
+    # (ADR-0066 S3, rotation Never), so a new certificate would break every installed app.
+    # Admitted by the ReferenceGrant in customer-edge/httproute.yaml, which landed in an EARLIER
+    # change on purpose (the Phase-1 RefNotPermitted lesson).
+    - name: https-customer-edge
+      protocol: HTTPS
+      port: 443
+      hostname: customer.open-bank.tech
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: customer-edge-tls
+            namespace: customer-edge
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              kubernetes.io/metadata.name: customer-edge
+    # admin.open-bank.tech (ADR-0324 Phase 2). TWO namespaces, because the host is shared: the
+    # ADR-0234 tool routes (/tools/*) live in `observability` next to the tools they front, and
+    # Phase 3 attaches the console itself from `admin-ui`. Every HTTPRoute in `observability`
+    # must carry an extAuth SecurityPolicy or an ungated-machine-callers declaration (Kyverno
+    # require-gated-or-declared-tool-httproute-cel), so this listener admits no ungated route
+    # from it. Certificate + ReferenceGrant: components/admin-ui/edge-gateway-grants.yaml,
+    # landed in an EARLIER change on purpose (the Phase-1 RefNotPermitted lesson in
+    # httproute-redirect.yaml / pact-broker/httproute.yaml).
+    - name: https-admin
+      protocol: HTTPS
+      port: 443
+      hostname: admin.open-bank.tech
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: admin-edge-tls
+            namespace: admin-ui
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchExpressions:
+              - key: kubernetes.io/metadata.name
+                operator: In
+                values: [admin-ui, observability]
+    # glitchtip.open-bank.tech (ADR-0324 Phase 4, observability/httproute-glitchtip.yaml). Its
+    # own Certificate `glitchtip-edge-tls` (not pinned), admitted by the ReferenceGrant
+    # glitchtip-edge-gateway-tls, which landed in an EARLIER change on purpose. Admits
+    # `observability`, where Kyverno requires every HTTPRoute to be extAuth-gated or to declare
+    # its ungated machine callers, as the glitchtip route does.
+    - name: https-glitchtip
+      protocol: HTTPS
+      port: 443
+      hostname: glitchtip.open-bank.tech
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: glitchtip-edge-tls
+            namespace: observability
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+    # kc.open-bank.tech (ADR-0324 Phase 3). Serves the SAME Secret the nginx Ingress does,
+    # `keycloak-tls`: the mobile app pins this host's SPKI (ADR-0066 S3, rotation Never), so a
+    # new certificate would break every installed app. Admitted by the ReferenceGrant in
+    # keycloak/httproute.yaml, which landed in an EARLIER change on purpose (the Phase-1
+    # RefNotPermitted lesson).
+    - name: https-keycloak
+      protocol: HTTPS
+      port: 443
+      hostname: kc.open-bank.tech
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: keycloak-tls
+            namespace: iam
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              kubernetes.io/metadata.name: iam
+    # api.open-bank.tech (ADR-0324 Phase 4). ONE host, FOUR namespaces: the accounts, balances,
+    # payments and sanctions routes each live beside their Services, as the four nginx Ingresses
+    # did. One certificate, `api-edge-tls`, declared in this namespace (api-edge-tls.yaml, landed
+    # in an EARLIER change so the listener never names a Secret that does not exist yet). Not
+    # key-pinned by the mobile app. Money path: the ClientTrafficPolicy below is part of the
+    # owner-approved replacement for nginx's per-client `limit-connections: 10`.
+    - name: https-api
+      protocol: HTTPS
+      port: 443
+      hostname: api.open-bank.tech
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: api-edge-tls
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchExpressions:
+              - key: kubernetes.io/metadata.name
+                operator: In
+                values: [accounts, balances, payments, sanctions]
+---
+# Listener-wide connection ceiling for api.open-bank.tech (ADR-0324 Phase 4 amendment). nginx
+# capped concurrent connections PER CLIENT IP at 10 (`limit-connections`); Envoy Gateway has no
+# per-client equivalent, so this bounds the host as a whole, with the per-client request rate
+# and the per-backend circuit breakers in each route's BackendTrafficPolicy doing the rest.
+# SIZING (read-only Prometheus, ~3.8 days of retention, 2026-10-04): the busiest Envoy replica
+# peaked at 52 active downstream connections for ALL hosts, ingress-nginx at 107 summed over
+# its replicas for all hosts, and api.open-bank.tech itself at ~1 req/s. 500 per proxy replica
+# is ~10x the whole edge's per-replica peak, so it never binds on legitimate traffic and still
+# caps what one abusive client can hold. Envoy counts it per proxy replica (3 replicas).
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: ClientTrafficPolicy
+metadata:
+  name: api-edge
+  namespace: envoy-gateway-system
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: edge
+      sectionName: https-api
+  connection:
+    connectionLimit:
+      value: 500

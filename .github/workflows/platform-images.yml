@@ -163,13 +163,20 @@ jobs:
         if: github.event_name != 'pull_request'
         run: |
           set -euo pipefail
-          ref="${ECR_REGISTRY}/${IMAGE}:${TAG}"
+          repo="${ECR_REGISTRY}/${IMAGE}"
           # Runtime backstop for a repository tofu has not created yet (#3423); fails open.
           bash .github/scripts/ensure-ecr-repository.sh "$IMAGE"
           docker buildx create --use --name obplatform --driver docker-container >/dev/null 2>&1 \
             || docker buildx use obplatform
-          docker buildx build --platform "$PLATFORM" --provenance=false \
-            --metadata-file "$RUNNER_TEMP/meta.json" -t "$ref" --push "$CONTEXT"
+          # Push BY DIGEST, untagged. The human-readable tag is moved only by "Tag attested
+          # image" below, after the CVE gate and the attestation both pass. Pushing `-t :TAG`
+          # here moved the tag onto an image the CVE gate then refused, so the tag named an
+          # unattested digest and the fleet attestation gate went red for every PR (2026-10-04,
+          # openbank-litellm:v1.99.4 -> a rebuild blocked on CVE-2026-102268).
+          docker buildx build --platform "$PLATFORM" --provenance=false --sbom=false \
+            --metadata-file "$RUNNER_TEMP/meta.json" \
+            --output "type=image,name=${repo},push-by-digest=true,name-canonical=true,push=true" \
+            "$CONTEXT"
           digest="$(jq -r '."containerimage.digest"' "$RUNNER_TEMP/meta.json")"
           case "$digest" in sha256:*) ;; *) echo "::error::no digest in buildx metadata"; exit 1 ;; esac
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
@@ -182,8 +189,8 @@ jobs:
           version: v0.72.0
 
       # Same gate auto-deploy applies to the service images: fixable CRITICAL blocks, HIGH is
-      # reported. A blocked image is pushed but never pinned — the gitops job only sees images
-      # that reach the attestation step, which this failure skips.
+      # reported. A blocked image is pushed untagged and never pinned — the gitops job only sees
+      # images that reach the attestation step, which this failure skips.
       - name: Trivy image scan (gate fixable CRITICAL, report HIGH)
         if: github.event_name != 'pull_request'
         env:
@@ -214,6 +221,22 @@ jobs:
           # shellcheck source=openbank-infra/scripts/lib/cosign-attest.sh
           source openbank-infra/scripts/lib/cosign-attest.sh
           cosign_sign_and_attest "$REF" "$PLATFORM"
+
+      # Only now does the tag move: every step above (CVE gate, sign, SBOM, provenance) passed
+      # for this exact digest. A failure anywhere earlier leaves the tag on the last good image.
+      - name: Tag attested image
+        if: github.event_name != 'pull_request'
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          # --prefer-index=false: without it imagetools wraps the single manifest in a new index,
+          # so the tag would name a DIFFERENT digest that carries no signature or attestation
+          # (measured against a local registry). The check below fails the job if that recurs.
+          docker buildx imagetools create --prefer-index=false \
+            -t "${ECR_REGISTRY}/${IMAGE}:${TAG}" "${ECR_REGISTRY}/${IMAGE}@${DIGEST}"
+          got="$(docker buildx imagetools inspect "${ECR_REGISTRY}/${IMAGE}:${TAG}" --format '{{json .Manifest.Digest}}' | tr -d '"')"
+          [ "$got" = "$DIGEST" ] || { echo "::error::tag ${TAG} resolves to ${got}, expected ${DIGEST}"; exit 1; }
 
       - name: Record result
         if: github.event_name != 'pull_request'

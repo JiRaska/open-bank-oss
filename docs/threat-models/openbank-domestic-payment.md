@@ -623,3 +623,35 @@ not change any existing request's outcome until explicitly flipped.
   Money can hold). Reads, events and the confirmation document serialise at the currency scale
   (`100.50`, not `100.500000`), numerically equal. **Not changed here:** no CZK-only rule exists today;
   any ISO 4217 currency with a minor unit is accepted — tracked in #12059. Rollback: revert the commit.
+
+## 2026-10-04 — Staged Envoy Gateway public edge (ADR-0324 Phase 4)
+
+The `payments-api` HTTPRoute stages `/api/v1/domestic-payments` beside the live nginx
+Ingress. The generated `domestic-payment-ingress-allow-list` adds the
+`envoy-gateway-system` peer on TCP 8116 and keeps ingress-nginx. DNS and the service's
+OIDC, OPA, idempotency, SCA and payment decisions do not change in this staging step.
+
+**D1 residual risk at cutover:** nginx's limit of ten concurrent connections per client
+IP is replaced by a 20/s per-client request rate, a per-backend circuit breaker and a
+listener-wide connection limit staged separately. A single client can hold more than ten
+slow connections and contend with other domestic-payment callers for the listener budget.
+Verify the listener policy and the expected 401/429 responses on the Gateway address
+before moving DNS. Roll back the four `api.open-bank.tech` routes together to nginx;
+its Ingress and NetworkPolicy peer remain until Phase 5.
+
+- **2026-10-04** — **AML outbound mTLS boundary (#12106).** The production AML REST client in `domestic-payment` now selects
+  the named `aml-authority` TLS bucket: it presents a client certificate, trusts the AML
+  private CA and uses TLS 1.3 to the client-authenticated AML listener on port 8443.
+  The deployment changes the client's URL and mounts the certificate material; dev and
+  test HTTP fixtures retain their old transport. **STRIDE-S/T/I:** the TLS handshake
+  authenticates the caller and server and protects requests and responses in transit;
+  a missing, expired or wrong-CA certificate must fail the connection rather than fall
+  back to plaintext. **Residual boundary:** AML keeps HTTP 8117 for readiness, Admin UI discovery and
+  the security scanner. Its opt-in per-port NetworkPolicy admits migrated caller
+  namespaces only on 8443; Admin UI and the scanner still reach 8117, and same-namespace
+  traffic remains permitted. This enforces the migrated cross-namespace path but does
+  not make every AML HTTP access mTLS. A successful readiness probe or local HTTP test
+  therefore does not prove the production handshake.
+  Rollout verification must exercise this caller against 8443 with valid and invalid
+  client certificates and check that failures do not reroute to HTTP. Rollback restores
+  the previous client URL/configuration while the AML listener remains available.

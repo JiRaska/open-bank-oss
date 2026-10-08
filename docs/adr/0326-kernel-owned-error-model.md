@@ -191,6 +191,16 @@ change for every service at once.
     adds a narrower `InvalidMoneyExceptionMapper` that renders the reason's code as a `ProblemDetail`
     at the same status. `Money.parseInbound` is the API-boundary helper that attributes the failure to
     its request field.
+  - *Addendum (non-positive amounts, additive).* `InvalidMoneyReason.NOT_POSITIVE` maps to a new
+    kernel code `AMOUNT_NOT_POSITIVE` (`VALIDATION`, 400), raised only when a caller opts in with
+    `Money.parseInbound(..., requirePositive = true)`; the default stays off, so every existing caller
+    is answered exactly as before. The test for a dedicated code versus `VALIDATION_ERROR` is the one
+    the first addendum applied: does a legitimate client hit it, and can it act on it without parsing
+    text? `AMOUNT_OUT_OF_RANGE` fails that test — only a hostile or broken client sends 20 integer
+    digits, and there is nothing to fix but "send a sane number" — so it shares `VALIDATION_ERROR`.
+    A zero or negative transfer amount passes it: an honest UI produces one, and the remedy ("enter
+    an amount above zero") is specific to it. Services had begun answering it with their own shapes,
+    which is the drift this ADR exists to stop.
 - **b — migrate, under a ratchet.** Services move their exceptions onto the hierarchy and delete
   their mappers, `ResourceNotFoundException` / `ResourceConflictException` fold into it, and domain
   codes move out of the kernel enum. Two gates: `error-code-catalogue` (codes derived from every

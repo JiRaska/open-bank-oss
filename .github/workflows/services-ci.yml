@@ -48,6 +48,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   # Don't let the nightly run cancel an in-flight PR/main run (or vice-versa): give the
@@ -73,19 +74,41 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
+      admission: ${{ steps.admit.outputs.proceed }}
       services: ${{ steps.detect.outputs.services }}
       any: ${{ steps.detect.outputs.any }}
       verification-modules: ${{ steps.detect.outputs.verification-modules }}
       verification-modules-json: ${{ steps.detect.outputs.verification-modules-json }}
       admin-ui-pact-changed: ${{ steps.detect.outputs.admin-ui-pact-changed }}
     steps:
-      # harden-runner omitted on the self-hosted sandbox runner — egress is enforced
-      # at the infra layer (egress-only SG, isolated VPC, ADR-0027), so the eBPF shim
-      # for ephemeral hosted runners is redundant here.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Read admission policy from the trusted base before checking out PR code.
+      - if: github.event_name == 'pull_request'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Admission policy and pinned requirements must come from the current
+          # trusted base branch; base.sha is frozen for older pull requests.
+          ref: ${{ github.event.pull_request.base.ref }}
+          persist-credentials: false
+      - id: admit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" != 'pull_request' ]; then
+            echo 'proceed=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          python3 -m venv "$RUNNER_TEMP/agent-admission-venv"
+          "$RUNNER_TEMP/agent-admission-venv/bin/python" -m pip install --quiet --require-hashes -r .github/workflows/requirements/public-readiness.txt
+          gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/pulls?state=open&per_page=100" > "$RUNNER_TEMP/agent-prs.json"
+          "$RUNNER_TEMP/agent-admission-venv/bin/python" .github/scripts/agent-admission.py "$RUNNER_TEMP/agent-prs.json" --current-pr "$PR_NUMBER" >> "$GITHUB_OUTPUT"
+      - if: steps.admit.outputs.proceed == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - id: detect
+        if: steps.admit.outputs.proceed == 'true'
         run: |
           set -euo pipefail
           # Canonical Gradle module list — DISCOVERED from the tree exactly like
@@ -99,38 +122,12 @@ jobs:
           # `openbank-infra` (OpenTofu) have no build.gradle.kts, so neither is picked up.
           ALL=$(for d in openbank-*/; do if [ -f "${d}build.gradle.kts" ]; then printf '%s ' "${d%/}"; fi; done)
 
-          # Paths that cannot change a service compile input or Pact contract. Keep this
-          # executable instead of growing an opaque grep: the same function is exercised by
-          # positive and negative controls on every event before it can select a matrix.
-          is_inert_service_path() {
-            case "$1" in
-              openbank-admin-ui/*|openbank-infra/*|docs/*|*/version.txt|*/CHANGELOG.md|.release-please-manifest.json|release-please-config.json)
-                return 0 ;;
-              .github/scripts/publish-admin-ui-pacts.py|.github/scripts/test-publish-admin-ui-pacts.py|.github/gates/workflow-write-permissions-baseline.txt)
-                # These feed the separate Pact drift/publication gate, not a service build.
-                return 0 ;;
-              .github/workflows/*)
-                # These two files own the service build itself. A change to either must
-                # still select the canary below; all other workflow files are external
-                # orchestration and cannot affect a service binary or Pact.
-                case "$1" in
-                  .github/workflows/services-ci.yml|.github/workflows/_service-ci.yml) return 1 ;;
-                  *) return 0 ;;
-                esac ;;
-              *) return 1 ;;
-            esac
-          }
-          is_inert_service_path ".github/workflows/security-regression-test.yml" \
-            || { echo "selector self-test: unrelated workflow must be inert" >&2; exit 1; }
-          ! is_inert_service_path ".github/workflows/services-ci.yml" \
-            || { echo "selector self-test: service CI recipe must remain relevant" >&2; exit 1; }
-          ! is_inert_service_path "openbank-ledger-service/src/main/kotlin/Ledger.kt" \
-            || { echo "selector self-test: service source must remain relevant" >&2; exit 1; }
-          ! is_inert_service_path ".github/scripts/unknown-service-build-helper.sh" \
-            || { echo "selector self-test: unknown automation must retain safe fallback" >&2; exit 1; }
+          # The sourced selector is exercised by positive and negative controls before it
+          # can select a build matrix. Unknown paths still take the conservative fallback.
           # shellcheck source=.github/scripts/service-ci-pact-modules.sh
           source .github/scripts/service-ci-pact-modules.sh
           pact_build_modules_self_test
+          python3 .github/scripts/coverage-floor-only-diff.py --self-test
 
           if [ "${{ github.event_name }}" = "schedule" ] \
              || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
@@ -140,7 +137,8 @@ jobs:
             # Scope service and Pact changes; inert release/docs/infra changes build nothing.
             # Unknown build inputs fall back to the full fleet below. Full history makes
             # HEAD~1 available on main (squash-merged pushes are single commits).
-            FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || true)
+            DIFF_BASE=HEAD~1
+            FILES=$(git diff --name-only "$DIFF_BASE" HEAD 2>/dev/null || true)
             if admin_ui_pact_changed "$FILES"; then
               echo "admin-ui-pact-changed=true" >> "$GITHUB_OUTPUT"
             fi
@@ -164,8 +162,8 @@ jobs:
               # The safe direction is still over-build: the moment a changed path is NOT cleanly
               # attributable to a module or a pact pair, fall back to full-fleet. Never under-build
               # the Pact graph.
-              #   - code-global input (openbank-libs*, gradle, build-logic) -> full-fleet (any
-              #     service's compile/test inputs may change).
+              #   - code-global input (core libs, gradle, build-logic) -> full-fleet.
+              #     libs-lending and libs-iso20022 follow their declared Gradle consumers.
               #     Lib test-only paths excepted (filter-lib-test-only-paths.py).
               #   - pacts/<consumer>-<provider>.json changed -> build both Gradle modules. The
               #     Admin UI consumer is not a Gradle module: its separate trusted Pact workflow
@@ -175,7 +173,13 @@ jobs:
               #   - the CI recipe itself -> canary below.
               #   - anything else -> unattributable -> full-fleet (safety).
               FILES_CODE=$(grep -vE '^openbank-libs/governance/' <<< "$RELEVANT" || true)
-              if grep -qE '^(openbank-libs/|openbank-libs-domain/|openbank-libs-runtime/|openbank-libs-testing/|openbank-libs-lending/|openbank-libs-iso20022/|gradle/|settings\.gradle\.kts|build\.gradle\.kts|gradle\.properties|build-logic/)' <<< "$(python3 .github/scripts/filter-lib-test-only-paths.py <<< "$FILES_CODE")"; then
+              FILES_GLOBAL=$(python3 .github/scripts/filter-lib-test-only-paths.py <<< "$FILES_CODE")
+              # An exact raised-floor-only diff stays local to libs-domain.
+              if grep -Fxq 'openbank-libs-domain/build.gradle.kts' <<< "$FILES_GLOBAL" && python3 .github/scripts/coverage-floor-only-diff.py --base "$DIFF_BASE"; then
+                echo "Decision: shared domain build script changes only its raised coverage floor."
+                FILES_GLOBAL=$(grep -vFx 'openbank-libs-domain/build.gradle.kts' <<< "$FILES_GLOBAL" || true)
+              fi
+              if grep -qE '^(openbank-libs/|openbank-libs-domain/|openbank-libs-runtime/|openbank-libs-testing/|gradle/|settings\.gradle\.kts|build\.gradle\.kts|gradle\.properties|build-logic/)' <<< "$FILES_GLOBAL"; then
                 echo "Decision: code-global change -> full-fleet."
                 CHANGED="$ALL"
               else
@@ -190,7 +194,7 @@ jobs:
                         if grep -qE "(^| )${p}( |$)" <<< " $ALL "; then CHANGED="$CHANGED $p"; else SCOPE_OK=0; fi
                       done <<< "$modules" ;;
                     openbank-libs/governance/*) : ;;
-                    .github/workflows/services-ci.yml|.github/workflows/_service-ci.yml|.github/scripts/service-ci-pact-modules.sh|.github/scripts/await-admin-ui-pact-publication.py|.github/scripts/test-await-admin-ui-pact-publication.py) : ;;
+                    .github/workflows/services-ci.yml|.github/workflows/_service-ci.yml|.github/scripts/service-ci-pact-modules.sh|.github/scripts/service-ci-library-dependents.py|.github/scripts/await-admin-ui-pact-publication.py|.github/scripts/test-await-admin-ui-pact-publication.py) : ;;
                     openbank-*/*)
                       m="${f%%/*}"
                       if grep -qE "(^| )${m}( |$)" <<< " $ALL "; then CHANGED="$CHANGED $m"; else SCOPE_OK=0; fi ;;
@@ -201,6 +205,8 @@ jobs:
                   echo "Decision: a changed path is not cleanly attributable -> full-fleet (safety)."
                   CHANGED="$ALL"
                 else
+                  # Include direct and transitive consumers of the small shared libraries.
+                  CHANGED="$CHANGED $(python3 .github/scripts/service-ci-library-dependents.py "$ALL" <<< "$FILES_GLOBAL")"
                   # (No dedup here: the matrix JSON below is built with `sort -u`, so a service
                   # named by both its src and a pact edge collapses to one job downstream.)
                   # DST-harness edge (ADR-0115/#267) — same as the PR path.
@@ -217,7 +223,7 @@ jobs:
                   fi
                   # Recipe-only change -> one canary (same as the PR path).
                   if [ -z "${CHANGED// /}" ] \
-                     && grep -qE '^(\.github/workflows/(services-ci|_service-ci)\.yml|\.github/scripts/(service-ci-pact-modules\.sh|(test-)?await-admin-ui-pact-publication\.py))$' <<< "$FILES"; then
+                     && grep -qE '^(\.github/workflows/(services-ci|_service-ci)\.yml|\.github/scripts/(service-ci-pact-modules\.sh|service-ci-library-dependents\.py|(test-)?await-admin-ui-pact-publication\.py))$' <<< "$FILES"; then
                     CHANGED="openbank-libs"
                   fi
                   echo "Decision: scoped main-push build -> ${CHANGED:-<none>}"
@@ -236,11 +242,12 @@ jobs:
             # would break merge-base once main advances past this PR's base.
             git fetch --no-tags --force origin \
               "+refs/heads/${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}" \
-              >/dev/null 2>&1 || true
+              >/dev/null 2>&1 || { echo "::error::Cannot refresh ${BASE}; build scope is unknown."; exit 1; }
             # Compute the merge-base explicitly rather than leaning on the
             # three-dot shorthand's ref resolution, then diff from it. Equivalent
             # to BASE...HEAD but observable and robust to odd ref state.
-            MB=$(git merge-base "$BASE" HEAD 2>/dev/null || echo "$BASE")
+            MB=$(git merge-base "$BASE" HEAD 2>/dev/null) || { echo "::error::Cannot find merge-base with ${BASE}; build scope is unknown."; exit 1; }
+            DIFF_BASE="$MB"
             FILES=$(git diff --name-only "$MB" HEAD)
             echo "Detect: base=$BASE merge-base=$MB changed-files=$(echo "$FILES" | grep -c . || true)"
             echo "Changed files:"; echo "$FILES" | sed 's/^/  /'
@@ -286,7 +293,13 @@ jobs:
             # quarkus.application.version invariant and check-admin-ui-version-sync.sh the
             # package.json one, both unconditionally in the gate job.
             FILES_CODE=$(grep -vE '^openbank-libs/governance/|(/version\.txt$)|(/CHANGELOG\.md$)|(^\.release-please-manifest\.json$)|(^release-please-config\.json$)' <<< "$FILES" || true)
-            if grep -qE '^(openbank-libs/|openbank-libs-domain/|openbank-libs-runtime/|openbank-libs-testing/|openbank-libs-lending/|openbank-libs-iso20022/|gradle/|settings\.gradle\.kts|build\.gradle\.kts|gradle\.properties|build-logic/)' <<< "$(python3 .github/scripts/filter-lib-test-only-paths.py <<< "$FILES_CODE")"; then
+            FILES_GLOBAL=$(python3 .github/scripts/filter-lib-test-only-paths.py <<< "$FILES_CODE")
+            # Match the push selector: an exact raised-floor-only diff stays local.
+            if grep -Fxq 'openbank-libs-domain/build.gradle.kts' <<< "$FILES_GLOBAL" && python3 .github/scripts/coverage-floor-only-diff.py --base "$DIFF_BASE"; then
+              echo "Decision: shared domain build script changes only its raised coverage floor."
+              FILES_GLOBAL=$(grep -vFx 'openbank-libs-domain/build.gradle.kts' <<< "$FILES_GLOBAL" || true)
+            fi
+            if grep -qE '^(openbank-libs/|openbank-libs-domain/|openbank-libs-runtime/|openbank-libs-testing/|gradle/|settings\.gradle\.kts|build\.gradle\.kts|gradle\.properties|build-logic/)' <<< "$FILES_GLOBAL"; then
               echo "Decision: code-global change -> build all modules."
               CHANGED="$ALL"
             else
@@ -297,6 +310,7 @@ jobs:
                   CHANGED="$CHANGED $m"
                 fi
               done
+              CHANGED="$CHANGED $(python3 .github/scripts/service-ci-library-dependents.py "$ALL" <<< "$FILES_GLOBAL")"
               # A changed pact builds BOTH sides, exactly as the main-push path above already
               # does. Without this the PR path attributes files ONLY by `^<module>/`, so a
               # pact-only PR matched no module, built nothing, and merged green — then broke the
@@ -366,7 +380,7 @@ jobs:
               # Skip the canary if a real service is already in the matrix (it validates
               # the recipe too).
               if [ -z "${CHANGED// /}" ] \
-                 && grep -qE '^(\.github/workflows/(services-ci|_service-ci)\.yml|\.github/scripts/(service-ci-pact-modules\.sh|(test-)?await-admin-ui-pact-publication\.py))$' <<< "$FILES"; then
+                 && grep -qE '^(\.github/workflows/(services-ci|_service-ci)\.yml|\.github/scripts/(service-ci-pact-modules\.sh|service-ci-library-dependents\.py|(test-)?await-admin-ui-pact-publication\.py))$' <<< "$FILES"; then
                 echo "Decision: recipe-only change -> build canary openbank-libs."
                 CHANGED="openbank-libs"
               fi
@@ -388,8 +402,11 @@ jobs:
             echo "any=true" >> "$GITHUB_OUTPUT"
           fi
 
+      # Admission rejection leaves the trusted base in a depth-1 checkout. The
+      # all-green job fails closed on admission=false; do not run a PR diff here
+      # until the full PR checkout above has actually happened.
       - name: Require service documentation with production changes
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && steps.admit.outputs.proceed == 'true'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -447,14 +464,16 @@ jobs:
       # is the event that changed. It is NOT stale for `contract`, which is still self-hosted
       # and still bounded by the same ARC pool (12 runners, Phase 1, #4319) — max-parallel is
       # a single number governing the WHOLE matrix, so it bounds both jobs' concurrency at
-      # once. Eight stays below both the 20-job hosted cap (leaving 12 slots for other CI)
-      # and the 12-runner ARC pool (leaving four slots for targeted verification/deploy work).
+      # once. Eight stays below the 12-runner ARC pool, leaving four slots for targeted
+      # verification/deploy work when contract jobs can run.
+      # On PRs the contract job is skipped, so twelve matrix lanes use hosted runners only
+      # and leave eight of the account's twenty hosted slots for other workflows. On main,
+      # schedules and manual runs, retain eight lanes to preserve ARC capacity.
       #
-      # Measured on successful full-fleet run 34476896912 after the hosted-build split:
-      # 50 build jobs, median 7.8 min, P90 10.4 min, 381 runner-minutes. Four lanes impose
-      # a ~95 min work floor before queueing; eight cut that floor to ~48 min without
-      # saturating either pool. Re-measure before raising it again.
-      max-parallel: 8
+      # Full-fleet PR run 37403901088: 79 hosted builds used 603 runner-minutes; eight
+      # lanes stayed occupied for almost all of the 79-minute build span. Twelve lanes
+      # lower the work floor from ~75 to ~50 minutes; hosted timing still needs measurement.
+      max-parallel: ${{ github.event_name == 'pull_request' && 12 || 8 }}
       matrix:
         service: ${{ fromJSON(needs.changes.outputs.services) }}
     uses: ./.github/workflows/_service-ci.yml
@@ -499,7 +518,7 @@ jobs:
           distribution: temurin
           java-version: "25"
 
-      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
           # READ-ONLY. This job cannot get an exact-key hit from setup-java's own
           # `cache: gradle` — that key hashes `**/*.gradle*`, and this job only runs
@@ -538,9 +557,14 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
+    permissions:
+      actions: read
     steps:
       - name: Verify no service failed
         run: |
+          if [ "${{ needs.changes.result }}" != 'success' ] || [ "${{ needs.changes.outputs.admission }}" != 'true' ]; then
+            echo "Agent PR admission refused or failed; service builds did not run."; exit 1
+          fi
           if [ "${{ needs.changes.result }}" != "success" ]; then
             echo "Changed-service detection did not succeed; build scope is unknown."; exit 1
           fi
@@ -556,6 +580,44 @@ jobs:
             echo "verification-metadata has no successful verdict for changed build files (#3218)."; exit 1
           fi
           echo "All changed services built green (or nothing to build)."
+      # `needs.build.result` can report success when a reusable matrix child was cancelled
+      # before receiving a runner (run 37347641780: Treasury cancelled, all-green passed).
+      # Audit every selected build in this exact attempt instead of trusting that summary.
+      - name: Require every selected service build to pass
+        if: needs.changes.outputs.any == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SERVICES_JSON: ${{ needs.changes.outputs.services }}
+          JOB_FILE: ${{ runner.temp }}/service-ci-jobs.ndjson
+        run: |
+          set -euo pipefail
+          gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}/jobs?per_page=100" \
+            --jq '.jobs[] | {name,conclusion}' > "$JOB_FILE"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          services = json.loads(os.environ["SERVICES_JSON"])
+          if not isinstance(services, list) or not services or len(services) != len(set(services)):
+              raise SystemExit("Invalid selected-service matrix")
+          expected = {f"build ({service}) / {service} (build)" for service in services}
+          observed = {}
+          for line in Path(os.environ["JOB_FILE"]).read_text().splitlines():
+              job = json.loads(line)
+              name = job["name"]
+              if name.startswith("build (") and name.endswith(" (build)"):
+                  observed.setdefault(name, []).append(job["conclusion"])
+          if set(observed) != expected:
+              missing = sorted(expected - set(observed))
+              extra = sorted(set(observed) - expected)
+              raise SystemExit(f"Service build roster mismatch: missing={missing}, extra={extra}")
+          bad = {name: verdicts for name, verdicts in observed.items() if verdicts != ["success"]}
+          if bad:
+              raise SystemExit(f"Service builds without one successful verdict: {bad}")
+          print(f"Verified {len(expected)} selected service builds in this workflow attempt")
+          PY
 
   # Nightly-only: turn a failed full-fleet build into an actionable, deduplicated issue.
   # Runs solely for the scheduled run so PR/push failures (already visible as red checks)

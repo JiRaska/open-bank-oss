@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.17.4](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.17.3...sepa-payment-v0.17.4) (2026-10-07)
+
+
+### Bug Fixes
+
+* **approval:** preserve verified maker actor kind ([#12159](https://github.com/JiRaska/open-bank-oss/issues/12159)) ([74cba34](https://github.com/JiRaska/open-bank-oss/commit/74cba348b75c0b318902c033bf81356ddba32393))
+
+## [0.17.3](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.17.2...sepa-payment-v0.17.3) (2026-10-04)
+
+
+### Bug Fixes
+
+* **domestic-payment:** report an unrecognised fraud verdict as UNKNOWN, not ALLOW ([#11614](https://github.com/JiRaska/open-bank-oss/issues/11614)) ([f6676f5](https://github.com/JiRaska/open-bank-oss/commit/f6676f5f31f058d939c58cd7a4321e8053e3d994))
+
 ## [0.17.2](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.17.1...sepa-payment-v0.17.2) (2026-10-03)
 
 

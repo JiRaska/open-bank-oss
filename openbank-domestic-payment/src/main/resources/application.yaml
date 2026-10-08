@@ -298,6 +298,19 @@ authz:
           pem:
             certs: /mnt/document-tls/ca.crt
         protocols: TLSv1.3
+      # Same client certificate (one identity, one private CA), separate bucket per upstream.
+      aml-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/aml-tls/tls.crt
+              key: /mnt/aml-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/aml-tls/ca.crt
+        protocols: TLSv1.3
     rest-client:
       document-service:
         tls-configuration-name: document-authority
+      aml-service:
+        tls-configuration-name: aml-authority

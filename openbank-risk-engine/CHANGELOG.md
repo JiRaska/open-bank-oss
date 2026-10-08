@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.26.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.25.0...risk-engine-v0.26.0) (2026-10-05)
+
+
+### Features
+
+* **fx:** ingest ČNB policy rates and minimum-reserve facts ([#12117](https://github.com/JiRaska/open-bank-oss/issues/12117)) ([35b73e9](https://github.com/JiRaska/open-bank-oss/commit/35b73e94db9d92265755e528cf0703899cb6d343))
+
+## [0.25.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.24.0...risk-engine-v0.25.0) (2026-10-04)
+
+
+### Features
+
+* **risk-engine:** classify residual GLs for liquidity so LCR/NSFR are evaluable ([#12067](https://github.com/JiRaska/open-bank-oss/issues/12067)) ([4216eed](https://github.com/JiRaska/open-bank-oss/commit/4216eeddb92c50bfa4801a43d9c8a463cde2c9ec))
+* **risk-engine:** IRRBB data gaps, default curve set and limit-based outlier test, with an admin-ui panel ([#12032](https://github.com/JiRaska/open-bank-oss/issues/12032)) ([6cf7d47](https://github.com/JiRaska/open-bank-oss/commit/6cf7d479c2733a54ec6036388e465f9430b134b9))
+* **risk-engine:** project treasury money-market deals into IRRBB gap, EVE and NII ([#12051](https://github.com/JiRaska/open-bank-oss/issues/12051)) ([8f4633a](https://github.com/JiRaska/open-bank-oss/commit/8f4633a6cfb93a4422fb9a749d2fcf9f670a8dde))
+
+
+### Bug Fixes
+
+* **docs:** keep every runnable service documentation current ([#11989](https://github.com/JiRaska/open-bank-oss/issues/11989)) ([88b6e08](https://github.com/JiRaska/open-bank-oss/commit/88b6e087386cd885badf22f75cc4694faa0f30bd))
+* **risk-engine:** classify nostro credit balances and pin the loan-book tie-out ([#12062](https://github.com/JiRaska/open-bank-oss/issues/12062)) ([77eb114](https://github.com/JiRaska/open-bank-oss/commit/77eb114ffeabd564ca9860f39b8cb2cac0eb7885))
+
 ## [0.24.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.23.1...risk-engine-v0.24.0) (2026-10-03)
 
 

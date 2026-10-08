@@ -11,7 +11,7 @@ import { act, cleanup, render, screen } from '@testing-library/react'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 import type { Irrbb } from '@/components/balance-sheet/contracts'
 import { irrbbSchema } from '@/components/balance-sheet/contracts'
-import { dataGapText, irrbbRows, outlierStatus } from '@/components/balance-sheet/irrbbSummary'
+import { dataGapText, irrbbRows, outlierStatus, treasuryRows } from '@/components/balance-sheet/irrbbSummary'
 import { IrrbbSummaryPanel } from '@/components/balance-sheet/IrrbbSummaryPanel'
 
 const json = (body: unknown, status = 200) =>
@@ -106,6 +106,27 @@ describe('IrrbbSummaryPanel', () => {
     await screen.findByText(/Test nelze vyhodnotit|Test not evaluable/)
     expect(screen.getByText(/Tier 1 is not positive/)).toBeTruthy()
     expect(screen.queryByText(/Pod prahem|Below the outlier/)).toBeNull()
+  })
+
+  it('shows the treasury deals as an of-which row at the worst scenario, and nothing without deals', async () => {
+    const withDeals = irrbbSchema.parse({
+      ...base(),
+      treasury: [{
+        currency: 'CZK', deals: 2, placements: 1000000, borrowings: 250000, basePv: 748000,
+        scenarios: [{ scenario: 'parallel-up', deltaEve: -4913.71 }, { scenario: 'steepener', deltaEve: -100 }],
+      }],
+    })
+    expect(treasuryRows(withDeals)).toEqual([
+      { currency: 'CZK', deals: 2, placements: 1000000, borrowings: 250000, scenario: 'parallel-up', deltaEve: -4913.71 },
+    ])
+    expect(treasuryRows(base())).toEqual([])
+    response = () => json(withDeals)
+    await renderPanel()
+    await screen.findByText(/Z toho obchody peněžního trhu|Of which money-market deals/)
+    const row = document.querySelector('tr[data-treasury="CZK"]')
+    expect(row?.textContent).toMatch(/4[\s\u00a0\u202f ,.]?914.*(Paralelní posun nahoru|Parallel up)/)
+    // The breakdown is not another scenario row: the worst-case highlight stays single.
+    expect(document.querySelectorAll('tr[data-worst="true"]').length).toBe(1)
   })
 
   it('no curve set for the run date is shown as unavailable, not as zero risk', async () => {

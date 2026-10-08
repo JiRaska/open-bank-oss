@@ -92,7 +92,7 @@ classify_failure() {
   # cosign's own attestation verdicts. `no matching attestations` covers both "none at all"
   # and "none this key/type accepts"; the signature/certificate wordings cover a payload that
   # exists but does not verify. All of these mean the artifact WAS fetched.
-  if printf '%s' "$err" | grep -qE 'no matching attestations|no attestations|none of the attestations matched|signature not found|invalid signature|failed to verify signature|unable to verify signature|no signatures found|error validating.*signature|crypto/rsa: verification error'; then
+  if printf '%s' "$err" | grep -qE 'no matching attestations|no attestations|no matching signatures|none of the attestations matched|signature not found|invalid signature|failed to verify signature|unable to verify signature|no signatures found|error validating.*signature|crypto/rsa: verification error'; then
     printf 'UNATTESTED\n'
     return 0
   fi
@@ -183,6 +183,13 @@ case "$img" in
   # The ARC runner repository, keyed by digest: one attested, one carrying a predicate the
   # policies require and it does not — the September shape.
   *ci-runner@sha256:0000*) echo "Verification for $img -- The signatures were verified"; exit 0 ;;
+  # Pinned-digest fixtures. The TAG and the DIGEST disagree on purpose, and the globs carry no
+  # tag: if the gate ever probes `repo:tag@sha256:` or the bare tag instead of `repo@sha256:`,
+  # the stub falls through to "unexpected image" and the fixture fails.
+  *fixture-pin@sha256:aaaa*) echo "Verification for $img -- The signatures were verified"; exit 0 ;;
+  *fixture-pin@sha256:bbbb*) echo "Error: no matching attestations:" >&2; exit 1 ;;
+  *fixture-pin:tag-attested) echo "Verification for $img -- The signatures were verified"; exit 0 ;;
+  *fixture-pin:tag-unattested) echo "Error: no matching signatures:" >&2; exit 1 ;;
   *ci-runner@sha256:1111*) echo "Error: no matching attestations:" >&2; exit 1 ;;
 esac
 echo "Error: stub reached with an unexpected image: $img" >&2; exit 1
@@ -295,6 +302,38 @@ STUB
   run_fixture "a missing runner Terraform file fails closed" 1 \
     "ARC runner Terraform file is missing" \
     "openbank-fixture-ok:t"
+
+  # ---------------------------------------------------------------------------------------
+  # DIGEST vs TAG. The gate must verify what Kyverno admits: the pinned digest. A tag is only
+  # the fallback for a ref that carries no digest, and the mode is reported, not implied.
+  local pa pb
+  pa="sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  pb="sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  # (a) production truth on 2026-10-04: the pin is attested, the tag moved to an unattested
+  #     build. Admission passes, so the gate must too.
+  run_fixture "(a) pinned digest attested, tag moved to unattested build -> PASS" 0 \
+    "2 attested / 0 unattested / 0 absent / 0 allowlisted placeholder / 0 unknown" \
+    "openbank-fixture-pin:tag-unattested@${pa}"
+  cases=$((cases + 1))
+  if grep -qF "OK          openbank-fixture-pin@${pa} [digest]" <<< "${LAST_OUT:-}"; then
+    printf '  ok: (a) the verdict names the probed digest and its mode\n'
+  else
+    printf '  FAIL: (a) the output does not say the pinned digest was what got verified\n'
+    failures=$((failures + 1))
+  fi
+  # (b) the latent outage the tag probe could not see: a pin to an UNATTESTED digest behind a
+  #     healthy tag. Kyverno denies it on the next reschedule; the gate must fail now.
+  run_fixture "(b) pinned digest unattested, tag attested -> FAIL" 1 \
+    "1 attested / 1 unattested / 0 absent / 0 allowlisted placeholder / 0 unknown" \
+    "openbank-fixture-pin:tag-attested@${pb}"
+  # (c) no digest in the ref -> tag mode, and the run says so.
+  run_fixture "(c) ref without a digest -> verified by tag, and reported as such" 0 \
+    "Probe mode: 1 by pinned digest / 1 by tag" \
+    "openbank-fixture-pin:tag-attested"
+  # A digest-only ref (no tag) used to be invisible to the enumerator altogether.
+  run_fixture "digest-only ref is in scope and verified by digest" 1 \
+    "Probe mode: 2 by pinned digest / 0 by tag" \
+    "openbank-fixture-pin@${pb}"
 
   # Every declared image attested -> 0.
   run_fixture "all attested -> exit 0" 0 \
@@ -526,7 +565,37 @@ echo
 
 # Position-blind on purpose: matches `image:` under containers, initContainers, sidecars,
 # ephemeralContainers, and any Helm/kustomize value that names a full openbank-* ref.
-IMAGE_RE="${ECR_REGISTRY//./\\.}/openbank-[A-Za-z0-9._/-]+:[A-Za-z0-9._-]+"
+#
+# The DIGEST is part of the match, and that is the whole point of the second alternative.
+# Kyverno admits by what the pod spec says: for `repo:tag@sha256:<d>` the runtime pulls <d>
+# and the tag is decoration, so <d> is what verifyImageSignatures/verifyAttestationSignatures
+# check. This regex used to stop at the tag, so the gate verified whatever the tag pointed at
+# TODAY: on 2026-10-04 a tag moved by a failed platform-images run onto an unattested build
+# reddened the gate while the pinned, admitted digest was fully attested, and the reverse (a
+# pin to an unattested digest behind a healthy tag) would have passed. A digest-only ref
+# (`repo@sha256:<d>`, no tag) did not match at all and was out of scope entirely.
+# POSIX leftmost-longest matching takes `:tag@sha256:<d>` whole rather than stopping at the tag.
+IMAGE_RE="${ECR_REGISTRY//./\\.}/openbank-[A-Za-z0-9._/-]+(:[A-Za-z0-9._-]+(@sha256:[a-f0-9]{64})?|@sha256:[a-f0-9]{64})"
+
+# The reference the probe actually asks cosign about: the one admission checks. A pinned digest
+# is probed as `repo@sha256:<d>` with the tag STRIPPED, so nothing the tag currently resolves to
+# can influence the verdict; only a ref with no digest falls back to the tag.
+probe_ref() {
+  local ref="$1" head digest path name
+  case "$ref" in
+    *@sha256:*)
+      head="${ref%%@*}"
+      digest="${ref#*@}"
+      path="${head%/*}"
+      name="${head##*/}"
+      printf '%s/%s@%s\n' "$path" "${name%%:*}" "$digest"
+      ;;
+    *) printf '%s\n' "$ref" ;;
+  esac
+}
+probe_mode() {
+  case "$1" in *@sha256:*) printf 'digest\n' ;; *) printf 'tag\n' ;; esac
+}
 
 # ---------------------------------------------------------------------------------------
 # WHICH PREDICATES — derived from the POLICIES, never written here as a literal.
@@ -744,8 +813,13 @@ RETRIES_DISABLED=0
 # and report exit 2 honestly.
 SYSTEMIC_UNKNOWN_THRESHOLD="${SYSTEMIC_UNKNOWN_THRESHOLD:-5}"
 
+BY_DIGEST=0
+BY_TAG=0
 for image in "${IMAGES[@]}"; do
-  short="${image#"${ECR_REGISTRY}"/}"
+  ref="$(probe_ref "$image")"
+  mode="$(probe_mode "$image")"
+  if [ "$mode" = digest ]; then BY_DIGEST=$((BY_DIGEST + 1)); else BY_TAG=$((BY_TAG + 1)); fi
+  short="${ref#"${ECR_REGISTRY}"/} [${mode}]"
 
   # Bounded retry, then classify. A verdict (OK / ABSENT / UNATTESTED) is final on the first
   # attempt that produces one; only an UNKNOWN — which is precisely the transient class — is
@@ -760,9 +834,18 @@ for image in "${IMAGES[@]}"; do
     verdict=OK
     err=""
     missing_type=""
+    # The image SIGNATURE first: the policy's first validation is verifyImageSignatures, and a
+    # signed attestation does not imply a signed image.
+    if ! _e="$(COSIGN_YES=true "$COSIGN_BIN_RESOLVED" verify \
+                 --key "$COSIGN_KEY" "$ref" 2>&1)"; then
+      err="$_e"
+      verdict="$(classify_failure "$err")"
+      missing_type="signature"
+    fi
     for _pt in "${PREDICATE_TYPES[@]}"; do
+      [ "$verdict" = OK ] || break
       if _e="$(COSIGN_YES=true "$COSIGN_BIN_RESOLVED" verify-attestation \
-                 --key "$COSIGN_KEY" --type "$_pt" "$image" 2>&1)"; then
+                 --key "$COSIGN_KEY" --type "$_pt" "$ref" 2>&1)"; then
         continue
       fi
       err="$_e"
@@ -828,6 +911,7 @@ done
 FAIL=$((UNATTESTED + ABSENT))
 
 echo
+echo "==> Probe mode: ${BY_DIGEST} by pinned digest / ${BY_TAG} by tag (a declared digest is what Kyverno admits)"
 echo "==> Fleet summary: ${PASS} attested / ${UNATTESTED} unattested / ${ABSENT} absent / ${ALLOWED} allowlisted placeholder / ${UNKNOWN} unknown (probe failed) / ${#IMAGES[@]} total"
 
 if [ -n "$FLEET_ATTEST_JSON" ] && command -v jq >/dev/null 2>&1; then
@@ -840,6 +924,8 @@ if [ -n "$FLEET_ATTEST_JSON" ] && command -v jq >/dev/null 2>&1; then
   }
   jq -n \
     --argjson total "${#IMAGES[@]}" \
+    --argjson byDigest "$BY_DIGEST" \
+    --argjson byTag "$BY_TAG" \
     --argjson attested "$PASS" \
     --argjson unattested "$UNATTESTED" \
     --argjson absent "$ABSENT" \
@@ -850,7 +936,8 @@ if [ -n "$FLEET_ATTEST_JSON" ] && command -v jq >/dev/null 2>&1; then
     --argjson unknownImages "$(_json_arr ${UNKNOWN_IMAGES[@]+"${UNKNOWN_IMAGES[@]}"})" \
     --arg scannedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     --arg gateResult "$([ "$FAIL" -gt 0 ] && echo FAIL || { [ "$UNKNOWN" -gt 0 ] && echo INCOMPLETE || echo PASS; })" \
-    '{scannedAt: $scannedAt, gateResult: $gateResult, total: $total, attested: $attested,
+    '{scannedAt: $scannedAt, gateResult: $gateResult, total: $total, probedByDigest: $byDigest,
+      probedByTag: $byTag, attested: $attested,
       unattested: $unattested, absent: $absent, allowlistedPlaceholders: $placeholders,
       unknown: $unknown, unattestedImages: $unattestedImages, absentImages: $absentImages,
       unknownImages: $unknownImages}' \

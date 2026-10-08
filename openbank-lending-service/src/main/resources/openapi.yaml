@@ -23,7 +23,8 @@ info:
   # optional contractNumber on LoanBookEntry, and a Loan response schema carrying it on
   # GET /loans, /loans/active and /loans/{id}. 1.30.0 is claimed by open PR #10266.
   # 1.31.0 -> 1.32.0: additive optional limit on the loan-application list for bounded Customer 360 reads.
-  version: 1.32.0
+  # 1.35.0 -> 1.36.0 (#11588): additive verified makerActorKind on approval responses.
+  version: 1.36.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
@@ -636,11 +637,29 @@ paths:
         makes them mandatory. Advancement stops at READY_TO_DISBURSE — booking is the disburse
         endpoint. Legacy status names (PROPOSED/APPROVED/REJECTED) remain accepted by the
         listRecentApplications filter for compatibility; retired rows were migrated by V9.
+        Decision states are not advanced: an application in FOUR_EYES moves on only through
+        POST /applications/{id}/decision by someone other than the proposer, and advance answers
+        409 FOUR_EYES_DECISION_REQUIRED with the state unchanged. An application past the decision
+        point that carries no recorded decision does not advance either (409
+        FOUR_EYES_DECISION_MISSING).
       parameters:
         - $ref: '#/components/parameters/IdPath'
       responses:
         '200': { description: Application advanced to the next state }
         '404': { description: Application not found }
+        '409':
+          description: >-
+            Refused by an origination control. FOUR_EYES_DECISION_REQUIRED: the application is in
+            a decision state (FOUR_EYES); use the decision endpoint. FOUR_EYES_DECISION_MISSING:
+            the application is past the decision point with no recorded decision.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error, message]
+                properties:
+                  error: { type: string, enum: [FOUR_EYES_DECISION_REQUIRED, FOUR_EYES_DECISION_MISSING] }
+                  message: { type: string }
         '422': { description: No forward transition from the current state }
         '403':
           $ref: '#/components/responses/Forbidden'
@@ -669,7 +688,10 @@ paths:
       tags: [Lending]
       operationId: disburseLoan
       summary: Disburse an approved application, booking the loan and its schedule
-      description: Requires ROLE_LENDING_OFFICER or ROLE_ADMIN.
+      description: >-
+        Requires ROLE_LENDING_OFFICER or ROLE_ADMIN. Refused with 409 when the application carries
+        no recorded four-eyes decision (`error` FOUR_EYES_DECISION_MISSING) or when the disburser
+        proposed or approved it (`error` SEGREGATION_OF_DUTIES).
       parameters:
         - $ref: '#/components/parameters/IdPath'
       responses:
@@ -1560,6 +1582,10 @@ components:
         resourceId: { type: string, nullable: true }
         status: { type: string, enum: [PENDING, APPROVED, REJECTED, EXECUTED] }
         makerId: { type: string, nullable: true, description: Principal that created the request }
+        makerActorKind:
+          type: string
+          enum: [HUMAN, AI_AGENT, SERVICE_ACCOUNT, CUSTOMER_PARTY, UNKNOWN]
+          description: Origin captured at creation; UNKNOWN for legacy records.
         createdAt: { type: string, format: date-time, nullable: true }
         decidedBy: { type: string, nullable: true }
     ProvisioningSnapshot:

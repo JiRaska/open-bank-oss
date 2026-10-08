@@ -2,18 +2,22 @@
 #
 # Deploy window flusher (see .github/scripts/deploy-window.py).
 #
-# auto-deploy.yml and admin-ui-deploy.yml open their deploy PR exactly as before, but arm its
-# auto-merge only when the window allows it: at most one bot deploy commit reaches main per
+# auto-deploy.yml and admin-ui-deploy.yml open their deploy PR exactly as before. This workflow
+# alone arms auto-merge when the window allows it: at most one bot deploy commit reaches main per
 # window, because each one makes every open PR `behind` under the strict up-to-date rule and
 # restarts its required checks. A deploy they DEFER stays open and unarmed — this workflow is
-# what lands it. Every tick it picks the OLDEST deferred deploy PR once the window has elapsed
+# what lands it. A workflow_run trigger handles new PRs and the schedule recovers missed runs.
+# Each run picks the OLDEST deferred deploy PR once the window has elapsed
 # and nothing else is armed, re-runs supersede-deploy-prs.sh on it (ancestry + coverage — a
 # rollback PR is refused, never armed), and arms auto-merge with the same App token the deploy
-# workflows use. A manual `workflow_dispatch` of either deploy workflow never waits for this.
+# workflows use. A successful manual dispatch of either producer expedites only its matching PR.
 
 name: Deploy window flush
 
 on:
+  workflow_run:
+    workflows: ["Auto deploy", "Admin-UI deploy"]
+    types: [completed]
   schedule:
     - cron: "*/10 * * * *"
   workflow_dispatch:
@@ -67,7 +71,20 @@ jobs:
           d="$RUNNER_TEMP/deploy-window"
           bash .github/scripts/deploy-window-inputs.sh "$d"
           python3 .github/scripts/deploy-window.py flush --prs-json "$d/prs.json" \
-            --commits-json "$d/commits.json" --now "$(date -u +%s)" | tee -a "$GITHUB_OUTPUT"
+            --commits-json "$d/commits.json" --event-json "$GITHUB_EVENT_PATH" \
+            --now "$(date -u +%s)" | tee -a "$GITHUB_OUTPUT"
+
+      - name: Verify deferred GitOps image source freshness
+        if: steps.pick.outputs.arm != '' && startsWith(steps.pick.outputs.arm_head, 'chore/gitops-auto-deploy-')
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          ARM: ${{ steps.pick.outputs.arm }}
+        run: |
+          set -euo pipefail
+          git fetch --depth=100 origin main
+          git reset --hard origin/main
+          gh pr diff "$ARM" --repo "$GITHUB_REPOSITORY" \
+            | python3 .github/scripts/deploy-window.py verify --root .
 
       - name: Close superseded deploy PRs (refuses a rollback)
         if: steps.pick.outputs.arm != ''

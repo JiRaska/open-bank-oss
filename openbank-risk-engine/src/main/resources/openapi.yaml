@@ -63,7 +63,15 @@ info:
   #        extrapolation past the last pillar, no prepayment, simplified NMD, margins, deals not
   #        projected); `outlierTest` falls back to the run's own-funds Tier 1 and is evaluated
   #        against the declared `irrbb-eve-outlier` limit (status, earlyWarning, limitId).
-  version: 1.23.0
+  # 1.23.0 -> 1.24.0 (#11107): additive — the IRRBB read projects the run's treasury money-market
+  #        deals (fixed rate, principal + ACT/360 interest at maturity) into the repricing gap,
+  #        ΔEVE and ΔNII, and breaks their share out in `treasury[]`; INSTRUMENTS_NOT_PROJECTED is
+  #        now raised only for instrument kinds still not projected, named in its detail.
+  # 1.24.0 -> 1.25.0: additive — GET /snapshots/{id}/min-reserves takes the reserve ratio and its
+  #        remuneration from the ČNB facts in effect on the run's as-of date (fed by fx-service), no
+  #        longer from configuration; assumptions.rateFacts names them with provenance. With no fact
+  #        in effect the 424 answers NOT_EVALUABLE (MinReservesNotEvaluable) instead of a number.
+  version: 1.25.0
   description: |
     Read-only balance-sheet risk engine (ADR-0313, ADR-0314). A snapshot run pulls the ledger
     trial balance and the deposit-control sub-ledger balances for an as-of date, expands them into
@@ -475,11 +483,13 @@ paths:
         Povinné minimální rezervy (Opatření ČNB o povinných minimálních rezervách): the reserve base
         (liabilities to non-bank clients and others with maturity up to 2 years, excluding
         liabilities to banks subject to minimum reserves and to the ČNB) per currency, the
-        requirement at the configured rate (2%), the balance on the ČNB current account as
-        holdings, and holdings minus requirement. While no GL account is mapped as the ČNB current
-        account, holdings, surplus and shortfall are null and `holdingsNotStated` says why. Minimum reserves are unremunerated since
-        2023-10-05. Parameters come from the versioned set `openbank.risk.min-reserves.*`, named on
-        the result. One snapshot day: reserves are held on average over the maintenance period, so
+        requirement at the ČNB reserve ratio in effect on the run's as-of date (4 % from 2025-01-02),
+        the balance on the ČNB current account as holdings, and holdings minus requirement. While no
+        GL account is mapped as the ČNB current account, holdings, surplus and shortfall are null and
+        `holdingsNotStated` says why. The ratio and its remuneration are ČNB facts published by
+        fx-service and named, with provenance, in `assumptions.rateFacts`; with no fact in effect on
+        the as-of date the answer is 424 NOT_EVALUABLE, never a default rate. Classification comes
+        from the versioned set `openbank.risk.min-reserves.*`, named on the result. One snapshot day: reserves are held on average over the maintenance period, so
         the surplus is indicative, not a compliance verdict. A GL balance the classification does
         not name is listed in `unclassified` and counted nowhere. Derived on request, never stored.
       parameters:
@@ -503,6 +513,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Untied'
+        '424':
+          description: A required ČNB reserve ratio or remuneration fact is not in effect on the run's as-of date
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MinReservesNotEvaluable'
 
   /api/v1/risk/min-reserves/periods:
     get:
@@ -1335,6 +1351,24 @@ components:
         count: {type: [integer, 'null']}
         detail: {type: string}
 
+    IrrbbTreasuryContribution:
+      type: object
+      required: [currency, deals, placements, borrowings, scenarios]
+      properties:
+        currency: {type: string}
+        deals: {type: integer}
+        placements: {type: number, description: Principal of asset-side deals (repricing at maturity)}
+        borrowings: {type: number, description: Principal of liability-side deals, as a magnitude}
+        basePv: {type: [number, 'null'], description: Base PV of the deals' flows; null when the currency is not evaluated}
+        scenarios:
+          type: array
+          items:
+            type: object
+            required: [scenario, deltaEve]
+            properties:
+              scenario: {type: string}
+              deltaEve: {type: number}
+
     Irrbb:
       type: object
       required: [runId, asOf, provenance, curveSetId, curveSetProvenance, curveSetSource, gaps, scenarios,
@@ -1382,6 +1416,13 @@ components:
             ratio: {type: [number, 'null']}
             breached: {type: [boolean, 'null']}
             note: {type: string}
+        treasury:
+          type: array
+          description: |
+            Per currency, the treasury money-market deals frozen on the run (placements and ČNB
+            deposits as assets, borrowings and ČNB lombard as liabilities) — their share of the gap
+            and ΔEVE, ALREADY included in `gaps` and `scenarios`. Empty when the run has no deals.
+          items: {$ref: '#/components/schemas/IrrbbTreasuryContribution'}
         dataGaps:
           type: array
           description: What the figures do not capture. Never silently omitted.
@@ -2027,6 +2068,16 @@ components:
           type: [string, 'null']
           description: The gap that made the limit NOT_EVALUABLE; null otherwise.
         citation: {type: string}
+    MinReservesNotEvaluable:
+      type: object
+      required: [error, runId, asOf, reason]
+      properties:
+        error:
+          type: string
+          enum: [NOT_EVALUABLE]
+        runId: {type: string, format: uuid}
+        asOf: {type: string, format: date}
+        reason: {type: string}
     MinReserves:
       type: object
       required: [runId, asOf, provenance, parameterSetId, parameterSetVersion, currencies, holdingCurrency,
@@ -2120,3 +2171,18 @@ components:
             glAccountTypes:
               type: array
               items: {$ref: '#/components/schemas/ReserveMapping'}
+            rateFacts:
+              type: array
+              description: The ČNB reserve ratio and remuneration facts in effect on the as-of date.
+              items:
+                type: object
+                required: [instrument, effectiveFrom, rate, sourceUrl, contentSha256]
+                properties:
+                  instrument: {type: string}
+                  effectiveFrom: {type: string, format: date}
+                  rate:
+                    type: number
+                    description: Fraction (0.04 = 4 %)
+                  sourceUrl: {type: string}
+                  contentSha256: {type: string}
+                  note: {type: [string, 'null']}

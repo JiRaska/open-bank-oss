@@ -43,7 +43,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: audit-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-audit-service:sandbox-49bf3545
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-audit-service:sandbox-43215314
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -175,7 +175,7 @@ spec:
         # gen-audit-opa-bundle.sh. Mirrors statement-service's OPA sidecar (same image, probes,
         # security context, subPath mounts).
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run

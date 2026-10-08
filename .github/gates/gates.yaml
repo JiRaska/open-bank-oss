@@ -395,6 +395,18 @@ gates:
       python3 .github/scripts/check-adr-delivery-evidence.py --root .
 
   # ==== gitops =========================================================
+  - id: deploy-hold-image-pins
+    name: "held services cannot change GitOps image pins (issue #11503)"
+    group: gitops
+    mode: enforced
+    budget_seconds: 45  # fixture creates a temporary Git repo; PR-mode gate measured 29s locally
+    rationale: "A held service keeps its GitOps image pin until release; live strict required checks prevent older green deploy PRs from merging after the hold changes main."
+    review_after: "2027-03-30"
+    selftest: python3 .github/scripts/check-deploy-holds.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-deploy-holds.py", "openbank-libs/governance/rules.yaml"]
+    run: python3 .github/scripts/check-deploy-holds.py --root . --enforce-live-strict
+
   # Issue #3345 / ADR-0237: every domain @Scheduled job registers the ADR-0160
   # mechanism-3 liveness gauge. ENFORCED as of #3931, ahead of the 2026-09-30
   # target — a baseline ratchet, not a sweep gate: the 16 files still without a
@@ -461,9 +473,9 @@ gates:
       a deploy PR's auto-merge is armed and carries pending pins into the newest PR. The failure
       it must never introduce is a built image that nothing pins, or a pin that rewinds a
       service; the self-test proves both (two pushes in one window -> one PR pins both, a moved
-      service is not rewound, workflow_dispatch is never delayed, nothing pending -> no PR). The
-      script only runs inside the deploy workflows against live PRs, so this is where it can go
-      red before it acts.
+      service is not rewound, a matching manual deploy bypasses the time window without arming a
+      second PR, nothing pending -> no PR). The script runs in the deploy workflows and flusher
+      against live PRs, so this is where it can go red before it acts.
     review_after: "2027-03-30"
     budget_seconds: 15
     run: |
@@ -1481,7 +1493,7 @@ gates:
     review_after: "2027-02-14"
     # The corpus is the checker's own fixture set — its subjects are assertions, not files, so
     # the floor is the number of cases that must run. It drops the day someone deletes one.
-    min_subjects: 17   # 18 today: 9 classifier + 5 end-to-end + 1 retry-count + 3 placeholder-staleness (2026-08-31)
+    min_subjects: 31   # 32 today (2026-10-04): 9 classifier + 7 ARC runner + 5 digest-vs-tag + 7 end-to-end/stderr + 1 retry-count + 3 placeholder-staleness
     run: |
       # The gate IS the selftest here: the artifact under test is the classifier + exit-code
       # contract, not the fleet (verifying 62 real images needs ECR credentials this job does
@@ -1593,6 +1605,9 @@ gates:
   # too, and a discovery root that covers only one of them is a coverage set maintained
   # separately from the artifacts it covers — the exact shape that let 16 pacts go
   # unreplayed (#2327). Adding a *_test.py beside a gate must be enough to have it run.
+  # The FreeMarker buildscript cases also run here, even on a cold runner: this shard
+  # is required while dependency-submission is not. Their wrapper-download retry keeps
+  # a transient transport reset from turning into an unrelated governance failure.
   - id: governance-script-unit-tests
     selftest_exempt: "is-a-test-suite — pytest over the governance scripts"
     name: "governance-script unit tests"
@@ -2587,6 +2602,23 @@ gates:
     run: |
       bash .github/scripts/spot-kill-retry.sh --self-test
 
+  - id: dast-zap-coverage-selftest
+    name: "DAST coverage verdict tells a scan from a non-scan (issue #12097, enforced)"
+    group: registry
+    mode: enforced
+    selftest_exempt: >-
+      is-a-test-suite — the run: below IS the self-test. It drives evaluate() over synthetic access
+      logs and asserts the spec/requested/auth-blocked counts and every non-scan verdict (zero ops,
+      >=95% 401/403, never ready); falsified by weakening the threshold, the template ordering and
+      the readiness check, each of which turned it red.
+    budget_seconds: 10
+    rationale: "dast-zap-baseline.yml runs only on schedule, so without this its non-scan detection would first be exercised by the run it is meant to judge — the shape that let the lane go green on 6 unauthenticated 4xx URLs and still back a pentest attestation (#12097)."
+    review_after: "2027-04-04"
+    min_subjects: 13
+    run: |
+      python3 .github/scripts/dast-zap-coverage.py --self-test
+      python3 .github/scripts/e2e/dast-zap-coverage.test.py
+
   - id: ci-reconcile-selector-selftest
     name: "CI reconciler verifies bounded queries and recent retry/flake candidates (issues #9645, #10262, enforced)"
     group: registry
@@ -3173,6 +3205,29 @@ gates:
     selftest_inputs: [".github/scripts/check-nonnull-jaxrs-params.py"]
     run: |
       python3 .github/scripts/check-nonnull-jaxrs-params.py --root .
+
+  # Every JAXP XML factory comes from com.openbank.libs.xml.SecureXml (openbank-libs-domain),
+  # which closes every external-entity vector in one place. A parse site that builds its own
+  # factory has to remember half a dozen settings, and the one it forgets is an XXE — so ANY raw
+  # *Factory.newInstance() in a src/main Kotlin/Java file outside SecureXml.kt fails. No baseline:
+  # the fleet (libs-iso20022, sanctions, treasury) was migrated in the same change.
+  - id: xml-factory-hardened
+    name: "XML factories only via the hardened SecureXml helper (enforced)"
+    group: security
+    mode: enforced
+    rationale: >-
+      Untrusted XML (ISO 20022 wire messages, camt.053 uploads, sanctions list feeds) must never
+      reach a parser built from a raw JAXP factory; centralising the hardening makes a forgotten
+      setting structurally impossible instead of a per-site review item.
+    review_after: "2027-04-03"
+    verified: "2026-10-03 — self-test flags raw DOM/SAX/Schema/StAX factories and ignores comments, src/test and SecureXml.kt; run against an origin/main snapshot of the three migrated modules it reported all 10 pre-migration sites and exited 1"
+    budget_seconds: 30
+    min_subjects: 1300   # 2747 src/main Kotlin/Java files measured 2026-10-03; half
+    selftest: python3 .github/scripts/check-xml-factory-hardened.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-xml-factory-hardened.py"]
+    run: |
+      python3 .github/scripts/check-xml-factory-hardened.py --root .
 
   # ADR-0318: rounding belongs in libs' RoundingPolicy registry, not in a money-path service's
   # inline setScale(n, RoundingMode.X). Per-service token counts measured 2026-09-26 are
@@ -3958,8 +4013,10 @@ gates:
       python3 .github/scripts/check-four-eyes-verb-grantable.py --self-test
     run: |
       set -euo pipefail
-      git fetch -q origin main
-      python3 .github/scripts/check-four-eyes-verb-grantable.py --ref origin/main --enforce
+      # Read the PR's own tree (HEAD = the merge commit), not the base: against origin/main a PR
+      # that grants an action AND drops its KNOWN_UNGRANTED entry fails on the base's stale
+      # state (#4754), so a baseline entry could never be removed.
+      python3 .github/scripts/check-four-eyes-verb-grantable.py --ref HEAD --enforce
 
   - id: openapi-version-not-taken
     name: "openapi-version-not-taken — info.version still free on the base tip (ADR-0048, enforced)"
@@ -4163,6 +4220,7 @@ gates:
     mode: enforced
     run: |
       bash .github/scripts/libs-change-dependents.sh --selftest
+      python3 .github/scripts/service-ci-library-dependents.py --self-test
 
   # analytics-sink owns no OLTP DB and runs no migration runner (ADR-0022): its ClickHouse DDL lives
   # once as `clickhouse/V*.sql` resources an operator applies, and once in the `clickhouse-init`
@@ -5198,6 +5256,28 @@ gates:
     run: |
       python3 .github/scripts/check-realm-template-importable.py
 
+  # A bank-owned canary customer (ADR-0331) is safe in exactly one shape: a confidential
+  # customers-realm client with no browser/password/implicit flow, a party_id mapper, and a
+  # service-account user holding only ROLE_CUSTOMER plus one SYNTHETIC party_id. And the
+  # synthetic taint may be trusted only from those clients at customer-edge, and only from the
+  # edge's relay identity downstream: any other trusted principal could drop real activity out
+  # of the regulatory aggregates by sending one header. Falsified on the real tree in both
+  # halves before wiring: enabling the canary's password grant, and adding a second principal
+  # to wealth-service's list, each exit 2 naming the file.
+  - id: synthetic-customer-identity
+    name: "synthetic customer identity keeps the ADR-0331 shape and trust list (enforced)"
+    group: security
+    mode: enforced
+    rationale: "A canary customer with a password grant or an extra role, or a trust list naming any other caller, would let that caller drop real activity out of the regulatory aggregates; the JSON and manifests are the only place either is visible before it is live."
+    review_after: "2027-04-04"
+    budget_seconds: 10
+    selftest: python3 .github/scripts/check-synthetic-customer-identity.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-synthetic-customer-identity.py"]
+    min_subjects: 3  # 2026-10-04: 1 canary client + 2 trusted-principal declarations (customer-edge, wealth)
+    run: |
+      python3 .github/scripts/check-synthetic-customer-identity.py --root .
+
   # Importability alone does not reject an operator client with a password grant,
   # open redirect or weak PKCE. Keep the dedicated CLI identity constrained (#10905).
   - id: ops-cli-client-contract
@@ -6126,6 +6206,8 @@ gates:
       - ".github/scripts/await-admin-ui-source-validation.py"
       - ".github/scripts/test-await-admin-ui-source-validation.py"
       - ".github/workflows/admin-ui-deploy.yml"
+      - ".github/workflows/auto-deploy.yml"
+      - ".github/workflows/platform-images.yml"
     selftest: |
       python3 .github/scripts/test-workflow-supply-chain.py
       python3 .github/scripts/test-infracost-scope.py

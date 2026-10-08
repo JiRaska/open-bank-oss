@@ -34,10 +34,20 @@ version = file("version.txt").readText().trim()
 // The generated page contains only facts from build inputs. It also supplies an
 // honest index for new services until they add authored docs to src/main/resources/docs.
 val generatedServiceDocs = layout.buildDirectory.dir("generated/service-docs")
-val sourceCommit = providers.environmentVariable("GITHUB_SHA")
+// The commit is an explicit INPUT, resolved in this order:
+//   1. SOURCE_COMMIT - set by every container build (Docker build arg, see
+//      standalone-service.Dockerfile); a container has no .git (.dockerignore drops it).
+//   2. GITHUB_SHA    - set by GitHub Actions for host-side builds.
+//   3. `git rev-parse HEAD` - a developer's checkout. Run with ignoreExitValue, so a tree
+//      without .git yields an empty value and the task below fails with an actionable
+//      message instead of "Error while evaluating property 'sourceCommit'".
+// There is deliberately no placeholder hash: the value is published as a build fact.
+val sourceCommit = providers.environmentVariable("SOURCE_COMMIT").map { it.trim() }.filter { it.isNotEmpty() }
+    .orElse(providers.environmentVariable("GITHUB_SHA").map { it.trim() }.filter { it.isNotEmpty() })
     .orElse(
         providers.exec {
             commandLine("git", "rev-parse", "HEAD")
+            isIgnoreExitValue = true
         }.standardOutput.asText.map { it.trim() },
     )
 val generateServiceDocs by tasks.registering {
@@ -56,7 +66,8 @@ val generateServiceDocs by tasks.registering {
         val releaseVersion = versionFile.asFile.readText().trim()
         val gitCommit = sourceCommit.get().trim()
         check(Regex("[0-9a-fA-F]{40}").matches(gitCommit)) {
-            "${project.name}: GITHUB_SHA or git rev-parse HEAD must provide a full commit hash"
+            "${project.name}: no source commit - set SOURCE_COMMIT (Docker: --build-arg SOURCE_COMMIT=<sha>), " +
+                "GITHUB_SHA, or build from a git checkout; got '$gitCommit'"
         }
         generatedServiceDocs.get().asFile.resolve("openbank-service-build.properties")
             .writeText("git.commit=$gitCommit\n")
@@ -310,6 +321,11 @@ val providerPactTest =
         group = org.gradle.language.base.plugins.LifecycleBasePlugin.VERIFICATION_GROUP
         testClassesDirs = providerPactTestSourceSet.output.classesDirs
         classpath = providerPactTestSourceSet.runtimeClasspath
+        // Broker publication is a side effect outside Gradle's output snapshot. Re-run this
+        // Test task on every invocation, while retaining cached compilation and app-model tasks.
+        // A workflow-wide --rerun-tasks invalidates those expensive prerequisites as well.
+        outputs.upToDateWhen { false }
+        outputs.cacheIf { false }
         // Independent of `check`/`test` — a service with no provider-verification classes at all
         // (the include filter above matches nothing) still gets the task registered, and it
         // reports 0 tests rather than failing; JUnit5's default `failOnNoTests` behaviour on an
@@ -351,6 +367,11 @@ kover {
     currentProject {
         instrumentation {
             excludedClasses.add("org.testcontainers.*")
+            // Kover otherwise wires every Test task into koverVerify. The ordinary `test`
+            // task already executes these provider classes, so letting coverage pull in
+            // providerPactTest repeats verification and can publish to the broker during
+            // every build. Keep that task explicit for the contract lane only.
+            disabledForTestTasks.add("providerPactTest")
         }
     }
 }

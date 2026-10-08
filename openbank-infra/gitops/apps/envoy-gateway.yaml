@@ -7,8 +7,8 @@
 #   envoy-gateway-config  components/envoy-gateway: GatewayClass `envoy`, EnvoyProxy (the
 #                         second NLB), the shared Gateway, PodMonitors, NetworkPolicies
 #
-# Chart + images verified 2026-09-28: gateway-helm v1.9.1 from the OCI registry manifest;
-# docker.io/envoyproxy/gateway:v1.9.1 and the proxy image the controller defaults to
+# Chart + images verified 2026-10-04: gateway-helm v1.9.2 from the OCI registry manifest;
+# docker.io/envoyproxy/gateway:v1.9.2 and the proxy image the controller defaults to
 # (docker.io/envoyproxy/envoy:distroless-v1.39.1, digest-pinned in the controller source)
 # both publish linux/amd64 + linux/arm64 (`docker manifest inspect`). Sibling apps pin
 # chart versions, not image digests, so neither is digest-pinned here.
@@ -29,7 +29,7 @@ spec:
   source:
     repoURL: docker.io/envoyproxy
     chart: gateway-helm
-    targetRevision: v1.9.1
+    targetRevision: v1.9.2
     helm:
       releaseName: eg
       valuesObject:

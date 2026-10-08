@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.5.2](https://github.com/JiRaska/open-bank-oss/compare/card-processing-service-v0.5.1...card-processing-service-v0.5.2) (2026-10-04)
+
+
+### Bug Fixes
+
+* **card-processing:** never mint a simulated token reference with a digit run ([#12109](https://github.com/JiRaska/open-bank-oss/issues/12109)) ([5fa95c7](https://github.com/JiRaska/open-bank-oss/commit/5fa95c7a19df70ce2ebc165380e9dde901c918e4))
+* **card-processing:** require idempotency keys on token status and dispute refresh ([#12031](https://github.com/JiRaska/open-bank-oss/issues/12031)) ([dfe96df](https://github.com/JiRaska/open-bank-oss/commit/dfe96dffa0265d4c6c224098f4705aa8bede40fb))
+* **card-processing:** send fraud-service its real scoring contract, and pin both money-path pacts ([#12073](https://github.com/JiRaska/open-bank-oss/issues/12073)) ([18ba0b8](https://github.com/JiRaska/open-bank-oss/commit/18ba0b83d7b0ae10422d8528f2d1ad5eb929154a))
+* **docs:** keep every runnable service documentation current ([#11989](https://github.com/JiRaska/open-bank-oss/issues/11989)) ([88b6e08](https://github.com/JiRaska/open-bank-oss/commit/88b6e087386cd885badf22f75cc4694faa0f30bd))
+
 ## [0.5.1](https://github.com/JiRaska/open-bank-oss/compare/card-processing-service-v0.5.0...card-processing-service-v0.5.1) (2026-10-04)
 
 

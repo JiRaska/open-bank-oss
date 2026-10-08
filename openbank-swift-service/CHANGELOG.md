@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.12.2](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.12.1...swift-service-v0.12.2) (2026-10-07)
+
+
+### Bug Fixes
+
+* **approval:** preserve verified maker actor kind ([#12159](https://github.com/JiRaska/open-bank-oss/issues/12159)) ([74cba34](https://github.com/JiRaska/open-bank-oss/commit/74cba348b75c0b318902c033bf81356ddba32393))
+
+## [0.12.1](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.12.0...swift-service-v0.12.1) (2026-10-04)
+
+
+### Bug Fixes
+
+* **swift:** describe error responses as the ProblemDetail the service sends ([#12079](https://github.com/JiRaska/open-bank-oss/issues/12079)) ([12ec893](https://github.com/JiRaska/open-bank-oss/commit/12ec893fd3c6037d69306a8bfe0e384bf855b3e3))
+
 ## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.11.7...swift-service-v0.12.0) (2026-10-03)
 
 
