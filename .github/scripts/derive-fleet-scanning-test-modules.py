@@ -70,6 +70,13 @@ def has_module_input(root: Path, paths: list[str]) -> bool:
     return any("/" in path and is_module(root, path.split("/", 1)[0]) for path in paths)
 
 
+def direct_readers(direct: set[tuple[str, str]], paths: list[str]) -> set[str]:
+    return {
+        reader for reader, watched in direct
+        if any(path == watched or path.startswith(watched.rstrip("/") + "/") for path in paths)
+    }
+
+
 def self_test() -> int:
     with tempfile.TemporaryDirectory() as d:
         r = Path(d)
@@ -99,6 +106,12 @@ def self_test() -> int:
             ok = False
         if ("openbank-infra-reader", "openbank-infra/gitops/x.yaml") not in direct:
             print("FAIL: direct GitOps input was not discovered")
+            ok = False
+        if direct_readers(direct, ["openbank-infra/gitops/x.yaml"]) != {"openbank-infra-reader"}:
+            print("FAIL: GitOps-only change did not select its direct test reader")
+            ok = False
+        if direct_readers(direct, ["openbank-infra/gitops/unrelated.yaml"]):
+            print("FAIL: unrelated GitOps change selected a direct test reader")
             ok = False
         cases = [
             ([], False),
@@ -136,11 +149,10 @@ def main(argv: list[str]) -> int:
                 if target in changed and reader not in changed and reader not in added:
                     print(f"Decision: {target} changed -> add {reader} (its tests read {target}'s tree).", file=sys.stderr)
                     added.append(reader)
-        for reader, watched in sorted(direct):
-            if any(path == watched or path.startswith(watched.rstrip("/") + "/") for path in paths):
-                if reader not in changed and reader not in added:
-                    print(f"Decision: changed direct test input {watched} -> add {reader}.", file=sys.stderr)
-                    added.append(reader)
+        for reader in sorted(direct_readers(direct, paths)):
+            if reader not in changed and reader not in added:
+                print(f"Decision: changed direct test input -> add {reader}.", file=sys.stderr)
+                added.append(reader)
         if not module_input and not added:
             print("Decision: no changed module or direct test input after filtering; "
                   "skip cross-module readers.", file=sys.stderr)
