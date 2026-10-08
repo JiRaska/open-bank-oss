@@ -21,13 +21,53 @@ object AgentAuditInventory {
         destinationConnection: () -> Connection,
         pageSize: Int = 500,
     ): AgentAuditDestinationReconciliation.Result {
-        val source = sourceConnection().use { collect(it, Side.SOURCE, pageSize) }
-        val sourceIds = source.map { it.eventId }
-        val destination = destinationConnection().use { collect(it, Side.DESTINATION, pageSize, sourceIds) }
-        val result = AgentAuditDestinationReconciliation.compare(source, destination)
-        verifyUnchanged(source, sourceConnection().use { collect(it, Side.SOURCE, pageSize) })
-        verifyUnchanged(destination, destinationConnection().use { collect(it, Side.DESTINATION, pageSize, sourceIds) })
+        val source = snapshot(sourceConnection, Side.SOURCE, pageSize)
+        val sourceIds = source.rows.map { it.eventId }
+        val destination = snapshot(
+            destinationConnection,
+            Side.DESTINATION,
+            pageSize,
+            sourceIds,
+            distinctFrom = source.database,
+        )
+        val result = AgentAuditDestinationReconciliation.compare(source.rows, destination.rows)
+        val sourceAgain = snapshot(sourceConnection, Side.SOURCE, pageSize, expectedDatabase = source.database)
+        val destinationAgain = snapshot(
+            destinationConnection,
+            Side.DESTINATION,
+            pageSize,
+            sourceIds,
+            expectedDatabase = destination.database,
+        )
+        verifyUnchanged(source.rows, sourceAgain.rows)
+        verifyUnchanged(destination.rows, destinationAgain.rows)
         return result
+    }
+
+    private data class Snapshot(val database: String, val rows: List<AgentAuditEvidenceIdentity>)
+
+    private fun snapshot(
+        factory: () -> Connection,
+        side: Side,
+        pageSize: Int,
+        sourceIds: List<UUID> = emptyList(),
+        expectedDatabase: String? = null,
+        distinctFrom: String? = null,
+    ): Snapshot = factory().use { connection ->
+        // A pre-opened transaction may already hold an old snapshot; refuse one even if its
+        // eventual JDBC flags look correct. The server check below verifies the effective mode.
+        require(connection.autoCommit) { "Audit inventory requires a fresh connection" }
+        connection.transactionIsolation = Connection.TRANSACTION_REPEATABLE_READ
+        connection.isReadOnly = true
+        connection.autoCommit = false
+        val database = serverDatabase(connection)
+        check(expectedDatabase == null || database == expectedDatabase) {
+            "Audit inventory database identity changed during collection"
+        }
+        check(distinctFrom == null || database != distinctFrom) {
+            "Audit inventory requires separate source and destination databases"
+        }
+        Snapshot(database, collect(connection, side, pageSize, sourceIds))
     }
 
     /**
@@ -46,6 +86,7 @@ object AgentAuditInventory {
                 connection.isReadOnly &&
                 connection.transactionIsolation == Connection.TRANSACTION_REPEATABLE_READ,
         ) { "Audit inventory requires a read-only repeatable-read transaction" }
+        serverDatabase(connection)
 
         if (side == Side.DESTINATION) {
             require(sourceIds.isNotEmpty()) { "Destination inventory requires source identities" }
@@ -94,6 +135,21 @@ object AgentAuditInventory {
     /** A second collection in fresh snapshots detects additions, removals, or payload edits during export. */
     fun verifyUnchanged(first: List<AgentAuditEvidenceIdentity>, second: List<AgentAuditEvidenceIdentity>) {
         check(first == second) { "Audit inventory changed during collection" }
+    }
+
+    /** The database name is retained only in memory and never included in an error or manifest. */
+    private fun serverDatabase(connection: Connection): String = connection.createStatement().use { statement ->
+        statement.executeQuery(
+            "SELECT current_database(), current_setting('transaction_read_only'), " +
+                "current_setting('transaction_isolation')",
+        ).use { rows ->
+            check(rows.next()) { "Audit inventory could not verify server transaction" }
+            check(rows.getString(2) == "on" && rows.getString(3) == "repeatable read") {
+                "Audit inventory server transaction is not read-only repeatable-read"
+            }
+            rows.getString(1)?.takeIf { it.isNotBlank() }
+                ?: error("Audit inventory database identity is unavailable")
+        }
     }
 
     private fun readPage(rows: java.sql.ResultSet, side: Side): List<AgentAuditEvidenceIdentity> = buildList {
