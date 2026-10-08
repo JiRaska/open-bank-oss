@@ -58,7 +58,6 @@ COMPONENTS = pathlib.Path("openbank-infra/gitops/components")
 ADVISORY_ALLOWLIST = {
     "openbank-card-issuance-service": "2026-10-05",
     "openbank-card-processing-service": "2026-10-05",
-    "openbank-sanctions-service": "2026-10-05",
     "openbank-standing-order-service": "2026-10-05",
 }
 
