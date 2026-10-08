@@ -591,9 +591,22 @@ jobs:
           JOB_FILE: ${{ runner.temp }}/service-ci-jobs.ndjson
         run: |
           set -euo pipefail
-          gh api --paginate \
-            "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}/jobs?per_page=100" \
-            --jq '.jobs[] | {name,conclusion}' > "$JOB_FILE"
+          # Large fleet runs can make GitHub's 100-job page return HTTP 502. Fetch
+          # smaller pages and publish the file only after every page succeeds.
+          for attempt in 1 2 3; do
+            if gh api --paginate \
+              "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}/jobs?per_page=50" \
+              --jq '.jobs[] | {name,conclusion}' > "${JOB_FILE}.tmp"; then
+              mv "${JOB_FILE}.tmp" "$JOB_FILE"
+              break
+            fi
+            rm -f "${JOB_FILE}.tmp"
+            if [ "$attempt" -eq 3 ]; then
+              echo 'Could not obtain the complete service CI job roster.' >&2
+              exit 1
+            fi
+            sleep "$((attempt * 2))"
+          done
           python3 - <<'PY'
           import json
           import os
