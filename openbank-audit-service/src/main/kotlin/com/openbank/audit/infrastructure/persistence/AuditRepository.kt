@@ -172,10 +172,18 @@ class AuditRepository : PanacheRepository<AuditEntryEntity> {
                 find("entryId", entry.id).firstResult()
             }.flatMap { existing ->
                 if (existing != null) {
-                    if (entry.eventType in CONTEXT_COMMITMENT_EVENT_TYPES) {
-                        require(existing.eventType == entry.eventType && existing.payload == entry.payload) {
-                            "Context audit commitment event ID reused with different evidence"
-                        }
+                    // Keep the legacy fleet's deduplication semantics. Agent provenance and
+                    // Context commitments carry strict evidence: a reused ID from either stream
+                    // must not silently accept a different body, type, or source claim.
+                    val agentEvidence = existing.sourceService == AGENT_SOURCE || entry.sourceService == AGENT_SOURCE
+                    val contextEvidence = existing.eventType in CONTEXT_COMMITMENT_EVENT_TYPES ||
+                        entry.eventType in CONTEXT_COMMITMENT_EVENT_TYPES
+                    if (agentEvidence || contextEvidence) {
+                        require(
+                            existing.eventType == entry.eventType &&
+                                existing.payload == entry.payload &&
+                                existing.sourceService == entry.sourceService,
+                        ) { "Audit event ID reused with different evidence" }
                     }
                     Uni.createFrom().voidItem()
                 } else {
@@ -499,6 +507,7 @@ class AuditRepository : PanacheRepository<AuditEntryEntity> {
     )
 
     companion object {
+        private const val AGENT_SOURCE = "agent-service"
         private val CONTEXT_COMMITMENT_EVENT_TYPES = setOf(
             "CONTEXT_READ_AUDIT_COMMITTED",
             "CONTEXT_DISCLOSURE_COMMITTED",
