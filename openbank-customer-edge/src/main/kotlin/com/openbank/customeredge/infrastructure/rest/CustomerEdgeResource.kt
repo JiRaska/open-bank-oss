@@ -3591,6 +3591,7 @@ class CustomerEdgeResource(
     fun listUnifiedNotifications(
         @QueryParam("limit") @DefaultValue("20") limit: Int,
         @QueryParam("partyId") filterPartyId: UUID?,
+        @QueryParam("cursor") cursor: String? = null,
     ): Response {
         val identity = customer()
         val allowed = listOf(identity.human) + actingForResolver.profilesOfStrict(identity.human)
@@ -3600,7 +3601,7 @@ class CustomerEdgeResource(
         }
         val parties = (filterPartyId?.let(::listOf) ?: allowed).distinct()
         return UnifiedNotificationInbox(upstream, objectMapper, notificationServiceUrl)
-            .list(parties, limit.coerceIn(1, 100))
+            .list(parties, limit.coerceIn(1, 100), cursor)
     }
 
     /** Mark one notification read. partyId injected from the JWT — the service scopes by it (IDOR). */
@@ -3608,11 +3609,19 @@ class CustomerEdgeResource(
     @Path("/notifications/{id}/read")
     @Authorize(action = "customer.notifications.mark-read", resource = "#id")
     @Blocking
-    fun markNotificationRead(@PathParam("id") id: UUID): Response {
-        val customer = customer()
+    fun markNotificationRead(@PathParam("id") id: UUID, @QueryParam("partyId") originPartyId: UUID?): Response {
+        val party = notificationOrigin(originPartyId) ?: return forbidden("Notification not found")
+        val detail = upstream.get(
+            "$notificationServiceUrl/api/v1/notifications/$id/self?partyId=$party",
+            party.toString(),
+        )
+        val node = runCatching { objectMapper.readTree(detail.entity?.toString() ?: "") }.getOrNull()
+        if (detail.status != 200 || node?.path("partyId")?.asText() != party.toString()) {
+            return forbidden("Notification not found")
+        }
         return upstream.patch(
-            "$notificationServiceUrl/api/v1/notifications/$id/read?partyId=${customer.partyId}",
-            customer.partyId.toString(),
+            "$notificationServiceUrl/api/v1/notifications/$id/read?partyId=$party",
+            party.toString(),
         )
     }
 
@@ -3621,11 +3630,11 @@ class CustomerEdgeResource(
     @Path("/notifications/read-all")
     @Authorize(action = "customer.notifications.mark-read")
     @Blocking
-    fun markAllNotificationsRead(): Response {
-        val customer = customer()
+    fun markAllNotificationsRead(@QueryParam("partyId") originPartyId: UUID? = null): Response {
+        val party = notificationOrigin(originPartyId) ?: return forbidden("Notification profile unavailable")
         return upstream.patch(
-            "$notificationServiceUrl/api/v1/notifications/read-all?partyId=${customer.partyId}",
-            customer.partyId.toString(),
+            "$notificationServiceUrl/api/v1/notifications/read-all?partyId=$party",
+            party.toString(),
         )
     }
 
@@ -3636,26 +3645,28 @@ class CustomerEdgeResource(
      * scoped, so the edge enforces ownership HERE: any notification whose `partyId` differs from the
      * caller is rejected as if absent (no existence leak) — the same IDOR guard the account routes
      * use. The body is already secret-redacted upstream (bodyForRead / TemplateSensitivity); the
-     * upstream `partyId`/`recipient` fields are stripped from the customer-facing response.
+     * upstream `recipient` is stripped from the customer-facing response. The authorized origin
+     * `partyId` is returned so detail and mark-read actions can target the same profile.
      */
     @GET
     @Path("/notifications/{id}")
     @Authorize(action = "customer.notifications.read", resource = "#id")
     @Blocking
-    fun getNotification(@PathParam("id") id: UUID): Response {
-        val customer = customer()
+    fun getNotification(@PathParam("id") id: UUID, @QueryParam("partyId") originPartyId: UUID?): Response {
+        val party = notificationOrigin(originPartyId) ?: return forbidden("Notification not found")
         val resp = upstream.get(
-            "$notificationServiceUrl/api/v1/notifications/$id",
-            customer.partyId.toString(),
+            "$notificationServiceUrl/api/v1/notifications/$id/self?partyId=$party",
+            party.toString(),
         )
         if (resp.status != 200) return forbidden("Notification not found")
         val node = runCatching { objectMapper.readTree(resp.entity?.toString() ?: "") }.getOrNull()
             ?: return forbidden("Notification not found")
-        if (node.get("partyId")?.asText() != customer.partyId.toString()) {
+        if (node.get("partyId")?.asText() != party.toString()) {
             return forbidden("Notification does not belong to caller")
         }
         val out = objectMapper.createObjectNode()
         out.put("id", node.get("id")?.asText())
+        out.put("partyId", party.toString())
         node.get("template")?.asText()?.let { out.put("template", it) }
         node.get("subject")?.asText()?.let { out.put("subject", it) }
         out.put("body", node.get("body")?.asText() ?: "")
@@ -3663,6 +3674,15 @@ class CustomerEdgeResource(
         node.get("readAt")?.asText()?.let { out.put("readAt", it) }
         node.get("createdAt")?.asText()?.let { out.put("createdAt", it) }
         return Response.ok(out).type(MediaType.APPLICATION_JSON).build()
+    }
+
+    private fun notificationOrigin(requested: UUID?): UUID? {
+        val identity = customer()
+        if (requested == null) return identity.partyId
+        if (requested == identity.human) return identity.human
+        return requested.takeIf { party ->
+            actingForResolver.profilesOfStrict(identity.human).any { it["partyId"] == party }
+        }
     }
 
     /** The caller's push-notification preferences (#2). Party is taken from the JWT, never the client. */

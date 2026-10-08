@@ -6,11 +6,21 @@ package com.openbank.customeredge.infrastructure.rest
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.ObjectNode
+import com.openbank.libs.web.MDC_SYNTHETIC
 import io.quarkus.logging.Log
+import jakarta.ws.rs.BadRequestException
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
+import org.jboss.logging.MDC
+import java.security.MessageDigest
+import java.time.Duration
+import java.time.Instant
+import java.util.Base64
 import java.util.UUID
 import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.CompletionService
+import java.util.concurrent.ExecutorCompletionService
+import java.util.concurrent.Future
 import java.util.concurrent.Semaphore
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
@@ -20,29 +30,42 @@ internal class UnifiedNotificationInbox(
     private val upstream: UpstreamClient,
     private val mapper: ObjectMapper,
     private val serviceUrl: String,
+    private val aggregateTimeout: Duration = Duration.ofSeconds(12),
 ) {
     private data class PartyPage(val items: List<ObjectNode>, val total: Long, val unread: Long)
+    private data class Cursor(val createdAt: Instant, val id: UUID, val profileScope: String) {
+        fun encode(): String = Base64.getUrlEncoder().withoutPadding()
+            .encodeToString("$createdAt|$id|$profileScope".toByteArray(Charsets.UTF_8))
+    }
 
-    fun list(parties: List<UUID>, limit: Int): Response {
-        // Synthetic taint lives in request-thread MDC/baggage. Keep those reads on the caller
-        // thread so the existing UpstreamClient propagates the trusted taint to every service.
+    fun list(parties: List<UUID>, limit: Int, cursor: String? = null): Response {
+        val scope = profileScope(parties)
+        val after = decodeCursor(cursor, scope)
+        // The request filter is the sole source of synthetic taint. Capture its trusted verdict
+        // before worker dispatch, and install only that bit for each worker call.
         val synthetic = currentRequestIsSynthetic()
         return try {
-            val pages = if (synthetic) {
-                parties.map { fetchBounded(it, limit) }
-            } else {
-                parties.map { party -> workers.submit<PartyPage> { fetchBounded(party, limit) } }.map { it.get() }
-            }
+            val deadline = System.nanoTime() + aggregateTimeout.toNanos()
+            val pages = fetchAll(parties, limit, after, synthetic, deadline)
             val ordered = pages.flatMap { it.items }.sortedWith(
-                compareByDescending<ObjectNode> { it.path("createdAt").asText() }
+                compareByDescending<ObjectNode> { Instant.parse(it.path("createdAt").asText()) }
                     .thenByDescending { it.path("id").asText() },
             ).take(limit)
+            check(System.nanoTime() < deadline) { "Notification deadline exceeded" }
             val out = mapper.createObjectNode()
             out.set<com.fasterxml.jackson.databind.JsonNode>("items", mapper.valueToTree(ordered))
             out.put("total", pages.sumOf { it.total })
             out.put("unreadCount", pages.sumOf { it.unread })
             out.put("size", limit)
             out.put("page", 0)
+            val last = ordered.lastOrNull()
+            if (ordered.size == limit && last != null) {
+                val lastAt = Instant.parse(last.path("createdAt").asText())
+                val lastId = UUID.fromString(last.path("id").asText())
+                out.put("nextCursor", Cursor(lastAt, lastId, scope).encode())
+            } else {
+                out.putNull("nextCursor")
+            }
             Response.ok(out.toString()).type(MediaType.APPLICATION_JSON).build()
         } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
             Log.warn("Unified notification feed unavailable", e)
@@ -51,18 +74,63 @@ internal class UnifiedNotificationInbox(
         }
     }
 
-    private fun fetchBounded(party: UUID, limit: Int): PartyPage {
+    private fun fetchAll(
+        parties: List<UUID>,
+        limit: Int,
+        after: Cursor?,
+        synthetic: Boolean,
+        deadline: Long,
+    ): List<PartyPage> {
+        val completion: CompletionService<PartyPage> = ExecutorCompletionService(workers)
+        val pending = mutableListOf<Future<PartyPage>>()
+        val pages = mutableListOf<PartyPage>()
+        var next = 0
+        try {
+            while (next < parties.size && pending.size < MAX_CONCURRENT_FEEDS) {
+                val party = parties[next++]
+                pending += completion.submit { fetchWithTaint(party, limit, after, synthetic) }
+            }
+            while (pending.isNotEmpty()) {
+                val remaining = deadline - System.nanoTime()
+                check(remaining > 0) { "Notification deadline exceeded" }
+                val done = completion.poll(remaining, TimeUnit.NANOSECONDS)
+                    ?: error("Notification deadline exceeded")
+                pending.remove(done)
+                pages += done.get()
+                if (next < parties.size) {
+                    val party = parties[next++]
+                    pending += completion.submit { fetchWithTaint(party, limit, after, synthetic) }
+                }
+            }
+            return pages
+        } finally {
+            pending.forEach { it.cancel(true) }
+        }
+    }
+
+    private fun fetchWithTaint(party: UUID, limit: Int, after: Cursor?, synthetic: Boolean): PartyPage {
+        val previous = MDC.get(MDC_SYNTHETIC)
+        if (synthetic) MDC.put(MDC_SYNTHETIC, "true") else MDC.remove(MDC_SYNTHETIC)
+        return try {
+            fetchBounded(party, limit, after)
+        } finally {
+            if (previous == null) MDC.remove(MDC_SYNTHETIC) else MDC.put(MDC_SYNTHETIC, previous)
+        }
+    }
+
+    private fun fetchBounded(party: UUID, limit: Int, after: Cursor?): PartyPage {
         upstreamPermits.acquire()
         return try {
-            fetch(party, limit)
+            fetch(party, limit, after)
         } finally {
             upstreamPermits.release()
         }
     }
 
-    private fun fetch(party: UUID, limit: Int): PartyPage {
+    private fun fetch(party: UUID, limit: Int, after: Cursor?): PartyPage {
+        val keyset = after?.let { "&beforeCreatedAt=${it.createdAt}&beforeId=${it.id}" } ?: ""
         val response = upstream.get(
-            "$serviceUrl/api/v1/notifications?partyId=$party&page=0&size=$limit",
+            "$serviceUrl/api/v1/notifications?partyId=$party&page=0&size=$limit$keyset",
             party.toString(),
         )
         if (response.status != HTTP_OK) error("Notification feed unavailable")
@@ -75,9 +143,27 @@ internal class UnifiedNotificationInbox(
             if (row !is ObjectNode || row.path("partyId").asText() != party.toString()) {
                 error("Notification party mismatch")
             }
-            row.deepCopy()
+            row.deepCopy().also { it.remove("recipient") }
         }
         return PartyPage(items, page.path("total").asLong(), page.path("unreadCount").asLong())
+    }
+
+    private fun profileScope(parties: List<UUID>): String {
+        val canonical = parties.distinct().sorted().joinToString(",")
+        val digest = MessageDigest.getInstance("SHA-256").digest(canonical.toByteArray(Charsets.UTF_8))
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(digest)
+    }
+
+    private fun decodeCursor(encoded: String?, expectedScope: String): Cursor? {
+        if (encoded == null) return null
+        if (encoded.length !in 1..220) throw BadRequestException("Invalid notification cursor")
+        return try {
+            val raw = String(Base64.getUrlDecoder().decode(encoded), Charsets.UTF_8).split('|')
+            require(raw.size == 3 && raw[2] == expectedScope)
+            Cursor(Instant.parse(raw[0]), UUID.fromString(raw[1]), raw[2])
+        } catch (e: IllegalArgumentException) {
+            throw BadRequestException("Invalid notification cursor", e)
+        }
     }
 
     private companion object {
@@ -85,9 +171,9 @@ internal class UnifiedNotificationInbox(
         const val MAX_QUEUED_FEEDS = 128
         const val HTTP_OK = 200
 
-        // One bounded pool per replica, not eight new threads per customer request. Caller-runs
-        // backpressures requests when its queue is full; the semaphore bounds upstream calls even
-        // when a task executes on the request thread. Synthetic requests bypass the pool entirely.
+        // One bounded pool per replica. Reject saturation so work cannot escape the request's
+        // deadline by running on its caller thread. Synthetic requests use this same pool after
+        // their trusted taint bit is captured and restored around each worker call.
         val upstreamPermits = Semaphore(MAX_CONCURRENT_FEEDS, true)
         val workers = ThreadPoolExecutor(
             MAX_CONCURRENT_FEEDS,
@@ -99,7 +185,7 @@ internal class UnifiedNotificationInbox(
                 Thread.ofPlatform().name("unified-notification-feed").daemon(true)
                     .inheritInheritableThreadLocals(false).unstarted(task)
             },
-            ThreadPoolExecutor.CallerRunsPolicy(),
+            ThreadPoolExecutor.AbortPolicy(),
         )
     }
 }

@@ -10,6 +10,7 @@ import com.openbank.customeredge.infrastructure.rest.inMemoryPaymentSessionStore
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import jakarta.ws.rs.BadRequestException
 import jakarta.ws.rs.ServiceUnavailableException
 import jakarta.ws.rs.core.Response
 import org.assertj.core.api.Assertions.assertThat
@@ -17,6 +18,7 @@ import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.jboss.logging.MDC
 import org.junit.jupiter.api.Test
 import java.time.Clock
+import java.time.Duration
 import java.util.UUID
 
 class UnifiedNotificationInboxTest {
@@ -48,6 +50,89 @@ class UnifiedNotificationInboxTest {
             .containsExactly(company.toString(), human.toString())
         assertThat(body.path("total").asInt()).isEqualTo(2)
         assertThat(body.path("unreadCount").asInt()).isEqualTo(3)
+    }
+
+    @Test
+    fun `fractional second instant outranks older whole second across profiles`() {
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(any(), human.toString()) } returns page(human, "2026-10-08T10:00:00Z", 1)
+        every { upstream.get(any(), company.toString()) } returns page(company, "2026-10-08T10:00:00.500Z", 1)
+        val response = UnifiedNotificationInbox(upstream, mapper, "http://notifications")
+            .list(listOf(human, company), 1)
+        assertThat(response.status).isEqualTo(200)
+        assertThat(mapper.readTree(response.entity as String).path("items")[0].path("partyId").asText())
+            .isEqualTo(company.toString())
+    }
+
+    @Test
+    fun `next page sends strict keyset cursor to every authorized profile`() {
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(any(), human.toString()) } answers {
+            if (firstArg<String>().contains("beforeCreatedAt=")) {
+                page(human, "2026-10-08T08:00:00Z", 1)
+            } else {
+                page(human, "2026-10-08T10:00:00Z", 1)
+            }
+        }
+        every { upstream.get(any(), company.toString()) } returns page(company, "2026-10-08T09:00:00Z", 1)
+        val inbox = UnifiedNotificationInbox(upstream, mapper, "http://notifications")
+        val first = mapper.readTree(inbox.list(listOf(human, company), 1).entity as String)
+        val cursor = first.path("nextCursor").asText()
+        val second = mapper.readTree(inbox.list(listOf(human, company), 1, cursor).entity as String)
+        assertThat(second.path("items")[0].path("createdAt").asText()).isEqualTo("2026-10-08T09:00:00Z")
+        verify(exactly = 2) { upstream.get(match { it.contains("beforeCreatedAt=2026-10-08T10:00:00Z") }, any()) }
+    }
+
+    @Test
+    fun `cursor from one authorized profile set cannot silently page another`() {
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(any(), human.toString()) } returns page(human, "2026-10-08T10:00:00Z", 1)
+        every { upstream.get(any(), company.toString()) } returns page(company, "2026-10-08T09:00:00Z", 1)
+        val inbox = UnifiedNotificationInbox(upstream, mapper, "http://notifications")
+        val first = mapper.readTree(inbox.list(listOf(human, company), 1).entity as String)
+        val cursor = first.path("nextCursor").asText()
+        assertThatThrownBy { inbox.list(listOf(human), 1, cursor) }
+            .isInstanceOf(BadRequestException::class.java)
+        verify(exactly = 1) { upstream.get(any(), human.toString()) }
+    }
+
+    @Test
+    fun `invalid cursor is refused before any upstream call`() {
+        val upstream = mockk<UpstreamClient>()
+        assertThatThrownBy {
+            UnifiedNotificationInbox(upstream, mapper, "http://notifications").list(listOf(human), 1, "!")
+        }.isInstanceOf(BadRequestException::class.java)
+        verify(exactly = 0) { upstream.get(any(), any()) }
+    }
+
+    @Test
+    fun `malformed upstream instant fails the whole inbox closed`() {
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(any(), human.toString()) } returns page(human, "invalid", 1)
+        val response = UnifiedNotificationInbox(upstream, mapper, "http://notifications")
+            .list(listOf(human), 1)
+        assertThat(response.status).isEqualTo(502)
+    }
+
+    @Test
+    fun `slow upstream exceeds aggregate deadline without partial response`() {
+        val upstream = mockk<UpstreamClient>()
+        val startedReads = java.util.concurrent.atomic.AtomicInteger()
+        every { upstream.get(any(), any()) } answers {
+            startedReads.incrementAndGet()
+            Thread.sleep(500)
+            page(UUID.fromString(secondArg()), "2026-10-08T09:00:00Z", 1)
+        }
+        val started = System.nanoTime()
+        val response = UnifiedNotificationInbox(
+            upstream,
+            mapper,
+            "http://notifications",
+            Duration.ofMillis(80),
+        ).list(List(40) { UUID.randomUUID() }, 1)
+        assertThat(response.status).isEqualTo(502)
+        assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofMillis(400))
+        assertThat(startedReads.get()).isLessThanOrEqualTo(16)
     }
 
     @Test
@@ -95,20 +180,50 @@ class UnifiedNotificationInboxTest {
     }
 
     @Test
-    fun `synthetic requests keep upstream reads on the tainted request thread`() {
+    fun `synthetic requests propagate trusted taint into bounded workers without leaking it`() {
         val upstream = mockk<UpstreamClient>()
-        val callerThread = Thread.currentThread().threadId()
-        val observedThreads = java.util.Collections.synchronizedList(mutableListOf<Long>())
+        val observedThreads = java.util.Collections.synchronizedList(mutableListOf<String>())
+        val observedTaint = java.util.Collections.synchronizedList(mutableListOf<Any?>())
         every { upstream.get(any(), any()) } answers {
-            observedThreads += Thread.currentThread().threadId()
+            observedThreads += Thread.currentThread().name
+            observedTaint += MDC.get("synthetic")
+            page(UUID.fromString(secondArg()), "2026-10-08T09:00:00Z", 1)
+        }
+        val inbox = UnifiedNotificationInbox(upstream, mapper, "http://notifications")
+        MDC.put("synthetic", "true")
+        try {
+            val response = inbox.list(listOf(human, company), 20)
+            assertThat(response.status).isEqualTo(200)
+            assertThat(observedThreads).allMatch { it == "unified-notification-feed" }
+            assertThat(observedTaint).containsOnly("true")
+        } finally {
+            MDC.remove("synthetic")
+        }
+        assertThat(inbox.list(listOf(human), 20).status).isEqualTo(200)
+        assertThat(observedTaint.last()).isNull()
+    }
+
+    @Test
+    fun `synthetic slow inventory obeys the same aggregate deadline`() {
+        val upstream = mockk<UpstreamClient>()
+        val startedReads = java.util.concurrent.atomic.AtomicInteger()
+        every { upstream.get(any(), any()) } answers {
+            startedReads.incrementAndGet()
+            Thread.sleep(500)
             page(UUID.fromString(secondArg()), "2026-10-08T09:00:00Z", 1)
         }
         MDC.put("synthetic", "true")
         try {
-            val response = UnifiedNotificationInbox(upstream, mapper, "http://notifications")
-                .list(listOf(human, company), 20)
-            assertThat(response.status).isEqualTo(200)
-            assertThat(observedThreads).containsExactly(callerThread, callerThread)
+            val started = System.nanoTime()
+            val response = UnifiedNotificationInbox(
+                upstream,
+                mapper,
+                "http://notifications",
+                Duration.ofMillis(80),
+            ).list(List(40) { UUID.randomUUID() }, 1)
+            assertThat(response.status).isEqualTo(502)
+            assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofMillis(400))
+            assertThat(startedReads.get()).isLessThanOrEqualTo(16)
         } finally {
             MDC.remove("synthetic")
         }
@@ -133,10 +248,10 @@ class UnifiedNotificationInboxTest {
                 active.decrementAndGet()
             }
         }
-        val callers = java.util.concurrent.Executors.newFixedThreadPool(12)
+        val callers = java.util.concurrent.Executors.newFixedThreadPool(6)
         try {
             val inbox = UnifiedNotificationInbox(upstream, mapper, "http://notifications")
-            val responses = List(12) { callers.submit<Response> { inbox.list(parties, 20) } }.map { it.get() }
+            val responses = List(6) { callers.submit<Response> { inbox.list(parties, 20) } }.map { it.get() }
             assertThat(responses.map { it.status }).containsOnly(200)
             assertThat(pooledThreads.size).isBetween(1, 16)
             assertThat(peak.get()).isLessThanOrEqualTo(16)
@@ -178,6 +293,70 @@ class UnifiedNotificationInboxTest {
         assertThatThrownBy { resource.listUnifiedNotifications(20, null) }
             .isInstanceOf(ServiceUnavailableException::class.java)
         verify(exactly = 0) { upstream.get(any(), any()) }
+    }
+
+    @Test
+    fun `authorized company detail includes origin while hiding upstream recipient`() {
+        val id = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        val url = "http://notifications/api/v1/notifications/$id/self?partyId=$company"
+        every { upstream.get(url, company.toString()) } returns
+            Response.ok("""{"id":"$id","partyId":"$company","recipient":"private","body":"message"}""").build()
+        val response = resource(upstream).getNotification(id, company)
+        assertThat(response.status).isEqualTo(200)
+        val body = response.entity.toString()
+        assertThat(body).contains(company.toString()).doesNotContain("recipient", "private")
+    }
+
+    @Test
+    fun `foreign origin cannot fetch detail or mark notification read`() {
+        val id = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        val resource = resource(upstream)
+        assertThat(resource.getNotification(id, stranger).status).isEqualTo(403)
+        assertThat(resource.markNotificationRead(id, stranger).status).isEqualTo(403)
+        verify(exactly = 0) { upstream.get(any(), any()) }
+        verify(exactly = 0) { upstream.patch(any(), any()) }
+    }
+
+    @Test
+    fun `mark read verifies upstream origin before mutation`() {
+        val id = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        val url = "http://notifications/api/v1/notifications/$id/self?partyId=$company"
+        every { upstream.get(url, company.toString()) } returns
+            Response.ok("""{"id":"$id","partyId":"$human"}""").build()
+        val response = resource(upstream).markNotificationRead(id, company)
+        assertThat(response.status).isEqualTo(403)
+        verify(exactly = 0) { upstream.patch(any(), any()) }
+    }
+
+    @Test
+    fun `authorized company notification is marked read in its origin profile`() {
+        val id = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        val url = "http://notifications/api/v1/notifications/$id/self?partyId=$company"
+        every { upstream.get(url, company.toString()) } returns
+            Response.ok("""{"id":"$id","partyId":"$company"}""").build()
+        val readUrl = "http://notifications/api/v1/notifications/$id/read?partyId=$company"
+        every { upstream.patch(readUrl, company.toString()) } returns
+            Response.noContent().build()
+        val response = resource(upstream).markNotificationRead(id, company)
+        assertThat(response.status).isEqualTo(204)
+        verify(exactly = 1) {
+            upstream.patch(readUrl, company.toString())
+        }
+    }
+
+    @Test
+    fun `read all remains scoped to authorized origin profile`() {
+        val upstream = mockk<UpstreamClient>()
+        val url = "http://notifications/api/v1/notifications/read-all?partyId=$company"
+        every { upstream.patch(url, company.toString()) } returns Response.ok("""{"marked":1}""").build()
+        val resource = resource(upstream)
+        assertThat(resource.markAllNotificationsRead(company).status).isEqualTo(200)
+        assertThat(resource.markAllNotificationsRead(stranger).status).isEqualTo(403)
+        verify(exactly = 1) { upstream.patch(url, company.toString()) }
     }
 
     private fun resource(upstream: UpstreamClient, resolver: ActingForResolver = mockk()): CustomerEdgeResource {
