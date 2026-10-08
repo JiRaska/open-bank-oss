@@ -661,7 +661,7 @@ jobs:
             git fetch --unshallow origin main
           fi
           gh pr diff "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
-            | python3 .github/scripts/deploy-window.py verify --root .
+            | python3 .github/scripts/deploy-window.py verify --root . --expect-admin-ui
       - name: Verify agent PR admission
         env:
           RESULT: ${{ needs.agent-admission.result }}
