@@ -56,6 +56,14 @@ spec:
           annotations:
             summary: "Public status monitoring is missing"
             description: "A public status page, API, freshness or DNS probe is not producing metrics. Check the Probe resources and blackbox exporter."
+        - alert: PublicStatusDNSResolverProbeMissing
+          expr: absent(probe_success{job="synthetic-status-dns",instance="1.1.1.1:53"}) or absent(probe_success{job="synthetic-status-dns",instance="8.8.8.8:53"})
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Public status DNS resolver probe missing: {{ $labels.instance }}"
+            description: "The public status DNS probe is not producing metrics for this resolver. Check the Probe target and blackbox exporter."
         # The login alert (probes-synthetic.yaml: synthetic-oidc-discovery). Fires when a
         # Keycloak realm stops serving its OIDC discovery document — i.e. nobody can log
         # in. This is deliberately its own alert because no other signal sees it: the
