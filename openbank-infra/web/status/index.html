@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#071933">
+  <meta name="description" content="Live OpenBank service status, incident updates, and a clear guide to availability, SLOs, SLAs, and error budgets.">
+  <link rel="canonical" href="https://status.open-bank.tech/">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="OpenBank Status">
+  <meta property="og:description" content="Live service checks and incident history, with the scope of each check clearly stated.">
+  <meta property="og:url" content="https://status.open-bank.tech/">
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebPage","name":"OpenBank Status","url":"https://status.open-bank.tech/","description":"Live OpenBank service checks and incident history.","isPartOf":{"@type":"WebSite","name":"OpenBank","url":"https://open-bank.tech/"}}</script>
+  <link rel="icon" href="assets/ob-mark-complete.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+  <title>OpenBank Status · Service health, clearly explained</title>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="shell header-inner">
+      <a class="brand" href="/" aria-label="OpenBank Status home"><img src="assets/ob-mark-complete.svg" width="43" height="31" alt=""><span>OpenBank<span class="brand-soft"> / Status</span></span></a>
+      <nav aria-label="Primary navigation"><a href="#services">Services</a><a href="#incidents">Incidents</a><a href="#learn">Learn</a><a class="nav-api" href="#api">API <span aria-hidden="true">↗</span></a></nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-grid shell">
+        <div class="hero-copy">
+          <div class="eyebrow"><span class="pulse-dot" aria-hidden="true"></span> LIVE SERVICE STATUS <span class="eyebrow-line"></span> OPENBANK</div>
+          <h1 id="hero-title">A clearer view of <em>what's working.</em></h1>
+          <p class="hero-intro">External and internal checks. Incident history.</p>
+          <div id="overall-banner" class="overall-banner is-unknown" role="status" aria-live="polite">
+            <span class="overall-icon" aria-hidden="true">?</span>
+            <span><strong id="overall-label">Checking service status</strong><small id="overall-detail">Connecting to our independent status checks…</small></span>
+          </div>
+          <div class="hero-meta"><span id="last-check">Last checked: —</span><span class="meta-separator" aria-hidden="true">·</span><span>Updated every 2 minutes</span></div>
+        </div>
+        <div class="mascot-stage" aria-label="OpenBank lions and robot working together">
+          <div class="stage-orbit stage-orbit-one"></div><div class="stage-orbit stage-orbit-two"></div>
+          <div class="stage-spark stage-spark-one"></div><div class="stage-spark stage-spark-two"></div>
+          <img class="mascot mascot-operational frame-a" src="assets/lions-operational.webp" width="1620" height="950" alt="Two OpenBank lions and a robot monitoring services" fetchpriority="high">
+          <img class="mascot mascot-operational frame-b" src="assets/lions-operational-motion.webp" width="1620" height="950" alt="" aria-hidden="true">
+          <img class="mascot mascot-repair frame-a" src="assets/lions-repair.webp" width="1620" height="950" alt="OpenBank lions wearing safety helmets and repairing a service" aria-hidden="true">
+          <img class="mascot mascot-repair frame-b" src="assets/lions-repair-motion.webp" width="1620" height="950" alt="" aria-hidden="true">
+          <div class="motion-packet packet-one" aria-hidden="true"></div><div class="motion-packet packet-two" aria-hidden="true"></div><div class="motion-packet packet-three" aria-hidden="true"></div>
+          <div class="stage-caption"><span class="caption-signal" aria-hidden="true">✦</span> Monitoring live</div>
+        </div>
+      </div>
+      <div class="hero-bottom shell"><span>PUBLIC STATUS · ALL TIMES UTC</span><a href="#services">Explore live checks <span aria-hidden="true">↓</span></a></div>
+    </section>
+
+    <section id="services" class="section shell" aria-labelledby="services-title">
+      <div class="section-heading"><div><span class="kicker">01 / LIVE CHECKS</span><h2 id="services-title">Service status.</h2><p>Each result covers only the check named below.</p></div><div class="legend"><span><i class="legend-dot healthy"></i> Operational</span><span><i class="legend-dot impaired"></i> Impacted</span><span><i class="legend-dot unknown"></i> Unverified</span></div></div>
+      <div id="components" class="component-grid" aria-live="polite">
+        <article class="service-card skeleton"><div class="service-icon">◎</div><div class="skeleton-line"></div><div class="skeleton-line short"></div></article>
+        <article class="service-card skeleton"><div class="service-icon">◈</div><div class="skeleton-line"></div><div class="skeleton-line short"></div></article>
+        <article class="service-card skeleton"><div class="service-icon">↗</div><div class="skeleton-line"></div><div class="skeleton-line short"></div></article>
+      </div>
+      <p class="coverage-note"><strong>Scope:</strong> Web, sign-in, API edge, core and payment service reachability. Payment completion and mobile journeys untested.</p>
+    </section>
+
+    <section class="section history-section" aria-labelledby="history-title"><div class="shell">
+      <div class="section-heading"><div><span class="kicker">02 / HISTORY</span><h2 id="history-title">Observed availability.</h2><p>Successful website checks ÷ valid checks. Missing samples stay unverified.</p></div><div class="window-switch" role="group" aria-label="History window"><button class="active" type="button" data-window="24h" aria-pressed="true">24 hours</button><button type="button" data-window="30d" aria-pressed="false">30 days</button></div></div>
+      <div class="history-panel"><div class="history-top"><div><span class="history-label">PUBLIC WEBSITE · OBSERVED AVAILABILITY</span><div class="history-value" id="availability-value">— <span>awaiting data</span></div></div><div class="history-stat"><span>Samples observed</span><strong id="samples-value">—</strong></div></div><div id="history-bars" class="history-bars" role="img" aria-label="No history available yet"></div><div class="history-axis"><span id="history-start">—</span><span id="history-end">Now</span></div><p class="history-footnote" id="history-note">Availability is calculated from recorded external probe results, not estimated from page views.</p></div>
+    </div></section>
+
+    <section id="incidents" class="section shell" aria-labelledby="incidents-title"><div class="section-heading"><div><span class="kicker">03 / INCIDENTS</span><h2 id="incidents-title">Incident log.</h2><p>Confirmed after 3 failed checks; resolved after 2 passes. Times in UTC.</p></div></div><div id="incident-list" class="incident-list"><div class="empty-state"><span class="empty-mark">○</span><div><strong>Checking incidents</strong></div></div></div></section>
+
+    <section id="learn" class="learn-section"><div class="shell">
+      <div class="learn-intro"><span class="kicker">04 / RELIABILITY, DEFINED</span><h2>Know the <em>difference.</em></h2><p>Measurement, target, agreement. Three distinct things.</p></div>
+      <div class="term-grid">
+        <article class="term-card"><span class="term-number">01 / MEASURED</span><h3>SLI <span>Indicator</span></h3><p>The measured result for a defined service and period.</p><div class="term-formula">successful checks ÷ valid checks</div></article>
+        <article class="term-card"><span class="term-number">02 / TARGET</span><h3>SLO <span>Objective</span></h3><p>An internal target for one SLI and time window.</p><div class="term-formula">example: 99.9% over 30 days</div></article>
+        <article class="term-card"><span class="term-number">03 / CONTRACT</span><h3>SLA <span>Agreement</span></h3><p>A contractual promise with scope and remedies.</p><div class="term-formula">examples here are not an SLA</div></article>
+      </div>
+      <div class="budget-panel"><div><span class="kicker">ERROR BUDGET · EXAMPLE</span><h3>How much downtime?</h3><p>Allowed unavailable time over 30 days for a hypothetical SLO.</p><label for="slo-select">Example SLO</label><select id="slo-select"><option value="99">99%</option><option value="99.5">99.5%</option><option value="99.9" selected>99.9%</option><option value="99.95">99.95%</option><option value="99.99">99.99%</option></select></div><div class="budget-visual"><div class="budget-ring" id="budget-ring"><div><span>30-DAY BUDGET</span><strong id="budget-value">43m 12s</strong></div></div><small id="budget-formula">(1 − 0.999) × 30 × 24 × 60 minutes</small></div></div>
+      <div class="more-metrics"><article><span class="metric-glyph">◷</span><h3>Latency · p95</h3><p>95% of measured requests finish within this time.</p></article><article><span class="metric-glyph">↺</span><h3>RTO · RPO</h3><p>Target restore time · maximum acceptable data-loss window.</p></article><article><span class="metric-glyph">◎</span><h3>MTTD · MTTR</h3><p>Measured time to detect · measured time to restore.</p></article></div>
+    </div></section>
+
+    <section id="api" class="api-section"><div class="shell api-inner"><div><span class="kicker">05 / PUBLIC API</span><h2>Status in <em>JSON.</em></h2><p>No key. Health returns 503 for impact or stale data.</p></div><div class="api-list"><a href="/api/v1/health"><code>GET /api/v1/health</code><span>Current status ↗</span></a><a href="/api/v1/history"><code>GET /api/v1/history</code><span>24h and 30d checks ↗</span></a><a href="/api/v1/incidents"><code>GET /api/v1/incidents</code><span>Incident timeline ↗</span></a><a href="/api/v1/healthz"><code>GET /api/v1/healthz</code><span>Status API health ↗</span></a><a href="/openapi.yaml"><code>OpenAPI 3.1</code><span>Contract ↗</span></a></div></div></section>
+  </main>
+  <footer class="site-footer"><div class="shell footer-inner"><div><a class="brand" href="https://open-bank.tech/"><img src="assets/ob-mark-complete.svg" width="36" height="26" alt="">OpenBank</a></div><div class="footer-links"><a href="https://open-bank.tech/">Website</a><a href="/privacy.html">Privacy</a><a href="https://github.com/JiRaska/open-bank-oss">Open source</a><a href="#main">Back to top ↑</a></div><small>© <span id="year">2026</span> OpenBank · UTC</small></div></footer>
+</body>
+</html>
