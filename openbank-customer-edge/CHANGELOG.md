@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.89.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.88.0...customer-edge-v0.89.0) (2026-10-08)
+
+
+### Features
+
+* **customer-edge:** unify authorized notification feeds ([#12261](https://github.com/JiRaska/open-bank-oss/issues/12261)) ([711b72a](https://github.com/JiRaska/open-bank-oss/commit/711b72a3fe365bbb21396f6876ff774bd496cb12))
+
 ## [0.88.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.87.0...customer-edge-v0.88.0) (2026-10-07)
 
 
