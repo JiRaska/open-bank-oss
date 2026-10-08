@@ -280,24 +280,30 @@ class BillingAssessmentRepositoryImpl(private val sf: Mutiny.SessionFactory, pri
         }.awaitSuspending().map { it.toDomain() }
 
     /**
-     * ADR-0248 annual fee-summary trigger. The durable issuance key is unique on the
-     * deterministic `(accountId, year)` aggregate ID and survives SENT outbox retention.
-     * Its insert and the event append share one transaction: a duplicate or concurrent rerun
-     * observes the conflict and cannot publish another event.
+     * ADR-0248 annual fee-summary trigger. [aggregateIdFor] is deterministic on
+     * `(accountId, year)`, so re-running the annual scheduler for an account/year that already
+     * has a row is a genuine no-op — the existence check and the insert happen in the SAME
+     * transaction, closing the same check-then-act race [persistWithPostingIntent] documents for
+     * the charge leg (two concurrent scheduler runs can only ever insert one row per account/year;
+     * the `billing_outbox` primary key has no unique constraint on `aggregate_id` to backstop this
+     * the way `uq_billing_cycle_assessment` backstops the charge leg, so the transactional
+     * read-then-write here IS the whole guarantee — acceptable because, unlike the charge leg,
+     * this table has exactly one writer: the annual scheduler, never a customer-facing request).
      */
     override suspend fun appendAnnualFeeSummaryEvent(summary: AnnualFeeSummary, occurredAt: Instant): Boolean {
         val aggregateId = aggregateIdFor(summary.accountId, summary.year)
         val now = Instant.now(clock)
         val payload = AnnualFeeSummaryOutboxPayloads.toJson(summary, occurredAt)
         return sf.withTransaction { s, _ ->
-            s.createNativeQuery<Int>(
-                "INSERT INTO billing_annual_fee_summary_issuance (aggregate_id, recorded_at) " +
-                    "VALUES (:id, :at) ON CONFLICT (aggregate_id) DO NOTHING",
+            s.createQuery(
+                "FROM BillingOutboxEntity WHERE aggregateId = :id AND eventType = :et",
+                BillingOutboxEntity::class.java,
             ).setParameter("id", aggregateId)
-                .setParameter("at", now)
-                .executeUpdate()
-                .chain { inserted ->
-                    if (inserted == 0) {
+                .setParameter("et", ANNUAL_FEE_SUMMARY_EVENT_TYPE)
+                .setMaxResults(1)
+                .singleResultOrNull
+                .chain { existing ->
+                    if (existing != null) {
                         Uni.createFrom().item(false)
                     } else {
                         val entity = BillingOutboxEntity().apply {

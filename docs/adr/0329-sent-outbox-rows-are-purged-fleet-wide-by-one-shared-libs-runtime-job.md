@@ -61,14 +61,15 @@ We will purge SENT outbox rows with **one** `@ApplicationScoped` job in `openban
 - **Isolated and observable:** one outbox failing increments `openbank_outbox_purge_failed_total`
   and the rest still run; deletions count into `openbank_outbox_purged_total{status="SENT"}`; the
   ADR-0237 workflow liveness `outbox-sent-retention` is registered at `StartupEvent` (only when the
-  service has an outbox) and recorded only when every outbox succeeded.
+  service has a non-exempt retention target) and recorded only when every active outbox succeeded.
 - **Opting out is explicit.** `openbank.outbox.retention.enabled=false` is the only runtime
   switch and logs a WARN at boot. At build time the enforced gate `outbox-sent-retention` requires
   every dispatcher-owning module to declare a `SentOutboxRetention` class, or carry a reasoned
-  exemption in `check-outbox-sent-retention.py`; the exemption set may only shrink. A kernel
+  exemption in `check-outbox-sent-retention.py`; the exemption set may only shrink after this
+  decision is merged. A kernel
   repository whose rows are still a read model sets `sentRetentionExempt=true`; the shared job
-  skips it and the gate requires a reason. Today the exemptions are case-coordinator, lending,
-  risk-engine and incentive, for the reasons in Context item 5.
+  skips it and the gate requires a reason. Today the exemptions are billing, case-coordinator,
+  lending, risk-engine and incentive, for the reasons in Context item 5 and billing issue #12187.
 - DEAD rows are out of scope here: they are the producer-side DLQ (ADR-0327 D4) and keep their own
   window (notification's janitor today, `purgeDead` when ADR-0327 Phase 4 wires it).
 
@@ -79,7 +80,7 @@ We will purge SENT outbox rows with **one** `@ApplicationScoped` job in `openban
 - **Lift `purgeSent` onto the v1 `OutboxRepository` port as abstract.** The compiler would then be
   the gate. Rejected because every hand-written test fake of every service's outbox port would
   have to implement it too (a repository concern leaking into application ports), and the three
-  outboxes that must not be purged would need a fake implementation that lies.
+  exempt outboxes that must not be purged would need a fake implementation that lies.
 - **Partition outbox tables by month and drop partitions.** Already rejected in ADR-0327 D8.
 - **Per-service janitors** (the notification-service DEAD janitor pattern). Rejected: 40 copies of
   the same job, liveness and metrics, which is the duplication ADR-0327 exists to remove.
@@ -87,7 +88,7 @@ We will purge SENT outbox rows with **one** `@ApplicationScoped` job in `openban
 ## Consequences
 
 **Positive**
-- SENT payloads stop outliving the retention periods of the tables they describe; 37 of 41
+- SENT payloads stop outliving the retention periods of the tables they describe; 36 of 41
   outboxes are purged from the first night after deploy.
 - A new outbox is purged by default (kernel base) or fails CI until it decides.
 

@@ -52,9 +52,8 @@ money (debits the customer, credits fee income), so it is a money-path service.
    `RestAccountContextPort` already calls for `productId`) and reads `assessed_fee` rows
    (`postedFeesForAccount`, POSTED-only, in-year) to build an `AnnualFeeSummary`. Appends a
    `billing_outbox` row (`billing.annual-fee-summary.ready`) idempotent per `(accountId, year)`
-   (`appendAnnualFeeSummaryEvent`): V8 backfills a separate unique issuance key from existing
-   outbox intents, and each new key commits atomically with its event. The key survives the
-   seven-day SENT payload purge, so a delayed or concurrent rerun cannot reissue the summary.
+   (`appendAnnualFeeSummaryEvent`). Until the durable issuance migration in #12311 is deployed,
+   SENT billing outbox rows remain the rerun guard and this repository is exempt from purge.
    The event is dispatched by the SAME `BillingOutboxDispatcher` →
    `LedgerOutboxEventPublisher`, which routes this `eventType` to a **new Kafka producer**
    (`billing-events-out` → topic `openbank.billing.fee.event`) instead of the ledger REST call —
@@ -227,7 +226,7 @@ first departure from "every trust boundary here is OIDC+mTLS REST".
 
 ## 6. Change log
 
-- **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `billing_outbox` kept every SENT row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; its v1 repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`. PENDING, FAILED, DISPATCHING and DEAD rows are never touched. Information disclosure: shrinks the window in which a database read (replica, backup, operator query) exposes past event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now comes from the broker or audit-service, not this table.
+- **2026-10-03** — **Fleet SENT retention excludes billing pending #12311** (ADR-0329, #12187). The shared `OutboxSentRetentionJob` can purge other services, but `BillingOutboxRepositoryImpl.sentRetentionExempt=true` preserves billing's annual-summary rerun guard. `billing_outbox` SENT payloads therefore remain until a durable account/year issuance key is deployed. The exemption is paired with a reason in the enforced fleet gate; remove both only after the migration and real-DB purge/rerun tests in #12311 are merged. No billing endpoint, caller or privilege changes in this phase.
 
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
   #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
