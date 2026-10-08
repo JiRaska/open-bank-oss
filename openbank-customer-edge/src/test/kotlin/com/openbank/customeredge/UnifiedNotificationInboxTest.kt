@@ -46,6 +46,7 @@ class UnifiedNotificationInboxTest {
         val body = mapper.readTree(response.entity as String)
         assertThat(body.path("items").map { it.path("partyId").asText() })
             .containsExactly(company.toString(), human.toString())
+        assertThat(body.path("total").asInt()).isEqualTo(2)
         assertThat(body.path("unreadCount").asInt()).isEqualTo(3)
     }
 
@@ -110,6 +111,42 @@ class UnifiedNotificationInboxTest {
             assertThat(observedThreads).containsExactly(callerThread, callerThread)
         } finally {
             MDC.remove("synthetic")
+        }
+    }
+
+    @Test
+    fun `concurrent inbox requests reuse a bounded worker pool`() {
+        val parties = List(20) { UUID.randomUUID() }
+        val pooledThreads = java.util.Collections.synchronizedSet(mutableSetOf<Long>())
+        val active = java.util.concurrent.atomic.AtomicInteger()
+        val peak = java.util.concurrent.atomic.AtomicInteger()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(any(), any()) } answers {
+            if (Thread.currentThread().name == "unified-notification-feed") {
+                pooledThreads += Thread.currentThread().threadId()
+            }
+            peak.accumulateAndGet(active.incrementAndGet()) { previous, current -> maxOf(previous, current) }
+            try {
+                Thread.sleep(10)
+                page(UUID.fromString(secondArg()), "2026-10-08T09:00:00Z", 1)
+            } finally {
+                active.decrementAndGet()
+            }
+        }
+        val callers = java.util.concurrent.Executors.newFixedThreadPool(12)
+        try {
+            val inbox = UnifiedNotificationInbox(upstream, mapper, "http://notifications")
+            val responses = List(12) { callers.submit<Response> { inbox.list(parties, 20) } }.map { it.get() }
+            assertThat(responses.map { it.status }).containsOnly(200)
+            assertThat(pooledThreads.size).isBetween(1, 16)
+            assertThat(peak.get()).isLessThanOrEqualTo(16)
+            responses.forEach { response ->
+                val body = mapper.readTree(response.entity as String)
+                assertThat(body.path("total").asInt()).isEqualTo(parties.size)
+                assertThat(body.path("unreadCount").asInt()).isEqualTo(parties.size)
+            }
+        } finally {
+            callers.shutdownNow()
         }
     }
 

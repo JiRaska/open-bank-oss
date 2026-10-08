@@ -10,7 +10,10 @@ import io.quarkus.logging.Log
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import java.util.UUID
-import java.util.concurrent.Executors
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.Semaphore
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 
 /** Merges only edge-authorized party feeds; a failed profile returns no partial inbox. */
 internal class UnifiedNotificationInbox(
@@ -23,16 +26,12 @@ internal class UnifiedNotificationInbox(
     fun list(parties: List<UUID>, limit: Int): Response {
         // Synthetic taint lives in request-thread MDC/baggage. Keep those reads on the caller
         // thread so the existing UpstreamClient propagates the trusted taint to every service.
-        val workers = if (currentRequestIsSynthetic()) {
-            null
-        } else {
-            Executors.newFixedThreadPool(minOf(MAX_CONCURRENT_FEEDS, parties.size))
-        }
+        val synthetic = currentRequestIsSynthetic()
         return try {
-            val pages = if (workers == null) {
-                parties.map { fetch(it, limit) }
+            val pages = if (synthetic) {
+                parties.map { fetchBounded(it, limit) }
             } else {
-                parties.map { party -> workers.submit<PartyPage> { fetch(party, limit) } }.map { it.get() }
+                parties.map { party -> workers.submit<PartyPage> { fetchBounded(party, limit) } }.map { it.get() }
             }
             val ordered = pages.flatMap { it.items }.sortedWith(
                 compareByDescending<ObjectNode> { it.path("createdAt").asText() }
@@ -49,8 +48,15 @@ internal class UnifiedNotificationInbox(
             Log.warn("Unified notification feed unavailable", e)
             Response.status(Response.Status.BAD_GATEWAY)
                 .entity(mapOf("code" to "NOTIFICATIONS_UNAVAILABLE")).build()
+        }
+    }
+
+    private fun fetchBounded(party: UUID, limit: Int): PartyPage {
+        upstreamPermits.acquire()
+        return try {
+            fetch(party, limit)
         } finally {
-            workers?.shutdownNow()
+            upstreamPermits.release()
         }
     }
 
@@ -75,7 +81,25 @@ internal class UnifiedNotificationInbox(
     }
 
     private companion object {
-        const val MAX_CONCURRENT_FEEDS = 8
+        const val MAX_CONCURRENT_FEEDS = 16
+        const val MAX_QUEUED_FEEDS = 128
         const val HTTP_OK = 200
+
+        // One bounded pool per replica, not eight new threads per customer request. Caller-runs
+        // backpressures requests when its queue is full; the semaphore bounds upstream calls even
+        // when a task executes on the request thread. Synthetic requests bypass the pool entirely.
+        val upstreamPermits = Semaphore(MAX_CONCURRENT_FEEDS, true)
+        val workers = ThreadPoolExecutor(
+            MAX_CONCURRENT_FEEDS,
+            MAX_CONCURRENT_FEEDS,
+            0L,
+            TimeUnit.MILLISECONDS,
+            ArrayBlockingQueue(MAX_QUEUED_FEEDS),
+            { task ->
+                Thread.ofPlatform().name("unified-notification-feed").daemon(true)
+                    .inheritInheritableThreadLocals(false).unstarted(task)
+            },
+            ThreadPoolExecutor.CallerRunsPolicy(),
+        )
     }
 }

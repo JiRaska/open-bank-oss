@@ -1201,7 +1201,10 @@ paths:
         - {name: partyId, in: query, required: false, description: Filter to an authorized person or company, schema: {type: string, format: uuid}}
       responses:
         '200':
-          description: Latest notifications across authorized profiles; each item carries its origin partyId
+          description: >-
+            Latest notifications across authorized profiles; each item carries its origin partyId.
+            total and unreadCount sum the party-scoped counts observed during this request;
+            concurrent writes can occur between party reads, so they are not one atomic snapshot.
         '403':
           description: Requested party is not authorized
         '502':
