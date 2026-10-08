@@ -39,6 +39,7 @@ the fleet, so:
       green push, which is a fact about other services;
   R4  the query is bounded (one unfiltered page), then R1 is applied locally. The filtered
       GitHub index can be stale (#12189); missing or old lane verdicts fail this watch closed.
+      A newer active scheduled run holds issue state while its verdict is pending.
 
 Three lanes
 -----------
@@ -49,8 +50,8 @@ Three lanes
                        inline `listWorkflowRuns` — the decision logic must not be re-inlined
                        into a `github-script` block, where no test can reach it.
   --evaluate           online: one `gh api` call, JSON verdict on stdout/--json. Exit 0 = not
-                       stuck, 2 = stuck, 1 = the watch itself could not answer (which is a
-                       failure of the watch, never a "not stuck").
+                       stuck, 2 = stuck, 3 = a newer scheduled run is still active (hold
+                       issue state), 1 = the watch itself could not answer.
 
 WHAT THIS CANNOT DO
 -------------------
@@ -137,8 +138,8 @@ def _slim(r: dict) -> dict:
     }
 
 
-def require_current_population(runs: list[dict], now: datetime) -> None:
-    """Do not turn a stale/truncated API page into a false red or false green verdict."""
+def require_current_population(runs: list[dict], now: datetime) -> bool:
+    """Return whether completed verdicts are fresh; hold while a newer tick is active."""
     if not runs:
         raise RuntimeError("workflow-runs page is empty")
 
@@ -157,7 +158,20 @@ def require_current_population(runs: list[dict], now: datetime) -> None:
     if len(verdicts) < THRESHOLD:
         raise RuntimeError(f"unfiltered page has only {len(verdicts)} scheduled verdicts; need {THRESHOLD}")
     if age(verdicts[0]) > MAX_LANE_AGE:
+        # A scheduled build may run across the next watch tick. The old completed
+        # verdict is not current, but the visible active tick proves the lane has
+        # not gone missing. Preserve the issue state until it completes.
+        active = [
+            r for r in runs
+            if r.get("event") == LANE
+            and r.get("status") in {"queued", "in_progress", "waiting", "pending", "requested"}
+            and r.get("created_at", "") > verdicts[0].get("created_at", "")
+            and timedelta(0) <= age(r) <= MAX_LANE_AGE
+        ]
+        if active:
+            return False
         raise RuntimeError("newest completed scheduled verdict is stale")
+    return True
 
 
 # --------------------------------------------------------------------------- online lane
@@ -197,6 +211,8 @@ def check_declaration(root: Path) -> list[str]:
             f"{WORKFLOW}: carries an inline `listWorkflowRuns` — the population decision "
             f"must live in {me}, where --self-test can reach it"
         )
+    if not re.search(r"if:\s*steps\.verdict\.outputs\.code\s*!=\s*['\"]3['\"]", code):
+        problems.append(f"{WORKFLOW}: must skip issue mutation while a scheduled run is active")
     return problems
 
 
@@ -332,6 +348,45 @@ def self_test() -> int:
                   if r["event"] == "schedule" else r for r in current]
     check("freshness: two missing three-hour ticks cannot close or reopen",
           rejected(missed_two))
+    # Oct 8 18:53: the 18:40 scheduled build was still running and finished
+    # green at 19:01. The latest completed verdict was 15:34; the watch must
+    # hold issue state, not fail itself or apply that older verdict.
+    at_1853 = datetime(2026, 10, 8, 18, 53, tzinfo=timezone.utc)
+    active_tick = _run(9, "schedule", "", status="in_progress")
+    active_tick["created_at"] = "2026-10-08T18:40:13Z"
+    earlier = [_run(8-i, "schedule", "success") for i in range(3)]
+    for run, stamp in zip(earlier, ["15:34:54", "12:47:02", "09:38:29"], strict=True):
+        run["created_at"] = f"2026-10-08T{stamp}Z"
+    check("Oct 8 18:53: active scheduled tick holds issue state",
+          require_current_population([active_tick, *earlier], at_1853) is False)
+    check("Oct 8 18:53: a push cannot substitute for the active scheduled tick",
+          rejected([dict(active_tick, event="push"), *earlier], at_1853))
+    check("Oct 8 18:53: a cancelled scheduled tick cannot defer a stale verdict",
+          rejected([dict(active_tick, status="completed", conclusion="cancelled"),
+                    *earlier], at_1853))
+    from contextlib import redirect_stdout
+    from io import StringIO
+    from tempfile import TemporaryDirectory
+
+    cli_now = datetime.now(timezone.utc)
+    cli_active = dict(active_tick, created_at=(cli_now - timedelta(minutes=13)).isoformat())
+    cli_earlier = [
+        dict(run, created_at=(cli_now - timedelta(hours=3, minutes=19+i)).isoformat())
+        for i, run in enumerate(earlier)
+    ]
+
+    def active_gh(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(argv, 0, json.dumps([cli_active, *cli_earlier]), "")
+
+    with TemporaryDirectory() as td, patch.object(subprocess, "run", side_effect=active_gh), \
+            patch.object(sys, "argv", ["watch", "--evaluate", "--repo", "example/repo",
+                                       "--json", str(Path(td) / "verdict.json")]), \
+            redirect_stdout(StringIO()) as output:
+        code = main()
+        saved = json.loads((Path(td) / "verdict.json").read_text())
+    check("Oct 8 18:53: CLI emits a hold verdict, not an old green/red verdict",
+          code == 3 and saved.get("pending") is True
+          and "pending" in output.getvalue())
     at_1650 = datetime(2026, 10, 6, 16, 50, tzinfo=timezone.utc)
     omitted_green = [_run(8, "push", "success"), _run(7, "schedule", "failure"),
                      _run(6, "schedule", "failure"), _run(5, "schedule", "failure")]
@@ -356,7 +411,8 @@ def self_test() -> int:
         wf.parent.mkdir(parents=True)
         me = Path(__file__).name
         good = (f"run: python3 .github/scripts/{me} --self-test\n"
-                f"run: python3 .github/scripts/{me} --evaluate --repo x\n")
+                f"run: python3 .github/scripts/{me} --evaluate --repo x\n"
+                "if: steps.verdict.outputs.code != '3'\n")
         wf.write_text(good)
         check("declaration: the committed shape passes", check_declaration(root) == [])
         wf.write_text(good + "script: |\n  github.rest.actions.listWorkflowRuns({})\n")
@@ -368,6 +424,9 @@ def self_test() -> int:
         wf.write_text(f"run: python3 .github/scripts/{me} --self-test\n")
         check("declaration: a workflow that never evaluates is rejected",
               any("--evaluate" in p for p in check_declaration(root)))
+        wf.write_text(good.replace("if: steps.verdict.outputs.code != '3'\n", ""))
+        check("declaration: an active tick cannot mutate issue state",
+              any("skip issue mutation" in p for p in check_declaration(root)))
 
     # The real tree, so the gate is red the moment the workflow drifts.
     real = check_declaration(Path(os.environ.get("GATE_ROOT", ".")))
@@ -411,18 +470,21 @@ def main() -> int:
             return 1
         try:
             runs = fetch_runs(a.repo)
-            require_current_population(runs, datetime.now(timezone.utc))
+            current = require_current_population(runs, datetime.now(timezone.utc))
         except (subprocess.CalledProcessError, TypeError, ValueError, RuntimeError) as e:
             err = getattr(e, "stderr", "") or str(e)
             print(f"::error::the watch could not read the {LANE} lane of {WORKFLOW_ID}: "
                   f"{err.strip()[:400]}", file=sys.stderr)
             return 1
-        v = evaluate(runs)
+        v = evaluate(runs) if current else {
+            "lane": LANE, "pending": True,
+            "reason": "newer scheduled run is active; preserving issue state",
+        }
         text = json.dumps(v, indent=2)
         print(text)
         if a.json:
             Path(a.json).write_text(text)
-        return 2 if v["stuck"] else 0
+        return 3 if not current else (2 if v["stuck"] else 0)
 
     ap.error("pick one of --self-test / --check-declaration / --evaluate")
     return 2
