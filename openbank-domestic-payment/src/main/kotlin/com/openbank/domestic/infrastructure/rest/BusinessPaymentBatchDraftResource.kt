@@ -103,13 +103,13 @@ class BusinessPaymentBatchDraftResource(
         val node = mapper.readTree(rawBody)
         require(node != null && node.isObject) { "batch body must be a JSON object" }
         val hash = sha256(mapper.writeValueAsBytes(canonical(node)))
-        store.replay(party, human, retryKey, hash)?.let { return Response.ok(view(it, 0)).build() }
+        store.replay(party, human, retryKey, hash)?.let { return Response.ok(originalView(it)).build() }
         val request = mapper.treeToValue(node, Create::class.java)
         val summary = validate(request.items)
         val (saved, replayed) = store.create(party, human, retryKey, hash, request, summary)
         return Response.status(
             if (replayed) Response.Status.OK else Response.Status.CREATED,
-        ).entity(view(saved, 0)).build()
+        ).entity(if (replayed) originalView(saved) else view(saved, 0)).build()
     }
 
     @GET
@@ -173,6 +173,9 @@ class BusinessPaymentBatchDraftResource(
             "createdAt" to row.createdAt, "updatedAt" to row.updatedAt, "items" to items,
         )
     }
+
+    private fun originalView(row: BusinessPaymentBatchDraftEntity): JsonNode =
+        mapper.readTree(row.originalResponseJson ?: throw BatchDraftConflict())
 
     data class Summary(val count: Int, val total: Long)
 
@@ -278,9 +281,18 @@ class BusinessPaymentBatchDraftStore(private val mapper: ObjectMapper) :
             amountMinor = summary.total
             createdAt = now
             updatedAt = now
+            originalResponseJson = mapper.writeValueAsString(
+                mapOf(
+                    "id" to id, "state" to "DRAFT", "debtorAccountId" to debtorAccountId,
+                    "itemCount" to itemCount, "totalAmountMinor" to amountMinor,
+                    "currency" to "CZK", "revision" to revision,
+                    "createdAt" to createdAt, "updatedAt" to updatedAt,
+                    "items" to mapper.readTree(itemsJson).take(20),
+                ),
+            )
         }
         return try {
-            Panache.withTransaction { persist(row).replaceWith(row) }.awaitSuspending() to false
+            Panache.withTransaction { persistAndFlush(row).replaceWith(row) }.awaitSuspending() to false
         } catch (e: RuntimeException) {
             if (!e.isBatchKeyViolation()) throw e
             val winner = Panache.withSession {

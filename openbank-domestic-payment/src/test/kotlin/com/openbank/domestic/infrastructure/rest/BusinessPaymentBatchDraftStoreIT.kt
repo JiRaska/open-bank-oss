@@ -81,8 +81,15 @@ class BusinessPaymentBatchDraftStoreIT {
         val row = db {
             store.create(company, creator, UUID.randomUUID().toString(), "d".repeat(64), request(), summary)
         }.first
-        val edited = db { store.replace(company, row.id, editor, row.revision, itemsJson(), summary) }
+        val original = row.originalResponseJson
+        val edited = db { store.replace(company, row.id, editor, row.revision, itemsJson(), summary.copy(total = 250)) }
         assertEquals(editor, edited?.updatedByPartyId)
+        val replay = db { store.replay(company, creator, row.idempotencyKey, row.requestHash) }
+        assertEquals(original, replay?.originalResponseJson)
+        val originalTotal = com.fasterxml.jackson.databind.ObjectMapper()
+            .readTree(replay?.originalResponseJson).path("totalAmountMinor").asInt()
+        assertEquals(125, originalTotal)
+        assertEquals(250, edited?.amountMinor)
         assertThrows(BatchDraftConflict::class.java) {
             db { store.replace(company, row.id, creator, row.revision, itemsJson(), summary) }
         }
@@ -114,5 +121,27 @@ class BusinessPaymentBatchDraftStoreIT {
         assertEquals(1, outcomes.count { it.isSuccess })
         assertEquals(1, outcomes.count { it.exceptionOrNull() is BatchDraftConflict })
         assertNotNull(db { store.get(company, row.id) }?.updatedByPartyId)
+    }
+
+    @Test
+    fun `concurrent create with the same key returns one immutable result`() {
+        val company = UUID.randomUUID()
+        val actor = UUID.randomUUID()
+        val key = UUID.randomUUID().toString()
+        val payload = request()
+        val calls = (1..2).map {
+            CompletableFuture.supplyAsync {
+                VertxContextSupport.subscribeAndAwait {
+                    uni(CoroutineScope(Dispatchers.Unconfined)) {
+                        store.create(company, actor, key, "e".repeat(64), payload, summary)
+                    }
+                }
+            }
+        }
+        val results = calls.map { it.join() }
+        assertEquals(1, results.count { !it.second })
+        assertEquals(1, results.count { it.second })
+        assertEquals(results[0].first.id, results[1].first.id)
+        assertEquals(results[0].first.originalResponseJson, results[1].first.originalResponseJson)
     }
 }

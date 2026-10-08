@@ -139,17 +139,34 @@ class BusinessPaymentBatchHttpIT {
         assertEquals(200, detail.statusCode)
         assertDraftResponse(detail.asString())
         assertEquals(1, detail.jsonPath().getInt("itemCount"))
+        val replacementItems = ObjectMapper().readTree(body).get("items").toString()
+            .replace("\"amountMinor\":125", "\"amountMinor\":250")
         val replace = RestAssured.given()
             .header("X-Customer-Party-Id", COMPANY)
             .header("X-Actor-Party-Id", HUMAN)
             .header("If-Match", "0")
             .contentType("application/json")
-            .body("""{"items":${com.fasterxml.jackson.databind.ObjectMapper().readTree(body).get("items")}}""")
+            .body("""{"items":$replacementItems}""")
             .put("$BATCH_BASE/$id/items")
         assertEquals(200, replace.statusCode)
         assertDraftResponse(replace.asString())
         assertEquals(1, replace.jsonPath().getInt("itemCount"))
         assertEquals("DRAFT", replace.jsonPath().getString("state"))
+        assertEquals(250L, replace.jsonPath().getLong("totalAmountMinor"))
+        val replayAfterReplace = RestAssured.given()
+            .header("X-Customer-Party-Id", COMPANY)
+            .header("X-Actor-Party-Id", HUMAN)
+            .header("Idempotency-Key", key)
+            .contentType("application/json")
+            .body(body)
+            .post(BATCH_BASE)
+        assertEquals(200, replayAfterReplace.statusCode)
+        assertEquals(
+            ObjectMapper().readTree(created.asString()),
+            ObjectMapper().readTree(replayAfterReplace.asString()),
+        )
+        val current = RestAssured.given().header("X-Customer-Party-Id", COMPANY).get("$BATCH_BASE/$id")
+        assertEquals(250L, current.jsonPath().getLong("totalAmountMinor"))
     }
 
     private fun assertDraftResponse(body: String) {
