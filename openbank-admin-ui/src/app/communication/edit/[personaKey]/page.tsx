@@ -68,6 +68,7 @@ export default function CommunicationStyleEditorPage() {
   const [loadingPublished, setLoadingPublished] = useState(true)
   const [publishedLoaded, setPublishedLoaded] = useState(false)
   const [loadAttempt, setLoadAttempt] = useState(0)
+  const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -102,7 +103,6 @@ export default function CommunicationStyleEditorPage() {
   const [lintViolations, setLintViolations] = useState<string[] | null>(null)
   const [draft, setDraft] = useState<StyleVersionDraft | null>(null)
   const [draftId, setDraftId] = useState('')
-  const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
 
   // Checker's initiate-publish state — deliberately separate from the maker's `draft` above:
   // an approver deciding to publish typically was not the one who just drafted it in this
