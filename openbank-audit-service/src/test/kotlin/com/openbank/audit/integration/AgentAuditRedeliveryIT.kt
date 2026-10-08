@@ -16,6 +16,7 @@ import jakarta.inject.Inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.time.Instant
 import java.util.UUID
@@ -49,6 +50,12 @@ class AgentAuditRedeliveryIT {
             repository.save(entry)
         }
 
+        assertThat(onEventLoop { repository.findByAggregateId("agent:rca") }.map { it.id })
+            .containsExactly(eventId)
+        assertThatThrownBy { onEventLoop { repository.save(entry.copy(payload = "{\"conflict\":true}")) } }
+            .isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy { onEventLoop { repository.save(entry.copy(sourceService = "other-service")) } }
+            .isInstanceOf(IllegalArgumentException::class.java)
         assertThat(onEventLoop { repository.findByAggregateId("agent:rca") }.map { it.id })
             .containsExactly(eventId)
     }
