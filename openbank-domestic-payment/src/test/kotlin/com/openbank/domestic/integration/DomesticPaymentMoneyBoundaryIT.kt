@@ -38,6 +38,17 @@ class DomesticPaymentMoneyBoundaryIT {
     @Inject
     lateinit var dataSource: DataSource
 
+    @Test
+    @TestSecurity(user = ACTOR_ID, roles = ["ROLE_VIEWER"])
+    fun `a viewer cannot create a domestic payment or consume an idempotency key`() {
+        val key = "money-boundary-it-denied-${UUID.randomUUID()}"
+
+        val refused = post(key, body("10.00", "CZK"))
+
+        assertThat(refused.statusCode).isEqualTo(403)
+        assertThat(countPayments(key)).isZero()
+    }
+
     @ParameterizedTest(name = "{0} {1} -> 400 {2}")
     @CsvSource(
         "100.005, CZK, AMOUNT_SCALE_EXCEEDED, amount",

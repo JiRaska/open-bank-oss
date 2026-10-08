@@ -16,7 +16,12 @@ class DomesticPaymentCurrencyContractTest {
         val invalidMoney = openApi.substringAfter("    InvalidMoney:").substringBefore("    Forbidden:")
         val currency = openApi.substringAfter("        currency:").substringBefore("        variableSymbol:")
 
-        assertThat(create).contains("'400':", "#/components/responses/InvalidMoney")
+        assertThat(create).contains(
+            "'400':",
+            "#/components/responses/InvalidMoney",
+            "'403':",
+            "#/components/responses/Forbidden",
+        )
         assertThat(invalidMoney).contains("CURRENCY_NOT_ALLOWED", "not CZK")
         assertThat(currency).contains("CZK only")
     }
