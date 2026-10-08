@@ -10,6 +10,8 @@ services:
   - product-catalog
   - card-issuance-service
   - notification-service
+sourceRefs:
+  - openbank-card-issuance-service/src/main/kotlin/com/openbank/cardissuance/application/usecase/CardService.kt
 steps:
   - id: start
     type: start

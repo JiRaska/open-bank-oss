@@ -1,0 +1,62 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+# Source: openbank-settlement-service/src/main/kotlin/com/openbank/settlement/application/workflow/SettlementWorkflowImpl.kt
+# An uncertain remote balance movement is NOT a clean rejection; compensation failures remain non-terminal.
+name: Settlement Booking
+desc: Debit, credit a zaúčtování do ledgeru. Při chybě se stav peněz nejprve ověřuje; pouze úplná kompenzace dovoluje REJECTED.
+regulation: DORA / účetní kontrola
+services:
+  - settlement-service
+  - balance-service
+  - ledger-service
+sourceRefs:
+  - openbank-settlement-service/src/main/kotlin/com/openbank/settlement/application/workflow/SettlementWorkflowImpl.kt
+steps:
+  - { id: start, type: start, x: 60, y: 100, label: Settlement }
+  - id: debit
+    type: task
+    x: 200
+    y: 100
+    label: Debit payer
+    lane: payment
+    relatedServices: [settlement-service, balance-service]
+  - id: credit
+    type: task
+    x: 370
+    y: 100
+    label: Credit payee
+    lane: payment
+    relatedServices: [settlement-service, balance-service]
+  - id: ledger
+    type: task
+    x: 550
+    y: 100
+    label: Book to ledger
+    lane: core
+    relatedServices: [settlement-service, ledger-service]
+  - { id: booked, type: end, x: 730, y: 100, label: BOOKED }
+  - { id: failure, type: gateway, x: 550, y: 220, label: Selhání }
+  - { id: unknown, type: end-err, x: 330, y: 270, label: BALANCE_STATE_UNKNOWN }
+  - id: unwind
+    type: task
+    x: 740
+    y: 220
+    label: Kompenzace
+    lane: core
+    relatedServices: [settlement-service, balance-service, ledger-service]
+  - { id: resolved, type: gateway, x: 900, y: 220, label: Úplná? }
+  - { id: rejected, type: end, x: 1060, y: 170, label: REJECTED }
+  - { id: outstanding, type: end-err, x: 1060, y: 270, label: Nevyřešený stav }
+flows:
+  - { from: start, to: debit }
+  - { from: debit, to: credit }
+  - { from: credit, to: ledger }
+  - { from: ledger, to: booked }
+  - { from: debit, to: failure, label: chyba }
+  - { from: credit, to: failure, label: chyba }
+  - { from: ledger, to: failure, label: chyba }
+  - { from: failure, to: unknown, label: stav peněz nejistý }
+  - { from: failure, to: unwind, label: jiná chyba }
+  - { from: unwind, to: resolved }
+  - { from: resolved, to: rejected, label: ano }
+  - { from: resolved, to: outstanding, label: ne }

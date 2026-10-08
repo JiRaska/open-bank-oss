@@ -8,6 +8,8 @@
 // manifest, so this fails the same way `next build` does — the manifest is the
 // contract.
 import { describe, it, expect } from 'vitest'
+import { existsSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { loadAllBpmnProcesses, listBpmnSlugs, loadBpmnProcess } from '@/lib/docs/bpmn/load'
 
 describe('bpmn manifests', () => {
@@ -16,13 +18,41 @@ describe('bpmn manifests', () => {
     expect(procs.length).toBeGreaterThan(0)
   })
 
+  it('links every process to existing implementation code', () => {
+    for (const entry of loadAllBpmnProcesses()) {
+      expect(entry.sourceRefs.length, entry.slug).toBeGreaterThan(0)
+      for (const ref of entry.sourceRefs) {
+        expect(existsSync(resolve(process.cwd(), '..', ref)), `${entry.slug}: ${ref}`).toBe(true)
+      }
+    }
+  })
+
   it('ships the canonical banking processes', () => {
     const slugs = listBpmnSlugs()
     for (const expected of [
       'account-opening', 'sepa-payment', 'kyc-process', 'aml-screening',
       'international-wire', 'account-closure',
+      'domestic-payment', 'fx-conversion', 'settlement-booking',
+      'business-onboarding-timers', 'campaign-journey',
     ]) {
       expect(slugs, expected).toContain(expected)
+    }
+  })
+
+  it('maps new money workflows to their owning and downstream services', () => {
+    for (const [slug, required] of [
+      ['domestic-payment', ['domestic-payment', 'transaction-service']],
+      ['fx-conversion', ['fx-service', 'sanctions-service']],
+      ['settlement-booking', ['settlement-service', 'balance-service', 'ledger-service']],
+      ['business-onboarding-timers', ['kyb-service']],
+      ['campaign-journey', ['campaign-service', 'consent-service']],
+    ] as const) {
+      const process = loadBpmnProcess(slug)
+      const mapped = new Set(process.steps.flatMap((step) => step.relatedServices ?? []))
+      for (const service of required) {
+        expect(process.services, `${slug}: listed ${service}`).toContain(service)
+        expect(mapped.has(service), `${slug}: mapped ${service}`).toBe(true)
+      }
     }
   })
 

@@ -1,0 +1,79 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+# Source: openbank-domestic-payment/src/main/kotlin/com/openbank/domestic/application/workflow/DomesticPaymentWorkflowImpl.kt
+# The diagram describes workflow control, not a claim that every external adapter is enabled.
+name: Domestic Payment
+desc: 'Tuzemská platba: sankční rozhodnutí, validace, stínové skórování, odeslání do schématu a idempotentní zaúčtování. REVIEW zůstává pozastavené pro AML rozhodnutí.'
+regulation: PSD2 / AML
+services:
+  - domestic-payment
+  - sanctions-service
+  - aml-service
+  - fraud-service
+  - transaction-service
+sourceRefs:
+  - openbank-domestic-payment/src/main/kotlin/com/openbank/domestic/application/workflow/DomesticPaymentWorkflowImpl.kt
+steps:
+  - { id: start, type: start, x: 60, y: 110, label: Přijetí }
+  - id: screen
+    type: task
+    x: 180
+    y: 110
+    label: Sankční screening
+    lane: aml
+    relatedServices: [domestic-payment, sanctions-service]
+  - { id: decision, type: gateway, x: 320, y: 110, label: Rozhodnutí }
+  - id: reject
+    type: end-err
+    x: 320
+    y: 220
+    label: REJECTED
+  - id: review
+    type: end
+    x: 480
+    y: 220
+    label: RECEIVED / AML
+    relatedServices: [domestic-payment, aml-service]
+  - id: validate
+    type: task
+    x: 470
+    y: 110
+    label: Validace
+    lane: payment
+    relatedServices: [domestic-payment]
+  - id: shadow
+    type: task
+    x: 610
+    y: 110
+    label: Fraud shadow
+    lane: payment
+    relatedServices: [domestic-payment, fraud-service]
+  - id: scheme
+    type: task
+    x: 750
+    y: 110
+    label: Předání schématu
+    lane: payment
+    relatedServices: [domestic-payment]
+  - { id: accepted, type: gateway, x: 860, y: 110, label: Přijato? }
+  - { id: other, type: end, x: 860, y: 220, label: Stav schématu }
+  - id: settle
+    type: task
+    x: 980
+    y: 110
+    label: Zaúčtování
+    lane: core
+    relatedServices: [domestic-payment, transaction-service]
+  - { id: end, type: end, x: 1080, y: 110, label: Settled }
+flows:
+  - { from: start, to: screen }
+  - { from: screen, to: decision }
+  - { from: decision, to: reject, label: BLOCK }
+  - { from: decision, to: review, label: REVIEW }
+  - { from: decision, to: validate, label: CLEAR }
+  - { from: validate, to: shadow }
+  - { from: shadow, to: scheme }
+  - { from: scheme, to: accepted }
+  - { from: accepted, to: other, label: jiný stav }
+  - { from: accepted, to: settle, label: SENT_TO_CLEARING }
+  - { from: settle, to: end }

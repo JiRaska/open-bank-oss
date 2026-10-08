@@ -13,6 +13,8 @@ services:
   - account-service
   - swift-service
   - clearing-service
+sourceRefs:
+  - openbank-swift-service/src/main/kotlin/com/openbank/swift/application/usecase/SwiftService.kt
 steps:
   - id: start
     type: start

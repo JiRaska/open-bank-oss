@@ -176,21 +176,21 @@ function ProcessLayerMap({ process }: { process: BpmnProcess }) {
         setStatuses((prev) => {
           const updated = { ...prev }
           servicesToCheck.forEach((svc) => {
-            updated[svc] = healthMap[svc] !== undefined ? healthMap[svc] : 'down'
+            updated[svc] = healthMap[svc] !== undefined ? healthMap[svc] : 'unknown'
           })
           return updated
         })
       } else {
         setStatuses((prev) => {
           const updated = { ...prev }
-          servicesToCheck.forEach((svc) => (updated[svc] = 'down'))
+          servicesToCheck.forEach((svc) => (updated[svc] = 'unknown'))
           return updated
         })
       }
     } catch {
       setStatuses((prev) => {
         const updated = { ...prev }
-        servicesToCheck.forEach((svc) => (updated[svc] = 'down'))
+        servicesToCheck.forEach((svc) => (updated[svc] = 'unknown'))
         return updated
       })
     }
@@ -276,7 +276,7 @@ function ProcessLayerMap({ process }: { process: BpmnProcess }) {
                       {status === 'up' && <StatusBadge status="up" label={t('AKTIVNÍ', 'UP')} leading={<CheckCircle2 size={12} />} className="badge-sm" />}
                       {status === 'down' && <StatusBadge status="down" label={t('NEDOSTUPNÉ', 'DOWN')} leading={<XCircle size={12} />} className="badge-sm" />}
                       {status === 'loading' && <StatusBadge status="loading" tone="warning" label={t('OVĚŘUJI', 'CHECKING')} leading={<RefreshCw size={12} className="animate-spin" />} className="badge-sm" />}
-                      {status === 'unknown' && <StatusBadge status="unknown" label={t('N/A', 'N/A')} leading={<AlertCircle size={12} />} className="badge-sm" />}
+                      {status === 'unknown' && <StatusBadge status="unknown" label={t('NEOVĚŘENO', 'UNKNOWN')} leading={<AlertCircle size={12} />} className="badge-sm" />}
                     </div>
                   )
                 }) : <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>{t('Služba není namapována', 'No service mapped')}</div>}
@@ -342,6 +342,25 @@ export function BpmnView({ processes }: { processes: BpmnProcess[] }) {
         <BpmnDiagram process={process} />
 
         <ProcessLayerMap process={process} />
+
+        <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--border)' }}>
+          <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-tertiary)', marginBottom: '8px' }}>
+            {t('Implementace v Gitu', 'Implementation in Git')}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <a href={`https://github.com/JiRaska/open-bank-oss/blob/main/openbank-admin-ui/src/content/bpmn/${encodeURIComponent(process.slug)}.yaml`}
+              target="_blank" rel="noopener noreferrer" style={{ fontSize: '12px' }}>
+              {t('Definice diagramu (YAML)', 'Diagram definition (YAML)')}
+            </a>
+            {process.sourceRefs.map((path) => (
+              <a key={path} href={`https://github.com/JiRaska/open-bank-oss/blob/main/${path.split('/').map(encodeURIComponent).join('/')}`}
+                target="_blank" rel="noopener noreferrer"
+                style={{ fontSize: '12px', overflowWrap: 'anywhere' }}>
+                {path}
+              </a>
+            ))}
+          </div>
+        </div>
 
         <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--border)' }}>
           <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-tertiary)', marginBottom: '8px' }}>

@@ -12,6 +12,8 @@ services:
   - account-service
   - sepa-instant
   - clearing-service
+sourceRefs:
+  - openbank-sepa-instant/src/main/kotlin/com/openbank/sepainstant/application/usecase/SctInstPaymentService.kt
 steps:
   - id: start
     type: start

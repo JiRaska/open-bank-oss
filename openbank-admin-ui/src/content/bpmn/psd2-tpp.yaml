@@ -13,6 +13,8 @@ services:
   - consent-service
   - audit-service
   - party-service
+sourceRefs:
+  - openbank-psd2-service/src/main/kotlin/com/openbank/psd2/infrastructure/rest/PisResource.kt
 steps:
   - id: start
     type: start

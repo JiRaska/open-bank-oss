@@ -10,6 +10,8 @@ services:
   - kyc-service
   - aml-service
   - party-service
+sourceRefs:
+  - openbank-kyc-service/src/main/kotlin/com/openbank/kyc/application/KycService.kt
 steps:
   - id: start
     type: start

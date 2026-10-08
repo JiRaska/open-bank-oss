@@ -11,6 +11,8 @@ services:
   - audit-service
   - notification-service
   - sanctions-service
+sourceRefs:
+  - openbank-aml-service/src/main/kotlin/com/openbank/aml/application/usecase/AmlCaseService.kt
 steps:
   - id: start
     type: start

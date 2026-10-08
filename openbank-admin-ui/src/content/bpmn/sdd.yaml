@@ -9,6 +9,8 @@ regulation: SEPA SDD Core/B2B Rulebook + PSD2
 services:
   - sdd-service
   - ledger-service
+sourceRefs:
+  - openbank-sdd-service/src/main/kotlin/com/openbank/sdd/application/usecase/SddMandateService.kt
 steps:
   - id: start
     type: start

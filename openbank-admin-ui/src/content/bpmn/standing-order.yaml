@@ -12,6 +12,8 @@ services:
   - ledger-service
   - audit-service
   - sepa-payment
+sourceRefs:
+  - openbank-standing-order-service/src/main/kotlin/com/openbank/standingorder/application/usecase/StandingOrderService.kt
 steps:
   - id: start
     type: start

@@ -21,6 +21,9 @@ services:
   - customer-edge
   - party-service
   - consent-service
+sourceRefs:
+  - openbank-party-service/src/main/kotlin/com/openbank/party/infrastructure/consent/MarketingConsentForwardingAdapter.kt
+  - openbank-party-service/src/main/kotlin/com/openbank/party/infrastructure/kafka/MarketingConsentEventConsumer.kt
 steps:
   - id: start
     type: start

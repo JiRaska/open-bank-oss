@@ -1,0 +1,56 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+# Source: openbank-kyb-service/src/main/kotlin/com/openbank/kyb/application/workflow/BusinessOnboardingTimersWorkflow.kt
+# Only the optional durable timer subflow is shown; the case state machine lives in Postgres.
+name: KYB Onboarding Timers
+desc: Volitelné trvanlivé časovače KYB případu. Změna stavu ruší starý časovač; pozvánky dostanou připomínku v polovině TTL, neaktivní případ lze opustit až po ověření aktuálního stavu.
+regulation: KYB / AML
+services:
+  - kyb-service
+sourceRefs:
+  - openbank-kyb-service/src/main/kotlin/com/openbank/kyb/application/workflow/BusinessOnboardingTimersWorkflow.kt
+steps:
+  - { id: start, type: start, x: 70, y: 110, label: Stav případu }
+  - id: state
+    type: task
+    x: 250
+    y: 110
+    label: State signal
+    lane: kyc
+    relatedServices: [kyb-service]
+  - { id: branch, type: gateway, x: 450, y: 110, label: Stav? }
+  - { id: terminal, type: end, x: 450, y: 240, label: Terminální }
+  - id: reminder
+    type: task
+    x: 660
+    y: 50
+    label: Reminder ½ TTL
+    lane: kyc
+    relatedServices: [kyb-service]
+  - id: wait
+    type: task
+    x: 660
+    y: 170
+    label: Idle TTL
+    lane: kyc
+    relatedServices: [kyb-service]
+  - { id: changed, type: gateway, x: 860, y: 110, label: Změna stavu? }
+  - id: abandon
+    type: task
+    x: 1020
+    y: 170
+    label: Abandon if same
+    lane: kyc
+    relatedServices: [kyb-service]
+  - { id: end, type: end, x: 1090, y: 270, label: Konec timeru }
+flows:
+  - { from: start, to: state }
+  - { from: state, to: branch }
+  - { from: branch, to: terminal, label: terminální }
+  - { from: branch, to: reminder, label: cosigners }
+  - { from: branch, to: wait, label: jiný otevřený }
+  - { from: reminder, to: changed }
+  - { from: wait, to: changed }
+  - { from: changed, to: state, label: ano; přezbrojit }
+  - { from: changed, to: abandon, label: ne; TTL uplynulo }
+  - { from: abandon, to: end }
