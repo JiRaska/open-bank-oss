@@ -118,6 +118,60 @@ class AgentAuditOutboxIT {
     }
 
     @Test
+    fun `V7 preserves published and unpublished source rows while delivery state remains mutable`() {
+        val publishedId = UUID.randomUUID()
+        val unpublishedId = UUID.randomUUID()
+        outbox.enqueue(publishedId, "{\"eventId\":\"$publishedId\"}")
+        outbox.enqueue(unpublishedId, "{\"eventId\":\"$unpublishedId\"}")
+
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "UPDATE agent_audit_outbox SET published_at = NOW(), publish_attempts = publish_attempts + 1 " +
+                    "WHERE event_id = ?",
+            ).use { statement ->
+                statement.setObject(1, publishedId)
+                assertThat(statement.executeUpdate()).isEqualTo(1)
+            }
+            // Keep this unpublished fixture out of the dispatcher claim query used by
+            // another test in this shared PostgreSQL resource.
+            connection.prepareStatement(
+                "UPDATE agent_audit_outbox SET claimed_at = NOW() WHERE event_id = ?",
+            ).use { statement ->
+                statement.setObject(1, unpublishedId)
+                assertThat(statement.executeUpdate()).isEqualTo(1)
+            }
+
+            for (eventId in listOf(publishedId, unpublishedId)) {
+                assertThatThrownBy {
+                    connection.prepareStatement("DELETE FROM agent_audit_outbox WHERE event_id = ?").use { statement ->
+                        statement.setObject(1, eventId)
+                        statement.executeUpdate()
+                    }
+                }.hasMessageContaining("source rows cannot be removed")
+            }
+
+            assertThatThrownBy {
+                connection.createStatement().use { statement ->
+                    statement.execute("TRUNCATE agent_audit_outbox")
+                }
+            }.hasMessageContaining("source rows cannot be removed")
+
+            connection.prepareStatement(
+                "SELECT count(*), count(*) FILTER (WHERE published_at IS NOT NULL) " +
+                    "FROM agent_audit_outbox WHERE event_id IN (?, ?)",
+            ).use { statement ->
+                statement.setObject(1, publishedId)
+                statement.setObject(2, unpublishedId)
+                statement.executeQuery().use { result ->
+                    assertThat(result.next()).isTrue()
+                    assertThat(result.getInt(1)).isEqualTo(2)
+                    assertThat(result.getInt(2)).isEqualTo(1)
+                }
+            }
+        }
+    }
+
+    @Test
     fun `replay cursor resumes after ACK and rejects changed source payload`() {
         val eventId = UUID.randomUUID()
         val campaignId = UUID.randomUUID()
