@@ -97,7 +97,7 @@ class MergeTests(unittest.TestCase):
 
 class RunnerTests(unittest.TestCase):
     def test_serial_shards_obey_total_resolution_budget(self):
-        self.assertEqual(subject.shard_timeout(1200, 0, 240), 240)
+        self.assertEqual(subject.shard_timeout(1200, 0, 360), 360)
         self.assertEqual(subject.shard_timeout(1200, 1195, 180), 5)
         with self.assertRaisesRegex(RuntimeError, '20-minute budget'):
             subject.shard_timeout(1200, 1200, 180)
@@ -167,7 +167,7 @@ class RunnerTests(unittest.TestCase):
                     result = subject.generate(root, output, env)
                     self.assertEqual(result['sha'], SHA)
                     self.assertEqual(len(calls), 2)
-                    self.assertEqual(timeouts, [240, 10] if case == 'budget-truncated' else [240, 180])
+                    self.assertEqual(timeouts, [360, 10] if case == 'budget-truncated' else [360, 180])
                     self.assertTrue((output / 'merged.json').is_file())
                     self.assertTrue(all('--continue' not in cmd for cmd in calls))
                 else:
@@ -178,7 +178,7 @@ class RunnerTests(unittest.TestCase):
                         self.assertEqual(len(calls), 1, 'reject the first bad shard before resolving the fleet')
                     if case == 'budget-expired':
                         self.assertEqual(len(calls), 1)
-                        self.assertEqual(timeouts, [240])
+                        self.assertEqual(timeouts, [360])
 
     def test_real_failed_process_is_not_accepted(self):
         with tempfile.TemporaryDirectory() as directory:

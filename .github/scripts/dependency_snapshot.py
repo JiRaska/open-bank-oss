@@ -224,11 +224,12 @@ def generate(repo, output, env, extra_arguments=()):
                    *extra_arguments, *tasks]
         started = time.monotonic()
         # The first process also warms build-logic and resolves the root project.
-        # Its successful hosted run took 135s; a cold run was killed at 180s
-        # while still resolving projects. Keep every shard bounded, but give
-        # only this extra-work shard measured cold-run headroom.
+        # Its successful hosted run took 189s on 2026-10-08, but two subsequent
+        # runs hit the 240s cap while still resolving its first four modules.
+        # Keep every shard bounded and retain the 20-minute fleet deadline;
+        # give only this extra-work shard room for cold dependency resolution.
         run_bounded(command, repo, child_env, shard / 'run.log',
-                    timeout=shard_timeout(deadline, time.monotonic(), 240 if i == 0 else 180))
+                    timeout=shard_timeout(deadline, time.monotonic(), 360 if i == 0 else 180))
         verify_coverage(coverage, projects, sha)
         snapshots = list(reports.glob('*.json'))
         if len(snapshots) != 1:
