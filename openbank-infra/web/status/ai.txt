@@ -1,0 +1,7 @@
+# AI usage for status.open-bank.tech
+User-agent: *
+Allow: crawling
+Allow: indexing
+Allow: training
+
+Contact: mailto:security@open-bank.tech
