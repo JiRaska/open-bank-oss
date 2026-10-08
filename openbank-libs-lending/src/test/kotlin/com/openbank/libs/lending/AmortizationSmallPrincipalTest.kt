@@ -104,13 +104,19 @@ class AmortizationSmallPrincipalTest {
     @Test
     fun `random schedules never go negative and repay exactly the principal`(): Unit = runBlocking {
         // Explicit seed, named in the failure, so a CI failure replays locally:
-        // AMORTIZATION_PROPERTY_SEED=<seed> ./gradlew :openbank-libs-lending:test --tests '*SmallPrincipal*'
+        // AMORTIZATION_PROPERTY_SEED=<seed> ./gradlew :openbank-libs-lending:test
+        //   --tests '*SmallPrincipal*' --rerun-tasks (otherwise Gradle may return a cached result).
         val seed = System.getenv(SEED_ENV)?.takeIf { it.isNotBlank() }?.toLong() ?: Random.nextLong()
         val ccyArb = Arb.element("EUR", "CZK", "JPY", "KWD")
         try {
             randomSchedulesHold(ccyArb, seed)
         } catch (e: AssertionError) {
-            throw AssertionError("Property failed with seed $seed (replay with $SEED_ENV=$seed): ${e.message}", e)
+            throw AssertionError(
+                "Property failed with seed $seed " +
+                    "(replay with $SEED_ENV=$seed ./gradlew :openbank-libs-lending:test " +
+                    "--tests '*SmallPrincipal*' --rerun-tasks): ${e.message}",
+                e,
+            )
         }
     }
 
