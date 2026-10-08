@@ -1,6 +1,5 @@
-# Communication Studio (ADR-0285 phase 2) first deployment stage. Replicas stay at zero
-# until the image pipeline has produced and attested the pinned source image; activation
-# is a separate reviewed step (mirrors referral/referral-service.yaml exactly).
+# Communication Studio (ADR-0285 phase 2). Activation follows the separately reviewed
+# image pin after the standard build, attestation, contract gate, and GitOps sync.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -10,7 +9,7 @@ metadata:
     app.kubernetes.io/name: communication-service
     app.kubernetes.io/part-of: communication
 spec:
-  replicas: 0
+  replicas: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: communication-service
