@@ -6,6 +6,12 @@ plugins {
     id("openbank.quarkus-service")
 }
 
+// Real PostgreSQL and Kafka Quarkus test profiles exceed Gradle's 512m test-fork default.
+// Scope the ceiling to this service's test JVM; the Gradle daemon is configured separately.
+tasks.named<Test>("test") {
+    maxHeapSize = "1g"
+}
+
 dependencies {
     implementation(enforcedPlatform(libs.quarkus.bom))
     implementation(libs.quarkus.kotlin)
