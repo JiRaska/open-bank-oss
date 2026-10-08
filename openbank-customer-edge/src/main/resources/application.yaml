@@ -175,6 +175,7 @@ openbank:
     keycloak-admin-url: ${KEYCLOAK_ADMIN_URL:http://keycloak.iam.svc:8080}
     keycloak-admin-realm: ${KEYCLOAK_ADMIN_REALM:openbank-customers}
     keycloak-admin-client-id: ${KEYCLOAK_ADMIN_CLIENT_ID:customer-edge-admin}
+    communication-service-url: ${COMMUNICATION_SERVICE_URL:}
     notification-service-url: ${NOTIFICATION_SERVICE_URL:http://notification-service.notifications.svc:8112}
     engagement-service-url: ${ENGAGEMENT_SERVICE_URL:http://engagement-service.engagement.svc:8153}
     campaign-service-url: ${CAMPAIGN_SERVICE_URL:https://campaign-service.campaign.svc:8443}

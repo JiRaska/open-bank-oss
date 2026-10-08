@@ -3,9 +3,12 @@
 """Negative and positive proofs for exact-main Pact publication ordering."""
 
 import importlib.util
+import json
+import os
 from pathlib import Path
 import re
 import subprocess
+import tempfile
 import textwrap
 import unittest
 
@@ -92,22 +95,24 @@ class PublicationWaitTest(unittest.TestCase):
 
     def test_required_service_aggregate_rejects_missing_publication(self):
         services = (Path(__file__).parents[1] / "workflows" / "services-ci.yml").read_text()
-        match = re.search(r"(?ms)^      - name: Verify no service failed\n        run: \|\n(.*?)(?=^  [a-z][a-z-]*:|\Z)", services)
+        match = re.search(r"(?ms)^      - name: Verify no service failed\n        run: \|\n(.*?)(?=^      - name:|^  [a-z][a-z-]*:|\Z)", services)
         self.assertIsNotNone(match)
         template = textwrap.dedent(match.group(1))
         common = {"needs.changes.result": "success", "needs.build.result": "success"}
         # The service aggregate also requires verification metadata for changed build files.
         # Exercise both independent prerequisites so a merge cannot make either gate vacuous.
-        for changed, publication, modules, metadata, expected_success in [
-            ("true", "success", "", "skipped", True),
-            ("true", "failure", "", "skipped", False),
-            ("true", "skipped", "", "skipped", False),
-            ("", "skipped", "", "skipped", True),
-            ("", "skipped", "openbank-treasury-service", "skipped", False),
-            ("", "skipped", "openbank-treasury-service", "success", True),
+        for changed, publication, modules, metadata, admission, expected_success in [
+            ("true", "success", "", "skipped", "true", True),
+            ("true", "failure", "", "skipped", "true", False),
+            ("true", "skipped", "", "skipped", "true", False),
+            ("", "skipped", "", "skipped", "true", True),
+            ("", "skipped", "openbank-treasury-service", "skipped", "true", False),
+            ("", "skipped", "openbank-treasury-service", "success", "true", True),
+            ("", "skipped", "", "skipped", "false", False),
         ]:
-            with self.subTest(changed=changed, publication=publication, modules=modules, metadata=metadata):
-                values = dict(common, **{"needs.changes.outputs.admin-ui-pact-changed": changed,
+            with self.subTest(changed=changed, publication=publication, modules=modules, metadata=metadata, admission=admission):
+                values = dict(common, **{"needs.changes.outputs.admission": admission,
+                                         "needs.changes.outputs.admin-ui-pact-changed": changed,
                                          "needs.changes.outputs.verification-modules": modules,
                                          "needs.verification-metadata.result": metadata,
                                          "needs.publication-ready.result": publication})
@@ -118,6 +123,35 @@ class PublicationWaitTest(unittest.TestCase):
                 result = subprocess.run(["bash", "-euo", "pipefail", "-c", script],
                                         capture_output=True, text=True, check=False)
                 self.assertEqual(result.returncode == 0, expected_success)
+
+    def test_required_service_aggregate_audits_each_matrix_build(self):
+        services = (Path(__file__).parents[1] / "workflows" / "services-ci.yml").read_text()
+        match = re.search(
+            r"(?ms)^      - name: Require every selected service build to pass\n.*?^        run: \|\n(.*?)(?=^  #|^  [a-z][a-z-]*:|\Z)",
+            services,
+        )
+        self.assertIsNotNone(match)
+        script = textwrap.dedent(match.group(1))
+        python = re.search(r"(?s)python3 - <<'PY'\n(.*?)\nPY", script)
+        self.assertIsNotNone(python)
+        selected = ["openbank-account-service", "openbank-treasury-service"]
+        account = "build (openbank-account-service) / openbank-account-service (build)"
+        treasury = "build (openbank-treasury-service) / openbank-treasury-service (build)"
+        for verdicts, expected_success in [
+            ([(account, "success"), (treasury, "success")], True),
+            ([(account, "success"), (treasury, "cancelled")], False),
+            ([(account, "success")], False),
+            ([(account, "success"), (treasury, "success"), (treasury, "success")], False),
+            ([(account, "success"), (treasury, "success"), ("build (openbank-extra) / openbank-extra (build)", "success")], False),
+        ]:
+            with self.subTest(verdicts=verdicts), tempfile.TemporaryDirectory() as directory:
+                jobs = Path(directory) / "jobs.ndjson"
+                jobs.write_text("".join(json.dumps({"name": name, "conclusion": conclusion}) + "\n"
+                                        for name, conclusion in verdicts))
+                env = dict(os.environ, SERVICES_JSON=json.dumps(selected), JOB_FILE=str(jobs))
+                result = subprocess.run(["python3", "-c", python.group(1)], env=env,
+                                        capture_output=True, text=True, check=False)
+                self.assertEqual(result.returncode == 0, expected_success, result.stderr)
 
 
 if __name__ == "__main__":

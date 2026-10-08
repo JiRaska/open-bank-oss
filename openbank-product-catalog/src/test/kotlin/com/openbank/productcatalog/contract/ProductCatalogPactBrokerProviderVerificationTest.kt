@@ -34,11 +34,10 @@ import org.junit.jupiter.api.extension.ExtendWith
  * openbank-product-catalog verifies anything, so its consumers (openbank-card-issuance-service) stayed
  * permanently UNVERIFIED and could not be deployed (issue #3232).
  *
- * A second `@Provider("openbank-product-catalog")` class is safe here for the reason
- * CLAUDE.md gives for ledger-service's identical pair: the collision it warns about is HTTP vs
- * MESSAGE target dispatch fighting over the same `@BeforeEach`, and both classes here use the
- * same target type, so verifying the same interactions from two pact sources is at worst
- * redundant, never colliding.
+ * Both classes replay mutating Product Studio interactions with pact-pinned UUIDs. They must
+ * have separate test databases: the first replay publishes an immutable revision, so the second
+ * cannot reset that provider state by deleting it. `restrictToAnnotatedClass` restarts the
+ * Quarkus test resource between the folder and broker verifiers.
  *
  * Gated on `pactbroker.url`: skipped locally and on the PR lane, which have no broker
  * configured. It runs on the main push, where `_service-ci.yml` sets `PUBLISH_RESULTS=true`
@@ -49,6 +48,7 @@ import org.junit.jupiter.api.extension.ExtendWith
 @QuarkusTestResource(
     value = PostgresTestResource::class,
     initArgs = [ResourceArg(name = "db", value = "openbank_products")],
+    restrictToAnnotatedClass = true,
 )
 @TestSecurity(user = "pact-verifier", roles = ["ROLE_OPERATOR"])
 @Provider("openbank-product-catalog")
@@ -92,8 +92,10 @@ class ProductCatalogPactBrokerProviderVerificationTest {
      * catalogue already satisfies "no product exists with this code".
      */
     @State("no product exists with code NO_SUCH_CARD_PRODUCT")
-    fun unknownProductCodeIsAbsent() {
-        // Intentionally empty — see the KDoc above.
+    fun unknownProductCodeNotFound() {
+        // Assert the negative provider state before Pact replays its own 404 interaction.
+        io.restassured.RestAssured.given().get("/api/v1/products/by-code/NO_SUCH_CARD_PRODUCT")
+            .then().statusCode(404)
     }
 
     /**
@@ -111,7 +113,7 @@ class ProductCatalogPactBrokerProviderVerificationTest {
      * already satisfies the account consumer's negative lookup state.
      */
     @State("no product exists with id 00000000-0000-0000-0000-000000000fff")
-    fun unknownProductIdIsAbsent() {
+    fun unknownProductIdNotFound() {
         // Intentionally empty — see the KDoc above.
     }
 

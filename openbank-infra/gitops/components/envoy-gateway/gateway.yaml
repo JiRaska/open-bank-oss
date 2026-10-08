@@ -200,6 +200,27 @@ spec:
           selector:
             matchLabels:
               kubernetes.io/metadata.name: ai-platform
+    # copilot.open-bank.tech (ADR-0324 Phase 4, copilot/httproute.yaml). Its own Certificate
+    # `copilot-edge-tls` (the host is not pinned), admitted by the ReferenceGrant
+    # copilot-edge-gateway-tls, which landed in an EARLIER change on purpose (the Phase-1
+    # RefNotPermitted lesson). `platform` also hosts agent, ap2 and mcp; the hostname pins this
+    # listener to the copilot route's host, and no other host is served from it.
+    - name: https-copilot
+      protocol: HTTPS
+      port: 443
+      hostname: copilot.open-bank.tech
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: copilot-edge-tls
+            namespace: platform
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              kubernetes.io/metadata.name: platform
     - name: https-rum
       protocol: HTTPS
       port: 443
@@ -216,6 +237,27 @@ spec:
           selector:
             matchLabels:
               kubernetes.io/metadata.name: observability
+    # customer.open-bank.tech (ADR-0324 Phase 4, customer-edge/httproute.yaml). Serves the SAME
+    # Secret the nginx Ingress does, `customer-edge-tls`: the mobile app pins this host's SPKI
+    # (ADR-0066 S3, rotation Never), so a new certificate would break every installed app.
+    # Admitted by the ReferenceGrant in customer-edge/httproute.yaml, which landed in an EARLIER
+    # change on purpose (the Phase-1 RefNotPermitted lesson).
+    - name: https-customer-edge
+      protocol: HTTPS
+      port: 443
+      hostname: customer.open-bank.tech
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: customer-edge-tls
+            namespace: customer-edge
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              kubernetes.io/metadata.name: customer-edge
     # admin.open-bank.tech (ADR-0324 Phase 2). TWO namespaces, because the host is shared: the
     # ADR-0234 tool routes (/tools/*) live in `observability` next to the tools they front, and
     # Phase 3 attaches the console itself from `admin-ui`. Every HTTPRoute in `observability`
@@ -284,3 +326,50 @@ spec:
           selector:
             matchLabels:
               kubernetes.io/metadata.name: iam
+    # api.open-bank.tech (ADR-0324 Phase 4). ONE host, FOUR namespaces: the accounts, balances,
+    # payments and sanctions routes each live beside their Services, as the four nginx Ingresses
+    # did. One certificate, `api-edge-tls`, declared in this namespace (api-edge-tls.yaml, landed
+    # in an EARLIER change so the listener never names a Secret that does not exist yet). Not
+    # key-pinned by the mobile app. Money path: the ClientTrafficPolicy below is part of the
+    # owner-approved replacement for nginx's per-client `limit-connections: 10`.
+    - name: https-api
+      protocol: HTTPS
+      port: 443
+      hostname: api.open-bank.tech
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: api-edge-tls
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchExpressions:
+              - key: kubernetes.io/metadata.name
+                operator: In
+                values: [accounts, balances, payments, sanctions]
+---
+# Listener-wide connection ceiling for api.open-bank.tech (ADR-0324 Phase 4 amendment). nginx
+# capped concurrent connections PER CLIENT IP at 10 (`limit-connections`); Envoy Gateway has no
+# per-client equivalent, so this bounds the host as a whole, with the per-client request rate
+# and the per-backend circuit breakers in each route's BackendTrafficPolicy doing the rest.
+# SIZING (read-only Prometheus, ~3.8 days of retention, 2026-10-04): the busiest Envoy replica
+# peaked at 52 active downstream connections for ALL hosts, ingress-nginx at 107 summed over
+# its replicas for all hosts, and api.open-bank.tech itself at ~1 req/s. 500 per proxy replica
+# is ~10x the whole edge's per-replica peak, so it never binds on legitimate traffic and still
+# caps what one abusive client can hold. Envoy counts it per proxy replica (3 replicas).
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: ClientTrafficPolicy
+metadata:
+  name: api-edge
+  namespace: envoy-gateway-system
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: edge
+      sectionName: https-api
+  connection:
+    connectionLimit:
+      value: 500

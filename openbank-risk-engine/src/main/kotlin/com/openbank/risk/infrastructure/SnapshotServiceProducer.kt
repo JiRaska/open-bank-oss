@@ -14,6 +14,7 @@ import com.openbank.risk.application.port.`in`.LiquidityUseCase
 import com.openbank.risk.application.port.`in`.MinReservesPeriodUseCase
 import com.openbank.risk.application.port.`in`.MinReservesUseCase
 import com.openbank.risk.application.port.`in`.SnapshotUseCase
+import com.openbank.risk.application.port.out.CnbPolicyRateFactRepository
 import com.openbank.risk.application.port.out.CurveSetRepository
 import com.openbank.risk.application.port.out.FxFixingRepository
 import com.openbank.risk.application.port.out.LedgerPort
@@ -252,8 +253,11 @@ class SnapshotServiceProducer {
      */
     @Produces
     @ApplicationScoped
-    fun minReservesUseCase(snapshots: SnapshotUseCase, config: MinReservesConfig): MinReservesUseCase =
-        MinReservesService(snapshots, config.toParameters())
+    fun minReservesUseCase(
+        snapshots: SnapshotUseCase,
+        config: MinReservesConfig,
+        facts: CnbPolicyRateFactRepository,
+    ): MinReservesUseCase = MinReservesService(snapshots, config.toParameters(), facts)
 
     /** Maintenance-period averaging (ADR-0315 D8) under `openbank.risk.min-reserves.maintenance-calendar`. */
     @Produces
@@ -262,7 +266,9 @@ class SnapshotServiceProducer {
         snapshots: SnapshotUseCase,
         config: MinReservesConfig,
         clock: Clock,
-    ): MinReservesPeriodUseCase = MinReservesPeriodService(snapshots, config.toParameters(), config.toCalendar(), clock)
+        facts: CnbPolicyRateFactRepository,
+    ): MinReservesPeriodUseCase =
+        MinReservesPeriodService(snapshots, config.toParameters(), config.toCalendar(), clock, facts)
 
     /** Same reason as [validateLiquidityParameters]: a bad rate or calendar must fail the deploy, not a request. */
     @Suppress("UnusedParameter") // the event only schedules the call
