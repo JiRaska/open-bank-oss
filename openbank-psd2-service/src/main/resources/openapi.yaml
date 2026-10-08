@@ -329,6 +329,8 @@ paths:
           description: Payment initiated
         '400':
           description: 'FORMAT_ERROR — domestic-cz accepts CZK only'
+        '401':
+          description: Missing or invalid TPP credentials
         '409':
           $ref: '#/components/responses/IdempotencyConflict'
 
