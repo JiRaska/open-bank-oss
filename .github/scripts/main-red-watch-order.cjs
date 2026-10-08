@@ -118,6 +118,38 @@ function successfulAfterLaterRuns(successfulJobs, laterRuns) {
   return [...successful]
 }
 
+const TERMINAL_JOB_CONCLUSIONS = new Set([
+  'success', 'failure', 'timed_out', 'cancelled', 'skipped', 'neutral', 'action_required',
+])
+
+/** Never replay a later run from a truncated or still-indexing Jobs API inventory. */
+async function fetchCompleteAttemptJobs(fetchPage) {
+  const jobs = []
+  const ids = new Set()
+  let expected
+  for (let page = 1; ; page++) {
+    const data = await fetchPage(page)
+    if (!data || !Number.isSafeInteger(data.total_count) || data.total_count < 1 ||
+        (expected !== undefined && data.total_count !== expected) ||
+        !Array.isArray(data.jobs) || !data.jobs.length || data.jobs.length > 100) {
+      throw new Error('Incomplete or malformed attempt-scoped Jobs API page')
+    }
+    expected = data.total_count
+    for (const job of data.jobs) {
+      if (!job || !Number.isSafeInteger(job.id) || job.id < 1 || ids.has(job.id) ||
+          typeof job.name !== 'string' || !job.name || job.status !== 'completed' ||
+          !TERMINAL_JOB_CONCLUSIONS.has(job.conclusion)) {
+        throw new Error('Incomplete or malformed attempt-scoped Jobs API job')
+      }
+      ids.add(job.id)
+      jobs.push(job)
+    }
+    if (jobs.length > expected) throw new Error('Attempt-scoped Jobs API exceeded total_count')
+    if (jobs.length === expected) return jobs
+    if (data.jobs.length < 100) throw new Error('Incomplete attempt-scoped Jobs API page')
+  }
+}
+
 /** Retry only GitHub's lagging completed-runs index; malformed data and API errors fail closed. */
 async function waitForCurrentVerdict(verdict, fetchLatest, sleep,
   delays = [1000, 2000, 4000, 8000, 16000, 30000]) {
@@ -135,5 +167,5 @@ async function waitForCurrentVerdict(verdict, fetchLatest, sleep,
 module.exports = {
   eventIsSuperseded, latestIndexedRun, failedJobsCovered, remainingFailureLines, withFailureLines,
   mergeFailureLines, unresolvedAfterLaterRuns, successfulAfterLaterRuns,
-  waitForCurrentVerdict, LatestRunLagError,
+  fetchCompleteAttemptJobs, waitForCurrentVerdict, LatestRunLagError,
 }

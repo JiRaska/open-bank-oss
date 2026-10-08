@@ -214,7 +214,7 @@ jobs:
         with:
           script: |
             const fs = require('fs')
-            const { waitForCurrentVerdict, latestIndexedRun, remainingFailureLines, withFailureLines, mergeFailureLines, unresolvedAfterLaterRuns, successfulAfterLaterRuns } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/main-red-watch-order.cjs`)
+            const { waitForCurrentVerdict, latestIndexedRun, remainingFailureLines, withFailureLines, mergeFailureLines, unresolvedAfterLaterRuns, successfulAfterLaterRuns, fetchCompleteAttemptJobs } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/main-red-watch-order.cjs`)
             const v = JSON.parse(fs.readFileSync('/tmp/main-red.json', 'utf8'))
             const LABEL = 'main-red'
             const slug = (v.workflow || 'unknown').toLowerCase().replace(/[^a-z0-9]+/g, '-')
@@ -270,8 +270,12 @@ jobs:
                 .sort((a, b) => a.id - b.id || a.run_attempt - b.run_attempt)
               const laterJobs = []
               for (const run of laterRuns) {
-                laterJobs.push(await github.paginate(github.rest.actions.listJobsForWorkflowRunAttempt, {
-                  ...context.repo, run_id: run.id, attempt_number: run.run_attempt, per_page: 100,
+                laterJobs.push(await fetchCompleteAttemptJobs(async page => {
+                  const response = await github.rest.actions.listJobsForWorkflowRunAttempt({
+                    ...context.repo, run_id: run.id, attempt_number: run.run_attempt,
+                    per_page: 100, page,
+                  })
+                  return response.data
                 }))
               }
               if (v.status === 'red') {

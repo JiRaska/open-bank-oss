@@ -6,7 +6,7 @@ const assert = require('node:assert/strict')
 const {
   eventIsSuperseded, latestIndexedRun, failedJobsCovered, remainingFailureLines, withFailureLines,
   mergeFailureLines, unresolvedAfterLaterRuns, successfulAfterLaterRuns,
-  waitForCurrentVerdict, LatestRunLagError,
+  fetchCompleteAttemptJobs, waitForCurrentVerdict, LatestRunLagError,
 } = require('./main-red-watch-order.cjs')
 
 const event = { run_id: 100, attempt: 1 }
@@ -74,6 +74,29 @@ async function main() {
   assert.deepEqual(successfulAfterLaterRuns(['A'], [
     [{ name: 'A', conclusion: 'failure' }], [{ name: 'A', conclusion: 'success' }],
   ]), ['A'])
+  const job = (id, name, conclusion) => ({ id, name, conclusion, status: 'completed' })
+  const completeJobs = [job(1, 'A', 'failure'), job(2, 'B', 'success')]
+  assert.deepEqual(await fetchCompleteAttemptJobs(async () => ({
+    total_count: 2, jobs: completeJobs,
+  })), completeJobs)
+  // A missing later A failure must not let the older A success clear the issue.
+  await assert.rejects(fetchCompleteAttemptJobs(async () => ({
+    total_count: 2, jobs: [job(2, 'B', 'success')],
+  })), /Incomplete/)
+  await assert.rejects(fetchCompleteAttemptJobs(async () => ({
+    total_count: 2, jobs: [job(1, 'A', 'failure'), job(1, 'B', 'success')],
+  })), /malformed/)
+  await assert.rejects(fetchCompleteAttemptJobs(async () => ({
+    total_count: 1, jobs: [{ ...job(1, 'A', 'failure'), status: 'in_progress' }],
+  })), /malformed/)
+  await assert.rejects(fetchCompleteAttemptJobs(async () => ({
+    total_count: 1, jobs: [job(1, 'A', null)],
+  })), /malformed/)
+  const firstPage = Array.from({ length: 100 }, (_, index) => job(index + 1, `job-${index}`, 'success'))
+  const pages = [{ total_count: 101, jobs: firstPage }, { total_count: 101, jobs: [job(101, 'A', 'failure')] }]
+  assert.equal((await fetchCompleteAttemptJobs(async page => pages[page - 1])).length, 101)
+  await assert.rejects(fetchCompleteAttemptJobs(async page =>
+    page === 1 ? pages[0] : { total_count: 100, jobs: [job(101, 'A', 'failure')] }), /malformed/)
 
   const run100 = { id: 100, run_attempt: 1 }
   const run101 = { id: 101, run_attempt: 1 }
