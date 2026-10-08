@@ -44,7 +44,7 @@ info:
   # 1.74.0 -> 1.75.0 (#10016): additive — GET /capabilities (ADR-0310 D5).
   # 1.75.0 -> 1.76.0 (#11966): additive — /holdings, the customer write side of the declared
   # holdings that GET /net-worth reads (ADR-0301 D1).
-  version: 1.79.0
+  version: 1.80.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -2084,6 +2084,50 @@ paths:
           description: >-
             Under X-Acting-For only: the company's signing policy could not be evaluated, so the
             instruction is refused rather than created with a single signature.
+
+  /standing-orders/receipt-lookup:
+    post:
+      tags: [Standing Orders]
+      summary: Recover a standing-order receipt after a lost create response
+      description: >-
+        The original idempotency key is accepted only in the JSON body. The edge derives the
+        effective party and authenticated actor from the verified customer token, checks debit
+        account ownership, and returns UNKNOWN when the service lacks an authoritative receipt.
+        UNKNOWN does not prove that no instruction was created.
+      operationId: lookupStandingOrderReceipt
+      security:
+        - customerOidc: [payments:read]
+      parameters:
+        - name: X-Acting-For
+          in: header
+          required: false
+          schema: {type: string, format: uuid}
+          description: Company party selected through an active mandate.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [idempotencyKey, debitAccountId]
+              properties:
+                idempotencyKey: {type: string, minLength: 1}
+                debitAccountId: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Durable receipt or UNKNOWN
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [outcome]
+                properties:
+                  outcome: {type: string, enum: [FOUND, UNKNOWN]}
+                  id: {type: string, format: uuid}
+                  status: {type: string}
+        '400': {description: Malformed lookup body}
+        '403': {description: Debit account does not belong to caller}
 
   /standing-orders/{id}:
     delete:

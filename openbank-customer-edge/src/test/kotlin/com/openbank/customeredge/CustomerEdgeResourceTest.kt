@@ -1354,7 +1354,7 @@ class CustomerEdgeResourceTest {
             """"paymentType":"DOMESTIC","startDate":"2026-07-01"}"""
         val resp = soResourceFor(upstream, caller).createStandingOrder(body, null, null)
         assertThat(resp.status).isEqualTo(403)
-        verify(exactly = 0) { upstream.post(match { it.contains("/standing-orders") }, any(), any()) }
+        verify(exactly = 0) { upstream.post(match { it.contains("/standing-orders") }, any(), any(), any(), any()) }
     }
 
     @Test
@@ -1364,7 +1364,7 @@ class CustomerEdgeResourceTest {
         val upstream = mockk<UpstreamClient>()
         every { upstream.get(match { it.contains("/accounts/$acct") }, any()) } returns accountJson(acct, caller)
         var forwarded: String? = null
-        every { upstream.post(match { it.contains("/api/v1/standing-orders") }, any(), any()) } answers {
+        every { upstream.post(match { it.contains("/api/v1/standing-orders") }, any(), any(), any(), any()) } answers {
             forwarded = thirdArg()
             Response.status(201).entity("""{"id":"${UUID.randomUUID()}","status":"ACTIVE"}""").build()
         }
@@ -1376,6 +1376,57 @@ class CustomerEdgeResourceTest {
         val node = mapper.readTree(forwarded!!)
         assertThat(node.get("partyId").asText()).isEqualTo(caller.toString())
         assertThat(node.get("idempotencyKey").asText()).isEqualTo("idem-1")
+        verify(exactly = 1) {
+            upstream.post(
+                "http://so/api/v1/standing-orders",
+                caller.toString(),
+                any(),
+                "idem-1",
+                mapOf("X-Customer-Actor-Id" to caller.toString()),
+            )
+        }
+    }
+
+    @Test
+    fun `standing order receipt refuses an unowned debit before contacting the service`() {
+        val caller = UUID.randomUUID()
+        val account = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(match { it.contains("/accounts/$account") }, any()) } returns
+            accountJson(account, UUID.randomUUID())
+        val response = soResourceFor(upstream, caller).standingOrderReceiptLookup(
+            """{"idempotencyKey":"original-key","debitAccountId":"$account"}""",
+        )
+        assertThat(response.status).isEqualTo(403)
+        verify(exactly = 0) { upstream.post(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `standing order receipt forwards only original key and verified account and actor`() {
+        val caller = UUID.randomUUID()
+        val account = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(match { it.contains("/accounts/$account") }, any()) } returns accountJson(account, caller)
+        every { upstream.post(any(), any(), any(), any(), any()) } returns
+            Response.ok("""{"outcome":"UNKNOWN"}""").build()
+        val response = soResourceFor(upstream, caller).standingOrderReceiptLookup(
+            """{"idempotencyKey":"original-key","debitAccountId":"$account","partyId":"${UUID.randomUUID()}"}""",
+        )
+        assertThat(response.status).isEqualTo(200)
+        verify(exactly = 1) {
+            upstream.post(
+                "http://so/api/v1/standing-orders/receipt-lookup",
+                caller.toString(),
+                match { body ->
+                    val forwarded = mapper.readTree(body)
+                    forwarded.size() == 2 &&
+                        forwarded.path("idempotencyKey").asText() == "original-key" &&
+                        forwarded.path("debitAccountId").asText() == account.toString()
+                },
+                "original-key",
+                mapOf("X-Customer-Actor-Id" to caller.toString()),
+            )
+        }
     }
 
     @Test

@@ -3521,6 +3521,8 @@ class CustomerEdgeResource(
             "$standingOrderServiceUrl/api/v1/standing-orders",
             customer.partyId.toString(),
             enriched,
+            extractTextField(objectMapper, enriched, "idempotencyKey"),
+            mapOf("X-Customer-Actor-Id" to standingOrderActorId().toString()),
         )
         audit.emit(
             eventType = "STANDING_ORDER_CREATED",
@@ -3534,6 +3536,38 @@ class CustomerEdgeResource(
             ),
         )
         return resp
+    }
+
+    /** The original JWT actor remains distinct from the effective business party. */
+    private fun standingOrderActorId(): UUID {
+        val claimed = resolvePartyIdClaim(jwt.getClaim<String>("party_id"), jwt.subject)
+            ?: throw ForbiddenException("Missing customer actor")
+        return runCatching { UUID.fromString(claimed) }
+            .getOrElse { throw ForbiddenException("Invalid customer actor") }
+    }
+
+    @POST
+    @Path("/standing-orders/receipt-lookup")
+    @Authorize(action = "customer.standing-orders.read")
+    @Blocking
+    fun standingOrderReceiptLookup(body: String): Response {
+        val customer = customer()
+        val key = extractTextField(objectMapper, body, "idempotencyKey")?.takeIf { it.isNotBlank() }
+            ?: return badRequest("idempotencyKey is required")
+        val debit = extractTextField(objectMapper, body, "debitAccountId")
+            ?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+            ?: return badRequest("Missing or malformed debitAccountId")
+        if (!ownsAccount(debit, customer.partyId)) return forbidden("Debit account does not belong to caller")
+        val request = objectMapper.writeValueAsString(
+            mapOf("idempotencyKey" to key, "debitAccountId" to debit.toString()),
+        )
+        return upstream.post(
+            "$standingOrderServiceUrl/api/v1/standing-orders/receipt-lookup",
+            customer.partyId.toString(),
+            request,
+            key,
+            mapOf("X-Customer-Actor-Id" to standingOrderActorId().toString()),
+        )
     }
 
     @POST
