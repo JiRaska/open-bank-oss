@@ -59,6 +59,8 @@ def required_policy(ruleset: dict) -> tuple[list[str], int]:
 def action(pr: dict, head: str, base: str, required: list[str], reviews: int) -> str:
     if pr.get("state") != "OPEN" or pr.get("isDraft"):
         raise ValueError("selected deploy PR is no longer open and ready")
+    if any(label.get("name") == "blocked" for label in pr.get("labels") or []):
+        raise ValueError("selected deploy PR carries a blocked deployment hold")
     if pr.get("headRefOid") != head or pr.get("baseRefOid") != base:
         raise ValueError("selected deploy PR head or base changed; retry selection")
     head_name = str(pr.get("headRefName", ""))
@@ -148,6 +150,7 @@ def self_test() -> None:
         ({**pr, "headRefOid": "c" * 40}, sha, base, 0),
         ({**pr, "baseRefOid": "c" * 40}, sha, base, 0),
         ({**pr, "statusCheckRollup": []}, sha, base, 0),
+        ({**pr, "labels": [{"name": "blocked"}]}, sha, base, 0),
         (pr, sha, base, 1),  # empty reviewDecision is not approval
         ({**pr, "mergeStateStatus": "BEHIND"}, sha, base, 0),
     ]:
@@ -188,7 +191,7 @@ def main(args: argparse.Namespace) -> None:
     if live_main(repo) != args.selected_main:
         raise ValueError("main changed after selection; retry next flush")
     pr = gh("pr", "view", str(args.number), "--repo", repo, "--json",
-            "state,isDraft,headRefName,headRefOid,baseRefOid,mergeStateStatus,reviewDecision,statusCheckRollup,commits,id")
+            "state,isDraft,labels,headRefName,headRefOid,baseRefOid,mergeStateStatus,reviewDecision,statusCheckRollup,commits,id")
     listing = gh("api", f"repos/{repo}/rulesets")
     matches = [r for r in listing if r.get("name") == "main-protection" and r.get("enforcement") == "active"]
     if len(matches) != 1:
@@ -220,7 +223,7 @@ def main(args: argparse.Namespace) -> None:
     if live_main(repo) != args.selected_main:
         raise ValueError("main changed before deploy mutation; retry next flush")
     current = gh("pr", "view", str(args.number), "--repo", repo, "--json",
-                 "state,isDraft,headRefName,headRefOid,baseRefOid,mergeStateStatus,reviewDecision,statusCheckRollup,commits,id")
+                 "state,isDraft,labels,headRefName,headRefOid,baseRefOid,mergeStateStatus,reviewDecision,statusCheckRollup,commits,id")
     if required_policy(gh("api", f"repos/{repo}/rulesets/{matches[0]['id']}")) != (required, reviews):
         raise ValueError("main ruleset changed during deploy verification; retry selection")
     if action(current, args.selected_head, args.selected_main, required, reviews) != choice:
