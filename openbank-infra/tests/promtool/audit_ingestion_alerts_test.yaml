@@ -64,3 +64,52 @@ tests:
   - eval_time: 45m
     alertname: AuditIngestionFailed
     exp_alerts: []
+- name: first agent audit DLQ sample already has an offset
+  interval: 1m
+  input_series:
+  - series: kafka_topic_partition_current_offset{topic="openbank.dlq.audit.agent-audit-events-in",partition="0"}
+    values: 1+0x20
+  alert_rule_test:
+  - eval_time: 1m
+    alertname: AgentAuditDeadLettered
+    exp_alerts:
+    - exp_labels:
+        severity: critical
+        service: audit-service
+      exp_annotations:
+        subject_period: continuous
+        summary: Agent audit evidence was dead-lettered
+        description: Agent audit evidence failed to reach the append-only store. Reconcile the original producer event ID and replay its unchanged payload after repairing the cause. A committed source offset does not mean the audit row exists.
+        runbook_url: docs/runbooks/audit-ingestion-recovery.md
+  - eval_time: 10m
+    alertname: AgentAuditDeadLettered
+    exp_alerts: []
+- name: idle agent audit DLQ stays quiet
+  interval: 1m
+  input_series:
+  - series: kafka_topic_partition_current_offset{topic="openbank.dlq.audit.agent-audit-events-in",partition="0"}
+    values: 0+0x20
+  alert_rule_test:
+  - eval_time: 1m
+    alertname: AgentAuditDeadLettered
+    exp_alerts: []
+- name: later agent audit dead letter fires then ages out
+  interval: 1m
+  input_series:
+  - series: kafka_topic_partition_current_offset{topic="openbank.dlq.audit.agent-audit-events-in",partition="0"}
+    values: 0+0x10 1+0x20
+  alert_rule_test:
+  - eval_time: 13m
+    alertname: AgentAuditDeadLettered
+    exp_alerts:
+    - exp_labels:
+        severity: critical
+        service: audit-service
+      exp_annotations:
+        subject_period: continuous
+        summary: Agent audit evidence was dead-lettered
+        description: Agent audit evidence failed to reach the append-only store. Reconcile the original producer event ID and replay its unchanged payload after repairing the cause. A committed source offset does not mean the audit row exists.
+        runbook_url: docs/runbooks/audit-ingestion-recovery.md
+  - eval_time: 25m
+    alertname: AgentAuditDeadLettered
+    exp_alerts: []
