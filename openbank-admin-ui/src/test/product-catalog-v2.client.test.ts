@@ -8,7 +8,7 @@ import { once } from 'node:events'
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import {
-  catalogV2Operation, createCatalogV2Client,
+  CatalogV2Error, catalogV2Operation, createCatalogV2Client,
 } from '@/lib/product-catalog-v2'
 
 describe('product catalog v2 production client', () => {
@@ -125,6 +125,9 @@ describe('product catalog v2 production client', () => {
       await catalogV2Operation('getProductTypeVersionV2', {
         pathParameters: { id: schemaRef.id, version: 1 },
       }, transport)
+      await expect(catalogV2Operation('getProductTypeVersionV2', {
+        pathParameters: { id: schemaRef.id, version: 999 },
+      }, transport)).rejects.toMatchObject({ status: 404 } satisfies Partial<CatalogV2Error>)
       await catalogV2Operation('createSpecificationV2', {
         body: { code: 'PACT_STUDIO_SPEC', schemaRef },
       }, transport)

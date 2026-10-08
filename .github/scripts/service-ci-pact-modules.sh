@@ -8,8 +8,8 @@ is_inert_service_path() {
   case "$1" in
     openbank-admin-ui/*|openbank-infra/*|docs/*|*/version.txt|*/CHANGELOG.md|.release-please-manifest.json|release-please-config.json)
       return 0 ;;
-    .github/scripts/publish-admin-ui-pacts.py|.github/scripts/test-publish-admin-ui-pacts.py|.github/gates/workflow-write-permissions-baseline.txt)
-      # These feed the separate Pact drift/publication gate, not a service build.
+    .github/scripts/check-flyway-version-commit-order.py|.github/scripts/publish-admin-ui-pacts.py|.github/scripts/test-publish-admin-ui-pacts.py|.github/scripts/verify-dependabot-auto-merge.py|.github/scripts/test-verify-dependabot-auto-merge.py|.github/gates/workflow-write-permissions-baseline.txt)
+      # Separate governance and Pact controls own these files; they do not build services.
       return 0 ;;
     .github/workflows/*)
       # Only the service CI recipes can affect a service build.
@@ -44,6 +44,10 @@ pact_build_modules_self_test() {
     || { echo "selector self-test: service source must remain relevant" >&2; return 1; }
   ! is_inert_service_path ".github/scripts/unknown-service-build-helper.sh" \
     || { echo "selector self-test: unknown automation must retain safe fallback" >&2; return 1; }
+  is_inert_service_path ".github/scripts/check-flyway-version-commit-order.py" \
+    || { echo "selector self-test: Flyway order gate must be service-inert" >&2; return 1; }
+  is_inert_service_path ".github/scripts/verify-dependabot-auto-merge.py" \
+    || { echo "selector self-test: Dependabot validator must be service-inert" >&2; return 1; }
   is_inert_service_path ".github/scripts/publish-admin-ui-pacts.py" \
     || { echo "selector self-test: Pact publisher must not full-fleet" >&2; return 1; }
   is_inert_service_path ".github/gates/workflow-write-permissions-baseline.txt" \
