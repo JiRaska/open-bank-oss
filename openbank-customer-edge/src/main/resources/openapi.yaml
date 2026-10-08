@@ -1189,6 +1189,26 @@ paths:
         '200':
           description: Party-scoped notification page with total and exact unreadCount
 
+  /notifications/unified:
+    get:
+      tags: [Notifications]
+      summary: List notifications for the person and all currently mandated companies
+      operationId: listUnifiedNotifications
+      security:
+        - customerOidc: [accounts:read]
+      parameters:
+        - {name: limit, in: query, required: false, schema: {type: integer, default: 20, minimum: 1, maximum: 100}}
+        - {name: partyId, in: query, required: false, description: Filter to an authorized person or company, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Latest notifications across authorized profiles; each item carries its origin partyId
+        '403':
+          description: Requested party is not authorized
+        '502':
+          description: At least one notification feed failed; no partial inbox is returned
+        '503':
+          description: Profile discovery failed; no partial inbox is returned
+
   /notifications/{id}/read:
     patch:
       tags: [Notifications]

@@ -3583,6 +3583,26 @@ class CustomerEdgeResource(
         )
     }
 
+    /** A single inbox across the token holder and currently mandated entities. */
+    @GET
+    @Path("/notifications/unified")
+    @Authorize(action = "customer.notifications.read")
+    @Blocking
+    fun listUnifiedNotifications(
+        @QueryParam("limit") @DefaultValue("20") limit: Int,
+        @QueryParam("partyId") filterPartyId: UUID?,
+    ): Response {
+        val identity = customer()
+        val allowed = listOf(identity.human) + actingForResolver.profilesOfStrict(identity.human)
+            .map { it["partyId"] as UUID }
+        if (filterPartyId != null && filterPartyId !in allowed) {
+            return forbidden("Notification profile unavailable")
+        }
+        val parties = (filterPartyId?.let(::listOf) ?: allowed).distinct()
+        return UnifiedNotificationInbox(upstream, objectMapper, notificationServiceUrl)
+            .list(parties, limit.coerceIn(1, 100))
+    }
+
     /** Mark one notification read. partyId injected from the JWT — the service scopes by it (IDOR). */
     @PATCH
     @Path("/notifications/{id}/read")
