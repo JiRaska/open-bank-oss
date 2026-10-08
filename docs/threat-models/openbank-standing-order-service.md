@@ -41,8 +41,9 @@ openbank-sdd-service.
 
 - **External entities:** customer-edge (authenticated customer), admin-UI (ROLE_OPERATOR),
   sepa-payment / account-service / transaction-service (M2M callees).
-- **Trust boundaries:** edge → service (OIDC + OPA sidecar, currently AUTHZ_ENFORCE=false
-  advisory); service → Kafka (mTLS via Strimzi); service → sepa-payment (OIDC client credentials,
+- **Trust boundaries:** edge → service (OIDC + OPA sidecar; the GitOps manifest declares
+  `AUTHZ_ENFORCE=true` for the `@Authorize` pause action); service → Kafka (mTLS via Strimzi);
+  service → sepa-payment (OIDC client credentials,
   `openbank-services` client, ROLE_OPERATOR accepted by sepa-payment's createPayment); service →
   account-service (same client, ROLE_OPERATOR accepted by `account.read`, read-only IBAN lookup,
   new — #889 follow-up); service → transaction-service (same client, ROLE_OPERATOR accepted by
@@ -54,9 +55,10 @@ openbank-sdd-service.
 
 - All REST endpoints: `@RolesAllowed` (ROLE_CUSTOMER for own orders, ROLE_OPERATOR/ROLE_ADMIN for
   operator surface), verified by `StandingOrderSecurityTest` and `StandingOrderSecurityContractTest`.
-- OPA sidecar deployed (ADR-0034 Phase 5); `AUTHZ_ENFORCE=false` (advisory) — decisions are
-  evaluated and logged but not enforced yet; the flip is a deliberate follow-up with an
-  observation window (rules.yaml AUTHZ_ENFORCE guardrail, issue #3679 cohort).
+- OPA sidecar deployed (ADR-0034 Phase 5); the GitOps manifest declares
+  `AUTHZ_ENFORCE=true` for `standingOrder.pause`, the only `@Authorize` method. The advisory
+  observation window had no pause requests or authorization decisions, so a positive live
+  customer-edge call and PDP availability still need verification after rollout (#12324).
 - Execution calls to sepa-payment are service-to-service (OIDC client credentials via
   `OidcClientRequestReactiveFilter`), not ambient authority.
 - **`standingOrder.pause` is identity-scoped, not role-only (GHSA-58jq-9hq3-66jr, #4228).**
@@ -88,9 +90,10 @@ openbank-sdd-service.
 
 ## 5. Residual risks / assumptions
 
-- **Advisory authz:** `AUTHZ_ENFORCE=false` means the OPA sidecar logs but does not block; RBAC
-  (`@RolesAllowed`) is the only enforced fine-grained gate until the enforce flip (tracked in the
-  #3679 cohort).
+- **Enforcement rollout:** the GitOps manifest sets `AUTHZ_ENFORCE=true`, but this single-replica
+  Deployment has no canary. OPA enforcement applies only to `standingOrder.pause`; the other REST
+  actions remain `@RolesAllowed`-only. Verify the live edge pause path and PDP health before
+  treating the manifest change as an effective authorization control (#12324).
 - **Partially-wired rails (#889):** `DOMESTIC`/`INTERNAL` orders now execute when the creditor IBAN
   resolves to an account of the SAME party as the order (own-account move, transaction-service
   `TRANSFER`, no screening needed — the same case `domestic-payment` itself skips AML/sanctions for).
