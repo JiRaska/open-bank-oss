@@ -17,3 +17,5 @@
 @media(prefers-reduced-motion:reduce){.mascot.frame-b,.mascot-repair.frame-b,.motion-packet{display:none}.mascot.frame-a{opacity:1!important}.is-incident .mascot-operational.frame-a{opacity:0!important}.is-incident .mascot-repair.frame-a{opacity:1!important}}
 .brand img{width:43px;height:31px;object-fit:contain;flex:none}.footer-inner .brand img{width:36px;height:26px}.term-card{min-height:216px}.term-card h3{margin-top:22px}.term-card p{min-height:48px}.section{padding-block:72px}.learn-section{padding-block:76px}.more-metrics{margin-top:42px}.budget-panel{padding-block:28px}.method-grid p{max-width:310px}
 @media(max-width:760px){.section,.learn-section{padding-block:58px}.term-card{min-height:0}.term-card p{min-height:0}}
+/* Keep the short privacy notice readable without adding page-specific inline styles. */
+.privacy-content { max-width: 720px; min-height: 65vh; }
