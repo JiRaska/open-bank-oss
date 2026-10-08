@@ -46,6 +46,27 @@ function latestIndexedRun(verdict, runs) {
   return runs.reduce((newest, run) => !newest || run.id > newest.id ? run : newest, null)
 }
 
+/** GitHub lists one row per run ID, so expand every intervening rerun attempt. */
+function laterRunAttempts(verdict, runs) {
+  if (!Array.isArray(runs) || !Number.isSafeInteger(verdict?.run_id) || verdict.run_id < 1 ||
+      !Number.isSafeInteger(verdict?.attempt) || verdict.attempt < 1) {
+    throw new Error('Malformed completed-runs inventory or event identity')
+  }
+  const later = []
+  for (const run of runs) {
+    if (!Number.isSafeInteger(run?.id) || run.id < 1 ||
+        !Number.isSafeInteger(run.run_attempt) || run.run_attempt < 1) {
+      throw new Error('Malformed completed-runs inventory entry')
+    }
+    if (run.id < verdict.run_id) continue
+    for (let attempt = run.id === verdict.run_id ? verdict.attempt + 1 : 1;
+      attempt <= run.run_attempt; attempt++) {
+      later.push({ id: run.id, attempt })
+    }
+  }
+  return later.sort((a, b) => a.id - b.id || a.attempt - b.attempt)
+}
+
 const FAILURE_HEADING = '### Unresolved failing jobs'
 const FAILURE_SECTION = /(### (?:Unresolved failing jobs|Every failing job in this attempt)\r?\n\r?\n)([^]*?)(?=\r?\n\r?\n|$)/
 
@@ -165,7 +186,7 @@ async function waitForCurrentVerdict(verdict, fetchLatest, sleep,
 }
 
 module.exports = {
-  eventIsSuperseded, latestIndexedRun, failedJobsCovered, remainingFailureLines, withFailureLines,
+  eventIsSuperseded, latestIndexedRun, laterRunAttempts, failedJobsCovered, remainingFailureLines, withFailureLines,
   mergeFailureLines, unresolvedAfterLaterRuns, successfulAfterLaterRuns,
   fetchCompleteAttemptJobs, waitForCurrentVerdict, LatestRunLagError,
 }

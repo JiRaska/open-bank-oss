@@ -4,7 +4,7 @@
 
 const assert = require('node:assert/strict')
 const {
-  eventIsSuperseded, latestIndexedRun, failedJobsCovered, remainingFailureLines, withFailureLines,
+  eventIsSuperseded, latestIndexedRun, laterRunAttempts, failedJobsCovered, remainingFailureLines, withFailureLines,
   mergeFailureLines, unresolvedAfterLaterRuns, successfulAfterLaterRuns,
   fetchCompleteAttemptJobs, waitForCurrentVerdict, LatestRunLagError,
 } = require('./main-red-watch-order.cjs')
@@ -74,6 +74,22 @@ async function main() {
   assert.deepEqual(successfulAfterLaterRuns(['A'], [
     [{ name: 'A', conclusion: 'failure' }], [{ name: 'A', conclusion: 'success' }],
   ]), ['A'])
+  // GitHub's runs list shows only the latest attempt. A failed A in attempt 2
+  // must still invalidate A's earlier success when attempt 3 runs only B.
+  const intervening = laterRunAttempts({ run_id: 100, attempt: 1 }, [
+    { id: 101, run_attempt: 1 }, { id: 100, run_attempt: 3 },
+  ])
+  assert.deepEqual(intervening, [
+    { id: 100, attempt: 2 }, { id: 100, attempt: 3 }, { id: 101, attempt: 1 },
+  ])
+  const attempts = new Map([
+    ['100/2', [{ name: 'A', conclusion: 'failure' }]],
+    ['100/3', [{ name: 'B', conclusion: 'success' }]],
+    ['101/1', [{ name: 'B', conclusion: 'success' }]],
+  ])
+  assert.deepEqual(successfulAfterLaterRuns(['A'], intervening.map(run =>
+    attempts.get(`${run.id}/${run.attempt}`))), [])
+  assert.throws(() => laterRunAttempts(event, [{ id: 100, run_attempt: '3' }]), /Malformed/)
   const job = (id, name, conclusion) => ({ id, name, conclusion, status: 'completed' })
   const completeJobs = [job(1, 'A', 'failure'), job(2, 'B', 'success')]
   assert.deepEqual(await fetchCompleteAttemptJobs(async () => ({
