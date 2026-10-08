@@ -52,8 +52,13 @@ def required_policy(ruleset: dict) -> tuple[list[str], int]:
     names = [r.get("context") for r in statuses.get("required_status_checks", [])]
     if not names or any(not n for n in names) or len(names) != len(set(names)):
         raise ValueError("required main status contexts are missing or ambiguous")
-    reviews = rules.get("pull_request", {})
-    return names, int(reviews.get("required_approving_review_count", 0) or 0)
+    reviews = rules.get("pull_request")
+    if not isinstance(reviews, dict):
+        raise ValueError("main-protection has no required pull request review rule")
+    count = reviews.get("required_approving_review_count")
+    if not isinstance(count, int) or isinstance(count, bool) or count < 1:
+        raise ValueError("main-protection does not require positive approving reviews")
+    return names, count
 
 
 def action(pr: dict, head: str, base: str, required: list[str], reviews: int) -> str:
@@ -73,7 +78,7 @@ def action(pr: dict, head: str, base: str, required: list[str], reviews: int) ->
         return "ARM"
     if state != "CLEAN":
         raise ValueError(f"deploy PR merge state {state!r} needs a safe retry")
-    if reviews and pr.get("reviewDecision") != "APPROVED":
+    if reviews < 1 or pr.get("reviewDecision") != "APPROVED":
         raise ValueError(f"{reviews} approval(s) required; reviewDecision is "
                          f"{pr.get('reviewDecision')!r}")
     checks = pr.get("statusCheckRollup") or []
@@ -121,12 +126,13 @@ def self_test() -> None:
               "conditions": {"ref_name": {"include": ["refs/heads/main"], "exclude": []}},
               "rules": [{"type": "required_status_checks", "parameters": {
                   "strict_required_status_checks_policy": True,
-                  "required_status_checks": [{"context": "all-green"}]}}]}
+                  "required_status_checks": [{"context": "all-green"}]}},
+                  {"type": "pull_request", "parameters": {"required_approving_review_count": 1}}]}
     checks, reviews = required_policy(policy)
     pr = {"state": "OPEN", "isDraft": False, "headRefName": DEPLOY_PREFIXES[0] + base,
           "headRefOid": sha, "baseRefOid": base, "mergeStateStatus": "CLEAN",
-          "reviewDecision": "", "statusCheckRollup": [{"name": "all-green", "conclusion": "SUCCESS"}]}
-    assert (checks, reviews) == (["all-green"], 0)
+          "reviewDecision": "APPROVED", "statusCheckRollup": [{"name": "all-green", "conclusion": "SUCCESS"}]}
+    assert (checks, reviews) == (["all-green"], 1)
     assert action(pr, sha, base, checks, reviews) == "MERGE"  # CLEAN never arms
     assert action({**pr, "mergeStateStatus": "BLOCKED"}, sha, base, checks, reviews) == "ARM"
     assert action({**pr, "mergeStateStatus": "PENDING"}, sha, base, checks, reviews) == "ARM"
@@ -151,7 +157,7 @@ def self_test() -> None:
         ({**pr, "baseRefOid": "c" * 40}, sha, base, 0),
         ({**pr, "statusCheckRollup": []}, sha, base, 0),
         ({**pr, "labels": [{"name": "blocked"}]}, sha, base, 0),
-        (pr, sha, base, 1),  # empty reviewDecision is not approval
+        ({**pr, "reviewDecision": ""}, sha, base, 1),
         ({**pr, "mergeStateStatus": "BEHIND"}, sha, base, 0),
     ]:
         try:
@@ -168,6 +174,14 @@ def self_test() -> None:
         pass
     else:
         raise AssertionError("non-strict main accepted")
+    for rules in (policy["rules"][:1], [policy["rules"][0],
+                  {"type": "pull_request", "parameters": {"required_approving_review_count": 0}}]):
+        try:
+            required_policy({**policy, "rules": rules})
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("main without positive required reviews accepted")
     original_gh = globals()["gh"]
     try:
         globals()["gh"] = lambda *_: {"commit": {"verification": {"verified": False}}}
@@ -229,6 +243,15 @@ def main(args: argparse.Namespace) -> None:
     if action(current, args.selected_head, args.selected_main, required, reviews) != choice:
         raise ValueError("deploy PR state changed during verification; retry next flush")
     if choice == "ARM":
+        # GraphQL has no expected-head parameter. Narrow its race with a final live read;
+        # GitHub's required review and strict checks still gate the eventual auto-merge.
+        if live_main(repo) != args.selected_main:
+            raise ValueError("main changed before arming; retry next flush")
+        latest = gh("pr", "view", str(args.number), "--repo", repo, "--json",
+                    "state,isDraft,labels,headRefName,headRefOid,baseRefOid,mergeStateStatus,reviewDecision,statusCheckRollup,id")
+        if latest.get("id") != current["id"] or action(latest, args.selected_head,
+                args.selected_main, required, reviews) != "ARM":
+            raise ValueError("deploy PR changed before arming; retry next flush")
         gh("api", "graphql", "-f", "query=mutation($id: ID!) { enablePullRequestAutoMerge(input: {pullRequestId: $id, mergeMethod: SQUASH}) {pullRequest {number}}}",
            "-f", f"id={current['id']}")
         print(f"auto-merge armed on deploy PR #{args.number}")
