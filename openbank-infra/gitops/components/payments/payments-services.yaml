@@ -53,7 +53,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: transaction-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-transaction-service:sandbox-bea35d6a
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-transaction-service:sandbox-631a1f05
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -464,7 +464,7 @@ spec:
         - name: sepa-payment
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-payment:sandbox-bea35d6a
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-payment:sandbox-631a1f05
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -1220,7 +1220,7 @@ spec:
         - name: sepa-instant
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-instant:sandbox-bea35d6a
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-instant:sandbox-631a1f05
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -2727,7 +2727,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: settlement-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-settlement-service:sandbox-bea35d6a
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-settlement-service:sandbox-631a1f05
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -3074,7 +3074,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: clearing-simulator
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-simulator:sandbox-133bed15
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-simulator:sandbox-92997073
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -3193,7 +3193,7 @@ spec:
         - name: swift-service
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-swift-service:sandbox-bea35d6a
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-swift-service:sandbox-631a1f05
 
           imagePullPolicy: IfNotPresent
           ports:
