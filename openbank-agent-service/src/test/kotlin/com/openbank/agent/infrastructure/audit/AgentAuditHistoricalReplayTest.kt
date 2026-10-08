@@ -30,11 +30,16 @@ class AgentAuditHistoricalReplayTest {
     private val eventId = UUID.randomUUID()
     private val payload = "{\"eventId\":\"$eventId\",\"sourceService\":\"agent-service\"}"
     private val row = AgentAuditReplayStore.Row(from.plusSeconds(1), eventId, payload)
+    private val manifest = AgentAuditReplayStore.sha256(
+        "${row.createdAt}:${row.eventId}:${AgentAuditReplayStore.sha256(payload)}\n",
+    )
 
     private fun replay(
         execute: Boolean,
         transportEnabled: Boolean = true,
         maxEvents: Int = 25,
+        expectedCount: Optional<Int> = Optional.of(1),
+        expectedManifest: Optional<String> = Optional.of(manifest),
     ): AgentAuditHistoricalReplay = AgentAuditHistoricalReplay(
         store,
         jacksonObjectMapper(),
@@ -46,7 +51,51 @@ class AgentAuditHistoricalReplayTest {
         Optional.of(from.toString()),
         Optional.of(until.toString()),
         maxEvents,
+        expectedCount,
+        expectedManifest,
     )
+
+    private fun mockSingleRowInventory() {
+        every { store.acquire() } returns connection
+        every { store.release(connection) } returns Unit
+        every { store.inventory(connection, from, until) } returns AgentAuditReplayStore.Inventory(1, 0)
+        every { store.next(connection, any(), 1) } returns listOf(row)
+    }
+
+    @Test
+    fun `execute without both approved inputs never creates a campaign or sends`(): Unit = runBlocking {
+        mockSingleRowInventory()
+
+        assertThatThrownBy {
+            runBlocking { replay(execute = true, expectedCount = Optional.empty()).replay() }
+        }.hasMessageContaining("expected count is required")
+        assertThatThrownBy {
+            runBlocking { replay(execute = true, expectedManifest = Optional.empty()).replay() }
+        }.hasMessageContaining("expected manifest SHA-256 is required")
+
+        verify(exactly = 0) { store.campaign(any(), any(), any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { store.checkpoint(any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { emitterInstance.get() }
+    }
+
+    @Test
+    fun `execute rejects mismatched count malformed digest and mismatched digest before writes`(): Unit = runBlocking {
+        mockSingleRowInventory()
+
+        assertThatThrownBy {
+            runBlocking { replay(execute = true, expectedCount = Optional.of(2)).replay() }
+        }.hasMessageContaining("does not match approved")
+        assertThatThrownBy {
+            runBlocking { replay(execute = true, expectedManifest = Optional.of("not-a-digest")).replay() }
+        }.hasMessageContaining("is invalid")
+        assertThatThrownBy {
+            runBlocking { replay(execute = true, expectedManifest = Optional.of("0".repeat(64))).replay() }
+        }.hasMessageContaining("does not match approved")
+
+        verify(exactly = 0) { store.campaign(any(), any(), any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { store.checkpoint(any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { emitterInstance.get() }
+    }
 
     @Test
     fun `dry run reads bounded rows without checkpoint or broker access`(): Unit = runBlocking {
