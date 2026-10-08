@@ -136,7 +136,7 @@ class BusinessPaymentApprovals(
 
         scaGate()?.let { return it }
         val challenge = UUID.fromString(requireNotNull(scaChallengeId).trim())
-        val created = signing.createApproval(entity, createBody(customer.human, challenge, payment))
+        val created = signing.createApproval(entity, createBody(customer, challenge, payment))
         if (!created.ok) {
             audit.emit(
                 eventType = "CUSTOMER_PAYMENT_REFUSED",
@@ -188,9 +188,12 @@ class BusinessPaymentApprovals(
         return if (reply.ok) read(reply.body) else null
     }
 
-    private fun createBody(human: UUID, challenge: UUID, p: HeldPayment): String {
+    private fun createBody(customer: CustomerIdentity, challenge: UUID, p: HeldPayment): String {
         val payload = objectMapper.createObjectNode().apply {
             put("rail", p.rail.name)
+            if (p.rail in setOf(PaymentRail.DOMESTIC, PaymentRail.SEPA)) {
+                put("initiatorActorId", (p.initiatorActorId ?: customer.authenticatedActor).toString())
+            }
             p.amount?.let { put("amount", it) }
             p.currency?.let { put("currency", it) }
             if (p.rail != PaymentRail.SDD_MANDATE) p.creditor?.let { put("creditorIban", it) }
@@ -198,14 +201,13 @@ class BusinessPaymentApprovals(
             p.creditorName?.let { put("creditorName", it) }
             p.reference?.let { put("reference", it) }
             put("debtorAccountId", p.debtorAccountId)
-            p.initiatorActorId?.let { put("initiatorActorId", it.toString()) }
             set<JsonNode>("railRequest", objectMapper.readTree(p.railRequest))
         }
         val body = objectMapper.createObjectNode().apply {
             put("kind", p.rail.kind)
             set<JsonNode>("payload", payload)
             putObject("initiatorSignature").apply {
-                put("partyId", human.toString())
+                put("partyId", customer.human.toString())
                 put("scaChallengeId", challenge.toString())
             }
         }
@@ -213,6 +215,7 @@ class BusinessPaymentApprovals(
     }
 
     /** Release after the last signature. Returns the release outcome for the sign response. */
+    @Suppress("LongMethod") // claim, provenance, rail post and result report form one release boundary
     fun release(entity: UUID, approvalId: UUID, verifiedInitiatorId: UUID?): Map<String, Any?> {
         val claim = signing.releaseClaim(entity, approvalId)
         if (!claim.ok) {
@@ -230,7 +233,7 @@ class BusinessPaymentApprovals(
         val actor = payload.path("initiatorActorId").takeIf { it.isTextual }
             ?.asText()?.let { runCatching { UUID.fromString(it) }.getOrNull() } ?: verifiedInitiatorId
         val frozenBody = objectMapper.writeValueAsString(railRequest)
-        val resp = if (rail == PaymentRail.SEPA) {
+        val resp = if (rail in setOf(PaymentRail.DOMESTIC, PaymentRail.SEPA)) {
             if (actor == null) {
                 report(entity, approvalId, ok = false, ref = null, error = "initiator identity unavailable")
                 return mapOf("status" to "RELEASE_FAILED", "error" to "initiator identity unavailable")

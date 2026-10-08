@@ -19,6 +19,7 @@ import io.quarkus.test.security.jwt.JwtSecurity
 import io.restassured.RestAssured
 import io.restassured.response.Response
 import io.smallrye.reactive.messaging.memory.InMemoryConnector
+import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
@@ -26,6 +27,7 @@ import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
+import javax.sql.DataSource
 
 /**
  * End-to-end journey for a Czech domestic credit transfer: **submit the payment, read it back,
@@ -64,6 +66,8 @@ import java.util.concurrent.Executors
     initArgs = [ResourceArg(name = "db", value = "openbank_domestic_payment_it")],
 )
 class DomesticPaymentJourneyE2E {
+    @Inject
+    lateinit var dataSource: DataSource
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> =
@@ -266,6 +270,58 @@ class DomesticPaymentJourneyE2E {
             .body("""{"idempotencyKey":"$key","debtorAccountId":"$account"}""")
             .post("/api/v1/domestic-payments/receipt-lookup")
         assertThat(missingActor.statusCode).isEqualTo(403)
+    }
+
+    @Test
+    @TestSecurity(user = EDGE_SUBJECT, roles = ["ROLE_OPERATOR"])
+    @JwtSecurity(
+        claims = [
+            Claim(key = "iss", value = "https://issuer.example"),
+            Claim(key = "sub", value = EDGE_SUBJECT),
+            Claim(key = "preferred_username", value = EDGE_SUBJECT),
+            Claim(key = "azp", value = "openbank-edge"),
+        ],
+    )
+    fun `pre-upgrade edge row with no end-user binding refuses exact retry and receipt`() {
+        val account = UUID.randomUUID()
+        val party = UUID.randomUUID()
+        val actor = UUID.randomUUID()
+        val key = "edge-legacy-${UUID.randomUUID()}"
+        val body = requestBody(account, AMOUNT, "E2E-${UUID.randomUUID()}")
+        val accounts = mockk<AccountServiceClient>()
+        coEvery { accounts.findPartyByAccountId(account) } returns party
+        QuarkusMock.installMockForType(accounts, AccountServiceClient::class.java)
+        val created = RestAssured.given().contentType("application/json")
+            .header("Idempotency-Key", key)
+            .header("X-Customer-Party-Id", party.toString())
+            .header("X-Customer-Actor-Id", actor.toString())
+            .body(body)
+            .post("/api/v1/domestic-payments")
+        assertThat(created.statusCode).isEqualTo(201)
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "UPDATE domestic_payments SET receipt_customer_party_id = NULL, receipt_customer_actor_id = NULL " +
+                    "WHERE idempotency_key = ?",
+            ).use { statement ->
+                statement.setString(1, key)
+                assertThat(statement.executeUpdate()).isEqualTo(1)
+            }
+        }
+
+        val retried = RestAssured.given().contentType("application/json")
+            .header("Idempotency-Key", key)
+            .header("X-Customer-Party-Id", party.toString())
+            .header("X-Customer-Actor-Id", actor.toString())
+            .body(body)
+            .post("/api/v1/domestic-payments")
+        assertThat(retried.statusCode).isEqualTo(409)
+        assertThat(retried.jsonPath().getString("code")).isEqualTo("IDEMPOTENCY_KEY_REUSED")
+        val receipt = RestAssured.given().contentType("application/json")
+            .header("X-Customer-Party-Id", party.toString())
+            .header("X-Customer-Actor-Id", actor.toString())
+            .body("""{"idempotencyKey":"$key","debtorAccountId":"$account"}""")
+            .post("/api/v1/domestic-payments/receipt-lookup")
+        assertThat(receipt.jsonPath().getString("outcome")).isEqualTo("UNKNOWN")
     }
 
     @Test

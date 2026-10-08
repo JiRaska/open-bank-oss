@@ -156,6 +156,9 @@ When customer-edge calls the rail, it supplies the effective party through `X-Cu
 and the authenticated human through `X-Customer-Actor-Id` under its verified service token.
 The rail binds both at creation and checks them again on receipt and create replay; two delegates
 of the same company cannot recover each other's receipt.
+Payments created through the edge before these durable end-user bindings existed cannot prove
+which customer initiated them. An otherwise identical create retry receives 409 and receipt lookup
+returns `UNKNOWN`; use existing payment-status/operator reconciliation instead of a new key.
 
 ### Amount scale on reads (#11604)
 

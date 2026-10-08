@@ -156,6 +156,9 @@ Zákaznický edge předává efektivní stranu v `X-Customer-Party-Id` a ověře
 v `X-Customer-Actor-Id` pod svým ověřeným služebním tokenem. Platební služba obě identity
 sváže s novou platbou a znovu ověří při dohledání i opakovaném založení. Dva zástupci stejné
 společnosti si proto nemohou navzájem dohledat potvrzení.
+U plateb založených přes edge před uložením těchto vazeb nelze prokázat původního klienta.
+I shodné opakované založení proto vrací 409 a dohledání `UNKNOWN`; použijte existující
+zjištění stavu platby nebo operátorské smíření, nikoli nový klíč.
 
 
 ### Škála částky při čtení (#11604)

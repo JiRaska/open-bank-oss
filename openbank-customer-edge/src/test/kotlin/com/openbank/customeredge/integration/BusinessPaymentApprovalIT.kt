@@ -34,6 +34,7 @@ private const val EVALUATE = "$ENTITY/signing/evaluate"
 private const val CREATE = "$ENTITY/approval-requests"
 private const val DETAIL = "$ENTITY/approval-requests/$APPROVAL"
 private const val SEPA_RAIL = "/api/v1/sepa-payments"
+private const val DOMESTIC_RAIL = "/api/v1/domestic-payments"
 private const val CONSUME = "/api/v1/sca/challenges/$SCA/consume"
 
 /**
@@ -239,6 +240,54 @@ class BusinessPaymentApprovalIT {
             body("release.status", equalTo("RELEASE_FAILED"))
         }
         assertThat(BusinessApprovalStubs.requests("POST", SEPA_RAIL)).isEmpty()
+    }
+
+    @Test
+    @TestSecurity(user = "customer:$COSIGNER", roles = ["ROLE_CUSTOMER"])
+    @OidcSecurity(claims = [Claim(key = "party_id", value = COSIGNER)])
+    fun `held domestic release forwards frozen initiator actor rather than co-signer`() {
+        stubLastSignature()
+        BusinessApprovalStubs.stub(
+            "POST",
+            "$DETAIL/release-claim",
+            body = """{"claimToken":"t1","payload":{"rail":"DOMESTIC","initiatorActorId":"$INITIATOR",""" +
+                """"railRequest":{"debtorAccountId":"$ACCOUNT"}}}""",
+        )
+        BusinessApprovalStubs.stub("POST", DOMESTIC_RAIL, status = 201, body = """{"id":"pay-10"}""")
+        BusinessApprovalStubs.stub("POST", "$DETAIL/release-result", body = "{}")
+
+        sign() Then {
+            statusCode(200)
+            body("release.status", equalTo("RELEASED"))
+        }
+
+        val rail = BusinessApprovalStubs.requests("POST", DOMESTIC_RAIL).single()
+        assertThat(rail.header("Idempotency-Key")).isEqualTo(APPROVAL)
+        assertThat(rail.header("X-Customer-Party-Id")).isEqualTo(COMPANY)
+        assertThat(rail.header("X-Customer-Actor-Id")).isEqualTo(INITIATOR)
+    }
+
+    @Test
+    @TestSecurity(user = "customer:$COSIGNER", roles = ["ROLE_CUSTOMER"])
+    @OidcSecurity(claims = [Claim(key = "party_id", value = COSIGNER)])
+    fun `older held domestic approval uses trusted signed initiator for release`() {
+        stubLastSignature()
+        BusinessApprovalStubs.stub(
+            "POST",
+            "$DETAIL/release-claim",
+            body = """{"claimToken":"t1","payload":{"rail":"DOMESTIC",""" +
+                """"railRequest":{"debtorAccountId":"$ACCOUNT"}}}""",
+        )
+        BusinessApprovalStubs.stub("POST", DOMESTIC_RAIL, status = 201, body = """{"id":"pay-11"}""")
+        BusinessApprovalStubs.stub("POST", "$DETAIL/release-result", body = "{}")
+
+        sign() Then {
+            statusCode(200)
+            body("release.status", equalTo("RELEASED"))
+        }
+
+        val rail = BusinessApprovalStubs.requests("POST", DOMESTIC_RAIL).single()
+        assertThat(rail.header("X-Customer-Actor-Id")).isEqualTo(INITIATOR)
     }
 
     @Test
