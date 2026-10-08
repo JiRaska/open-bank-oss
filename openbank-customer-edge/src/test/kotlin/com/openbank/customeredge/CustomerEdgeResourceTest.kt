@@ -17,8 +17,6 @@ import jakarta.ws.rs.core.Response
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.Clock
-import java.time.Instant
-import java.time.ZoneOffset
 import java.util.UUID
 
 /**
@@ -34,17 +32,13 @@ class CustomerEdgeResourceTest {
     // verify the account belongs to the JWT party before proxying. Mirrors the guard
     // already applied to transactions/statements/payments.
 
-    private fun resourceFor(
-        upstream: UpstreamClient,
-        callerParty: UUID,
-        clock: Clock = Clock.systemUTC(),
-    ): CustomerEdgeResource = CustomerEdgeResource(
+    private fun resourceFor(upstream: UpstreamClient, callerParty: UUID): CustomerEdgeResource = CustomerEdgeResource(
         upstream,
         mockk(relaxed = true),
         inMemoryPaymentSessionStore(),
         mockk(relaxed = true),
         mockk(relaxed = true),
-        clock,
+        Clock.systemUTC(),
     ).apply {
         partyMergeResolver = mockk { every { resolve(any()) } answers { firstArg() } }
         jwt = mockk {
@@ -1343,13 +1337,10 @@ class CustomerEdgeResourceTest {
 
     // ── standing orders (recurring payments) ──
 
-    private fun soResourceFor(
-        upstream: UpstreamClient,
-        callerParty: UUID,
-        clock: Clock = Clock.systemUTC(),
-    ): CustomerEdgeResource = resourceFor(upstream, callerParty, clock).apply {
-        standingOrderServiceUrl = "http://so"
-    }
+    private fun soResourceFor(upstream: UpstreamClient, callerParty: UUID): CustomerEdgeResource =
+        resourceFor(upstream, callerParty).apply {
+            standingOrderServiceUrl = "http://so"
+        }
 
     @Test
     fun `createStandingOrder rejects a debit account owned by another party (IDOR guard)`() {
@@ -1391,13 +1382,13 @@ class CustomerEdgeResourceTest {
                 caller.toString(),
                 any(),
                 "idem-1",
-                mapOf("X-Customer-Actor-Id" to caller.toString(), "X-Start-Date-Defaulted" to "false"),
+                mapOf("X-Customer-Actor-Id" to caller.toString()),
             )
         }
     }
 
     @Test
-    fun `omitted standing start date stays the same retry intent after midnight`() {
+    fun `omitted standing start date stays omitted in forwarded retry intent`() {
         val caller = UUID.randomUUID()
         val account = UUID.randomUUID()
         val upstream = mockk<UpstreamClient>()
@@ -1413,16 +1404,14 @@ class CustomerEdgeResourceTest {
             {"debitAccountId":"$account","creditorIban":"CZ123","creditorName":"Landlord",
              "amountMinorUnits":100,"currency":"CZK","frequency":"MONTHLY","paymentType":"DOMESTIC"}
         """.trimIndent()
-        val before = Clock.fixed(Instant.parse("2026-10-08T23:59:00Z"), ZoneOffset.UTC)
-        val after = Clock.fixed(Instant.parse("2026-10-09T00:01:00Z"), ZoneOffset.UTC)
-
-        val first = soResourceFor(upstream, caller, before).createStandingOrder(body, "same-key", null)
-        val retry = soResourceFor(upstream, caller, after).createStandingOrder(body, "same-key", null)
+        val first = soResourceFor(upstream, caller).createStandingOrder(body, "same-key", null)
+        val retry = soResourceFor(upstream, caller).createStandingOrder(body, "same-key", null)
         assertThat(first.status).isEqualTo(201)
         assertThat(retry.status).isEqualTo(201)
-        assertThat(bodies.map { mapper.readTree(it).path("startDate").asText() })
-            .containsExactly("2026-10-08", "2026-10-09")
-        assertThat(headers.map { it["X-Start-Date-Defaulted"] }).containsExactly("true", "true")
+        assertThat(bodies.map { mapper.readTree(it).has("startDate") }).containsExactly(false, false)
+        assertThat(headers.map { it.keys }).allSatisfy { keys ->
+            assertThat(keys).containsExactly("X-Customer-Actor-Id")
+        }
     }
 
     @Test

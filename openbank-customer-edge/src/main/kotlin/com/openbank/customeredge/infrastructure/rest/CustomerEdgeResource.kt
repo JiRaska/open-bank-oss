@@ -3503,15 +3503,9 @@ class CustomerEdgeResource(
             "idempotencyKey",
             idempotencyKey?.takeIf { it.isNotBlank() } ?: "so-${UUID.randomUUID()}",
         ) ?: enriched
-        // The app's create form has no date picker; default the upstream-required startDate to
-        // today when the app omits it (or sends it blank), so a standing order can be created
-        // from amount + payee alone. Tell the service this was a default so tomorrow's retry
-        // retains the SAME request identity despite a different resolved calendar date.
-        val startDateDefaulted = extractTextField(objectMapper, enriched, "startDate") == null
-        if (startDateDefaulted) {
-            enriched =
-                injectField(objectMapper, enriched, "startDate", java.time.LocalDate.now(clock).toString()) ?: enriched
-        }
+        // Keep a missing start date missing. The standing-order service binds that original
+        // request shape to the key, then resolves today only for the first accepted creation.
+        // A retry after midnight therefore returns the original order, not a changed payload.
         // Business multi-signature (#10281): a standing order for an entity is a recurring outflow
         // and follows the entity's signing policy, banded by its per-execution amount.
         if (customer.actingFor != null) {
@@ -3524,10 +3518,7 @@ class CustomerEdgeResource(
             customer.partyId.toString(),
             enriched,
             extractTextField(objectMapper, enriched, "idempotencyKey"),
-            mapOf(
-                "X-Customer-Actor-Id" to standingOrderActorId().toString(),
-                "X-Start-Date-Defaulted" to startDateDefaulted.toString(),
-            ),
+            mapOf("X-Customer-Actor-Id" to standingOrderActorId().toString()),
         )
         audit.emit(
             eventType = "STANDING_ORDER_CREATED",
