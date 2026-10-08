@@ -142,6 +142,8 @@ class CommunicationStyleServiceTest {
     fun `invalid UI copy never persists`() {
         listOf(
             mapOf("cs.balance" to "0"),
+            mapOf("cs.pay.unknown.body" to "Platbu můžeš odeslat znovu."),
+            mapOf("en.err.moveUnknown" to "Try the transfer again now."),
             mapOf("cs.status.loading" to "<b>Text</b>"),
             mapOf("cs.status.loading" to " "),
             mapOf("cs.status.loading" to "x".repeat(241)),

@@ -115,7 +115,7 @@ paths:
                   version: {type: integer, minimum: 0}
                   messages:
                     type: object
-                    maxProperties: 20
+                    maxProperties: 332
                     additionalProperties: {type: string, maxLength: 240}
         '502': {description: Invalid upstream document}
         '503': {description: Copy service unavailable; retain local fallback}

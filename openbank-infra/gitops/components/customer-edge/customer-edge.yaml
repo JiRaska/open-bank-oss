@@ -92,10 +92,8 @@ spec:
               containerPort: 8085
           env:
             - name: COMMUNICATION_SERVICE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: customer-edge-app-copy
-                  key: service-url
+              # Same private CA trust chain as campaign and referral upstreams.
+              value: https://communication-service.communication.svc:8443
             # Traces (ADR-0008/0087). openbank-libs defaults the exporter to
             # localhost:4317, which in the cluster is nothing; without this env every
             # span of this service was exported into a closed port (0 traces in Tempo,
