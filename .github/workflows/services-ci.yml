@@ -365,10 +365,8 @@ jobs:
                 CHANGED="$CHANGED openbank-client-product-catalog"
               fi
               # Derive cross-module test readers from filtered inputs (#11513, #11560).
-              if [ -n "${CHANGED// /}" ]; then
-                CHANGED="$CHANGED $(python3 .github/scripts/derive-fleet-scanning-test-modules.py \
-                  --expand "$CHANGED" --input-paths-stdin <<< "$FILES_GLOBAL")"
-              fi
+              CHANGED="$CHANGED $(python3 .github/scripts/derive-fleet-scanning-test-modules.py \
+                --expand "$CHANGED" --input-paths-stdin <<< "$FILES_GLOBAL")"
               # A change to the CI recipe itself (services-ci / _service-ci) can NOT
               # alter any service's compile/test inputs, so it does NOT warrant a
               # 28-module fan-out -- that is what turned the trivial #547 cache-flag
