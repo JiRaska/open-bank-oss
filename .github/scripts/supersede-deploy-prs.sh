@@ -143,6 +143,93 @@ classify_coverage() {
   if covers "$keep_files" "$other_files"; then printf 'CLOSE'; else printf 'SKIP'; fi
 }
 
+# ── hold inheritance (issue #11503) ────────────────────────────────────────────────────────────
+RULES_PATH=openbank-libs/governance/rules.yaml
+
+# Full unified diff of a PR. Overridable via SUPERSEDE_DIFF_HOOK for the self-test.
+pr_diff() {
+  if [ -n "${SUPERSEDE_DIFF_HOOK:-}" ]; then
+    "$SUPERSEDE_DIFF_HOOK" "$1"
+    return
+  fi
+  gh pr diff "$1" --repo "$REPO" 2>/dev/null
+}
+
+# Services whose image pin a diff ADDS (stdin -> one `openbank-*` name per line). Pure.
+held_services_from_diff() {
+  grep -E '^\+[[:space:]]*(-[[:space:]]*)?image:' \
+    | grep -oE 'openbank-[a-z0-9-]+[:@]' | sed -E 's/[:@]$//' | sort -u || true
+}
+
+# rules.yaml on stdin -> rules.yaml on stdout with a deploy_holds.services entry for each service
+# named after $3 that is not already held. rc 1 when there is no `deploy_holds:` / `  services:`
+# block to insert into — unknown layout must never mean "recorded". Pure.
+add_hold_entries() {
+  local pr="$1" keep="$2"; shift 2
+  local text missing=() svc
+  text="$(cat)"
+  for svc in "$@"; do
+    grep -qxF "    $svc:" <<<"$text" || missing+=("$svc")
+  done
+  if [ "${#missing[@]}" -eq 0 ]; then printf '%s\n' "$text"; return 0; fi
+  awk -v pr="$pr" -v keep="$keep" -v svcs="${missing[*]}" '
+    BEGIN { n = split(svcs, list, " ") }
+    { print }
+    /^deploy_holds:[[:space:]]*$/ { inholds = 1; next }
+    /^[^[:space:]#]/ { inholds = 0 }
+    inholds && !done && /^  services:[[:space:]]*$/ {
+      for (i = 1; i <= n; i++) {
+        printf "    %s:\n", list[i]
+        printf "      issue: \"#%s\"\n", pr
+        printf "      reason: \"Inherited from held deploy PR #%s when #%s superseded it (issue #11503).\"\n", pr, keep
+        printf "      release_condition: \"Resolve why #%s was held, then remove this entry in a reviewed change.\"\n", pr
+      }
+      done = 1
+    }
+    END { if (!done) exit 1 }
+  ' <<<"$text"
+}
+
+# Live: record the hold on #KEEP's branch (signed API commit), then draft + label + comment.
+inherit_hold() {
+  local n="$1" keep="$2" services branch blob sha rules new
+  services="$(pr_diff "$n" | held_services_from_diff)"
+  if [ -z "$services" ]; then
+    echo "::warning::supersede: held #$n pins no readable openbank image — cannot record its hold."
+    return 1
+  fi
+  local listed
+  listed="$(printf '%s' "$services" | tr '\n' ' ')"
+  if [ "${DRY_RUN:-}" = "true" ]; then
+    echo "supersede: DRY_RUN — would inherit hold: #$keep -> rules.yaml deploy_holds [${listed% }] + draft + 'blocked' (from held #$n)."
+    return 0
+  fi
+  branch="$(gh pr view "$keep" --repo "$REPO" --json headRefName --jq .headRefName)" || return 1
+  blob="$(gh api "repos/$REPO/contents/$RULES_PATH?ref=$branch")" || return 1
+  sha="$(jq -r .sha <<<"$blob")"
+  rules="$(jq -r .content <<<"$blob" | base64 --decode)" || return 1
+  # shellcheck disable=SC2086
+  new="$(add_hold_entries "$n" "$keep" $services <<<"$rules")" || return 1
+  if [ "$new" != "$rules" ]; then
+    gh api -X PUT "repos/$REPO/contents/$RULES_PATH" \
+      -f message="chore(gitops): inherit deploy hold from #$n (issue #11503)" \
+      -f content="$(printf '%s\n' "$new" | base64 | tr -d '\n')" \
+      -f sha="$sha" -f branch="$branch" >/dev/null || return 1
+  fi
+  gh pr ready "$keep" --repo "$REPO" --undo || return 1
+  gh pr edit "$keep" --repo "$REPO" --add-label blocked || return 1
+  gh pr comment "$keep" --repo "$REPO" --body \
+"Deployment hold inherited from #$n, which was draft or labelled \`blocked\` when this PR superseded it.
+
+A descendant image pin does not clear an owner's hold (issue #11503). This PR's branch now carries a
+\`deploy_holds\` entry in \`$RULES_PATH\` for: ${listed% }. The \`deploy-hold-image-pins\` gate
+refuses this PR's pin change for those services while the entry exists; undrafting or removing the
+\`blocked\` label does not release it. Release = a reviewed change removing the entry once the reason
+for #$n's hold is resolved.
+
+(\`.github/scripts/supersede-deploy-prs.sh\`)"
+}
+
 # ── main ────────────────────────────────────────────────────────────────────────────────────────
 run() {
   local PREFIX="$1" KEEP="$2" KEEP_SHA="$3" PAIRS="$4"
@@ -189,18 +276,12 @@ run() {
       CLOSE)
         if [ "${held:-0}" = "1" ]; then
           # Transfer the hold BEFORE closing anything; a failed transfer leaves the held PR open.
-          if [ "${DRY_RUN:-}" = "true" ]; then
-            echo "supersede: DRY_RUN — would inherit hold: #$KEEP -> draft + 'blocked' (from held #$n)."
-          elif ! { gh pr ready "$KEEP" --repo "$REPO" --undo \
-                   && gh pr edit "$KEEP" --repo "$REPO" --add-label blocked \
-                   && gh pr comment "$KEEP" --repo "$REPO" --body \
-"Deployment hold inherited from #$n, which was draft or labelled \`blocked\` when this PR superseded it.
-
-A descendant image pin does not clear an owner's hold (issue #11503): this PR is now draft and
-\`blocked\`, so the deploy window will not arm auto-merge on it. Release it only once the reason for
-the hold on #$n is resolved — mark it ready for review and remove the label deliberately.
-
-(\`.github/scripts/supersede-deploy-prs.sh\`)"; }; then
+          # The DURABLE half is a `rules.yaml: deploy_holds` entry committed onto #KEEP's branch
+          # for every service #n pinned: check-deploy-holds.py (gate deploy-hold-image-pins) then
+          # refuses #KEEP's pin change for those services until a reviewed rules.yaml edit removes
+          # the entry. Draft + `blocked` only stop the deploy window from arming it meanwhile —
+          # undrafting or unlabelling alone releases nothing.
+          if ! inherit_hold "$n" "$KEEP"; then
             echo "::error::supersede: could not transfer #$n's deployment hold to #$KEEP — leaving #$n OPEN."
             inherited=1
             failed=1
@@ -208,7 +289,7 @@ the hold on #$n is resolved — mark it ready for review and remove the label de
           fi
           inherited=1
           echo "::error::supersede: #$n carried a deployment hold (draft or 'blocked'); #$KEEP inherits it" \
-               "and is not to be armed (issue #11503)."
+               "as a rules.yaml deploy_holds entry and is not to be armed (issue #11503)."
         fi
         if [ "${DRY_RUN:-}" = "true" ]; then
           echo "supersede: DRY_RUN — would close #$n (${other_sha:0:8} is an ancestor of ${KEEP_SHA:0:8})."
@@ -308,7 +389,7 @@ HOOK
 #!/usr/bin/env bash
 pr="$1"
 case "$pr" in
-  11491|11499) echo "openbank-infra/gitops/components/sanctions-service/sanctions-service.yaml" ;;
+  11491|11498|11499) echo "openbank-infra/gitops/components/sanctions-service/sanctions-service.yaml" ;;
   6222|6225|1|2) echo "openbank-infra/gitops/components/shared/shared-service.yaml" ;;
   7313) printf '%s\n' "openbank-infra/gitops/components/balances/balance-service.yaml" ;;
   7319) printf '%s\n' "openbank-infra/gitops/components/accounts/account-service.yaml" ;;
@@ -322,6 +403,17 @@ esac
 HOOK
   chmod +x "$tmp/files"
   export SUPERSEDE_FILES_HOOK="$tmp/files"
+  cat > "$tmp/diff" <<'HOOK'
+#!/usr/bin/env bash
+case "$1" in
+  11491) printf '%s\n' '--- a/x.yaml' '+++ b/x.yaml' \
+           '-          image: r.example/openbank-sanctions-service:sandbox-11111111' \
+           '+          image: r.example/openbank-sanctions-service:sandbox-99f04ef5' ;;
+  *) echo "" ;;
+esac
+HOOK
+  chmod +x "$tmp/diff"
+  export SUPERSEDE_DIFF_HOOK="$tmp/diff"
   local OLD=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
   local NEW=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
   local P=chore/gitops-auto-deploy-
@@ -401,7 +493,7 @@ HOOK
   out="$(run "$P" 11499 "$NEW" "$(printf '11491\t%s%s\t1' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
   if [ "$rc" -eq 0 ]; then
     echo "SELF-TEST FAIL case 7: held predecessor superseded with rc=0 — survivor would be armed; got: $out"; ok=1; dump_out "$out"
-  elif ! printf '%s' "$out" | grep -q 'would inherit hold: #11499'; then
+  elif ! printf '%s' "$out" | grep -qF "would inherit hold: #11499 -> rules.yaml deploy_holds [openbank-sanctions-service]"; then
     echo "SELF-TEST FAIL case 7: #11499 did not inherit #11491's hold; got: $out"; ok=1; dump_out "$out"
   else
     echo "self-test case 7 OK (held #11491 superseded -> #11499 inherits hold, rc=$rc)"
@@ -416,11 +508,36 @@ HOOK
     echo "self-test case 8 OK (unheld -> closed, rc=0, no hold)"
   fi
 
+  # case 9 — a held predecessor whose hold cannot be recorded (no readable image pin) must stay
+  # OPEN and the run must fail: unknown is never permission to drop a hold.
+  out="$(run "$P" 11499 "$NEW" "$(printf '11498\t%s%s\t1' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -eq 0 ] || printf '%s' "$out" | grep -q 'would close #11498'; then
+    echo "SELF-TEST FAIL case 9: unrecordable hold was dropped; got: $out"; ok=1; dump_out "$out"
+  else
+    echo "self-test case 9 OK (unrecordable hold -> #11498 left OPEN, rc=$rc)"
+  fi
+
+  # case 10 — the durable record itself: add_hold_entries on a deploy_holds block inserts exactly
+  # the missing services, is a no-op for an already-held one, and refuses a file with no block.
+  local rules_in rules_out
+  rules_in=$'x: 1\ndeploy_holds:\n  services:\n    openbank-sanctions-service:\n      issue: "#11492"\ncommits:\n  y: 2'
+  rules_out="$(add_hold_entries 11491 11499 openbank-sanctions-service openbank-kyc-service <<<"$rules_in")" && rc=0 || rc=$?
+  if [ "$rc" -ne 0 ] || [ "$(grep -c '^    openbank-kyc-service:$' <<<"$rules_out")" -ne 1 ] \
+     || [ "$(grep -c '^    openbank-sanctions-service:$' <<<"$rules_out")" -ne 1 ] \
+     || ! grep -qF '      issue: "#11491"' <<<"$rules_out" \
+     || [ "$(sed -n '4p' <<<"$rules_out")" != "    openbank-kyc-service:" ]; then
+    echo "SELF-TEST FAIL case 10: hold entry not inserted under deploy_holds.services; got: $rules_out"; ok=1
+  elif add_hold_entries 1 2 openbank-kyc-service <<<$'x: 1\ncommits: {}' >/dev/null; then
+    echo "SELF-TEST FAIL case 10: a rules file with no deploy_holds block reported success"; ok=1
+  else
+    echo "self-test case 10 OK (durable deploy_holds entry inserted; no block -> refused)"
+  fi
+
   if [ "$ok" -ne 0 ]; then
     echo "self-test: FAILED"
     return 1
   fi
-  echo "self-test: all 8 cases OK"
+  echo "self-test: all 10 cases OK"
   return 0
 }
 
