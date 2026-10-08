@@ -22,7 +22,7 @@ Tato dokumentace je publikována přímo službou na management endpointu `/q/op
 - **Tech stack:** Kotlin / Quarkus 3.x / Hibernate Reactive (Panache) + reaktivní PostgreSQL / SmallRye Reactive Messaging (Kafka) — sestaveno přes konvenční plugin `openbank.quarkus-service`
 - **Port:** 8127 (app), 8085 (management — `/q`)
 - **Persistence:** dedikovaná databáze `openbank_sepa_instant`, deklarované schéma `sepa_instant_schema`, Flyway migrace V1..V5 ve zdrojovém kandidátu
-- **Události:** přechody platby s událostí a outbox řádky se commitují společně; dispatcher opakuje odeslání dosavadního čtyřpolového payloadu bez klíče a hlaviček do `openbank.sepa.instant.events` (at-least-once; bez záruky deduplikace u konzumenta)
+- **Události:** přechody platby s událostí a outbox řádky se commitují společně; dispatcher opakuje odeslání dosavadního čtyřpolového payloadu s klíčem id platby a hlavičkami `ce-id`/`idempotency-key` do `openbank.sepa.instant.events` (at-least-once; konzumenti deduplikují podle `ce-id`)
 - **Idempotence:** hlavička `Idempotency-Key` (fallback na pole v těle) → unique constraint na `sct_inst_payments.idempotency_key`
 - **Auth:** Keycloak OIDC (klient `openbank-services`); OPA autorizace (ADR-0034) ve výchozím stavu advisory; `@Authorize` na recallu
 - **Money-path:** ANO — uvedeno v `rules.yaml: money_path_services`; ADR-0057 tier **T0 (always-on)**; threat model v `docs/threat-models/openbank-sepa-instant.md`

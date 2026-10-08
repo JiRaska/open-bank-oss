@@ -21,7 +21,10 @@ class KafkaSctInstEventPublisher @Inject constructor(
     @Channel("sct-inst-events-out") private val emitter: MutinyEmitter<String>,
 ) : OutboxEventPublisher {
 
-    /** Keep the established unkeyed payload, but expose the durable event ID on every retry. */
+    /**
+     * Keep the established four-field body; key by the payment (aggregate) id so per-payment order
+     * holds, and expose the durable event ID as ce-id/idempotency-key on every retry.
+     */
     override suspend fun publish(entry: OutboxEntry) {
         emitter.sendMessage(messageFor(entry)).awaitSuspending()
     }
@@ -31,7 +34,10 @@ class KafkaSctInstEventPublisher @Inject constructor(
         OutboxKafkaHeaders.headersFor(entry).forEach { (name, value) ->
             headers.add(name, value.toByteArray(Charsets.UTF_8))
         }
-        val metadata = OutgoingKafkaRecordMetadata.builder<String>().withHeaders(headers).build()
+        val metadata = OutgoingKafkaRecordMetadata.builder<String>()
+            .withKey(entry.aggregateId.toString())
+            .withHeaders(headers)
+            .build()
         return Message.of(entry.payload).addMetadata(metadata)
     }
 }

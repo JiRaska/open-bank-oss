@@ -22,7 +22,7 @@ The outbox sections describe the #12181 source candidate. They do not establish 
 - **Tech stack:** Kotlin / Quarkus 3.x / Hibernate Reactive (Panache) + Reactive PostgreSQL / SmallRye Reactive Messaging (Kafka) — built via the `openbank.quarkus-service` convention plugin
 - **Port:** 8127 (app), 8085 (management — `/q`)
 - **Persistence:** dedicated database `openbank_sepa_instant`, schema declared `sepa_instant_schema`, Flyway migrations V1..V5 in the candidate source
-- **Events:** event-producing payment transitions and outbox rows commit together; the dispatcher retries the existing four-field, unkeyed and headerless payload to `openbank.sepa.instant.events` (at-least-once; no consumer deduplication guarantee)
+- **Events:** event-producing payment transitions and outbox rows commit together; the dispatcher retries the existing four-field payload, keyed by payment id with `ce-id`/`idempotency-key` headers, to `openbank.sepa.instant.events` (at-least-once; consumers deduplicate on `ce-id`)
 - **Idempotency:** `Idempotency-Key` header (falls back to body field) → unique constraint on `sct_inst_payments.idempotency_key`
 - **Auth:** Keycloak OIDC (client `openbank-services`); OPA authz (ADR-0034) advisory by default; `@Authorize` on recall
 - **Money-path:** YES — listed in `rules.yaml: money_path_services`; ADR-0057 tier **T0 (always-on)**; threat model at `docs/threat-models/openbank-sepa-instant.md`

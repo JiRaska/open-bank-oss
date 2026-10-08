@@ -162,8 +162,8 @@ channels:
     description: |
       SCT Inst lifecycle. Payment state and its event are committed together, then relayed from
       the outbox with retry. The relay preserves the existing body and sends `ce-type`, stable
-      `ce-id` and `idempotency-key` headers. The record has no partition key, so order per
-      aggregate is not guaranteed. Consumers can use `ce-id` to deduplicate a retried send.
+      `ce-id` and `idempotency-key` headers. The record is keyed by the payment id, so order per payment is
+      preserved within its partition. Consumers can use `ce-id` to deduplicate a retried send.
 
       The discriminator is the body key **`type`** — spelled `type`, not `eventType` — whose value
       is a Kotlin class simple name (`SctInstPaymentSubmitted`, `SctInstPaymentSettled`,

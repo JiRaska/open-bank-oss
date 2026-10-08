@@ -22,13 +22,14 @@ import java.util.UUID
 /** The durable writer stores the established four-field Kafka payload verbatim. */
 class KafkaSctInstEventPublisherTest {
     @Test
-    fun `retry retains the outbox event ID header without changing the body or adding a key`() {
+    fun `retry retains the outbox event ID header keyed by the aggregate without changing the body`() {
         val eventId = UUID.randomUUID()
         val payload = """{"type":"SctInstPaymentSubmitted","paymentId":"${UUID.randomUUID()}"}"""
         val now = Instant.parse("2026-08-17T10:00:00Z")
+        val aggregateId = UUID.randomUUID()
         val entry = OutboxEntry(
             eventId = eventId,
-            aggregateId = UUID.randomUUID(),
+            aggregateId = aggregateId,
             eventType = "SctInstPaymentSubmitted",
             payload = payload,
             status = OutboxStatus.PENDING,
@@ -43,7 +44,7 @@ class KafkaSctInstEventPublisherTest {
         listOf(publisher.messageFor(entry), publisher.messageFor(entry.copy(attemptCount = 1))).forEach { message ->
             assertThat(message.payload).isEqualTo(payload)
             val metadata = message.getMetadata(OutgoingKafkaRecordMetadata::class.java).orElseThrow()
-            assertThat(metadata.key).isNull()
+            assertThat(metadata.key).isEqualTo(aggregateId.toString())
             assertThat(metadata.headers.lastHeader(OutboxKafkaHeaders.HEADER_EVENT_ID).value().toString(Charsets.UTF_8))
                 .isEqualTo(eventId.toString())
         }

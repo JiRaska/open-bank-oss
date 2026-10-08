@@ -22,7 +22,7 @@ import jakarta.inject.Inject
 import org.eclipse.microprofile.reactive.messaging.spi.Connector
 import java.util.UUID
 
-/** Real Panache-to-Kafka dispatch proof for the established unkeyed SCT Inst event stream. */
+/** Real Panache-to-Kafka dispatch proof for the SCT Inst event stream (aggregate-keyed, CloudEvents headers). */
 @QuarkusTest
 @TestProfile(SctInstOutboxDispatchConformanceIT.DispatchEnabledProfile::class)
 @QuarkusTestResource(
@@ -59,10 +59,6 @@ class SctInstOutboxDispatchConformanceIT : OutboxDispatchConformanceIT() {
     override lateinit var connector: InMemoryConnector
 
     override val channelName: String = "sct-inst-events-out"
-
-    // This one stream was already unkeyed. Its four-field body and partitioning stay stable
-    // while ce-id/idempotency-key supply retry identity to the upgraded audit consumer.
-    override val legacyUnkeyedProducer: Boolean = true
 
     override suspend fun seed(message: OutboxMessage) {
         Panache.withTransaction { repository.persistInTransaction(message) }.awaitSuspending()
