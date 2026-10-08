@@ -29,6 +29,23 @@ function eventIsSuperseded(verdict, latest) {
   return latestId > runId || latestAttempt > attempt
 }
 
+/** A newer indexed run does not prove the event's own run has been indexed. */
+function latestIndexedRun(verdict, runs) {
+  if (!Array.isArray(runs)) throw new Error('Malformed completed-runs inventory')
+  if (!Number.isSafeInteger(verdict?.run_id) || verdict.run_id < 1 ||
+      !Number.isSafeInteger(verdict?.attempt) || verdict.attempt < 1) {
+    throw new Error('Malformed event identity in completed-runs inventory')
+  }
+  if (runs.some(run => !Number.isSafeInteger(run?.id) || run.id < 1 ||
+      !Number.isSafeInteger(run.run_attempt) || run.run_attempt < 1)) {
+    throw new Error('Malformed completed-runs inventory entry')
+  }
+  const eventRun = runs.find(run => run?.id === verdict?.run_id)
+  if (!eventRun) return null
+  if (eventRun.run_attempt < verdict.attempt) return null
+  return runs.reduce((newest, run) => !newest || run.id > newest.id ? run : newest, null)
+}
+
 const FAILURE_HEADING = '### Unresolved failing jobs'
 const FAILURE_SECTION = /(### (?:Unresolved failing jobs|Every failing job in this attempt)\r?\n\r?\n)([^]*?)(?=\r?\n\r?\n|$)/
 
@@ -87,6 +104,20 @@ function unresolvedAfterLaterRuns(failingLines, laterRuns) {
   return [...unresolved.values()]
 }
 
+/** A delayed green proves only jobs whose latest subsequent execution still succeeded. */
+function successfulAfterLaterRuns(successfulJobs, laterRuns) {
+  const original = new Set(successfulJobs)
+  const successful = new Set(original)
+  for (const jobs of laterRuns) {
+    for (const job of jobs) {
+      if (!original.has(job.name)) continue
+      if (job.conclusion === 'success') successful.add(job.name)
+      if (job.conclusion === 'failure' || job.conclusion === 'timed_out') successful.delete(job.name)
+    }
+  }
+  return [...successful]
+}
+
 /** Retry only GitHub's lagging completed-runs index; malformed data and API errors fail closed. */
 async function waitForCurrentVerdict(verdict, fetchLatest, sleep,
   delays = [1000, 2000, 4000, 8000, 16000, 30000]) {
@@ -102,6 +133,7 @@ async function waitForCurrentVerdict(verdict, fetchLatest, sleep,
 }
 
 module.exports = {
-  eventIsSuperseded, failedJobsCovered, remainingFailureLines, withFailureLines,
-  mergeFailureLines, unresolvedAfterLaterRuns, waitForCurrentVerdict, LatestRunLagError,
+  eventIsSuperseded, latestIndexedRun, failedJobsCovered, remainingFailureLines, withFailureLines,
+  mergeFailureLines, unresolvedAfterLaterRuns, successfulAfterLaterRuns,
+  waitForCurrentVerdict, LatestRunLagError,
 }

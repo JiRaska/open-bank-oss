@@ -4,8 +4,9 @@
 
 const assert = require('node:assert/strict')
 const {
-  eventIsSuperseded, failedJobsCovered, remainingFailureLines, withFailureLines,
-  mergeFailureLines, unresolvedAfterLaterRuns, waitForCurrentVerdict, LatestRunLagError,
+  eventIsSuperseded, latestIndexedRun, failedJobsCovered, remainingFailureLines, withFailureLines,
+  mergeFailureLines, unresolvedAfterLaterRuns, successfulAfterLaterRuns,
+  waitForCurrentVerdict, LatestRunLagError,
 } = require('./main-red-watch-order.cjs')
 
 const event = { run_id: 100, attempt: 1 }
@@ -61,6 +62,34 @@ async function main() {
   assert.deepEqual(unresolvedAfterLaterRuns([a], [
     [{ name: 'A', conclusion: 'success' }], [{ name: 'A', conclusion: 'failure' }],
   ]), [a])
+  // R1 fails A; R2 succeeds A; R3 fails B without A. R3 refreshes [A,B]
+  // before R2's delayed event arrives. The delayed green must remove A.
+  const r3BeforeR2 = withFailureLines(r1, mergeFailureLines([a], [b]))
+  const effectiveR2Success = successfulAfterLaterRuns(['A'], [[{ name: 'B', conclusion: 'failure' }]])
+  assert.deepEqual(effectiveR2Success, ['A'])
+  assert.deepEqual(remainingFailureLines(r3BeforeR2, effectiveR2Success), [b])
+  assert.deepEqual(successfulAfterLaterRuns(['A'], [
+    [{ name: 'A', conclusion: 'failure' }],
+  ]), []) // A failed again after R2; the delayed green must not erase it.
+  assert.deepEqual(successfulAfterLaterRuns(['A'], [
+    [{ name: 'A', conclusion: 'failure' }], [{ name: 'A', conclusion: 'success' }],
+  ]), ['A'])
+
+  const run100 = { id: 100, run_attempt: 1 }
+  const run101 = { id: 101, run_attempt: 1 }
+  assert.equal(latestIndexedRun(event, [run101]), null) // newer run indexed, event missing
+  assert.deepEqual(latestIndexedRun(event, [run101, run100]), run101)
+  assert.equal(latestIndexedRun({ run_id: 100, attempt: 2 }, [run100, run101]), null)
+  assert.throws(() => latestIndexedRun(event, [{ id: '100', run_attempt: 1 }]), /Malformed/)
+  const indexSnapshots = [[run101], [run101, run100]]
+  const indexWaits = []
+  const indexed = await waitForCurrentVerdict(event,
+    async () => latestIndexedRun(event, indexSnapshots.shift()),
+    async ms => indexWaits.push(ms), [1])
+  assert.deepEqual(indexed, { latest: run101, superseded: true })
+  assert.deepEqual(indexWaits, [1])
+  await assert.rejects(waitForCurrentVerdict(event,
+    async () => latestIndexedRun(event, [run101]), async () => {}, [1]), LatestRunLagError)
 
   const delays = []
   const runs = [{ id: 99, run_attempt: 1 }, null, { id: 100, run_attempt: 1 }]
