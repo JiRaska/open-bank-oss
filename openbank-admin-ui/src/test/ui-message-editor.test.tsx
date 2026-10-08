@@ -30,4 +30,17 @@ describe('mobile message editor', () => {
     expect(screen.queryByRole('img')).not.toBeInTheDocument()
     expect(screen.getAllByRole('textbox')[0]).toBeDisabled()
   })
+
+  it('edits the profile-change introduction while showing the fixed payment instruction', () => {
+    const onChange = vi.fn()
+    render(<UiMessageEditor value={{ 'cs.send.profileChanged': 'Změnili jste profil.' }} onChange={onChange} disabled={false} />)
+    const intro = screen.getByLabelText('Změna profilu při platbě') as HTMLTextAreaElement
+    expect(intro.value).toBe('Změnili jste profil.')
+    expect(intro.maxLength).toBe(120)
+    expect(screen.getByLabelText('Náhled hlášky')).toHaveTextContent(
+      'Změnili jste profil. Zkontrolujte platbu a potvrďte ji znovu.',
+    )
+    fireEvent.change(intro, { target: { value: 'Jste v jiném profilu.' } })
+    expect(onChange).toHaveBeenCalledWith({ 'cs.send.profileChanged': 'Jste v jiném profilu.' })
+  })
 })

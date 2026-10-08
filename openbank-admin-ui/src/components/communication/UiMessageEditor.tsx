@@ -15,7 +15,16 @@ export const UI_MESSAGE_KEYS = [
   ['prod.retry', 'Tlačítko opakování', 'Retry button'],
   ['send.processing', 'Zpracování platby', 'Processing payment'],
   ['send.accepted.sub', 'Čekání na dokončení platby', 'Awaiting payment completion'],
+  ['send.profileChanged', 'Změna profilu při platbě', 'Profile changed during payment'],
+  ['so.err.profileChanged', 'Změna profilu u trvalého příkazu', 'Profile changed during standing order'],
 ] as const
+
+const PROFILE_CHANGE_ACTIONS: Record<string, string> = {
+  'cs.send.profileChanged': 'Zkontrolujte platbu a potvrďte ji znovu.',
+  'en.send.profileChanged': 'Review and confirm the payment again.',
+  'cs.so.err.profileChanged': 'Zkontrolujte příkaz a potvrďte ho znovu.',
+  'en.so.err.profileChanged': 'Review and confirm the order again.',
+}
 
 export function UiMessageEditor({ value, onChange, disabled }: {
   value: Record<string, string>
@@ -37,18 +46,20 @@ export function UiMessageEditor({ value, onChange, disabled }: {
     </label>
     {UI_MESSAGE_KEYS.map(([key, cs, en]) => {
       const fullKey = `${locale}.${key}`
+      const fixedAction = PROFILE_CHANGE_ACTIONS[fullKey]
       return <label key={fullKey} style={{ display: 'block', marginTop: 12, fontSize: 13 }}>
         {t(cs, en)}
-        <textarea className="input" rows={2} maxLength={240} value={value[fullKey] ?? ''}
-          placeholder={t('Výchozí text aplikace', 'Bundled app text')}
+        <textarea className="input" rows={2} maxLength={fixedAction ? 120 : 240} value={value[fullKey] ?? ''} aria-label={t(cs, en)}
+          placeholder={fixedAction ? t('Krátká úvodní věta, např. Změnili jste profil.', 'Short intro, e.g. Your profile changed.') : t('Výchozí text aplikace', 'Bundled app text')}
           onChange={e => {
             const next = { ...value }
             if (e.target.value.trim()) next[fullKey] = e.target.value
             else delete next[fullKey]
             onChange(next)
           }} />
-        <small style={{ color: 'var(--text-muted)' }}>{(value[fullKey] ?? '').length}/240</small>
-        {value[fullKey] && <p aria-label={t('Náhled hlášky', 'Message preview')} style={{ color: 'var(--text-primary)' }}>{value[fullKey]}</p>}
+        <small style={{ color: 'var(--text-muted)' }}>{(value[fullKey] ?? '').length}/{fixedAction ? 120 : 240}</small>
+        {fixedAction && <p style={{ color: 'var(--text-secondary)' }}>{t('Pevný bezpečnostní pokyn:', 'Fixed safety instruction:')} {fixedAction}</p>}
+        {value[fullKey] && <p aria-label={t('Náhled hlášky', 'Message preview')} style={{ color: 'var(--text-primary)' }}>{value[fullKey]}{fixedAction ? ` ${fixedAction}` : ''}</p>}
       </label>
     })}
   </fieldset>

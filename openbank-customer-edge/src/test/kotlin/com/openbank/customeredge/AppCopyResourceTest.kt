@@ -30,6 +30,48 @@ class AppCopyResourceTest {
     }
 
     @Test
+    fun `profile-change introductions always gain the fixed review and confirm instruction`() {
+        every { upstream.get(any(), null) } returns Response.ok(
+            """{"styleVersion":3,"uiMessages":{"cs.send.profileChanged":"Změnili jste profil.","en.send.profileChanged":"Your profile changed.","cs.so.err.profileChanged":"Jste v jiném profilu.","en.so.err.profileChanged":"You switched profiles."}}""",
+        ).build()
+        val response = resource.copy()
+        assertThat(response.status).isEqualTo(200)
+        val messages = ObjectMapper()
+            .valueToTree<com.fasterxml.jackson.databind.JsonNode>(response.entity)
+            .path("messages")
+        assertThat(messages.path("cs.send.profileChanged").asText())
+            .isEqualTo("Změnili jste profil. Zkontrolujte platbu a potvrďte ji znovu.")
+        assertThat(messages.path("en.send.profileChanged").asText())
+            .isEqualTo("Your profile changed. Review and confirm the payment again.")
+        assertThat(messages.path("cs.so.err.profileChanged").asText())
+            .isEqualTo("Jste v jiném profilu. Zkontrolujte příkaz a potvrďte ho znovu.")
+        assertThat(messages.path("en.so.err.profileChanged").asText())
+            .isEqualTo("You switched profiles. Review and confirm the order again.")
+    }
+
+    @Test
+    fun `omitted overrides stay omitted so bundled complete fallback is not duplicated`() {
+        every { upstream.get(any(), null) } returns Response.ok("""{"styleVersion":3,"uiMessages":{}}""").build()
+        val response = resource.copy()
+        val messages = ObjectMapper()
+            .valueToTree<com.fasterxml.jackson.databind.JsonNode>(response.entity)
+            .path("messages")
+        assertThat(messages.size()).isZero()
+    }
+
+    @Test
+    fun `malformed safety introduction never reaches the public copy`() {
+        listOf("<script>", "Your profile changed. Review and confirm the payment again.", " ").forEach { lead ->
+            every { upstream.get(any(), null) } returns Response.ok(
+                ObjectMapper().writeValueAsString(
+                    mapOf("styleVersion" to 3, "uiMessages" to mapOf("en.send.profileChanged" to lead)),
+                ),
+            ).build()
+            assertThat(resource.copy().status).isEqualTo(502)
+        }
+    }
+
+    @Test
     fun `outages and malformed responses never replace known good copy`() {
         listOf(Response.status(503).build(), Response.ok("broken").build(), Response.ok("{}").build()).forEach {
             every { upstream.get(any(), null) } returns it

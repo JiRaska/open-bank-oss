@@ -44,12 +44,46 @@ class AppCopyResource(
             if (!validVersion || !validMessages) {
                 return Response.status(Response.Status.BAD_GATEWAY).build()
             }
+            val projected = mutableMapOf<String, String>()
+            if (messages.isObject) {
+                val fields = messages.fields()
+                while (fields.hasNext()) {
+                    val (key, value) = fields.next()
+                    if (!value.isTextual) return Response.status(Response.Status.BAD_GATEWAY).build()
+                    val lead = value.asText()
+                    val suffix = PROFILE_CHANGE_ACTIONS[key]
+                    projected[key] = if (suffix == null) {
+                        lead
+                    } else {
+                        if (
+                            lead.isBlank() ||
+                            lead.trim() != lead ||
+                            lead.length > 120 ||
+                            lead.last() !in setOf('.', '!', '?') ||
+                            lead.count { it == '.' || it == '!' || it == '?' } != 1 ||
+                            lead.any { it == '<' || it == '>' || it == '{' || it == '}' || it.isISOControl() }
+                        ) {
+                            return Response.status(Response.Status.BAD_GATEWAY).build()
+                        }
+                        "${lead.trim()} $suffix"
+                    }
+                }
+            }
             return Response.ok(
                 mapOf(
                     "version" to version.asInt(),
-                    "messages" to if (messages.isObject) messages else emptyMap<String, String>(),
+                    "messages" to projected,
                 ),
             ).header("Cache-Control", "public, max-age=60").build()
         }
+    }
+
+    private companion object {
+        val PROFILE_CHANGE_ACTIONS = mapOf(
+            "cs.send.profileChanged" to "Zkontrolujte platbu a potvrďte ji znovu.",
+            "en.send.profileChanged" to "Review and confirm the payment again.",
+            "cs.so.err.profileChanged" to "Zkontrolujte příkaz a potvrďte ho znovu.",
+            "en.so.err.profileChanged" to "Review and confirm the order again.",
+        )
     }
 }
