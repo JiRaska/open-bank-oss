@@ -32,6 +32,7 @@ data class DraftStyleVersionRequest(
     val forbiddenTerms: List<String?> = emptyList(),
     val signature: String? = null,
     val uiMessages: Map<String, String?> = emptyMap(),
+    val basePublishedVersion: Int? = null,
 ) {
     /** Validates every element is non-null and returns the caller-facing non-nullable shape. */
     fun validatedPreferredTerms(): Map<String, String> =
@@ -75,6 +76,7 @@ class CommunicationStyleResource(
                     signature = req.signature,
                     maker = actor(),
                     uiMessages = req.validatedUiMessages(),
+                    basePublishedVersion = req.basePublishedVersion,
                 ),
             ),
         ).build()

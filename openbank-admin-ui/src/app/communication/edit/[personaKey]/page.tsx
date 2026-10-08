@@ -67,6 +67,7 @@ export default function CommunicationStyleEditorPage() {
   const [forbiddenTerms, setForbiddenTerms] = useState<string[]>([])
   const [loadingPublished, setLoadingPublished] = useState(true)
   const [publishedLoaded, setPublishedLoaded] = useState(false)
+  const [basePublishedVersion, setBasePublishedVersion] = useState(0)
   const [loadAttempt, setLoadAttempt] = useState(0)
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
 
@@ -76,12 +77,14 @@ export default function CommunicationStyleEditorPage() {
     setPublishedLoaded(false)
     setTone(''); setFormality(''); setFormOfAddress(''); setSignature(''); setMaxLength('')
     setUiMessages({}); setPreferredTerms({}); setForbiddenTerms([])
+    setBasePublishedVersion(0)
     fetch(`${PROXY_BASE}/${encodeURIComponent(personaKey)}/published`, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(8_000)]) })
       .then(async res => {
         if (res.status === 404) { if (!controller.signal.aborted) setPublishedLoaded(true); return }
         if (!res.ok) throw new Error('Published style unavailable')
         const published = await res.json()
         if (controller.signal.aborted) return
+        setBasePublishedVersion(published.styleVersion)
         setTone(published.tone ?? '')
         setFormality(published.formality ?? '')
         setFormOfAddress(published.formOfAddress ?? '')
@@ -128,6 +131,7 @@ export default function CommunicationStyleEditorPage() {
           preferredTerms,
           forbiddenTerms,
           uiMessages,
+          basePublishedVersion,
         }),
       })
       if (res.status === 400) {
@@ -150,7 +154,7 @@ export default function CommunicationStyleEditorPage() {
     } catch {
       setUnavailable({ kind: 'unreachable' })
     } finally { setSaving(false) }
-  }, [personaKey, tone, formality, formOfAddress, signature, maxLength, preferredTerms, forbiddenTerms, uiMessages, t])
+  }, [personaKey, tone, formality, formOfAddress, signature, maxLength, preferredTerms, forbiddenTerms, uiMessages, basePublishedVersion, t])
 
   const submitForReview = useCallback(async () => {
     if (!draft) return

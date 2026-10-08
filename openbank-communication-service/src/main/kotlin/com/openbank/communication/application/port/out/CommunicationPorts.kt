@@ -22,10 +22,14 @@ interface StyleVersionRepository {
     suspend fun find(id: UUID): StyleVersion?
     suspend fun latestVersionNumber(personaId: UUID): Int
     suspend fun submit(id: UUID, at: Instant): StyleVersion?
-    suspend fun publish(id: UUID, checker: String, at: Instant): StyleVersion?
+
+    /** Atomically compare the draft's base to the current publication and replace it. */
+    suspend fun publish(id: UUID, checker: String, at: Instant): StylePublication?
     suspend fun retire(id: UUID, checker: String, at: Instant): StyleVersion?
     suspend fun findPublished(personaId: UUID): StyleVersion?
 }
+
+data class StylePublication(val published: StyleVersion, val supersededId: UUID?)
 
 interface CommunicationAuditRepository {
     suspend fun append(type: String, aggregateId: UUID, actor: String, details: String, at: Instant)

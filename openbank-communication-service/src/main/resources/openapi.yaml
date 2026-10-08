@@ -8,12 +8,12 @@ info:
   # is the next free minor rather than a collision. Neither branch could stay at 1.0.0 — main
   # holds it, and `openapi-version-not-taken` reads the base tip, so an unchanged version on an
   # additive change fails that gate and `api-contract-gate` both.
-  version: 1.3.0
+  version: 1.4.0
 paths:
   /api/v1/personas/{personaKey}/style-versions:
     post:
       summary: Draft a new style version for a persona (D3 lint runs before persistence)
-      description: Optional uiMessages map contains approved mobile copy keys prefixed cs. or en., up to 332 plain-text values of 240 characters. Only customer-copilot supports UI copy. Omitted keys use bundled client defaults. The field is persisted and returned in the published style; the existing four-eyes publication applies.
+      description: Optional uiMessages map contains approved mobile copy keys prefixed cs. or en., up to 332 plain-text values of 240 characters. Only customer-copilot supports UI copy. Omitted keys use bundled client defaults. The field is persisted and returned in the published style. Send basePublishedVersion from GET published (or 0 if it returned 404); an omitted value captures the current publication at draft creation for older clients. Publication compares this saved base atomically and rejects a stale draft with 409.
       parameters: [{name: personaKey, in: path, required: true, schema: {type: string}}]
       responses: {"201": {description: Created}, "400": {description: Rejected by lint or validation}}
   /api/v1/personas/style-versions/{id}/submit:
@@ -23,7 +23,7 @@ paths:
       responses: {"200": {description: Submitted}, "409": {description: Conflict}}
   /api/v1/personas/style-versions/{id}/publish:
     post:
-      summary: Publish (four-eyes-gated, commstyle.publish; the draft's own maker is refused)
+      summary: Publish (four-eyes-gated, commstyle.publish; stale drafts and the draft's own maker are refused)
       parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
       responses: {"200": {description: Published}, "202": {description: Paused pending a checker decision}, "409": {description: Conflict}}
   /api/v1/personas/style-versions/{id}/retire:

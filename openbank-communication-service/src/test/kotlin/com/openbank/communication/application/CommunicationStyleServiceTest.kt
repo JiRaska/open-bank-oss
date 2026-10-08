@@ -8,6 +8,7 @@ package com.openbank.communication.application
 import com.openbank.communication.application.port.out.CommunicationAuditRepository
 import com.openbank.communication.application.port.out.CommunicationEventPublisher
 import com.openbank.communication.application.port.out.PersonaRepository
+import com.openbank.communication.application.port.out.StylePublication
 import com.openbank.communication.application.port.out.StyleVersionRepository
 import com.openbank.communication.domain.Persona
 import com.openbank.communication.domain.PersonaPublishOutcome
@@ -49,8 +50,15 @@ private class InMemoryStyleVersionRepository : StyleVersionRepository {
         rows[id] = updated
         return updated
     }
-    override suspend fun publish(id: UUID, checker: String, at: Instant): StyleVersion? {
+    override suspend fun publish(id: UUID, checker: String, at: Instant): StylePublication? {
         val existing = rows[id] ?: return null
+        val current = rows.values.firstOrNull {
+            it.personaId == existing.personaId && it.status == StyleVersionStatus.PUBLISHED
+        }
+        if (existing.basePublishedVersion != (current?.version ?: 0)) {
+            throw StyleVersionConflictException("stale style draft")
+        }
+        if (current != null) rows[current.id] = current.copy(status = StyleVersionStatus.RETIRED, retiredAt = at)
         val updated = existing.copy(
             status = StyleVersionStatus.PUBLISHED,
             decidedBy = checker,
@@ -58,7 +66,7 @@ private class InMemoryStyleVersionRepository : StyleVersionRepository {
             publishedAt = at,
         )
         rows[id] = updated
-        return updated
+        return StylePublication(updated, current?.id)
     }
     override suspend fun retire(id: UUID, checker: String, at: Instant): StyleVersion? {
         val existing = rows[id] ?: return null
@@ -226,6 +234,7 @@ class CommunicationStyleServiceTest {
         runBlocking { service.publish(first.id, "checker-b") }
 
         val second = draft(maker = "editor-a")
+        assertThat(second.basePublishedVersion).isEqualTo(first.version)
         runBlocking { service.submit(second.id, "editor-a") }
         runBlocking { service.publish(second.id, "checker-b") }
 

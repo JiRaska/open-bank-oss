@@ -8,6 +8,7 @@ package com.openbank.communication.infrastructure.persistence
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.communication.application.port.out.CommunicationAuditRepository
 import com.openbank.communication.application.port.out.PersonaRepository
+import com.openbank.communication.application.port.out.StylePublication
 import com.openbank.communication.application.port.out.StyleVersionRepository
 import com.openbank.communication.domain.Persona
 import com.openbank.communication.domain.StyleVersion
@@ -22,6 +23,7 @@ import jakarta.enterprise.context.ApplicationScoped
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.Id
+import jakarta.persistence.LockModeType
 import jakarta.persistence.Table
 import java.time.Instant
 import java.util.UUID
@@ -45,6 +47,7 @@ class StyleVersionEntity : PanacheEntityBase() {
     @Id lateinit var id: UUID
     lateinit var personaId: UUID
     var version = 1
+    var basePublishedVersion = 0
     lateinit var status: String
     lateinit var tone: String
     lateinit var formality: String
@@ -85,6 +88,7 @@ private fun StyleVersionEntity.toDomain() = StyleVersion(
     id = id,
     personaId = personaId,
     version = version,
+    basePublishedVersion = basePublishedVersion,
     status = StyleVersionStatus.valueOf(status),
     tone = tone,
     formality = formality,
@@ -124,6 +128,7 @@ class PanacheStyleVersionRepository :
                 id = s.id
                 personaId = s.personaId
                 version = s.version
+                basePublishedVersion = s.basePublishedVersion
                 status = s.status.name
                 tone = s.tone
                 formality = s.formality
@@ -159,14 +164,39 @@ class PanacheStyleVersionRepository :
             "id = ?1 and status = ?2",
             id,
             StyleVersionStatus.IN_REVIEW.name,
-        ).firstResult<StyleVersionEntity>().map { e ->
+        ).firstResult<StyleVersionEntity>().flatMap { e ->
             requireNotNull(e)
             if (e.maker == checker) throw StyleVersionConflictException("maker cannot publish their own style version")
-            e.status = StyleVersionStatus.PUBLISHED.name
-            e.decidedBy = checker
-            e.decidedAt = at
-            e.publishedAt = at
-            e.toDomain()
+            // Lock the stable persona row, including when no style is published yet. Every
+            // publisher for this persona serializes here before reading the current version.
+            Panache.getSession().flatMap { session ->
+                session.find(PersonaEntity::class.java, e.personaId, LockModeType.PESSIMISTIC_WRITE)
+            }.flatMap {
+                find(
+                    "personaId = ?1 and status = ?2",
+                    e.personaId,
+                    StyleVersionStatus.PUBLISHED.name,
+                ).firstResult<StyleVersionEntity>()
+            }.flatMap { current ->
+                val currentVersion = current?.version ?: 0
+                if (e.basePublishedVersion != currentVersion) {
+                    throw StyleVersionConflictException(
+                        "stale style draft: based on published version ${e.basePublishedVersion}, current is $currentVersion",
+                    )
+                }
+                val retiredId = current?.id
+                if (current != null) {
+                    current.status = StyleVersionStatus.RETIRED.name
+                    current.retiredAt = at
+                }
+                Panache.getSession().flatMap { it.flush() }.map {
+                    e.status = StyleVersionStatus.PUBLISHED.name
+                    e.decidedBy = checker
+                    e.decidedAt = at
+                    e.publishedAt = at
+                    StylePublication(e.toDomain(), retiredId)
+                }
+            }
         }
     }.awaitSuspending()
 

@@ -197,6 +197,61 @@ class CommunicationStyleRestContractIT {
     }
 
     @Test
+    @TestSecurity(user = "checker-c@openbank.test", roles = ["ROLE_COMMS_EDITOR", "ROLE_COMMS_APPROVER", "ROLE_API"])
+    fun `second editor cannot publish a draft based on copy superseded by the first editor`() {
+        val firstPublished = seedStyleVersion(persona = "collections", maker = "editor-initial", status = "PUBLISHED")
+        val editorOne = draftForCollections(1, "First editor copy")
+        val editorTwo = draftForCollections(1, "Second editor copy")
+        dataSource.connection.use { connection ->
+            connection.prepareStatement("update style_version set maker = 'editor-one' where id in (?, ?)").use { ps ->
+                ps.setObject(1, UUID.fromString(editorOne))
+                ps.setObject(2, UUID.fromString(editorTwo))
+                ps.executeUpdate()
+            }
+        }
+        listOf(editorOne, editorTwo).forEach { id ->
+            Given { this }.When { post("/api/v1/personas/style-versions/$id/submit") } Then { statusCode(200) }
+        }
+
+        Given { this }.When { post("/api/v1/personas/style-versions/$editorOne/publish") } Then {
+            statusCode(200)
+            body("version", equalTo(2))
+        }
+        Given { this }.When { post("/api/v1/personas/style-versions/$editorTwo/publish") } Then {
+            statusCode(409)
+            body("error", containsString("stale style draft"))
+        }
+        Given { this }.When { get("/api/v1/personas/collections/published") } Then {
+            statusCode(200)
+            body("styleVersion", equalTo(2))
+            body("tone", equalTo("First editor copy"))
+        }
+        org.junit.jupiter.api.Assertions.assertEquals("RETIRED", styleStatus(firstPublished))
+        org.junit.jupiter.api.Assertions.assertEquals("PUBLISHED", styleStatus(UUID.fromString(editorOne)))
+        org.junit.jupiter.api.Assertions.assertEquals("IN_REVIEW", styleStatus(UUID.fromString(editorTwo)))
+    }
+
+    private fun styleStatus(id: UUID): String = dataSource.connection.use { connection ->
+        connection.prepareStatement("select status from style_version where id = ?").use { ps ->
+            ps.setObject(1, id)
+            ps.executeQuery().use { rows ->
+                org.junit.jupiter.api.Assertions.assertTrue(rows.next())
+                rows.getString(1)
+            }
+        }
+    }
+
+    private fun draftForCollections(base: Int, tone: String): String = Given {
+        contentType("application/json")
+        body("""{"tone":"$tone","formality":"formal","formOfAddress":"vykani","basePublishedVersion":$base}""")
+    } When {
+        post("/api/v1/personas/collections/style-versions")
+    } Then {
+        statusCode(201)
+        body("basePublishedVersion", equalTo(base))
+    } Extract { path("id") }
+
+    @Test
     @TestSecurity(user = "viewer@openbank.test", roles = ["ROLE_API"])
     fun `an unknown persona 404s rather than 500ing`() {
         Given { this }.When {

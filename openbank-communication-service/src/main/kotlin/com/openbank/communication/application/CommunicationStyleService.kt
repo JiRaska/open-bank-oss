@@ -36,6 +36,7 @@ data class DraftStyleVersionCommand(
     val signature: String?,
     val maker: String,
     val uiMessages: Map<String, String> = emptyMap(),
+    val basePublishedVersion: Int? = null,
 )
 
 @ApplicationScoped
@@ -71,10 +72,14 @@ class CommunicationStyleService(
         }
         val now = Instant.now(clock)
         val nextVersion = styleVersions.latestVersionNumber(persona.id) + 1
+        val basePublishedVersion = command.basePublishedVersion
+            ?: (styleVersions.findPublished(persona.id)?.version ?: 0)
+        require(basePublishedVersion >= 0) { "basePublishedVersion must be non-negative" }
         val draft = StyleVersion(
             id = Ids.newId(),
             personaId = persona.id,
             version = nextVersion,
+            basePublishedVersion = basePublishedVersion,
             status = StyleVersionStatus.DRAFT,
             tone = command.tone,
             formality = command.formality,
@@ -132,19 +137,18 @@ class CommunicationStyleService(
             throw StyleVersionConflictException("style version is not in review")
         }
         val now = Instant.now(clock)
-        val previouslyPublished = styleVersions.findPublished(existing.personaId)
-        if (previouslyPublished != null) {
-            styleVersions.retire(previouslyPublished.id, checker, now)
+        val publication = styleVersions.publish(id, checker, now)
+            ?: throw StyleVersionConflictException("style version could not be published")
+        if (publication.supersededId != null) {
             audit.append(
                 "STYLE_RETIRED",
-                previouslyPublished.id,
+                publication.supersededId,
                 checker,
                 "superseded by version=${existing.version}",
                 now,
             )
         }
-        val published = styleVersions.publish(id, checker, now)
-            ?: throw StyleVersionConflictException("style version could not be published")
+        val published = publication.published
         audit.append("STYLE_PUBLISHED", id, checker, "version=${published.version}", now)
         val persona =
             personas.find(published.personaId)
