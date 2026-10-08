@@ -1,0 +1,65 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+
+package com.openbank.audit.it
+
+import com.openbank.libs.testing.evidence.TestInfrastructureEvidence
+import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
+import org.apache.kafka.clients.admin.Admin
+import org.apache.kafka.clients.admin.NewTopic
+import org.testcontainers.redpanda.RedpandaContainer
+import org.testcontainers.utility.DockerImageName
+import java.util.concurrent.TimeUnit
+
+/** Real broker and database for the dedicated agent provenance channel. */
+class AgentAuditKafkaTestResource : QuarkusTestResourceLifecycleManager {
+    private val postgres = PostgresTestResource()
+    private var broker: RedpandaContainer? = null
+
+    override fun start(): Map<String, String> {
+        val settings = postgres.start()
+        try {
+            val kafka = RedpandaContainer(
+                DockerImageName.parse(REDPANDA_IMAGE)
+                    .asCompatibleSubstituteFor("docker.redpanda.com/redpandadata/redpanda"),
+            )
+            broker = kafka
+            kafka.start()
+            TestInfrastructureEvidence.record("redpanda", REDPANDA_IMAGE, "started")
+            Admin.create(mapOf("bootstrap.servers" to kafka.bootstrapServers)).use { admin ->
+                admin.createTopics(listOf(NewTopic(INPUT_TOPIC, 1, 1), NewTopic(DLQ_TOPIC, 1, 1)))
+                    .all().get(20, TimeUnit.SECONDS)
+            }
+            return settings + mapOf(
+                "kafka.bootstrap.servers" to kafka.bootstrapServers,
+                "mp.messaging.connector.smallrye-kafka.bootstrap.servers" to kafka.bootstrapServers,
+                "mp.messaging.incoming.audit-events-in.enabled" to "false",
+                "mp.messaging.incoming.agent-audit-events-in.enabled" to "true",
+                "mp.messaging.incoming.agent-audit-events-in.topic" to INPUT_TOPIC,
+                "mp.messaging.incoming.agent-audit-events-in.group.id" to GROUP,
+                "mp.messaging.incoming.agent-audit-events-in.auto.offset.reset" to "earliest",
+                "mp.messaging.incoming.agent-audit-events-in.dead-letter-queue.topic" to DLQ_TOPIC,
+            )
+        } catch (failure: Exception) {
+            stop()
+            throw failure
+        }
+    }
+
+    override fun stop() {
+        broker?.let {
+            it.stop()
+            TestInfrastructureEvidence.record("redpanda", REDPANDA_IMAGE, "stopped")
+        }
+        broker = null
+        postgres.stop()
+    }
+
+    companion object {
+        private const val REDPANDA_IMAGE = "redpandadata/redpanda:v24.1.2"
+        const val INPUT_TOPIC = "openbank.agent.audit.integration-test"
+        const val DLQ_TOPIC = "openbank.dlq.audit.agent-audit-integration-test"
+        const val GROUP = "audit-agent-provenance-integration-test"
+    }
+}
