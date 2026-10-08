@@ -2,11 +2,12 @@
 # style/playbook layer that sits on top of the immutable git prompt core, and admin-ui
 # edits it under four-eyes with evals-on-publish.
 #
-# Initially registered at the same staged zero-replica state as referral: the component
-# declares the namespace, its single-owner CNPG Postgres + daily ScheduledBackup, the OIDC
-# ExternalSecret, internal TLS Certificate, valkey cache, OPA bundle and workload. The
-# separately reviewed activation now declares one replica after the image pin. Verify
-# GitOps sync and live management readiness before claiming the service is healthy.
+# Registered at the SAME stage referral was: the component declares the namespace, its
+# single-owner CNPG Postgres + daily ScheduledBackup, the OIDC ExternalSecret, the
+# internal TLS Certificate, the valkey cache, the OPA bundle and the workload — with the
+# Deployment at `replicas: 0`. Syncing this Application therefore provisions the domain
+# and starts NO pod; activation is a separate reviewed change that records live health
+# evidence, exactly as communication-service.yaml's own header states.
 #
 # Why it is registered now rather than at activation: admin-ui already ships a
 # RoleBinding for admin-ui-discovery into namespace `communication` (#9173) and lists
@@ -16,7 +17,7 @@
 #   namespaces "communication" not found
 # — so admin-ui itself had been OutOfSync since 2026-09-10T21:10Z, and communication-db
 # fired PostgresClusterDeclaredNotDeployed. A component that nothing syncs is not a
-# staged rollout, it is a manifest no one applies; staging used `replicas: 0` until activation.
+# staged rollout, it is a manifest no one applies; the staging lives in `replicas: 0`.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:

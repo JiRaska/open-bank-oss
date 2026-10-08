@@ -8,12 +8,14 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 > Operational runbook for the `communication` service. Data domain **platform**,
 > classification **internal**, datastore **PostgreSQL**.
 
-## Deployment status — GITOPS ACTIVATION
+## Deployment status — WORKLOAD STAGED, ACTIVATION PENDING
 
-GitOps declares one replica after a separately reviewed activation change. Confirm the
-pinned image is signed and attested, ArgoCD has synced, and the Deployment has one ready
-replica before claiming the service is live. Check readiness on the management endpoint
-`:8086/q/health/ready`; the public HTTP port is not a health-evidence substitute.
+**GitOps deliberately declares zero replicas for this workload.** This is not a live
+service and does not authorize a replica increase, restart, log inspection, traffic claim,
+or metrics/health assertion. Activation remains the separately reviewed step after the
+pinned image, GitOps sync, and live cluster-health evidence are available. After that
+step, health must be checked on the management endpoint `:8086`;
+the public HTTP port is not a health-evidence substitute.
 
 ## Service identity
 
@@ -35,10 +37,11 @@ replica before claiming the service is live. Check readiness on the management e
 A failure here propagates to the downstream services above — check them when
 triaging an incident that starts on `communication`.
 
-## Runtime operations
+## Runtime operations — DEFERRED
 
-Use a reviewed GitOps change for replica or image updates. After sync, verify the
-Deployment and the declared probes:
+Do not increase replicas, restart, or use log/metrics commands to activate this staged
+workload. The reviewed activation procedure must first establish the signed image,
+GitOps sync, and actual cluster health. The declared probes are:
 
 - Readiness: `GET :8086/q/health/ready` · Liveness: `GET :8086/q/health/live`
 
