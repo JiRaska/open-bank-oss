@@ -63,6 +63,11 @@ def decide(event: str, now: int, last_deploy: int | None, armed_open: bool, wind
     return "DEFER", f"last deploy commit is {age}s old, window {window}s — flush arms it at {last_deploy + window}"
 
 
+def merge_action(status: str) -> str | None:
+    """A clean PR can merge now; pending checks/reviews need auto-merge. Unknown fails closed."""
+    return {"CLEAN": "merge", "BLOCKED": "auto", "UNSTABLE": "auto"}.get(status)
+
+
 def manual_deploy_head(event: dict) -> str | None:
     """Identify only a successful manual producer run from GitHub's workflow_run event."""
     run = event.get("workflow_run") or {}
@@ -215,6 +220,11 @@ def self_test() -> int:
             fails.append(name)
 
     W, T = 1800, 1_000_000
+    check("clean deploy PR merges immediately", merge_action("CLEAN") == "merge")
+    check("blocked deploy PR retains auto-merge", merge_action("BLOCKED") == "auto")
+    check("unstable deploy PR retains auto-merge", merge_action("UNSTABLE") == "auto")
+    for status in ("BEHIND", "DIRTY", "DRAFT", "HAS_HOOKS", "UNKNOWN", ""):
+        check(f"{status or 'empty'} merge state fails closed", merge_action(status) is None)
     # 1. single push, quiet main: armed immediately (no added latency for sparse traffic)
     check("single push after a quiet window -> ARM", decide("push", T, T - 4000, False, W)[0] == "ARM")
     # 2. second push inside the window: deferred, then flushed at the window
@@ -358,6 +368,8 @@ def main() -> int:
     c.add_argument("--skip-images", default="", help="space-separated images this run pins itself")
     v = sub.add_parser("verify")
     v.add_argument("--root", default=".")
+    m = sub.add_parser("merge-action")
+    m.add_argument("--status", required=True)
     for p in (d, f):
         p.add_argument("--now", type=int, required=True)
         p.add_argument("--window", type=int, default=int(os.environ.get("DEPLOY_WINDOW_SECONDS", DEFAULT_WINDOW_SECONDS)))
@@ -388,6 +400,13 @@ def main() -> int:
         for pin in stale:
             print(f"::error::stale GitOps image pin: {pin}", file=sys.stderr)
         return 1 if stale else 0
+    if a.cmd == "merge-action":
+        action = merge_action(a.status)
+        if action is None:
+            print(f"::error::deploy PR merge state {a.status!r} is not safe to act on", file=sys.stderr)
+            return 1
+        print(action)
+        return 0
     ap.print_help()
     return 2
 

@@ -9,8 +9,9 @@
 # what lands it. A workflow_run trigger handles new PRs and the schedule recovers missed runs.
 # Each run picks the OLDEST deferred deploy PR once the window has elapsed
 # and nothing else is armed, re-runs supersede-deploy-prs.sh on it (ancestry + coverage — a
-# rollback PR is refused, never armed), and arms auto-merge with the same App token the deploy
-# workflows use. A successful manual dispatch of either producer expedites only its matching PR.
+# rollback PR is refused), and merges a CLEAN PR or arms auto-merge while checks/reviews remain
+# pending. Both actions use the same App token as the deploy workflows. A successful manual
+# dispatch of either producer expedites only its matching PR.
 
 name: Deploy window flush
 
@@ -31,7 +32,7 @@ concurrency:
 
 jobs:
   flush:
-    name: Arm the oldest deferred deploy PR
+    name: Flush the oldest deferred deploy PR
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # Read-only GITHUB_TOKEN: every write (arming auto-merge, closing a superseded PR) goes through
@@ -101,18 +102,24 @@ jobs:
           esac
           bash .github/scripts/supersede-deploy-prs.sh "$prefix" "$ARM"
 
-      - name: Enable auto-merge
+      - name: Merge clean PR or enable auto-merge
         if: steps.pick.outputs.arm != ''
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           ARM: ${{ steps.pick.outputs.arm }}
         run: |
           set -euo pipefail
-          id="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${ARM}" --jq .node_id)"
-          # shellcheck disable=SC2016  # $id is a GraphQL variable, not a shell one
-          gh api graphql -f query='mutation($id: ID!) {
-            enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: SQUASH }) {
-              pullRequest { number }
-            }
-          }' -f id="$id" >/dev/null
-          echo "auto-merge armed on deferred deploy PR #${ARM}"
+          read -r status head_sha < <(gh pr view "$ARM" --repo "$GITHUB_REPOSITORY" \
+            --json mergeStateStatus,headRefOid --jq '[.mergeStateStatus, .headRefOid] | @tsv')
+          [[ "$head_sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::invalid deploy PR head"; exit 1; }
+          action="$(python3 .github/scripts/deploy-window.py merge-action --status "$status")"
+          case "$action" in
+            merge)
+              gh pr merge "$ARM" --repo "$GITHUB_REPOSITORY" --squash --match-head-commit "$head_sha"
+              echo "merged clean deferred deploy PR #${ARM}"
+              ;;
+            auto)
+              gh pr merge "$ARM" --repo "$GITHUB_REPOSITORY" --squash --auto --match-head-commit "$head_sha"
+              echo "auto-merge armed on deferred deploy PR #${ARM}"
+              ;;
+          esac
