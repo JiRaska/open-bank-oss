@@ -32,6 +32,18 @@ class BusinessPaymentBatchOpenApiTest {
     }
 
     @Test
+    fun `a caller without trusted company context has a 403 contract`() {
+        val path = spec.path("paths").path("/api/v1/business-payment-batches")
+        for (method in listOf("get", "post")) {
+            assertThat(path.path(method).path("responses").has("403")).isTrue()
+            val header = path.path(method).path("parameters").first {
+                it.path("name").asText() == "X-Customer-Party-Id"
+            }
+            assertThat(header.path("required").asBoolean()).isTrue()
+        }
+    }
+
+    @Test
     fun `draft schemas declare the returned fields and item pagination`() {
         val schemas = spec.path("components").path("schemas")
         val draft = schemas.path("BusinessPaymentBatchDraft")
