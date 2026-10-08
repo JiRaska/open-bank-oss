@@ -1288,8 +1288,9 @@ jobs:
               .github/scripts/check-deploy-holds.py --root . --list-holds --rules-ref origin/main)"
             HELD_IMAGES="$(for service in $HELD_SERVICES; do printf '%s/%s ' "$ECR_REGISTRY" "$service"; done)"
             for n in $( (gh pr list --repo "$GITHUB_REPOSITORY" --state open --limit 200 \
-                         --json number,headRefName,autoMergeRequest,isCrossRepository,isDraft \
+                         --json number,headRefName,autoMergeRequest,isCrossRepository,isDraft,labels \
                          --jq '.[] | select((.isCrossRepository | not) and (.isDraft | not) and .autoMergeRequest == null
+                                 and ([.labels[].name] | index("blocked") | not)
                                  and (.headRefName | startswith("chore/gitops-auto-deploy-"))) | .number') || true); do
               carried="$(gh pr diff "$n" --repo "$GITHUB_REPOSITORY" \
                 | python3 .github/scripts/deploy-window.py carry --root . --skip-images "$OWN_IMAGES $HELD_IMAGES")" \
