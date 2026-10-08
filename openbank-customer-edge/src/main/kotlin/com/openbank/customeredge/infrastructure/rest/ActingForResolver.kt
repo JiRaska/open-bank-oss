@@ -96,6 +96,29 @@ class ActingForResolver(
         }
     }
 
+    /** Inbox aggregation must never turn a mandate lookup outage into a false empty company feed. */
+    @Suppress("ThrowsCount") // Each malformed mandate response must fail the aggregate closed.
+    fun profilesOfStrict(agent: UUID): List<Map<String, Any?>> {
+        if (!enabled) return emptyList()
+        val response = try {
+            upstream.get("$partyServiceUrl/api/v1/parties/$agent/acting-for", agent.toString())
+        } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+            Log.warn("Notification mandate inventory unavailable", e)
+            throw jakarta.ws.rs.ServiceUnavailableException("Notification profiles unavailable")
+        }
+        if (response.status != OK) throw jakarta.ws.rs.ServiceUnavailableException("Notification profiles unavailable")
+        val body = response.entity as? String
+            ?: throw jakarta.ws.rs.ServiceUnavailableException("Notification profiles unavailable")
+        val node = runCatching { objectMapper.readTree(body) }.getOrNull()
+            ?.takeIf { it.isArray }
+            ?: throw jakarta.ws.rs.ServiceUnavailableException("Notification profiles unavailable")
+        return node.map { profile ->
+            val id = runCatching { UUID.fromString(profile.path("partyId").asText()) }.getOrNull()
+                ?: throw jakarta.ws.rs.ServiceUnavailableException("Notification profiles unavailable")
+            mapOf("partyId" to id)
+        }
+    }
+
     private fun mayActFor(agent: UUID, entity: UUID): Boolean {
         val now = Instant.now(clock)
         cache[agent to entity]?.takeIf { it.expiresAt.isAfter(now) }?.let { return it.allowed }
