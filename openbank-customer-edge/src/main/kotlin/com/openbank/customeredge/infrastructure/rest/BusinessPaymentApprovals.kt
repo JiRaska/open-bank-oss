@@ -46,6 +46,8 @@ data class HeldPayment(
     val railRequest: String,
     /** Kind-specific fields a signer is shown: frequency, creditorIdentifier, mandateReference. */
     val extras: Map<String, String?> = emptyMap(),
+    /** Verified original initiator, frozen for receipt provenance on delayed SEPA release. */
+    val initiatorActorId: UUID? = null,
 )
 
 /**
@@ -196,6 +198,7 @@ class BusinessPaymentApprovals(
             p.creditorName?.let { put("creditorName", it) }
             p.reference?.let { put("reference", it) }
             put("debtorAccountId", p.debtorAccountId)
+            p.initiatorActorId?.let { put("initiatorActorId", it.toString()) }
             set<JsonNode>("railRequest", objectMapper.readTree(p.railRequest))
         }
         val body = objectMapper.createObjectNode().apply {
@@ -210,7 +213,7 @@ class BusinessPaymentApprovals(
     }
 
     /** Release after the last signature. Returns the release outcome for the sign response. */
-    fun release(entity: UUID, approvalId: UUID): Map<String, Any?> {
+    fun release(entity: UUID, approvalId: UUID, verifiedInitiatorId: UUID?): Map<String, Any?> {
         val claim = signing.releaseClaim(entity, approvalId)
         if (!claim.ok) {
             // 409: somebody else holds the claim — the payment is being (or was) released by them.
@@ -224,12 +227,19 @@ class BusinessPaymentApprovals(
             report(entity, approvalId, ok = false, ref = null, error = "frozen payload has no rail request")
             return mapOf("status" to "RELEASE_FAILED", "error" to "frozen payload has no rail request")
         }
-        val resp = upstream.post(
-            railUrl(rail),
-            entity.toString(),
-            objectMapper.writeValueAsString(railRequest),
-            approvalId.toString(),
-        )
+        val actor = payload.path("initiatorActorId").takeIf { it.isTextual }
+            ?.asText()?.let { runCatching { UUID.fromString(it) }.getOrNull() } ?: verifiedInitiatorId
+        val frozenBody = objectMapper.writeValueAsString(railRequest)
+        val resp = if (rail == PaymentRail.SEPA) {
+            if (actor == null) {
+                report(entity, approvalId, ok = false, ref = null, error = "initiator identity unavailable")
+                return mapOf("status" to "RELEASE_FAILED", "error" to "initiator identity unavailable")
+            }
+            val receiptHeaders = mapOf("X-Customer-Actor-Id" to actor.toString())
+            upstream.post(railUrl(rail), entity.toString(), frozenBody, approvalId.toString(), receiptHeaders)
+        } else {
+            upstream.post(railUrl(rail), entity.toString(), frozenBody, approvalId.toString())
+        }
         val respBody = (resp.entity as? String).orEmpty()
         val ok = resp.statusInfo.family == Response.Status.Family.SUCCESSFUL
         val ref = read(respBody)?.path("id")?.textOrNull()

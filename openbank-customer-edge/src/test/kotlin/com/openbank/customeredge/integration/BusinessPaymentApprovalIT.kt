@@ -146,6 +146,7 @@ class BusinessPaymentApprovalIT {
         assertThat(created.path("initiatorSignature").path("partyId").asText()).isEqualTo(INITIATOR)
         assertThat(created.path("initiatorSignature").path("scaChallengeId").asText()).isEqualTo(SCA)
         assertThat(created.path("payload").path("rail").asText()).isEqualTo("SEPA")
+        assertThat(created.path("payload").path("initiatorActorId").asText()).isEqualTo(INITIATOR)
         assertThat(created.path("payload").path("railRequest").path("debtorName").asText()).isEqualTo("Firma s.r.o.")
     }
 
@@ -211,10 +212,33 @@ class BusinessPaymentApprovalIT {
         assertThat(signature.path("scaChallengeId").asText()).isEqualTo(SCA)
         val rail = BusinessApprovalStubs.requests("POST", SEPA_RAIL).single()
         assertThat(rail.header("Idempotency-Key")).isEqualTo(APPROVAL)
+        assertThat(rail.header("X-Customer-Actor-Id")).isEqualTo(INITIATOR)
         assertThat(readJson(rail.body).path("creditorIban").asText()).isEqualTo(CREDITOR)
         val result = readJson(BusinessApprovalStubs.requests("POST", "$DETAIL/release-result").single().body)
         assertThat(result.path("ok").asBoolean()).isTrue()
         assertThat(result.path("releaseRef").asText()).isEqualTo("pay-9")
+    }
+
+    @Test
+    @TestSecurity(user = "customer:$COSIGNER", roles = ["ROLE_CUSTOMER"])
+    @OidcSecurity(claims = [Claim(key = "party_id", value = COSIGNER)])
+    fun `legacy SEPA approval without verified initiator does not reach the rail`() {
+        stubLastSignature()
+        val incomplete = detailBody("APPROVED", """[{"partyId":"$INITIATOR"},{"partyId":"$COSIGNER"}]""")
+            .replace("\"initiatorPartyId\":\"$INITIATOR\",", "")
+        BusinessApprovalStubs.stub("POST", "$DETAIL/signatures", body = incomplete)
+        BusinessApprovalStubs.stub(
+            "POST",
+            "$DETAIL/release-claim",
+            body = """{"claimToken":"t1","payload":{"rail":"SEPA","railRequest":{"type":"SCT"}}}""",
+        )
+        BusinessApprovalStubs.stub("POST", "$DETAIL/release-result", body = "{}")
+
+        sign() Then {
+            statusCode(200)
+            body("release.status", equalTo("RELEASE_FAILED"))
+        }
+        assertThat(BusinessApprovalStubs.requests("POST", SEPA_RAIL)).isEmpty()
     }
 
     @Test

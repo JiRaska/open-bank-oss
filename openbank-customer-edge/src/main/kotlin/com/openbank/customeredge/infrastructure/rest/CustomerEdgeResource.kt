@@ -3093,6 +3093,7 @@ class CustomerEdgeResource(
                     extractTextField(objectMapper, body, "reference"),
                     debtor.toString(),
                     enriched,
+                    initiatorActorId = authenticatedActorId(),
                 ),
                 scaChallengeId,
                 "payments.sepa",
@@ -3104,7 +3105,7 @@ class CustomerEdgeResource(
             customer.partyId.toString(),
             enriched,
             idempotencyKey,
-            mapOf("X-Customer-Actor-Id" to customer.human.toString()),
+            mapOf("X-Customer-Actor-Id" to authenticatedActorId().toString()),
         )
         auditPayment(resp, customer, "payments.sepa", amount, currency, creditorIban, scaChallengeId)
         return resp
@@ -3138,7 +3139,7 @@ class CustomerEdgeResource(
             customer.partyId.toString(),
             upstreamBody.toString(),
             null,
-            mapOf("X-Customer-Actor-Id" to customer.human.toString()),
+            mapOf("X-Customer-Actor-Id" to authenticatedActorId().toString()),
         )
     }
 
@@ -5435,16 +5436,20 @@ class CustomerEdgeResource(
      * creation enforces the invariant: Keycloak user.id == partyId AND user attribute
      * party_id == partyId (see scripts/seed-test-customer.sh and ADR-0069 §2).
      */
-    private fun customer(): CustomerIdentity {
+    private fun authenticatedActorId(): UUID {
         val partyIdStr = resolvePartyIdClaim(
             partyIdClaim = jwt.getClaim<String>("party_id"),
             sub = jwt.subject,
         ) ?: throw ForbiddenException("Missing party_id/sub claim in customer token")
-        val claimed = try {
+        return try {
             UUID.fromString(partyIdStr)
         } catch (e: IllegalArgumentException) {
             throw ForbiddenException("party_id claim is not a valid party UUID: $partyIdStr")
         }
+    }
+
+    private fun customer(): CustomerIdentity {
+        val claimed = authenticatedActorId()
         // ADR-0179: the token still carries the id of a party that may since have been merged
         // away. Follow `merged_into` HERE, once, so every downstream proxy call below is made
         // with the surviving id — otherwise a merged customer sees an empty bank (no accounts,

@@ -146,6 +146,24 @@ class BusinessPaymentSingleSignatureRegressionTest {
     }
 
     @Test
+    fun `merged party still sends immutable authenticated actor for SEPA create`() {
+        val calls = mutableListOf<Call>()
+        val r = resource(upstream(calls), withHold = false)
+        val survivor = UUID.randomUUID()
+        r.partyMergeResolver = mockk { every { resolve(human) } returns survivor }
+        val sepa = """{"debtorAccountId":"$account","amount":"12.34","currency":"EUR",""" +
+            """"creditorIban":"DE89370400440532013000","creditorName":"Supplier"}"""
+
+        assertThat(r.createSepaPayment(sepa, "merged-actor-key", sca.toString()).status).isEqualTo(201)
+        assertThat(calls.single { it.url.endsWith("/api/v1/sepa-payments") }.headers)
+            .containsEntry("X-Customer-Actor-Id", human.toString())
+        val lookup = """{"idempotencyKey":"merged-actor-key","debtorAccountId":"$account"}"""
+        assertThat(r.lookupSepaPaymentReceipt(lookup).status).isEqualTo(201)
+        assertThat(calls.single { it.url.endsWith("/api/v1/sepa-payments/receipts/lookup") }.headers)
+            .containsEntry("X-Customer-Actor-Id", human.toString())
+    }
+
+    @Test
     fun `control - the same drive with required == 2 does NOT reach any rail`() {
         val calls = mutableListOf<Call>()
         val u = upstream(calls)
