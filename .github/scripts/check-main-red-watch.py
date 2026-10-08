@@ -283,9 +283,23 @@ def gh_api(path: str) -> object:
 def fetch_jobs_scoped(repo: str, run_id: int, attempt: int) -> list[dict]:
     """R4 lives here: the URL is attempt-scoped, always. Never `/runs/<id>/jobs`."""
     docs = gh_api(f"repos/{repo}/actions/runs/{run_id}/attempts/{attempt}/jobs?per_page=100")
+    if not docs or not isinstance(docs[0], dict):
+        raise ValueError("empty or malformed attempt-scoped Jobs API response")
+    expected = docs[0].get("total_count")
+    if not isinstance(expected, int) or isinstance(expected, bool) or expected < 0:
+        raise ValueError("invalid attempt-scoped Jobs API total_count")
     jobs: list[dict] = []
     for doc in docs:
-        jobs.extend(doc.get("jobs", []) if isinstance(doc, dict) else [])
+        if not isinstance(doc, dict) or doc.get("total_count") != expected:
+            raise ValueError("inconsistent attempt-scoped Jobs API page")
+        batch = doc.get("jobs")
+        if not isinstance(batch, list) or not all(isinstance(job, dict) for job in batch):
+            raise ValueError("malformed attempt-scoped Jobs API job list")
+        jobs.extend(batch)
+    ids = [job.get("id") for job in jobs]
+    if len(jobs) != expected or any(not isinstance(id_, int) or isinstance(id_, bool) for id_ in ids) \
+            or len(set(ids)) != len(ids):
+        raise ValueError("incomplete or duplicate attempt-scoped Jobs API inventory")
     return jobs
 
 
@@ -334,7 +348,7 @@ def check_attempt_scoped_fetch() -> list[str]:
 
     def _record(path: str) -> object:
         seen.append(path)
-        return []
+        return [{"total_count": 0, "jobs": []}]
 
     global gh_api
     original = gh_api
@@ -374,6 +388,8 @@ def classify_run(run: dict, jobs: list[dict]) -> dict:
         "html_url": run.get("html_url"),
         "conclusion": conclusion,
         "failing": [],
+        "successful_jobs": [j.get("name") for j in jobs
+                            if j.get("conclusion") == "success" and isinstance(j.get("name"), str)],
         "status": None,
     }
 
@@ -550,6 +566,7 @@ def self_test() -> int:
     check("a green run classifies green", green["status"] == "green")
     check("exit code for green is 0", STATUS_EXIT[green["status"]] == 0)
     check("a green run escalates nothing", green["failing"] == [])
+    check("a green run names only jobs it actually ran successfully", green["successful_jobs"] == ["build"])
 
     # THE log-grep trap, made unreachable by construction. This job carries a `_log` body full of
     # the exact strings a naive grep would match -- including a step's own `run:` script echoing
@@ -583,7 +600,7 @@ def self_test() -> int:
     def _stub(path):
         seen_urls.append(path)
         attempt = int(re.search(r"/attempts/(\d+)/", path).group(1)) if "/attempts/" in path else 1
-        return [{"jobs": attempts[attempt]}]
+        return [{"total_count": len(attempts[attempt]), "jobs": attempts[attempt]}]
 
     _original_gh_api = gh_api
     try:
@@ -602,6 +619,23 @@ def self_test() -> int:
         "the fetch URL is never the unscoped /runs/<id>/jobs",
         not any(re.search(r"/runs/\d+/jobs", u) for u in seen_urls),
     )
+
+    # A partial or duplicated page must not hide a failing job from the verdict.
+    for label, pages in (
+        ("missing second page", [{"total_count": 2, "jobs": [attempts[1][0]]}]),
+        ("duplicate job id", [{"total_count": 2, "jobs": [attempts[1][0], attempts[1][0]]}]),
+        ("inconsistent page count", [{"total_count": 1, "jobs": [attempts[1][0]]},
+                                     {"total_count": 2, "jobs": []}]),
+    ):
+        try:
+            gh_api = lambda path, pages=pages: pages  # type: ignore[assignment]
+            fetch_jobs_scoped("o/r", 1, 1)
+        except ValueError:
+            check(f"{label} fails closed", True)
+        else:
+            check(f"{label} fails closed", False)
+        finally:
+            gh_api = _original_gh_api  # type: ignore[assignment]
 
     cancelled = classify_run(_run("cancelled"), [])
     check("a cancelled run is not this watch's business", cancelled["status"] == "not-a-verdict")
