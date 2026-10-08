@@ -35,15 +35,17 @@ from pathlib import Path
 ROOT_READ = re.compile(r'(?:File|Path\.of|Paths\.get)\(\s*"\.\."\s*\)')
 PREFIX_FILTER = re.compile(r'startsWith\(\s*"openbank-"\s*\)')
 PINNED = re.compile(r'(?:File\(\s*"\.\./|Path\.of\(\s*"\.\.",\s*"|Paths\.get\(\s*"\.\.",\s*")(openbank-[a-z0-9-]+)')
+DIRECT_FILE = re.compile(r'File\(\s*"\.\./(openbank-[^"]+)"\s*\)')
 
 
 def is_module(root: Path, name: str) -> bool:
     return (root / name / "build.gradle.kts").is_file() or (root / name / "build.gradle").is_file()
 
 
-def scan(root: Path) -> tuple[set[str], set[tuple[str, str]]]:
+def scan(root: Path) -> tuple[set[str], set[tuple[str, str]], set[tuple[str, str]]]:
     fleet: set[str] = set()
     edges: set[tuple[str, str]] = set()
+    direct: set[tuple[str, str]] = set()
     for mod in sorted(p for p in root.iterdir() if p.is_dir() and is_module(root, p.name)):
         test_dir = mod / "src" / "test"
         if not test_dir.is_dir():
@@ -58,7 +60,9 @@ def scan(root: Path) -> tuple[set[str], set[tuple[str, str]]]:
                 target = target.rstrip("-")
                 if target != mod.name and is_module(root, target):
                     edges.add((mod.name, target))
-    return fleet, edges
+            for path in DIRECT_FILE.findall(text):
+                direct.add((mod.name, path))
+    return fleet, edges, direct
 
 
 def has_module_input(root: Path, paths: list[str]) -> bool:
@@ -85,13 +89,16 @@ def self_test() -> int:
               'val z = File("src/main/kotlin/X.kt"); val s = "openbank-x".startsWith("openbank-")')
         write("openbank-infra-reader", "d/InfraTest.kt",
               'val i = File("../openbank-infra/gitops/x.yaml")')  # openbank-infra is not a module here
-        fleet, edges = scan(r)
+        fleet, edges, direct = scan(r)
         ok = True
         if fleet != {"openbank-scanner"}:
             print(f"FAIL: fleet set {sorted(fleet)} != ['openbank-scanner']")
             ok = False
         if edges != {("openbank-pinner", "openbank-target")}:
             print(f"FAIL: edges {sorted(edges)} != [('openbank-pinner', 'openbank-target')]")
+            ok = False
+        if ("openbank-infra-reader", "openbank-infra/gitops/x.yaml") not in direct:
+            print("FAIL: direct GitOps input was not discovered")
             ok = False
         cases = [
             ([], False),
@@ -111,27 +118,32 @@ def main(argv: list[str]) -> int:
     if "--self-test" in argv:
         return self_test()
     root = Path(__file__).resolve().parents[2]
-    fleet, edges = scan(root)
+    fleet, edges, direct = scan(root)
     if "--expand" in argv:
         if not fleet:
             print("ERROR: empty fleet-scanner set; the probe is broken.", file=sys.stderr)
             return 1
-        if "--input-paths-stdin" in argv:
-            paths = [line.strip() for line in sys.stdin if line.strip()]
-            if not has_module_input(root, paths):
-                print("Decision: no changed Gradle-module input after test-only filtering; "
-                      "skip cross-module test readers.", file=sys.stderr)
-                return 0
+        paths = [line.strip() for line in sys.stdin if line.strip()] if "--input-paths-stdin" in argv else []
+        module_input = has_module_input(root, paths) if "--input-paths-stdin" in argv else True
         changed = set(argv[argv.index("--expand") + 1].split())
         added: list[str] = []
-        for m in sorted(fleet):
-            if m not in changed:
-                print(f"Decision: module change -> add fleet-scanning test module {m} (#11513).", file=sys.stderr)
-                added.append(m)
-        for reader, target in sorted(edges):
-            if target in changed and reader not in changed and reader not in added:
-                print(f"Decision: {target} changed -> add {reader} (its tests read {target}'s tree).", file=sys.stderr)
-                added.append(reader)
+        if module_input:
+            for m in sorted(fleet):
+                if m not in changed:
+                    print(f"Decision: module change -> add fleet-scanning test module {m} (#11513).", file=sys.stderr)
+                    added.append(m)
+            for reader, target in sorted(edges):
+                if target in changed and reader not in changed and reader not in added:
+                    print(f"Decision: {target} changed -> add {reader} (its tests read {target}'s tree).", file=sys.stderr)
+                    added.append(reader)
+        for reader, watched in sorted(direct):
+            if any(path == watched or path.startswith(watched.rstrip("/") + "/") for path in paths):
+                if reader not in changed and reader not in added:
+                    print(f"Decision: changed direct test input {watched} -> add {reader}.", file=sys.stderr)
+                    added.append(reader)
+        if not module_input and not added:
+            print("Decision: no changed module or direct test input after filtering; "
+                  "skip cross-module readers.", file=sys.stderr)
         for m in added:
             print(m)
         return 0
