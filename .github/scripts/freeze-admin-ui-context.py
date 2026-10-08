@@ -56,11 +56,54 @@ def paths(root: Path) -> set[Path]:
     return found
 
 
+def require_clean_source_inputs(root: Path) -> None:
+    """Only explicitly generated evidence may differ from the source commit."""
+    changed = subprocess.run(
+        ["git", "diff", "HEAD", "--name-only", "-z"],
+        cwd=root, check=True, capture_output=True,
+    )
+    generated = {Path("openbank-admin-ui") / name for name in GENERATED_ROOT_JSON}
+    dirty = [Path(os.fsdecode(name)) for name in changed.stdout.split(b"\0") if name]
+    if any(name not in generated for name in dirty):
+        raise ValueError("tracked source input differs from source commit")
+
+
+def committed_blobs(root: Path) -> tuple[dict[Path, str], str]:
+    listing = subprocess.run(["git", "ls-tree", "-rz", "HEAD"], cwd=root,
+                             check=True, capture_output=True).stdout
+    blobs = {}
+    for entry in listing.split(b"\0"):
+        if not entry:
+            continue
+        header, name = entry.split(b"\t", 1)
+        mode, kind, object_id = header.split(b" ")
+        if kind == b"blob":
+            blobs[Path(os.fsdecode(name))] = object_id.decode("ascii")
+    object_format = subprocess.run(["git", "rev-parse", "--show-object-format=storage"],
+                                   cwd=root, check=True, capture_output=True,
+                                   text=True).stdout.strip()
+    if object_format not in ("sha1", "sha256"):
+        raise ValueError("unknown source commit object format")
+    return blobs, object_format
+
+
+def require_committed_content(relative: Path, content: bytes, blobs: dict[Path, str],
+                              object_format: str) -> None:
+    if relative in {Path("openbank-admin-ui") / name for name in GENERATED_ROOT_JSON}:
+        return
+    expected = blobs.get(relative)
+    digest = hashlib.new(object_format, b"blob " + str(len(content)).encode() + b"\0" + content).hexdigest()
+    if expected != digest:
+        raise ValueError(f"frozen tracked input differs from source commit: {relative}")
+
+
 def freeze(root: Path, output: Path, manifest: Path) -> dict:
     if output.exists() or manifest.exists():
         raise ValueError("output and manifest must not already exist")
     if output.is_relative_to(root) or manifest.is_relative_to(root):
         raise ValueError("frozen context and manifest must be outside the source tree")
+    require_clean_source_inputs(root)
+    blobs, object_format = committed_blobs(root)
     output.mkdir(parents=True)
     entries = []
     for relative in sorted(paths(root), key=str):
@@ -70,6 +113,7 @@ def freeze(root: Path, output: Path, manifest: Path) -> dict:
             resolved = (source.parent / link).resolve()
             if not resolved.is_relative_to(root):
                 raise ValueError(f"external symlink in build context: {relative}")
+            require_committed_content(relative, os.fsencode(link), blobs, object_format)
             target = output / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             target.symlink_to(link)
@@ -81,8 +125,10 @@ def freeze(root: Path, output: Path, manifest: Path) -> dict:
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
         content = target.read_bytes()
+        require_committed_content(relative, content, blobs, object_format)
         entries.append({"path": relative.as_posix(), "sha256": hashlib.sha256(content).hexdigest(),
                         "size": len(content), "executable": bool(target.stat().st_mode & 0o111)})
+    require_clean_source_inputs(root)
     source_sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, check=True,
                                 capture_output=True, text=True).stdout.strip()
     record = {"schema": "openbank.admin-ui.build-context/v1", "sourceCommit": source_sha,

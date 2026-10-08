@@ -57,8 +57,8 @@ done
 
 # Provenance: version from version.txt (ADR-0029 release_invariant — version.txt is
 # the single source of truth, the admin-ui analog of quarkus.application.version),
-# short sha + clean/dirty marker from git, UTC build date. A dirty tree gets a
-# "-dirty" suffix so an uncommitted image can never masquerade as a clean commit.
+# short sha from git and UTC build date. The context freezer rejects modified
+# tracked source inputs outside the explicitly generated evidence allowlist.
 BUILD_VERSION="$(tr -d '[:space:]' < ./openbank-admin-ui/version.txt)"
 # Enforce the release_invariant locally: version.txt MUST equal package.json:version
 # (the runtime-readable version). A drift here means a release artifact whose UI chip
@@ -70,9 +70,6 @@ if [ "${BUILD_VERSION}" != "${PKG_VERSION}" ]; then
   exit 1
 fi
 GIT_SHA="$(git rev-parse --short HEAD)"
-if ! git diff --quiet HEAD -- openbank-admin-ui 2>/dev/null; then
-  GIT_SHA="${GIT_SHA}-dirty"
-fi
 BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 # A workflow_dispatch may rebuild the same commit after newly available evidence
 # has been staged. ECR tags are immutable, so it must use a distinct, still

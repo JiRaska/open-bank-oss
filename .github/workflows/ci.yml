@@ -655,6 +655,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          ADMIN_UI_IMAGE_VERIFY_REGISTRY: ${{ vars.ADMIN_UI_IMAGE_VERIFY_REGISTRY }}
         run: |
           set -euo pipefail
           if [ "$(git rev-parse --is-shallow-repository)" = true ]; then
