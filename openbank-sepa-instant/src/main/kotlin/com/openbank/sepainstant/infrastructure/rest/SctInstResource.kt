@@ -254,6 +254,8 @@ class SctInstResource @Inject constructor(
         return recallUseCase.recall(paymentId, body.reason).map { Response.ok(toResponse(it)).build() }
     }
 
+    // PENDING on GET/list is non-authoritative: a scheme response may have been lost after
+    // acceptance. Only the bound receipt lookup says whether a durable decision exists.
     private fun toResponse(p: com.openbank.sepainstant.domain.model.SctInstPayment) = SctInstPaymentResponse(
         paymentId = p.paymentId, status = p.status.name,
         debtorIban = p.debtorIban, creditorIban = p.creditorIban,

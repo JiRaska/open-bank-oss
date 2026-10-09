@@ -229,6 +229,7 @@ class SctInstPaymentServiceTest {
         val result = buildService(schemeSubmissionEnabled = true).submit(command).await().indefinitely()
 
         assertThat(result.status).isEqualTo(SctInstStatus.SETTLED)
+        assertThat(result.schemeOutcomeUnknown).isFalse()
         verify(exactly = 1) { schemeGatewayPort.submit(any()) }
         verify(exactly = 1) { settlementPort.settle(any()) }
         // Issue #5049 follow-up: paymentCompleted() was already wired (correctly, per PR #5068's
@@ -266,6 +267,7 @@ class SctInstPaymentServiceTest {
         val result = buildService(schemeSubmissionEnabled = true).submit(command).await().indefinitely()
 
         assertThat(result.status).isEqualTo(SctInstStatus.REJECTED)
+        assertThat(result.schemeOutcomeUnknown).isFalse()
         assertThat(result.rejectReason).isEqualTo("AC04")
         verify(exactly = 1) { metrics.paymentCompleted("sepa_instant", result.currency, "rejected") }
         verify(exactly = 1) { metrics.paymentProcessingDuration("sepa_instant", "rejected", any()) }
@@ -273,16 +275,90 @@ class SctInstPaymentServiceTest {
     }
 
     @Test
-    fun `D4 scheme gateway outage holds the payment PENDING (fail-closed)`() {
-        val command = command(idempotencyKey = "idem-scheme-down")
-        every { repo.findByIdempotencyKey(command.idempotencyKey) } returns Uni.createFrom().nullItem()
+    fun `lost scheme response leaves durable unknown fence and cannot send again`() {
+        val command = command(idempotencyKey = "idem-scheme-down").copy(
+            requestHash = "request-sha",
+            initiatingPrincipal = "issuer\u001foperator-01",
+        )
+        val durable = AtomicReference<SctInstPayment?>()
+        every { repo.findByIdempotencyKey(command.idempotencyKey) } answers {
+            Uni.createFrom().item(durable.get())
+        }
+        every { repo.save(any()) } answers {
+            firstArg<SctInstPayment>().let { payment ->
+                durable.set(payment)
+                Uni.createFrom().item(payment)
+            }
+        }
         clearScreening()
         every { schemeGatewayPort.submit(any()) } returns
             Uni.createFrom().failure(SchemeGatewayUnavailableException(RuntimeException("down")))
 
-        val result = buildService(schemeSubmissionEnabled = true).submit(command).await().indefinitely()
+        val instantService = buildService(schemeSubmissionEnabled = true)
+        assertThatThrownBy { instantService.submit(command).await().indefinitely() }
+            .isInstanceOf(IdempotencyRequestInProgressException::class.java)
+        assertThat(durable.get()?.status).isEqualTo(SctInstStatus.PENDING)
+        assertThat(durable.get()?.schemeOutcomeUnknown).isTrue()
+        assertThat(durable.get()?.receiptReady).isFalse()
+        assertThat(
+            instantService.findReceipt(
+                command.idempotencyKey,
+                command.debtorAccountId,
+                requireNotNull(command.initiatingPrincipal),
+                command.initiatingPartyId,
+                command.initiatingActorPartyId,
+            ).await().indefinitely(),
+        ).isNull()
+        assertThatThrownBy { instantService.submit(command).await().indefinitely() }
+            .isInstanceOf(IdempotencyRequestInProgressException::class.java)
 
-        assertThat(result.status).isEqualTo(SctInstStatus.PENDING)
+        verify(exactly = 1) { schemeGatewayPort.submit(any()) }
+        verify(exactly = 0) { settlementPort.settle(any()) }
+    }
+
+    @Test
+    fun `scheme submission is never attempted when durable fence cannot commit`() {
+        val command = command(idempotencyKey = "idem-fence-write-fail")
+        every { repo.findByIdempotencyKey(command.idempotencyKey) } returns Uni.createFrom().nullItem()
+        every { repo.save(any()) } answers {
+            val payment = firstArg<SctInstPayment>()
+            if (payment.schemeOutcomeUnknown) {
+                Uni.createFrom().failure(IllegalStateException("fence write failed"))
+            } else {
+                Uni.createFrom().item(payment)
+            }
+        }
+        clearScreening()
+
+        assertThatThrownBy { buildService(schemeSubmissionEnabled = true).submit(command).await().indefinitely() }
+            .isInstanceOf(IllegalStateException::class.java)
+            .hasMessage("fence write failed")
+        verify(exactly = 0) { schemeGatewayPort.submit(any()) }
+    }
+
+    @Test
+    fun `interceptor failure outside adapter Uni remains an unknown scheme outcome`() {
+        val command = command(idempotencyKey = "idem-scheme-interceptor")
+        val saved = mutableListOf<SctInstPayment>()
+        every { repo.findByIdempotencyKey(command.idempotencyKey) } returns Uni.createFrom().nullItem()
+        every { repo.save(any()) } answers {
+            firstArg<SctInstPayment>().let { payment ->
+                saved += payment
+                Uni.createFrom().item(payment)
+            }
+        }
+        clearScreening()
+        every { schemeGatewayPort.submit(any()) } answers {
+            throw IllegalStateException("timeout interceptor")
+        }
+
+        assertThatThrownBy { buildService(schemeSubmissionEnabled = true).submit(command).await().indefinitely() }
+            .isInstanceOf(IdempotencyRequestInProgressException::class.java)
+        assertThat(saved.last().status).isEqualTo(SctInstStatus.PENDING)
+        assertThat(saved.last().schemeOutcomeUnknown).isTrue()
+        assertThat(saved.last().receiptReady).isFalse()
+        verify(exactly = 1) { schemeGatewayPort.submit(any()) }
+        verify(exactly = 0) { settlementPort.settle(any()) }
     }
 
     @Test

@@ -80,6 +80,11 @@ not change any existing request's outcome until explicitly flipped.
 
 - **Irrevocability** ⇒ pre-send fraud checks + SCA are the key controls; post-hoc recall is best-effort.
 - Idempotency-key mandatory (instant retries must not double-send).
+- A lost scheme response after a send has an unknown outcome. The rail commits
+  `scheme_outcome_unknown` before the send, does not retry the gateway POST, and withholds the
+  customer receipt and settlement until a durable pacs.002 verdict exists. Replay is blocked by
+  the retained key. Scheme status lookup and automatic reconciliation are still absent, so these
+  rows require controlled investigation; public `PENDING` alone is not evidence of non-acceptance.
 - **Four-eyes `PendingApproval` records are TTL-bounded (Redis), not a permanent audit
   trail** (ADR-0155) — a durable-audit requirement for "who approved what, forever" would
   need an additional store; not implemented in this PR.

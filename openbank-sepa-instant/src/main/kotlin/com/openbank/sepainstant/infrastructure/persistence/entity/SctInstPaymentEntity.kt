@@ -37,6 +37,9 @@ class SctInstPaymentEntity {
     @Column(name = "receipt_ready", nullable = false)
     var receiptReady: Boolean = false
 
+    @Column(name = "scheme_outcome_unknown", nullable = false)
+    var schemeOutcomeUnknown: Boolean = false
+
     @Column(nullable = false)
     var status: String = "PENDING"
 

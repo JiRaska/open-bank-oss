@@ -241,11 +241,26 @@ class SctInstApiIT {
     @Test
     @Order(10)
     @TestSecurity(user = "operator-01", roles = ["ROLE_OPERATOR"])
-    fun `an unresolved durable claim is unknown and cannot replay a stale success`() {
+    fun `an unresolved scheme outcome remains PENDING on reads but has no receipt or replay`() {
         val key = requireNotNull(receiptKey)
         val payload = requireNotNull(submittedPayload)
-        updateReceipt(status = "PENDING", ready = false)
+        updateReceipt(status = "PENDING", ready = false, schemeUnknown = true)
         try {
+            Given { contentType("application/json") } When {
+                get("/api/v1/sepa-instant/${requireNotNull(createdPaymentId)}")
+            } Then {
+                statusCode(200)
+                body("status", equalTo("PENDING"))
+            }
+            Given { contentType("application/json") } When {
+                get("/api/v1/sepa-instant/debtor/$debtorAccountId")
+            } Then {
+                statusCode(200)
+                body(
+                    "find { it.paymentId == '${requireNotNull(createdPaymentId)}' }.status",
+                    equalTo("PENDING"),
+                )
+            }
             Given {
                 contentType("application/json")
                 body("""{"idempotencyKey":"$key","debtorAccountId":"$debtorAccountId"}""")
@@ -265,18 +280,19 @@ class SctInstApiIT {
                 statusCode(409)
             }
         } finally {
-            updateReceipt(status = "SETTLED", ready = true)
+            updateReceipt(status = "SETTLED", ready = true, schemeUnknown = false)
         }
     }
 
-    private fun updateReceipt(status: String, ready: Boolean) {
+    private fun updateReceipt(status: String, ready: Boolean, schemeUnknown: Boolean = false) {
         dataSource.connection.use { connection ->
             connection.prepareStatement(
-                "UPDATE sct_inst_payments SET status = ?, receipt_ready = ? WHERE payment_id = ?",
+                "UPDATE sct_inst_payments SET status = ?, receipt_ready = ?, scheme_outcome_unknown = ? WHERE payment_id = ?",
             ).use { statement ->
                 statement.setString(1, status)
                 statement.setBoolean(2, ready)
-                statement.setObject(3, UUID.fromString(requireNotNull(createdPaymentId)))
+                statement.setBoolean(3, schemeUnknown)
+                statement.setObject(4, UUID.fromString(requireNotNull(createdPaymentId)))
                 assertThat(statement.executeUpdate()).isEqualTo(1)
             }
         }

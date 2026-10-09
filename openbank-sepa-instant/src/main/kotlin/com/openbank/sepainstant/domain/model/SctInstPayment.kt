@@ -47,6 +47,8 @@ data class SctInstPayment(
     val initiatingActorPartyId: UUID? = null,
     /** True only after a durable screening/scheme decision; a claimed key alone is not a receipt. */
     val receiptReady: Boolean = false,
+    /** Scheme send may have succeeded, but no durable pacs.002 verdict exists. Never resend automatically. */
+    val schemeOutcomeUnknown: Boolean = false,
 ) {
     /** ISO 4217 code of [amount], the spelling every outbound contract carries. */
     val currency: String get() = amount.currency.code

@@ -20,7 +20,6 @@ import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.faulttolerance.CircuitBreaker
-import org.eclipse.microprofile.faulttolerance.Retry
 import org.eclipse.microprofile.faulttolerance.Timeout
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import java.time.OffsetDateTime
@@ -32,8 +31,8 @@ import java.time.ZoneOffset
  * `openbank-libs` builder (identical wire format to every other rail), validates it against the
  * XSD before it leaves the rail, and reads the verdict with the shared reader. Reactive (`Uni`).
  *
- * Fails **closed**: any gateway/transport/parse failure becomes a [SchemeGatewayUnavailableException]
- * so the caller holds the payment rather than settling it.
+ * A lost response does not prove the scheme rejected the transfer. Never retry this POST: the
+ * counterparty does not provide durable deduplication or a status lookup contract.
  */
 @ApplicationScoped
 class SchemeGatewayAdapter(
@@ -47,7 +46,6 @@ class SchemeGatewayAdapter(
 
     @Suppress("MagicNumber") // resilience tuning constants (mirror SanctionsScreeningAdapter)
     @CircuitBreaker(requestVolumeThreshold = 4, failureRatio = 0.5, delay = 10_000, successThreshold = 2)
-    @Retry(maxRetries = 2, delay = 300, jitter = 150)
     @Timeout(5_000)
     override fun submit(payment: SctInstPayment): Uni<SchemeSubmissionOutcome> {
         // No creditor agent BIC → the scheme would reject (RC01); surface it without a round-trip.

@@ -19,7 +19,6 @@ import com.openbank.sepainstant.application.port.out.FraudVerdict
 import com.openbank.sepainstant.application.port.out.OpenAmlCaseCommand
 import com.openbank.sepainstant.application.port.out.SanctionsScreeningPort
 import com.openbank.sepainstant.application.port.out.SchemeGatewayPort
-import com.openbank.sepainstant.application.port.out.SchemeGatewayUnavailableException
 import com.openbank.sepainstant.application.port.out.ScreeningUnavailableException
 import com.openbank.sepainstant.application.port.out.SctInstEventPublisher
 import com.openbank.sepainstant.application.port.out.SctInstPaymentRepository
@@ -100,7 +99,6 @@ class SctInstPaymentService(
         const val ALERT_SANCTIONS_HIT = "SANCTIONS_HIT"
         const val ALERT_AML_HOLD = "AML_HOLD"
         const val ALERT_SCREENING_UNAVAILABLE = "SCREENING_UNAVAILABLE"
-        const val ALERT_SCHEME_UNAVAILABLE = "SCHEME_UNAVAILABLE"
         const val ALERT_SETTLEMENT_UNAVAILABLE = "SETTLEMENT_UNAVAILABLE"
     }
 
@@ -297,24 +295,35 @@ class SctInstPaymentService(
      * ADR-0104 D4 + ADR-0108: once screened CLEAR, build a real pacs.008 and submit it to the
      * scheme gateway, acting on the pacs.002 verdict — `ACSC` → [proceed] to PROCESSING, then
      * immediately call [settlementPort] to book the funds and transition to SETTLED. `RJCT` →
-     * reject with the scheme reason. Fails **closed**: an unreachable gateway holds the payment
-     * PENDING; an unreachable transaction-service leaves it PROCESSING (funds not yet booked).
+     * reject with the scheme reason. An unreachable gateway leaves the durable scheme-outcome
+     * fence unresolved; an unreachable transaction-service leaves it PROCESSING (funds not yet booked).
      * Flag-gated — default OFF preserves today's behaviour exactly.
      */
     private fun submitToScheme(base: SctInstPayment): Uni<SctInstPayment> {
         if (!schemeSubmissionEnabled) return proceed(base)
-        return schemeGatewayPort.submit(base)
-            .flatMap { outcome ->
-                if (outcome.accepted) {
-                    proceed(base).flatMap { processing -> settleAfterScheme(processing) }
-                } else {
-                    rejectScheme(base, outcome.reasonCode)
+        // Commit the fence BEFORE the external call. A crash at any point from here until the
+        // pacs.002 decision is persisted must not permit another scheme send on key replay.
+        val fenced = base.copy(schemeOutcomeUnknown = true, receiptReady = false)
+        return repo.save(fenced).flatMap { claimed ->
+            Uni.createFrom().deferred { schemeGatewayPort.submit(claimed) }
+                // Interceptor timeouts and open circuits can fail outside the adapter's own Uni.
+                // Scope recovery to the send itself so later database failures are never hidden.
+                .onFailure().transform { failure ->
+                    log.warnf(
+                        failure,
+                        "Scheme outcome unknown for instant payment %s; reconciliation required",
+                        claimed.paymentId,
+                    )
+                    IdempotencyRequestInProgressException()
                 }
-            }
-            .onFailure(SchemeGatewayUnavailableException::class.java).recoverWithUni { ex ->
-                log.warnf(ex, "Scheme gateway unavailable for instant payment %s; holding", base.paymentId)
-                hold(base, AmlCaseRiskLevel.MEDIUM, ALERT_SCHEME_UNAVAILABLE, ex.message, null)
-            }
+                .flatMap { outcome ->
+                    if (outcome.accepted) {
+                        proceed(claimed).flatMap { processing -> settleAfterScheme(processing) }
+                    } else {
+                        rejectScheme(claimed, outcome.reasonCode)
+                    }
+                }
+        }
     }
 
     /**
@@ -349,6 +358,7 @@ class SctInstPaymentService(
         val rejected = base.copy(
             status = SctInstStatus.REJECTED,
             receiptReady = true,
+            schemeOutcomeUnknown = false,
             rejectReason = code,
             rejectDetail = "scheme reject (pacs.002): $code",
         )
@@ -377,6 +387,7 @@ class SctInstPaymentService(
         val processing = base.copy(
             status = SctInstStatus.PROCESSING,
             receiptReady = true,
+            schemeOutcomeUnknown = false,
             executionTimeoutAt = OffsetDateTime.now(clock).plusSeconds(timeoutSeconds),
         )
         return repo.save(processing).flatMap { saved ->

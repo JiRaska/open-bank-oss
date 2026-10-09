@@ -23,5 +23,5 @@ interface SchemeGatewayPort {
  */
 data class SchemeSubmissionOutcome(val accepted: Boolean, val reasonCode: String?)
 
-/** Thrown when the scheme gateway is unreachable; the rail fails closed (holds, never settles). */
+/** Gateway response absent; acceptance may have happened. The rail leaves its durable fence unresolved. */
 class SchemeGatewayUnavailableException(cause: Throwable) : RuntimeException("scheme gateway unavailable", cause)

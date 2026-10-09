@@ -25,6 +25,7 @@ class SctInstMapper {
         requestHash = e.requestHash, initiatingPrincipal = e.initiatingPrincipal,
         initiatingPartyId = e.initiatingPartyId, initiatingActorPartyId = e.initiatingActorPartyId,
         receiptReady = e.receiptReady,
+        schemeOutcomeUnknown = e.schemeOutcomeUnknown,
     )
 
     fun toEntity(d: SctInstPayment) = SctInstPaymentEntity().also { e ->
@@ -36,6 +37,7 @@ class SctInstMapper {
         e.initiatingPartyId = d.initiatingPartyId
         e.initiatingActorPartyId = d.initiatingActorPartyId
         e.receiptReady = d.receiptReady
+        e.schemeOutcomeUnknown = d.schemeOutcomeUnknown
         e.status = d.status.name
         e.debtorAccountId = d.debtorAccountId
         e.debtorIban = d.debtorIban

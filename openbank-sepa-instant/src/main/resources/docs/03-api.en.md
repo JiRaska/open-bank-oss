@@ -31,7 +31,7 @@ Submits an SCT Inst payment. Synchronously screens debtor and creditor names (AD
   | `remittanceInfo` | string? | optional |
   | `endToEndId` | string | required |
 
-- **Response:** `201 Created` with `SctInstPaymentResponse`. The `status` reflects the screening outcome: `PROCESSING` (CLEAR), `PENDING` (REVIEW / screening outage), or `REJECTED` (BLOCK / sanctions hit).
+- **Response:** `201 Created` with `SctInstPaymentResponse`. The `status` reflects the screening outcome: `PROCESSING` (CLEAR), `PENDING` (REVIEW / screening outage), or `REJECTED` (BLOCK / sanctions hit). A later `GET`/list result of `PENDING` is not proof that the scheme never accepted the transfer: a lost gateway response can leave a durable unknown-outcome fence. In that case the receipt lookup stays `UNKNOWN` and replay stays blocked pending reconciliation.
 
 ### `GET /api/v1/sepa-instant` — List all payments
 
