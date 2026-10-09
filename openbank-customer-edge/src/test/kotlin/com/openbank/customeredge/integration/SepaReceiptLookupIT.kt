@@ -109,7 +109,8 @@ class SepaReceiptLookupIT {
     fun `standing receipt acting for a company keeps effective party separate from original actor`() {
         StubUpstreamResource.stub(
             "/api/v1/parties/$PARTY/acting-for",
-            body = """[{"partyId":"$COMPANY","partyType":"COMPANY","status":"ACTIVE"}]""",
+            body = """[{"partyId":"$COMPANY","partyType":"COMPANY","status":"ACTIVE","mandate":{
+                "id":"$MANDATE","principalPartyId":"$COMPANY","agentPartyId":"$PARTY","status":"ACTIVE"}}]""",
         )
         StubUpstreamResource.stub(
             ACCOUNT_PATH,
@@ -128,6 +129,8 @@ class SepaReceiptLookupIT {
             .containsExactly(COMPANY)
         assertThat(request.headers.entries.single { it.key.equals("X-Customer-Actor-Id", true) }.value)
             .containsExactly(PARTY)
+        assertThat(request.headers.entries.single { it.key.equals("X-Customer-Mandate-Ids", true) }.value)
+            .containsExactly(MANDATE)
     }
 
     @Test
@@ -188,6 +191,7 @@ class SepaReceiptLookupIT {
 private const val PARTY = "11111111-1111-1111-1111-111111111111"
 private const val ACCOUNT = "22222222-2222-2222-2222-222222222222"
 private const val COMPANY = "33333333-3333-3333-3333-333333333333"
+private const val MANDATE = "44444444-4444-4444-4444-444444444444"
 private const val ACCOUNT_PATH = "/api/v1/accounts/$ACCOUNT"
 private const val PARTY_PATH = "/api/v1/parties/$PARTY"
 private const val RAIL_PATH = "/api/v1/sepa-payments/receipts/lookup"
