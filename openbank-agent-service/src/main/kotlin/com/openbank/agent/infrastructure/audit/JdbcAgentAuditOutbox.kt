@@ -42,10 +42,23 @@ class AgentAuditOutbox(private val dataSource: DataSource) {
             ).use { ps ->
                 ps.setObject(1, eventId)
                 ps.setString(2, payload)
-                ps.executeUpdate()
+                if (ps.executeUpdate() == 0) {
+                    // ON CONFLICT waits for a concurrent insert to finish. Read the committed
+                    // source row before accepting this as an idempotent retry. A different body
+                    // under the same ID fails here; the original row may already be published.
+                    require(matchesStoredPayload(c, eventId, payload)) {
+                        "Agent audit event ID reused with different evidence"
+                    }
+                }
             }
         }
     }
+
+    private fun matchesStoredPayload(c: Connection, eventId: UUID, payload: String): Boolean =
+        c.prepareStatement("SELECT payload FROM agent_audit_outbox WHERE event_id = ?").use { existing ->
+            existing.setObject(1, eventId)
+            existing.executeQuery().use { rows -> rows.next() && rows.getString(1) == payload }
+        }
 
     fun claim(limit: Int): List<Claimed> = dataSource.connection.use { c ->
         c.autoCommit = false

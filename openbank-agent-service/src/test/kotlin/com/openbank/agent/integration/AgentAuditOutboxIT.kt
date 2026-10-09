@@ -97,12 +97,18 @@ class AgentAuditOutboxIT {
     @Test
     fun `V4 durable handoff deduplicates producer event id before dispatch`() {
         val eventId = UUID.randomUUID()
-        outbox.enqueue(eventId, "{\"eventId\":\"$eventId\"}")
-        outbox.enqueue(eventId, "{\"eventId\":\"$eventId\"}")
+        val payload = "{\"eventId\":\"$eventId\"}"
+        outbox.enqueue(eventId, payload)
+        outbox.enqueue(eventId, payload)
+
+        assertThatThrownBy {
+            outbox.enqueue(eventId, "{\"eventId\":\"$eventId\",\"result\":\"different\"}")
+        }.isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessage("Agent audit event ID reused with different evidence")
 
         val claimed = outbox.claim(25)
 
-        assertThat(claimed).containsExactly(AgentAuditOutbox.Claimed(eventId, "{\"eventId\":\"$eventId\"}"))
+        assertThat(claimed).containsExactly(AgentAuditOutbox.Claimed(eventId, payload))
         dataSource.connection.use { connection ->
             connection.prepareStatement(
                 "SELECT count(*), MAX(publish_attempts) FROM agent_audit_outbox WHERE event_id = ?",
