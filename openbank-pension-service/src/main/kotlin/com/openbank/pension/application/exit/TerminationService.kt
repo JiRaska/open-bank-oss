@@ -87,10 +87,10 @@ class TerminationService(
         val now = ctx.clock.instant()
         if (!now.isBefore(notice.quoteExpiresAt)) {
             stores.notices.save(notice.expire(now))
-            throw IllegalStateException("the termination quote expired; request a new one")
+            error("the termination quote expired; request a new one")
         }
         val iban = IbanRule.normalise(command.iban)
-        verifySignatureAndAccount(contract, command.scaChallengeId, notice.quoteHash, iban)
+        ctx.gateways.verifySignatureAndAccount(contract.participantPartyId, command.scaChallengeId, notice.quoteHash, iban)
         val signed = stores.notices.save(
             notice.sign(iban, command.scaChallengeId, command.idempotencyKey, noticeDays, now, LocalDate.now(ctx.clock)),
         )
@@ -102,15 +102,6 @@ class TerminationService(
     suspend fun get(caller: Caller, contractId: UUID, noticeId: UUID): TerminationNotice {
         contractsUseCase.get(caller, contractId)
         return load(contractId, noticeId)
-    }
-
-    private suspend fun verifySignatureAndAccount(contract: PensionContract, challenge: String, hash: String, iban: String) {
-        if (!ctx.gateways.sca.verify(contract.participantPartyId, challenge, hash)) {
-            throw ExitForbiddenException("strong customer authentication failed for this quote")
-        }
-        if (!ctx.gateways.accounts.isOwnVerifiedAccount(contract.participantPartyId, iban)) {
-            throw ExitForbiddenException("the payout account is not a verified account of the participant")
-        }
     }
 
     private suspend fun ensureTerminating(contract: PensionContract) {

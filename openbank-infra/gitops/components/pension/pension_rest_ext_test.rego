@@ -56,3 +56,61 @@ test_anonymous_may_not_read if {
 		"action": "pension.contract.read",
 	}
 }
+
+# --- slice S5: exits and death claims ---
+
+test_edge_may_sign_a_termination_and_confirm_a_payout if {
+	rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": pension_edge, "roles": ["ROLE_API"]},
+		"action": "pension.exit.terminate",
+	}
+	rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": pension_edge, "roles": ["ROLE_API"]},
+		"action": "pension.exit.payout",
+	}
+}
+
+test_operator_may_read_exits_but_not_move_money if {
+	rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
+		"action": "pension.exit.read",
+	}
+	not rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
+		"action": "pension.exit.payout",
+	}
+	not rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
+		"action": "pension.exit.terminate",
+	}
+}
+
+test_operator_may_work_a_death_claim if {
+	every action in {"pension.death.read", "pension.death.notify", "pension.death.verify", "pension.death.approve"} {
+		rest.allow with input as {
+			"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
+			"action": action,
+		}
+	}
+}
+
+test_edge_may_not_touch_a_death_claim if {
+	not rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": pension_edge, "roles": ["ROLE_API"]},
+		"action": "pension.death.notify",
+	}
+}
+
+test_service_account_with_operator_role_may_not_approve_a_death_claim if {
+	not rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]},
+		"action": "pension.death.approve",
+	}
+}
+
+test_viewer_may_not_notify_a_death if {
+	not rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "bob", "roles": ["ROLE_VIEWER"]},
+		"action": "pension.death.notify",
+	}
+}

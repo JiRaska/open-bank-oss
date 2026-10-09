@@ -173,7 +173,7 @@ data class DeathClaim(
                 Claimant(UUID.randomUUID(), it.name, it.partyId, it.sharePercent, estate = false)
             }
             rules.estateWhenNoBeneficiary -> listOf(Claimant(UUID.randomUUID(), "Estate", null, HUNDRED, estate = true))
-            else -> throw IllegalStateException("no designated beneficiary and the pack does not settle to the estate")
+            else -> error("no designated beneficiary and the pack does not settle to the estate")
         }
 
         @Suppress("LongParameterList")

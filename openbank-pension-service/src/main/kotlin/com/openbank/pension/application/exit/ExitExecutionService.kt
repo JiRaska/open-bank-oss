@@ -25,6 +25,7 @@ import java.util.UUID
  * Amounts come ONLY from the stored binding quote (or the schedule cut from it) — never from a
  * fresh valuation — which is the preview == executed invariant.
  */
+@Suppress("TooManyFunctions") // one function per workflow step; each must stay independently idempotent
 class ExitExecutionService(private val ctx: ExitContext) {
 
     private val stores get() = ctx.stores

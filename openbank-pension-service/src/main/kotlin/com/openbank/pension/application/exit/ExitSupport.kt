@@ -52,6 +52,16 @@ internal object IbanRule {
     }
 }
 
+/** SCA over the quote hash, then the payout account: both a 403, neither says which part failed. */
+internal suspend fun ExitGateways.verifySignatureAndAccount(partyId: java.util.UUID, challenge: String, hash: String, iban: String) {
+    if (!sca.verify(partyId, challenge, hash)) {
+        throw ExitForbiddenException("strong customer authentication failed for this quote")
+    }
+    if (!accounts.isOwnVerifiedAccount(partyId, iban)) {
+        throw ExitForbiddenException("the payout account is not a verified account of the participant")
+    }
+}
+
 internal fun requireKey(key: String?): String {
     val k = requireNotNull(key) { "header 'Idempotency-Key' is required" }
     require(k.isNotBlank() && k.length <= MAX_KEY_LENGTH) { "Idempotency-Key must be 1..$MAX_KEY_LENGTH characters" }

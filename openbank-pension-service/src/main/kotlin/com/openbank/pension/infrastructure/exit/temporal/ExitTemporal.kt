@@ -37,6 +37,7 @@ import java.util.UUID
  * every call is lifted onto a duplicated context through [VertxContextSupport], exactly as
  * domestic-payment's activities do. Never `runBlocking`.
  */
+@Suppress("TooManyFunctions") // one bridge per activity
 @ApplicationScoped
 class ExitActivitiesImpl(private val execution: ExitExecutionService) : ExitActivities {
 

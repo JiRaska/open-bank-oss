@@ -21,6 +21,7 @@ import java.time.Duration
 
 const val EXIT_TASK_QUEUE = "openbank-pension-exit"
 
+@Suppress("TooManyFunctions") // one activity per workflow step
 @ActivityInterface
 interface ExitActivities {
     fun terminationRedeem(noticeId: String): Boolean

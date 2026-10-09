@@ -31,7 +31,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-pension-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "5c8d66e6b13a6d64"
+        openbank.tech/policy-checksum: "4a98fe13767a4fa2"
       labels:
         app.kubernetes.io/name: pension-service
         app.kubernetes.io/part-of: pension
@@ -88,6 +88,15 @@ spec:
             # participant actions to the edge principal only, and no service-account reaches a
             # write by any rule.
             - name: AUTHZ_ENFORCE
+              value: "true"
+            # ADR-0334 S5 exit workflows. The `openbank-pension` Temporal namespace and the
+            # `pension` entry in temporal-platform-ingress are the other two halves; without the
+            # ingress entry the worker's StartupEvent gRPC is dropped.
+            - name: TEMPORAL_FRONTEND_URL
+              value: temporal-frontend.temporal.svc.cluster.local:7233
+            - name: OPENBANK_TEMPORAL_NAMESPACE
+              value: openbank-pension
+            - name: PENSION_EXIT_WORKER_ENABLED
               value: "true"
           resources:
             requests:

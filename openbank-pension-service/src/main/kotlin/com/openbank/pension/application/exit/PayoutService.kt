@@ -108,18 +108,13 @@ class PayoutService(
         val now = ctx.clock.instant()
         if (!now.isBefore(request.quoteExpiresAt)) {
             stores.payouts.save(request.expire(now))
-            throw IllegalStateException("the payout quote expired; request a new one")
+            error("the payout quote expired; request a new one")
         }
         check(contract.status == ContractStatus.ACTIVE || contract.status == ContractStatus.SUSPENDED) {
             "a payout needs an ACTIVE or SUSPENDED contract, was ${contract.status}"
         }
         val iban = IbanRule.normalise(command.iban)
-        if (!ctx.gateways.sca.verify(contract.participantPartyId, command.scaChallengeId, request.quoteHash)) {
-            throw ExitForbiddenException("strong customer authentication failed for this quote")
-        }
-        if (!ctx.gateways.accounts.isOwnVerifiedAccount(contract.participantPartyId, iban)) {
-            throw ExitForbiddenException("the payout account is not a verified account of the participant")
-        }
+        ctx.gateways.verifySignatureAndAccount(contract.participantPartyId, command.scaChallengeId, request.quoteHash, iban)
         val confirmed = stores.payouts.save(
             request.confirm(iban, command.scaChallengeId, command.idempotencyKey, LocalDate.now(ctx.clock), now),
         )
@@ -173,7 +168,7 @@ class PayoutService(
             PayoutForm.PHASED_WITHDRAWAL -> rules.phasedWithdrawal
             PayoutForm.FIXED_PERIOD_PENSION -> rules.fixedPeriodPension
             else -> return months.also { require(it == null) { "months applies only to a scheduled payout" } }
-        } ?: throw IllegalStateException("the pack states no schedule bounds for $form")
+        } ?: error("the pack states no schedule bounds for $form")
         val m = requireNotNull(months) { "months is required for $form" }
         require(m in bounds.minMonths..bounds.maxMonths) { "months must be ${bounds.minMonths}..${bounds.maxMonths} for $form" }
         return m

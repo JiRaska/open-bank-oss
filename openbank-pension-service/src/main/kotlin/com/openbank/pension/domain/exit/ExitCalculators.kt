@@ -87,7 +87,7 @@ data class PayoutQuote(
 }
 
 fun JurisdictionPack.exitRules(): ExitRules =
-    exit ?: throw IllegalStateException(
+    exit ?: error(
         "pack $jurisdiction/$productLine v$version defines no exit rules; termination and payout are unavailable",
     )
 
