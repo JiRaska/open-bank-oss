@@ -5,6 +5,8 @@
 package com.openbank.tax.application.usecase
 
 import com.openbank.libs.domain.calendar.AccountingClock
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
 import com.openbank.tax.application.port.out.ReturnCatalogueSource
 import com.openbank.tax.application.port.out.ReturnDataPort
 import com.openbank.tax.application.port.out.ReturnDataUnavailableException
@@ -21,6 +23,8 @@ import com.openbank.tax.domain.returns.ReturnStatus
 import com.openbank.tax.domain.returns.StatutoryReturn
 import com.openbank.tax.domain.returns.ValidationRule
 import com.openbank.tax.infrastructure.returns.StatutoryReturnDeadlineScheduler
+import io.mockk.every
+import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -198,7 +202,13 @@ class StatutoryReturnServiceTest {
                 published = count
             }
         }
-        StatutoryReturnDeadlineScheduler(service(start = LocalDate.of(2026, 6, 30)), metrics).refresh()
+        val liveness = mockk<WorkflowLivenessRecorder>(relaxed = true)
+        val domainMetrics = mockk<DomainMetrics> {
+            every { registerWorkflowLiveness(any(), any()) } returns liveness
+        }
+        StatutoryReturnDeadlineScheduler(service(start = LocalDate.of(2026, 6, 30)), metrics, domainMetrics)
+            .also { it.registerLiveness() }
+            .refresh()
         assertThat(published).isEqualTo(5)
     }
 }

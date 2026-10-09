@@ -6,6 +6,8 @@ package com.openbank.tax.infrastructure.returns
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
 import com.openbank.tax.application.port.out.ReturnCatalogueSource
 import com.openbank.tax.application.port.out.ReturnDataPort
 import com.openbank.tax.application.port.out.ReturnDataUnavailableException
@@ -23,13 +25,16 @@ import com.openbank.tax.domain.returns.StatutoryReturn
 import com.openbank.tax.domain.returns.ValidationRule
 import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
+import io.quarkus.runtime.Startup
 import io.quarkus.scheduler.Scheduled
+import jakarta.annotation.PostConstruct
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Produces
 import jakarta.inject.Singleton
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.math.BigDecimal
+import java.time.Duration
 import java.time.LocalDate
 import java.util.Optional
 import java.util.concurrent.atomic.AtomicInteger
@@ -148,12 +153,20 @@ class MicrometerStatutoryReturnMetrics(registry: MeterRegistry) : StatutoryRetur
 }
 
 /** Refreshes the breach gauge. `suspend` so the reactive repository has a Vert.x context. */
+@Startup
 @ApplicationScoped
 class StatutoryReturnDeadlineScheduler(
     private val service: StatutoryReturnService,
     private val metrics: StatutoryReturnMetricsPort,
+    private val domainMetrics: DomainMetrics,
 ) {
     private val log = Logger.getLogger(StatutoryReturnDeadlineScheduler::class.java)
+    private lateinit var liveness: WorkflowLivenessRecorder
+
+    @PostConstruct
+    fun registerLiveness() {
+        liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, Duration.ofHours(1))
+    }
 
     @Scheduled(
         every = "{openbank.statutory-returns.deadline-check-every:1h}",
@@ -162,6 +175,7 @@ class StatutoryReturnDeadlineScheduler(
     suspend fun refresh() {
         val breaches = service.breaches()
         metrics.recordBreaches(breaches.size)
+        liveness.recordSuccess()
         if (breaches.isNotEmpty()) {
             log.warnf(
                 "%d statutory return(s) past deadline: %s",
@@ -175,5 +189,6 @@ class StatutoryReturnDeadlineScheduler(
 
     private companion object {
         const val LOG_SAMPLE = 10
+        const val WORKFLOW_NAME = "statutory-return-deadline-check"
     }
 }
