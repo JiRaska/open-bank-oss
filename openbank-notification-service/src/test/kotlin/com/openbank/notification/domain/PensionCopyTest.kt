@@ -70,7 +70,9 @@ class PensionCopyTest {
     fun `copy escapes producer values and never accepts another template`() {
         val vars = values + ("contractId" to "<script>x</script>")
         val (_, body) = PensionCopy.render(
-            NotificationTemplate.PENSION_PAYOUT_ACCOUNT_CHANGED, vars, NotificationLanguage.EN,
+            NotificationTemplate.PENSION_PAYOUT_ACCOUNT_CHANGED,
+            vars,
+            NotificationLanguage.EN,
         )
         assertThat(body).contains("&lt;script&gt;x&lt;/script&gt;").doesNotContain("<script>")
         assertThat(PensionCopy.renderOrNull(NotificationTemplate.WELCOME, values, NotificationLanguage.CS)).isNull()

@@ -44,6 +44,7 @@ object PensionCopy {
                     "${vars.v("effectiveFrom")} (ending ${vars.v("accountLast4")}). " +
                     "If you did not request this, contact the bank.</p>"
             }
+
             NotificationTemplate.PENSION_PAYOUT_EXECUTED -> if (cs) {
                 "Výplata z penzijní smlouvy" to
                     "<p>Ze smlouvy ${vars.v("contractId")} byla provedena výplata ${vars.v("amount")} " +
@@ -55,6 +56,7 @@ object PensionCopy {
                     "from contract ${vars.v("contractId")} was sent to an account ending " +
                     "${vars.v("accountLast4")}.</p>"
             }
+
             NotificationTemplate.PENSION_STRATEGY_CHANGE_EFFECTIVE -> if (cs) {
                 "Změna penzijní strategie" to
                     "<p>U smlouvy ${vars.v("contractId")} je od ${vars.v("effectiveFrom")} účinná " +
@@ -64,6 +66,7 @@ object PensionCopy {
                     "<p>Investment strategy ${vars.v("strategyCode")} for contract " +
                     "${vars.v("contractId")} took effect on ${vars.v("effectiveFrom")}.</p>"
             }
+
             NotificationTemplate.PENSION_TRANSFER_STATUS -> if (cs) {
                 "Stav převodu penzijní smlouvy" to
                     "<p>Převod smlouvy ${vars.v("contractId")} (${vars.v("direction")}) má stav " +
@@ -73,27 +76,36 @@ object PensionCopy {
                     "<p>The transfer for contract ${vars.v("contractId")} (${vars.v("direction")}) " +
                     "has status ${vars.v("status")}.</p>"
             }
+
             NotificationTemplate.PENSION_INCENTIVE_RECEIVED -> incentive(vars, cs, received = true)
+
             NotificationTemplate.PENSION_INCENTIVE_RETURNED -> incentive(vars, cs, received = false)
+
             else -> error("unreachable: guarded by TEMPLATES")
         }
     }
 
-    private fun incentive(vars: Map<String, String>, cs: Boolean, received: Boolean): Pair<String, String> =
-        when {
-            cs && received -> "Připsán státní příspěvek" to
+    private fun incentive(vars: Map<String, String>, cs: Boolean, received: Boolean): Pair<String, String> = when {
+        cs && received ->
+            "Připsán státní příspěvek" to
                 "<p>Ke smlouvě ${vars.v("contractId")} byl za období ${vars.v("period")} připsán " +
                 "státní příspěvek ${vars.v("amount")} ${vars.v("currency")}.</p>"
-            cs -> "Vrácen státní příspěvek" to
+
+        cs ->
+            "Vrácen státní příspěvek" to
                 "<p>U smlouvy ${vars.v("contractId")} byl za období ${vars.v("period")} vrácen " +
                 "státní příspěvek ${vars.v("amount")} ${vars.v("currency")}.</p>"
-            received -> "State contribution received" to
+
+        received ->
+            "State contribution received" to
                 "<p>A state contribution of ${vars.v("amount")} ${vars.v("currency")} for period " +
                 "${vars.v("period")} was credited to contract ${vars.v("contractId")}.</p>"
-            else -> "State contribution returned" to
+
+        else ->
+            "State contribution returned" to
                 "<p>A state contribution of ${vars.v("amount")} ${vars.v("currency")} for period " +
                 "${vars.v("period")} was returned for contract ${vars.v("contractId")}.</p>"
-        }
+    }
 
     private fun Map<String, String>.v(key: String): String = HtmlEscape.escape(this[key].orEmpty())
 }

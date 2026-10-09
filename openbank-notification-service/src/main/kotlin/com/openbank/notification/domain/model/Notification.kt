@@ -29,7 +29,7 @@ enum class NotificationStatus { PENDING, SENT, FAILED, BOUNCED }
  * cleartext (issue #1325). Secrecy is a property of the variables, not of the template, so the
  * defence has to live here and not only in [TemplateSensitivity].
  *
- * Keep this in step with `NotificationConsumer.renderTemplate`: a variable declared but never
+ * Keep this in step with the exhaustive `renderTemplate` in `NotificationConsumer.kt`: a variable declared but never
  * rendered is dead, and a variable rendered but not declared cannot arrive.
  */
 enum class NotificationTemplate(val variables: Set<String>) {
