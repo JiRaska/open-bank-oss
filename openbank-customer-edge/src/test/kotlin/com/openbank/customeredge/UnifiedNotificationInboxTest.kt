@@ -171,10 +171,11 @@ class UnifiedNotificationInboxTest {
     fun `synthetic sequential reads shrink their per-call timeout within one deadline`() {
         val upstream = mockk<UpstreamClient>()
         val budgets = mutableListOf<Long>()
+        val elapsedNanos = java.util.concurrent.atomic.AtomicLong()
         every { upstream.get(any(), any(), any()) } answers {
             val budget = thirdArg<Long>()
             budgets += budget
-            Thread.sleep(minOf(60, budget))
+            elapsedNanos.addAndGet(TimeUnit.MILLISECONDS.toNanos(minOf(60, budget)))
             if (budget < 60) {
                 Response.status(502).build()
             } else {
@@ -188,10 +189,11 @@ class UnifiedNotificationInboxTest {
                 mapper,
                 "http://notifications",
                 TimeUnit.MILLISECONDS.toNanos(100),
+                elapsedNanos::get,
             ).list(listOf(human, company, stranger), 20)
             assertThat(response.status).isEqualTo(502)
             assertThat(budgets).hasSize(2)
-            assertThat(budgets[1]).isLessThan(budgets[0])
+            assertThat(budgets).containsExactly(100L, 40L)
         } finally {
             MDC.remove("synthetic")
         }
