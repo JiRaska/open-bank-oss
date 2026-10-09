@@ -4,7 +4,6 @@
 
 package com.openbank.pension.integration
 
-import com.openbank.pension.application.port.`in`.PensionContractUseCase
 import com.openbank.pension.application.port.out.PensionContractRepository
 import com.openbank.pension.infrastructure.exit.stub.StubParticipantNotificationAdapter
 import com.openbank.pension.infrastructure.fund.InMemoryFundAdministrationAdapter
@@ -37,9 +36,6 @@ import java.util.UUID
 @QuarkusTest
 @QuarkusTestResource(PostgresTestResource::class)
 class PensionIntegrationRoutesIT {
-
-    @Inject
-    lateinit var contractUseCase: PensionContractUseCase
 
     @Inject
     lateinit var contractRepository: PensionContractRepository
@@ -142,7 +138,6 @@ class PensionIntegrationRoutesIT {
 
     private fun retiredContract(): UUID = onVertx {
         ContractFixtures.activeContract(
-            contractUseCase,
             contractRepository,
             party,
             birthDate = LocalDate.parse("1960-02-02"),

@@ -12,7 +12,6 @@ import com.openbank.pension.application.port.`in`.PensionContractUseCase
 import com.openbank.pension.application.port.out.ContractNotFoundException
 import com.openbank.pension.application.port.out.PensionContractRepository
 import com.openbank.pension.domain.model.ContractStatus
-import com.openbank.pension.domain.model.Limits
 import com.openbank.pension.domain.model.PensionContract
 import com.openbank.pension.domain.pack.IncentiveResult
 import com.openbank.pension.domain.pack.JurisdictionPackRegistry
@@ -32,53 +31,14 @@ class PensionContractService(
 ) : PensionContractUseCase {
 
     override suspend fun createDraft(command: CreateDraftCommand): PensionContract {
-        command.idempotencyKey?.let { key ->
-            contracts.findByIdempotencyKey(command.participantPartyId, key)?.let { return it }
-        }
-        require(command.beneficiaries.size <= Limits.MAX_BENEFICIARIES) {
-            "at most ${Limits.MAX_BENEFICIARIES} beneficiaries"
-        }
-        require(command.residencyEvidence.size <= Limits.MAX_ENTRIES) { "too many residency evidence entries" }
-        Limits.requireCode(command.jurisdiction, "jurisdiction")
-        val today = LocalDate.now(clock)
-        require(command.birthDate.isBefore(today)) { "birthDate must be in the past" }
-        val pack = packs.resolve(command.jurisdiction, command.productLine, today)
-        require(command.providerType in pack.permittedProviderTypes) {
-            "provider type ${command.providerType} may not provide ${pack.productLine} under " +
-                "${pack.jurisdiction} pack v${pack.version}"
-        }
-        require(command.schedule.currency == pack.currency) {
-            "contribution currency must be ${pack.currency} under this pack"
-        }
-        val eligibility = PackEvaluator.checkEligibility(
-            pack,
-            command.birthDate,
-            command.residencyCountry,
-            command.residencyEvidence,
-            command.hasGuardian,
-            today,
-        )
-        require(eligibility.eligible) { "participant is not eligible: ${eligibility.reasons.joinToString("; ")}" }
-        val draft = PensionContract.draft(
-            participantPartyId = command.participantPartyId,
-            productLine = command.productLine,
-            jurisdiction = pack.jurisdiction,
-            packVersion = pack.version,
-            providerEntityId = command.providerEntityId,
-            providerType = command.providerType,
-            participantBirthDate = command.birthDate,
-            schedule = command.schedule,
-            initialStrategy = command.initialStrategy,
-            beneficiaries = command.beneficiaries,
-            today = today,
-            now = clock.instant(),
-            idempotencyKey = command.idempotencyKey,
-        )
-        return contracts.save(draft)
+        error("direct contract creation is unavailable; complete the pension onboarding flow")
     }
 
-    override suspend fun submit(caller: Caller, id: UUID) =
-        transition(caller, id, ContractStatus.PENDING_ACTIVATION) { it.submit(clock.instant()) }
+    override suspend fun submit(caller: Caller, id: UUID): PensionContract {
+        caller.requireParticipant()
+        get(caller, id)
+        error("direct contract submission is unavailable; complete the pension onboarding flow")
+    }
 
     override suspend fun list(caller: Caller, status: ContractStatus?, limit: Int): List<PensionContract> {
         val page = limit.coerceIn(1, MAX_LIST)
@@ -87,12 +47,16 @@ class PensionContractService(
         return contracts.findByParticipant(party, page).filter { status == null || it.status == status }
     }
 
-    override suspend fun electStrategy(caller: Caller, id: UUID, strategyCode: String, effectiveFrom: LocalDate?) =
-        transition(caller, id, null) {
-            val from = effectiveFrom ?: LocalDate.now(clock)
-            require(!from.isBefore(LocalDate.now(clock))) { "a strategy change cannot take effect in the past" }
-            it.electStrategy(strategyCode, from, clock.instant())
-        }
+    override suspend fun electStrategy(
+        caller: Caller,
+        id: UUID,
+        strategyCode: String,
+        effectiveFrom: LocalDate?,
+    ): PensionContract {
+        caller.requireParticipant()
+        get(caller, id)
+        error("strategy changes are unavailable until questionnaire and catalog mapping checks are supported")
+    }
 
     override suspend fun suspendContributions(caller: Caller, id: UUID) =
         transition(caller, id, ContractStatus.SUSPENDED) { it.suspendContributions(clock.instant()) }
@@ -122,8 +86,7 @@ class PensionContractService(
 
     /**
      * A lifecycle action is idempotent: a retry that finds the contract already in [target] returns
-     * it unchanged instead of failing the second attempt of an action that succeeded. A `null`
-     * target (strategy election) always applies the change.
+     * it unchanged instead of failing the second attempt of an action that succeeded.
      */
     private suspend fun transition(
         caller: Caller,

@@ -4,13 +4,11 @@
 
 package com.openbank.pension.testsupport
 
-import com.openbank.pension.application.port.`in`.Caller
-import com.openbank.pension.application.port.`in`.CreateDraftCommand
-import com.openbank.pension.application.port.`in`.PensionContractUseCase
 import com.openbank.pension.application.port.out.PensionContractRepository
 import com.openbank.pension.domain.model.Beneficiary
 import com.openbank.pension.domain.model.ContributionFrequency
 import com.openbank.pension.domain.model.ContributionSchedule
+import com.openbank.pension.domain.model.PensionContract
 import com.openbank.pension.domain.model.ProductLine
 import com.openbank.pension.domain.pack.ProviderType
 import java.math.BigDecimal
@@ -27,7 +25,6 @@ import java.util.UUID
  */
 object ContractFixtures {
     suspend fun activeContract(
-        contracts: PensionContractUseCase,
         repository: PensionContractRepository,
         party: UUID,
         beneficiaries: List<Beneficiary> = listOf(
@@ -38,19 +35,22 @@ object ContractFixtures {
         birthDate: LocalDate = LocalDate.parse("1985-05-05"),
         startDate: LocalDate = LocalDate.now(),
     ): UUID {
-        val draft = contracts.createDraft(
-            CreateDraftCommand(
-                participantPartyId = party, productLine = productLine, jurisdiction = "CZ",
-                providerEntityId = UUID.randomUUID(),
-                providerType = if (productLine == ProductLine.DIP) ProviderType.BANK else ProviderType.PENSION_COMPANY,
-                birthDate = birthDate, residencyCountry = "CZ", residencyEvidence = emptySet(), hasGuardian = false,
-                schedule = ContributionSchedule(BigDecimal("1700"), "CZK", ContributionFrequency.MONTHLY),
-                initialStrategy = "BALANCED",
-                beneficiaries = beneficiaries,
-                idempotencyKey = UUID.randomUUID().toString(),
-            ),
+        val now = Instant.now()
+        val draft = PensionContract.draft(
+            participantPartyId = party,
+            productLine = productLine,
+            jurisdiction = "CZ",
+            packVersion = 1,
+            providerEntityId = UUID.randomUUID(),
+            providerType = if (productLine == ProductLine.DIP) ProviderType.BANK else ProviderType.PENSION_COMPANY,
+            participantBirthDate = birthDate,
+            schedule = ContributionSchedule(BigDecimal("1700"), "CZK", ContributionFrequency.MONTHLY),
+            initialStrategy = "BALANCED",
+            beneficiaries = beneficiaries,
+            today = LocalDate.now(),
+            now = now,
         )
-        val pending = contracts.submit(Caller.customer(party), draft.id)
+        val pending = repository.save(draft.submit(now))
         repository.save(pending.activate(startDate, Instant.now()))
         return draft.id
     }

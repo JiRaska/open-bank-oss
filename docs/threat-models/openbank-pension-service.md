@@ -49,8 +49,15 @@ The pre-SCA signature check prevents spending a challenge after the mapping has 
 packs without an appropriateness test retain their existing risk-profile warning flow.
 
 Residual: the separate post-onboarding contract strategy-election endpoint does not yet resolve
-the assessment or apply this instrument gate. It must be gated before investment strategy changes
-can use this evidence.
+the assessment or apply this instrument gate. The direct contract create, submit, and strategy
+election application methods now return 409; reads and contribution status actions remain
+available. The onboarding workflow creates and submits the contract directly after KID acceptance
+and signature. Strategy changes remain unavailable until a reviewed reassessment flow can bind the
+new election to an effective published mapping; issue #12384 remains open for that replacement.
+The OpenAPI diff removes successful responses from three v1 routes and is breaking relative to the
+stacked pension API. Normal merge requires landing this guard before that v1 contract is published
+on the correct base and merge order, or a reviewed v2 API transition. The current v1 document
+states the 409 behavior and does not claim backward compatibility.
 
 | Threat | Vector | Mitigation in S1 |
 |---|---|---|

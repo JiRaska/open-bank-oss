@@ -21,7 +21,6 @@ import org.eclipse.microprofile.config.ConfigProvider
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.everyItem
 import org.hamcrest.Matchers.hasItem
-import org.hamcrest.Matchers.hasSize
 import org.hamcrest.Matchers.not
 import org.junit.jupiter.api.Test
 import java.sql.DriverManager
@@ -55,16 +54,8 @@ class PensionContractApiIT {
         }
     """.trimIndent()
 
-    private fun create(key: String = UUID.randomUUID().toString()): String = given()
-        .contentType("application/json")
-        .header("X-Customer-Party-Id", party.toString())
-        .header("Idempotency-Key", key)
-        .body(createBody())
-        .`when`().post(base)
-        .then().statusCode(201)
-        .body("status", equalTo("DRAFT"))
-        .body("packVersion", equalTo(1))
-        .extract().path("contractId")
+    /** Seeded directly so API tests can exercise reads and status actions without the closed shortcut. */
+    private fun create(): String = seedContract()
 
     private fun post(path: String, body: String = "{}", asParty: UUID? = party) =
         given().contentType("application/json")
@@ -85,19 +76,19 @@ class PensionContractApiIT {
     /** Fixture: the product activates only through onboarding (S8), which this class does not drive. */
     private fun activateDirectly(id: String) = onVertx {
         val pending = requireNotNull(contracts.findById(UUID.fromString(id)))
-        contracts.save(pending.activate(LocalDate.now(), Instant.now()))
+        contracts.save(pending.submit(Instant.now()).activate(LocalDate.now(), Instant.now()))
     }
 
     @Test
     @TestSecurity(user = "edge", roles = ["ROLE_API"])
     fun `the participant cannot activate or terminate through the retired S1 routes`() {
         val id = create()
-        post("$base/$id/submit").statusCode(200).body("status", equalTo("PENDING_ACTIVATION"))
+        post("$base/$id/submit").statusCode(409)
         // ADR-0334 S8: activation is the onboarding workflow's (KID, SCA, cooling-off); termination
         // is S5's quote/sign flow. Neither S1 shortcut is served any more.
         post("$base/$id/activate").statusCode(404)
         post("$base/$id/early-termination", """{"currentValue":5000,"confirm":true}""").statusCode(404)
-        read(id, party).statusCode(200).body("status", equalTo("PENDING_ACTIVATION"))
+        read(id, party).statusCode(200).body("status", equalTo("DRAFT"))
     }
 
     @Test
@@ -116,13 +107,13 @@ class PensionContractApiIT {
     @TestSecurity(user = "edge", roles = ["ROLE_API"])
     fun `the full participant lifecycle runs over real HTTP`() {
         val id = create()
-        post("$base/$id/submit").statusCode(200).body("status", equalTo("PENDING_ACTIVATION"))
+        post("$base/$id/submit").statusCode(409)
         activateDirectly(id)
 
         given().contentType("application/json").header("X-Customer-Party-Id", party.toString())
             .body("""{"strategyCode":"DYNAMIC"}""")
             .`when`().put("$base/$id/strategy")
-            .then().statusCode(200).body("strategyHistory", hasSize<Any>(2))
+            .then().statusCode(409)
 
         post("$base/$id/suspend").statusCode(200).body("status", equalTo("SUSPENDED"))
         post("$base/$id/resume").statusCode(200).body("status", equalTo("ACTIVE"))
@@ -133,10 +124,9 @@ class PensionContractApiIT {
 
         read(id, party).statusCode(200)
             .body("status", equalTo("ACTIVE"))
-            .body("currentStrategy.strategyCode", equalTo("DYNAMIC"))
-            .body("beneficiaries[0].name", equalTo("Jane Doe"))
+            .body("currentStrategy.strategyCode", equalTo("BALANCED"))
 
-        assertThat(electionRows(UUID.fromString(id))).containsExactly("BALANCED", "DYNAMIC")
+        assertThat(electionRows(UUID.fromString(id))).containsExactly("BALANCED")
     }
 
     @Test
@@ -149,7 +139,7 @@ class PensionContractApiIT {
 
     @Test
     @TestSecurity(user = "edge", roles = ["ROLE_API"])
-    fun `a missing header or a provider the pack does not permit is a 400, not a 500`() {
+    fun `missing headers are 400 and direct creation is 409`() {
         given().contentType("application/json").header("Idempotency-Key", "k").body(createBody())
             .`when`().post(base).then().statusCode(400)
         given().contentType("application/json").header("X-Customer-Party-Id", party.toString()).body(createBody())
@@ -158,7 +148,7 @@ class PensionContractApiIT {
             .header("X-Customer-Party-Id", party.toString())
             .header("Idempotency-Key", UUID.randomUUID().toString())
             .body(createBody(providerType = "BANK"))
-            .`when`().post(base).then().statusCode(400)
+            .`when`().post(base).then().statusCode(409)
     }
 
     @Test
@@ -183,9 +173,33 @@ class PensionContractApiIT {
 
     @Test
     @TestSecurity(user = "edge", roles = ["ROLE_API"])
-    fun `a retried create with the same Idempotency-Key returns the same contract`() {
+    fun `a retried direct create cannot bypass onboarding`() {
         val key = UUID.randomUUID().toString()
-        assertThat(create(key)).isEqualTo(create(key))
+        repeat(2) {
+            given().contentType("application/json")
+                .header("X-Customer-Party-Id", party.toString())
+                .header("Idempotency-Key", key)
+                .body(createBody())
+                .`when`().post(base).then().statusCode(409)
+        }
+    }
+
+    @Test
+    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    fun `direct create submit and strategy shortcuts are conflicts without mutation`() {
+        given().contentType("application/json")
+            .header("X-Customer-Party-Id", party.toString())
+            .header("Idempotency-Key", UUID.randomUUID().toString())
+            .body(createBody())
+            .`when`().post(base).then().statusCode(409)
+
+        val id = create()
+        post("$base/$id/submit").statusCode(409)
+        given().contentType("application/json").header("X-Customer-Party-Id", party.toString())
+            .body("""{"strategyCode":"UNPUBLISHED"}""")
+            .`when`().put("$base/$id/strategy").then().statusCode(409)
+        read(id, party).statusCode(200).body("status", equalTo("DRAFT"))
+        assertThat(electionRows(UUID.fromString(id))).containsExactly("BALANCED")
     }
 
     private fun electionRows(contractId: UUID): List<String> {

@@ -71,42 +71,74 @@ class PensionContractServiceTest {
         idempotencyKey = key,
     )
 
-    @Test
-    fun `a draft pins the pack version in force`(): Unit = runBlocking {
-        val draft = service.createDraft(command())
-        assertThat(draft.status).isEqualTo(ContractStatus.DRAFT)
-        assertThat(draft.packVersion).isEqualTo(1)
-        assertThat(repo.rows).containsKey(draft.id)
+    private suspend fun seed(status: ContractStatus = ContractStatus.DRAFT): PensionContract {
+        val input = command()
+        val draft = PensionContract.draft(
+            participantPartyId = party,
+            productLine = input.productLine,
+            jurisdiction = input.jurisdiction,
+            packVersion = 1,
+            providerEntityId = input.providerEntityId,
+            providerType = input.providerType,
+            participantBirthDate = input.birthDate,
+            schedule = input.schedule,
+            initialStrategy = input.initialStrategy,
+            beneficiaries = emptyList(),
+            today = LocalDate.parse("2026-10-09"),
+            now = clock.instant(),
+        )
+        val chosen = when (status) {
+            ContractStatus.DRAFT -> draft
+            ContractStatus.PENDING_ACTIVATION -> draft.submit(clock.instant())
+            ContractStatus.ACTIVE -> draft.submit(clock.instant()).activate(
+                LocalDate.parse("2026-10-09"),
+                clock.instant(),
+            )
+            else -> error("unsupported test status")
+        }
+        return repo.save(chosen)
     }
 
     @Test
-    fun `a provider type the pack does not permit is refused`(): Unit = runBlocking {
-        assertThatThrownBy { runBlocking { service.createDraft(command(provider = ProviderType.BANK)) } }
-            .isInstanceOf(IllegalArgumentException::class.java)
-            .hasMessageContaining("may not provide")
-        assertThat(
-            service.createDraft(command(ProductLine.DIP, ProviderType.BANK)).productLine,
-        ).isEqualTo(ProductLine.DIP)
+    fun `direct create cannot bypass onboarding even with an idempotency key`(): Unit = runBlocking {
+        repeat(2) {
+            assertThatThrownBy { runBlocking { service.createDraft(command(key = "same-key")) } }
+                .isInstanceOf(IllegalStateException::class.java)
+                .hasMessageContaining("onboarding flow")
+        }
+        assertThat(repo.rows).isEmpty()
     }
 
     @Test
-    fun `an ineligible participant and a foreign currency are refused`(): Unit = runBlocking {
+    fun `direct create is closed for every product line and provider type`(): Unit = runBlocking {
+        listOf(command(provider = ProviderType.BANK), command(ProductLine.DIP, ProviderType.BANK)).forEach { input ->
+            assertThatThrownBy { runBlocking { service.createDraft(input) } }
+                .isInstanceOf(IllegalStateException::class.java)
+        }
+        assertThat(repo.rows).isEmpty()
+    }
+
+    @Test
+    fun `invalid direct create inputs cannot bypass the closed path`(): Unit = runBlocking {
         assertThatThrownBy { runBlocking { service.createDraft(command(birth = "2015-01-01")) } }
-            .isInstanceOf(IllegalArgumentException::class.java)
+            .isInstanceOf(IllegalStateException::class.java)
         assertThatThrownBy { runBlocking { service.createDraft(command(currency = "EUR")) } }
-            .isInstanceOf(IllegalArgumentException::class.java)
+            .isInstanceOf(IllegalStateException::class.java)
+        assertThat(repo.rows).isEmpty()
     }
 
     @Test
-    fun `a strategy change cannot take effect in the past`(): Unit = runBlocking {
-        val id = service.createDraft(command()).id
-        assertThatThrownBy { runBlocking { service.electStrategy(me, id, "DYNAMIC", LocalDate.parse("2020-01-01")) } }
-            .isInstanceOf(IllegalArgumentException::class.java)
+    fun `strategy election cannot use an unassessed unpublished code`(): Unit = runBlocking {
+        val active = seed(ContractStatus.ACTIVE)
+        assertThatThrownBy { runBlocking { service.electStrategy(me, active.id, "UNPUBLISHED", null) } }
+            .isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("strategy changes are unavailable")
+        assertThat(repo.rows.getValue(active.id).strategyHistory).isEqualTo(active.strategyHistory)
     }
 
     @Test
     fun `another participant's contract is not found, and staff may read but not change it`(): Unit = runBlocking {
-        val id = service.createDraft(command()).id
+        val id = seed().id
         val stranger = Caller.customer(UUID.randomUUID())
         assertThatThrownBy { runBlocking { service.get(stranger, id) } }
             .isInstanceOf(com.openbank.pension.application.port.out.ContractNotFoundException::class.java)
@@ -118,18 +150,21 @@ class PensionContractServiceTest {
     }
 
     @Test
-    fun `a retried create with the same key returns the first contract`(): Unit = runBlocking {
-        val first = service.createDraft(command(key = "k-1"))
-        val second = service.createDraft(command(key = "k-1"))
-        assertThat(second.id).isEqualTo(first.id)
-        assertThat(repo.rows).hasSize(1)
+    fun `direct submit cannot bypass questionnaire KID and signature`(): Unit = runBlocking {
+        val draft = seed()
+        assertThatThrownBy { runBlocking { service.submit(me, draft.id) } }
+            .isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("onboarding flow")
+        assertThat(repo.rows.getValue(draft.id).status).isEqualTo(ContractStatus.DRAFT)
     }
 
     @Test
-    fun `a retried lifecycle action is a no-op, not a conflict`(): Unit = runBlocking {
-        val id = service.createDraft(command()).id
-        service.submit(me, id)
-        assertThat(service.submit(me, id).status).isEqualTo(ContractStatus.PENDING_ACTIVATION)
+    fun `reads and status actions remain available`(): Unit = runBlocking {
+        val active = seed(ContractStatus.ACTIVE)
+        assertThat(service.get(me, active.id)).isEqualTo(active)
+        assertThat(service.list(me, ContractStatus.ACTIVE, 10)).contains(active)
+        assertThat(service.suspendContributions(me, active.id).status).isEqualTo(ContractStatus.SUSPENDED)
+        assertThat(service.resumeContributions(me, active.id).status).isEqualTo(ContractStatus.ACTIVE)
     }
 
     @Test

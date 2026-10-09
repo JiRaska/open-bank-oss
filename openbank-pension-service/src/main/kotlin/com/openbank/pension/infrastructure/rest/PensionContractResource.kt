@@ -63,7 +63,7 @@ class PensionContractResource {
     lateinit var access: ContractAccessGuard
 
     @POST
-    @Operation(summary = "Create a DRAFT contract under the jurisdiction pack in force today")
+    @Operation(summary = "Direct contract creation is temporarily unavailable (409)")
     @Authorize(action = "pension.contract.create")
     suspend fun create(
         @HeaderParam("X-Customer-Party-Id") participantPartyId: String?,
@@ -120,7 +120,7 @@ class PensionContractResource {
 
     @POST
     @Path("/{id}/submit")
-    @Operation(summary = "DRAFT -> PENDING_ACTIVATION")
+    @Operation(summary = "Direct contract submission is temporarily unavailable (409)")
     @Authorize(action = "pension.contract.submit", resource = "#id")
     suspend fun submit(
         @PathParam("id") id: UUID,
@@ -137,7 +137,7 @@ class PensionContractResource {
 
     @PUT
     @Path("/{id}/strategy")
-    @Operation(summary = "Elect or change the investment strategy; earlier elections stay as history")
+    @Operation(summary = "Strategy changes are temporarily unavailable (409)")
     @Authorize(action = "pension.contract.strategy", resource = "#id")
     suspend fun electStrategy(
         @PathParam("id") id: UUID,

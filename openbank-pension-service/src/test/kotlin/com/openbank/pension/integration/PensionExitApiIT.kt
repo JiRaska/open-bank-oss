@@ -5,7 +5,6 @@
 package com.openbank.pension.integration
 
 import com.openbank.pension.application.exit.DeathClaimService
-import com.openbank.pension.application.port.`in`.PensionContractUseCase
 import com.openbank.pension.application.port.out.IncentiveLedgerRepository
 import com.openbank.pension.application.port.out.PensionContractRepository
 import com.openbank.pension.domain.incentive.IncentiveLedgerEntry
@@ -65,16 +64,12 @@ class PensionExitApiIT {
     @Inject
     lateinit var deathClaims: DeathClaimService
 
-    @Inject
-    lateinit var contractUseCase: PensionContractUseCase
-
     private fun <T> onVertx(block: suspend () -> T): T =
         VertxContextSupport.subscribeAndAwait { CoroutineScope(Dispatchers.Unconfined).async { block() }.asUni() }
 
-    /** An active contract created through the use case — an operator is not the edge relay, so cannot create over HTTP. */
     /** An active contract (fixture: onboarding is not this class's subject). */
     private fun activeContractDirect(): UUID = onVertx {
-        ContractFixtures.activeContract(contractUseCase, contractRepository, party)
+        ContractFixtures.activeContract(contractRepository, party)
     }
 
     private val contracts = "/api/v1/pension/contracts"

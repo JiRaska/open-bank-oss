@@ -57,11 +57,10 @@ paths:
     post:
       tags: [Pension]
       operationId: createContract
-      summary: Create a DRAFT contract under the jurisdiction pack in force today
+      summary: Direct contract creation is temporarily unavailable
       description: |
-        Refused with 400 when no pack is in force for the jurisdiction and product line, when the
-        provider type is not permitted by the pack, when the currency differs from the pack's, or
-        when the participant fails the pack's eligibility rules.
+        Always returns 409 for an authenticated, valid request. Use the pension onboarding flow,
+        which requires a questionnaire, strategy mapping, KID acceptance, and signature.
       parameters:
         - $ref: '#/components/parameters/CustomerPartyId'
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -72,14 +71,9 @@ paths:
             schema:
               $ref: '#/components/schemas/CreateContractRequest'
       responses:
-        '201':
-          description: Draft contract created
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Contract'
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { $ref: '#/components/responses/Conflict' }
   /api/v1/pension/contracts/{id}:
     get:
       tags: [Pension]
@@ -96,13 +90,13 @@ paths:
     post:
       tags: [Pension]
       operationId: submitContract
-      summary: DRAFT -> PENDING_ACTIVATION
+      summary: Direct contract submission is temporarily unavailable
+      description: Returns 409 for an owned contract; onboarding performs submission after signature.
       parameters:
         - $ref: '#/components/parameters/ContractId'
         - $ref: '#/components/parameters/CustomerPartyIdOptional'
         - $ref: '#/components/parameters/IdempotencyKey'
       responses:
-        '200': { $ref: '#/components/responses/Contract' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
@@ -138,7 +132,8 @@ paths:
     put:
       tags: [Pension]
       operationId: electStrategy
-      summary: Elect or change the investment strategy; earlier elections stay as history
+      summary: Strategy changes are temporarily unavailable
+      description: Returns 409 for an owned contract until questionnaire and catalog mapping checks are supported.
       parameters:
         - $ref: '#/components/parameters/ContractId'
         - $ref: '#/components/parameters/CustomerPartyIdOptional'
@@ -149,7 +144,6 @@ paths:
             schema:
               $ref: '#/components/schemas/ElectStrategyRequest'
       responses:
-        '200': { $ref: '#/components/responses/Contract' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
