@@ -43,9 +43,8 @@ class StaticQuestionSetRegistry(sets: List<QuestionSet>, onboarding: List<Onboar
         latest[jurisdiction to productLine]
             ?: throw PackNotFoundException("no question set for $jurisdiction/$productLine")
 
-    override fun questionSet(id: String, version: Int): QuestionSet =
-        byVersion[id to version]
-            ?: throw PackNotFoundException("no question set $id version $version")
+    override fun questionSet(id: String, version: Int): QuestionSet = byVersion[id to version]
+        ?: throw PackNotFoundException("no question set $id version $version")
 }
 
 /** Loads `jurisdiction-packs/questionnaire/` through `index.json` with a STRICT mapper (ADR-0212 D2). */
