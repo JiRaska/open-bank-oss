@@ -33,6 +33,17 @@ interface PaymentMandateRepository {
     suspend fun markCancelled(id: UUID, at: Instant)
 }
 
+/**
+ * account-service: the account id of [iban] when, and only when, it is a verified account held by
+ * [partyId]; null otherwise. The mandate's debit account is ALWAYS resolved through this — never
+ * taken from the caller (#12378 security review).
+ */
+interface ParticipantAccountPort {
+    suspend fun ownAccountId(partyId: UUID, iban: String): UUID?
+}
+
+class ForeignDebtorAccountException : RuntimeException("the debtor account is not a verified account of the participant")
+
 class PaymentMandateNotFoundException(id: UUID) : NoSuchElementException("payment mandate $id not found")
 
 /**
@@ -49,10 +60,13 @@ class PaymentMandateService(
     private val contributions: ContributionService,
     private val port: PaymentMandatePort,
     private val mandates: PaymentMandateRepository,
+    private val accounts: ParticipantAccountPort,
     private val clock: Clock,
 ) {
     suspend fun setUp(request: MandateRequest): PaymentMandate {
-        val externalId = contributions.setUpMandate(request)
+        val iban = request.debtorIban.replace(" ", "").uppercase()
+        val accountId = accounts.ownAccountId(request.participantPartyId, iban) ?: throw ForeignDebtorAccountException()
+        val externalId = contributions.setUpMandate(request.copy(debtorIban = iban, debtorAccountId = accountId))
         val now = clock.instant()
         return mandates.recordIfAbsent(
             PaymentMandate(UUID.randomUUID(), request.contractId, request.kind, externalId, PaymentMandateStatus.ACTIVE, now, now),

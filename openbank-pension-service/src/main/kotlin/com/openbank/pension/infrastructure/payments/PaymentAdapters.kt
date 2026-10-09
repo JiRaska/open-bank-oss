@@ -58,8 +58,8 @@ interface MandateRails {
  * - **SEPA direct debit** (sdd-service): registers the DEBTOR-side mandate on the participant's
  *   account, so the debtor bank authorises the provider's collections. Idempotent on
  *   (creditor identifier, UMR) at the provider; the UMR is derived from the contract reference.
- *   Initiating the collections themselves is a creditor-side rail no service offers yet (#12378
- *   follow-up) — the mandate is what this port can make true today.
+ *   Initiating the collections themselves is a creditor-side rail no service offers yet (#12387)
+ *   — the mandate is what this port can make true today.
  *
  * Every missing input is a refusal before any call: no debtor account id, no debtor name for a
  * direct debit, or no configured collection account means nothing is sent.

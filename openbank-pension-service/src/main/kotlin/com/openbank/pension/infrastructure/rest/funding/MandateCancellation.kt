@@ -4,6 +4,7 @@
 
 package com.openbank.pension.infrastructure.rest.funding
 
+import com.openbank.pension.application.usecase.ForeignDebtorAccountException
 import com.openbank.pension.application.usecase.PaymentMandateNotFoundException
 import jakarta.ws.rs.core.Response
 import org.jboss.resteasy.reactive.server.ServerExceptionMapper
@@ -25,6 +26,10 @@ class PaymentMandateExceptionMappers {
     @ServerExceptionMapper(PaymentMandateNotFoundException::class)
     fun notFound(e: PaymentMandateNotFoundException): Response =
         Response.status(Response.Status.NOT_FOUND).entity(mapOf("error" to e.message)).build()
+
+    @ServerExceptionMapper(ForeignDebtorAccountException::class)
+    fun foreignAccount(e: ForeignDebtorAccountException): Response =
+        Response.status(Response.Status.FORBIDDEN).entity(mapOf("error" to e.message)).build()
 
     @ServerExceptionMapper(MandateScaFailedException::class)
     fun scaFailed(e: MandateScaFailedException): Response =

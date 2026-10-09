@@ -858,3 +858,18 @@ spec:
   config:
     retention.ms: 2592000000
     cleanup.policy: delete
+---
+# openbank-pension-service :: channel `domestic-payment-events-in` (#12378)
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.pension.domestic-payment-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete

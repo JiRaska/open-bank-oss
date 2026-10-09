@@ -53,8 +53,6 @@ data class MandateSetupRequest(
     val amount: BigDecimal? = null,
     val currency: String? = null,
     val firstCollection: LocalDate? = null,
-    /** account-service id of the debtor account (#12378); the downstream rail refuses without it. */
-    val debtorAccountId: java.util.UUID? = null,
     /** Account holder's name; required for a SEPA direct-debit mandate (#12378). */
     val debtorName: String? = null,
 )

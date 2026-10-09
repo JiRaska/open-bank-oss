@@ -6,6 +6,7 @@ package com.openbank.pension.infrastructure.payments
 
 import com.openbank.pension.application.port.out.PaymentMandatePort
 import com.openbank.pension.application.usecase.ContributionService
+import com.openbank.pension.application.usecase.ParticipantAccountPort
 import com.openbank.pension.application.usecase.PaymentMandateRepository
 import com.openbank.pension.application.usecase.PaymentMandateService
 import com.openbank.pension.application.usecase.PayoutSettlementRepository
@@ -25,8 +26,9 @@ class PaymentBeans {
         contributions: ContributionService,
         port: PaymentMandatePort,
         mandates: PaymentMandateRepository,
+        accounts: ParticipantAccountPort,
         clock: Clock,
-    ): PaymentMandateService = PaymentMandateService(contributions, port, mandates, clock)
+    ): PaymentMandateService = PaymentMandateService(contributions, port, mandates, accounts, clock)
 
     @Produces
     @ApplicationScoped

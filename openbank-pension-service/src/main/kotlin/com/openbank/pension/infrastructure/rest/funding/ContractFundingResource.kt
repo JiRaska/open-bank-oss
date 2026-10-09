@@ -124,7 +124,6 @@ class ContractFundingResource {
                 firstCollection = requireNotNull(body.firstCollection) { "firstCollection is required" },
                 // #12378: the order repeats at the contract's own contribution frequency.
                 frequency = contract.schedule.frequency,
-                debtorAccountId = body.debtorAccountId,
                 debtorName = body.debtorName?.takeIf { it.isNotBlank() },
             ),
         )
