@@ -1,0 +1,228 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:catalog-schema:org.openbank.retirement.pension-savings:2",
+  "$comment": "ADR-0334 retirement pack v2. Instrument class coverage is selected per offering by a maker and approved by an independent checker; no strategy implies a default class composition.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "productLine",
+    "jurisdictionPackId",
+    "reviewStatus",
+    "fundStrategy",
+    "instrumentClasses",
+    "permittedProviderTypes",
+    "currency",
+    "feeSchedule",
+    "contributionLimits",
+    "riskClass",
+    "sustainability",
+    "eligibility",
+    "requiredDocuments"
+  ],
+  "properties": {
+    "productLine": {
+      "type": "string",
+      "enum": [
+        "DPS",
+        "DIP"
+      ]
+    },
+    "jurisdictionPackId": {
+      "type": "string",
+      "enum": [
+        "CZ/DPS",
+        "CZ/DIP"
+      ]
+    },
+    "reviewStatus": {
+      "type": "string",
+      "enum": [
+        "ILLUSTRATIVE_REQUIRES_LEGAL_AND_COMMERCIAL_REVIEW",
+        "LEGAL_AND_COMMERCIAL_REVIEWED"
+      ]
+    },
+    "fundStrategy": {
+      "type": "string",
+      "enum": [
+        "CONSERVATIVE",
+        "BALANCED",
+        "SUSTAINABLE_BALANCED",
+        "DYNAMIC",
+        "EQUITY_GLOBAL",
+        "LIFECYCLE"
+      ]
+    },
+    "instrumentClasses": {
+      "type": "array",
+      "description": "Instrument classes covered by this strategy; select only classes evidenced by the applicable questionnaire and offering documents.",
+      "minItems": 1,
+      "maxItems": 3,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "PENSION_FUNDS",
+          "BOND_FUNDS",
+          "EQUITY_FUNDS"
+        ]
+      }
+    },
+    "permittedProviderTypes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "PENSION_COMPANY",
+          "INVESTMENT_COMPANY",
+          "BANK",
+          "INSURANCE_COMPANY",
+          "SECURITIES_DEALER"
+        ]
+      }
+    },
+    "currency": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$"
+    },
+    "feeSchedule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "managementFeeAnnualPercent",
+        "performanceFeePercent"
+      ],
+      "properties": {
+        "managementFeeAnnualPercent": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,2})(\\.[0-9]{1,6})?$"
+        },
+        "performanceFeePercent": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,2})(\\.[0-9]{1,6})?$"
+        }
+      }
+    },
+    "contributionLimits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "minMonthly"
+      ],
+      "properties": {
+        "minMonthly": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,15})(\\.[0-9]{1,2})?$"
+        },
+        "maxMonthly": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,15}(\\.[0-9]{1,2})?$"
+        }
+      }
+    },
+    "riskClass": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 7,
+      "$comment": "PRIIPs summary risk indicator (SRI)."
+    },
+    "sustainability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sfdrArticle"
+      ],
+      "properties": {
+        "sfdrArticle": {
+          "type": "string",
+          "enum": [
+            "ARTICLE_6",
+            "ARTICLE_8",
+            "ARTICLE_9"
+          ]
+        },
+        "minSustainableInvestmentPercent": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        }
+      }
+    },
+    "eligibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "minAge",
+        "residencyCountries"
+      ],
+      "properties": {
+        "minAge": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 120
+        },
+        "residencyCountries": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z]{2}$"
+          }
+        }
+      }
+    },
+    "requiredDocuments": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "productLine": {
+            "const": "DPS"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "jurisdictionPackId": {
+            "const": "CZ/DPS"
+          },
+          "permittedProviderTypes": {
+            "items": {
+              "const": "PENSION_COMPANY"
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "productLine": {
+            "const": "DIP"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "jurisdictionPackId": {
+            "const": "CZ/DIP"
+          }
+        }
+      }
+    }
+  ]
+}
