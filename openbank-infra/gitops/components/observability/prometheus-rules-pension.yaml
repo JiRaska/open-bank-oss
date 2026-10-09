@@ -1,0 +1,78 @@
+# Pension participant-side signals. Fund NAV and holdings belong to the fund-service follow-up.
+# The queue gauges appear only after a successful database snapshot; the existing workflow
+# liveness family distinguishes a failed refresh from a truly empty queue.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-pension-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.pension.operations
+      interval: 1m
+      rules:
+        - alert: PensionUnmatchedPaymentsAgeing
+          expr: openbank_pension_queue_oldest_age_seconds{queue="unmatched_payments"} > 86400 and on(namespace, pod) openbank_pension_queue_size{queue="unmatched_payments"} > 0
+          for: 15m
+          labels:
+            severity: warning
+            team: pension
+          annotations:
+            summary: "Pension unmatched-payment queue has an item older than one day"
+            description: "A pension payment is parked without an identified contract. Reconcile the queue before retrying; do not guess the beneficiary."
+            runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/svc-pension.md
+        - alert: PensionStateContributionDeadlineBreached
+          expr: openbank_pension_state_contribution_deadline_breaches > 0
+          for: 5m
+          labels:
+            severity: critical
+            team: pension
+          annotations:
+            summary: "Pension state-contribution deadline breached ({{ $labels.kind }})"
+            description: "Inspect the filed claim/return and the corresponding acknowledgement; a scheduler success alone does not prove timely filing."
+            runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/svc-pension.md
+        - alert: PensionPaymentInstructionsStuck
+          expr: openbank_pension_queue_oldest_age_seconds{queue="payment_instructions_pending"} > 3600 and on(namespace, pod) openbank_pension_queue_size{queue="payment_instructions_pending"} > 0
+          for: 15m
+          labels:
+            severity: warning
+            team: pension
+          annotations:
+            summary: "Pension payment instruction pending for over one hour"
+            description: "Check the instruction and settlement outcome before any retry to avoid a duplicate payout."
+            runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/svc-pension.md
+        - alert: PensionNotificationsSkippedWhileEnabled
+          expr: increase(openbank_pension_notification_requests_total{outcome="skipped"}[10m]) > 0 and on(namespace, pod) openbank_pension_notifications_enabled == 1
+          for: 2m
+          labels:
+            severity: warning
+            team: pension
+          annotations:
+            summary: "Pension notifications are skipped despite enabled publisher"
+            description: "The pension publisher reported a skipped request while enabled; inspect its configuration and template support."
+            runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/svc-pension.md
+        - alert: PensionStateGaugeRefreshStale
+          expr: openbank_workflow_last_success_age_seconds{workflow="pension-state-gauges"} > 180
+          for: 5m
+          labels:
+            severity: warning
+            team: pension
+          annotations:
+            summary: "Pension state snapshot has not refreshed for over three minutes"
+            description: "Contract counts and queue gauges may be stale; check pension database and the snapshot scheduler before trusting dashboard zeros."
+            runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/svc-pension.md
+        # Kafka's current offset is a cumulative cursor, not a retained-record count. Alert on
+        # newly dead-lettered records; a true persistent non-empty backlog needs an exporter of
+        # the DLQ's retained-record count (or a controlled consumer cursor) before it is safe.
+        - alert: PensionPaymentEventsDeadLettered
+          expr: sum(increase(kafka_topic_partition_current_offset{topic="openbank.dlq.pension.domestic-payment-events-in"}[10m])) > 0
+          for: 2m
+          labels:
+            severity: warning
+            team: pension
+          annotations:
+            summary: "Pension payment event was dead-lettered"
+            description: "Investigate the pension payment-event DLQ and reconcile the affected instruction before replay."
+            runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/svc-pension.md

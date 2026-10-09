@@ -1,0 +1,143 @@
+# Execute against the shipped PrometheusRule via tests/promtool/run.sh.
+rule_files:
+  - prometheus-rules-pension.yaml
+evaluation_interval: 1m
+tests:
+  - interval: 1m
+    name: unmatched payment ageing fires only with a populated queue
+    input_series:
+      - series: 'openbank_pension_queue_oldest_age_seconds{namespace="pension",pod="p1",queue="unmatched_payments"}'
+        values: '90000+0x20'
+      - series: 'openbank_pension_queue_size{namespace="pension",pod="p1",queue="unmatched_payments"}'
+        values: '1+0x20'
+    alert_rule_test:
+      - eval_time: 17m
+        alertname: PensionUnmatchedPaymentsAgeing
+        exp_alerts:
+          - exp_labels: {namespace: pension, pod: p1, queue: unmatched_payments, severity: warning, team: pension}
+            exp_annotations:
+              summary: Pension unmatched-payment queue has an item older than one day
+              description: A pension payment is parked without an identified contract. Reconcile the queue before retrying; do not guess the beneficiary.
+              runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/svc-pension.md
+  - interval: 1m
+    name: empty unmatched queue does not fire on stale age
+    input_series:
+      - series: 'openbank_pension_queue_oldest_age_seconds{namespace="pension",pod="p1",queue="unmatched_payments"}'
+        values: '90000+0x20'
+      - series: 'openbank_pension_queue_size{namespace="pension",pod="p1",queue="unmatched_payments"}'
+        values: '0+0x20'
+    alert_rule_test:
+      - {eval_time: 17m, alertname: PensionUnmatchedPaymentsAgeing, exp_alerts: []}
+  - interval: 1m
+    name: contribution deadline breach fires
+    input_series:
+      - series: 'openbank_pension_state_contribution_deadline_breaches{namespace="pension",kind="return_due"}'
+        values: '1+0x10'
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: PensionStateContributionDeadlineBreached
+        exp_alerts:
+          - exp_labels: {namespace: pension, kind: return_due, severity: critical, team: pension}
+            exp_annotations:
+              summary: Pension state-contribution deadline breached (return_due)
+              description: Inspect the filed claim/return and the corresponding acknowledgement; a scheduler success alone does not prove timely filing.
+              runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/svc-pension.md
+  - interval: 1m
+    name: no contribution deadline breach stays quiet
+    input_series:
+      - series: 'openbank_pension_state_contribution_deadline_breaches{namespace="pension",kind="return_due"}'
+        values: '0+0x10'
+    alert_rule_test:
+      - {eval_time: 7m, alertname: PensionStateContributionDeadlineBreached, exp_alerts: []}
+  - interval: 1m
+    name: old pending payment instruction fires
+    input_series:
+      - series: 'openbank_pension_queue_oldest_age_seconds{namespace="pension",pod="p1",queue="payment_instructions_pending"}'
+        values: '4000+0x20'
+      - series: 'openbank_pension_queue_size{namespace="pension",pod="p1",queue="payment_instructions_pending"}'
+        values: '1+0x20'
+    alert_rule_test:
+      - eval_time: 17m
+        alertname: PensionPaymentInstructionsStuck
+        exp_alerts:
+          - exp_labels: {namespace: pension, pod: p1, queue: payment_instructions_pending, severity: warning, team: pension}
+            exp_annotations:
+              summary: Pension payment instruction pending for over one hour
+              description: Check the instruction and settlement outcome before any retry to avoid a duplicate payout.
+              runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/svc-pension.md
+  - interval: 1m
+    name: recent pending instruction stays quiet
+    input_series:
+      - series: 'openbank_pension_queue_oldest_age_seconds{namespace="pension",pod="p1",queue="payment_instructions_pending"}'
+        values: '300+0x20'
+      - series: 'openbank_pension_queue_size{namespace="pension",pod="p1",queue="payment_instructions_pending"}'
+        values: '1+0x20'
+    alert_rule_test:
+      - {eval_time: 17m, alertname: PensionPaymentInstructionsStuck, exp_alerts: []}
+  - interval: 1m
+    name: skipped notice fires only when enabled
+    input_series:
+      - series: 'openbank_pension_notification_requests_total{namespace="pension",pod="p1",kind="PAYOUT",outcome="skipped"}'
+        values: '0+1x15'
+      - series: 'openbank_pension_notifications_enabled{namespace="pension",pod="p1"}'
+        values: '1+0x15'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: PensionNotificationsSkippedWhileEnabled
+        exp_alerts:
+          - exp_labels: {namespace: pension, pod: p1, kind: PAYOUT, outcome: skipped, severity: warning, team: pension}
+            exp_annotations:
+              summary: Pension notifications are skipped despite enabled publisher
+              description: The pension publisher reported a skipped request while enabled; inspect its configuration and template support.
+              runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/svc-pension.md
+  - interval: 1m
+    name: disabled publisher intentionally skips quietly
+    input_series:
+      - series: 'openbank_pension_notification_requests_total{namespace="pension",pod="p1",kind="PAYOUT",outcome="skipped"}'
+        values: '0+1x15'
+      - series: 'openbank_pension_notifications_enabled{namespace="pension",pod="p1"}'
+        values: '0+0x15'
+    alert_rule_test:
+      - {eval_time: 6m, alertname: PensionNotificationsSkippedWhileEnabled, exp_alerts: []}
+  - interval: 1m
+    name: state snapshot refresh stale fires
+    input_series:
+      - series: 'openbank_workflow_last_success_age_seconds{namespace="pension",workflow="pension-state-gauges"}'
+        values: '300+0x10'
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: PensionStateGaugeRefreshStale
+        exp_alerts:
+          - exp_labels: {namespace: pension, workflow: pension-state-gauges, severity: warning, team: pension}
+            exp_annotations:
+              summary: Pension state snapshot has not refreshed for over three minutes
+              description: Contract counts and queue gauges may be stale; check pension database and the snapshot scheduler before trusting dashboard zeros.
+              runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/svc-pension.md
+  - interval: 1m
+    name: healthy snapshot refresh stays quiet
+    input_series:
+      - series: 'openbank_workflow_last_success_age_seconds{namespace="pension",workflow="pension-state-gauges"}'
+        values: '60+0x10'
+    alert_rule_test:
+      - {eval_time: 7m, alertname: PensionStateGaugeRefreshStale, exp_alerts: []}
+  - interval: 1m
+    name: newly dead-lettered payment events fire
+    input_series:
+      - series: 'kafka_topic_partition_current_offset{topic="openbank.dlq.pension.domestic-payment-events-in",partition="0"}'
+        values: '1+1x15'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: PensionPaymentEventsDeadLettered
+        exp_alerts:
+          - exp_labels: {severity: warning, team: pension}
+            exp_annotations:
+              summary: Pension payment event was dead-lettered
+              description: Investigate the pension payment-event DLQ and reconcile the affected instruction before replay.
+              runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/svc-pension.md
+  - interval: 1m
+    name: unchanged DLQ offset stays quiet
+    input_series:
+      - series: 'kafka_topic_partition_current_offset{topic="openbank.dlq.pension.domestic-payment-events-in",partition="0"}'
+        values: '5+0x15'
+    alert_rule_test:
+      - {eval_time: 6m, alertname: PensionPaymentEventsDeadLettered, exp_alerts: []}

@@ -51,6 +51,27 @@ triaging an incident that starts on `pension`.
 - **Downstream errors:** verify the upstream dependencies above are healthy before
   assuming the fault is local.
 
+## Pension business and technical signals
+
+The `OpenBank — Pension Business` and `OpenBank — Pension Technical` dashboards are
+defined in `openbank-infra/gitops/components/observability/`. Their state panels are
+database snapshots from the `pension-state-gauges` workflow. A missing series on a
+cold pod is **unknown**, not a zero. If the snapshot-age alert fires, do not use a
+displayed old queue value as evidence that the queue is still empty or unchanged.
+
+| Alert | First check | Resolution evidence |
+|---|---|---|
+| `PensionUnmatchedPaymentsAgeing` | Compare the open queue count and oldest age with the underlying parked-payment records. | An authorised reconciliation decision is recorded for the payment; do not infer the contract from an identifier in a metric. |
+| `PensionStateContributionDeadlineBreached` | Identify the claim-filing, claim-payment or return deadline class. | Match the submitted batch/return and its acknowledgement to the statutory period; a successful scheduler invocation is not a receipt. |
+| `PensionPaymentInstructionsStuck` | Check the pending instruction and downstream settlement outcome. | Confirm one settled instruction or a documented cancellation before any replay, so a payout is not duplicated. |
+| `PensionNotificationsSkippedWhileEnabled` | Check the publisher's enabled gauge, request outcome and available template. | One broker-acknowledged request after correction; `enqueued` does not mean delivered to a device. |
+| `PensionStateGaugeRefreshStale` | Check the snapshot scheduler and pension database availability. | A new recorded workflow success and fresh state-gauge scrape. |
+| `PensionPaymentEventsDeadLettered` | Inspect the payment-event DLQ and consumer errors. | Reconcile and safely replay the affected event, then verify the resulting contract/payment state. |
+
+The DLQ alert detects **new arrivals** from a Kafka offset increase. Kafka's
+`current_offset` is cumulative and cannot prove whether retained DLQ records remain;
+do not interpret a quiet alert as an empty DLQ.
+
 ## Disaster recovery
 
 - **RPO target:** ≤ 5 min (continuous archiving). **RTO target:** ≤ 30 min (restore + warm-up).

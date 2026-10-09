@@ -25,6 +25,7 @@ import org.jboss.logging.Logger
 import java.time.LocalDate
 import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicInteger
 
 /** The send, without Kafka types, so [ParticipantNotificationPublisher] is unit-tested. */
 fun interface NotificationRequestSender {
@@ -115,6 +116,14 @@ class KafkaParticipantNotifier(
     objectMapper: ObjectMapper,
     meters: MeterRegistry,
 ) : ParticipantNotifier {
+    // Separate from the outcome counter: a skipped notice is expected while deliberately
+    // disabled, but signals a defect if the live publisher is configured on.
+    private val enabledGauge = AtomicInteger(if (enabled) 1 else 0)
+
+    init {
+        meters.gauge("openbank_pension_notifications_enabled", enabledGauge)
+    }
+
     private val publisher = ParticipantNotificationPublisher(
         enabled,
         { key, payload -> emitter.send(Record.of(key, payload)).await() },
