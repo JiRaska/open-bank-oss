@@ -153,6 +153,9 @@ data class PensionContract(
 
     fun close(now: Instant): PensionContract = moveTo(ContractStatus.CLOSED, now)
 
+    /** TERMINATING -> TRANSFERRED_OUT once a transfer-out settled (ADR-0334 slice S2). */
+    fun markTransferredOut(now: Instant): PensionContract = moveTo(ContractStatus.TRANSFERRED_OUT, now)
+
     /** Strategy can change in any non-terminal state; the previous elections stay as history. */
     fun electStrategy(strategyCode: String, effectiveFrom: LocalDate, now: Instant): PensionContract {
         check(!status.terminal && status != ContractStatus.TERMINATING) {
