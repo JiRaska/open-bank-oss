@@ -48,6 +48,8 @@ data class HeldPayment(
     val extras: Map<String, String?> = emptyMap(),
     /** Verified original initiator, frozen for receipt provenance on delayed rail release. */
     val initiatorActorId: UUID? = null,
+    /** Verified representation mandate at the original hold, never supplied by the client. */
+    val initiatorMandateId: UUID? = null,
 )
 
 /**
@@ -92,6 +94,8 @@ class BusinessPaymentApprovals(
     @ConfigProperty(name = "openbank.edge.business-approvals.enforce", defaultValue = "false")
     private val enforce: Boolean,
 ) {
+    @jakarta.inject.Inject
+    lateinit var actingForResolver: ActingForResolver
     private val actorBoundRails = setOf(
         PaymentRail.DOMESTIC,
         PaymentRail.SEPA,
@@ -201,6 +205,10 @@ class BusinessPaymentApprovals(
             if (p.rail in actorBoundRails) {
                 put("initiatorActorId", (p.initiatorActorId ?: customer.authenticatedActor).toString())
             }
+            p.initiatorMandateId?.let {
+                put("initiatorMandateId", it.toString())
+                put("initiatorHumanId", customer.human.toString())
+            }
             p.amount?.let { put("amount", it) }
             p.currency?.let { put("currency", it) }
             if (p.rail != PaymentRail.SDD_MANDATE) p.creditor?.let { put("creditorIban", it) }
@@ -239,6 +247,8 @@ class BusinessPaymentApprovals(
         }
         val frozenActor = payload.path("initiatorActorId").takeIf { it.isTextual }
             ?.asText()?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+        val frozenMandate = payload.path("initiatorMandateId").takeIf { it.isTextual }
+            ?.asText()?.let { runCatching { UUID.fromString(it) }.getOrNull() }
         // A later signer cannot supply the missing original actor of an older held instruction.
         val actor = frozenActor ?: if (rail in originalKeyRails) null else verifiedInitiatorId
         val frozenBody = objectMapper.writeValueAsString(railRequest)
@@ -247,7 +257,31 @@ class BusinessPaymentApprovals(
                 report(entity, approvalId, ok = false, ref = null, error = "initiator identity unavailable")
                 return mapOf("status" to "RELEASE_FAILED", "error" to "initiator identity unavailable")
             }
-            val receiptHeaders = mapOf("X-Customer-Actor-Id" to actor.toString())
+            val receiptHeaders = if (rail == PaymentRail.STANDING_ORDER) {
+                val originalHuman = payload.path("initiatorHumanId").takeIf { it.isTextual }
+                    ?.asText()?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+                val activeMandates = if (
+                    originalHuman != null &&
+                    frozenMandate != null &&
+                    this::actingForResolver.isInitialized
+                ) {
+                    runCatching { actingForResolver.activeMandateIds(originalHuman, entity) }
+                        .getOrDefault(emptyList())
+                } else {
+                    emptyList()
+                }
+                if (frozenMandate == null || frozenMandate !in activeMandates) {
+                    report(entity, approvalId, ok = false, ref = null, error = "original mandate unavailable")
+                    return mapOf("status" to "RELEASE_FAILED", "error" to "original mandate unavailable")
+                }
+                mapOf(
+                    "X-Customer-Actor-Id" to actor.toString(),
+                    "X-Customer-Mandate-Id" to frozenMandate.toString(),
+                    "X-Customer-Mandate-Ids" to activeMandates.joinToString(","),
+                )
+            } else {
+                mapOf("X-Customer-Actor-Id" to actor.toString())
+            }
             val key = if (rail in originalKeyRails) {
                 val originalKey = railRequest.path("idempotencyKey").takeIf { it.isTextual }
                     ?.asText()?.takeIf { it.isNotBlank() }

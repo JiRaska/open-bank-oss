@@ -11,6 +11,7 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import jakarta.ws.rs.ForbiddenException
+import jakarta.ws.rs.ServiceUnavailableException
 import jakarta.ws.rs.core.Response
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -31,6 +32,11 @@ class ActingForResolverTest {
     private val stranger = UUID.randomUUID()
     private val partyBase = "http://party-service.party.svc:8111"
     private val clock = Clock.fixed(Instant.parse("2026-09-05T10:00:00Z"), ZoneOffset.UTC)
+
+    private val originalMandate = UUID.randomUUID()
+
+    private fun mandate(id: UUID) =
+        """{"partyId":"$company","mandate":{"id":"$id","principalPartyId":"$company","agentPartyId":"$human","status":"ACTIVE"}}"""
 
     private fun resolver(upstream: UpstreamClient, enabled: Boolean = true) =
         ActingForResolver(upstream, ObjectMapper(), clock, partyBase, enabled)
@@ -106,5 +112,44 @@ class ActingForResolverTest {
         val r = resolver(upstream)
         repeat(5) { assertThat(r.resolve(human, company.toString())).isEqualTo(company) }
         verify(exactly = 1) { upstream.get(any(), any()) }
+    }
+
+    @Test
+    fun `money-moving mandate identity is refreshed and regrant gets a distinct identity`() {
+        val upstream = mockk<UpstreamClient>()
+        val regrant = UUID.randomUUID()
+        every { upstream.get(any(), any()) } returnsMany listOf(
+            Response.ok("[${mandate(originalMandate)}]").build(),
+            Response.ok("[${mandate(regrant)}]").build(),
+        )
+        val resolver = resolver(upstream)
+        assertThat(resolver.activeMandateId(human, company)).isEqualTo(originalMandate)
+        assertThat(resolver.activeMandateId(human, company)).isEqualTo(regrant)
+        verify(exactly = 2) { upstream.get(any(), any()) }
+    }
+
+    @Test
+    fun `multiple active roles remain usable while unavailable inventory fails closed`() {
+        val multiple = mockk<UpstreamClient>()
+        val other = UUID.randomUUID()
+        every { multiple.get(any(), any()) } returns Response.ok(
+            "[${mandate(originalMandate)},${mandate(other)}]",
+        ).build()
+        assertThat(resolver(multiple).activeMandateIds(human, company))
+            .containsExactlyElementsOf(listOf(originalMandate, other).sortedBy { it.toString() })
+        val down = mockk<UpstreamClient>()
+        every { down.get(any(), any()) } returns Response.status(503).build()
+        assertThatThrownBy { resolver(down).activeMandateId(human, company) }
+            .isInstanceOf(ServiceUnavailableException::class.java)
+    }
+
+    @Test
+    fun `duplicate active mandate identities fail closed`() {
+        val duplicate = mockk<UpstreamClient>()
+        every { duplicate.get(any(), any()) } returns Response.ok(
+            "[${mandate(originalMandate)},${mandate(originalMandate)}]",
+        ).build()
+        assertThatThrownBy { resolver(duplicate).activeMandateIds(human, company) }
+            .isInstanceOf(ForbiddenException::class.java)
     }
 }

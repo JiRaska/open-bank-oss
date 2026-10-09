@@ -70,6 +70,43 @@ class ActingForResolver(
         return entity ?: claimed
     }
 
+    /** Fresh, bounded ACTIVE mandate identities; never rely on the profile-switch cache for money. */
+    fun activeMandateIds(agent: UUID, entity: UUID): List<UUID> {
+        if (!enabled || agent == entity) throw ForbiddenException("An acting-for mandate is required")
+        val response = try {
+            upstream.get("$partyServiceUrl/api/v1/parties/$agent/acting-for", agent.toString())
+        } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+            Log.warn("Standing-order mandate validation unavailable", e)
+            throw jakarta.ws.rs.ServiceUnavailableException("Mandate validation unavailable")
+        }
+        if (response.status != OK) throw jakarta.ws.rs.ServiceUnavailableException("Mandate validation unavailable")
+        val profiles = runCatching { objectMapper.readTree(response.entity?.toString() ?: "") }.getOrNull()
+            ?.takeIf { it.isArray }
+            ?: throw jakarta.ws.rs.ServiceUnavailableException("Mandate validation unavailable")
+        val matching = profiles.filter { it.path("partyId").asText() == entity.toString() }
+        if (matching.isEmpty() || matching.size > MAX_ACTIVE_MANDATES) {
+            throw ForbiddenException("Active acting-for mandate inventory is invalid")
+        }
+        val ids = matching.map { profile ->
+            val mandate = profile.path("mandate")
+            val id = runCatching { UUID.fromString(mandate.path("id").asText()) }.getOrNull()
+            if (
+                id == null ||
+                mandate.path("principalPartyId").asText() != entity.toString() ||
+                mandate.path("agentPartyId").asText() != agent.toString() ||
+                mandate.path("status").asText() != "ACTIVE"
+            ) {
+                throw ForbiddenException("Acting-for mandate identity is invalid")
+            }
+            id
+        }
+        if (ids.toSet().size != ids.size) throw ForbiddenException("Duplicate acting-for mandate identity")
+        return ids.sortedBy { it.toString() }
+    }
+
+    /** Stable selection for a NEW instruction; existing instructions use set membership. */
+    fun activeMandateId(agent: UUID, entity: UUID): UUID = activeMandateIds(agent, entity).first()
+
     /** The entities [agent] may switch to, straight from party-service (no cache — this IS the list the cache is derived from). */
     fun profilesOf(agent: UUID): List<Map<String, Any?>> {
         val response = upstream.get("$partyServiceUrl/api/v1/parties/$agent/acting-for", agent.toString())
@@ -159,6 +196,7 @@ class ActingForResolver(
     private companion object {
         const val OK = 200
         const val MAX_ENTRIES = 10_000
+        const val MAX_ACTIVE_MANDATES = 16
         val positiveTtl: Duration = Duration.ofSeconds(60)
         val negativeTtl: Duration = Duration.ofSeconds(15)
     }

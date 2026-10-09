@@ -2097,7 +2097,9 @@ paths:
       description: >-
         The edge verifies debit-account ownership and forwards the original key with the
         authenticated actor and effective party. UNKNOWN does not establish that the instruction
-        failed. The key is carried only in the request body, never in a URL.
+        failed. Under X-Acting-For the edge freshly verifies the original representation mandate;
+        a revoked or replaced grant cannot recover an older receipt. The key is carried only in
+        the request body, never in a URL.
       operationId: lookupStandingOrderReceipt
       security:
         - customerOidc: [payments:read]

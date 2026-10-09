@@ -36,6 +36,8 @@ private const val SO_UPSTREAM = "/api/v1/standing-orders"
 private const val SDD_UPSTREAM = "/api/v1/sdd/mandates"
 private const val CONSUME = "/api/v1/sca/challenges/$SCA/consume"
 private const val OLD_ORDER = "ffffffff-ffff-4fff-8fff-ffffffffffff"
+private const val INITIATOR_MANDATE = "99999999-9999-4999-8999-999999999999"
+private const val COSIGNER_MANDATE = "88888888-8888-4888-8888-888888888888"
 
 /**
  * #10281 gap: a standing order or an SDD mandate created under X-Acting-For is a recurring outflow
@@ -58,9 +60,19 @@ class BusinessRecurringApprovalIT {
     @BeforeEach
     fun stubs() {
         BusinessApprovalStubs.reset()
-        val mandate = """[{"partyId":"$COMPANY","partyType":"COMPANY","status":"ACTIVE"}]"""
-        BusinessApprovalStubs.stub("GET", "/api/v1/parties/$INITIATOR/acting-for", body = mandate)
-        BusinessApprovalStubs.stub("GET", "/api/v1/parties/$COSIGNER/acting-for", body = mandate)
+        fun mandate(human: String, id: String) =
+            """[{"partyId":"$COMPANY","partyType":"COMPANY","status":"ACTIVE","mandate":{
+              "id":"$id","principalPartyId":"$COMPANY","agentPartyId":"$human","status":"ACTIVE"}}]"""
+        BusinessApprovalStubs.stub(
+            "GET",
+            "/api/v1/parties/$INITIATOR/acting-for",
+            body = mandate(INITIATOR, INITIATOR_MANDATE),
+        )
+        BusinessApprovalStubs.stub(
+            "GET",
+            "/api/v1/parties/$COSIGNER/acting-for",
+            body = mandate(COSIGNER, COSIGNER_MANDATE),
+        )
         BusinessApprovalStubs.stub("GET", "/api/v1/parties/$COMPANY", body = """{"legalName":"Firma s.r.o."}""")
         BusinessApprovalStubs.stub("GET", "/api/v1/parties/$INITIATOR", body = """{"legalName":"Jana"}""")
         BusinessApprovalStubs.stub("GET", "/api/v1/parties/$COSIGNER", body = """{"legalName":"Petr"}""")
@@ -139,6 +151,8 @@ class BusinessRecurringApprovalIT {
         assertThat(created.path("initiatorSignature").path("partyId").asText()).isEqualTo(INITIATOR)
         assertThat(created.path("payload").path("rail").asText()).isEqualTo("STANDING_ORDER")
         assertThat(created.path("payload").path("initiatorActorId").asText()).isEqualTo(INITIATOR)
+        assertThat(created.path("payload").path("initiatorMandateId").asText()).isEqualTo(INITIATOR_MANDATE)
+        assertThat(created.path("payload").path("initiatorHumanId").asText()).isEqualTo(INITIATOR)
         assertThat(created.path("payload").path("frequency").asText()).isEqualTo("MONTHLY")
         val frozen = created.path("payload").path("railRequest")
         assertThat(frozen.path("partyId").asText()).isEqualTo(COMPANY)
@@ -174,6 +188,40 @@ class BusinessRecurringApprovalIT {
         assertThat(BusinessApprovalStubs.requests("POST", SO_UPSTREAM)).hasSize(1)
         assertThat(BusinessApprovalStubs.requests("POST", CONSUME)).isEmpty()
         assertThat(BusinessApprovalStubs.requests("POST", CREATE)).isEmpty()
+    }
+
+    @Test
+    @TestSecurity(user = "customer:$INITIATOR", roles = ["ROLE_CUSTOMER"])
+    @OidcSecurity(claims = [Claim(key = "party_id", value = INITIATOR)])
+    fun `receipt lookup forwards freshly verified mandate after regrant`() {
+        val lookup = "$SO_UPSTREAM/receipts/lookup"
+        BusinessApprovalStubs.stub("POST", lookup, body = """{"state":"UNKNOWN"}""")
+        fun callLookup() = Given {
+            contentType("application/json")
+            header("X-Acting-For", COMPANY)
+            header("X-Customer-Mandate-Ids", "00000000-0000-4000-8000-000000000001")
+            body("""{"idempotencyKey":"original","debitAccountId":"$ACCOUNT"}""")
+        } When { post("/customer/v1/standing-orders/receipts/lookup") }
+
+        callLookup() Then { statusCode(200) }
+        val replacement = "77777777-7777-4777-8777-777777777777"
+        fun profile(id: String): String =
+            """{"partyId":"$COMPANY","mandate":{"id":"$id","principalPartyId":"$COMPANY",""" +
+                """"agentPartyId":"$INITIATOR","status":"ACTIVE"}}"""
+        BusinessApprovalStubs.stub(
+            "GET",
+            "/api/v1/parties/$INITIATOR/acting-for",
+            body = "[${profile(INITIATOR_MANDATE)},${profile(replacement)}]",
+        )
+        callLookup() Then { statusCode(200) }
+        BusinessApprovalStubs.stub(
+            "GET",
+            "/api/v1/parties/$INITIATOR/acting-for",
+            body = "[${profile(replacement)}]",
+        )
+        callLookup() Then { statusCode(200) }
+        assertThat(BusinessApprovalStubs.requests("POST", lookup).map { it.header("X-Customer-Mandate-Ids") })
+            .containsExactly(INITIATOR_MANDATE, "$replacement,$INITIATOR_MANDATE", replacement)
     }
 
     @Test
@@ -317,6 +365,7 @@ class BusinessRecurringApprovalIT {
             "POST",
             "$DETAIL/release-claim",
             body = """{"claimToken":"t1","payload":{"rail":"STANDING_ORDER","initiatorActorId":"$INITIATOR",""" +
+                """"initiatorHumanId":"$INITIATOR","initiatorMandateId":"$INITIATOR_MANDATE",""" +
                 """"railRequest":{"partyId":"$COMPANY","idempotencyKey":"standing-original", """ +
                 """"amountMinorUnits":150000}}}""",
         )
@@ -329,12 +378,36 @@ class BusinessRecurringApprovalIT {
             body("release.paymentId", equalTo("so-9"))
         }
         val upstream = BusinessApprovalStubs.requests("POST", SO_UPSTREAM).single()
+        assertThat(upstream.header("X-Customer-Mandate-Id")).isEqualTo(INITIATOR_MANDATE)
+        assertThat(upstream.header("X-Customer-Mandate-Ids")).isEqualTo(INITIATOR_MANDATE)
         assertThat(upstream.header("Idempotency-Key")).isEqualTo("standing-original")
         assertThat(upstream.header("X-Customer-Actor-Id")).isEqualTo(INITIATOR)
         assertThat(upstream.header("X-Customer-Party-Id")).isEqualTo(COMPANY)
         assertThat(readJson(upstream.body).path("amountMinorUnits").asLong()).isEqualTo(150_000L)
         val result = readJson(BusinessApprovalStubs.requests("POST", "$DETAIL/release-result").single().body)
         assertThat(result.path("releaseRef").asText()).isEqualTo("so-9")
+    }
+
+    @Test
+    @TestSecurity(user = "customer:$COSIGNER", roles = ["ROLE_CUSTOMER"])
+    @OidcSecurity(claims = [Claim(key = "party_id", value = COSIGNER)])
+    fun `a revoked original mandate refuses held release before rail submission`() {
+        stubLastSignature()
+        BusinessApprovalStubs.stub(
+            "POST",
+            "$DETAIL/release-claim",
+            body = """{"claimToken":"t1","payload":{"rail":"STANDING_ORDER","initiatorActorId":"$INITIATOR",""" +
+                """"initiatorHumanId":"$INITIATOR","initiatorMandateId":"$INITIATOR_MANDATE",""" +
+                """"railRequest":{"partyId":"$COMPANY","idempotencyKey":"standing-original"}}}""",
+        )
+        BusinessApprovalStubs.stub("GET", "/api/v1/parties/$INITIATOR/acting-for", body = "[]")
+        BusinessApprovalStubs.stub("POST", "$DETAIL/release-result", body = "{}")
+
+        sign() Then {
+            statusCode(200)
+            body("release.status", equalTo("RELEASE_FAILED"))
+        }
+        assertThat(BusinessApprovalStubs.requests("POST", SO_UPSTREAM)).isEmpty()
     }
 
     @Test

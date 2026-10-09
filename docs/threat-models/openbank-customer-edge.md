@@ -161,6 +161,11 @@ Trust boundaries:
   cannot replace them during release. Older held payloads without that actor fail closed and need
   reconciliation. A client that omits its own stable key cannot recover a lost create response from
   the edge's generated key; receipt-capable clients must retain and reuse their original key.
+  Under `X-Acting-For`, each standing-order create and lookup freshly resolves the ACTIVE
+  representation mandate IDs from party-service; malformed, oversized or unavailable evidence
+  refuses the operation. Creation freezes one deterministically selected ID while lookup passes
+  the bounded ACTIVE set. The original ID and human are frozen in a held approval, and release
+  refuses an expired or replaced mandate. A new grant cannot recover the former receipt.
 
 - **2026-10-04** — **Canary customer trusted for the synthetic taint (ADR-0331).** `OPENBANK_SYNTHETIC_TRUSTED_PRINCIPALS` names `service-account-openbank-synthetic-retail`, a customers-realm service account bound to one SYNTHETIC party. The identity's shape and the trust list are held by the enforced `synthetic-customer-identity` gate. S-5 residual updated.
 

@@ -3586,6 +3586,9 @@ class CustomerEdgeResource(
         @HeaderParam("X-SCA-Challenge-Id") scaChallengeId: String?,
     ): Response {
         val customer = customer()
+        val activeMandateIds = customer.actingFor?.let { actingForResolver.activeMandateIds(customer.human, it) }
+            .orEmpty()
+        val mandateId = activeMandateIds.firstOrNull()
         val debit = extractTextField(objectMapper, body, "debitAccountId")
             ?.let { runCatching { UUID.fromString(it) }.getOrNull() }
             ?: return badRequest("Missing or malformed debitAccountId")
@@ -3620,15 +3623,23 @@ class CustomerEdgeResource(
         // and follows the entity's signing policy, banded by its per-execution amount.
         if (customer.actingFor != null) {
             val held = heldStandingOrder(enriched, debit, customer.authenticatedActor)
+                ?.copy(initiatorMandateId = mandateId)
                 ?: return badRequest("Missing or malformed amountMinorUnits/currency/creditorIban")
             holdForApproval(customer, held, scaChallengeId, "standingOrders.create")?.let { return it }
+        }
+        val provenanceHeaders = buildMap {
+            put("X-Customer-Actor-Id", customer.authenticatedActor.toString())
+            if (mandateId != null) {
+                put("X-Customer-Mandate-Id", mandateId.toString())
+                put("X-Customer-Mandate-Ids", activeMandateIds.joinToString(","))
+            }
         }
         val resp = upstream.post(
             "$standingOrderServiceUrl/api/v1/standing-orders",
             customer.partyId.toString(),
             enriched,
             key,
-            mapOf("X-Customer-Actor-Id" to customer.authenticatedActor.toString()),
+            provenanceHeaders,
         )
         audit.emit(
             eventType = "STANDING_ORDER_CREATED",
@@ -3651,6 +3662,8 @@ class CustomerEdgeResource(
     @Blocking
     fun lookupStandingOrderReceipt(body: String?): Response {
         val customer = customer()
+        val activeMandateIds = customer.actingFor?.let { actingForResolver.activeMandateIds(customer.human, it) }
+            .orEmpty()
         val request = runCatching { objectMapper.readTree(body) as? ObjectNode }.getOrNull()
             ?: return badRequest("Malformed receipt request")
         val key = request.path("idempotencyKey").takeIf { it.isTextual }?.asText()?.takeIf { it.isNotBlank() }
@@ -3666,12 +3679,18 @@ class CustomerEdgeResource(
             put("idempotencyKey", key)
             put("debitAccountId", accountId.toString())
         }
+        val provenanceHeaders = buildMap {
+            put("X-Customer-Actor-Id", customer.authenticatedActor.toString())
+            if (activeMandateIds.isNotEmpty()) {
+                put("X-Customer-Mandate-Ids", activeMandateIds.joinToString(","))
+            }
+        }
         return upstream.post(
             "$standingOrderServiceUrl/api/v1/standing-orders/receipts/lookup",
             customer.partyId.toString(),
             upstreamBody.toString(),
             null,
-            mapOf("X-Customer-Actor-Id" to customer.authenticatedActor.toString()),
+            provenanceHeaders,
         )
     }
 
