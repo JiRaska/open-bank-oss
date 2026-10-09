@@ -94,10 +94,10 @@ interface BillingAssessmentRepository {
     suspend fun postedFeesForAccount(accountId: String, from: Instant, to: Instant): List<AssessedFee>
 
     /**
-     * Idempotently appends the `billing.annual-fee-summary.ready` outbox row for
-     * `(summary.accountId, summary.year)` (ADR-0248) — a no-op (returns `false`, nothing written)
-     * if a row for this account/year was already appended, so the annual scheduler is safe to
-     * re-run. Returns `true` if this call actually appended the row.
+     * Idempotently reserves `(summary.accountId, summary.year)` in durable issuance state and
+     * appends the `billing.annual-fee-summary.ready` outbox row in the SAME transaction (ADR-0248).
+     * A no-op (returns `false`, nothing written) if this account/year was already issued, including
+     * after the SENT outbox row has been purged. Returns `true` only when this call owns the new key.
      */
     suspend fun appendAnnualFeeSummaryEvent(summary: AnnualFeeSummary, occurredAt: Instant): Boolean
 }
