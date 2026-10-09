@@ -75,6 +75,8 @@ All paths are under `/customer/v1`. Scopes are the OAuth scopes declared in `ope
 
 Omitting `partyId` merges the authenticated person and every company in the current mandate inventory. Each item carries its origin `partyId`; pass that value to the detail and mark-read routes when opening a company item. An explicit `partyId` filter must belong to the person or a current mandate. The response contains the latest 1–100 items with `page: 0`; use the existing selected-profile list for older history. `total` and `unreadCount` sum the party responses seen during this request, so concurrent writes do not form one atomic snapshot. A failed mandate inventory returns 503; an unauthorized filter returns 403; a failed or mismatched party feed returns 502 without partial items.
 
+Upstream reads share one aggregate monotonic deadline; later reads receive only the remaining time, and an expired budget returns 502 rather than a partial feed.
+
 ## Selected requests
 
 ### Initiate a domestic payment (enriched)
