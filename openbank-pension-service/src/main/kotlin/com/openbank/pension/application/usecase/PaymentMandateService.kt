@@ -4,6 +4,8 @@
 
 package com.openbank.pension.application.usecase
 
+import com.openbank.pension.application.exit.ScaOperation
+import com.openbank.pension.application.exit.ScaVerificationPort
 import com.openbank.pension.application.port.out.MandateRequest
 import com.openbank.pension.application.port.out.PaymentMandatePort
 import com.openbank.pension.domain.contribution.MandateKind
@@ -42,6 +44,32 @@ interface ParticipantAccountPort {
     suspend fun ownAccountId(partyId: UUID, iban: String): UUID?
 }
 
+/**
+ * The exact document a mandate set-up challenge signs: contract, kind, debtor IBAN (normalised),
+ * amount, currency and first collection. A challenge raised for another IBAN, another contract or
+ * another amount has a different hash and is refused, and sca-service burns it only once.
+ */
+object PaymentMandateSetup {
+    fun documentHash(request: MandateRequest): String {
+        val iban = request.debtorIban.replace(" ", "").uppercase()
+        val doc = listOf(
+            "pension-mandate-setup",
+            request.contractId,
+            request.kind,
+            iban,
+            request.amount.stripTrailingZeros().toPlainString(),
+            request.currency.uppercase(),
+            request.firstCollection,
+        ).joinToString("|")
+        return java.security.MessageDigest.getInstance("SHA-256")
+            .digest(doc.toByteArray(java.nio.charset.StandardCharsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+    }
+}
+
+/** The participant's SCA over the mandate document was not verified (403); nothing was looked up or sent. */
+class MandateSetupScaFailedException : RuntimeException("strong customer authentication failed for this mandate")
+
 class ForeignDebtorAccountException :
     RuntimeException("the debtor account is not a verified account of the participant")
 
@@ -62,9 +90,17 @@ class PaymentMandateService(
     private val port: PaymentMandatePort,
     private val mandates: PaymentMandateRepository,
     private val accounts: ParticipantAccountPort,
+    private val sca: ScaVerificationPort,
     private val clock: Clock,
 ) {
-    suspend fun setUp(request: MandateRequest): PaymentMandate {
+    /**
+     * Binds the participant's account to a recurring debit, so it is SCA-gated like every sibling
+     * (mandate cancel, payout confirm, payout-account change): the single-use challenge must sign
+     * `pension-mandate-setup:<documentHash>` (ADR-0335 namespace) BEFORE the account is looked up
+     * or any rail is called. There is no operator or system path to this method.
+     */
+    suspend fun setUp(request: MandateRequest, scaChallengeId: String?): PaymentMandate {
+        requireMandateSca(request, scaChallengeId)
         val iban = request.debtorIban.replace(" ", "").uppercase()
         val accountId = accounts.ownAccountId(request.participantPartyId, iban) ?: throw ForeignDebtorAccountException()
         val externalId = contributions.setUpMandate(request.copy(debtorIban = iban, debtorAccountId = accountId))
@@ -80,6 +116,18 @@ class PaymentMandateService(
                 now,
             ),
         )
+    }
+
+    private suspend fun requireMandateSca(request: MandateRequest, scaChallengeId: String?) {
+        val challenge = scaChallengeId?.takeIf { it.isNotBlank() }
+        val verified = challenge != null &&
+            sca.verify(
+                request.participantPartyId,
+                challenge,
+                PaymentMandateSetup.documentHash(request),
+                ScaOperation.MANDATE_SETUP,
+            )
+        if (!verified) throw MandateSetupScaFailedException()
     }
 
     suspend fun cancel(contractId: UUID, mandateId: UUID): PaymentMandate {

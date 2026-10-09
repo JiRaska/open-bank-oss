@@ -155,7 +155,7 @@ class FundingApiIT {
         spec(
             owner,
         ).body(
-            """{"kind":"STANDING_ORDER","debtorIban":"CZ6508000000192000145399","amount":1700,"currency":"CZK","firstCollection":"2026-11-01"}""",
+            """{"kind":"STANDING_ORDER","debtorIban":"CZ6508000000192000145399","amount":1700,"currency":"CZK","firstCollection":"2026-11-01","scaChallengeId":"sca-${UUID.randomUUID()}"}""",
         )
             .`when`().post("$funding/$id/mandates").then().statusCode(201)
         spec(owner).body("""{"usage":{"retirement-products-deduction":10000}}""")

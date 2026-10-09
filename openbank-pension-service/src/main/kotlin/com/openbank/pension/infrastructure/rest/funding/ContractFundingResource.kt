@@ -127,6 +127,7 @@ class ContractFundingResource {
                 frequency = contract.schedule.frequency,
                 debtorName = body.debtorName?.takeIf { it.isNotBlank() },
             ),
+            body.scaChallengeId,
         )
         return Response.status(Response.Status.CREATED)
             .entity(MandateResponse(mandate.externalId, mandate.id, mandate.status.name))

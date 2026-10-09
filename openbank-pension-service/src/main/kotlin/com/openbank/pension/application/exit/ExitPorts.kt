@@ -93,6 +93,7 @@ enum class ScaOperation(val code: String) {
     BENEFICIARY_CHANGE("beneficiary-change"),
     ANNUITY_SELECTION("annuity-selection"),
     ANNUITY_CANCELLATION("annuity-cancellation"),
+    MANDATE_SETUP("mandate-setup"),
     MANDATE_CANCELLATION("mandate-cancellation"),
     ;
 

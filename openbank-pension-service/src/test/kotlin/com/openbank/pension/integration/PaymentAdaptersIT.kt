@@ -76,7 +76,7 @@ class PaymentAdaptersIT {
     private fun mandate(owner: UUID, id: String, first: String = "2026-11-01"): String = spec(owner)
         .body(
             """{"kind":"STANDING_ORDER","debtorIban":"CZ6508000000192000145399","amount":1700,"currency":"CZK",""" +
-                """"firstCollection":"$first"}""",
+                """"firstCollection":"$first","scaChallengeId":"sca-${UUID.randomUUID()}"}""",
         )
         .`when`().post("$funding/$id/mandates").then().statusCode(201)
         .body("status", equalTo("ACTIVE"))
@@ -90,10 +90,17 @@ class PaymentAdaptersIT {
         val mandateId = mandate(owner, id)
         assertThat(text("SELECT status FROM pension_payment_mandates WHERE id = '$mandateId'")).isEqualTo("ACTIVE")
 
+        // No SCA challenge over the mandate document: refused before any lookup, nothing recorded.
+        spec(owner).body(
+            """{"kind":"STANDING_ORDER","debtorIban":"CZ6508000000192000145399","amount":1700,"currency":"CZK",""" +
+                """"firstCollection":"2027-01-01"}""",
+        ).`when`().post("$funding/$id/mandates").then().statusCode(403)
+        assertThat(text("SELECT count(*) FROM pension_payment_mandates WHERE contract_id = '$id'")).isEqualTo("1")
+
         // Someone else's account as the debtor: refused, nothing recorded.
         spec(owner).body(
             """{"kind":"STANDING_ORDER","debtorIban":"CZ5508000000001234567899","amount":1700,"currency":"CZK",""" +
-                """"firstCollection":"2027-01-01"}""",
+                """"firstCollection":"2027-01-01","scaChallengeId":"sca-${UUID.randomUUID()}"}""",
         ).`when`().post("$funding/$id/mandates").then().statusCode(403)
         assertThat(text("SELECT count(*) FROM pension_payment_mandates WHERE contract_id = '$id'")).isEqualTo("1")
 

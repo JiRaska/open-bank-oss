@@ -2941,8 +2941,15 @@ components:
           description: SCA challenge signing this contract's cancellation of this mandate (single use).
     MandateSetupRequest:
       type: object
-      required: [kind, debtorIban, amount, currency, firstCollection]
+      required: [kind, debtorIban, amount, currency, firstCollection, scaChallengeId]
       properties:
+        scaChallengeId:
+          type: string
+          description: >-
+            Single-use sca-service APPROVAL challenge raised with approvalRequestId
+            `pension-mandate-setup:<sha256>` over `pension-mandate-setup|contractId|kind|IBAN|amount|CURRENCY|firstCollection`
+            (IBAN without spaces, upper case; amount without trailing zeros). Missing or not verified = 403,
+            before any account lookup.
         kind: { type: string, enum: [STANDING_ORDER, DIRECT_DEBIT] }
         debtorIban: { type: string }
         amount: { type: number, exclusiveMinimum: 0, maximum: 999999999.99, multipleOf: 0.01 }

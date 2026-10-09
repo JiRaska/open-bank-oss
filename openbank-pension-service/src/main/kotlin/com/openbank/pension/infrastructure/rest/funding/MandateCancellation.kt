@@ -22,6 +22,10 @@ object PaymentMandateCancellation {
 class MandateScaFailedException : RuntimeException("strong customer authentication failed for this cancellation")
 
 class PaymentMandateExceptionMappers {
+    @ServerExceptionMapper(com.openbank.pension.application.usecase.MandateSetupScaFailedException::class)
+    fun setupScaFailed(e: com.openbank.pension.application.usecase.MandateSetupScaFailedException): Response =
+        Response.status(Response.Status.FORBIDDEN).entity(mapOf("error" to e.message)).build()
+
     @ServerExceptionMapper(PaymentMandateNotFoundException::class)
     fun notFound(e: PaymentMandateNotFoundException): Response =
         Response.status(Response.Status.NOT_FOUND).entity(mapOf("error" to e.message)).build()
