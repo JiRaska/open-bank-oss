@@ -54,6 +54,9 @@ class ContractChangesApiIT {
     @Inject
     lateinit var deathClaims: DeathClaimService
 
+    @Inject
+    lateinit var claimRepo: com.openbank.pension.application.exit.DeathClaimRepository
+
     private val party: UUID = UUID.randomUUID()
     private val contracts = "/api/v1/pension/contracts"
 
@@ -113,7 +116,8 @@ class ContractChangesApiIT {
     @TestSecurity(user = "edge", roles = ["ROLE_API"])
     fun `beneficiary change - shares must total 100, history kept, contract updated`() {
         val id = active()
-        val bad = """{"beneficiaries":[{"name":"A","sharePercent":60},{"name":"B","sharePercent":30}],"scaChallengeId":"x"}"""
+        val bad = """{"beneficiaries":[{"name":"A","sharePercent":60},{"name":"B","sharePercent":30}],""" +
+            """"scaChallengeId":"x"}"""
         req().body(bad).post("$contracts/$id/beneficiaries/changes").then().statusCode(400)
         val good =
             """{"beneficiaries":[{"name":"John Doe","sharePercent":40},{"name":"Jane Doe","sharePercent":60}],""" +
@@ -187,5 +191,99 @@ class ContractChangesApiIT {
         }
         assertThat(outcome.exceptionOrNull()).hasMessageContaining("death claim")
         assertThat(jdbc("select count(*) from pension_beneficiary_designations where contract_id = ?", id)).isZero()
+    }
+
+    @Test
+    fun `two parallel schedule changes planned on the same history - exactly one wins`() {
+        val id = active()
+        val contract = onVertx { contractRepository.findById(id)!! }
+        val base = onVertx { store.scheduleHistory(id) }
+        val pack = com.openbank.pension.infrastructure.pack.JurisdictionPackLoader.loadRegistry().pinnedFor(contract)
+        val today = LocalDate.now()
+        val start = CountDownLatch(1)
+        val pool = Executors.newFixedThreadPool(2)
+        val results = listOf("2000", "2100").map { amount ->
+            pool.submit(
+                Callable {
+                    start.await()
+                    runCatching {
+                        val req = com.openbank.pension.domain.maintenance.ScheduleChangeRequest(
+                            BigDecimal(amount),
+                            com.openbank.pension.domain.model.ContributionFrequency.MONTHLY,
+                            20,
+                        )
+                        val plan = base.plan(contract, pack, req, today)
+                        onVertx {
+                            store.saveSchedule(base.record(plan, "sca-$amount", "k-$amount", today, Instant.now()))
+                        }
+                    }
+                },
+            )
+        }
+        start.countDown()
+        val outcomes = results.map { it.get() }
+        pool.shutdown()
+        assertThat(outcomes.count { it.isSuccess }).isEqualTo(1)
+        assertThat(
+            jdbc("select count(*) from pension_contribution_schedule_changes where contract_id = ?", id),
+        ).isEqualTo(1)
+    }
+
+    /**
+     * Change vs death registration IN PARALLEL, repeated. Whatever the interleaving, the claim's
+     * claimants are the designation in force when the claim committed: either the change was
+     * refused, or it committed first and the claim carries it. Never a committed designation the
+     * claim does not reflect.
+     */
+    @Test
+    fun `beneficiary change racing a death registration - the claim always reflects the final designation`() {
+        repeat(RACE_ROUNDS) { round ->
+            val id = active()
+            onVertx { contractRepository.save(contractRepository.findById(id)!!.requestTermination(Instant.now())) }
+            val snapshot = onVertx { contractRepository.findById(id)!! }
+            val b = Beneficiary("Racer $round", null, BigDecimal("100"))
+            val start = CountDownLatch(1)
+            val pool = Executors.newFixedThreadPool(2)
+            val change = pool.submit(
+                Callable {
+                    start.await()
+                    runCatching {
+                        onVertx {
+                            store.saveBeneficiaries(
+                                snapshot.designateBeneficiaries(listOf(b), Instant.now()),
+                                version(1, "r$round", b),
+                            )
+                        }
+                    }
+                },
+            )
+            val death = pool.submit(
+                Callable {
+                    start.await()
+                    onVertx {
+                        deathClaims.notify(
+                            NotifyDeathCommand("op-1", id, LocalDate.now().minusDays(1), "cert", "d$round"),
+                        )
+                    }
+                },
+            )
+            start.countDown()
+            val changed = change.get().isSuccess
+            death.get()
+            pool.shutdown()
+            val claimantNames = onVertx { claimRepo.findByContract(id)!! }.claimants.map { it.name }
+            if (changed) {
+                assertThat(claimantNames).containsExactly("Racer $round")
+            } else {
+                assertThat(claimantNames).containsExactlyInAnyOrder("Jane Doe", "John Doe")
+                assertThat(
+                    jdbc("select count(*) from pension_beneficiary_designations where contract_id = ?", id),
+                ).isZero()
+            }
+        }
+    }
+
+    private companion object {
+        const val RACE_ROUNDS = 8
     }
 }

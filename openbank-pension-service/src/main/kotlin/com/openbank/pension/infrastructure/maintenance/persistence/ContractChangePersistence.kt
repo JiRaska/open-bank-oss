@@ -133,6 +133,12 @@ class ContractChangeStoreImpl(
             lockContractRow(history.contractId).flatMap {
                 schedules.find("contractId = ?1 order by seq", history.contractId).list()
             }.flatMap { stored ->
+                // Under the contract lock: the history this change was planned on must still be the
+                // stored one (exactly one new version on top of it). A concurrent change that
+                // committed first makes this a 409 here — not only via the (contract_id, seq) key.
+                if (stored.size != history.latestSeq - 1) {
+                    throw ConcurrentContractUpdateException(history.contractId, stored.size, history.latestSeq - 1)
+                }
                 val bySeq = stored.associateBy { it.seq }
                 history.versions.filter { it.seq in bySeq }.forEach { v ->
                     // The only mutation history allows: SCHEDULED -> SUPERSEDED.

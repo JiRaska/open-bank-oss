@@ -71,7 +71,7 @@ class ContractMaintenanceResource {
     suspend fun previewSchedule(
         @PathParam("contractId") contractId: UUID,
         @HeaderParam(PARTY_HEADER) party: String?,
-        @HeaderParam(IDEMPOTENCY_HEADER) idempotencyKey: String?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         request: ScheduleChangeDto?,
     ): SchedulePreviewResponse {
         requireIdempotencyKey(idempotencyKey)
@@ -88,7 +88,7 @@ class ContractMaintenanceResource {
     suspend fun changeSchedule(
         @PathParam("contractId") contractId: UUID,
         @HeaderParam(PARTY_HEADER) party: String?,
-        @HeaderParam(IDEMPOTENCY_HEADER) idempotencyKey: String?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         request: ScheduleChangeDto?,
     ): Response {
         val key = requireIdempotencyKey(idempotencyKey)
@@ -124,7 +124,7 @@ class ContractMaintenanceResource {
     suspend fun previewBeneficiaries(
         @PathParam("contractId") contractId: UUID,
         @HeaderParam(PARTY_HEADER) party: String?,
-        @HeaderParam(IDEMPOTENCY_HEADER) idempotencyKey: String?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         request: BeneficiaryChangeDto?,
     ): BeneficiaryPreviewResponse {
         requireIdempotencyKey(idempotencyKey)
@@ -141,7 +141,7 @@ class ContractMaintenanceResource {
     suspend fun changeBeneficiaries(
         @PathParam("contractId") contractId: UUID,
         @HeaderParam(PARTY_HEADER) party: String?,
-        @HeaderParam(IDEMPOTENCY_HEADER) idempotencyKey: String?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         request: BeneficiaryChangeDto?,
     ): Response {
         val key = requireIdempotencyKey(idempotencyKey)
