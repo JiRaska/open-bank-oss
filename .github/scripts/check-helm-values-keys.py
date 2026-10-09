@@ -236,7 +236,10 @@ def check_fleet() -> int:
         for name, chart, repo_url, version, values in iter_helm_sources():
             chart_root = cache / f"{chart}-{version}"
             if not chart_root.exists():
+                pull_started = time.monotonic()
                 pull_error = _pull_chart(chart, repo_url, version, chart_root)
+                print(f"TIMING {name}: pull {chart}@{version} "
+                      f"{time.monotonic() - pull_started:.2f}s", flush=True)
                 if pull_error is not None:
                     # COULD-NOT-CHECK is a third state, and collapsing it into FAIL was wrong in
                     # both directions. Measured 2026-08-21: gitlab.com answered 502 for the
@@ -263,7 +266,10 @@ def check_fleet() -> int:
                       file=sys.stderr)
                 return 1
 
+            render_started = time.monotonic()
             ignored = ignored_top_level_keys(str(chart_yamls[0].parent), values)
+            print(f"TIMING {name}: render {chart}@{version} "
+                  f"{time.monotonic() - render_started:.2f}s", flush=True)
             if ignored is None:
                 print(f"FAIL {name}: `helm template` failed for {chart}@{version}",
                       file=sys.stderr)
