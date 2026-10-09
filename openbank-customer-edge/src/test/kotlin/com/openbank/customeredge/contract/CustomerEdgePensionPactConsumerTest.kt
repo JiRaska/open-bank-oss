@@ -1,0 +1,253 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+
+package com.openbank.customeredge.contract
+
+import au.com.dius.pact.consumer.MockServer
+import au.com.dius.pact.consumer.dsl.LambdaDsl.newJsonBody
+import au.com.dius.pact.consumer.dsl.LambdaDslObject
+import au.com.dius.pact.consumer.dsl.PactDslRequestWithoutPath
+import au.com.dius.pact.consumer.dsl.PactDslWithProvider
+import au.com.dius.pact.consumer.dsl.PactDslWithState
+import au.com.dius.pact.consumer.junit5.PactConsumerTestExt
+import au.com.dius.pact.consumer.junit5.PactTestFor
+import au.com.dius.pact.core.model.PactSpecVersion
+import au.com.dius.pact.core.model.RequestResponsePact
+import au.com.dius.pact.core.model.annotations.Pact
+import com.openbank.customeredge.infrastructure.rest.CustomerPartyResolver
+import com.openbank.customeredge.infrastructure.rest.CustomerPensionResource
+import com.openbank.customeredge.infrastructure.rest.UpstreamClient
+import com.sun.net.httpserver.HttpServer
+import io.mockk.every
+import io.mockk.mockk
+import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.extension.ExtendWith
+import java.net.InetSocketAddress
+import java.util.Optional
+import java.util.UUID
+
+/**
+ * Consumer contract for the calls customer-edge makes to pension-service (ADR-0334 S6) on the
+ * routes S1 has shipped. The real [CustomerPensionResource] and [UpstreamClient] drive every
+ * interaction, and every expected path is a LITERAL.
+ *
+ * By-id routes are two interactions, because the edge reads the contract with the party header to
+ * prove ownership before acting. The 404 for an unknown contract is what that guard relies on, and
+ * the 401 records that pension-service refuses a caller with no M2M identity (ADR-0279).
+ *
+ * Provider replay: pension-service is not on main yet, so its `@PactFolder` replay of this pact
+ * lands with the service (#12350); the pact is listed in check-pact-provider-replay.py's
+ * KNOWN_UNCOVERED until then.
+ */
+@ExtendWith(PactConsumerTestExt::class)
+@PactTestFor(providerName = "openbank-pension-service", pactVersion = PactSpecVersion.V3)
+class CustomerEdgePensionPactConsumerTest {
+    private lateinit var tokenStub: HttpServer
+
+    @BeforeEach
+    fun startTokenStub() {
+        tokenStub = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0).apply {
+            createContext("/protocol/openid-connect/token") { exchange ->
+                val bytes = """{"access_token":"pact-token","expires_in":300}""".toByteArray()
+                exchange.responseHeaders.add("Content-Type", "application/json")
+                exchange.sendResponseHeaders(200, bytes.size.toLong())
+                exchange.responseBody.use { it.write(bytes) }
+            }
+            start()
+        }
+    }
+
+    @AfterEach
+    fun stopTokenStub() = tokenStub.stop(0)
+
+    @Pact(consumer = "openbank-customer-edge", provider = "openbank-pension-service")
+    fun createContract(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(NO_CONTRACT_STATE)
+        .uponReceiving("POST a draft pension contract for the customer party")
+        .path("/api/v1/pension/contracts")
+        .method("POST")
+        .headers(mapOf("Content-Type" to "application/json", "X-Customer-Party-Id" to PARTY_ID))
+        .body(
+            newJsonBody { b ->
+                b.stringValue("productLine", "DPS")
+                b.stringValue("jurisdiction", "CZ")
+                b.stringValue("providerEntityId", PROVIDER_ID)
+                b.stringValue("providerType", "PENSION_COMPANY")
+                b.stringValue("birthDate", "1990-05-01")
+                b.nullValue("residencyCountry")
+                b.`object`("schedule") { s ->
+                    s.numberValue("amount", 1000)
+                    s.stringValue("currency", "CZK")
+                    s.stringValue("frequency", "MONTHLY")
+                    s.nullValue("employerAmount")
+                }
+                b.stringValue("strategyCode", "BALANCED")
+                b.array("beneficiaries") { }
+            }.build(),
+        )
+        .willRespondWith()
+        .status(201)
+        .body(newJsonBody { c -> contract(c, "DRAFT", anyId = true) }.build())
+        .toPact()
+
+    @Pact(consumer = "openbank-customer-edge", provider = "openbank-pension-service")
+    fun readContract(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(ACTIVE_STATE).readById("ACTIVE")
+        .toPact()
+
+    @Pact(consumer = "openbank-customer-edge", provider = "openbank-pension-service")
+    fun electStrategy(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(ACTIVE_STATE).readById("ACTIVE")
+        .given(ACTIVE_STATE)
+        .uponReceiving("PUT a new strategy election on the contract")
+        .path("/api/v1/pension/contracts/$CONTRACT_ID/strategy")
+        .method("PUT")
+        .headers(mapOf("Content-Type" to "application/json", "X-Customer-Party-Id" to PARTY_ID))
+        .body(newJsonBody { b -> b.stringValue("strategyCode", "DYNAMIC").nullValue("effectiveFrom") }.build())
+        .willRespondWith()
+        .status(200)
+        .body(newJsonBody { c -> contract(c, "ACTIVE") }.build())
+        .toPact()
+
+    @Pact(consumer = "openbank-customer-edge", provider = "openbank-pension-service")
+    fun suspend(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(ACTIVE_STATE).readById("ACTIVE")
+        .given(ACTIVE_STATE)
+        .uponReceiving("POST suspend contributions on the contract")
+        .path("/api/v1/pension/contracts/$CONTRACT_ID/suspend")
+        .method("POST")
+        .headers(mapOf("X-Customer-Party-Id" to PARTY_ID))
+        .willRespondWith()
+        .status(200)
+        .body(newJsonBody { c -> contract(c, "SUSPENDED") }.build())
+        .toPact()
+
+    @Pact(consumer = "openbank-customer-edge", provider = "openbank-pension-service")
+    fun unknownContract(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(NO_CONTRACT_STATE)
+        .uponReceiving("GET a pension contract the customer party does not hold")
+        .path("/api/v1/pension/contracts/$UNKNOWN_ID")
+        .method("GET")
+        .headers(mapOf("X-Customer-Party-Id" to PARTY_ID))
+        .willRespondWith()
+        .status(404)
+        .toPact()
+
+    @Pact(consumer = "openbank-customer-edge", provider = "openbank-pension-service")
+    fun missingIdentity(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(NEGATIVE_AUTH_STATE)
+        .uponReceiving("GET a pension contract with no M2M identity")
+        .path("/api/v1/pension/contracts/$CONTRACT_ID")
+        .method("GET")
+        .headers(mapOf("X-Customer-Party-Id" to PARTY_ID))
+        .willRespondWith()
+        .status(401)
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "createContract")
+    fun `creating a draft matches the provider`(mockServer: MockServer) {
+        val response = resource(mockServer).create(
+            """{"productLine":"DPS","jurisdiction":"CZ","providerEntityId":"$PROVIDER_ID",
+               "providerType":"PENSION_COMPANY","birthDate":"1990-05-01","strategyCode":"BALANCED",
+               "schedule":{"amount":"1000","currency":"CZK","frequency":"MONTHLY"}}""",
+            "pact-key",
+        )
+
+        assertThat(response.status).isEqualTo(201)
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "readContract")
+    fun `reading an owned contract matches the provider`(mockServer: MockServer) {
+        // The unit register is a separate provider; unreachable here, so the overview omits valuation.
+        assertThat(resource(mockServer).contract(CONTRACT_ID).status).isEqualTo(200)
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "electStrategy")
+    fun `electing a strategy matches the provider`(mockServer: MockServer) {
+        assertThat(resource(mockServer).strategy(CONTRACT_ID, """{"strategyCode":"DYNAMIC"}""").status).isEqualTo(200)
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "suspend")
+    fun `pausing contributions matches the provider`(mockServer: MockServer) {
+        assertThat(resource(mockServer).pause(CONTRACT_ID, "pact-key").status).isEqualTo(200)
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "unknownContract")
+    fun `an unknown contract is NOT_FOUND at the provider and at the edge`(mockServer: MockServer) {
+        assertThat(resource(mockServer).contract(UNKNOWN_ID).status).isEqualTo(404)
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "missingIdentity")
+    fun `the provider answers 401 UNAUTHORIZED to a caller with no identity`(mockServer: MockServer) {
+        val connection = java.net.URI("${mockServer.getUrl()}/api/v1/pension/contracts/$CONTRACT_ID").toURL()
+            .openConnection() as java.net.HttpURLConnection
+        connection.setRequestProperty("X-Customer-Party-Id", PARTY_ID)
+
+        assertThat(connection.responseCode).isEqualTo(401)
+    }
+
+    private fun resource(mockServer: MockServer): CustomerPensionResource {
+        val upstream = UpstreamClient().apply {
+            tokenEndpointBase = "http://127.0.0.1:${tokenStub.address.port}"
+            clientId = "openbank-customer-edge"
+            clientSecret = "pact"
+            tlsTrustCertificateFile = Optional.empty()
+        }
+        val parties = mockk<CustomerPartyResolver> { every { resolve(null) } returns UUID.fromString(PARTY_ID) }
+        return CustomerPensionResource(upstream, parties).apply {
+            pensionServiceUrl = mockServer.getUrl()
+            fundServiceUrl = "http://127.0.0.1:9"
+            catalogUrl = "http://127.0.0.1:9"
+        }
+    }
+
+    private fun PactDslWithState.readById(status: String) =
+        uponReceiving("GET the pension contract to prove the customer holds it").readById(status)
+
+    private fun PactDslRequestWithoutPath.readById(status: String) = path("/api/v1/pension/contracts/$CONTRACT_ID")
+        .method("GET")
+        .headers(mapOf("X-Customer-Party-Id" to PARTY_ID))
+        .willRespondWith()
+        .status(200)
+        .body(newJsonBody { c -> contract(c, status) }.build())
+
+    private companion object {
+        const val PARTY_ID = "11111111-1111-4111-8111-111111111111"
+        const val CONTRACT_ID = "44444444-4444-4444-8444-444444444444"
+        const val PROVIDER_ID = "55555555-5555-4555-8555-555555555555"
+        const val UNKNOWN_ID = "99999999-9999-4999-8999-999999999999"
+        const val ACTIVE_STATE = "the customer party holds an active pension contract"
+        const val NO_CONTRACT_STATE = "the customer party holds no pension contract"
+        const val NEGATIVE_AUTH_STATE = "no valid M2M identity is presented"
+        const val STATUSES =
+            "DRAFT|PENDING_ACTIVATION|ACTIVE|SUSPENDED|TERMINATING|PAID_OUT|TRANSFERRED_OUT|CLOSED"
+
+        /** The fields the edge reads. `participantPartyId` is what the ownership guard compares. */
+        fun contract(c: LambdaDslObject, status: String, anyId: Boolean = false) {
+            if (anyId) c.uuid("contractId") else c.uuid("contractId", UUID.fromString(CONTRACT_ID))
+            c.uuid("participantPartyId", UUID.fromString(PARTY_ID))
+            c.stringMatcher("productLine", "DPS|DIP", "DPS")
+            c.stringType("jurisdiction", "CZ")
+            c.integerType("packVersion", 1)
+            c.stringType("providerType", "PENSION_COMPANY")
+            c.stringMatcher("status", STATUSES, status)
+            c.`object`("schedule") { s ->
+                s.numberType("amount", 1000)
+                s.stringMatcher("currency", "[A-Z]{3}", "CZK")
+                s.stringType("frequency", "MONTHLY")
+            }
+            c.stringType("createdAt", "2026-10-01T10:00:00Z")
+            c.stringType("updatedAt", "2026-10-01T10:00:00Z")
+        }
+    }
+}

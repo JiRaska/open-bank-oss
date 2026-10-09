@@ -44,7 +44,8 @@ info:
   # 1.74.0 -> 1.75.0 (#10016): additive — GET /capabilities (ADR-0310 D5).
   # 1.75.0 -> 1.76.0 (#11966): additive — /holdings, the customer write side of the declared
   # holdings that GET /net-worth reads (ADR-0301 D1).
-  version: 1.79.0
+  # 1.79.0 -> 1.80.0 (#12350): additive — /pension/*, the customer pension lifecycle (ADR-0334 S6).
+  version: 1.80.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -80,6 +81,7 @@ tags:
   - name: Cards
   - name: Lending
   - name: Wealth
+  - name: Pension
   - name: Delegation
   - name: External disclosures
   - name: Pockets
@@ -193,6 +195,402 @@ paths:
           description: The net-worth tree, possibly partial
         '401':
           description: Missing or invalid bearer token
+  /pension/products:
+    get:
+      tags: [Pension]
+      operationId: listPensionProducts
+      summary: Published DPS and DIP offerings from the product catalog retirement pack
+      description: >-
+        ADR-0334 S6. Values in the illustrative pack carry reviewStatus
+        ILLUSTRATIVE_REQUIRES_LEGAL_AND_COMMERCIAL_REVIEW and are not an offer.
+      security:
+        - customerOidc: [pension:read]
+      responses:
+        '200':
+          description: Offerings
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/PensionProduct'}
+        '401': {description: Missing or invalid bearer token}
+        '502': {description: Product catalog unavailable}
+  /pension/simulations:
+    post:
+      tags: [Pension]
+      operationId: simulatePension
+      summary: Retirement projection for a strategy (backend pending)
+      description: >-
+        Proxies pension-service POST /api/v1/pension/simulations, which backend slice S1 has not
+        shipped (#12350); until it does the route answers 404. The projection is illustrative.
+      x-backend-pending: true
+      security:
+        - customerOidc: [pension:read]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PensionSimulationRequest'}
+      responses:
+        '200':
+          description: Projection
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        '400': {description: Invalid input; the message names the first invalid field}
+        '401': {description: Missing or invalid bearer token}
+        '404': {description: Backend route not deployed yet}
+        '502': {description: Pension service unavailable}
+  /pension/contracts:
+    get:
+      tags: [Pension]
+      operationId: listPensionContracts
+      summary: The caller's pension contracts (backend pending)
+      description: >-
+        Proxies pension-service GET /api/v1/pension/contracts, not shipped by S1 (#12350). The
+        participant is always the token's own party; X-Acting-For is not honoured on pension routes.
+      x-backend-pending: true
+      security:
+        - customerOidc: [pension:read]
+      responses:
+        '200':
+          description: Contracts
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/PensionContract'}
+        '401': {description: Missing or invalid bearer token}
+        '404': {description: Backend route not deployed yet}
+        '502': {description: Pension service unavailable}
+    post:
+      tags: [Pension]
+      operationId: createPensionContract
+      summary: 'Onboarding: open a DRAFT contract under the jurisdiction pack in force today'
+      description: >-
+        The participant is the token's own party. Any participant, valuation or other field not in
+        the request schema is dropped before the call.
+      security:
+        - customerOidc: [pension:write]
+      parameters:
+        - {name: Idempotency-Key, in: header, required: false, schema: {type: string}, description: Synthesized by the edge when absent}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreatePensionContractRequest'}
+      responses:
+        '201':
+          description: Draft created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PensionContract'}
+        '400': {description: 'Invalid input, or PENSION_RULE_REFUSED: the jurisdiction pack refused it'}
+        '401': {description: Missing or invalid bearer token}
+        '502': {description: Pension service unavailable}
+  /pension/contracts/{contractId}:
+    get:
+      tags: [Pension]
+      operationId: getPensionContract
+      summary: Contract overview with holdings valued at the latest published NAV
+      description: >-
+        valuation is null when the unit register cannot be read; complete is false when a holding
+        has no published NAV yet. An unknown, malformed or another party's id is the same 404.
+      security:
+        - customerOidc: [pension:read]
+      parameters:
+        - $ref: '#/components/parameters/PensionContractId'
+      responses:
+        '200':
+          description: Contract
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PensionContract'}
+        '401': {description: Missing or invalid bearer token}
+        '404': {description: No such contract for the caller}
+        '502': {description: Pension service unavailable}
+  /pension/contracts/{contractId}/transactions:
+    get:
+      tags: [Pension]
+      operationId: listPensionTransactions
+      summary: Priced unit transactions of the contract, newest first
+      security:
+        - customerOidc: [pension:read]
+      parameters:
+        - $ref: '#/components/parameters/PensionContractId'
+      responses:
+        '200':
+          description: Transactions
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/PensionUnitTransaction'}
+        '401': {description: Missing or invalid bearer token}
+        '404': {description: No such contract for the caller}
+        '502': {description: Pension fund service unavailable}
+  /pension/contracts/{contractId}/submit:
+    post:
+      tags: [Pension]
+      operationId: submitPensionContract
+      summary: 'Onboarding: submit the signed draft (DRAFT -> PENDING_ACTIVATION)'
+      security:
+        - customerOidc: [pension:write]
+      parameters:
+        - $ref: '#/components/parameters/PensionContractId'
+        - {name: Idempotency-Key, in: header, required: false, schema: {type: string}, description: Synthesized by the edge when absent}
+      responses:
+        '200': {$ref: '#/components/responses/PensionContract'}
+        '401': {description: Missing or invalid bearer token}
+        '404': {description: No such contract for the caller}
+        '409': {description: 'INVALID_CONTRACT_STATE'}
+        '502': {description: Pension service unavailable}
+  /pension/contracts/{contractId}/pause:
+    post:
+      tags: [Pension]
+      operationId: pausePensionContributions
+      summary: Pause contributions (ACTIVE -> SUSPENDED)
+      security:
+        - customerOidc: [pension:write]
+      parameters:
+        - $ref: '#/components/parameters/PensionContractId'
+        - {name: Idempotency-Key, in: header, required: false, schema: {type: string}, description: Synthesized by the edge when absent}
+      responses:
+        '200': {$ref: '#/components/responses/PensionContract'}
+        '401': {description: Missing or invalid bearer token}
+        '404': {description: No such contract for the caller}
+        '409': {description: 'INVALID_CONTRACT_STATE'}
+        '502': {description: Pension service unavailable}
+  /pension/contracts/{contractId}/resume:
+    post:
+      tags: [Pension]
+      operationId: resumePensionContributions
+      summary: Resume contributions (SUSPENDED -> ACTIVE)
+      security:
+        - customerOidc: [pension:write]
+      parameters:
+        - $ref: '#/components/parameters/PensionContractId'
+        - {name: Idempotency-Key, in: header, required: false, schema: {type: string}, description: Synthesized by the edge when absent}
+      responses:
+        '200': {$ref: '#/components/responses/PensionContract'}
+        '401': {description: Missing or invalid bearer token}
+        '404': {description: No such contract for the caller}
+        '409': {description: 'INVALID_CONTRACT_STATE'}
+        '502': {description: Pension service unavailable}
+  /pension/contracts/{contractId}/strategy:
+    put:
+      tags: [Pension]
+      operationId: changePensionStrategy
+      summary: Change the investment strategy; units switch at the next NAV
+      security:
+        - customerOidc: [pension:write]
+      parameters:
+        - $ref: '#/components/parameters/PensionContractId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [strategyCode]
+              properties:
+                strategyCode: {type: string, pattern: '^[A-Z0-9_]{1,64}$'}
+                effectiveFrom: {type: string, format: date, description: Defaults to today; never in the past}
+      responses:
+        '200': {$ref: '#/components/responses/PensionContract'}
+        '400': {description: 'Invalid input, or PENSION_RULE_REFUSED'}
+        '401': {description: Missing or invalid bearer token}
+        '404': {description: No such contract for the caller}
+        '409': {description: 'INVALID_CONTRACT_STATE'}
+        '502': {description: Pension service unavailable}
+  /pension/contracts/{contractId}/contribution:
+    put:
+      tags: [Pension]
+      operationId: changePensionContribution
+      summary: Change the contribution schedule (backend pending)
+      description: Proxies pension-service PUT .../schedule, not shipped by S1 (#12350, slice S3).
+      x-backend-pending: true
+      security:
+        - customerOidc: [pension:write]
+      parameters:
+        - $ref: '#/components/parameters/PensionContractId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PensionSchedule'}
+      responses:
+        '200': {$ref: '#/components/responses/PensionContract'}
+        '400': {description: 'Invalid input, or PENSION_RULE_REFUSED'}
+        '401': {description: Missing or invalid bearer token}
+        '404': {description: No such contract for the caller, or backend route not deployed yet}
+        '409': {description: 'INVALID_CONTRACT_STATE'}
+        '502': {description: Pension service unavailable}
+  /pension/contracts/{contractId}/beneficiaries:
+    put:
+      tags: [Pension]
+      operationId: replacePensionBeneficiaries
+      summary: Replace the beneficiary designations (backend pending)
+      description: Proxies pension-service PUT .../beneficiaries, not shipped by S1 (#12350, slice S5).
+      x-backend-pending: true
+      security:
+        - customerOidc: [pension:write]
+      parameters:
+        - $ref: '#/components/parameters/PensionContractId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [beneficiaries]
+              properties:
+                beneficiaries:
+                  type: array
+                  maxItems: 10
+                  description: Shares must total 100 when any are given.
+                  items: {$ref: '#/components/schemas/PensionBeneficiary'}
+      responses:
+        '200': {$ref: '#/components/responses/PensionContract'}
+        '400': {description: Invalid input}
+        '401': {description: Missing or invalid bearer token}
+        '404': {description: No such contract for the caller, or backend route not deployed yet}
+        '502': {description: Pension service unavailable}
+  /pension/contracts/{contractId}/tax-summary:
+    get:
+      tags: [Pension]
+      operationId: getPensionTaxSummary
+      summary: Contributions, incentives and deductible amount for a tax year (backend pending)
+      description: Proxies pension-service GET .../tax-summary, not shipped by S1 (#12350, slice S3).
+      x-backend-pending: true
+      security:
+        - customerOidc: [pension:read]
+      parameters:
+        - $ref: '#/components/parameters/PensionContractId'
+        - {name: year, in: query, required: true, schema: {type: integer, minimum: 2000}}
+      responses:
+        '200':
+          description: Tax-year summary
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        '400': {description: year missing, malformed or in the future}
+        '401': {description: Missing or invalid bearer token}
+        '404': {description: No such contract for the caller, or backend route not deployed yet}
+        '502': {description: Pension service unavailable}
+  /pension/contracts/{contractId}/transfers-in:
+    post:
+      tags: [Pension]
+      operationId: requestPensionTransferIn
+      summary: 'Onboarding by transfer-in from a ceding provider (backend pending)'
+      description: Proxies pension-service POST .../transfers-in, not shipped by S1 (#12350, slice S2).
+      x-backend-pending: true
+      security:
+        - customerOidc: [pension:write]
+      parameters:
+        - $ref: '#/components/parameters/PensionContractId'
+        - {name: Idempotency-Key, in: header, required: false, schema: {type: string}, description: Synthesized by the edge when absent}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cedingProviderName, cedingContractNumber]
+              properties:
+                cedingProviderName: {type: string, maxLength: 200}
+                cedingContractNumber: {type: string, maxLength: 200}
+                cedingProviderId: {type: string, format: uuid}
+      responses:
+        '201':
+          description: Transfer requested
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        '400': {description: 'Invalid input, or PENSION_RULE_REFUSED'}
+        '401': {description: Missing or invalid bearer token}
+        '404': {description: No such contract for the caller, or backend route not deployed yet}
+        '409': {description: 'INVALID_CONTRACT_STATE'}
+        '502': {description: Pension service unavailable}
+  /pension/contracts/{contractId}/early-termination/preview:
+    post:
+      tags: [Pension]
+      operationId: previewPensionEarlyTermination
+      summary: Surrender preview priced from the unit register
+      description: >-
+        The current value is the sum of the contract's holdings at the latest published NAV; the
+        caller cannot supply it. incentiveHistoryIncluded is false until the incentive register
+        (slice S3) feeds clawbacks, so the clawback list may understate what an exit returns.
+      security:
+        - customerOidc: [pension:read]
+      parameters:
+        - $ref: '#/components/parameters/PensionContractId'
+        - {name: Idempotency-Key, in: header, required: false, schema: {type: string}, description: Synthesized by the edge when absent}
+      responses:
+        '200':
+          description: Preview
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PensionEarlyTermination'}
+        '401': {description: Missing or invalid bearer token}
+        '404': {description: No such contract for the caller}
+        '409': {description: 'VALUATION_INCOMPLETE (a holding has no published NAV) or INVALID_CONTRACT_STATE'}
+        '502': {description: Pension service unavailable}
+        '503': {description: 'VALUATION_UNAVAILABLE: the unit register cannot be read'}
+  /pension/contracts/{contractId}/early-termination/notice:
+    post:
+      tags: [Pension]
+      operationId: givePensionEarlyTerminationNotice
+      summary: Early-termination notice; the contract moves to TERMINATING
+      security:
+        - customerOidc: [pension:write]
+      parameters:
+        - $ref: '#/components/parameters/PensionContractId'
+        - {name: Idempotency-Key, in: header, required: false, schema: {type: string}, description: Synthesized by the edge when absent}
+      responses:
+        '200':
+          description: Notice accepted, with the preview it was given on
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PensionEarlyTermination'}
+        '401': {description: Missing or invalid bearer token}
+        '404': {description: No such contract for the caller}
+        '409': {description: 'VALUATION_INCOMPLETE or INVALID_CONTRACT_STATE'}
+        '502': {description: Pension service unavailable}
+        '503': {description: 'VALUATION_UNAVAILABLE'}
+  /pension/contracts/{contractId}/payouts:
+    post:
+      tags: [Pension]
+      operationId: requestPensionPayout
+      summary: Request the regular payout (backend pending)
+      description: Proxies pension-service POST .../payouts, not shipped by S1 (#12350, slice S5).
+      x-backend-pending: true
+      security:
+        - customerOidc: [pension:write]
+      parameters:
+        - $ref: '#/components/parameters/PensionContractId'
+        - {name: Idempotency-Key, in: header, required: false, schema: {type: string}, description: Synthesized by the edge when absent}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [form, payoutIban]
+              properties:
+                form: {type: string, enum: [LUMP_SUM, ANNUITY, PHASED_WITHDRAWAL]}
+                payoutIban: {type: string}
+      responses:
+        '201':
+          description: Payout requested
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        '400': {description: 'Invalid input, or PENSION_RULE_REFUSED (payout conditions not met)'}
+        '401': {description: Missing or invalid bearer token}
+        '404': {description: No such contract for the caller, or backend route not deployed yet}
+        '409': {description: 'INVALID_CONTRACT_STATE'}
+        '502': {description: Pension service unavailable}
   /holdings:
     get:
       tags: [Wealth]
@@ -5409,7 +5807,144 @@ components:
       type: openIdConnect
       openIdConnectUrl: https://kc.open-bank.tech/realms/openbank-customers/.well-known/openid-configuration
 
+  parameters:
+    PensionContractId:
+      name: contractId
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+  responses:
+    PensionContract:
+      description: The contract after the change
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/PensionContract'}
+
   schemas:
+    PensionProduct:
+      type: object
+      properties:
+        offeringId: {type: string}
+        name: {type: [string, 'null']}
+        productLine: {type: string, enum: [DPS, DIP]}
+        jurisdictionPackId: {type: [string, 'null']}
+        fundStrategy: {type: [string, 'null']}
+        currency: {type: [string, 'null']}
+        riskClass: {type: [integer, 'null']}
+        permittedProviderTypes: {type: array, items: {type: string}}
+        feeSchedule: {type: [object, 'null'], additionalProperties: true}
+        contributionLimits: {type: [object, 'null'], additionalProperties: true}
+        sfdrArticle: {type: [string, 'null']}
+        requiredDocuments: {type: array, items: {type: string}}
+        reviewStatus: {type: [string, 'null']}
+    PensionSimulationRequest:
+      type: object
+      required: [productLine, jurisdiction, strategyCode, birthDate, monthlyContribution, horizonYears]
+      properties:
+        productLine: {type: string, enum: [DPS, DIP]}
+        jurisdiction: {type: string, pattern: '^[A-Z]{2}$'}
+        strategyCode: {type: string, pattern: '^[A-Z0-9_]{1,64}$'}
+        birthDate: {type: string, format: date}
+        monthlyContribution: {type: string, description: Decimal string}
+        employerMonthlyContribution: {type: string, description: Decimal string}
+        horizonYears: {type: integer, minimum: 1, maximum: 60}
+    PensionSchedule:
+      type: object
+      required: [amount, currency, frequency]
+      properties:
+        amount: {type: string, description: Decimal string, 0 to 1e9}
+        currency: {type: string, pattern: '^[A-Z]{3}$'}
+        frequency: {type: string, enum: [MONTHLY, QUARTERLY, ANNUALLY]}
+        employerAmount: {type: [string, 'null'], description: Decimal string}
+    PensionBeneficiary:
+      type: object
+      required: [name, sharePercent]
+      properties:
+        name: {type: string, maxLength: 200}
+        partyId: {type: string, format: uuid}
+        sharePercent: {type: string, description: 'Decimal string, > 0 and <= 100'}
+    CreatePensionContractRequest:
+      type: object
+      required: [productLine, jurisdiction, providerEntityId, providerType, birthDate, schedule, strategyCode]
+      properties:
+        productLine: {type: string, enum: [DPS, DIP]}
+        jurisdiction: {type: string, pattern: '^[A-Z]{2}$'}
+        providerEntityId: {type: string, format: uuid}
+        providerType: {type: string, enum: [PENSION_COMPANY, BANK, INVESTMENT_FIRM, MANAGEMENT_COMPANY, INSURANCE_COMPANY]}
+        birthDate: {type: string, format: date}
+        residencyCountry: {type: string, pattern: '^[A-Z]{2}$'}
+        schedule: {$ref: '#/components/schemas/PensionSchedule'}
+        strategyCode: {type: string, pattern: '^[A-Z0-9_]{1,64}$'}
+        beneficiaries: {type: array, maxItems: 10, items: {$ref: '#/components/schemas/PensionBeneficiary'}}
+    PensionValuation:
+      type: [object, 'null']
+      properties:
+        holdings:
+          type: array
+          items:
+            type: object
+            properties:
+              fundId: {type: string, format: uuid}
+              units: {type: [string, 'null']}
+              navPerUnit: {type: [string, 'null']}
+              navDate: {type: [string, 'null'], format: date}
+              value: {type: [string, 'null']}
+              currency: {type: [string, 'null']}
+        totals: {type: object, additionalProperties: {type: string}, description: Decimal string per currency}
+        pendingOrders: {type: integer}
+        complete: {type: boolean, description: False when a holding has no published NAV yet}
+    PensionContract:
+      type: object
+      properties:
+        contractId: {type: string, format: uuid}
+        productLine: {type: string, enum: [DPS, DIP]}
+        jurisdiction: {type: string}
+        packVersion: {type: [integer, 'null']}
+        providerType: {type: [string, 'null']}
+        status: {type: string, enum: [DRAFT, PENDING_ACTIVATION, ACTIVE, SUSPENDED, TERMINATING, PAID_OUT, TRANSFERRED_OUT, CLOSED]}
+        schedule: {$ref: '#/components/schemas/PensionSchedule'}
+        currentStrategy:
+          type: [object, 'null']
+          properties:
+            strategyCode: {type: string}
+            effectiveFrom: {type: string, format: date}
+            electedAt: {type: string, format: date-time}
+        strategyHistory: {type: array, items: {type: object}}
+        beneficiaries: {type: array, items: {type: object}}
+        startDate: {type: [string, 'null'], format: date}
+        createdAt: {type: [string, 'null'], format: date-time}
+        updatedAt: {type: [string, 'null'], format: date-time}
+        valuation: {$ref: '#/components/schemas/PensionValuation'}
+    PensionUnitTransaction:
+      type: object
+      properties:
+        type: {type: string, enum: [SUBSCRIBE, REDEEM, SWITCH_OUT, SWITCH_IN, FEE]}
+        fundId: {type: string, format: uuid}
+        units: {type: [string, 'null']}
+        amount: {type: [string, 'null']}
+        navPerUnit: {type: [string, 'null']}
+        pricedAt: {type: [string, 'null'], format: date-time}
+    PensionEarlyTermination:
+      type: object
+      properties:
+        payoutConditionsMet: {type: boolean}
+        earlyWithdrawalAllowed: {type: boolean}
+        ageAtExit: {type: [integer, 'null']}
+        durationMonths: {type: [integer, 'null']}
+        currentValue: {type: [string, 'null']}
+        fee: {type: [string, 'null']}
+        clawbacks:
+          type: array
+          items:
+            type: object
+            properties:
+              incentiveId: {type: string}
+              mode: {type: string, enum: [RETURN_ALL, RECAPTURE_YEARS]}
+              amount: {type: [string, 'null']}
+        estimatedNetPayout: {type: [string, 'null']}
+        notes: {type: array, items: {type: string}}
+        status: {type: [string, 'null'], description: Contract status after the call}
+        incentiveHistoryIncluded: {type: boolean}
     CapabilityId:
       type: string
       description: >-
