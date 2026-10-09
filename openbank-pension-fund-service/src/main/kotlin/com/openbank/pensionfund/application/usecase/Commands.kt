@@ -53,4 +53,5 @@ data class PlaceOrderCommand(
     val amount: BigDecimal?,
     val units: BigDecimal?,
     val targetFundId: UUID?,
+    val idempotencyKey: String,
 )

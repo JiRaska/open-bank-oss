@@ -241,7 +241,9 @@ locals {
   # in gitops outgrow this table, so the limit below cannot silently fall behind.
   stateful_load_by_zone = {
     "eu-north-1a" = { cpu = 0.55, memory_gib = 1.375, pods = 4 }
-    "eu-north-1b" = { cpu = 4.25, memory_gib = 11.5, pods = 41 }
+    # 1b includes pension-fund-db (ADR-0334, 2 x 100m / 256Mi) as DECLARED, not measured: it is
+    # not deployed yet, and its AZ is unknown until its volumes bind. Re-measure after first deploy.
+    "eu-north-1b" = { cpu = 4.45, memory_gib = 12.0, pods = 43 }
     "eu-north-1c" = { cpu = 1.00, memory_gib = 2.375, pods = 7 }
   }
   # One xlarge m-family node as the sizing unit (2xlarge is also admitted and is

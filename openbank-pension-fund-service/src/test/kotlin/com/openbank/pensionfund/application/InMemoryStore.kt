@@ -60,6 +60,8 @@ class InMemoryStore : PensionFundStore {
     override suspend fun pendingOrdersForContract(contractId: UUID) =
         orders.values.filter { it.contractId == contractId && it.status == OrderStatus.PENDING }
     override suspend fun orders(contractId: UUID) = orders.values.filter { it.contractId == contractId }
+    override suspend fun orderByIdempotencyKey(contractId: UUID, idempotencyKey: String) =
+        orders.values.firstOrNull { it.contractId == contractId && it.idempotencyKey == idempotencyKey }
     override suspend fun holding(contractId: UUID, fundId: UUID) = holdings[contractId to fundId]
     override suspend fun holdings(contractId: UUID) = holdings.values.filter { it.contractId == contractId }
     override suspend fun unitsOutstanding(fundId: UUID): BigDecimal =

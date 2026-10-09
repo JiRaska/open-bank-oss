@@ -232,6 +232,9 @@ class UnitOrderEntity : PanacheEntityBase {
 
     @Column(name = "nav_id")
     var navId: UUID? = null
+
+    @Column(name = "idempotency_key")
+    var idempotencyKey: String? = null
 }
 
 @Entity

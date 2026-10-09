@@ -54,7 +54,14 @@ class UnitRegisterService(private val store: PensionFundStore, private val clock
             parentOrderId = null,
             status = OrderStatus.PENDING,
             placedAt = clock.instant(),
+            idempotencyKey = command.idempotencyKey,
         )
+        // A retry returns the ORIGINAL order; the same key carrying a different instruction is a
+        // caller bug, refused rather than silently answered with an order it did not ask for.
+        store.orderByIdempotencyKey(command.contractId, command.idempotencyKey)?.let { existing ->
+            check(existing.sameInstructionAs(order)) { "Idempotency-Key reused for a different order" }
+            return existing
+        }
         if (order.isOutgoing) {
             val held = store.holding(order.contractId, order.fundId)?.units ?: BigDecimal.ZERO
             val queued = store.pendingOrdersForContract(order.contractId)

@@ -37,8 +37,12 @@ data class UnitOrder(
     val placedAt: Instant,
     val settledAt: Instant? = null,
     val navId: UUID? = null,
+    val idempotencyKey: String? = null,
 ) {
     init {
+        require(idempotencyKey == null || idempotencyKey.length in 1..MAX_KEY_LENGTH) {
+            "idempotency key must be 1..128 characters"
+        }
         when (type) {
             OrderType.SUBSCRIBE, OrderType.SWITCH_IN -> {
                 require(amount != null && amount.signum() > 0) { "$type needs a positive amount" }
@@ -54,6 +58,20 @@ data class UnitOrder(
     }
 
     val isOutgoing: Boolean get() = type == OrderType.REDEEM || type == OrderType.SWITCH_OUT
+
+    /** Same instruction as [other], ignoring identity and lifecycle — what a replay must match. */
+    fun sameInstructionAs(other: UnitOrder): Boolean = contractId == other.contractId &&
+        fundId == other.fundId &&
+        type == other.type &&
+        targetFundId == other.targetFundId &&
+        sameNumber(amount, other.amount) &&
+        sameNumber(units, other.units)
+
+    private fun sameNumber(a: BigDecimal?, b: BigDecimal?) = if (a == null || b == null) a == b else a.compareTo(b) == 0
+
+    private companion object {
+        const val MAX_KEY_LENGTH = 128
+    }
 }
 
 data class UnitHolding(val contractId: UUID, val fundId: UUID, val units: BigDecimal) {

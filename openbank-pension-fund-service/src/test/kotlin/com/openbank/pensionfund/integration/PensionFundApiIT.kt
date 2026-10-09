@@ -76,8 +76,16 @@ class PensionFundApiIT {
             """{"allocations":${allocation("0.5", "0.5")},"reason":"de-risk","effectiveDate":"$effective"}""",
         ).then().statusCode(201).body("status", equalTo("PENDING_APPROVAL")).extract().path("id")
 
-        post("/api/v1/contracts/$contract/orders", """{"fundId":"$fundA","type":"SUBSCRIBE","amount":1000}""")
-            .then().statusCode(202).body("status", equalTo("PENDING"))
+        val order = """{"fundId":"$fundA","type":"SUBSCRIBE","amount":1000}"""
+        // Without the key the money-path POST is refused, never queued (#8351).
+        post("/api/v1/contracts/$contract/orders", order).then().statusCode(400)
+        val placed = given().contentType("application/json").header("Idempotency-Key", "order-1").body(order)
+            .`when`().post("/api/v1/contracts/$contract/orders")
+            .then().statusCode(202).body("status", equalTo("PENDING")).extract().path<String>("id")
+        // A retry with the same key returns the same order: one order, not two.
+        given().contentType("application/json").header("Idempotency-Key", "order-1").body(order)
+            .`when`().post("/api/v1/contracts/$contract/orders")
+            .then().statusCode(202).body("id", equalTo(placed))
 
         nav = post("/api/v1/funds/$fundA/navs", """{"valuationDate":"${LocalDate.now(ZoneOffset.UTC)}","cash":0}""")
             .then().statusCode(201).body("status", equalTo("CALCULATED")).extract().path("id")

@@ -48,6 +48,8 @@ class UnitRegisterFlowTest {
     private val register = UnitRegisterService(store, clock)
     private val contract = UUID.randomUUID()
 
+    private fun key() = UUID.randomUUID().toString()
+
     private fun definition(isin: String) = FundDefinition(
         name = "Fund $isin", isin = isin, lei = "315700ABCDEF12345678", depositaryReference = "DEP",
         custodyAccountReference = "CUST-$isin", currency = "CZK", riskClass = 3, mandatoryConservative = false,
@@ -73,7 +75,7 @@ class UnitRegisterFlowTest {
     fun `orders queue until the next nav, then settle at it`(): Unit = runBlocking {
         val fund = admin.createFund(definition("CZ0000000011"))
         val order = register.place(
-            PlaceOrderCommand(contract, fund.id, OrderType.SUBSCRIBE, BigDecimal("1000"), null, null),
+            PlaceOrderCommand(contract, fund.id, OrderType.SUBSCRIBE, BigDecimal("1000"), null, null, key()),
         )
         assertThat(order.status).isEqualTo(OrderStatus.PENDING)
         assertThat(register.valuation(contract).holdings).isEmpty()
@@ -95,7 +97,7 @@ class UnitRegisterFlowTest {
             "maker",
         )
         later()
-        register.place(PlaceOrderCommand(contract, fund.id, OrderType.SUBSCRIBE, BigDecimal("10"), null, null))
+        register.place(PlaceOrderCommand(contract, fund.id, OrderType.SUBSCRIBE, BigDecimal("10"), null, null, key()))
         later()
         val publication = navs.publish(nav.id, "checker")
         // placed before publication -> settled at it (forward: the price was not yet known).
@@ -106,11 +108,15 @@ class UnitRegisterFlowTest {
     fun `a switch settles in two forward-priced legs`(): Unit = runBlocking {
         val source = admin.createFund(definition("CZ0000000037"))
         val target = admin.createFund(definition("CZ0000000045"))
-        register.place(PlaceOrderCommand(contract, source.id, OrderType.SUBSCRIBE, BigDecimal("500"), null, null))
+        register.place(
+            PlaceOrderCommand(contract, source.id, OrderType.SUBSCRIBE, BigDecimal("500"), null, null, key()),
+        )
         later()
         publish(source.id, "0")
         later()
-        register.place(PlaceOrderCommand(contract, source.id, OrderType.SWITCH_OUT, null, BigDecimal("200"), target.id))
+        register.place(
+            PlaceOrderCommand(contract, source.id, OrderType.SWITCH_OUT, null, BigDecimal("200"), target.id, key()),
+        )
         later()
         publish(source.id, "500", "2026-10-10") // NAV 1.000000 on 500 units
         assertThat(register.valuation(contract).pendingOrders.single().type).isEqualTo(OrderType.SWITCH_IN)
@@ -125,13 +131,15 @@ class UnitRegisterFlowTest {
     @Test
     fun `cannot redeem units already committed to a queued redemption`(): Unit = runBlocking {
         val fund = admin.createFund(definition("CZ0000000052"))
-        register.place(PlaceOrderCommand(contract, fund.id, OrderType.SUBSCRIBE, BigDecimal("100"), null, null))
+        register.place(PlaceOrderCommand(contract, fund.id, OrderType.SUBSCRIBE, BigDecimal("100"), null, null, key()))
         later()
         publish(fund.id, "0")
-        register.place(PlaceOrderCommand(contract, fund.id, OrderType.REDEEM, null, BigDecimal("60"), null))
+        register.place(PlaceOrderCommand(contract, fund.id, OrderType.REDEEM, null, BigDecimal("60"), null, key()))
         assertThatThrownBy {
             runBlocking {
-                register.place(PlaceOrderCommand(contract, fund.id, OrderType.REDEEM, null, BigDecimal("60"), null))
+                register.place(
+                    PlaceOrderCommand(contract, fund.id, OrderType.REDEEM, null, BigDecimal("60"), null, key()),
+                )
             }
         }.isInstanceOf(IllegalStateException::class.java)
     }
@@ -139,10 +147,10 @@ class UnitRegisterFlowTest {
     @Test
     fun `a nav correction supersedes the original and re-prices its transactions`(): Unit = runBlocking {
         val fund = admin.createFund(definition("CZ0000000060"))
-        register.place(PlaceOrderCommand(contract, fund.id, OrderType.SUBSCRIBE, BigDecimal("1000"), null, null))
+        register.place(PlaceOrderCommand(contract, fund.id, OrderType.SUBSCRIBE, BigDecimal("1000"), null, null, key()))
         later()
         val first = publish(fund.id, "0")
-        register.place(PlaceOrderCommand(contract, fund.id, OrderType.SUBSCRIBE, BigDecimal("1000"), null, null))
+        register.place(PlaceOrderCommand(contract, fund.id, OrderType.SUBSCRIBE, BigDecimal("1000"), null, null, key()))
         later()
         // 1000 units outstanding, net 2000 -> NAV 2.000000; the second subscription buys 500 units.
         val wrong = publish(fund.id, "2000", "2026-10-10")
@@ -196,4 +204,25 @@ class UnitRegisterFlowTest {
             }
         }.isInstanceOf(IllegalArgumentException::class.java)
     }
+
+    @Test
+    fun `a retried placement returns the original order and a reused key with another order is refused`(): Unit =
+        runBlocking {
+            val fund = admin.createFund(definition("CZ0000000086"))
+            val first = register.place(
+                PlaceOrderCommand(contract, fund.id, OrderType.SUBSCRIBE, BigDecimal("100"), null, null, "k-1"),
+            )
+            val retry = register.place(
+                PlaceOrderCommand(contract, fund.id, OrderType.SUBSCRIBE, BigDecimal("100.00"), null, null, "k-1"),
+            )
+            assertThat(retry.id).isEqualTo(first.id)
+            assertThat(register.orders(contract)).hasSize(1)
+            assertThatThrownBy {
+                runBlocking {
+                    register.place(
+                        PlaceOrderCommand(contract, fund.id, OrderType.SUBSCRIBE, BigDecimal("999"), null, null, "k-1"),
+                    )
+                }
+            }.isInstanceOf(IllegalStateException::class.java)
+        }
 }

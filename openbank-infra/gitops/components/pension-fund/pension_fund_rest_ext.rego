@@ -53,7 +53,7 @@ pension_fund_staff if {
 }
 
 # Fund administrators: real staff only.
-allowed_reasons contains "pension-fund-staff-write" if {
+allowed_reasons contains "operator-pension-fund-write" if {
 	pension_fund_staff
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles

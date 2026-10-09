@@ -15,6 +15,7 @@ import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.GET
+import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
@@ -43,7 +44,12 @@ class ContractUnitResource {
     @Operation(summary = "Place a subscription, redemption or switch; it queues until the next published NAV")
     @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "pension-fund.order.place", resource = "#contractId")
-    suspend fun place(@PathParam("contractId") contractId: UUID, request: OrderDto?): Response {
+    suspend fun place(
+        @PathParam("contractId") contractId: UUID,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        request: OrderDto?,
+    ): Response {
+        val key = requireNotNull(idempotencyKey?.takeIf { it.isNotBlank() }) { "header 'Idempotency-Key' is required" }
         val body = requireNotNull(request) { "request body is required" }
         val order = register.place(
             PlaceOrderCommand(
@@ -53,6 +59,7 @@ class ContractUnitResource {
                 amount = body.amount,
                 units = body.units,
                 targetFundId = body.targetFundId,
+                idempotencyKey = key,
             ),
         )
         return Response.status(Response.Status.ACCEPTED).entity(order).build()

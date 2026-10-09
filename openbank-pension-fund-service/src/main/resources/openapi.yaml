@@ -255,6 +255,12 @@ paths:
       tags: [Unit register]
       operationId: placeOrder
       summary: Place a subscription, redemption or switch; it queues until the next published NAV
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: A retry with the same key returns the original order; the same key with a different order is 409.
+          schema: { type: string, maxLength: 128 }
       requestBody:
         required: true
         content:
@@ -458,7 +464,10 @@ components:
       description: SUBSCRIBE takes `amount`; REDEEM and SWITCH_OUT take `units`; SWITCH_OUT also names `targetFundId`.
       properties:
         fundId: { type: string, format: uuid }
-        type: { type: string, enum: [SUBSCRIBE, REDEEM, SWITCH_OUT] }
+        type:
+          type: string
+          enum: [SUBSCRIBE, REDEEM, SWITCH_OUT, SWITCH_IN]
+          description: SWITCH_IN is created by a settled SWITCH_OUT and is refused (400) when placed directly.
         amount: { type: number }
         units: { type: number }
         targetFundId: { type: string, format: uuid }

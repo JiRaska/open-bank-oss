@@ -88,7 +88,11 @@ CREATE TABLE unit_orders (
     status           VARCHAR(16) NOT NULL,
     placed_at        TIMESTAMPTZ NOT NULL,
     settled_at       TIMESTAMPTZ,
-    nav_id           UUID REFERENCES fund_navs (id)
+    nav_id           UUID REFERENCES fund_navs (id),
+    -- Caller-supplied Idempotency-Key (NULL only for a SWITCH_IN leg the service creates itself):
+    -- a retried placement returns the original order instead of queueing money twice.
+    idempotency_key  VARCHAR(128),
+    CONSTRAINT uq_unit_orders_idempotency UNIQUE (contract_id, idempotency_key)
 );
 
 CREATE INDEX idx_unit_orders_pending ON unit_orders (fund_id, placed_at) WHERE status = 'PENDING';

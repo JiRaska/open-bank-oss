@@ -121,6 +121,10 @@ class PanachePensionFundStore(
     override suspend fun orders(contractId: UUID): List<UnitOrder> =
         read { orders.find("contractId = ?1 order by placedAt desc", contractId).list() }.map { it.toDomain() }
 
+    override suspend fun orderByIdempotencyKey(contractId: UUID, idempotencyKey: String): UnitOrder? = read {
+        orders.find("contractId = ?1 and idempotencyKey = ?2", contractId, idempotencyKey).firstResult()
+    }?.toDomain()
+
     override suspend fun holding(contractId: UUID, fundId: UUID): UnitHolding? =
         read { holdings.findById(holdingId(contractId, fundId)) }?.toDomain()
 
@@ -278,6 +282,7 @@ class PanachePensionFundStore(
         it.placedAt = placedAt
         it.settledAt = settledAt
         it.navId = navId
+        it.idempotencyKey = idempotencyKey
     }
 
     private fun UnitOrderEntity.toDomain() = UnitOrder(
@@ -293,6 +298,7 @@ class PanachePensionFundStore(
         placedAt = placedAt,
         settledAt = settledAt,
         navId = navId,
+        idempotencyKey = idempotencyKey,
     )
 
     private fun UnitHolding.toEntity() = UnitHoldingEntity().also {

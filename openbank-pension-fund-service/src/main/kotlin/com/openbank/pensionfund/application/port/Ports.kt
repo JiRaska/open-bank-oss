@@ -54,6 +54,7 @@ interface PensionFundStore {
     suspend fun pendingOrders(fundId: UUID): List<UnitOrder>
     suspend fun pendingOrdersForContract(contractId: UUID): List<UnitOrder>
     suspend fun orders(contractId: UUID): List<UnitOrder>
+    suspend fun orderByIdempotencyKey(contractId: UUID, idempotencyKey: String): UnitOrder?
 
     suspend fun holding(contractId: UUID, fundId: UUID): UnitHolding?
     suspend fun holdings(contractId: UUID): List<UnitHolding>
