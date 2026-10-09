@@ -136,6 +136,16 @@ class CommStyleLinterTest {
     }
 
     @Test
+    fun `full approved UI copy catalog has its own budget without weakening persona instruction cap`() {
+        val copy = UiMessages.keys.flatMap { key ->
+            listOf("uiMessages.cs.$key" to "a".repeat(240), "uiMessages.en.$key" to "b".repeat(240))
+        }.toMap()
+        assertThat(CommStyleLinter.lint(copy)).noneMatch { it.rule.contains("size-cap-exceeded") }
+        assertThat(CommStyleLinter.lint(copy + ("tone" to "a".repeat(CommStyleLinter.MAX_TOTAL_CHARS + 1))))
+            .anyMatch { it.rule.startsWith("size-cap-exceeded") }
+    }
+
+    @Test
     fun `every violation is reported, not just the first`() {
         val violations = CommStyleLinter.lint(
             mapOf(
