@@ -3,12 +3,12 @@
 openapi: 3.1.0
 info:
   title: Tax Reporting Service API
-  version: 1.0.0
+  version: 1.1.0
   description: >
-    §38d Vyúčtování daně vybírané srážkou podle zvláštní sazby daně — the platform's system of
-    record for the monthly withholding-tax return (ADR-0180). Consumes
-    interest.withholding.remitted.v1, aggregates per §38d period, and records what was filed.
-    EPO XML rendering is not built in v1; see /export-capability, which reports that plainly.
+    Legacy monthly withholding workflow (ADR-0180). The source event records an assembled
+    interest-service batch; it does not prove cash settlement. Existing monthly FILED rows and
+    references do not establish submission of the annual §38d Vyúčtování. The annual obligation
+    is being designed under issue #12429. EPO XML rendering is not built; see /export-capability.
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -38,10 +38,9 @@ paths:
   /api/v1/tax/filings/overdue:
     get:
       tags: [TaxFiling]
-      summary: Filings past the §38d deadline and not yet filed
+      summary: Legacy monthly records past their configured due date
       description: >
-        The alertable set. A return that is late is a compliance failure that produces no error
-        anywhere else — nothing throws when a filing simply does not happen.
+        This is a legacy monthly workflow view. It is not an annual §38d filing-deadline signal.
       operationId: listOverdueTaxFilings
       responses:
         '200':
@@ -94,7 +93,9 @@ paths:
     get:
       tags: [TaxFiling]
       summary: The remittance batches making up a period
-      description: The audit trail behind the total — which batches produced this figure.
+      description: >
+        Observed assembled batches behind the monthly total. Observation alone does not prove
+        cash settlement or submission of an annual return.
       operationId: listPeriodRemittances
       parameters:
         - $ref: '#/components/parameters/PeriodPath'
@@ -136,11 +137,12 @@ paths:
   /api/v1/tax/filings/{period}/filed:
     post:
       tags: [TaxFiling]
-      summary: Record that the assembled return was submitted (ASSEMBLED → FILED)
+      summary: Record a reference on the legacy monthly workflow (ASSEMBLED → FILED)
       description: >
         Four-eyes — the actor who assembled the period may not also record it as filed, and an
         assembly with no recorded author can never be filed. The reference is mandatory: a filing
-        recorded without one cannot be evidenced later.
+        recorded without one cannot be evidenced later. A monthly FILED row must not be interpreted
+        as an annual §38d Vyúčtování submission.
       operationId: markTaxFilingFiled
       parameters:
         - $ref: '#/components/parameters/PeriodPath'
@@ -232,12 +234,22 @@ components:
       properties:
         id: { type: string, format: uuid }
         period: { type: string, description: 'YYYY-MM' }
-        status: { type: string, enum: [OPEN, ASSEMBLED, FILED] }
+        status:
+          type: string
+          enum: [OPEN, ASSEMBLED, FILED]
+          description: Legacy monthly workflow status; FILED does not establish annual submission.
+        recordKind:
+          type: string
+          enum: [LEGACY_MONTHLY_WORKFLOW]
+          description: Distinguishes historic monthly workflow rows from the annual §38d obligation.
         currency: { type: string }
         totalTaxAmount: { type: string }
         remittanceCount: { type: integer }
         itemCount: { type: integer }
-        dueDate: { type: string, format: date, description: '§38d odst. 3 deadline.' }
+        dueDate:
+          type: string
+          format: date
+          description: Legacy monthly due date, not the annual §38d filing deadline.
         assembledAt: { type: string, format: date-time, nullable: true }
         assembledBy: { type: string, nullable: true }
         filedAt: { type: string, format: date-time, nullable: true }
@@ -250,10 +262,14 @@ components:
       properties:
         remittanceId: { type: string, format: uuid }
         period: { type: string }
+        sourceStage:
+          type: string
+          enum: [BATCH_ASSEMBLED_ONLY]
+          description: Source event was emitted on batch assembly, before independent cash settlement proof.
         currency: { type: string }
         totalTaxAmount: { type: string }
         itemCount: { type: integer }
-        dueDate: { type: string, format: date }
+        dueDate: { type: string, format: date, description: Producer-supplied monthly cash due date. }
         observedAt: { type: string, format: date-time }
 
   securitySchemes:

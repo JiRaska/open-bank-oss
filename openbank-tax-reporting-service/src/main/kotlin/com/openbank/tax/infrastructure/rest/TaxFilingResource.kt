@@ -47,7 +47,7 @@ private const val UNPROCESSABLE_ENTITY = 422
 @Path("/api/v1/tax/filings")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
-@Tag(name = "TaxFiling", description = "§38d Vyúčtování daně vybírané srážkou — monthly withholding return")
+@Tag(name = "TaxFiling", description = "Legacy monthly withholding workflow; annual §38d filing is not represented")
 class TaxFilingResource(private val taxFilingService: TaxFilingService, private val epoRenderer: EpoRendererPort) {
 
     @Inject
@@ -61,9 +61,7 @@ class TaxFilingResource(private val taxFilingService: TaxFilingService, private 
     @GET
     @Path("/overdue")
     @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
-    @Operation(
-        summary = "Filings past their §38d deadline and not yet filed — the thing worth alerting on",
-    )
+    @Operation(summary = "Legacy monthly records past their configured due date; not an annual filing alert")
     suspend fun overdue(): Response = Response.ok(taxFilingService.overdue().map { it.toResponse() }).build()
 
     @GET
@@ -76,7 +74,7 @@ class TaxFilingResource(private val taxFilingService: TaxFilingService, private 
     @GET
     @Path("/{period}/remittances")
     @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
-    @Operation(summary = "The remittance batches making up a period — the audit trail behind the total")
+    @Operation(summary = "Observed assembled batches; cash settlement is not verified here")
     suspend fun remittances(@PathParam("period") period: String): Response =
         Response.ok(taxFilingService.remittancesFor(parsePeriod(period)).map { it.toResponse() }).build()
 
@@ -93,8 +91,8 @@ class TaxFilingResource(private val taxFilingService: TaxFilingService, private 
     @Path("/{period}/filed")
     @RolesAllowed(Roles.OPERATOR)
     @Operation(
-        summary = "Record that the assembled return was submitted, with its FÚ/EPO reference " +
-            "(ASSEMBLED → FILED; four-eyes, the assembler may not file)",
+        summary = "Record a reference on the legacy monthly workflow " +
+            "(ASSEMBLED → FILED; four-eyes, not annual submission evidence)",
     )
     suspend fun markFiled(@PathParam("period") period: String, request: MarkFiledRequest): Response {
         val record = taxFilingService.markFiled(parsePeriod(period), request.reference, by = actingPrincipal())
@@ -113,9 +111,9 @@ class TaxFilingResource(private val taxFilingService: TaxFilingService, private 
             note = if (epoRenderer.available) {
                 "EPO XML rendering is bound."
             } else {
-                "EPO XML rendering is not built (ADR-0180 v1). The assembled totals on this API are " +
-                    "the filing figures; an operator submits via the EPO portal or datová schránka " +
-                    "and records the reference through POST /{period}/filed."
+                "EPO XML rendering is not built (ADR-0180 v1). This API contains legacy monthly " +
+                    "batch totals only; it does not establish cash settlement or annual §38d " +
+                    "Vyúčtování submission."
             },
         ),
     ).build()
@@ -157,6 +155,7 @@ data class TaxFilingResponse(
     val filedAt: String?,
     val filedBy: String?,
     val filingReference: String?,
+    val recordKind: String = LEGACY_MONTHLY_RECORD_KIND,
 )
 
 data class ObservedRemittanceResponse(
@@ -167,9 +166,13 @@ data class ObservedRemittanceResponse(
     val itemCount: Int,
     val dueDate: String,
     val observedAt: String,
+    val sourceStage: String = ASSEMBLED_BATCH_SOURCE_STAGE,
 )
 
-private fun TaxFilingRecord.toResponse() = TaxFilingResponse(
+internal const val LEGACY_MONTHLY_RECORD_KIND = "LEGACY_MONTHLY_WORKFLOW"
+internal const val ASSEMBLED_BATCH_SOURCE_STAGE = "BATCH_ASSEMBLED_ONLY"
+
+internal fun TaxFilingRecord.toResponse() = TaxFilingResponse(
     id = id,
     period = period.label,
     status = status.name,
@@ -185,7 +188,7 @@ private fun TaxFilingRecord.toResponse() = TaxFilingResponse(
     filingReference = filingReference,
 )
 
-private fun ObservedRemittance.toResponse() = ObservedRemittanceResponse(
+internal fun ObservedRemittance.toResponse() = ObservedRemittanceResponse(
     remittanceId = remittanceId,
     period = period.label,
     currency = currency,
