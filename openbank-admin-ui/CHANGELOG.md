@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.277.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.277.0...admin-ui-v0.277.1) (2026-10-08)
+
+
+### Bug Fixes
+
+* **infra:** improve public portal metadata and contrast ([#12279](https://github.com/JiRaska/open-bank-oss/issues/12279)) ([b94fee2](https://github.com/JiRaska/open-bank-oss/commit/b94fee283612664a84aada74464a0486cc91d5d4))
+
 ## [0.277.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.276.2...admin-ui-v0.277.0) (2026-10-08)
 
 
