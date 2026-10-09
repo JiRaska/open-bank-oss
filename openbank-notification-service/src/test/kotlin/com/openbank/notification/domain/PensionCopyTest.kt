@@ -67,23 +67,6 @@ class PensionCopyTest {
     }
 
     @Test
-    fun `localized copy covers approval and pension templates and nothing else`() {
-        val approval = mapOf("entityName" to "Acme", "kind" to "PAYMENT")
-        assertThat(
-            PensionCopy.localizedOrNull(NotificationTemplate.APPROVAL_COMPLETED, approval, NotificationLanguage.CS),
-        )
-            .isEqualTo(ApprovalCopy.render(NotificationTemplate.APPROVAL_COMPLETED, approval, NotificationLanguage.CS))
-        val pension = mapOf("contractId" to "C1", "direction" to "OUT", "status" to "DONE")
-        assertThat(
-            PensionCopy.localizedOrNull(NotificationTemplate.PENSION_TRANSFER_STATUS, pension, NotificationLanguage.CS),
-        )
-            .isEqualTo(
-                PensionCopy.render(NotificationTemplate.PENSION_TRANSFER_STATUS, pension, NotificationLanguage.CS),
-            )
-        assertThat(PensionCopy.localizedOrNull(NotificationTemplate.WELCOME, mapOf("name" to "Ada"), null)).isNull()
-    }
-
-    @Test
     fun `non-pension templates are not its business`() {
         assertThat(PensionCopy.renderOrNull(NotificationTemplate.WELCOME, emptyMap(), null)).isNull()
         assertThatThrownBy { PensionCopy.render(NotificationTemplate.WELCOME, emptyMap(), null) }

@@ -35,17 +35,6 @@ object PensionCopy {
         language: NotificationLanguage?,
     ): Pair<String, String>? = if (template in TEMPLATES) render(template, vars, language) else null
 
-    /**
-     * The localized copy for any template that has Czech copy — approval (#10281) or pension
-     * (#12392) — or `null` for the English-only templates NotificationConsumer renders itself.
-     */
-    fun localizedOrNull(
-        template: NotificationTemplate,
-        vars: Map<String, String>,
-        language: NotificationLanguage?,
-    ): Pair<String, String>? = ApprovalCopy.renderOrNull(template, vars, language)
-        ?: renderOrNull(template, vars, language)
-
     /** Renders (subject, htmlBody). [language] `null` means English. */
     @Suppress("LongMethod")
     fun render(
