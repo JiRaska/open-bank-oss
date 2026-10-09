@@ -32,7 +32,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-risk-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "6bb4ff9d36374430"
+        openbank.tech/policy-checksum: "07f34f1a67ced78c"
       labels:
         app.kubernetes.io/name: risk-engine
         app.kubernetes.io/part-of: risk

@@ -103,6 +103,8 @@ CREATE TABLE unit_holdings (
     contract_id  UUID NOT NULL,
     fund_id      UUID NOT NULL REFERENCES funds (id),
     units        NUMERIC(25, 6) NOT NULL CHECK (units >= 0),
+    -- Optimistic lock: two settlements racing on one holding cannot both write from the same read.
+    version      BIGINT NOT NULL DEFAULT 0,
     CONSTRAINT uq_unit_holdings_contract_fund UNIQUE (contract_id, fund_id)
 );
 

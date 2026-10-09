@@ -91,11 +91,52 @@ test_customer_cannot_read_holdings if {
 	}
 }
 
-# Stated, not wished away: base rest.rego's `operator-read-any` lets the shared service-account
-# READ (never write) here, and a per-service extension cannot veto it (allowed_reasons is a union).
-test_shared_service_account_reads_via_base_rule if {
+excluded := {"authz": {"operator_read_any_excluded_actions": ["pension-fund.holding.read"]}}
+
+# Holdings: must-DENY the shared M2M account and an unrelated service, even holding ROLE_OPERATOR.
+test_shared_and_unrelated_service_accounts_cannot_read_holdings if {
+	not rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR", "ROLE_API"]},
+		"action": "pension-fund.holding.read",
+	}
+		with data.rules as excluded
+	not rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "service-account-openbank-treasury", "roles": ["ROLE_OPERATOR", "ROLE_API"]},
+		"action": "pension-fund.holding.read",
+	}
+		with data.rules as excluded
+}
+
+# Holdings: must-ALLOW pension-service's own client and staff.
+test_pension_service_and_staff_read_holdings if {
+	rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "service-account-openbank-pension", "roles": ["ROLE_API"]},
+		"action": "pension-fund.holding.read",
+	}
+		with data.rules as excluded
+	rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
+		"action": "pension-fund.holding.read",
+	}
+		with data.rules as excluded
+}
+
+test_pension_service_places_orders_but_cannot_administer if {
+	rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "service-account-openbank-pension", "roles": ["ROLE_API"]},
+		"action": "pension-fund.order.place",
+	}
+	not rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "service-account-openbank-pension", "roles": ["ROLE_API"]},
+		"action": "pension-fund.nav.approve",
+	}
+}
+
+# The exclusion is what does the work: without it the base rule re-admits the shared account.
+test_without_the_exclusion_the_base_rule_reopens_holdings if {
 	rest.allow with input as {
 		"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]},
 		"action": "pension-fund.holding.read",
 	}
+		with data.rules as {}
 }

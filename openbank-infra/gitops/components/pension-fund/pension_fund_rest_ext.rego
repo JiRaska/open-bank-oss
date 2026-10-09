@@ -19,9 +19,12 @@
 # Four-eyes (maker != checker) is enforced by the service itself, on the authenticated principal;
 # this policy only decides who may be a maker or a checker at all.
 #
-# There is deliberately NO machine grant yet. pension-service will reach this service through its
-# FundAdministrationPort adapter (ADR-0334 §1), which is not built; the grant for its own client
-# arrives with that adapter, never speculatively.
+# Participant data (pension-fund.holding.read, pension-fund.order.place) is reachable by real
+# staff and by pension-service's OWN client, service-account-openbank-pension (fleet naming
+# convention `openbank-<service>`; pension-service's FundAdministrationPort adapter, ADR-0334 §1),
+# and by nothing else. holding.read is also excluded from base `operator-read-any` via
+# rules.yaml: authz.operator_read_any_excluded_actions, which is what keeps the shared
+# service-account (ROLE_OPERATOR) and every other service out.
 #
 # Do NOT gate on input.principal.type == "SERVICE": AuthorizeInterceptor never emits it (#266).
 
@@ -66,4 +69,14 @@ allowed_reasons contains "pension-fund-staff-read" if {
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE", "ROLE_AUDITOR"}
 	role in input.principal.roles
 	input.action in pension_fund_read_actions
+}
+
+pension_service_account := "service-account-openbank-pension"
+
+# pension-service, and only pension-service, acts on the unit register for its contracts.
+allowed_reasons contains "service-pension-unit-register" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == pension_service_account
+	"ROLE_API" in input.principal.roles
+	input.action in {"pension-fund.holding.read", "pension-fund.order.place", "pension-fund.fund.read", "pension-fund.strategy.read", "pension-fund.nav.read"}
 }

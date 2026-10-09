@@ -9,6 +9,7 @@ import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.Id
 import jakarta.persistence.Table
+import jakarta.persistence.Version
 import java.math.BigDecimal
 import java.time.Instant
 import java.time.LocalDate
@@ -252,6 +253,15 @@ class UnitHoldingEntity : PanacheEntityBase {
 
     @Column(name = "units", nullable = false)
     lateinit var units: BigDecimal
+
+    /**
+     * Optimistic lock. A merge carrying a version older than the row's fails the whole commit
+     * (409), so two NAV publications or corrections cannot both apply a delta to one stale read.
+     * Null on a holding never stored, which makes merge insert it.
+     */
+    @Version
+    @Column(name = "version", nullable = false)
+    var version: Long? = null
 }
 
 @Entity

@@ -306,9 +306,10 @@ class PanachePensionFundStore(
         it.contractId = contractId
         it.fundId = fundId
         it.units = units
+        it.version = version
     }
 
-    private fun UnitHoldingEntity.toDomain() = UnitHolding(contractId, fundId, units)
+    private fun UnitHoldingEntity.toDomain() = UnitHolding(contractId, fundId, units, version)
 
     private fun UnitTransaction.toEntity() = UnitTransactionEntity().also {
         it.id = id

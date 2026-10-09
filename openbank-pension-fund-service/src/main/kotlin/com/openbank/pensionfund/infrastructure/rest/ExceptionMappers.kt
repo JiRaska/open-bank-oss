@@ -24,6 +24,25 @@ class ExceptionMappers {
     fun conflict(e: IllegalStateException): Response =
         Response.status(Response.Status.CONFLICT).entity(mapOf("error" to e.message)).build()
 
+    /** A concurrent writer changed a holding between our read and our write; nothing was applied. */
+    @ServerExceptionMapper
+    fun staleHolding(e: jakarta.persistence.OptimisticLockException): Response =
+        Response.status(Response.Status.CONFLICT).entity(
+            mapOf(
+                "error" to "concurrent update, retry",
+                "cause" to e.javaClass.simpleName,
+            ),
+        ).build()
+
+    @ServerExceptionMapper
+    fun staleHoldingHibernate(e: org.hibernate.StaleStateException): Response =
+        Response.status(Response.Status.CONFLICT).entity(
+            mapOf(
+                "error" to "concurrent update, retry",
+                "cause" to e.javaClass.simpleName,
+            ),
+        ).build()
+
     /** The maker tried to be their own checker: forbidden for this caller, whatever their role. */
     @ServerExceptionMapper
     fun fourEyes(e: FourEyesViolationException): Response =

@@ -74,7 +74,8 @@ data class UnitOrder(
     }
 }
 
-data class UnitHolding(val contractId: UUID, val fundId: UUID, val units: BigDecimal) {
+/** [version] is the persistence lock token read with the holding; null for one never stored. */
+data class UnitHolding(val contractId: UUID, val fundId: UUID, val units: BigDecimal, val version: Long? = null) {
     init {
         require(units.signum() >= 0) { "a holding cannot go negative" }
     }
