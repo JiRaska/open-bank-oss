@@ -429,7 +429,7 @@ jobs:
             python3 .github/scripts/record-admin-ui-artifact.py \
               --archive /tmp/per-service-sboms.zip --ledger "$ADMIN_UI_FEED_RECEIPTS" \
               --source security-actions-artifact --artifact-id "$ARTIFACT_ID" \
-              "${svc}/build/reports/bom.json" || exit 1
+              --bind "$(basename "$f")" "${svc}/build/reports/bom.json" || exit 1
             echo "  staged ${svc}/build/reports/bom.json"
           done
           echo "SBOM staging complete."
@@ -531,18 +531,25 @@ jobs:
               fi
               mkdir -p "${svc}/build/test-intelligence"
               cp "${RUN_JSON}" "${svc}/build/test-intelligence/run.json"
+              receipt_bindings=(--bind "${RUN_JSON#${TMPDIR_ART}/}" "${svc}/build/test-intelligence/run.json")
               # Inside the zip: test-results/*/TEST-*.xml (actions/upload-artifact@v7 strips
               # the leading service/build/ prefix). Reconstruct the full target path.
-              find "${TMPDIR_ART}" -path "*/test-results/*/TEST-*.xml" | while read -r xml; do
+              while IFS= read -r xml; do
                 rel="test-results/${xml#*/test-results/}"
                 target="${svc}/build/${rel}"
                 mkdir -p "$(dirname "${target}")"
                 cp "${xml}" "${target}"
-              done
-              find "${TMPDIR_ART}" -path '*/reports/kover/report.xml' | while read -r xml; do
+                receipt_bindings+=(--bind "${xml#${TMPDIR_ART}/}" "${target}")
+              done < <(find "${TMPDIR_ART}" -path "*/test-results/*/TEST-*.xml")
+              while IFS= read -r xml; do
                 mkdir -p "${svc}/build/reports/kover"
                 cp "${xml}" "${svc}/build/reports/kover/report.xml"
-              done
+                receipt_bindings+=(--bind "${xml#${TMPDIR_ART}/}" "${svc}/build/reports/kover/report.xml")
+              done < <(find "${TMPDIR_ART}" -path '*/reports/kover/report.xml')
+              python3 .github/scripts/record-admin-ui-artifact.py \
+                --archive "/tmp/${art_name}.zip" --ledger "$ADMIN_UI_FEED_RECEIPTS" \
+                --source per-service-actions-artifact --artifact-id "$art_id" \
+                "${receipt_bindings[@]}" || exit 1
               DOWNLOADED=$((DOWNLOADED + 1))
               echo "  ${svc}: staged"
             else
@@ -581,7 +588,7 @@ jobs:
             python3 .github/scripts/record-admin-ui-artifact.py \
               --archive "${archive}" --ledger "$ADMIN_UI_FEED_RECEIPTS" \
               --source client-actions-artifact --artifact-id "$artifact_id" \
-              "openbank-admin-ui/client-test-evidence/openbank-app-${artifact_id}.json" || exit 1
+              --bind "${evidence}" "openbank-admin-ui/client-test-evidence/openbank-app-${artifact_id}.json" || exit 1
           done <<< "${ARTIFACTS}"
           echo "Staged $(find openbank-admin-ui/client-test-evidence -name '*.json' | wc -l | tr -d ' ') mobile client evidence artifact(s)."
 
@@ -647,7 +654,7 @@ jobs:
                 python3 .github/scripts/record-admin-ui-artifact.py \
                   --archive "${archive}" --ledger "$ADMIN_UI_FEED_RECEIPTS" \
                   --source test-intelligence-actions-artifact --artifact-id "$artifact_id" \
-                  "${cached}" || exit 1
+                  --bind "$(unzip -Z1 "${archive}" | grep -E '(^|/)run(-[a-z0-9-]+)?\.json$')" "${cached}" || exit 1
               done
           echo "Staged $(find openbank-admin-ui/test-run-history -name '*.json' | wc -l | tr -d ' ') immutable run envelopes, $(($(wc -l < openbank-admin-ui/test-run-history/.staged-ids | tr -d ' ') - KNOWN_BEFORE)) new artifact IDs recorded this build."
 
@@ -709,6 +716,13 @@ jobs:
               # each evidence lane in a fresh private directory and publish it
               # atomically; never merge two archives or prompt on overwrite.
               python3 .github/scripts/stage-pitest-artifacts.py stage "${archive}" "${svc}" . --run-id "${RUN_ID}" || exit 1
+              pit_bindings=()
+              [ ! -f "${svc}/build/reports/pitest/mutations.xml" ] || pit_bindings+=(--bind mutations.xml "${svc}/build/reports/pitest/mutations.xml")
+              [ ! -f "${svc}/build/reports/pitest/test-intelligence-run.json" ] || pit_bindings+=(--bind test-intelligence-run.json "${svc}/build/reports/pitest/test-intelligence-run.json")
+              python3 .github/scripts/record-admin-ui-artifact.py \
+                --archive "${archive}" --ledger "$ADMIN_UI_FEED_RECEIPTS" \
+                --source pitest-actions-artifact --artifact-id "$art_id" \
+                "${pit_bindings[@]}" || exit 1
               DOWNLOADED=$((DOWNLOADED + 1))
             else
               echo "PIT artifact ${art_name} could not be downloaded; refusing incomplete Test Intelligence image" >&2
@@ -909,14 +923,14 @@ jobs:
                   cp "${BASELINE_ENVELOPE}" openbank-admin-ui/perf-artifacts/money-path-smoke-summary.json.run.json
                   ENVELOPE_STATUS=yes
                 fi
-                staged_baseline=()
-                [ "${SUMMARY_STATUS}" = no ] || staged_baseline+=(openbank-admin-ui/perf-artifacts/money-path-smoke-summary.json)
-                [ "${ENVELOPE_STATUS}" = no ] || staged_baseline+=(openbank-admin-ui/perf-artifacts/money-path-smoke-summary.json.run.json)
-                if [ "${#staged_baseline[@]}" -gt 0 ]; then
+                baseline_bindings=()
+                [ "${SUMMARY_STATUS}" = no ] || baseline_bindings+=(--bind perf-summary.json openbank-admin-ui/perf-artifacts/money-path-smoke-summary.json)
+                [ "${ENVELOPE_STATUS}" = no ] || baseline_bindings+=(--bind perf-run.json openbank-admin-ui/perf-artifacts/money-path-smoke-summary.json.run.json)
+                if [ "${#baseline_bindings[@]}" -gt 0 ]; then
                   python3 .github/scripts/record-admin-ui-artifact.py \
                     --archive /tmp/k6-money-path-summary.zip --ledger "$ADMIN_UI_FEED_RECEIPTS" \
                     --source performance-actions-artifact --artifact-id "$BASELINE_ARTIFACT" \
-                    "${staged_baseline[@]}" || exit 1
+                    "${baseline_bindings[@]}" || exit 1
                 fi
                 echo "Staged money-path baseline ${BASELINE_RUN_ID}: summary=${SUMMARY_STATUS} envelope=${ENVELOPE_STATUS}."
               fi

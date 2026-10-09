@@ -35,6 +35,11 @@ GENERATED_ROOT_JSON = (
     "test-intelligence.json", "test-results.json",
 )
 SBOM_PATH = re.compile(r"openbank-[^/]+/build/reports/bom\.json\Z")
+SERVICE_EVIDENCE_PATH = re.compile(
+    r"openbank-[^/]+/build/(?:test-intelligence/run\.json|test-results/(?:[^/]+/)*[^/]+\.xml|"
+    r"reports/kover/(?:xml/)?report\.xml)\Z")
+PITEST_EVIDENCE_PATH = re.compile(
+    r"openbank-[^/]+/build/reports/pitest/(?:mutations\.xml|test-intelligence-run\.json)\Z")
 EXTERNAL_ROOT_SOURCES = {
     "cost-report.json": "aws-cost-explorer",
     "infra-lifecycle.json": "endoflife-date",
@@ -51,15 +56,19 @@ EXTERNAL_DIR_SOURCES = {
     "openbank-admin-ui/test-run-history": "test-intelligence-actions-artifact",
     "sbom-staging": "security-actions-artifact",
 }
-ARTIFACT_SOURCES = set(EXTERNAL_DIR_SOURCES.values()) | {"security-actions-artifact"}
+ARTIFACT_SOURCES = set(EXTERNAL_DIR_SOURCES.values()) | {
+    "security-actions-artifact", "per-service-actions-artifact", "pitest-actions-artifact",
+}
 
 
 def valid_receipt(item: object) -> bool:
-    return (isinstance(item, dict) and set(item) == {"source", "artifactId", "archiveSha256", "path", "sha256"}
+    return (isinstance(item, dict) and set(item) == {"source", "artifactId", "archiveSha256", "member", "path", "sha256"}
             and item["source"] in ARTIFACT_SOURCES
             and isinstance(item["artifactId"], str) and item["artifactId"].isdecimal()
             and isinstance(item["path"], str) and item["path"]
             and not Path(item["path"]).is_absolute() and ".." not in Path(item["path"]).parts
+            and isinstance(item["member"], str) and item["member"]
+            and not Path(item["member"]).is_absolute() and ".." not in Path(item["member"]).parts
             and isinstance(item["sha256"], str)
             and re.fullmatch(r"[0-9a-f]{64}", item["sha256"]) is not None
             and isinstance(item["archiveSha256"], str)
@@ -103,6 +112,7 @@ def receipts_cover(entries: list[dict], receipts: list[dict]) -> bool:
             if (receipt is None or receipt["source"] != source
                     or receipt["sha256"] != entry.get("sha256")
                     or receipt["artifactId"] != material.get("artifactId")
+                    or receipt["member"] != material.get("member")
                     or receipt["archiveSha256"] != material.get("archiveSha256")):
                 return False
             if source == "client-actions-artifact" and Path(entry["path"]).name != f"openbank-app-{receipt['artifactId']}.json":
@@ -117,6 +127,10 @@ def material_for(relative: Path, sha256: str, source_sha: str, producer: dict) -
         source = EXTERNAL_ROOT_SOURCES.get(root_json, "repo-derived-collector")
     elif SBOM_PATH.fullmatch(relative.as_posix()):
         source = "security-actions-artifact"
+    elif SERVICE_EVIDENCE_PATH.fullmatch(relative.as_posix()):
+        source = "per-service-actions-artifact"
+    elif PITEST_EVIDENCE_PATH.fullmatch(relative.as_posix()):
+        source = "pitest-actions-artifact"
     elif relative == Path("openbank-admin-ui/test-run-history/.staged-ids"):
         source = "repo-derived-collector"
     else:
@@ -172,6 +186,15 @@ def paths(root: Path) -> set[Path]:
     # into the runtime image. Freeze exactly that path shape and hash the bytes.
     found.update(p.relative_to(root) for p in root.glob("openbank-*/build/reports/bom.json")
                  if p.is_file() and SBOM_PATH.fullmatch(p.relative_to(root).as_posix()))
+    for pattern, accepted in (
+        ("openbank-*/build/test-intelligence/run.json", SERVICE_EVIDENCE_PATH),
+        ("openbank-*/build/test-results/**/*.xml", SERVICE_EVIDENCE_PATH),
+        ("openbank-*/build/reports/kover/**/report.xml", SERVICE_EVIDENCE_PATH),
+        ("openbank-*/build/reports/pitest/*.xml", PITEST_EVIDENCE_PATH),
+        ("openbank-*/build/reports/pitest/test-intelligence-run.json", PITEST_EVIDENCE_PATH),
+    ):
+        found.update(p.relative_to(root) for p in root.glob(pattern)
+                     if p.is_file() and accepted.fullmatch(p.relative_to(root).as_posix()))
     others = subprocess.run(["git", "ls-files", "--others", "--exclude-standard", "-z"],
                             cwd=root, check=True, capture_output=True)
     non_inputs = (".app-src/", "sbom-downloads/")
@@ -224,7 +247,9 @@ def require_committed_content(relative: Path, content: bytes, blobs: dict[Path, 
     if expected is None and any(relative.is_relative_to(Path(directory))
                                 and relative != Path(directory) for directory in GENERATED_DIRS):
         return
-    if expected is None and SBOM_PATH.fullmatch(relative.as_posix()):
+    if expected is None and (SBOM_PATH.fullmatch(relative.as_posix())
+                             or SERVICE_EVIDENCE_PATH.fullmatch(relative.as_posix())
+                             or PITEST_EVIDENCE_PATH.fullmatch(relative.as_posix())):
         return
     digest = hashlib.new(object_format, b"blob " + str(len(content)).encode() + b"\0" + content).hexdigest()
     if expected != digest:
@@ -291,6 +316,7 @@ def freeze(root: Path, output: Path, manifest: Path) -> dict:
                 receipt = receipt_by_path.get(entry["path"])
                 if receipt is not None:
                     entry["material"]["artifactId"] = receipt["artifactId"]
+                    entry["material"]["member"] = receipt["member"]
                     entry["material"]["archiveSha256"] = receipt["archiveSha256"]
     if producer.get("kind") == "github-actions" and not os.environ.get("ADMIN_UI_FEED_RECEIPTS"):
         raise ValueError("external feed receipt ledger is unavailable")

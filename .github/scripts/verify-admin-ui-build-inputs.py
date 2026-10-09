@@ -73,6 +73,7 @@ def materialized_context_matches(record: dict, root: Path) -> bool:
                 if receipt is None:
                     return False
                 expected_material["artifactId"] = receipt["artifactId"]
+                expected_material["member"] = receipt["member"]
                 expected_material["archiveSha256"] = receipt["archiveSha256"]
             if material != expected_material:
                 return False

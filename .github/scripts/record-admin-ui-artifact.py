@@ -11,23 +11,30 @@ from pathlib import Path
 
 
 def record(archive: Path, ledger: Path, source: str, artifact_id: str,
-           root: Path, paths: list[Path]) -> None:
-    if not artifact_id.isdecimal() or not paths:
-        raise ValueError("artifact receipt requires an ID and staged paths")
-    with zipfile.ZipFile(archive) as zipped:
-        upstream = {hashlib.sha256(zipped.read(item)).hexdigest()
-                    for item in zipped.namelist() if not item.endswith("/")}
+           root: Path, bindings: list[tuple[str, Path]]) -> None:
+    if not artifact_id.isdecimal() or not bindings:
+        raise ValueError("artifact receipt requires an ID and member bindings")
     receipts = []
     archive_digest = hashlib.sha256(archive.read_bytes()).hexdigest()
-    for path in paths:
-        if not path.is_file() or path.is_symlink() or not path.resolve().is_relative_to(root.resolve()):
-            raise ValueError(f"invalid staged artifact file: {path}")
-        digest = hashlib.sha256(path.read_bytes()).hexdigest()
-        if digest not in upstream:
-            raise ValueError(f"staged file differs from Actions artifact: {path}")
-        receipts.append({"source": source, "artifactId": artifact_id,
-                         "archiveSha256": archive_digest,
-                         "path": path.relative_to(root).as_posix(), "sha256": digest})
+    with zipfile.ZipFile(archive) as zipped:
+        names = [item.filename for item in zipped.infolist()]
+        if len(names) != len(set(names)):
+            raise ValueError("Actions artifact contains duplicate members")
+        for member, path in bindings:
+            member_path = Path(member)
+            if (member_path.is_absolute() or ".." in member_path.parts or member not in names
+                    or member.endswith("/")):
+                raise ValueError(f"invalid Actions artifact member: {member}")
+            staged = path if path.is_absolute() else root / path
+            if not staged.is_file() or staged.is_symlink() or not staged.resolve().is_relative_to(root.resolve()):
+                raise ValueError(f"invalid staged artifact file: {path}")
+            content = staged.read_bytes()
+            if content != zipped.read(member):
+                raise ValueError(f"staged file differs from named Actions artifact member: {path}")
+            receipts.append({"source": source, "artifactId": artifact_id,
+                             "archiveSha256": archive_digest, "member": member,
+                             "path": staged.relative_to(root).as_posix(),
+                             "sha256": hashlib.sha256(content).hexdigest()})
     # A failed validation cannot append a partial receipt set.
     with ledger.open("a") as output:
         for item in receipts:
@@ -46,20 +53,21 @@ def main() -> None:
     parser.add_argument("--flatten", action="store_true",
                         help="The staging command discarded ZIP member directories")
     parser.add_argument("--suffix", help="Only record ZIP members with this suffix")
-    parser.add_argument("paths", nargs="*", type=Path)
+    parser.add_argument("--bind", nargs=2, action="append", metavar=("MEMBER", "STAGED_PATH"), default=[])
     args = parser.parse_args()
-    paths = args.paths
+    bindings = [(member, Path(path)) for member, path in args.bind]
     if args.member_directory is not None:
-        if paths:
-            parser.error("explicit paths and --member-directory are exclusive")
+        if bindings:
+            parser.error("--bind and --member-directory are exclusive")
         with zipfile.ZipFile(args.archive) as zipped:
-            names = [Path(name) for name in zipped.namelist()
+            names = [name for name in zipped.namelist()
                      if not name.endswith("/") and (not args.suffix or name.endswith(args.suffix))]
-        if any(path.is_absolute() or ".." in path.parts for path in names):
+        if any(Path(name).is_absolute() or ".." in Path(name).parts for name in names):
             raise ValueError("unsafe artifact ZIP member")
-        paths = [args.member_directory / (path.name if args.flatten else path) for path in names]
+        bindings = [(name, args.member_directory / (Path(name).name if args.flatten else name))
+                    for name in names]
     record(args.archive, args.ledger, args.source, args.artifact_id,
-           args.root.resolve(), paths)
+           args.root.resolve(), bindings)
 
 
 if __name__ == "__main__":

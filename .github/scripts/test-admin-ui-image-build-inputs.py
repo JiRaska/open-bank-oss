@@ -37,20 +37,29 @@ class AdminUiImageInputsTest(unittest.TestCase):
             staged.parent.mkdir(parents=True)
             with zipfile.ZipFile(archive, "w") as zipped:
                 zipped.writestr("summary.json", b'{"state":"passed"}\n')
+                zipped.writestr("unrelated.json", b'{"state":"failed"}\n')
             staged.write_bytes(b'{"state":"passed"}\n')
             ledger = root / "receipts.jsonl"
-            receipt_mod.record(archive, ledger, "performance-actions-artifact", "42", root, [staged])
+            receipt_mod.record(archive, ledger, "performance-actions-artifact", "42", root,
+                               [("summary.json", staged.relative_to(root))])
             item = json.loads(ledger.read_text())
             self.assertEqual(item["path"], "openbank-admin-ui/perf-artifacts/summary.json")
             self.assertEqual(item["artifactId"], "42")
+            self.assertEqual(item["member"], "summary.json")
             self.assertEqual(item["archiveSha256"], hashlib.sha256(archive.read_bytes()).hexdigest())
+            staged.write_bytes(b'{"state":"tampered"}\n')
+            with self.assertRaisesRegex(ValueError, "differs from named Actions artifact member"):
+                receipt_mod.record(archive, ledger, "performance-actions-artifact", "42", root,
+                                   [("summary.json", staged)])
+            # The same bytes exist in the archive, but at the wrong member.
             staged.write_bytes(b'{"state":"failed"}\n')
-            with self.assertRaisesRegex(ValueError, "differs from Actions artifact"):
-                receipt_mod.record(archive, ledger, "performance-actions-artifact", "42", root, [staged])
+            with self.assertRaisesRegex(ValueError, "differs from named Actions artifact member"):
+                receipt_mod.record(archive, ledger, "performance-actions-artifact", "42", root,
+                                   [("summary.json", staged)])
             self.assertEqual(len(ledger.read_text().splitlines()), 1)
             with self.assertRaisesRegex(ValueError, "invalid staged artifact file"):
                 receipt_mod.record(archive, ledger, "performance-actions-artifact", "42", root,
-                                   [root / "openbank-admin-ui/perf-artifacts/absent.json"])
+                                   [("summary.json", root / "openbank-admin-ui/perf-artifacts/absent.json")])
 
     def test_every_host_collector_output_is_allowlisted(self):
         root = Path(__file__).resolve().parents[2]
@@ -93,6 +102,17 @@ class AdminUiImageInputsTest(unittest.TestCase):
             flat_sbom = repo / "sbom-staging/openbank-notification-service.json"
             flat_sbom.parent.mkdir()
             flat_sbom.write_bytes(sbom.read_bytes())
+            service_inputs = (
+                "openbank-notification-service/build/test-intelligence/run.json",
+                "openbank-notification-service/build/test-results/test/TEST-Sample.xml",
+                "openbank-notification-service/build/reports/kover/report.xml",
+                "openbank-notification-service/build/reports/pitest/mutations.xml",
+                "openbank-notification-service/build/reports/pitest/test-intelligence-run.json",
+            )
+            for path in service_inputs:
+                staged_input = repo / path
+                staged_input.parent.mkdir(parents=True, exist_ok=True)
+                staged_input.write_text(f"evidence for {path}\n")
             history = repo / "openbank-admin-ui/test-run-history"
             history.mkdir()
             (history / ".staged-ids").write_text("789\n")
@@ -104,13 +124,15 @@ class AdminUiImageInputsTest(unittest.TestCase):
             receipts = base / "receipts.jsonl"
             def receipt(source_name, artifact_id, path):
                 return {"source": source_name, "artifactId": artifact_id,
-                        "archiveSha256": "a" * 64, "path": path,
+                        "archiveSha256": "a" * 64, "member": Path(path).name, "path": path,
                         "sha256": hashlib.sha256((repo / path).read_bytes()).hexdigest()}
             receipts.write_text('\n'.join(json.dumps(item) for item in (
                 receipt("client-actions-artifact", "123", "openbank-admin-ui/client-test-evidence/openbank-app-123.json"),
                 receipt("security-actions-artifact", "456", "openbank-notification-service/build/reports/bom.json"),
                 receipt("security-actions-artifact", "456", "sbom-staging/openbank-notification-service.json"),
                 receipt("test-intelligence-actions-artifact", "789", "openbank-admin-ui/test-run-history/test-intelligence-run-example.json"),
+                *(receipt("pitest-actions-artifact" if "/pitest/" in path else "per-service-actions-artifact",
+                          "901" if "/pitest/" in path else "900", path) for path in service_inputs),
             )) + '\n')
             with patch.dict("os.environ", {"GITHUB_ACTIONS": "true", "GITHUB_RUN_ID": "12345",
                                         "GITHUB_RUN_ATTEMPT": "1", "GITHUB_WORKFLOW_REF":
@@ -128,6 +150,7 @@ class AdminUiImageInputsTest(unittest.TestCase):
                                 for item in inventory))
             self.assertTrue(any(item["path"] == "sbom-staging/openbank-notification-service.json"
                                 for item in inventory))
+            self.assertTrue(all(any(item["path"] == path for item in inventory) for path in service_inputs))
             self.assertEqual((context / "openbank-notification-service/build/reports/bom.json").read_bytes(),
                              sbom.read_bytes())
             self.assertEqual((context / "sbom-staging/openbank-notification-service.json").read_bytes(),
@@ -143,6 +166,18 @@ class AdminUiImageInputsTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "lacks a source artifact receipt"):
                     freeze_mod.freeze(repo, base / "stale-context", base / "stale-manifest.json")
             stale.unlink()
+            full_ledger = receipts.read_text()
+            for missing_path in (service_inputs[1], service_inputs[3]):
+                receipts.write_text("\n".join(line for line in full_ledger.splitlines()
+                                              if json.loads(line)["path"] != missing_path) + "\n")
+                with patch.dict("os.environ", {"GITHUB_ACTIONS": "true", "GITHUB_RUN_ID": "12345",
+                                            "GITHUB_RUN_ATTEMPT": "1", "GITHUB_WORKFLOW_REF":
+                                            "JiRaska/open-bank-oss/.github/workflows/admin-ui-deploy.yml@refs/heads/main",
+                                            "ADMIN_UI_FEED_RECEIPTS": str(receipts)}):
+                    with self.assertRaisesRegex(ValueError, "lacks a source artifact receipt"):
+                        freeze_mod.freeze(repo, base / f"missing-{Path(missing_path).name}",
+                                          base / f"missing-{Path(missing_path).name}.json")
+            receipts.write_text(full_ledger)
             malicious = json.loads(original_manifest)
             forged = next(item for item in malicious["files"] if item["path"] ==
                           "openbank-admin-ui/test-run-history/test-intelligence-run-example.json")
