@@ -1,0 +1,116 @@
+# Threat model — openbank-pension-service
+
+## 1. Scope & purpose
+
+Participant side of the pension platform (ADR-0334): the `PensionContract` aggregate, its
+lifecycle (`DRAFT → PENDING_ACTIVATION → ACTIVE ⇄ SUSPENDED → TERMINATING → PAID_OUT |
+TRANSFERRED_OUT | CLOSED`), strategy elections, contribution schedule, beneficiaries, and the
+evaluation of jurisdiction packs (state incentives, tax relief, payout and clawback rules).
+
+Slice S1 moves **no money**: there is no contribution collection, no unit register, no payout and
+no outbound call. The service is listed in `money_path_services` from the bootstrap because the
+next slices add exactly those, and the review and threat-model rules must already hold when they
+land. This model covers S1 and names what the money-moving slices must add.
+
+## 2. Data flow (DFD)
+
+```
+participant ──(OIDC)──▶ customer-edge ──(bearer, X-Customer-Party-Id)──▶ pension-service ──▶ pension-db (CNPG)
+                                                                   │
+                                                                   └── OPA sidecar (localhost:8181)
+jurisdiction-packs/*.json (classpath, reviewed in PR) ──load at startup──▶ JurisdictionPackRegistry
+```
+
+Trust boundaries: edge → service (in-cluster, NetworkPolicy admits customer-edge, admin-ui and the
+platform scrapers only); service → database (single-owner CNPG cluster); repository → image (the
+packs are code-reviewed data baked into the image, not runtime input).
+
+## 3. Authn/Authz
+
+- Every route is `@RolesAllowed(API, OPERATOR, ADMIN)` behind Keycloak OIDC; there is no
+  anonymous surface.
+- `pension_rest_ext.rego` grants the participant actions (`create`, `submit`, `activate`,
+  `strategy`, `suspend`, `resume`, `terminate`, `read`) to `service-account-openbank-edge` only,
+  keyed on `principal.id`, and grants real staff (`HUMAN`, not `service-account-*`) **read only**.
+  No action is placed in `rules.yaml: authz.role_action_matrix`, because a matrix line is a grant
+  to every service-account holding the role and cannot be vetoed (#3765/#3734).
+- `AUTHZ_ENFORCE=true` from the first rollout. Policy tests carry a must-deny for every allow.
+
+## 4. STRIDE
+
+| Threat | Vector | Mitigation in S1 |
+|---|---|---|
+| **Spoofing** | A caller impersonates the participant to open or terminate a contract | Writes reachable only through the edge principal, which authenticates the human and stamps `X-Customer-Party-Id`; an absent header is a 400 (nullable param + `requireNotNull`, #3104) |
+| **Spoofing / IDOR** | A customer reads or acts on another participant's contract by id | Every route resolves the caller: a caller without a staff role must carry `X-Customer-Party-Id` and is confined to that party's contracts; someone else's contract answers **404**, identical to an unknown id, so ids cannot be enumerated. Staff may read without the header; every change requires a participant caller. Covered by `PensionContractApiIT` (stranger → 404 on read and every action, owner → 200, operator → 200 read / 400 write), falsified by removing the check |
+| **Tampering** | Retried requests double-create or double-apply | `Idempotency-Key` is required on every POST; create deduplicates per participant (unique index), lifecycle actions are idempotent by state |
+| **Tampering** | Oversized or pathological amounts | Every caller-supplied amount bounded (≤ 1e9, ≤ 4 decimals); list/map inputs capped; codes restricted to `[A-Za-z0-9_-]{1,64}` |
+| **Tampering** | Request sets lifecycle state, pack version or a backdated strategy | Status is never a request field; transitions go through `ContractStatus.canMoveTo` and an illegal edge is 409; the pack version is resolved server-side by date and pinned; strategy changes cannot take effect in the past; DB `CHECK` constraints mirror the status vocabulary and the start-date invariant |
+| **Tampering** | Pack data edited to inflate incentives | Packs are repository data reviewed in PR, loaded through a strict mapper (unknown key = boot failure), validated per rule type; every pack carries a legal-review status |
+| **Repudiation** | Participant disputes a strategy change | Strategy elections are append-only rows with `elected_at`; nothing overwrites a previous election. Signed client intent (SCA) arrives with the onboarding workflow slice |
+| **Information disclosure** | Contract and beneficiary data leak | Confidential classification; no ingress; staff read only via the narrow rule; service accounts other than the edge excluded; beneficiaries stored only in this service's database |
+| **Denial of service** | Request floods or oversized bodies | Fleet rate limit (100 concurrent), 1 MB body limit, read/idle timeouts from `application.yaml` |
+| **Elevation of privilege** | A backend service-account holding `ROLE_OPERATOR` writes a contract | `operator-pension-read` excludes `service-account-*` and is read-only; the edge grant is keyed on one principal id |
+
+## 4a. Exits — termination, payout, death (slice S5)
+
+New trust boundaries: the fund unit register (redeem), the payment rail (payout), the tax authority
+(withholding remittance), the incentive ledger (clawback), an annuity insurer, sca-service and
+account-service. All are behind ports; in S5 they are `@DefaultBean` stubs.
+
+| STRIDE | Threat | Mitigation |
+|---|---|---|
+| **Spoofing** | A caller names another participant's party to cash out their contract | `ContractAccessGuard`: the party header is trusted only from the edge relay; another party's contract is 404 |
+| **Tampering** | Amounts changed between the preview and the payout | The quote is stored and signed: SCA dynamic linking over `quoteHash`; execution pays only stored quote amounts (IT asserts preview == executed) |
+| **Repudiation** | Participant denies requesting the termination | SCA challenge id, signing time and quote hash are stored on the notice |
+| **Information disclosure** | Enumerating notices / payouts / claims | Every exit aggregate is looked up under its contract after the ownership check; mismatch is 404 |
+| **Denial of service** | A retried activity or replayed request pays twice | Deterministic idempotency keys per step, `pension_payment_instructions.idempotency_key` UNIQUE, workflow id = aggregate id, `Idempotency-Key` on every money-moving command |
+| **Elevation of privilege** | One operator registers a death and pays the claimants alone | Death routes: staff roles + `operator-pension-death-claim` (no service-account, no edge); approval is four-eyes in `DeathClaim.approve` |
+
+Residual: the SCA, own-account and beneficiary-KYC stubs FAIL CLOSED outside %dev/%test, so a
+deployment refuses every exit until sca-service / account-service adapters are wired. A binding
+quote moves NAV risk to the provider for the notice period (`navVariance` is recorded, never
+charged to the participant). A death during a phased withdrawal stops the remaining installments;
+handing the unpaid remainder to the claim is a follow-up.
+
+## 4b. Integration (slice S8)
+
+S8 joins S1/S2/S3/S5 into one service and adds the routes customer-edge needs. New trust boundary:
+pension-fund-service (the unit register), reached over REST as pension-service's OWN Keycloak
+client `openbank-pension` (client_credentials, ROLE_API only); pension-fund-service admits holdings
+and orders for that identity alone, never the shared `openbank-services` account.
+
+| STRIDE | Threat | Mitigation |
+|---|---|---|
+| **Elevation of privilege** | A payment quoting a contract's reference activates a contract whose onboarding was never signed (no KID, no SCA, no cooling-off) — S3's default activation adapter applied S1's `activate` directly | Activation is the onboarding workflow's alone: a contribution only SIGNALS a SIGNED new-contract application; a pending contract with no such application parks the money (`CONTRACT_NOT_ACCEPTING`), also for operator assignment and employer lines. S1's participant `/activate` and caller-valued `/early-termination` routes are retired |
+| **Tampering** | The payout account is swapped after the participant approved the amount | The SCA challenge signs the quote AND the destination (`signingHash(iban)`) for termination and payout; execution pays only the stored, signed account |
+| **Tampering** | A payout-account change redirects money (account takeover) | SCA-bound to this payout and IBAN; own verified account only; never on an unsigned or single-payment payout; HELD 3 days and applied only to installments due after that; the participant is notified at once on the known channel (fails closed if the notice cannot be sent); a second change while one is pending is refused |
+| **Tampering** | Check-then-act races on money-moving state (confirm vs account change, two confirms, activity vs operator) lose an update | Optimistic locking on every exit aggregate and on the contract row (`row_version`, checked on save and by Hibernate `@Version` at flush): the loser gets 409, an activity retries on a fresh read. Two parallel confirmations: exactly one wins (IT) |
+| **Denial of service / repudiation** | A retried POST runs twice (second application, second order) | `Idempotency-Key` required on every POST; the first 2xx response is stored per (principal, participant, method, path, key) and replayed |
+| **Information disclosure** | The simulation is mistaken for advice | Always `illustrative: true` with a disclaimer; assumed returns are configuration; nothing about the caller is read or stored |
+| **Spoofing** | The fund register is called with a borrowed identity | Own client, own Vault entry (`keycloak/pension-service`), env ref `optional: false`; in-memory register exists only in dev/test builds |
+
+Residual: two concurrent FIRST attempts with one idempotency key can both run (the store is written
+after the response) — every money step beneath is idempotent on its own key/unique index. The stub
+SCA does not compare the signed hash; the binding is enforced by sca-service's consume once the
+real adapter replaces the stub (fails closed until then). The notification port is a stub that
+refuses outside dev/test. Orders are forward-priced: a redemption returns the amount ordered, the
+proceeds settle at the next NAV.
+
+## 5. Residual risks / assumptions
+
+- **(Resolved in S8)** S1's caller-valued surrender preview is retired; termination is S5's quote
+  over the unit register and the incentive ledger.
+- **Pack activation is a deploy, not a four-eyes runtime act** in S1. ADR-0212 D4's maker-checker
+  activation is a follow-up; until then the pull-request review is the second pair of eyes.
+- **Concurrent creates with one key.** Two simultaneous first attempts with the same key race to
+  the unique index; the loser fails at insert rather than returning the winner's contract.
+- **Pack values pending legal review.** The CZ/DPS and CZ/DIP packs are reference data.
+- **Money-moving slices must extend this model** before they merge: contribution collection
+  (SDD/standing order), incentive claims to a state agency, payouts, transfers, and the
+  fund-administration port each add a trust boundary.
+
+## 6. Change log
+
+- 2026-10-09 — initial model with the S1 bootstrap (ADR-0334, #12350).
+- 2026-10-09 — S5 exits: termination, payout, death claims (§4a).
+- 2026-10-09 — S8 integration: fund REST client identity, onboarding-only activation, account-bound SCA, held account change, optimistic locking, POST replay (§4b).
