@@ -101,16 +101,15 @@ jobs:
             # Force the remote-tracking ref to the true tip (persistent self-hosted
             # runners reuse the workdir, so the cached ref can be stale).
             git fetch origin "${BASE_REF}:refs/remotes/origin/${BASE_REF}" --no-tags
-            # These extra pathspecs are build INPUTS outside openbank-admin-ui/:
-            # service governance/schema for the governance generator, and the gate
-            # manifest consumed by generate-gate-catalog.mjs during pretest/prebuild.
+            # The extra pathspecs are the governance gate's INPUTS, not UI code:
+            # every per-service governance.yaml, plus the schema it validates them
+            # against. The generator itself lives under openbank-admin-ui/.
             N=$(git diff --name-only "${BASE}...HEAD" -- \
                   openbank-admin-ui/ \
                   '*/governance.yaml' \
-                  openbank-libs/governance/governance.schema.json \
-                  .github/gates/gates.yaml | wc -l | tr -d ' ')
+                  openbank-libs/governance/governance.schema.json | wc -l | tr -d ' ')
             echo "changed=$( [ "$N" -gt 0 ] && echo 'true' || echo 'false' )" >> "$GITHUB_OUTPUT"
-            echo "Admin UI or build-input files changed: $N"
+            echo "Admin UI or governance files changed: $N"
             # Derive cross-package guard inputs from literal backend paths.
             # Backend-only RBAC changes get a focused test lane; UI changes run
             # the full UI suite above. A missing/dynamic input fails detection.
