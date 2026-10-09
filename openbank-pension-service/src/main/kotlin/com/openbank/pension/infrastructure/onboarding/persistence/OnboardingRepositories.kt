@@ -69,7 +69,11 @@ class OnboardingApplicationRepositoryImpl(private val json: PayloadMapper) :
             find("applicationId", application.id).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult()
                 .flatMap { existing ->
                     if (existing == null) {
-                        if (application.version != 0L) conflict("onboarding application", application.id, -1, application.version)
+                        if (application.version !=
+                            0L
+                        ) {
+                            conflict("onboarding application", application.id, -1, application.version)
+                        }
                         persist(
                             OnboardingApplicationEntity().apply {
                                 applicationId = application.id

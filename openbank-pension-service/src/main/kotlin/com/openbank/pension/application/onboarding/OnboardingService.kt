@@ -33,8 +33,13 @@ import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 
+/**
+ * [actingPartyId] is ALWAYS the authenticated principal's party. [onBehalfOfPartyId] is set only
+ * when a guardian applies for a ward; it is honoured only after party-service verifies the relation.
+ */
 data class StartOnboardingCommand(
-    val partyId: UUID,
+    val actingPartyId: UUID,
+    val onBehalfOfPartyId: UUID?,
     val kind: OnboardingKind,
     val productLine: ProductLine,
     val jurisdiction: String,
@@ -44,20 +49,15 @@ data class StartOnboardingCommand(
     val declaredBirthDate: LocalDate,
     val declaredResidencyCountry: String?,
     val residencyEvidence: Set<String>,
-    val guardianPartyId: UUID?,
     val ceding: CedingContract?,
 )
 
-data class ChooseStrategyCommand(
-    val strategyCode: String?,
-    val acknowledgeUnsuitable: Boolean,
-    val language: String?,
-)
+data class ChooseStrategyCommand(val strategyCode: String?, val acknowledgeUnsuitable: Boolean, val language: String?)
 
 class SignatureRejectedException(message: String) : RuntimeException(message)
 
 /** Runs a block in ONE database transaction; nested repository transactions join it. */
-fun interface TransactionRunner {
+interface TransactionRunner {
     suspend fun <T> inTransaction(block: suspend () -> T): T
 }
 
@@ -77,6 +77,7 @@ class OnboardingService(
     private val packs: JurisdictionPackRegistry,
     private val rules: OnboardingRulesRegistry,
     private val kyc: PartyKycPort,
+    private val relations: PartyRelationPort,
     private val documents: KeyInformationDocumentPort,
     private val signatures: SignatureVerificationPort,
     private val orchestrator: PensionOrchestrator,
@@ -99,29 +100,24 @@ class OnboardingService(
         if (command.kind == OnboardingKind.TRANSFER_IN) {
             require(pack.transfer.allowed) { "this pack does not allow a transfer-in" }
         }
-        val profile = kyc.profile(command.partyId)
-            ?: throw IllegalArgumentException("party ${command.partyId} is not known to KYC")
+        val ward = command.onBehalfOfPartyId?.takeIf { it != command.actingPartyId }
+        require(ward == null || relations.isLegalGuardian(command.actingPartyId, ward)) {
+            "the caller is not a verified legal guardian of the applicant"
+        }
+        val applicantId = ward ?: command.actingPartyId
+        val guardianId = if (ward != null) command.actingPartyId else null
+        val profile = kyc.profile(applicantId)
+            ?: throw IllegalArgumentException("party $applicantId is not known to KYC")
         val facts = ApplicantFacts(
             birthDate = profile.verifiedBirthDate ?: command.declaredBirthDate,
             residencyCountry = profile.verifiedResidencyCountry ?: command.declaredResidencyCountry,
             residencyEvidence = command.residencyEvidence,
             fullLegalCapacity = profile.fullLegalCapacity,
-            guardianPartyId = command.guardianPartyId,
+            guardianPartyId = guardianId,
         )
-        val reasons = mutableListOf<String>()
-        if (profile.status != KycStatus.VERIFIED) reasons += "KYC is ${profile.status}, not VERIFIED"
-        if (profile.verifiedBirthDate != null && profile.verifiedBirthDate != command.declaredBirthDate) {
-            reasons += "declared birth date does not match the verified one"
-        }
-        val eligibility = PackEvaluator.checkEligibility(
-            pack, facts.birthDate, facts.residencyCountry, facts.residencyEvidence, facts.guardianPartyId != null, today(),
-        )
-        reasons += eligibility.reasons
-        if (!facts.fullLegalCapacity && onboarding.guardianRequiredForLimitedCapacity && facts.guardianPartyId == null) {
-            reasons += "a participant without full legal capacity needs a guardian"
-        }
+        val reasons = ineligibility(pack, onboarding, profile, facts, command.declaredBirthDate)
         val application = OnboardingApplication.start(
-            partyId = command.partyId,
+            partyId = applicantId,
             kind = command.kind,
             productLine = pack.productLine,
             jurisdiction = pack.jurisdiction,
@@ -138,9 +134,43 @@ class OnboardingService(
         return applications.save(application)
     }
 
+    /** Eligibility per pack (age, residency, capacity, guardian) plus the KYC verdict. */
+    private fun ineligibility(
+        pack: com.openbank.pension.domain.pack.JurisdictionPack,
+        onboarding: com.openbank.pension.domain.onboarding.OnboardingRules,
+        profile: KycProfile,
+        facts: ApplicantFacts,
+        declaredBirthDate: LocalDate,
+    ): List<String> {
+        val reasons = mutableListOf<String>()
+        if (profile.status != KycStatus.VERIFIED) reasons += "KYC is ${profile.status}, not VERIFIED"
+        if (profile.verifiedBirthDate != null && profile.verifiedBirthDate != declaredBirthDate) {
+            reasons += "declared birth date does not match the verified one"
+        }
+        reasons += PackEvaluator.checkEligibility(
+            pack,
+            facts.birthDate,
+            facts.residencyCountry,
+            facts.residencyEvidence,
+            facts.guardianPartyId != null,
+            today(),
+        ).reasons
+        if (!facts.fullLegalCapacity &&
+            onboarding.guardianRequiredForLimitedCapacity &&
+            facts.guardianPartyId == null
+        ) {
+            reasons += "a participant without full legal capacity needs a guardian"
+        }
+        return reasons
+    }
+
     suspend fun get(id: UUID, partyId: UUID?): OnboardingApplication {
         val application = applications.findById(id) ?: throw OnboardingNotFoundException("onboarding application", id)
-        if (partyId != null && application.partyId != partyId) throw OnboardingNotFoundException("onboarding application", id)
+        if (partyId != null &&
+            !application.actableBy(partyId)
+        ) {
+            throw OnboardingNotFoundException("onboarding application", id)
+        }
         return application
     }
 
@@ -152,7 +182,13 @@ class OnboardingService(
         val application = live(id, partyId)
         val onboarding = rulesFor(application)
         val assessment = SuitabilityAssessment.assess(
-            partyId, id, application.productLine, onboarding.questionnaire, answers, today(), now(),
+            partyId,
+            id,
+            application.productLine,
+            onboarding.questionnaire,
+            answers,
+            today(),
+            now(),
         )
         val recommendation = recommend(application, assessment)
         val saved = tx.inTransaction {
@@ -190,7 +226,9 @@ class OnboardingService(
             require(command.acknowledgeUnsuitable) { "choosing an unsuitable strategy needs an acknowledged warning" }
         }
         if (assessment.appropriate == false) {
-            require(command.acknowledgeUnsuitable) { "the product is not appropriate; the warning must be acknowledged" }
+            require(command.acknowledgeUnsuitable) {
+                "the product is not appropriate; the warning must be acknowledged"
+            }
         }
         val document = documents.generate(
             KidRequest(
@@ -224,7 +262,9 @@ class OnboardingService(
         val live = live(id, partyId)
         check(live.status == OnboardingStatus.KID_ACCEPTED) { "the key-information document must be accepted first" }
         val kid = checkNotNull(live.kid)
-        val outcome = signatures.verify(partyId, challengeId, kid.sha256, "pension-onboarding:$id")
+        // Bound to THIS application and THIS document; the signer is the acting party (the
+        // guardian, for a ward). sca-service spends the challenge, so it cannot sign twice.
+        val outcome = signatures.verify(partyId, challengeId, kid.sha256, "pension-onboarding:$id:${kid.documentId}")
         if (outcome != SignatureOutcome.VERIFIED) throw SignatureRejectedException("the SCA challenge was not verified")
         val pack = packs.pinned(live.jurisdiction, live.productLine, live.packVersion)
         val onboarding = rulesFor(live)
@@ -304,7 +344,9 @@ class OnboardingService(
     /** The first contribution reached the contract (until slice S3 emits it as an event). */
     suspend fun contributionReceived(id: UUID): OnboardingApplication {
         val application = get(id, null)
-        check(application.status == OnboardingStatus.SIGNED) { "a ${application.status} application awaits no contribution" }
+        check(application.status == OnboardingStatus.SIGNED) {
+            "a ${application.status} application awaits no contribution"
+        }
         check(application.kind == OnboardingKind.NEW_CONTRACT) { "a transfer-in activates on the transferred funds" }
         orchestrator.signalContributionReceived(id)
         return application
@@ -316,13 +358,15 @@ class OnboardingService(
     suspend fun activate(id: UUID): Boolean {
         val application = get(id, null)
         if (application.status != OnboardingStatus.SIGNED) return application.status == OnboardingStatus.ACTIVATED
+        // The aggregate guards first (signature, cooling-off); only then does the contract move.
+        val activated = application.activate(today(), now())
         tx.inTransaction {
             val contractId = checkNotNull(application.contractId)
             val contract = contracts.findById(contractId) ?: throw OnboardingNotFoundException("contract", contractId)
             if (contract.status == ContractStatus.PENDING_ACTIVATION) {
                 contracts.save(contract.activate(today(), now()))
             }
-            applications.save(application.activate(now()))
+            applications.save(activated)
         }
         return true
     }
@@ -363,8 +407,11 @@ class OnboardingService(
                 transferId,
                 application.id,
                 TransferInTimers(
-                    responseDeadlineDays = requireNotNull(pack.transfer.deadlineDays) { "pack has no transfer deadline" },
+                    responseDeadlineDays = requireNotNull(pack.transfer.deadlineDays) {
+                        "pack has no transfer deadline"
+                    },
                     fundsGraceDays = onboarding.transferIn.fundsGraceDays,
+                    coolingOffDays = onboarding.coolingOffDays,
                 ),
             )
         } else {
@@ -384,7 +431,7 @@ class OnboardingService(
         check(application.status.preSignature) { "a ${application.status} application can no longer be edited" }
         if (today().isAfter(application.expiresOn)) {
             applications.save(application.expire("application lapsed unsigned", now()))
-            throw IllegalStateException("the application lapsed on ${application.expiresOn}")
+            error("the application lapsed on ${application.expiresOn}")
         }
         return application
     }
@@ -397,10 +444,17 @@ class OnboardingService(
         return assessment
     }
 
-    private fun recommend(application: OnboardingApplication, assessment: SuitabilityAssessment): StrategyRecommendation {
+    private fun recommend(
+        application: OnboardingApplication,
+        assessment: SuitabilityAssessment,
+    ): StrategyRecommendation {
         val pack = packs.pinned(application.jurisdiction, application.productLine, application.packVersion)
         return StrategyRecommender.recommend(
-            rulesFor(application), assessment, application.applicant.birthDate, pack.payout.minAge, today(),
+            rulesFor(application),
+            assessment,
+            application.applicant.birthDate,
+            pack.payout.minAge,
+            today(),
         )
     }
 

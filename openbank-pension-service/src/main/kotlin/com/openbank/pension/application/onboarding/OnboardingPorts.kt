@@ -69,6 +69,14 @@ data class KycProfile(
     val verifiedResidencyCountry: String?,
 )
 
+/**
+ * party-service: whether [guardianPartyId] is the VERIFIED legal guardian of [wardPartyId]. The
+ * only way a party other than the applicant may act on an application.
+ */
+interface PartyRelationPort {
+    suspend fun isLegalGuardian(guardianPartyId: UUID, wardPartyId: UUID): Boolean
+}
+
 /** party-service / kyc-service. Returns null when the party is unknown. */
 interface PartyKycPort {
     suspend fun profile(partyId: UUID): KycProfile?
@@ -95,12 +103,19 @@ interface KeyInformationDocumentPort {
 enum class SignatureOutcome { VERIFIED, REJECTED }
 
 /**
- * sca-service: spends a challenge on exactly the operation it authorised (dynamic linking). The
- * adapter raises [IntegrationUnavailableException] when it cannot ask; it never answers VERIFIED
- * for a check it did not perform.
+ * sca-service: spends a challenge on exactly the operation it authorised (dynamic linking) — the
+ * [operationRef] names the application or transfer and its counterparty, [documentSha256] the
+ * document signed. Server-side and SINGLE-USE: a challenge spent once answers REJECTED for any
+ * second use. The adapter raises [IntegrationUnavailableException] when it cannot ask; it never
+ * answers VERIFIED for a check it did not perform.
  */
 interface SignatureVerificationPort {
-    suspend fun verify(partyId: UUID, challengeId: String, documentSha256: String?, operationRef: String): SignatureOutcome
+    suspend fun verify(
+        partyId: UUID,
+        challengeId: String,
+        documentSha256: String?,
+        operationRef: String,
+    ): SignatureOutcome
 }
 
 enum class CounterpartyDispatch { DISPATCHED, REFUSED }
@@ -142,7 +157,7 @@ data class OnboardingTimers(
     val activationDeadlineDays: Int,
 )
 
-data class TransferInTimers(val responseDeadlineDays: Int, val fundsGraceDays: Int)
+data class TransferInTimers(val responseDeadlineDays: Int, val fundsGraceDays: Int, val coolingOffDays: Int)
 
 /**
  * Starts and signals the long-running workflows. Suspending, because the adapter's calls are

@@ -14,6 +14,7 @@ import com.openbank.pension.application.onboarding.KidRequest
 import com.openbank.pension.application.onboarding.KycProfile
 import com.openbank.pension.application.onboarding.KycStatus
 import com.openbank.pension.application.onboarding.PartyKycPort
+import com.openbank.pension.application.onboarding.PartyRelationPort
 import com.openbank.pension.application.onboarding.SignatureOutcome
 import com.openbank.pension.application.onboarding.SignatureVerificationPort
 import com.openbank.pension.application.onboarding.TransferCounterpartyPort
@@ -64,8 +65,20 @@ class StubIntegrationSwitch(
 class StubPartyKycAdapter(private val stub: StubIntegrationSwitch) : PartyKycPort {
     /** Verified, full capacity, no verified attributes — the applicant's declaration stands. */
     override suspend fun profile(partyId: UUID): KycProfile = stub.call("PartyKycPort") {
-        KycProfile(KycStatus.VERIFIED, fullLegalCapacity = true, verifiedBirthDate = null, verifiedResidencyCountry = null)
+        KycProfile(
+            KycStatus.VERIFIED,
+            fullLegalCapacity = true,
+            verifiedBirthDate = null,
+            verifiedResidencyCountry = null,
+        )
     }
+}
+
+/** No relation is ever verified by the stub: guardian applications need the real party-service. */
+@ApplicationScoped
+class StubPartyRelationAdapter(private val stub: StubIntegrationSwitch) : PartyRelationPort {
+    override suspend fun isLegalGuardian(guardianPartyId: UUID, wardPartyId: UUID): Boolean =
+        stub.call("PartyRelationPort") { false }
 }
 
 @ApplicationScoped
@@ -78,16 +91,26 @@ class StubKeyInformationDocumentAdapter(private val stub: StubIntegrationSwitch)
     }
 }
 
+/**
+ * Emulates sca-service's contract closely enough that callers cannot rely on anything looser:
+ * a challenge is SINGLE-USE (any second spend is REJECTED, whatever it is bound to), and a blank
+ * or `rejected-` challenge is refused so tests can drive the refusal path.
+ */
 @ApplicationScoped
 class StubSignatureVerificationAdapter(private val stub: StubIntegrationSwitch) : SignatureVerificationPort {
-    /** Even the stub refuses a blank or "rejected" challenge, so tests can drive the refusal path. */
+    private val spent = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
     override suspend fun verify(
         partyId: UUID,
         challengeId: String,
         documentSha256: String?,
         operationRef: String,
     ): SignatureOutcome = stub.call("SignatureVerificationPort") {
-        if (challengeId.isBlank() || challengeId.startsWith(REJECT_PREFIX)) SignatureOutcome.REJECTED else SignatureOutcome.VERIFIED
+        when {
+            challengeId.isBlank() || challengeId.startsWith(REJECT_PREFIX) -> SignatureOutcome.REJECTED
+            !spent.add(challengeId) -> SignatureOutcome.REJECTED
+            else -> SignatureOutcome.VERIFIED
+        }
     }
 
     companion object {
@@ -104,15 +127,19 @@ class StubTransferCounterpartyAdapter(private val stub: StubIntegrationSwitch) :
 
     override suspend fun cancelTransferIn(request: TransferRequest) = stub.call("TransferCounterpartyPort") { }
 
-    override suspend fun payTransferOut(request: TransferRequest, incentiveHistory: List<IncentiveHistoryEntry>): String =
-        stub.call("TransferCounterpartyPort") { "stub-payment-${request.id}" }
+    override suspend fun payTransferOut(
+        request: TransferRequest,
+        incentiveHistory: List<IncentiveHistoryEntry>,
+    ): String = stub.call("TransferCounterpartyPort") { "stub-payment-${request.id}" }
 }
 
 @ApplicationScoped
-class StubFundAdministrationAdapter(private val stub: StubIntegrationSwitch, private val clock: Clock) : FundAdministrationPort {
-    override suspend fun valuation(contractId: UUID, currency: String): Valuation = stub.call("FundAdministrationPort") {
-        Valuation(STUB_VALUE, currency, LocalDate.now(clock))
-    }
+class StubFundAdministrationAdapter(private val stub: StubIntegrationSwitch, private val clock: Clock) :
+    FundAdministrationPort {
+    override suspend fun valuation(contractId: UUID, currency: String): Valuation =
+        stub.call("FundAdministrationPort") {
+            Valuation(STUB_VALUE, currency, LocalDate.now(clock))
+        }
 
     override suspend fun redeemForTransfer(contractId: UUID, transferId: UUID, amount: BigDecimal): String =
         stub.call("FundAdministrationPort") { "stub-redemption-$transferId" }

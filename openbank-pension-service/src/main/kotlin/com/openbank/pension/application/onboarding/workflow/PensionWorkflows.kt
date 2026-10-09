@@ -63,18 +63,21 @@ interface TransferOutActivities {
 internal object PensionActivityOptions {
     private const val MAX_ATTEMPTS = 20
     private const val BACKOFF = 2.0
+    private const val START_TO_CLOSE_SECONDS = 30L
+    private const val INITIAL_RETRY_SECONDS = 2L
+    private const val MAX_RETRY_MINUTES = 10L
 
     /**
      * A domain refusal (`IllegalStateException` / `IllegalArgumentException`) is final — retrying it
      * only delays the compensation. Anything else (a collaborator down) is retried with backoff.
      */
     val DEFAULT: ActivityOptions = ActivityOptions.newBuilder()
-        .setStartToCloseTimeout(Duration.ofSeconds(30))
+        .setStartToCloseTimeout(Duration.ofSeconds(START_TO_CLOSE_SECONDS))
         .setRetryOptions(
             RetryOptions.newBuilder()
-                .setInitialInterval(Duration.ofSeconds(2))
+                .setInitialInterval(Duration.ofSeconds(INITIAL_RETRY_SECONDS))
                 .setBackoffCoefficient(BACKOFF)
-                .setMaximumInterval(Duration.ofMinutes(10))
+                .setMaximumInterval(Duration.ofMinutes(MAX_RETRY_MINUTES))
                 .setMaximumAttempts(MAX_ATTEMPTS)
                 .setDoNotRetry(IllegalStateException::class.java.name, IllegalArgumentException::class.java.name)
                 .build(),
@@ -100,8 +103,9 @@ interface OnboardingWorkflow {
 }
 
 /**
- * Signed → (activation trigger) → ACTIVE, with the cooling-off window running alongside. A
- * contract never funded before the pack's activation deadline lapses and is closed.
+ * Signed → cooling-off ends → (activation trigger) → ACTIVE. Activation is never attempted before
+ * the cooling-off period ends (the aggregate refuses it too); a contract not funded by the later of
+ * the cooling-off end and the pack's activation deadline lapses and is closed.
  */
 class OnboardingWorkflowImpl : OnboardingWorkflow {
 
@@ -120,27 +124,28 @@ class OnboardingWorkflowImpl : OnboardingWorkflow {
     override fun run(applicationId: UUID, timers: OnboardingTimers): OnboardingOutcome {
         val start = Workflow.currentTimeMillis()
         val coolingOffEnd = start + days(timers.coolingOffDays)
-        val activationDeadline = start + days(timers.activationDeadlineDays)
-        var activated = false
-        if (timers.activationTrigger == ActivationTrigger.SIGNATURE) {
-            if (!activities.activate(applicationId)) return OnboardingOutcome.WITHDRAWN
-            activated = true
-        }
+        val deadline = maxOf(coolingOffEnd, start + days(timers.activationDeadlineDays))
+        val onSignature = timers.activationTrigger == ActivationTrigger.SIGNATURE
         while (true) {
             if (withdrawal) return OnboardingOutcome.WITHDRAWN
-            if (!activated && contribution) {
-                if (!activities.activate(applicationId)) return OnboardingOutcome.WITHDRAWN
-                activated = true
-            }
             val now = Workflow.currentTimeMillis()
-            if (activated && now >= coolingOffEnd) return OnboardingOutcome.ACTIVATED
-            if (!activated && now >= activationDeadline) {
+            val pastCoolingOff = now >= coolingOffEnd
+            if (pastCoolingOff && (onSignature || contribution)) {
+                return if (activities.activate(
+                        applicationId,
+                    )
+                ) {
+                    OnboardingOutcome.ACTIVATED
+                } else {
+                    OnboardingOutcome.WITHDRAWN
+                }
+            }
+            if (now >= deadline) {
                 activities.expire(applicationId, "contract not funded within ${timers.activationDeadlineDays} days")
                 return OnboardingOutcome.EXPIRED
             }
-            val wakeAt = if (activated) coolingOffEnd else activationDeadline
-            val isActivated = activated
-            Workflow.await(Duration.ofMillis(wakeAt - now)) { withdrawal || (!isActivated && contribution) }
+            val wakeAt = if (pastCoolingOff) deadline else coolingOffEnd
+            Workflow.await(Duration.ofMillis(wakeAt - now)) { withdrawal || (pastCoolingOff && contribution) }
         }
     }
 }
@@ -202,11 +207,17 @@ class TransferInWorkflowImpl : TransferInWorkflow {
             return TransferOutcome.FAILED
         }
         if (dispatched == DispatchResult.ENDED) return TransferOutcome.FAILED
+        val coolingOffEnd = Workflow.currentTimeMillis() + days(timers.coolingOffDays)
         var limit = Workflow.currentTimeMillis() + days(timers.responseDeadlineDays)
         var acceptanceRecorded = false
         while (true) {
-            val outcome = settle(transferId)
+            val outcome = resolve(transferId, Workflow.currentTimeMillis() >= coolingOffEnd)
             if (outcome != null) return outcome
+            if (arrival != null) {
+                // Funds arrived inside the cooling-off period: the contract may not activate yet.
+                Workflow.await(Duration.ofMillis(coolingOffEnd - Workflow.currentTimeMillis())) { withdrawal }
+                continue
+            }
             if (acceptance && !acceptanceRecorded) {
                 activities.recordAccepted(transferId)
                 acceptanceRecorded = true
@@ -224,7 +235,7 @@ class TransferInWorkflowImpl : TransferInWorkflow {
         }
     }
 
-    private fun settle(transferId: UUID): TransferOutcome? {
+    private fun resolve(transferId: UUID, pastCoolingOff: Boolean): TransferOutcome? {
         val reason = rejection
         val funds = arrival
         return when {
@@ -236,7 +247,7 @@ class TransferInWorkflowImpl : TransferInWorkflow {
                 activities.fail(transferId, TransferStatus.REJECTED, reason)
                 TransferOutcome.REJECTED
             }
-            funds != null -> {
+            funds != null && pastCoolingOff -> {
                 activities.complete(transferId, funds)
                 TransferOutcome.COMPLETED
             }

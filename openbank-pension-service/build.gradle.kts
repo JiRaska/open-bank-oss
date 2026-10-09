@@ -30,9 +30,14 @@ dependencies {
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
 
+    // Onboarding and transfer workflows (ADR-0334 S2): shared TemporalConfig + client producer (ADR-0209 D1).
+    implementation(project(":openbank-libs-temporal"))
+    implementation("io.temporal:temporal-sdk:1.25.1")
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
 
+    testImplementation("io.temporal:temporal-testing:1.25.1")
+    testImplementation("io.grpc:grpc-inprocess:1.68.1")
     testImplementation(libs.quarkus.junit5)
     testImplementation(libs.quarkus.test.security)
     testImplementation(libs.assertj)

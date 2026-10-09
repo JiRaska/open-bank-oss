@@ -23,6 +23,8 @@ enum class TransferOrigin { PARTICIPANT, RECEIVING_PROVIDER }
  * and an OUT request can never "receive funds".
  */
 enum class TransferStatus {
+    /** A receiving provider asked; nothing moves until the participant SCA-consents. */
+    AWAITING_CONSENT,
     REQUESTED,
     SENT,
     ACCEPTED,
@@ -47,6 +49,7 @@ enum class TransferStatus {
             FUNDS_RECEIVED to setOf(COMPLETED),
         )
         private val OUT_EDGES: Map<TransferStatus, Set<TransferStatus>> = mapOf(
+            AWAITING_CONSENT to setOf(REQUESTED, CANCELLED),
             REQUESTED to setOf(VALUATED, REJECTED),
             VALUATED to setOf(SETTLED, FAILED),
             SETTLED to setOf(COMPLETED),
@@ -126,6 +129,12 @@ data class TransferRequest(
         }
     }
 
+    /** The participant's SCA consent to a provider-initiated transfer-out. */
+    fun consented(signatureRef: String, now: Instant): TransferRequest {
+        require(signatureRef.isNotBlank()) { "consent must be SCA-signed" }
+        return moveTo(TransferStatus.REQUESTED, now).copy(signatureRef = signatureRef)
+    }
+
     fun sent(reference: String, now: Instant): TransferRequest =
         moveTo(TransferStatus.SENT, now).copy(counterpartyReference = reference)
 
@@ -161,11 +170,17 @@ data class TransferRequest(
 
     fun failed(status: TransferStatus, reason: String, compensation: Compensation, now: Instant): TransferRequest {
         require(status.terminal && status != TransferStatus.COMPLETED) { "$status is not a failure outcome" }
-        return moveTo(status, now).copy(failureReason = reason, compensation = compensation)
+        checkMove(status)
+        // One copy: the failure status and the reason it requires change together.
+        return copy(status = status, updatedAt = now, failureReason = reason, compensation = compensation)
+    }
+
+    private fun checkMove(target: TransferStatus) = check(TransferStatus.canMove(direction, status, target)) {
+        "transfer $direction $status -> $target is not allowed"
     }
 
     private fun moveTo(target: TransferStatus, now: Instant): TransferRequest {
-        check(TransferStatus.canMove(direction, status, target)) { "transfer $direction $status -> $target is not allowed" }
+        checkMove(target)
         return copy(status = target, updatedAt = now)
     }
 
@@ -185,6 +200,17 @@ data class TransferRequest(
             require(origin == TransferOrigin.RECEIVING_PROVIDER || !signatureRef.isNullOrBlank()) {
                 "a participant's transfer request must be SCA-signed"
             }
+            require(origin == TransferOrigin.PARTICIPANT || direction == TransferDirection.OUT) {
+                "only a transfer-out can be requested by a receiving provider"
+            }
+            // A provider's request never carries the participant's consent: it waits for it.
+            val initial = if (origin ==
+                TransferOrigin.RECEIVING_PROVIDER
+            ) {
+                TransferStatus.AWAITING_CONSENT
+            } else {
+                TransferStatus.REQUESTED
+            }
             return TransferRequest(
                 id = UUID.randomUUID(),
                 direction = direction,
@@ -193,8 +219,8 @@ data class TransferRequest(
                 partyId = partyId,
                 counterparty = counterparty,
                 currency = currency,
-                signatureRef = signatureRef,
-                status = TransferStatus.REQUESTED,
+                signatureRef = if (origin == TransferOrigin.RECEIVING_PROVIDER) null else signatureRef,
+                status = initial,
                 deadline = deadline,
                 createdAt = now,
                 updatedAt = now,

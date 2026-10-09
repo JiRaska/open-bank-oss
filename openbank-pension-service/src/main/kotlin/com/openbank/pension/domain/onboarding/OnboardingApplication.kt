@@ -50,8 +50,8 @@ enum class OnboardingStatus {
             KID_ISSUED to setOf(QUESTIONNAIRE_SUBMITTED, KID_ISSUED, KID_ACCEPTED) + PRE_SIGN_EXITS,
             KID_ACCEPTED to setOf(QUESTIONNAIRE_SUBMITTED, KID_ISSUED, SIGNED) + PRE_SIGN_EXITS,
             SIGNED to setOf(ACTIVATED, WITHDRAWN, EXPIRED, TRANSFER_FAILED),
-            // Withdrawal stays possible after activation while the cooling-off period runs.
-            ACTIVATED to setOf(WITHDRAWN),
+            // Activation happens only once the cooling-off period has ended, so nothing follows it here.
+            ACTIVATED to emptySet(),
             REJECTED to emptySet(),
             WITHDRAWN to emptySet(),
             EXPIRED to emptySet(),
@@ -88,6 +88,7 @@ data class IssuedKid(val documentId: String, val sha256: String, val strategyCod
  * `IllegalStateException` (409 at the REST edge). [version] is the optimistic-lock counter the
  * repository compares, so a REST call and a workflow activity cannot silently overwrite each other.
  */
+@Suppress("TooManyFunctions") // one behaviour per lifecycle edge
 data class OnboardingApplication(
     val id: UUID,
     val partyId: UUID,
@@ -142,7 +143,12 @@ data class OnboardingApplication(
     }
 
     /** Choosing a strategy issues a fresh key-information document for exactly that strategy. */
-    fun issueKid(strategyCode: String, acknowledgedUnsuitable: Boolean, kid: IssuedKid, now: Instant): OnboardingApplication {
+    fun issueKid(
+        strategyCode: String,
+        acknowledgedUnsuitable: Boolean,
+        kid: IssuedKid,
+        now: Instant,
+    ): OnboardingApplication {
         check(assessmentId != null) { "the questionnaire must be answered before a strategy is chosen" }
         require(kid.strategyCode == strategyCode) { "the document must be issued for the chosen strategy" }
         return moveTo(OnboardingStatus.KID_ISSUED, now).copy(
@@ -171,7 +177,13 @@ data class OnboardingApplication(
         require((kind == OnboardingKind.TRANSFER_IN) == (transferRequestId != null)) {
             "a TRANSFER_IN application signs its transfer request together with the contract"
         }
-        return moveTo(OnboardingStatus.SIGNED, now).copy(
+        check(status.canMoveTo(OnboardingStatus.SIGNED)) {
+            "transition $status -> ${OnboardingStatus.SIGNED} is not allowed"
+        }
+        // One copy: the status and the contract it requires must change together.
+        return copy(
+            status = OnboardingStatus.SIGNED,
+            updatedAt = now,
             signatureRef = signatureRef,
             signedAt = now,
             contractId = contractId,
@@ -180,7 +192,23 @@ data class OnboardingApplication(
         )
     }
 
-    fun activate(now: Instant): OnboardingApplication = moveTo(OnboardingStatus.ACTIVATED, now)
+    /**
+     * The participant, or the verified guardian who applied on their behalf. Every step is taken by
+     * one of them; anyone else must not even learn that the application exists.
+     */
+    fun actableBy(party: UUID): Boolean = party == partyId || party == applicant.guardianPartyId
+
+    /**
+     * SIGNED -> ACTIVATED. Enforced HERE, not in a caller: never before the SCA signature (the
+     * transition table only leaves SIGNED) and never before the cooling-off period has ended.
+     */
+    fun activate(today: LocalDate, now: Instant): OnboardingApplication {
+        checkNotNull(signatureRef) { "an unsigned application cannot be activated" }
+        val endsOn =
+            checkNotNull(coolingOffEndsOn) { "an application without a cooling-off period cannot be activated" }
+        check(!today.isBefore(endsOn)) { "the cooling-off period runs until $endsOn" }
+        return moveTo(OnboardingStatus.ACTIVATED, now)
+    }
 
     fun withdraw(today: LocalDate, now: Instant): OnboardingApplication {
         val endsOn = checkNotNull(coolingOffEndsOn) { "only a signed application can be withdrawn" }

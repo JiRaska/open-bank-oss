@@ -2,10 +2,17 @@
 -- Each aggregate is stored as a JSON payload plus the columns that are queried or constrained;
 -- `version` is the optimistic-lock counter the repositories compare under a row lock.
 -- Rollback:
+--   (constraint) restore V1's pension_contracts_start_date_when_active without 'CLOSED';
 --   DROP TABLE pension_transfer_requests; DROP TABLE pension_suitability_assessments;
 --   DROP TABLE pension_onboarding_applications;
 --   DROP SEQUENCE pension_transfer_requests_seq; DROP SEQUENCE pension_suitability_assessments_seq;
 --   DROP SEQUENCE pension_onboarding_applications_seq;
+
+-- A contract withdrawn in the cooling-off period, or never funded, is CLOSED without ever having
+-- started; V1's constraint (and the aggregate's init block, changed alongside) did not allow that.
+ALTER TABLE pension_contracts DROP CONSTRAINT pension_contracts_start_date_when_active;
+ALTER TABLE pension_contracts ADD CONSTRAINT pension_contracts_start_date_when_active CHECK (
+    status IN ('DRAFT', 'PENDING_ACTIVATION', 'CLOSED') OR start_date IS NOT NULL);
 
 CREATE TABLE pension_onboarding_applications (
     id                    BIGINT PRIMARY KEY,
@@ -60,7 +67,7 @@ CREATE TABLE pension_transfer_requests (
     updated_at    TIMESTAMPTZ NOT NULL,
     CONSTRAINT pension_transfer_direction_known CHECK (direction IN ('IN', 'OUT')),
     CONSTRAINT pension_transfer_status_known CHECK (status IN (
-        'REQUESTED', 'SENT', 'ACCEPTED', 'FUNDS_RECEIVED', 'VALUATED', 'SETTLED', 'COMPLETED',
+        'AWAITING_CONSENT', 'REQUESTED', 'SENT', 'ACCEPTED', 'FUNDS_RECEIVED', 'VALUATED', 'SETTLED', 'COMPLETED',
         'REJECTED', 'TIMED_OUT', 'CANCELLED', 'FAILED'))
 );
 
@@ -69,7 +76,7 @@ CREATE INDEX idx_pension_transfer_status ON pension_transfer_requests (status, u
 -- At most one transfer-out in flight per contract, enforced by the database and not only by the
 -- service's check-then-act.
 CREATE UNIQUE INDEX uq_pension_transfer_out_open ON pension_transfer_requests (contract_id)
-    WHERE direction = 'OUT' AND status IN ('REQUESTED', 'VALUATED', 'SETTLED');
+    WHERE direction = 'OUT' AND status IN ('AWAITING_CONSENT', 'REQUESTED', 'VALUATED', 'SETTLED');
 
 CREATE SEQUENCE IF NOT EXISTS pension_onboarding_applications_seq INCREMENT BY 50;
 CREATE SEQUENCE IF NOT EXISTS pension_suitability_assessments_seq INCREMENT BY 50;

@@ -59,7 +59,9 @@ class OnboardingResource {
     lateinit var onboarding: OnboardingService
 
     @POST
-    @Operation(summary = "Start an application; eligibility and KYC are checked at once (REJECTED with reasons if not met)")
+    @Operation(
+        summary = "Start an application; eligibility and KYC are checked at once (REJECTED with reasons if not met)",
+    )
     @Authorize(action = "pension.onboarding.start")
     suspend fun start(@HeaderParam(PARTY_HEADER) party: String?, request: StartApplicationRequest?): Response {
         val partyId = partyOf(party)
@@ -78,7 +80,8 @@ class OnboardingResource {
         }
         val application = onboarding.start(
             StartOnboardingCommand(
-                partyId = partyId,
+                actingPartyId = partyId,
+                onBehalfOfPartyId = body.onBehalfOfPartyId,
                 kind = kind,
                 productLine = requireNotNull(body.productLine) { "productLine is required" },
                 jurisdiction = requireNotNull(body.jurisdiction) { "jurisdiction is required" },
@@ -95,7 +98,6 @@ class OnboardingResource {
                 residencyEvidence = body.residencyEvidence.orEmpty().mapIndexed { i, e ->
                     requireNotNull(e) { "residencyEvidence[$i] must not be null" }
                 }.toSet(),
-                guardianPartyId = body.guardianPartyId,
                 ceding = ceding,
             ),
         )
@@ -137,8 +139,10 @@ class OnboardingResource {
     @Path("/{id}/recommendation")
     @Operation(summary = "The strategy recommendation from the risk profile and years to retirement")
     @Authorize(action = "pension.onboarding.read", resource = "#id")
-    suspend fun recommendation(@HeaderParam(PARTY_HEADER) party: String?, @PathParam("id") id: UUID): RecommendationResponse =
-        RecommendationResponse.from(onboarding.recommendation(id, partyOf(party)))
+    suspend fun recommendation(
+        @HeaderParam(PARTY_HEADER) party: String?,
+        @PathParam("id") id: UUID,
+    ): RecommendationResponse = RecommendationResponse.from(onboarding.recommendation(id, partyOf(party)))
 
     @POST
     @Path("/{id}/strategy")
@@ -181,7 +185,8 @@ class OnboardingResource {
         @PathParam("id") id: UUID,
         request: SignRequest?,
     ): ApplicationResponse {
-        val challenge = requireNotNull(request?.scaChallengeId?.takeIf { it.isNotBlank() }) { "scaChallengeId is required" }
+        val challenge =
+            requireNotNull(request?.scaChallengeId?.takeIf { it.isNotBlank() }) { "scaChallengeId is required" }
         return ApplicationResponse.from(onboarding.sign(id, partyOf(party), challenge))
     }
 

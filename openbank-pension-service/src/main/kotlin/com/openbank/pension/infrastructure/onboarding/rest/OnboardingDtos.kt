@@ -49,7 +49,11 @@ data class StartApplicationRequest(
     val birthDate: LocalDate? = null,
     val residencyCountry: String? = null,
     val residencyEvidence: List<String?>? = null,
-    val guardianPartyId: UUID? = null,
+    /**
+     * Set only by a guardian applying for a ward; honoured only after party-service verifies the
+     * relation. The ACTING party is never taken from the body — it is the edge-stamped header.
+     */
+    val onBehalfOfPartyId: UUID? = null,
     val transferIn: CedingContractDto? = null,
 )
 
@@ -152,6 +156,8 @@ data class TransferOutRequest(
     val receivingContractNumber: String? = null,
     val scaChallengeId: String? = null,
 )
+
+data class TransferConsentRequest(val scaChallengeId: String? = null)
 
 data class CounterpartyResponseRequest(val accepted: Boolean? = null, val reason: String? = null)
 

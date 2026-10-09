@@ -16,10 +16,8 @@ import com.openbank.pension.domain.pack.JurisdictionPack
 import com.openbank.pension.domain.pack.PackNotFoundException
 
 /** Onboarding extensions keyed by the core pack they extend. */
-class StaticOnboardingRulesRegistry(
-    rules: List<OnboardingRules>,
-    corePacks: List<JurisdictionPack>,
-) : OnboardingRulesRegistry {
+class StaticOnboardingRulesRegistry(rules: List<OnboardingRules>, corePacks: List<JurisdictionPack>) :
+    OnboardingRulesRegistry {
 
     private val byKey: Map<Triple<String, ProductLine, Int>, OnboardingRules> =
         rules.associateBy { Triple(it.jurisdiction, it.productLine, it.packVersion) }

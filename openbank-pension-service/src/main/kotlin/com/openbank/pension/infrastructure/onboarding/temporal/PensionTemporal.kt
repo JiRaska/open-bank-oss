@@ -33,12 +33,12 @@ import io.temporal.worker.WorkerFactory
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.event.Observes
 import jakarta.enterprise.inject.Instance
-import org.eclipse.microprofile.config.inject.ConfigProperty
-import org.jboss.logging.Logger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
+import org.eclipse.microprofile.config.inject.ConfigProperty
+import org.jboss.logging.Logger
 import java.util.UUID
 
 /**
@@ -55,6 +55,7 @@ internal fun <T> onWorker(block: suspend () -> T): T =
  * re-ensures the workflow rather than starting a second one.
  */
 @ApplicationScoped
+@Suppress("TooManyFunctions") // one start/signal per port method; splitting would scatter the id scheme
 class TemporalPensionOrchestrator(
     private val client: WorkflowClient,
     @ConfigProperty(name = "openbank.temporal.task-queue", defaultValue = "openbank-pension")
@@ -79,29 +80,44 @@ class TemporalPensionOrchestrator(
     }
 
     override suspend fun startOnboarding(applicationId: UUID, timers: OnboardingTimers) = idempotent {
-        val stub = client.newWorkflowStub(OnboardingWorkflow::class.java, options(PensionWorkflowIds.onboarding(applicationId)))
+        val stub = client.newWorkflowStub(
+            OnboardingWorkflow::class.java,
+            options(PensionWorkflowIds.onboarding(applicationId)),
+        )
         WorkflowClient.start(stub::run, applicationId, timers)
     }
 
-    override suspend fun signalContributionReceived(applicationId: UUID) = blocking { onboarding(applicationId).contributionReceived() }
+    override suspend fun signalContributionReceived(applicationId: UUID) = blocking {
+        onboarding(applicationId).contributionReceived()
+    }
 
     override suspend fun signalWithdrawal(applicationId: UUID) = blocking { onboarding(applicationId).withdrawn() }
 
     override suspend fun startTransferIn(transferId: UUID, applicationId: UUID, timers: TransferInTimers) = idempotent {
-        val stub = client.newWorkflowStub(TransferInWorkflow::class.java, options(PensionWorkflowIds.transferIn(transferId)))
+        val stub = client.newWorkflowStub(
+            TransferInWorkflow::class.java,
+            options(PensionWorkflowIds.transferIn(transferId)),
+        )
         WorkflowClient.start(stub::run, transferId, timers)
     }
 
     override suspend fun signalCounterpartyAccepted(transferId: UUID) = blocking { transferIn(transferId).accepted() }
 
-    override suspend fun signalCounterpartyRejected(transferId: UUID, reason: String) = blocking { transferIn(transferId).rejected(reason) }
+    override suspend fun signalCounterpartyRejected(transferId: UUID, reason: String) = blocking {
+        transferIn(transferId).rejected(reason)
+    }
 
-    override suspend fun signalFundsReceived(transferId: UUID, arrival: FundsArrival) = blocking { transferIn(transferId).fundsReceived(arrival) }
+    override suspend fun signalFundsReceived(transferId: UUID, arrival: FundsArrival) = blocking {
+        transferIn(transferId).fundsReceived(arrival)
+    }
 
     override suspend fun signalTransferWithdrawal(transferId: UUID) = blocking { transferIn(transferId).withdrawn() }
 
     override suspend fun startTransferOut(transferId: UUID) = idempotent {
-        val stub = client.newWorkflowStub(TransferOutWorkflow::class.java, options(PensionWorkflowIds.transferOut(transferId)))
+        val stub = client.newWorkflowStub(
+            TransferOutWorkflow::class.java,
+            options(PensionWorkflowIds.transferOut(transferId)),
+        )
         WorkflowClient.start(stub::run, transferId)
     }
 
@@ -121,7 +137,9 @@ class TemporalPensionOrchestrator(
 class PensionActivitiesImpl(
     private val onboardingService: Instance<OnboardingService>,
     private val transferService: Instance<TransferService>,
-) : OnboardingActivities, TransferInActivities, TransferOutActivities {
+) : OnboardingActivities,
+    TransferInActivities,
+    TransferOutActivities {
 
     private val onboarding get() = onboardingService.get()
     private val transfers get() = transferService.get()
@@ -134,7 +152,9 @@ class PensionActivitiesImpl(
 
     override fun recordAccepted(transferId: UUID) = onWorker { transfers.recordAccepted(transferId) }
 
-    override fun complete(transferId: UUID, arrival: FundsArrival) = onWorker { transfers.completeIn(transferId, arrival) }
+    override fun complete(transferId: UUID, arrival: FundsArrival) = onWorker {
+        transfers.completeIn(transferId, arrival)
+    }
 
     override fun fail(transferId: UUID, outcome: TransferStatus, reason: String) =
         onWorker { transfers.failIn(transferId, outcome, reason) }

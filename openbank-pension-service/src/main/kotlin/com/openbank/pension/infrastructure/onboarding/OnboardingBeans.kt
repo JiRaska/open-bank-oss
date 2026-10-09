@@ -10,6 +10,7 @@ import com.openbank.pension.application.onboarding.OnboardingApplicationReposito
 import com.openbank.pension.application.onboarding.OnboardingRulesRegistry
 import com.openbank.pension.application.onboarding.OnboardingService
 import com.openbank.pension.application.onboarding.PartyKycPort
+import com.openbank.pension.application.onboarding.PartyRelationPort
 import com.openbank.pension.application.onboarding.PensionOrchestrator
 import com.openbank.pension.application.onboarding.SignatureVerificationPort
 import com.openbank.pension.application.onboarding.SuitabilityAssessmentRepository
@@ -51,13 +52,15 @@ class OnboardingBeans {
         packs: JurisdictionPackRegistry,
         rules: OnboardingRulesRegistry,
         kyc: PartyKycPort,
+        relations: PartyRelationPort,
         documents: KeyInformationDocumentPort,
         signatures: SignatureVerificationPort,
         orchestrator: PensionOrchestrator,
         tx: TransactionRunner,
         clock: Clock,
     ): OnboardingService = OnboardingService(
-        applications, assessments, transfers, contracts, packs, rules, kyc, documents, signatures, orchestrator, tx, clock,
+        applications, assessments, transfers, contracts, packs, rules, kyc, relations, documents, signatures,
+        orchestrator, tx, clock,
     )
 
     @Produces
@@ -76,6 +79,7 @@ class OnboardingBeans {
         tx: TransactionRunner,
         clock: Clock,
     ): TransferService = TransferService(
-        transfers, applications, contracts, packs, counterparties, funds, signatures, orchestrator, onboarding, tx, clock,
+        transfers, applications, contracts, packs, counterparties, funds, signatures, orchestrator, onboarding,
+        tx, clock,
     )
 }

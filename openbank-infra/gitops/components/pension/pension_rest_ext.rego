@@ -50,3 +50,54 @@ allowed_reasons contains "edge-service-pension" if {
 		"pension.contract.terminate",
 	}
 }
+
+# --- ADR-0334 slice S2: onboarding and transfers ------------------------------------------------
+#
+#   pension.onboarding.{start,read,questionnaire,strategy,kid,sign,withdraw}  OnboardingResource
+#   pension.transfer.{request-out,consent,read}                               PensionTransferResource
+#   pension.transfer.provider-request                                         ReceivingProviderResource
+#   pension.operator.{read,contribution,transfer}                             PensionOperatorResource
+
+# The customer edge carrying the participant's own intent (party from the edge-stamped header).
+allowed_reasons contains "edge-service-pension-onboarding" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-edge"
+	input.action in {
+		"pension.onboarding.start",
+		"pension.onboarding.read",
+		"pension.onboarding.questionnaire",
+		"pension.onboarding.strategy",
+		"pension.onboarding.kid",
+		"pension.onboarding.sign",
+		"pension.onboarding.withdraw",
+		"pension.transfer.request-out",
+		"pension.transfer.consent",
+		"pension.transfer.read",
+	}
+}
+
+# A receiving provider's own client, and ONLY the provider-request action. The resource further
+# requires the principal to equal `service-account-pension-provider-<receivingProviderId>`.
+allowed_reasons contains "receiving-provider-transfer-request" if {
+	input.principal.type == "HUMAN"
+	startswith(input.principal.id, "service-account-pension-provider-")
+	input.action == "pension.transfer.provider-request"
+}
+
+# Real staff only. `service-account-` is excluded outright: a backend holding ROLE_OPERATOR must
+# not relay a ceding provider's answer or a contribution (#3765/#3734).
+allowed_reasons contains "operator-pension-onboarding" if {
+	input.principal.type == "HUMAN"
+	not startswith(input.principal.id, "service-account-")
+	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+	role in input.principal.roles
+	input.action in {"pension.operator.read", "pension.operator.contribution", "pension.operator.transfer"}
+}
+
+# Compliance reads the operator views, never acts.
+allowed_reasons contains "compliance-pension-onboarding-read" if {
+	input.principal.type == "HUMAN"
+	not startswith(input.principal.id, "service-account-")
+	"ROLE_COMPLIANCE" in input.principal.roles
+	input.action == "pension.operator.read"
+}

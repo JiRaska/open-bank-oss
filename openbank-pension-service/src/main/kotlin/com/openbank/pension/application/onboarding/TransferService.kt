@@ -76,16 +76,18 @@ class TransferService(
         }
         val pack = packs.pinned(contract.jurisdiction, contract.productLine, contract.packVersion)
         check(pack.transfer.allowed) { "this pack does not allow a transfer-out" }
-        check(transfers.findByContract(contract.id).none { it.direction == TransferDirection.OUT && !it.status.terminal }) {
+        check(
+            transfers.findByContract(contract.id).none {
+                it.direction == TransferDirection.OUT && !it.status.terminal
+            },
+        ) {
             "a transfer-out of this contract is already in progress"
         }
         val origin = if (command.partyId != null) TransferOrigin.PARTICIPANT else TransferOrigin.RECEIVING_PROVIDER
         if (origin == TransferOrigin.PARTICIPANT) {
-            val challenge = requireNotNull(command.challengeId?.takeIf { it.isNotBlank() }) { "scaChallengeId is required" }
-            val outcome = signatures.verify(
-                contract.participantPartyId, challenge, null, "pension-transfer-out:${contract.id}",
-            )
-            if (outcome != SignatureOutcome.VERIFIED) throw SignatureRejectedException("the SCA challenge was not verified")
+            val challenge =
+                requireNotNull(command.challengeId?.takeIf { it.isNotBlank() }) { "scaChallengeId is required" }
+            verifyConsent(contract.participantPartyId, challenge, outRef(contract.id, command.receiving))
         }
         val request = TransferRequest.request(
             direction = TransferDirection.OUT,
@@ -99,8 +101,33 @@ class TransferService(
             now = now(),
         )
         val saved = transfers.save(request)
+        if (saved.status == TransferStatus.REQUESTED) orchestrator.startTransferOut(saved.id)
+        return saved
+    }
+
+    /**
+     * The participant's SCA consent to a transfer-out a receiving provider requested. Without it
+     * the request never leaves AWAITING_CONSENT and nothing is valued, sold or paid.
+     */
+    suspend fun consentTransferOut(id: UUID, partyId: UUID, challengeId: String): TransferRequest {
+        val transfer = get(id, partyId)
+        check(transfer.status == TransferStatus.AWAITING_CONSENT) {
+            "transfer $id is ${transfer.status}, not awaiting consent"
+        }
+        verifyConsent(partyId, challengeId, outRef(transfer.contractId, transfer.counterparty) + ":$id")
+        val saved = transfers.save(transfer.consented(challengeId, now()))
         orchestrator.startTransferOut(saved.id)
         return saved
+    }
+
+    /** Binds the challenge to this contract and THIS receiving contract — never reusable elsewhere. */
+    private fun outRef(contractId: UUID, receiving: Counterparty) =
+        "pension-transfer-out:$contractId:${receiving.providerId}:${receiving.contractNumber}"
+
+    private suspend fun verifyConsent(partyId: UUID, challengeId: String, operationRef: String) {
+        if (signatures.verify(partyId, challengeId, null, operationRef) != SignatureOutcome.VERIFIED) {
+            throw SignatureRejectedException("the SCA challenge was not verified")
+        }
     }
 
     // --- transfer-in: counterparty callbacks (relayed by an operator / integration) -----------
@@ -140,7 +167,14 @@ class TransferService(
             failIn(id, TransferStatus.FAILED, receipt.reason ?: "the ceding provider refused the request")
             return DispatchResult.ENDED
         }
-        transfers.save(transfer.sent(checkNotNull(receipt.reference) { "a dispatched request carries a reference" }, now()))
+        transfers.save(
+            transfer.sent(
+                checkNotNull(receipt.reference) {
+                    "a dispatched request carries a reference"
+                },
+                now(),
+            ),
+        )
         return DispatchResult.SENT
     }
 
@@ -173,7 +207,7 @@ class TransferService(
             }
             val application = applications.findByTransferRequest(id)
             if (application != null && application.status == OnboardingStatus.SIGNED) {
-                applications.save(application.activate(now()))
+                applications.save(application.activate(today(), now()))
             }
             transfers.save(received.completed(emptyList(), now()))
         }
@@ -196,7 +230,11 @@ class TransferService(
         tx.inTransaction {
             onboarding.closeContract(transfer.contractId)
             applications.findByTransferRequest(transfer.id)?.let { application ->
-                if (application.status == OnboardingStatus.SIGNED) applications.save(application.transferFailed(reason, now()))
+                if (application.status ==
+                    OnboardingStatus.SIGNED
+                ) {
+                    applications.save(application.transferFailed(reason, now()))
+                }
             }
             transfers.save(transfer.failed(outcome, reason, compensation, now()))
         }
@@ -218,7 +256,9 @@ class TransferService(
         }
         val pack = packs.pinned(contract.jurisdiction, contract.productLine, contract.packVersion)
         val valuation = funds.valuation(contract.id, transfer.currency)
-        check(valuation.currency == transfer.currency) { "valuation currency ${valuation.currency} != ${transfer.currency}" }
+        check(valuation.currency == transfer.currency) {
+            "valuation currency ${valuation.currency} != ${transfer.currency}"
+        }
         val fee = TransferTerms.fee(pack.transfer, contract.startDate, valuation.amount, today())
         transfers.save(transfer.valuated(valuation.amount, fee, now()))
         return true
