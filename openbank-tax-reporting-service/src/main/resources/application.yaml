@@ -47,9 +47,8 @@ mp:
 openbank:
   api:
     version: "1"
-  # ADR-0336: catalogue-defined statutory returns. fund-ids and reporting-start are deliberately
-  # unset: with no reporting start, the breach gauge counts only stored returns, so an unconfigured
-  # deployment reports nothing rather than inventing breaches for funds it does not manage.
+  # ADR-0336: catalogue-defined statutory returns. Until the reporting start and fund roster are
+  # configured, deadline checks fail closed and workflow liveness cannot report success.
   statutory-returns:
     catalogues: statutory-returns/cz/pension-cnb.v1.json
     company-id: company

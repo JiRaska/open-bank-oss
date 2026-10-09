@@ -211,6 +211,8 @@ paths:
                 items: { $ref: '#/components/schemas/ReturnBreachResponse' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '503':
+          description: Reporting start or fund roster is unconfigured; deadline status is unavailable
 
   /api/v1/statutory-returns/capability:
     get:

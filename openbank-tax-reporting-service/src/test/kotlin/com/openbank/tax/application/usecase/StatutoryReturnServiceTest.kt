@@ -25,6 +25,7 @@ import com.openbank.tax.domain.returns.ValidationRule
 import com.openbank.tax.infrastructure.returns.StatutoryReturnDeadlineScheduler
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -99,13 +100,17 @@ class StatutoryReturnServiceTest {
     private val repo = InMemoryRepo()
     private val data = FixedData(mapOf("units" to BigDecimal("100")))
 
-    private fun service(start: LocalDate? = null, d: ReturnDataPort = data) = StatutoryReturnService(
+    private fun service(
+        start: LocalDate? = LocalDate.of(2026, 8, 1),
+        d: ReturnDataPort = data,
+        fundIds: List<String> = listOf("fund-a", "fund-b"),
+    ) = StatutoryReturnService(
         catalogues = object : ReturnCatalogueSource {
             override fun catalogues() = listOf(catalogue)
         },
         data = d,
         repository = repo,
-        entities = ReportingEntities("company", listOf("fund-a", "fund-b"), start),
+        entities = ReportingEntities("company", fundIds, start),
         accountingClock = AccountingClock.bank(clock),
         clock = clock,
     )
@@ -190,8 +195,25 @@ class StatutoryReturnServiceTest {
     }
 
     @Test
-    fun `with no reporting start an unconfigured deployment reports no invented breaches`(): Unit = runBlocking {
-        assertThat(service(start = null).breaches()).isEmpty()
+    fun `an overdue correction remains a breach after an earlier revision was submitted`(): Unit = runBlocking {
+        val svc = service()
+        val original = svc.assemble("test-cat", "M-FUND", "fund-a", "2026-07", "maker")
+        svc.submit(svc.approve(original.id, "checker").id, "REF-1", "checker")
+        val correction = svc.assemble("test-cat", "M-FUND", "fund-a", "2026-07", "maker")
+        assertThat(svc.breaches().map { "${it.period}/${it.kind}" })
+            .containsExactly("2026-07/NOT_SUBMITTED")
+        svc.submit(svc.approve(correction.id, "checker").id, "REF-2", "checker")
+        assertThat(svc.breaches()).isEmpty()
+    }
+
+    @Test
+    fun `missing reporting start or fund roster refuses deadline status instead of zero`(): Unit = runBlocking {
+        assertThatThrownBy { runBlocking { service(start = null).breaches() } }
+            .isInstanceOf(ReturnDataUnavailableException::class.java)
+            .hasMessageContaining("reporting start")
+        assertThatThrownBy { runBlocking { service(fundIds = emptyList()).breaches() } }
+            .isInstanceOf(ReturnDataUnavailableException::class.java)
+            .hasMessageContaining("fund roster")
     }
 
     @Test
@@ -210,5 +232,26 @@ class StatutoryReturnServiceTest {
             .also { it.registerLiveness() }
             .refresh()
         assertThat(published).isEqualTo(5)
+    }
+
+    @Test
+    fun `the scheduler cannot record success or zero breaches without reporting configuration`(): Unit = runBlocking {
+        var published = -1
+        val metrics = object : StatutoryReturnMetricsPort {
+            override fun recordBreaches(count: Int) {
+                published = count
+            }
+        }
+        val liveness = mockk<WorkflowLivenessRecorder>(relaxed = true)
+        val domainMetrics = mockk<DomainMetrics> {
+            every { registerWorkflowLiveness(any(), any()) } returns liveness
+        }
+        val scheduler = StatutoryReturnDeadlineScheduler(service(start = null), metrics, domainMetrics)
+            .also { it.registerLiveness() }
+
+        assertThatThrownBy { runBlocking { scheduler.refresh() } }
+            .isInstanceOf(ReturnDataUnavailableException::class.java)
+        assertThat(published).isEqualTo(-1)
+        verify(exactly = 0) { liveness.recordSuccess() }
     }
 }

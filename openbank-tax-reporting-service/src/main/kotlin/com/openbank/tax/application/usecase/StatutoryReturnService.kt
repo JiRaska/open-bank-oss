@@ -7,6 +7,7 @@ package com.openbank.tax.application.usecase
 import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.tax.application.port.out.ReturnCatalogueSource
 import com.openbank.tax.application.port.out.ReturnDataPort
+import com.openbank.tax.application.port.out.ReturnDataUnavailableException
 import com.openbank.tax.application.port.out.StatutoryReturnRepository
 import com.openbank.tax.domain.model.TaxConflictException
 import com.openbank.tax.domain.model.TaxValidationException
@@ -108,21 +109,27 @@ class StatutoryReturnService(
      *
      * Counts returns that were never assembled, not only stored ones left unsubmitted: the silent
      * failure in periodic reporting is the return nobody started, and a register of stored rows
-     * cannot see it. Expected periods run from the configured reporting start; with no start
-     * configured only stored returns are considered, so an unconfigured deployment reports nothing
-     * rather than a wall of invented breaches.
+     * cannot see it. A missing reporting start or fund roster makes the expected obligations
+     * unknowable, so the check fails instead of publishing a misleading zero.
      */
     suspend fun breaches(): List<ReturnBreach> {
+        val start = entities.reportingStart ?: throw ReturnDataUnavailableException(
+            "Statutory return reporting start is not configured; deadline status is unavailable",
+        )
+        if (catalogues.catalogues().any { catalogue -> catalogue.returns.any { it.scope == ReturnScope.FUND } } &&
+            entities.fundIds.isEmpty()
+        ) {
+            throw ReturnDataUnavailableException(
+                "Statutory return fund roster is not configured; deadline status is unavailable",
+            )
+        }
         val today = accountingClock.today()
         val stored = repository.listReturns()
         val latestByKey = stored.groupBy { Key(it.catalogueId, it.returnCode, it.entityId, it.period) }
             .mapValues { (_, revisions) -> revisions.maxBy { it.revision } }
-        val submittedKeys = stored.filter { it.status == ReturnStatus.SUBMITTED }
-            .map { Key(it.catalogueId, it.returnCode, it.entityId, it.period) }.toSet()
-
         val breaches = mutableListOf<ReturnBreach>()
         latestByKey.forEach { (key, latest) ->
-            if (key !in submittedKeys && latest.isOverdueAt(today)) {
+            if (latest.status != ReturnStatus.SUBMITTED && latest.isOverdueAt(today)) {
                 breaches +=
                     ReturnBreach(
                         key.catalogueId,
@@ -134,7 +141,6 @@ class StatutoryReturnService(
                     )
             }
         }
-        val start = entities.reportingStart ?: return breaches
         return breaches + notAssembled(start, today, latestByKey.keys)
     }
 

@@ -29,6 +29,8 @@ class StatutoryReturnDeadlineSchedulerIT {
         override fun getConfigOverrides(): Map<String, String> = mapOf(
             "quarkus.scheduler.enabled" to "true",
             "openbank.statutory-returns.deadline-check-every" to "2s",
+            "openbank.statutory-returns.reporting-start" to "2099-01-01",
+            "openbank.statutory-returns.fund-ids" to "test-fund",
         )
     }
 
