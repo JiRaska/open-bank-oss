@@ -203,7 +203,10 @@ class PayoutService(
                 iban.takeLast(LAST4),
                 effectiveFrom,
             )
-        } catch (e: RuntimeException) {
+        } catch (
+            // Counted and rethrown unchanged: whatever the notice path raised, the change stays held.
+            @Suppress("TooGenericExceptionCaught") e: RuntimeException,
+        ) {
             // The change stays held and inert: it cannot apply without the participant hearing of it.
             ctx.metrics.payoutAccountChange("notice_failed")
             throw e
