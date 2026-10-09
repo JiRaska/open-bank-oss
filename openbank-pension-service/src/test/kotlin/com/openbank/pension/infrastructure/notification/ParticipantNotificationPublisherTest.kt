@@ -37,7 +37,8 @@ class ParticipantNotificationPublisherTest {
             sent +=
                 k to p
         },
-    ) = ParticipantNotificationPublisher(enabled, sender, json, meters, timeoutMillis = 200)
+        language: ParticipantLanguageResolver = ParticipantLanguageResolver { "CS" },
+    ) = ParticipantNotificationPublisher(enabled, sender, json, meters, language, timeoutMillis = 200)
 
     private fun count(outcome: String) =
         meters.find(ParticipantNotificationPublisher.METRIC).tag("outcome", outcome).counter()?.count() ?: 0.0
@@ -96,5 +97,22 @@ class ParticipantNotificationPublisherTest {
         assertThatThrownBy {
             ParticipantNotification(party, ParticipantNotificationKind.TRANSFER_STATUS, mapOf("contractId" to "c"))
         }.isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test
+    fun `the notice carries the participant's language so notification-service renders cs or en`(): Unit = runBlocking {
+        publisher(enabled = true, language = { if (it == party) "EN" else "CS" }).send(notice)
+        val envelope: Map<String, Any?> = json.readValue(sent.single().second)
+        assertThat(envelope).containsEntry("language", "EN")
+    }
+
+    @Test
+    fun `a party language maps onto notification-service's closed vocabulary, never an unknown value`() {
+        assertThat(NoticeLanguage.of("cs", "CS")).isEqualTo("CS")
+        assertThat(NoticeLanguage.of("en-GB", "CS")).isEqualTo("EN")
+        assertThat(NoticeLanguage.of("EN", "CS")).isEqualTo("EN")
+        assertThat(NoticeLanguage.of("de", "CS")).isEqualTo("CS")
+        assertThat(NoticeLanguage.of(null, "EN")).isEqualTo("EN")
+        assertThat(NoticeLanguage.of(" ", "xx")).isEqualTo("CS")
     }
 }

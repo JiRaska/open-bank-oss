@@ -21,10 +21,34 @@ import kotlinx.coroutines.withTimeout
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.reactive.messaging.Channel
 import org.eclipse.microprofile.reactive.messaging.Emitter
+import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.jboss.logging.Logger
 import java.time.LocalDate
 import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
+
+/**
+ * The participant's notice language, as notification-service's closed `NotificationLanguage`
+ * vocabulary (`CS` | `EN`; anything else would be rejected by its consumer). Resolved from the
+ * party record per notice, so a participant who switches language is told in the new one.
+ */
+fun interface ParticipantLanguageResolver {
+    suspend fun languageOf(partyId: UUID): String
+}
+
+/**
+ * Maps a party's preferred language to notification-service's vocabulary. Unknown, blank or an
+ * unsupported language falls back to [default] (`CS` for a CZ-only product line), never to a value
+ * the consumer would reject.
+ */
+object NoticeLanguage {
+    val SUPPORTED = setOf("CS", "EN")
+
+    fun of(preferred: String?, default: String): String {
+        val code = preferred?.trim()?.take(2)?.uppercase()
+        return if (code in SUPPORTED) code!! else default.uppercase().takeIf { it in SUPPORTED } ?: "CS"
+    }
+}
 
 /** The send, without Kafka types, so [ParticipantNotificationPublisher] is unit-tested. */
 fun interface NotificationRequestSender {
@@ -54,6 +78,7 @@ class ParticipantNotificationPublisher(
     private val sender: NotificationRequestSender,
     private val objectMapper: ObjectMapper,
     private val meters: MeterRegistry,
+    private val language: ParticipantLanguageResolver,
     private val timeoutMillis: Long = DEFAULT_TIMEOUT_MILLIS,
 ) : ParticipantNotifier {
     private val log = Logger.getLogger(ParticipantNotificationPublisher::class.java)
@@ -63,7 +88,10 @@ class ParticipantNotificationPublisher(
             NotificationDispatch.SKIPPED
         } else {
             try {
-                withTimeout(timeoutMillis) { sender.send(notification.partyId.toString(), envelope(notification)) }
+                withTimeout(timeoutMillis) {
+                    val lang = language.languageOf(notification.partyId)
+                    sender.send(notification.partyId.toString(), envelope(notification, lang))
+                }
                 NotificationDispatch.ENQUEUED
             } catch (
                 @Suppress("TooGenericExceptionCaught") e: Exception,
@@ -81,8 +109,10 @@ class ParticipantNotificationPublisher(
         return outcome
     }
 
-    fun envelope(notification: ParticipantNotification): String = objectMapper.writeValueAsString(
+    fun envelope(notification: ParticipantNotification, language: String): String = objectMapper.writeValueAsString(
         mapOf(
+            // notification-service renders the PENSION_* copy in this language (cs / en, #12409).
+            "language" to language,
             "partyId" to notification.partyId.toString(),
             "channel" to "PUSH",
             "template" to notification.kind.template,
@@ -114,12 +144,14 @@ class KafkaParticipantNotifier(
     private val enabled: Boolean,
     objectMapper: ObjectMapper,
     meters: MeterRegistry,
+    language: PartyLanguageResolver,
 ) : ParticipantNotifier {
     private val publisher = ParticipantNotificationPublisher(
         enabled,
         { key, payload -> emitter.send(Record.of(key, payload)).await() },
         objectMapper,
         meters,
+        language,
     )
 
     override suspend fun send(notification: ParticipantNotification) = publisher.send(notification)
@@ -180,5 +212,33 @@ internal suspend fun requireEnqueued(
         throw ParticipantNotificationUnavailableException(
             "the payout-account change notice was $outcome, not enqueued; the change is refused",
         )
+    }
+}
+
+/**
+ * The REAL resolver: the participant's `preferredLanguage` on the party record (party-service
+ * `GET /api/v1/parties/{id}`, the read pension already makes for KYC). A lookup that cannot be made
+ * falls back to the default rather than failing an informational notice; the security notice is
+ * still sent, in the default language.
+ */
+@UnlessBuildProfile(anyOf = ["dev", "test"])
+@ApplicationScoped
+class PartyLanguageResolver(
+    @param:RestClient private val parties: com.openbank.pension.infrastructure.identity.PartyRestClient,
+    @param:ConfigProperty(name = "openbank.pension.notifications.default-language", defaultValue = "CS")
+    private val default: String,
+) : ParticipantLanguageResolver {
+    private val log = Logger.getLogger(PartyLanguageResolver::class.java)
+
+    override suspend fun languageOf(partyId: UUID): String {
+        val preferred = try {
+            parties.party(partyId).preferredLanguage
+        } catch (
+            @Suppress("TooGenericExceptionCaught") e: Exception,
+        ) {
+            log.debugf(e, "party language for %s not resolved; using %s", partyId, default)
+            null
+        }
+        return NoticeLanguage.of(preferred, default)
     }
 }
