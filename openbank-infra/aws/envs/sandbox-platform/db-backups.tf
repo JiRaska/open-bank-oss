@@ -310,8 +310,6 @@ locals {
     # BEFORE the manifest lands, so WAL archiving never runs without credentials.
     pricing = { namespace = "pricing", sa = "pricing-db" }
     vop     = { namespace = "payments", sa = "vop-db" }
-    # ADR-0334 S1: pension-db declares a barmanObjectStore from its first manifest.
-    pension = { namespace = "pension", sa = "pension-db" }
     # Added by #1444 (second wave). These 11 declared NO backup at all — they never even
     # attempted an archive, so nothing alerted, and they would have had no recovery point the
     # first time anyone needed one. The matching barmanObjectStore + ScheduledBackup + a bounded

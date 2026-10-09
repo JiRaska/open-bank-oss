@@ -75,8 +75,8 @@ class PensionContractResource {
     @Operation(summary = "Create a DRAFT contract under the jurisdiction pack in force today")
     @Authorize(action = "pension.contract.create")
     suspend fun create(
-        @HeaderParam(PARTY_HEADER) participantPartyId: String?,
-        @HeaderParam(IDEMPOTENCY_HEADER) idempotencyKey: String?,
+        @HeaderParam("X-Customer-Party-Id") participantPartyId: String?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         request: CreateContractRequest?,
     ): Response {
         val party = requireNotNull(participantPartyId) { "header '$PARTY_HEADER' is required" }
@@ -115,7 +115,7 @@ class PensionContractResource {
     @Path("/{id}")
     @Operation(summary = "Read one contract with its strategy history")
     @Authorize(action = "pension.contract.read", resource = "#id")
-    suspend fun get(@PathParam("id") id: UUID, @HeaderParam(PARTY_HEADER) party: String?): ContractResponse =
+    suspend fun get(@PathParam("id") id: UUID, @HeaderParam("X-Customer-Party-Id") party: String?): ContractResponse =
         ContractResponse.from(contracts.get(caller(party), id))
 
     @POST
@@ -124,8 +124,8 @@ class PensionContractResource {
     @Authorize(action = "pension.contract.submit", resource = "#id")
     suspend fun submit(
         @PathParam("id") id: UUID,
-        @HeaderParam(PARTY_HEADER) party: String?,
-        @HeaderParam(IDEMPOTENCY_HEADER) idempotencyKey: String?,
+        @HeaderParam("X-Customer-Party-Id") party: String?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
     ): ContractResponse = ContractResponse.from(
         contracts.submit(
             caller(party).also {
@@ -141,8 +141,8 @@ class PensionContractResource {
     @Authorize(action = "pension.contract.activate", resource = "#id")
     suspend fun activate(
         @PathParam("id") id: UUID,
-        @HeaderParam(PARTY_HEADER) party: String?,
-        @HeaderParam(IDEMPOTENCY_HEADER) idempotencyKey: String?,
+        @HeaderParam("X-Customer-Party-Id") party: String?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
     ): ContractResponse = ContractResponse.from(
         contracts.activate(
             caller(party).also {
@@ -158,7 +158,7 @@ class PensionContractResource {
     @Authorize(action = "pension.contract.strategy", resource = "#id")
     suspend fun electStrategy(
         @PathParam("id") id: UUID,
-        @HeaderParam(PARTY_HEADER) party: String?,
+        @HeaderParam("X-Customer-Party-Id") party: String?,
         request: ElectStrategyRequest?,
     ): ContractResponse {
         val body = requireNotNull(request) { "request body is required" }
@@ -172,8 +172,8 @@ class PensionContractResource {
     @Authorize(action = "pension.contract.suspend", resource = "#id")
     suspend fun suspend(
         @PathParam("id") id: UUID,
-        @HeaderParam(PARTY_HEADER) party: String?,
-        @HeaderParam(IDEMPOTENCY_HEADER) idempotencyKey: String?,
+        @HeaderParam("X-Customer-Party-Id") party: String?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
     ): ContractResponse =
         ContractResponse.from(contracts.suspendContributions(caller(party).also { idempotencyKey(idempotencyKey) }, id))
 
@@ -183,8 +183,8 @@ class PensionContractResource {
     @Authorize(action = "pension.contract.resume", resource = "#id")
     suspend fun resume(
         @PathParam("id") id: UUID,
-        @HeaderParam(PARTY_HEADER) party: String?,
-        @HeaderParam(IDEMPOTENCY_HEADER) idempotencyKey: String?,
+        @HeaderParam("X-Customer-Party-Id") party: String?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
     ): ContractResponse =
         ContractResponse.from(contracts.resumeContributions(caller(party).also { idempotencyKey(idempotencyKey) }, id))
 
@@ -194,8 +194,8 @@ class PensionContractResource {
     @Authorize(action = "pension.contract.read", resource = "#id")
     suspend fun evaluateIncentives(
         @PathParam("id") id: UUID,
-        @HeaderParam(PARTY_HEADER) party: String?,
-        @HeaderParam(IDEMPOTENCY_HEADER) idempotencyKey: String?,
+        @HeaderParam("X-Customer-Party-Id") party: String?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         request: IncentiveEvaluationRequest?,
     ): List<IncentiveResultResponse> {
         idempotencyKey(idempotencyKey)
@@ -220,8 +220,8 @@ class PensionContractResource {
     @Authorize(action = "pension.contract.terminate", resource = "#id")
     suspend fun earlyTermination(
         @PathParam("id") id: UUID,
-        @HeaderParam(PARTY_HEADER) party: String?,
-        @HeaderParam(IDEMPOTENCY_HEADER) idempotencyKey: String?,
+        @HeaderParam("X-Customer-Party-Id") party: String?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         request: EarlyTerminationRequest?,
     ): EarlyTerminationResponse {
         idempotencyKey(idempotencyKey)
@@ -247,7 +247,6 @@ class PensionContractResource {
 
     private companion object {
         const val PARTY_HEADER = "X-Customer-Party-Id"
-        const val IDEMPOTENCY_HEADER = "Idempotency-Key"
         val STAFF_ROLES = listOf(Roles.OPERATOR, Roles.ADMIN, Roles.COMPLIANCE)
     }
 }
