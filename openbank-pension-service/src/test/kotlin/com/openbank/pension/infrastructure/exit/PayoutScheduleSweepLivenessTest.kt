@@ -48,9 +48,11 @@ class PayoutScheduleSweepLivenessTest {
 
     @Test
     fun `a disabled schedule publishes no heartbeat`() {
-        scheduler("OFF")
-        assertThat(registry.find(WorkflowLivenessMetrics.SUCCESS_RECORDED).gauge()).isNull()
-        assertThat(registry.find(WorkflowLivenessMetrics.EXPECTED_INTERVAL_SECONDS).gauge()).isNull()
+        listOf("off", "OFF", "disabled", "DISABLED").forEach { interval ->
+            scheduler(interval)
+            assertThat(registry.find(WorkflowLivenessMetrics.SUCCESS_RECORDED).gauge()).isNull()
+            assertThat(registry.find(WorkflowLivenessMetrics.EXPECTED_INTERVAL_SECONDS).gauge()).isNull()
+        }
     }
 
     @Test
