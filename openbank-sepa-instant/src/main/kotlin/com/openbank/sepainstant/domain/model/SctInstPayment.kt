@@ -41,6 +41,10 @@ data class SctInstPayment(
     val submittedAt: OffsetDateTime?,
     val createdAt: OffsetDateTime,
     val updatedAt: OffsetDateTime,
+    val requestHash: String? = null,
+    val initiatingPrincipal: String? = null,
+    val initiatingPartyId: UUID? = null,
+    val initiatingActorPartyId: UUID? = null,
 ) {
     /** ISO 4217 code of [amount], the spelling every outbound contract carries. */
     val currency: String get() = amount.currency.code

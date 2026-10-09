@@ -4,6 +4,7 @@
 
 package com.openbank.sepainstant.application.usecase
 
+import com.openbank.libs.idempotency.IdempotencyKeyReusedException
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.sepainstant.application.port.`in`.GetSctInstPaymentUseCase
 import com.openbank.sepainstant.application.port.`in`.RecallSctInstPaymentUseCase
@@ -106,12 +107,66 @@ class SctInstPaymentService(
         repo.findByIdempotencyKey(command.idempotencyKey)
             .flatMap { existing ->
                 if (existing != null) {
-                    Uni.createFrom().item(existing)
+                    if (!sameRequest(existing, command)) {
+                        Uni.createFrom().failure(IdempotencyKeyReusedException())
+                    } else {
+                        Uni.createFrom().item(existing)
+                    }
                 } else {
                     // ADR-0084 §4.1 (SHADOW): score after screening; fail-open, never blocks/holds.
                     applyScreening(command).call { payment -> scoreFraudShadow(payment) }
+                        .onFailure().recoverWithUni { failure ->
+                            if (!failure.isKeyConflict()) {
+                                Uni.createFrom().failure(failure)
+                            } else {
+                                repo.findByIdempotencyKey(command.idempotencyKey).flatMap { winner ->
+                                    if (winner != null && sameRequest(winner, command)) {
+                                        Uni.createFrom().item(winner)
+                                    } else {
+                                        Uni.createFrom().failure(IdempotencyKeyReusedException())
+                                    }
+                                }
+                            }
+                        }
                 }
             }
+
+    private fun Throwable.isKeyConflict(): Boolean =
+        generateSequence(this) { it.cause.takeIf { cause -> cause !== it } }
+            .any { cause ->
+                (cause as? org.hibernate.exception.ConstraintViolationException)?.constraintName ==
+                    "sct_inst_payments_idempotency_key_key" ||
+                    cause.message.orEmpty().contains("sct_inst_payments_idempotency_key_key")
+            }
+
+    override fun findReceipt(
+        key: String,
+        accountId: UUID,
+        principal: String,
+        partyId: UUID?,
+        actorId: UUID?,
+    ): Uni<SctInstPayment?> = repo.findByIdempotencyKey(key).map { payment ->
+        payment?.takeIf {
+            it.requestHash != null &&
+                it.initiatingPrincipal != null &&
+                it.initiatingPrincipal == principal &&
+                it.initiatingPartyId == partyId &&
+                (it.initiatingPartyId == null || it.initiatingActorPartyId != null) &&
+                it.initiatingActorPartyId == actorId &&
+                it.debtorAccountId == accountId
+        }
+    }
+
+    private fun sameRequest(existing: SctInstPayment, command: SubmitSctInstCommand): Boolean =
+        existing.requestHash != null &&
+            command.requestHash != null &&
+            existing.requestHash == command.requestHash &&
+            existing.initiatingPrincipal != null &&
+            existing.initiatingPrincipal == command.initiatingPrincipal &&
+            existing.initiatingPartyId == command.initiatingPartyId &&
+            (existing.initiatingPartyId == null || existing.initiatingActorPartyId != null) &&
+            existing.initiatingActorPartyId == command.initiatingActorPartyId &&
+            existing.debtorAccountId == command.debtorAccountId
 
     /**
      * Fraud scoring in SHADOW mode (ADR-0084 §1/§4.1): observe the verdict, never enforce it.
@@ -161,6 +216,10 @@ class SctInstPaymentService(
     private fun applyScreening(command: SubmitSctInstCommand): Uni<SctInstPayment> {
         val base = SctInstPayment(
             idempotencyKey = command.idempotencyKey,
+            requestHash = command.requestHash,
+            initiatingPrincipal = command.initiatingPrincipal,
+            initiatingPartyId = command.initiatingPartyId,
+            initiatingActorPartyId = command.initiatingActorPartyId,
             status = SctInstStatus.PENDING,
             debtorAccountId = command.debtorAccountId,
             debtorIban = command.debtorIban,
@@ -182,16 +241,32 @@ class SctInstPaymentService(
             updatedAt = OffsetDateTime.now(clock),
         )
         metrics.paymentSubmitted("sepa_instant", base.currency)
-        return screeningPort.screen(base.debtorName, ScreeningRole.DEBTOR, "${base.paymentId}:debtor")
-            .flatMap { debtor ->
-                screeningPort.screen(base.creditorName, ScreeningRole.CREDITOR, "${base.paymentId}:creditor")
-                    .map { creditor -> listOf(debtor, creditor) }
-            }
-            .flatMap { results -> applyDecision(base, results) }
-            .onFailure(ScreeningUnavailableException::class.java).recoverWithUni { ex ->
-                log.warnf(ex, "Sanctions screening unavailable for payment %s; holding in PENDING", base.paymentId)
-                hold(base, AmlCaseRiskLevel.MEDIUM, ALERT_SCREENING_UNAVAILABLE, ex.message, null)
-            }
+        // Claim the durable unique key before any external screening, scheme or settlement call.
+        // A crash after this commit leaves a visible PENDING receipt, never a second execution.
+        return repo.save(base).flatMap { persisted ->
+            screeningPort.screen(
+                persisted.debtorName,
+                ScreeningRole.DEBTOR,
+                "${persisted.paymentId}:debtor",
+            )
+                .flatMap { debtor ->
+                    screeningPort.screen(
+                        persisted.creditorName,
+                        ScreeningRole.CREDITOR,
+                        "${persisted.paymentId}:creditor",
+                    )
+                        .map { creditor -> listOf(debtor, creditor) }
+                }
+                .flatMap { results -> applyDecision(persisted, results) }
+                .onFailure(ScreeningUnavailableException::class.java).recoverWithUni { ex ->
+                    log.warnf(
+                        ex,
+                        "Sanctions screening unavailable for payment %s; holding in PENDING",
+                        persisted.paymentId,
+                    )
+                    hold(persisted, AmlCaseRiskLevel.MEDIUM, ALERT_SCREENING_UNAVAILABLE, ex.message, null)
+                }
+        }
     }
 
     private fun applyDecision(base: SctInstPayment, results: List<ScreeningResult>): Uni<SctInstPayment> {

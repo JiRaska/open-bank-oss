@@ -19,10 +19,14 @@ data class SubmitSctInstRequest(
     val amount: BigDecimal,
     val currency: String = "EUR",
     val remittanceInfo: String?,
-    val endToEndId: String
+    val endToEndId: String,
 )
 
 data class RecallRequest(val reason: String)
+
+data class SctInstReceiptLookupRequest(val idempotencyKey: String, val debtorAccountId: UUID)
+
+data class SctInstReceiptLookupResponse(val state: String, val paymentId: UUID? = null, val status: String? = null)
 
 data class SctInstPaymentResponse(
     val paymentId: UUID,
@@ -34,5 +38,5 @@ data class SctInstPaymentResponse(
     val endToEndId: String,
     val executionTimeoutAt: OffsetDateTime?,
     val settledAt: OffsetDateTime?,
-    val createdAt: OffsetDateTime
+    val createdAt: OffsetDateTime,
 )

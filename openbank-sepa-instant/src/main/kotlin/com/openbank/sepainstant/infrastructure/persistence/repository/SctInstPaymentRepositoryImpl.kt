@@ -29,7 +29,13 @@ class SctInstPaymentRepositoryImpl @Inject constructor(
     @WithTransaction
     override fun save(payment: SctInstPayment): Uni<SctInstPayment> {
         val entity = mapper.toEntity(payment)
-        return sf.withTransaction { s -> s.persist(entity).map { mapper.toDomain(entity) } }
+        return sf.withTransaction { s ->
+            if (payment.id == 0L) {
+                s.persist(entity).map { mapper.toDomain(entity) }
+            } else {
+                s.merge(entity).map(mapper::toDomain)
+            }
+        }
     }
 
     @WithSession

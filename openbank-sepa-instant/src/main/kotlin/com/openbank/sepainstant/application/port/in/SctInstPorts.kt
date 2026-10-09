@@ -11,6 +11,13 @@ import java.util.UUID
 
 interface SubmitSctInstPaymentUseCase {
     fun submit(command: SubmitSctInstCommand): Uni<SctInstPayment>
+    fun findReceipt(
+        key: String,
+        accountId: UUID,
+        principal: String,
+        partyId: UUID?,
+        actorId: UUID?,
+    ): Uni<SctInstPayment?>
 }
 
 interface GetSctInstPaymentUseCase {
@@ -35,4 +42,8 @@ data class SubmitSctInstCommand(
     val amount: Money,
     val remittanceInfo: String?,
     val endToEndId: String,
+    val requestHash: String? = null,
+    val initiatingPrincipal: String? = null,
+    val initiatingPartyId: UUID? = null,
+    val initiatingActorPartyId: UUID? = null,
 )

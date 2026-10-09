@@ -12,7 +12,8 @@ info:
   # 1.7 -> 1.8 (#11913): additive — submit documents 400 CURRENCY_NOT_ALLOWED (SCT Inst is
   # euro-only; any non-EUR currency is refused at the boundary).
   # 1.8 -> 1.9 (#11588): additive verified makerActorKind on approval responses.
-  version: 1.9.0
+  # 1.9 -> 1.10 (#12317): additive authenticated receipt lookup and replay conflict.
+  version: 1.10.0
   description: >-
     SEPA Instant Credit Transfer — sub-10s settlement, recall support. On submit, debtor and creditor
     names are synchronously screened against the sanctions lists (ADR-0032): a clean payment proceeds
@@ -72,6 +73,35 @@ paths:
                 $ref: '#/components/schemas/SctInstPaymentResponse'
         '400':
           $ref: '#/components/responses/InvalidMoney'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Key already belongs to a different payload or an in-flight request
+
+  /api/v1/sepa-instant/receipts/lookup:
+    post:
+      tags: [SCT Inst]
+      summary: Resolve the caller's original instant-payment attempt
+      description: >-
+        The key is a correlation value, never authorization. The authenticated actor, original
+        customer party and debit account must match durable provenance. Missing, in-flight and
+        legacy rows answer UNKNOWN; only a matching row answers FOUND.
+      operationId: lookupSctInstReceipt
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SctInstReceiptLookupRequest'
+      responses:
+        '200':
+          description: Authoritative matching receipt or UNKNOWN
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SctInstReceiptLookupResponse'
+        '400':
+          description: Missing or invalid request
         '403':
           $ref: '#/components/responses/Forbidden'
 
@@ -263,6 +293,19 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
+    SctInstReceiptLookupRequest:
+      type: object
+      required: [idempotencyKey, debtorAccountId]
+      properties:
+        idempotencyKey: {type: string}
+        debtorAccountId: {type: string, format: uuid}
+    SctInstReceiptLookupResponse:
+      type: object
+      required: [state]
+      properties:
+        state: {type: string, enum: [FOUND, UNKNOWN]}
+        paymentId: {type: string, format: uuid, nullable: true}
+        status: {type: string, nullable: true, enum: [PENDING, PROCESSING, SETTLED, REJECTED, TIMEOUT, RECALLED]}
     SubmitSctInstRequest:
       # Field-for-field with SubmitSctInstRequest in SctInstDtos.kt. `idempotencyKey`,
       # `debtorIban` and `debtorName` are non-nullable there, so a body omitting any of them

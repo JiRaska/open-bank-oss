@@ -22,12 +22,18 @@ class SctInstMapper {
         settledAt = e.settledAt, recalledAt = e.recalledAt, recallReason = e.recallReason,
         rejectReason = e.rejectReason, rejectDetail = e.rejectDetail,
         submittedAt = e.submittedAt, createdAt = e.createdAt, updatedAt = e.updatedAt,
+        requestHash = e.requestHash, initiatingPrincipal = e.initiatingPrincipal,
+        initiatingPartyId = e.initiatingPartyId, initiatingActorPartyId = e.initiatingActorPartyId,
     )
 
     fun toEntity(d: SctInstPayment) = SctInstPaymentEntity().also { e ->
         e.id = d.id
         e.paymentId = d.paymentId
         e.idempotencyKey = d.idempotencyKey
+        e.requestHash = d.requestHash
+        e.initiatingPrincipal = d.initiatingPrincipal
+        e.initiatingPartyId = d.initiatingPartyId
+        e.initiatingActorPartyId = d.initiatingActorPartyId
         e.status = d.status.name
         e.debtorAccountId = d.debtorAccountId
         e.debtorIban = d.debtorIban

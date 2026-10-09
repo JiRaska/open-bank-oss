@@ -33,6 +33,8 @@ class SctInstApiIT {
     companion object {
         private val debtorAccountId: UUID = UUID.randomUUID()
         private var createdPaymentId: String? = null
+        private var receiptKey: String? = null
+        private var submittedPayload: String? = null
 
         init {
             RestAssured.filters(ResponseLoggingFilter())
@@ -83,6 +85,8 @@ class SctInstApiIT {
         }
 
         createdPaymentId = response.extract().body().jsonPath().getString("paymentId")
+        receiptKey = idempotencyKey
+        submittedPayload = payload
         assertThat(createdPaymentId).isNotNull
     }
 
@@ -125,6 +129,87 @@ class SctInstApiIT {
             get("/api/v1/sepa-instant/debtor/$debtorAccountId")
         } Then {
             statusCode(200)
+        }
+    }
+
+    @Test
+    @Order(6)
+    @TestSecurity(user = "operator-01", roles = ["ROLE_OPERATOR"])
+    fun `durable receipt resolves and exact replay returns the original payment`() {
+        val key = requireNotNull(receiptKey)
+        val payload = requireNotNull(submittedPayload)
+        val id = requireNotNull(createdPaymentId)
+        Given {
+            contentType("application/json")
+            body("""{"idempotencyKey":"$key","debtorAccountId":"$debtorAccountId"}""")
+        } When {
+            post("/api/v1/sepa-instant/receipts/lookup")
+        } Then {
+            statusCode(200)
+            body("state", equalTo("FOUND"))
+            body("paymentId", equalTo(id))
+        }
+        Given {
+            contentType("application/json")
+            header("Idempotency-Key", key)
+            body(payload)
+        } When {
+            post("/api/v1/sepa-instant")
+        } Then {
+            statusCode(201)
+            body("paymentId", equalTo(id))
+        }
+    }
+
+    @Test
+    @Order(7)
+    @TestSecurity(user = "operator-02", roles = ["ROLE_OPERATOR"])
+    fun `another principal cannot resolve or replay the receipt`() {
+        val key = requireNotNull(receiptKey)
+        val payload = requireNotNull(submittedPayload)
+        Given {
+            contentType("application/json")
+            body("""{"idempotencyKey":"$key","debtorAccountId":"$debtorAccountId"}""")
+        } When {
+            post("/api/v1/sepa-instant/receipts/lookup")
+        } Then {
+            statusCode(200)
+            body("state", equalTo("UNKNOWN"))
+        }
+        Given {
+            contentType("application/json")
+            header("Idempotency-Key", key)
+            body(payload)
+        } When {
+            post("/api/v1/sepa-instant")
+        } Then {
+            statusCode(409)
+        }
+    }
+
+    @Test
+    @Order(8)
+    @TestSecurity(user = "operator-01", roles = ["ROLE_OPERATOR"])
+    fun `receipt rejects a different debit account and a changed payload`() {
+        val key = requireNotNull(receiptKey)
+        val payload = requireNotNull(submittedPayload)
+        Given {
+            contentType("application/json")
+            body("""{"idempotencyKey":"$key","debtorAccountId":"${UUID.randomUUID()}"}""")
+        } When {
+            post("/api/v1/sepa-instant/receipts/lookup")
+        } Then {
+            statusCode(200)
+            body("state", equalTo("UNKNOWN"))
+        }
+        Given {
+            contentType("application/json")
+            header("Idempotency-Key", key)
+            body(payload.replace("\"SCT Inst test\"", "\"changed remittance\""))
+        } When {
+            post("/api/v1/sepa-instant")
+        } Then {
+            statusCode(409)
         }
     }
 }

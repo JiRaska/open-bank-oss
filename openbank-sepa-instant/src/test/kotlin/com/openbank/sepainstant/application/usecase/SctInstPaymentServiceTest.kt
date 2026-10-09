@@ -100,8 +100,11 @@ class SctInstPaymentServiceTest {
 
     @Test
     fun `submit returns existing payment for same idempotency key`() {
-        val existing = payment(status = SctInstStatus.PROCESSING)
-        val command = command()
+        val existing = payment(status = SctInstStatus.PROCESSING).copy(
+            requestHash = "hash-123",
+            initiatingPrincipal = "issuer\u001foperator-01",
+        )
+        val command = command().copy(requestHash = "hash-123", initiatingPrincipal = "issuer\u001foperator-01")
 
         every { repo.findByIdempotencyKey(command.idempotencyKey) } returns Uni.createFrom().item(existing)
 
@@ -225,7 +228,7 @@ class SctInstPaymentServiceTest {
         assertThat(executionTimeoutAt).isAfter(submittedAt)
         assertThat(result).isSameAs(paymentSlot.captured)
 
-        verify(exactly = 1) { repo.save(any()) }
+        verify(exactly = 2) { repo.save(any()) }
         verify(exactly = 1) { publisher.publish(match<SctInstPaymentSubmitted> { it.paymentId == result.paymentId }) }
         verify(exactly = 0) { amlCasePort.openCase(any()) }
     }
