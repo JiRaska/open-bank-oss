@@ -62,7 +62,7 @@ class ContractFundingResource {
         @PathParam("contractId") contractId: UUID,
         @HeaderParam(ContractAccessGuard.PARTY_HEADER) party: String?,
     ): PaymentReferenceResponse {
-        guard.authorize(identity, party, contractId)
+        guard.forRead(identity, party, contractId)
         return PaymentReferenceResponse(contractId, contributions.paymentReference(contractId))
     }
 
@@ -74,7 +74,7 @@ class ContractFundingResource {
         @PathParam("contractId") contractId: UUID,
         @HeaderParam(ContractAccessGuard.PARTY_HEADER) party: String?,
     ): List<ContributionResponse> {
-        guard.authorize(identity, party, contractId)
+        guard.forRead(identity, party, contractId)
         return contributions.list(contractId).map(ContributionResponse::from)
     }
 
@@ -87,7 +87,7 @@ class ContractFundingResource {
         @HeaderParam(ContractAccessGuard.PARTY_HEADER) party: String?,
         request: MandateSetupRequest?,
     ): Response {
-        val contract = guard.authorize(identity, party, contractId)
+        val contract = guard.forWrite(identity, party, contractId)
         val body = requireNotNull(request) { "request body is required" }
         val id = contributions.setUpMandate(
             MandateRequest(
@@ -104,6 +104,20 @@ class ContractFundingResource {
         return Response.status(Response.Status.CREATED).entity(MandateResponse(id)).build()
     }
 
+    @PUT
+    @Path("/employers/{employerPartyId}")
+    @Operation(summary = "Authorise an employer to contribute to this contract through its bulk files")
+    @Authorize(action = "pension.funding.mandate", resource = "#contractId")
+    suspend fun enrolEmployer(
+        @PathParam("contractId") contractId: UUID,
+        @PathParam("employerPartyId") employerPartyId: UUID,
+        @HeaderParam(ContractAccessGuard.PARTY_HEADER) party: String?,
+    ): Response {
+        guard.forWrite(identity, party, contractId)
+        contributions.enrolEmployer(contractId, employerPartyId)
+        return Response.noContent().build()
+    }
+
     @GET
     @Path("/incentives")
     @Operation(summary = "Incentive claims and the per-incentive ledger balance")
@@ -112,9 +126,12 @@ class ContractFundingResource {
         @PathParam("contractId") contractId: UUID,
         @HeaderParam(ContractAccessGuard.PARTY_HEADER) party: String?,
     ): IncentiveStatusResponse {
-        guard.authorize(identity, party, contractId)
+        guard.forRead(identity, party, contractId)
         val status = incentives.status(contractId)
-        return IncentiveStatusResponse(status.claims.map(ClaimResponse::from), status.balances.map(BalanceResponse::from))
+        return IncentiveStatusResponse(
+            status.claims.map(ClaimResponse::from),
+            status.balances.map(BalanceResponse::from),
+        )
     }
 
     @GET
@@ -126,7 +143,7 @@ class ContractFundingResource {
         @PathParam("year") year: Int,
         @HeaderParam(ContractAccessGuard.PARTY_HEADER) party: String?,
     ): TaxYearSummaryResponse {
-        guard.authorize(identity, party, contractId)
+        guard.forRead(identity, party, contractId)
         return TaxYearSummaryResponse.from(incentives.taxSummary(contractId, year))
     }
 
@@ -140,7 +157,7 @@ class ContractFundingResource {
         @HeaderParam(ContractAccessGuard.PARTY_HEADER) party: String?,
         request: ExternalCapUsageRequest?,
     ): TaxYearSummaryResponse {
-        guard.authorize(identity, party, contractId)
+        guard.forWrite(identity, party, contractId)
         val usage = requireNotNull(request?.usage) { "usage is required" }
             .mapValues { (group, v) -> requireNotNull(v) { "usage['$group'] must not be null" } }
         incentives.declareExternalCapUsage(contractId, year, usage)

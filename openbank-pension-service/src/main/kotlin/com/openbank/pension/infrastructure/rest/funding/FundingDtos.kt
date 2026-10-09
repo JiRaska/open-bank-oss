@@ -65,6 +65,7 @@ data class MandateResponse(val mandateId: String)
 
 data class ContributionResponse(
     val id: UUID,
+    val contractId: UUID,
     val paymentId: String,
     val source: String,
     val channel: String,
@@ -78,13 +79,18 @@ data class ContributionResponse(
 ) {
     companion object {
         fun from(c: Contribution) = ContributionResponse(
-            c.id, c.paymentId, c.source.name, c.channel.name, c.amount, c.currency, c.valueDate, c.taxYear,
+            c.id, c.contractId, c.paymentId, c.source.name, c.channel.name, c.amount, c.currency, c.valueDate,
+            c.taxYear,
             c.employerPartyId, c.subscriptionOrderId, c.receivedAt,
         )
     }
 }
 
-data class ReceiptResponse(val outcome: String, val contribution: ContributionResponse?, val unmatched: UnmatchedResponse?)
+data class ReceiptResponse(
+    val outcome: String,
+    val contribution: ContributionResponse?,
+    val unmatched: UnmatchedResponse?,
+)
 
 data class UnmatchedResponse(
     val id: UUID,
@@ -107,7 +113,12 @@ data class UnmatchedResponse(
     }
 }
 
-data class EmployerLineResponse(val lineNo: Int, val contractReference: String, val amount: BigDecimal, val outcome: String) {
+data class EmployerLineResponse(
+    val lineNo: Int,
+    val contractReference: String,
+    val amount: BigDecimal,
+    val outcome: String,
+) {
     companion object {
         fun from(r: EmployerLineResult) = EmployerLineResponse(r.lineNo, r.contractReference, r.amount, r.outcome.name)
     }
@@ -134,7 +145,12 @@ data class ClaimResponse(
     }
 }
 
-data class BalanceResponse(val incentiveId: String, val received: BigDecimal, val returned: BigDecimal, val net: BigDecimal) {
+data class BalanceResponse(
+    val incentiveId: String,
+    val received: BigDecimal,
+    val returned: BigDecimal,
+    val net: BigDecimal,
+) {
     companion object {
         fun from(b: IncentiveBalance) = BalanceResponse(b.incentiveId, b.received, b.returned, b.net)
     }
@@ -152,15 +168,33 @@ data class ClaimBatchResponse(
     val createdAt: Instant,
 ) {
     companion object {
-        fun from(b: ClaimBatch) = ClaimBatchResponse(b.id, b.claimFormat, b.period.toString(), b.claimIds, b.status.name, b.payload, b.createdAt)
+        fun from(b: ClaimBatch) = ClaimBatchResponse(
+            b.id,
+            b.claimFormat,
+            b.period.toString(),
+            b.claimIds,
+            b.status.name,
+            b.payload,
+            b.createdAt,
+        )
     }
 }
 
-data class ClaimRunResponse(val claimsCreated: Int, val batches: List<ClaimBatchResponse>, val unfiledFormats: Set<String>)
+data class ClaimRunResponse(
+    val claimsCreated: Int,
+    val batches: List<ClaimBatchResponse>,
+    val unfiledFormats: Set<String>,
+)
 
-data class EmployerExemptionResponse(val employerPartyId: UUID, val contributed: BigDecimal, val exempt: BigDecimal, val taxable: BigDecimal) {
+data class EmployerExemptionResponse(
+    val employerPartyId: UUID,
+    val contributed: BigDecimal,
+    val exempt: BigDecimal,
+    val taxable: BigDecimal,
+) {
     companion object {
-        fun from(e: EmployerExemption) = EmployerExemptionResponse(e.employerPartyId, e.contributed, e.exempt, e.taxable)
+        fun from(e: EmployerExemption) =
+            EmployerExemptionResponse(e.employerPartyId, e.contributed, e.exempt, e.taxable)
     }
 }
 
@@ -191,7 +225,12 @@ data class TaxYearSummaryResponse(
     }
 }
 
-data class ClawbackItemResponse(val incentiveId: String, val kind: String, val amount: BigDecimal, val taxYears: List<Int>) {
+data class ClawbackItemResponse(
+    val incentiveId: String,
+    val kind: String,
+    val amount: BigDecimal,
+    val taxYears: List<Int>,
+) {
     companion object {
         fun from(c: ClawbackItem) = ClawbackItemResponse(c.incentiveId, c.kind.name, c.amount, c.taxYears.sorted())
     }

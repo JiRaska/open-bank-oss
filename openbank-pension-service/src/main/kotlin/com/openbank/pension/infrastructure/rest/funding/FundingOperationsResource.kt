@@ -39,7 +39,10 @@ import java.util.UUID
  * certificate. Staff only — `ROLE_API` is deliberately NOT allowed, so the customer edge can never
  * reach an operator route even if a path leaked into its proxy table.
  */
-@Tag(name = "Pension funding operations", description = "Operator queue, employer batches and state incentive claim batches")
+@Tag(
+    name = "Pension funding operations",
+    description = "Operator queue, employer batches and state incentive claim batches",
+)
 @Path("/api/v1/pension/funding/operations")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
@@ -65,8 +68,16 @@ class FundingOperationsResource {
     @Authorize(action = "pension.funding.ingest")
     suspend fun ingest(request: IncomingPaymentRequest?): ReceiptResponse =
         when (val outcome = contributions.receive(requireNotNull(request) { "request body is required" }.toDomain())) {
-            is ReceiptOutcome.Credited -> ReceiptResponse("CREDITED", ContributionResponse.from(outcome.contribution), null)
-            is ReceiptOutcome.Duplicate -> ReceiptResponse("DUPLICATE", ContributionResponse.from(outcome.contribution), null)
+            is ReceiptOutcome.Credited -> ReceiptResponse(
+                "CREDITED",
+                ContributionResponse.from(outcome.contribution),
+                null,
+            )
+            is ReceiptOutcome.Duplicate -> ReceiptResponse(
+                "DUPLICATE",
+                ContributionResponse.from(outcome.contribution),
+                null,
+            )
             is ReceiptOutcome.Unmatched -> ReceiptResponse("UNMATCHED", null, UnmatchedResponse.from(outcome.unmatched))
         }
 
@@ -78,7 +89,9 @@ class FundingOperationsResource {
         val body = requireNotNull(request) { "request body is required" }
         val batch = EmployerBatch(
             employerPartyId = requireNotNull(body.employerPartyId) { "employerPartyId is required" },
-            payment = requireNotNull(body.payment) { "payment is required" }.toDomain(ContributionChannel.EMPLOYER_BATCH),
+            payment = requireNotNull(body.payment) {
+                "payment is required"
+            }.toDomain(ContributionChannel.EMPLOYER_BATCH),
             lines = requireNotNull(body.lines) { "lines are required" }.mapIndexed { i, l ->
                 val line = requireNotNull(l) { "lines[$i] must not be null" }
                 EmployerBatchLine(
@@ -125,7 +138,11 @@ class FundingOperationsResource {
             throw IllegalArgumentException("period must be YYYY-MM", e)
         }
         val result = incentives.runMonthlyClaims(period)
-        return ClaimRunResponse(result.claimsCreated, result.batches.map(ClaimBatchResponse::from), result.unfiledFormats)
+        return ClaimRunResponse(
+            result.claimsCreated,
+            result.batches.map(ClaimBatchResponse::from),
+            result.unfiledFormats,
+        )
     }
 
     @GET
@@ -136,7 +153,7 @@ class FundingOperationsResource {
 
     @POST
     @Path("/claim-batches/{id}/receipt")
-    @Operation(summary = "Apply the agency's receipt file: credit accepted claims, reject the rest")
+    @Operation(summary = "Apply the agency's receipt file, crediting accepted claims and rejecting the rest")
     @Authorize(action = "pension.funding.operate", resource = "#id")
     suspend fun receipt(@PathParam("id") id: UUID, request: ReceiptFileRequest?): ClaimBatchResponse {
         val payload = requireNotNull(request?.payload?.takeIf { it.isNotBlank() }) { "payload is required" }
@@ -153,26 +170,32 @@ class FundingOperationsResource {
     @Path("/contracts/{contractId}/clawback-preview")
     @Operation(summary = "What an early exit on the given date would have to return, per incentive")
     @Authorize(action = "pension.funding.operate", resource = "#contractId")
-    suspend fun clawback(@PathParam("contractId") contractId: UUID, @QueryParam("on") on: LocalDate?): List<ClawbackItemResponse> =
+    suspend fun clawback(
+        @PathParam("contractId") contractId: UUID,
+        @QueryParam("on") on: LocalDate?,
+    ): List<ClawbackItemResponse> =
         incentives.clawbackPreview(contractId, on ?: LocalDate.now(clock)).map(ClawbackItemResponse::from)
 
     @POST
     @Path("/contracts/{contractId}/tax-years/{year}/certificate")
     @Operation(summary = "Freeze a closed tax year and issue its tax certificate")
     @Authorize(action = "pension.funding.operate", resource = "#contractId")
-    suspend fun certificate(@PathParam("contractId") contractId: UUID, @PathParam("year") year: Int): TaxYearSummaryResponse =
-        TaxYearSummaryResponse.from(incentives.issueCertificate(contractId, year))
+    suspend fun certificate(
+        @PathParam("contractId") contractId: UUID,
+        @PathParam("year") year: Int,
+    ): TaxYearSummaryResponse = TaxYearSummaryResponse.from(incentives.issueCertificate(contractId, year))
 
     private fun actor(): String = identity.principal?.name ?: "anonymous"
 
-    private fun IncomingPaymentRequest.toDomain(defaultChannel: ContributionChannel = ContributionChannel.BANK_TRANSFER) =
-        IncomingPayment(
-            paymentId = requireNotNull(paymentId?.takeIf { it.isNotBlank() }) { "paymentId is required" },
-            amount = requireNotNull(amount) { "amount is required" },
-            currency = requireNotNull(currency) { "currency is required" },
-            valueDate = requireNotNull(valueDate) { "valueDate is required" },
-            reference = reference,
-            channel = channel ?: defaultChannel,
-            payerAccount = payerAccount,
-        )
+    private fun IncomingPaymentRequest.toDomain(
+        defaultChannel: ContributionChannel = ContributionChannel.BANK_TRANSFER,
+    ) = IncomingPayment(
+        paymentId = requireNotNull(paymentId?.takeIf { it.isNotBlank() }) { "paymentId is required" },
+        amount = requireNotNull(amount) { "amount is required" },
+        currency = requireNotNull(currency) { "currency is required" },
+        valueDate = requireNotNull(valueDate) { "valueDate is required" },
+        reference = reference,
+        channel = channel ?: defaultChannel,
+        payerAccount = payerAccount,
+    )
 }

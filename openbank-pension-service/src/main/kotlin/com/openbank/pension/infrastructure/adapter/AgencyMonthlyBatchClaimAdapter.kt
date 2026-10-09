@@ -32,12 +32,22 @@ class AgencyMonthlyBatchClaimAdapter : StateIncentiveClaimPort {
 
     override val claimFormat: String = FORMAT
 
-    override suspend fun submit(period: YearMonth, claims: List<IncentiveClaim>, references: Map<UUID, String>): RenderedClaimBatch {
+    override suspend fun submit(
+        period: YearMonth,
+        claims: List<IncentiveClaim>,
+        references: Map<UUID, String>,
+    ): RenderedClaimBatch {
         val lines = claims.map { c ->
-            listOf(c.id, references.getValue(c.contractId), c.period, c.basis.toPlainString(), c.claimedAmount.toPlainString())
+            listOf(
+                c.id,
+                references.getValue(c.contractId),
+                c.period,
+                c.basis.toPlainString(),
+                c.claimedAmount.toPlainString(),
+            )
                 .joinToString(SEP)
         }
-        val header = "$FORMAT${SEP}period=$period${SEP}count=${claims.size}${SEP}" +
+        val header = "$FORMAT${SEP}period=$period${SEP}count=${claims.size}$SEP" +
             "total=${claims.fold(BigDecimal.ZERO) { a, c -> a + c.claimedAmount }.toPlainString()}"
         return RenderedClaimBatch((listOf(header) + lines).joinToString("\n"), channelReference = null)
     }
@@ -46,9 +56,18 @@ class AgencyMonthlyBatchClaimAdapter : StateIncentiveClaimPort {
         payload.lines().map { it.trim() }.filter { it.isNotEmpty() && !it.startsWith(FORMAT) }.mapIndexed { i, line ->
             val parts = line.split(SEP)
             require(parts.size == RECEIPT_FIELDS) { "receipt line ${i + 1} must have $RECEIPT_FIELDS fields" }
-            val id = runCatching { UUID.fromString(parts[0]) }.getOrElse { throw IllegalArgumentException("receipt line ${i + 1}: bad claim id") }
+            val id = runCatching {
+                UUID.fromString(parts[0])
+            }.getOrElse { throw IllegalArgumentException("receipt line ${i + 1}: bad claim id") }
             when (parts[1]) {
-                "ACCEPTED" -> ClaimReceiptLine(id, true, parts[2].toBigDecimalOrNull() ?: throw IllegalArgumentException("receipt line ${i + 1}: bad amount"), null)
+                "ACCEPTED" -> ClaimReceiptLine(
+                    id,
+                    true,
+                    parts[2].toBigDecimalOrNull() ?: throw IllegalArgumentException(
+                        "receipt line ${i + 1}: bad amount",
+                    ),
+                    null,
+                )
                 "REJECTED" -> ClaimReceiptLine(id, false, null, parts[2])
                 else -> throw IllegalArgumentException("receipt line ${i + 1}: unknown outcome '${parts[1]}'")
             }

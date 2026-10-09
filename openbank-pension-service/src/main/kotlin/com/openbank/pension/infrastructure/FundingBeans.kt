@@ -9,6 +9,7 @@ import com.openbank.pension.application.port.out.ContractFundingDirectory
 import com.openbank.pension.application.port.out.ContractReferenceRepository
 import com.openbank.pension.application.port.out.ContributionRepository
 import com.openbank.pension.application.port.out.EmployerDirectoryPort
+import com.openbank.pension.application.port.out.EmployerEnrolmentRepository
 import com.openbank.pension.application.port.out.FundAdministrationPort
 import com.openbank.pension.application.port.out.IncentiveClaimRepository
 import com.openbank.pension.application.port.out.IncentiveLedgerRepository
@@ -40,8 +41,11 @@ class FundingBeans {
         fund: FundAdministrationPort,
         employers: EmployerDirectoryPort,
         mandates: PaymentMandatePort,
+        enrolments: EmployerEnrolmentRepository,
         clock: Clock,
-    ): ContributionService = ContributionService(directory, references, contributions, unmatched, fund, employers, mandates, clock)
+    ): ContributionService = ContributionService(
+        directory, references, contributions, unmatched, fund, employers, mandates, enrolments, clock,
+    )
 
     @Produces
     @ApplicationScoped

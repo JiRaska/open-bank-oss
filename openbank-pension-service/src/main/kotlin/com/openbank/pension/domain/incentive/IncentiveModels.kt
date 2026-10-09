@@ -113,7 +113,12 @@ data class IncentiveLedgerEntry(
 }
 
 /** Employer contributions of one employer in a tax year, split into the exempt and taxable part. */
-data class EmployerExemption(val employerPartyId: UUID, val contributed: BigDecimal, val exempt: BigDecimal, val taxable: BigDecimal)
+data class EmployerExemption(
+    val employerPartyId: UUID,
+    val contributed: BigDecimal,
+    val exempt: BigDecimal,
+    val taxable: BigDecimal,
+)
 
 /**
  * Per contract, per tax year: what came in by source, what incentives were received, and the

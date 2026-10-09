@@ -33,7 +33,12 @@ private fun stubId(prefix: String, key: String): String =
 class StubFundAdministrationAdapter : FundAdministrationPort {
     private val log = Logger.getLogger(StubFundAdministrationAdapter::class.java)
 
-    override suspend fun placeSubscription(contractId: UUID, amount: BigDecimal, currency: String, idempotencyKey: String): String {
+    override suspend fun placeSubscription(
+        contractId: UUID,
+        amount: BigDecimal,
+        currency: String,
+        idempotencyKey: String,
+    ): String {
         log.warnf("STUB fund administration: subscription for contract %s not sent to pension-fund-service", contractId)
         return stubId("stub-sub", idempotencyKey)
     }
@@ -67,8 +72,16 @@ class StubEmployerDirectoryAdapter : EmployerDirectoryPort {
 class StubTaxCertificateDocumentAdapter : TaxCertificateDocumentPort {
     private val log = Logger.getLogger(StubTaxCertificateDocumentAdapter::class.java)
 
-    override suspend fun generate(summary: TaxYearSummary, participantPartyId: UUID, contractReference: String): String {
-        log.warnf("STUB tax certificate: %d for contract %s not rendered by document-service", summary.taxYear, summary.contractId)
+    override suspend fun generate(
+        summary: TaxYearSummary,
+        participantPartyId: UUID,
+        contractReference: String,
+    ): String {
+        log.warnf(
+            "STUB tax certificate: %d for contract %s not rendered by document-service",
+            summary.taxYear,
+            summary.contractId,
+        )
         return stubId("stub-doc", "${summary.contractId}:${summary.taxYear}")
     }
 }

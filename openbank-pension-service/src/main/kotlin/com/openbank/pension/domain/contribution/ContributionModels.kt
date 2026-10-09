@@ -10,6 +10,30 @@ import java.time.LocalDate
 import java.time.YearMonth
 import java.util.UUID
 
+/**
+ * Bounds every money amount entering S3 is held to: positive, at most two decimals, below a
+ * ceiling no single pension payment plausibly reaches. A payment outside them is refused at the
+ * edge of the domain, not stored and reconciled later.
+ */
+object MoneyBounds {
+    val MAX: BigDecimal = BigDecimal("1000000000")
+    const val MAX_SCALE = 2
+    private val CURRENCY = Regex("^[A-Z]{3}$")
+
+    fun requireAmount(amount: BigDecimal, what: String) {
+        require(amount.signum() > 0) { "$what must be positive" }
+        require(amount.stripTrailingZeros().scale() <= MAX_SCALE) { "$what must have at most $MAX_SCALE decimals" }
+        require(amount < MAX) { "$what must be below $MAX" }
+    }
+
+    fun requireCurrency(currency: String) = require(CURRENCY.matches(currency)) { "currency must be an ISO 4217 code" }
+
+    fun requireToken(value: String, what: String, max: Int) {
+        require(value.isNotBlank()) { "$what must not be blank" }
+        require(value.length <= max) { "$what must be at most $max characters" }
+    }
+}
+
 /** Who paid a contribution (ADR-0334 §1). */
 enum class ContributionSource { PARTICIPANT, EMPLOYER, STATE, TRANSFER_IN }
 
@@ -38,9 +62,9 @@ data class Contribution(
     val receivedAt: Instant,
 ) {
     init {
-        require(paymentId.isNotBlank()) { "paymentId must not be blank" }
-        require(amount.signum() > 0) { "a contribution must be positive" }
-        require(currency.length == ISO_CURRENCY_LENGTH) { "currency must be an ISO 4217 code" }
+        MoneyBounds.requireToken(paymentId, "paymentId", PAYMENT_ID_MAX)
+        MoneyBounds.requireAmount(amount, "contribution amount")
+        MoneyBounds.requireCurrency(currency)
         require((source == ContributionSource.EMPLOYER) == (employerPartyId != null)) {
             "an employer contribution, and only one, names its employer"
         }
@@ -48,11 +72,11 @@ data class Contribution(
 
     val taxYear: Int get() = valueDate.year
     val period: YearMonth get() = YearMonth.from(valueDate)
-
-    private companion object {
-        const val ISO_CURRENCY_LENGTH = 3
-    }
 }
+
+/** Column widths of V3; checked here so an oversized value is a 400, not a 500 from Postgres. */
+const val PAYMENT_ID_MAX = 128
+const val REFERENCE_MAX = 64
 
 /**
  * A payment received on the provider's collection account, before it is attributed to a contract.
@@ -68,12 +92,25 @@ data class IncomingPayment(
     val payerAccount: String? = null,
 ) {
     init {
-        require(paymentId.isNotBlank()) { "paymentId must not be blank" }
-        require(amount.signum() > 0) { "a payment must be positive" }
+        // Employer lines derive `paymentId#lineNo`, so the base id leaves room for the suffix.
+        MoneyBounds.requireToken(paymentId, "paymentId", PAYMENT_ID_MAX)
+        MoneyBounds.requireAmount(amount, "payment amount")
+        MoneyBounds.requireCurrency(currency)
+        reference?.let { require(it.length <= REFERENCE_MAX) { "reference must be at most $REFERENCE_MAX characters" } }
+        payerAccount?.let {
+            require(it.length <= REFERENCE_MAX) { "payerAccount must be at most $REFERENCE_MAX characters" }
+        }
     }
 }
 
-enum class UnmatchedReason { NO_REFERENCE, UNKNOWN_REFERENCE, CONTRACT_NOT_ACCEPTING, CURRENCY_MISMATCH, EMPLOYER_LINE }
+enum class UnmatchedReason {
+    NO_REFERENCE,
+    UNKNOWN_REFERENCE,
+    CONTRACT_NOT_ACCEPTING,
+    CURRENCY_MISMATCH,
+    EMPLOYER_LINE,
+    EMPLOYER_NOT_AUTHORISED,
+}
 
 enum class UnmatchedStatus { OPEN, ASSIGNED, RETURNED }
 
@@ -94,7 +131,12 @@ data class UnmatchedPayment(
 ) {
     fun assign(contractId: UUID, actor: String, at: Instant): UnmatchedPayment {
         check(status == UnmatchedStatus.OPEN) { "unmatched payment $id is already $status" }
-        return copy(status = UnmatchedStatus.ASSIGNED, resolvedContractId = contractId, resolvedBy = actor, resolvedAt = at)
+        return copy(
+            status = UnmatchedStatus.ASSIGNED,
+            resolvedContractId = contractId,
+            resolvedBy = actor,
+            resolvedAt = at,
+        )
     }
 
     fun returnToPayer(actor: String, at: Instant): UnmatchedPayment {
@@ -106,27 +148,32 @@ data class UnmatchedPayment(
 /** One line of an employer's bulk contribution file: which contract, how much. */
 data class EmployerBatchLine(val contractReference: String, val amount: BigDecimal) {
     init {
-        require(contractReference.isNotBlank()) { "line contractReference must not be blank" }
-        require(amount.signum() > 0) { "line amount must be positive" }
+        MoneyBounds.requireToken(contractReference, "line contractReference", REFERENCE_MAX)
+        MoneyBounds.requireAmount(amount, "line amount")
     }
 }
 
 enum class EmployerLineOutcome { CREDITED, DUPLICATE, UNMATCHED }
 
-data class EmployerLineResult(val lineNo: Int, val contractReference: String, val amount: BigDecimal, val outcome: EmployerLineOutcome)
+data class EmployerLineResult(
+    val lineNo: Int,
+    val contractReference: String,
+    val amount: BigDecimal,
+    val outcome: EmployerLineOutcome,
+)
 
 /**
  * An employer's bulk file covering one payment (ADR-0334 S3). The lines must add up to the
  * payment — a file that does not reconcile to the money is refused whole, because crediting part
  * of it would leave the remainder attributable to nobody.
  */
-data class EmployerBatch(
-    val employerPartyId: UUID,
-    val payment: IncomingPayment,
-    val lines: List<EmployerBatchLine>,
-) {
+data class EmployerBatch(val employerPartyId: UUID, val payment: IncomingPayment, val lines: List<EmployerBatchLine>) {
     init {
         require(lines.isNotEmpty()) { "an employer batch must have at least one line" }
+        require(lines.size <= MAX_LINES) { "an employer batch carries at most $MAX_LINES lines" }
+        require(payment.paymentId.length <= PAYMENT_ID_MAX - LINE_SUFFIX_ROOM) {
+            "employer batch paymentId is too long"
+        }
         val total = lines.fold(BigDecimal.ZERO) { acc, l -> acc + l.amount }
         require(total.compareTo(payment.amount) == 0) {
             "employer batch lines total $total but the payment is ${payment.amount}"
@@ -135,6 +182,11 @@ data class EmployerBatch(
 
     /** Per-line idempotency key: stable for the same payment and line position. */
     fun linePaymentId(lineNo: Int): String = "${payment.paymentId}#$lineNo"
+
+    companion object {
+        const val MAX_LINES = 5000
+        private const val LINE_SUFFIX_ROOM = 6
+    }
 }
 
 /** How a participant pays regularly; set up through standing-order-service or sdd-service. */

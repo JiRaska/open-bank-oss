@@ -11,6 +11,7 @@ import com.openbank.pension.application.port.out.ContractFundingDirectory
 import com.openbank.pension.application.port.out.ContractFundingView
 import com.openbank.pension.application.port.out.ContractReferenceRepository
 import com.openbank.pension.application.port.out.ContributionRepository
+import com.openbank.pension.application.port.out.EmployerEnrolmentRepository
 import com.openbank.pension.application.port.out.IncentiveClaimRepository
 import com.openbank.pension.application.port.out.IncentiveLedgerRepository
 import com.openbank.pension.application.port.out.TaxYearSummaryRepository
@@ -34,7 +35,7 @@ import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.vertx.mutiny.sqlclient.Pool
 import io.vertx.mutiny.sqlclient.Row
 import io.vertx.mutiny.sqlclient.Tuple
-import jakarta.enterprise.context.ApplicationScoped
+import jakarta.inject.Singleton
 import java.math.BigDecimal
 import java.time.Instant
 import java.time.LocalDate
@@ -44,6 +45,9 @@ import java.time.ZoneOffset
 import java.util.UUID
 
 /**
+ * `@Singleton`, not `@ApplicationScoped`: a stateless store needs no client proxy, and a proxy
+ * would need a no-args constructor the shared base class cannot offer.
+ *
  * Shared plumbing for the S3 funding stores. Raw SQL over the reactive pool for the S3 funding tables (ADR-0334 S3), the shape
  * copilot-service's `PgVectorPassageIndex` uses. Chosen over Panache here because every write is
  * an append or an `ON CONFLICT DO NOTHING` insert — the idempotency guarantee IS the statement, and
@@ -61,8 +65,10 @@ abstract class PgFundingSupport(protected val client: Pool) {
         client.preparedQuery(sql).execute(args).awaitSuspending().rowCount()
 }
 
-@ApplicationScoped
-class PgContractReferences(client: Pool) : PgFundingSupport(client), ContractReferenceRepository {
+@Singleton
+class PgContractReferences(client: Pool) :
+    PgFundingSupport(client),
+    ContractReferenceRepository {
 
     override suspend fun referenceFor(contractId: UUID): String {
         client.preparedQuery(
@@ -81,23 +87,29 @@ class PgContractReferences(client: Pool) : PgFundingSupport(client), ContractRef
             .firstOrNull()?.getUUID("contract_id")
 }
 
-@ApplicationScoped
-class PgContractDirectory(client: Pool) : PgFundingSupport(client), ContractFundingDirectory {
+@Singleton
+class PgContractDirectory(client: Pool) :
+    PgFundingSupport(client),
+    ContractFundingDirectory {
 
     override suspend fun find(contractId: UUID): ContractFundingView? =
-        rows("$Sql.CONTRACT_SELECT WHERE contract_id = $1", Tuple.of(contractId)).firstOrNull()?.toContract()
+        rows("${Sql.CONTRACT_SELECT} WHERE contract_id = $1", Tuple.of(contractId)).firstOrNull()?.toContract()
 
-    override suspend fun byParticipant(participantPartyId: UUID): List<ContractFundingView> =
-        rows("$Sql.CONTRACT_SELECT WHERE participant_party_id = $1 ORDER BY created_at, contract_id", Tuple.of(participantPartyId))
-            .map { it.toContract() }
+    override suspend fun byParticipant(participantPartyId: UUID): List<ContractFundingView> = rows(
+        "${Sql.CONTRACT_SELECT} WHERE participant_party_id = $1 ORDER BY created_at, contract_id",
+        Tuple.of(participantPartyId),
+    )
+        .map { it.toContract() }
 
     override suspend fun fundable(): List<ContractFundingView> =
-        rows("$Sql.CONTRACT_SELECT WHERE status IN ('ACTIVE', 'SUSPENDED') ORDER BY created_at", Tuple.tuple())
+        rows("${Sql.CONTRACT_SELECT} WHERE status IN ('ACTIVE', 'SUSPENDED') ORDER BY created_at", Tuple.tuple())
             .map { it.toContract() }
 }
 
-@ApplicationScoped
-class PgContributions(client: Pool) : PgFundingSupport(client), ContributionRepository {
+@Singleton
+class PgContributions(client: Pool) :
+    PgFundingSupport(client),
+    ContributionRepository {
 
     override suspend fun insertIfAbsent(contribution: Contribution): Pair<Contribution, Boolean> {
         val inserted = client.preparedQuery(
@@ -116,7 +128,10 @@ class PgContributions(client: Pool) : PgFundingSupport(client), ContributionRepo
                 ),
             ),
         ).awaitSuspending().rowCount() == 1
-        val stored = rows("$Sql.CONTRIBUTION_SELECT WHERE payment_id = $1", Tuple.of(contribution.paymentId)).first().toContribution()
+        val stored = rows(
+            "${Sql.CONTRIBUTION_SELECT} WHERE payment_id = $1",
+            Tuple.of(contribution.paymentId),
+        ).first().toContribution()
         return stored to inserted
     }
 
@@ -126,21 +141,26 @@ class PgContributions(client: Pool) : PgFundingSupport(client), ContributionRepo
     }
 
     override suspend fun byContract(contractId: UUID): List<Contribution> =
-        rows("$Sql.CONTRIBUTION_SELECT WHERE contract_id = $1 ORDER BY value_date, received_at", Tuple.of(contractId))
+        rows("${Sql.CONTRIBUTION_SELECT} WHERE contract_id = $1 ORDER BY value_date, received_at", Tuple.of(contractId))
             .map { it.toContribution() }
 
     override suspend fun byContractAndYear(contractId: UUID, taxYear: Int): List<Contribution> =
         byContractAndRange(contractId, LocalDate.of(taxYear, 1, 1), LocalDate.of(taxYear + 1, 1, 1))
 
-    override suspend fun byContractAndRange(contractId: UUID, from: LocalDate, toExclusive: LocalDate): List<Contribution> =
-        rows(
-            "$Sql.CONTRIBUTION_SELECT WHERE contract_id = $1 AND value_date >= $2 AND value_date < $3 ORDER BY value_date, received_at",
-            Tuple.of(contractId, from, toExclusive),
-        ).map { it.toContribution() }
+    override suspend fun byContractAndRange(
+        contractId: UUID,
+        from: LocalDate,
+        toExclusive: LocalDate,
+    ): List<Contribution> = rows(
+        "${Sql.CONTRIBUTION_SELECT} WHERE contract_id = $1 AND value_date >= $2 AND value_date < $3 ORDER BY value_date, received_at",
+        Tuple.of(contractId, from, toExclusive),
+    ).map { it.toContribution() }
 }
 
-@ApplicationScoped
-class PgUnmatchedPayments(client: Pool) : PgFundingSupport(client), UnmatchedPaymentRepository {
+@Singleton
+class PgUnmatchedPayments(client: Pool) :
+    PgFundingSupport(client),
+    UnmatchedPaymentRepository {
 
     override suspend fun insertIfAbsent(payment: UnmatchedPayment): UnmatchedPayment {
         val p = payment.payment
@@ -159,27 +179,39 @@ class PgUnmatchedPayments(client: Pool) : PgFundingSupport(client), UnmatchedPay
                 ),
             ),
         ).awaitSuspending()
-        return rows("$Sql.UNMATCHED_SELECT WHERE payment_id = $1", Tuple.of(p.paymentId)).first().toUnmatched()
+        return rows("${Sql.UNMATCHED_SELECT} WHERE payment_id = $1", Tuple.of(p.paymentId)).first().toUnmatched()
     }
 
     override suspend fun findById(id: UUID): UnmatchedPayment? =
-        rows("$Sql.UNMATCHED_SELECT WHERE id = $1", Tuple.of(id)).firstOrNull()?.toUnmatched()
+        rows("${Sql.UNMATCHED_SELECT} WHERE id = $1", Tuple.of(id)).firstOrNull()?.toUnmatched()
 
-    override suspend fun list(status: UnmatchedStatus?): List<UnmatchedPayment> =
-        rows("$Sql.UNMATCHED_SELECT WHERE ($1::text IS NULL OR status = $1) ORDER BY created_at", Tuple.of(status?.name))
-            .map { it.toUnmatched() }
+    override suspend fun list(status: UnmatchedStatus?): List<UnmatchedPayment> = rows(
+        "${Sql.UNMATCHED_SELECT} WHERE ($1::text IS NULL OR status = $1) ORDER BY created_at",
+        Tuple.of(status?.name),
+    )
+        .map { it.toUnmatched() }
 
     override suspend fun update(payment: UnmatchedPayment) {
         client.preparedQuery(
             "UPDATE pension_unmatched_payments SET status = $2, resolved_contract_id = $3, resolved_by = $4, resolved_at = $5 WHERE id = $1",
         ).execute(
-            Tuple.tuple(listOf(payment.id, payment.status.name, payment.resolvedContractId, payment.resolvedBy, payment.resolvedAt?.let(::utc))),
+            Tuple.tuple(
+                listOf(
+                    payment.id,
+                    payment.status.name,
+                    payment.resolvedContractId,
+                    payment.resolvedBy,
+                    payment.resolvedAt?.let(::utc),
+                ),
+            ),
         ).awaitSuspending()
     }
 }
 
-@ApplicationScoped
-class PgIncentiveClaims(client: Pool) : PgFundingSupport(client), IncentiveClaimRepository {
+@Singleton
+class PgIncentiveClaims(client: Pool) :
+    PgFundingSupport(client),
+    IncentiveClaimRepository {
 
     override suspend fun insertIfAbsent(claim: IncentiveClaim): Pair<IncentiveClaim, Boolean> {
         val inserted = client.preparedQuery(
@@ -191,20 +223,22 @@ class PgIncentiveClaims(client: Pool) : PgFundingSupport(client), IncentiveClaim
             """.trimIndent(),
         ).execute(claimTuple(claim)).awaitSuspending().rowCount() == 1
         val stored = rows(
-            "$Sql.CLAIM_SELECT WHERE contract_id = $1 AND incentive_id = $2 AND period = $3",
+            "${Sql.CLAIM_SELECT} WHERE contract_id = $1 AND incentive_id = $2 AND period = $3",
             Tuple.of(claim.contractId, claim.incentiveId, claim.period.toString()),
         ).first().toClaim()
         return stored to inserted
     }
 
     override suspend fun findById(id: UUID): IncentiveClaim? =
-        rows("$Sql.CLAIM_SELECT WHERE id = $1", Tuple.of(id)).firstOrNull()?.toClaim()
+        rows("${Sql.CLAIM_SELECT} WHERE id = $1", Tuple.of(id)).firstOrNull()?.toClaim()
 
     override suspend fun byStatus(status: ClaimStatus): List<IncentiveClaim> =
-        rows("$Sql.CLAIM_SELECT WHERE status = $1 ORDER BY period, created_at", Tuple.of(status.name)).map { it.toClaim() }
+        rows("${Sql.CLAIM_SELECT} WHERE status = $1 ORDER BY period, created_at", Tuple.of(status.name)).map {
+            it.toClaim()
+        }
 
     override suspend fun byContract(contractId: UUID): List<IncentiveClaim> =
-        rows("$Sql.CLAIM_SELECT WHERE contract_id = $1 ORDER BY period", Tuple.of(contractId)).map { it.toClaim() }
+        rows("${Sql.CLAIM_SELECT} WHERE contract_id = $1 ORDER BY period", Tuple.of(contractId)).map { it.toClaim() }
 
     override suspend fun update(claim: IncentiveClaim) {
         client.preparedQuery(
@@ -213,7 +247,16 @@ class PgIncentiveClaims(client: Pool) : PgFundingSupport(client), IncentiveClaim
                 rejection_reason = $5, updated_at = $6 WHERE id = $1
             """.trimIndent(),
         ).execute(
-            Tuple.tuple(listOf(claim.id, claim.status.name, claim.batchId, claim.receivedAmount, claim.rejectionReason, utc(claim.updatedAt))),
+            Tuple.tuple(
+                listOf(
+                    claim.id,
+                    claim.status.name,
+                    claim.batchId,
+                    claim.receivedAmount,
+                    claim.rejectionReason,
+                    utc(claim.updatedAt),
+                ),
+            ),
         ).awaitSuspending()
     }
 
@@ -225,29 +268,57 @@ class PgIncentiveClaims(client: Pool) : PgFundingSupport(client), IncentiveClaim
     )
 }
 
-@ApplicationScoped
-class PgClaimBatches(client: Pool) : PgFundingSupport(client), ClaimBatchRepository {
+@Singleton
+class PgClaimBatches(client: Pool) :
+    PgFundingSupport(client),
+    ClaimBatchRepository {
 
-    override suspend fun insert(batch: ClaimBatch) {
-        client.preparedQuery(
-            """
-            INSERT INTO pension_claim_batches (id, claim_format, period, claim_ids, payload, channel_reference, status, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-            """.trimIndent(),
-        ).execute(
-            Tuple.tuple(
-                listOf(
-                    batch.id, batch.claimFormat, batch.period.toString(), batch.claimIds.joinToString(","),
-                    batch.payload, batch.channelReference, batch.status.name, utc(batch.createdAt),
+    override suspend fun fileAtomically(batch: ClaimBatch, at: Instant): Boolean {
+        val ids = batch.claimIds.toTypedArray()
+        return client.withTransaction { conn ->
+            conn.preparedQuery(
+                """
+                INSERT INTO pension_claim_batches (id, claim_format, period, claim_ids, payload, channel_reference, status, created_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                """.trimIndent(),
+            ).execute(
+                Tuple.tuple(
+                    listOf(
+                        batch.id,
+                        batch.claimFormat,
+                        batch.period.toString(),
+                        batch.claimIds.joinToString(","),
+                        batch.payload,
+                        batch.channelReference,
+                        batch.status.name,
+                        utc(batch.createdAt),
+                    ),
                 ),
-            ),
-        ).awaitSuspending()
+            ).flatMap {
+                conn.preparedQuery(
+                    "UPDATE pension_incentive_claims SET status = 'SUBMITTED', batch_id = $1, updated_at = $2 " +
+                        "WHERE id = ANY($3) AND status = 'PENDING'",
+                ).execute(Tuple.of(batch.id, utc(at), ids))
+            }.flatMap { result ->
+                if (result.rowCount() == ids.size) {
+                    io.smallrye.mutiny.Uni.createFrom().item(true)
+                } else {
+                    // Roll the whole filing back: some claim was already filed by a concurrent run.
+                    io.smallrye.mutiny.Uni.createFrom().failure(LostFilingRace())
+                }
+            }
+        }.onFailure(LostFilingRace::class.java).recoverWithItem(false).awaitSuspending()
     }
 
-    override suspend fun findById(id: UUID): ClaimBatch? =
-        rows("$Sql.BATCH_SELECT WHERE id = $1", Tuple.of(id)).firstOrNull()?.toBatch()
+    private class LostFilingRace : RuntimeException("claim batch lost a filing race")
 
-    override suspend fun list(): List<ClaimBatch> = rows("$Sql.BATCH_SELECT ORDER BY created_at DESC", Tuple.tuple()).map { it.toBatch() }
+    override suspend fun findById(id: UUID): ClaimBatch? =
+        rows("${Sql.BATCH_SELECT} WHERE id = $1", Tuple.of(id)).firstOrNull()?.toBatch()
+
+    override suspend fun list(): List<ClaimBatch> =
+        rows("${Sql.BATCH_SELECT} ORDER BY created_at DESC", Tuple.tuple()).map {
+            it.toBatch()
+        }
 
     override suspend fun update(batch: ClaimBatch) {
         client.preparedQuery("UPDATE pension_claim_batches SET status = $2 WHERE id = $1")
@@ -255,8 +326,30 @@ class PgClaimBatches(client: Pool) : PgFundingSupport(client), ClaimBatchReposit
     }
 }
 
-@ApplicationScoped
-class PgIncentiveLedger(client: Pool) : PgFundingSupport(client), IncentiveLedgerRepository {
+@Singleton
+class PgEmployerEnrolments(client: Pool) :
+    PgFundingSupport(client),
+    EmployerEnrolmentRepository {
+
+    override suspend fun enrol(contractId: UUID, employerPartyId: UUID) {
+        exec(
+            "INSERT INTO pension_employer_enrolments (contract_id, employer_party_id, enrolled_at) " +
+                "VALUES ($1, $2, now()) " +
+                "ON CONFLICT (contract_id, employer_party_id) DO NOTHING",
+            Tuple.of(contractId, employerPartyId),
+        )
+    }
+
+    override suspend fun isEnrolled(contractId: UUID, employerPartyId: UUID): Boolean = rows(
+        "SELECT 1 FROM pension_employer_enrolments WHERE contract_id = $1 AND employer_party_id = $2",
+        Tuple.of(contractId, employerPartyId),
+    ).isNotEmpty()
+}
+
+@Singleton
+class PgIncentiveLedger(client: Pool) :
+    PgFundingSupport(client),
+    IncentiveLedgerRepository {
 
     override suspend fun append(entry: IncentiveLedgerEntry) {
         client.preparedQuery(
@@ -274,21 +367,21 @@ class PgIncentiveLedger(client: Pool) : PgFundingSupport(client), IncentiveLedge
         ).awaitSuspending()
     }
 
-    override suspend fun byContract(contractId: UUID): List<IncentiveLedgerEntry> =
-        rows(
-            "SELECT * FROM pension_incentive_ledger WHERE contract_id = $1 ORDER BY occurred_at, id",
-            Tuple.of(contractId),
-        ).map { it.toLedger() }
+    override suspend fun byContract(contractId: UUID): List<IncentiveLedgerEntry> = rows(
+        "SELECT * FROM pension_incentive_ledger WHERE contract_id = $1 ORDER BY occurred_at, id",
+        Tuple.of(contractId),
+    ).map { it.toLedger() }
 }
 
-@ApplicationScoped
-class PgTaxYears(client: Pool, private val objectMapper: ObjectMapper) : PgFundingSupport(client), TaxYearSummaryRepository {
+@Singleton
+class PgTaxYears(client: Pool, private val objectMapper: ObjectMapper) :
+    PgFundingSupport(client),
+    TaxYearSummaryRepository {
 
-    override suspend fun findFinal(contractId: UUID, taxYear: Int): TaxYearSummary? =
-        rows(
-            "SELECT summary FROM pension_tax_year_certificates WHERE contract_id = $1 AND tax_year = $2",
-            Tuple.of(contractId, taxYear),
-        ).firstOrNull()?.let { objectMapper.readValue<SummaryRow>(it.getString("summary")).toDomain() }
+    override suspend fun findFinal(contractId: UUID, taxYear: Int): TaxYearSummary? = rows(
+        "SELECT summary FROM pension_tax_year_certificates WHERE contract_id = $1 AND tax_year = $2",
+        Tuple.of(contractId, taxYear),
+    ).firstOrNull()?.let { objectMapper.readValue<SummaryRow>(it.getString("summary")).toDomain() }
 
     override suspend fun saveFinal(summary: TaxYearSummary) {
         client.preparedQuery(
@@ -298,19 +391,25 @@ class PgTaxYears(client: Pool, private val objectMapper: ObjectMapper) : PgFundi
             """.trimIndent(),
         ).execute(
             Tuple.of(
-                summary.contractId, summary.taxYear, objectMapper.writeValueAsString(SummaryRow.from(summary)),
-                requireNotNull(summary.certificateDocumentId), utc(requireNotNull(summary.finalizedAt)),
+                summary.contractId,
+                summary.taxYear,
+                objectMapper.writeValueAsString(SummaryRow.from(summary)),
+                requireNotNull(summary.certificateDocumentId),
+                utc(requireNotNull(summary.finalizedAt)),
             ),
         ).awaitSuspending()
     }
 
-    override suspend fun externalCapUsage(participantPartyId: UUID, taxYear: Int): Map<String, BigDecimal> =
-        rows(
-            "SELECT cap_group, amount FROM pension_external_cap_usage WHERE participant_party_id = $1 AND tax_year = $2",
-            Tuple.of(participantPartyId, taxYear),
-        ).associate { it.getString("cap_group") to it.getBigDecimal("amount") }
+    override suspend fun externalCapUsage(participantPartyId: UUID, taxYear: Int): Map<String, BigDecimal> = rows(
+        "SELECT cap_group, amount FROM pension_external_cap_usage WHERE participant_party_id = $1 AND tax_year = $2",
+        Tuple.of(participantPartyId, taxYear),
+    ).associate { it.getString("cap_group") to it.getBigDecimal("amount") }
 
-    override suspend fun declareExternalCapUsage(participantPartyId: UUID, taxYear: Int, usage: Map<String, BigDecimal>) {
+    override suspend fun declareExternalCapUsage(
+        participantPartyId: UUID,
+        taxYear: Int,
+        usage: Map<String, BigDecimal>,
+    ) {
         usage.forEach { (group, amount) ->
             client.preparedQuery(
                 """
@@ -429,7 +528,9 @@ data class SummaryRow(
     fun toDomain() = TaxYearSummary(
         UUID.fromString(contractId), taxYear, currency, participantContributions, employerContributions,
         stateIncentives, transferIn, deductibleAmount, indicativeTaxSaving, sharedCapUsedElsewhere,
-        employerExemptions.map { EmployerExemption(UUID.fromString(it.employerPartyId), it.contributed, it.exempt, it.taxable) },
+        employerExemptions.map {
+            EmployerExemption(UUID.fromString(it.employerPartyId), it.contributed, it.exempt, it.taxable)
+        },
         finalizedAt?.let(Instant::parse), certificateDocumentId,
     )
 
@@ -437,13 +538,20 @@ data class SummaryRow(
         fun from(s: TaxYearSummary) = SummaryRow(
             s.contractId.toString(), s.taxYear, s.currency, s.participantContributions, s.employerContributions,
             s.stateIncentives, s.transferIn, s.deductibleAmount, s.indicativeTaxSaving, s.sharedCapUsedElsewhere,
-            s.employerExemptions.map { ExemptionRow(it.employerPartyId.toString(), it.contributed, it.exempt, it.taxable) },
+            s.employerExemptions.map {
+                ExemptionRow(it.employerPartyId.toString(), it.contributed, it.exempt, it.taxable)
+            },
             s.finalizedAt?.toString(), s.certificateDocumentId,
         )
     }
 }
 
-data class ExemptionRow(val employerPartyId: String, val contributed: BigDecimal, val exempt: BigDecimal, val taxable: BigDecimal)
+data class ExemptionRow(
+    val employerPartyId: String,
+    val contributed: BigDecimal,
+    val exempt: BigDecimal,
+    val taxable: BigDecimal,
+)
 
 private object Sql {
     const val CONTRACT_SELECT =

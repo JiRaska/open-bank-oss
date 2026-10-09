@@ -13,7 +13,11 @@ import org.jboss.resteasy.reactive.server.ServerExceptionMapper
 /** 404s for the S3 not-found types; everything else maps through S1's mappers and libs-runtime. */
 class FundingExceptionMappers {
 
-    @ServerExceptionMapper(UnmatchedPaymentNotFoundException::class, ClaimBatchNotFoundException::class, IncentiveClaimNotFoundException::class)
+    @ServerExceptionMapper(
+        UnmatchedPaymentNotFoundException::class,
+        ClaimBatchNotFoundException::class,
+        IncentiveClaimNotFoundException::class,
+    )
     fun notFound(e: RuntimeException): Response =
         Response.status(Response.Status.NOT_FOUND).entity(mapOf("error" to e.message)).build()
 }

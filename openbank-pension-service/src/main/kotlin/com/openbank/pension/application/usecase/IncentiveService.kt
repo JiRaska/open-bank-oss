@@ -58,6 +58,9 @@ data class ClaimRunResult(val claimsCreated: Int, val batches: List<ClaimBatch>,
  * through the claim channel adapter the pack names, receipt reconciliation, rejections, returns,
  * the clawback ledger, and the per-contract tax year.
  */
+// One use case per S3 incentive concern would scatter a single lifecycle (claim -> file -> receive ->
+// return -> clawback) over many classes; the ports are the seams, not the method count.
+@Suppress("LongParameterList", "TooManyFunctions")
 class IncentiveService(
     private val directory: ContractFundingDirectory,
     private val references: ContractReferenceRepository,
@@ -85,40 +88,40 @@ class IncentiveService(
         return ClaimRunResult(created, filed, unfiled)
     }
 
-    suspend fun generateClaims(period: YearMonth): Int {
-        var created = 0
-        directory.fundable().forEach { contract ->
-            val pack = packOf(contract)
-            if (IncentiveEngine.claimableRules(pack).isEmpty()) return@forEach
-            val from = period.atDay(1).minusMonths(MAX_PERIOD_MONTHS)
-            val window = contributions.byContractAndRange(contract.contractId, from, period.plusMonths(1).atDay(1))
-            IncentiveEngine.claimableRules(pack).map { it.period }.toSet().forEach { rulePeriod ->
-                val start = IncentiveEngine.periodStart(period, rulePeriod)
-                // Only claim a period once it has fully closed: its last month is `period`.
-                val end = start.plusMonths((MONTHS_PER_YEAR / rulePeriod.periodsPerYear).toLong() - 1)
-                if (end != period) return@forEach
-                IncentiveEngine.claimsFor(pack, start, window).filter { draft ->
-                    pack.incentives.first { it.id == draft.incentiveId }.period == rulePeriod
-                }.forEach { draft ->
-                    val (_, isNew) = claims.insertIfAbsent(
-                        IncentiveClaim(
-                            id = UUID.randomUUID(),
-                            contractId = contract.contractId,
-                            incentiveId = draft.incentiveId,
-                            period = draft.period,
-                            basis = draft.basis,
-                            claimedAmount = draft.amount,
-                            currency = contract.currency,
-                            status = ClaimStatus.PENDING,
-                            createdAt = now(),
-                            updatedAt = now(),
-                        ),
-                    )
-                    if (isNew) created++
-                }
-            }
+    suspend fun generateClaims(period: YearMonth): Int =
+        directory.fundable().sumOf { contract -> generateClaimsFor(contract, period) }
+
+    private suspend fun generateClaimsFor(contract: ContractFundingView, period: YearMonth): Int {
+        val pack = packOf(contract)
+        val rules = IncentiveEngine.claimableRules(pack)
+        if (rules.isEmpty()) return 0
+        val from = period.atDay(1).minusMonths(MAX_PERIOD_MONTHS)
+        val window = contributions.byContractAndRange(contract.contractId, from, period.plusMonths(1).atDay(1))
+        // Only claim a period once it has fully closed: its last month is `period`.
+        val closing = rules.map { it.period }.toSet().filter { rulePeriod ->
+            val start = IncentiveEngine.periodStart(period, rulePeriod)
+            start.plusMonths((MONTHS_PER_YEAR / rulePeriod.periodsPerYear).toLong() - 1) == period
         }
-        return created
+        val drafts = closing.flatMap { rulePeriod ->
+            IncentiveEngine.claimsFor(pack, IncentiveEngine.periodStart(period, rulePeriod), window)
+                .filter { draft -> pack.incentives.first { it.id == draft.incentiveId }.period == rulePeriod }
+        }
+        return drafts.count { draft ->
+            claims.insertIfAbsent(
+                IncentiveClaim(
+                    id = UUID.randomUUID(),
+                    contractId = contract.contractId,
+                    incentiveId = draft.incentiveId,
+                    period = draft.period,
+                    basis = draft.basis,
+                    claimedAmount = draft.amount,
+                    currency = contract.currency,
+                    status = ClaimStatus.PENDING,
+                    createdAt = now(),
+                    updatedAt = now(),
+                ),
+            ).second
+        }
     }
 
     /** Files every PENDING claim, one batch per (format, period). Formats with no adapter stay PENDING. */
@@ -146,9 +149,17 @@ class IncentiveService(
                 status = ClaimBatchStatus.SUBMITTED,
                 createdAt = now(),
             )
-            batches.insert(batch)
-            group.forEach { claims.update(it.submit(batch.id, now())) }
-            filed += batch
+            // Atomic: a concurrent run that filed any of these claims first makes this a no-op,
+            // so no claim is ever filed twice (the rendered payload is simply discarded).
+            if (batches.fileAtomically(batch, now())) {
+                filed += batch
+            } else {
+                log.warnf(
+                    "claim batch for %s/%s lost a race with a concurrent run; nothing filed twice",
+                    format,
+                    period,
+                )
+            }
         }
         return filed to unfiled
     }
@@ -180,7 +191,8 @@ class IncentiveService(
                 claims.update(received)
                 ledger.append(ledgerEntry(received, LedgerEntryKind.RECEIVED, amount))
                 contributionService.creditIncentive(
-                    claim.contractId, claim.id,
+                    claim.contractId,
+                    claim.id,
                     IncomingPayment(
                         paymentId = "incentive:${claim.id}",
                         amount = amount,
@@ -215,8 +227,14 @@ class IncentiveService(
         val balances = entries.groupBy { it.incentiveId }.map { (id, list) ->
             IncentiveBalance(
                 incentiveId = id,
-                received = list.filter { it.kind == LedgerEntryKind.RECEIVED }.fold(BigDecimal.ZERO) { a, e -> a + e.amount },
-                returned = list.filter { it.kind == LedgerEntryKind.RETURNED }.fold(BigDecimal.ZERO) { a, e -> a + e.amount },
+                received = list.filter { it.kind == LedgerEntryKind.RECEIVED }.fold(BigDecimal.ZERO) { a, e ->
+                    a +
+                        e.amount
+                },
+                returned = list.filter { it.kind == LedgerEntryKind.RETURNED }.fold(BigDecimal.ZERO) { a, e ->
+                    a +
+                        e.amount
+                },
             )
         }
         return IncentiveStatus(claims.byContract(contractId), balances)
@@ -266,7 +284,10 @@ class IncentiveService(
                 employerContributions = yearContributions.filter { it.source == ContributionSource.EMPLOYER },
             )
         }
-        val allocation = IncentiveEngine.allocateTaxYear(inputs, summaries.externalCapUsage(contract.participantPartyId, year))
+        val allocation = IncentiveEngine.allocateTaxYear(
+            inputs,
+            summaries.externalCapUsage(contract.participantPartyId, year),
+        )
             .getValue(contract.contractId)
         val own = contributions.byContractAndYear(contract.contractId, year)
         val stateNet = ledger.byContract(contract.contractId).filter { it.taxYear == year }
@@ -275,7 +296,14 @@ class IncentiveService(
             contractId = contract.contractId,
             taxYear = year,
             currency = contract.currency,
-            participantContributions = IncentiveEngine.money(sum(own.filter { it.source == ContributionSource.PARTICIPANT })),
+            participantContributions = IncentiveEngine.money(
+                sum(
+                    own.filter {
+                        it.source ==
+                            ContributionSource.PARTICIPANT
+                    },
+                ),
+            ),
             employerContributions = IncentiveEngine.money(sum(own.filter { it.source == ContributionSource.EMPLOYER })),
             stateIncentives = IncentiveEngine.money(stateNet),
             transferIn = IncentiveEngine.money(sum(own.filter { it.source == ContributionSource.TRANSFER_IN })),
@@ -307,7 +335,8 @@ class IncentiveService(
     private fun packOf(c: ContractFundingView): JurisdictionPack =
         registry.pinned(c.jurisdiction, ProductLine.valueOf(c.productLine), c.packVersion)
 
-    private suspend fun requireContract(id: UUID): ContractFundingView = directory.find(id) ?: throw ContractNotFoundException(id)
+    private suspend fun requireContract(id: UUID): ContractFundingView =
+        directory.find(id) ?: throw ContractNotFoundException(id)
 
     private fun sum(list: List<com.openbank.pension.domain.contribution.Contribution>) =
         list.fold(BigDecimal.ZERO) { a, c -> a + c.amount }

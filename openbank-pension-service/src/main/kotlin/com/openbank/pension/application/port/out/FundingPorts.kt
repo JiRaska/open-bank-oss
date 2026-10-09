@@ -82,7 +82,12 @@ interface IncentiveClaimRepository {
 }
 
 interface ClaimBatchRepository {
-    suspend fun insert(batch: ClaimBatch)
+    /**
+     * Files [batch] atomically: in ONE transaction, moves every claim it lists from PENDING to
+     * SUBMITTED and stores the batch. If any listed claim is no longer PENDING (a concurrent run
+     * filed it first) nothing is written and the answer is false — a claim is never in two batches.
+     */
+    suspend fun fileAtomically(batch: ClaimBatch, at: java.time.Instant): Boolean
 
     suspend fun findById(id: UUID): ClaimBatch?
 
@@ -108,6 +113,17 @@ interface TaxYearSummaryRepository {
     suspend fun declareExternalCapUsage(participantPartyId: UUID, taxYear: Int, usage: Map<String, BigDecimal>)
 }
 
+/**
+ * Which employers a participant has authorised to pay into a contract. An employer bulk line for a
+ * contract its employer is not enrolled on is never credited: a reference alone must not let one
+ * business push money (and its exemption) onto a stranger's contract.
+ */
+interface EmployerEnrolmentRepository {
+    suspend fun enrol(contractId: UUID, employerPartyId: UUID)
+
+    suspend fun isEnrolled(contractId: UUID, employerPartyId: UUID): Boolean
+}
+
 interface ContractFundingDirectory {
     suspend fun find(contractId: UUID): ContractFundingView?
 
@@ -125,7 +141,12 @@ interface ContractFundingDirectory {
 /** pension-fund-service (S4): turn credited money into units at the next NAV. */
 interface FundAdministrationPort {
     /** Idempotent on [idempotencyKey]; returns the fund-side order id. */
-    suspend fun placeSubscription(contractId: UUID, amount: BigDecimal, currency: String, idempotencyKey: String): String
+    suspend fun placeSubscription(
+        contractId: UUID,
+        amount: BigDecimal,
+        currency: String,
+        idempotencyKey: String,
+    ): String
 }
 
 data class MandateRequest(
@@ -161,7 +182,11 @@ data class RenderedClaimBatch(val payload: String, val channelReference: String?
 interface StateIncentiveClaimPort {
     val claimFormat: String
 
-    suspend fun submit(period: YearMonth, claims: List<IncentiveClaim>, references: Map<UUID, String>): RenderedClaimBatch
+    suspend fun submit(
+        period: YearMonth,
+        claims: List<IncentiveClaim>,
+        references: Map<UUID, String>,
+    ): RenderedClaimBatch
 
     /** Parses the agency's receipt / response file for a batch this adapter rendered. */
     fun parseReceipt(payload: String): List<ClaimReceiptLine>

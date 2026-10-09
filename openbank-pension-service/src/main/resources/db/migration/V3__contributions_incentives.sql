@@ -4,7 +4,8 @@
 --   DROP TABLE pension_tax_year_certificates; DROP TABLE pension_external_cap_usage;
 --   DROP TABLE pension_incentive_ledger; DROP TABLE pension_incentive_claims;
 --   DROP TABLE pension_claim_batches; DROP TABLE pension_unmatched_payments;
---   DROP TABLE pension_contributions; DROP TABLE pension_contract_references;
+--   DROP TABLE pension_contributions; DROP TABLE pension_employer_enrolments;
+--   DROP TABLE pension_contract_references;
 --   DROP SEQUENCE pension_contract_reference_seq;
 
 -- The payment reference a payer quotes (variable-symbol equivalent). Numeric and allocated from a
@@ -14,6 +15,15 @@ CREATE SEQUENCE IF NOT EXISTS pension_contract_reference_seq START WITH 10000000
 CREATE TABLE pension_contract_references (
     contract_id  UUID PRIMARY KEY REFERENCES pension_contracts (contract_id),
     reference    VARCHAR(20) NOT NULL UNIQUE
+);
+
+-- Employers the participant authorised to pay into the contract by bulk file. A bulk line for a
+-- contract whose employer is not listed here is parked, never credited (no cross-tenant credit).
+CREATE TABLE pension_employer_enrolments (
+    contract_id        UUID NOT NULL REFERENCES pension_contracts (contract_id),
+    employer_party_id  UUID NOT NULL,
+    enrolled_at        TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (contract_id, employer_party_id)
 );
 
 -- Append-only. The unique payment_id IS the idempotency guarantee: a redelivered payment hits the
@@ -30,7 +40,7 @@ CREATE TABLE pension_contributions (
     employer_party_id      UUID,
     subscription_order_id  VARCHAR(128),
     received_at            TIMESTAMPTZ NOT NULL,
-    CONSTRAINT pension_contributions_positive CHECK (amount > 0),
+    CONSTRAINT pension_contributions_positive CHECK (amount > 0 AND amount < 1000000000),
     CONSTRAINT pension_contributions_source_known CHECK (source IN ('PARTICIPANT', 'EMPLOYER', 'STATE', 'TRANSFER_IN')),
     CONSTRAINT pension_contributions_employer_named CHECK ((source = 'EMPLOYER') = (employer_party_id IS NOT NULL))
 );

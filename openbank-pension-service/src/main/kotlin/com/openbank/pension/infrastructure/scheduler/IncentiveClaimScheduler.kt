@@ -61,7 +61,10 @@ class IncentiveClaimScheduler(
                 claimLiveness?.recordSuccess()
                 log.infof(
                     "incentive claims for %s: %d created, %d batch(es) filed, unfiled formats %s",
-                    period, it.claimsCreated, it.batches.size, it.unfiledFormats,
+                    period,
+                    it.claimsCreated,
+                    it.batches.size,
+                    it.unfiledFormats,
                 )
             }
             .onFailure { log.error("monthly incentive claim run failed", it) }

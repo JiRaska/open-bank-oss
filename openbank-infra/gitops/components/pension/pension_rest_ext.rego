@@ -50,3 +50,56 @@ allowed_reasons contains "edge-service-pension" if {
 		"pension.contract.terminate",
 	}
 }
+
+# ---------------------------------------------------------------------------------------------
+# ADR-0334 S3 — contributions & state incentives (ContractFundingResource,
+# FundingOperationsResource).
+#   pension.funding.read     — GET payment-reference, contributions, incentives, tax-years/{y}
+#   pension.funding.mandate  — POST mandates, PUT employers/{employerPartyId}
+#   pension.funding.declare  — PUT tax-years/{y}/external-cap-usage
+#   pension.funding.ingest   — POST operations/payments, operations/employer-batches
+#   pension.funding.operate  — unmatched queue, claim runs/batches/receipts, returns, clawback
+#                              preview, tax certificate
+# Contract OWNERSHIP is enforced in the service (ContractAccessGuard), not here.
+# ---------------------------------------------------------------------------------------------
+
+# Participant intent via the edge: read own funding, set up mandates / enrol an employer, declare
+# cap usage elsewhere. Never ingest or operate.
+allowed_reasons contains "edge-service-pension-funding" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-edge"
+	input.action in {
+		"pension.funding.read",
+		"pension.funding.mandate",
+		"pension.funding.declare",
+	}
+}
+
+# Real staff read any contract's funding.
+allowed_reasons contains "operator-pension-funding-read" if {
+	input.principal.type == "HUMAN"
+	not startswith(input.principal.id, "service-account-")
+	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE"}
+	role in input.principal.roles
+	input.action == "pension.funding.read"
+}
+
+# Back-office queue and claim-batch operations: real staff only — a service account holding
+# ROLE_OPERATOR (#3765) must not drive the unmatched queue or file claims.
+allowed_reasons contains "operator-pension-funding-operate" if {
+	input.principal.type == "HUMAN"
+	not startswith(input.principal.id, "service-account-")
+	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+	role in input.principal.roles
+	input.action == "pension.funding.operate"
+}
+
+# Payment intake: real payments/operations staff. Automated intake (a payment-received consumer)
+# is a follow-up and will get its own named service-account rule, not a role grant.
+allowed_reasons contains "operator-pension-funding-ingest" if {
+	input.principal.type == "HUMAN"
+	not startswith(input.principal.id, "service-account-")
+	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS"}
+	role in input.principal.roles
+	input.action == "pension.funding.ingest"
+}

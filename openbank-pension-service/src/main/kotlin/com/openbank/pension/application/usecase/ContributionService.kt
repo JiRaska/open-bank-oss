@@ -10,6 +10,7 @@ import com.openbank.pension.application.port.out.ContractNotFoundException
 import com.openbank.pension.application.port.out.ContractReferenceRepository
 import com.openbank.pension.application.port.out.ContributionRepository
 import com.openbank.pension.application.port.out.EmployerDirectoryPort
+import com.openbank.pension.application.port.out.EmployerEnrolmentRepository
 import com.openbank.pension.application.port.out.FundAdministrationPort
 import com.openbank.pension.application.port.out.MandateRequest
 import com.openbank.pension.application.port.out.PaymentMandatePort
@@ -21,6 +22,7 @@ import com.openbank.pension.domain.contribution.EmployerBatch
 import com.openbank.pension.domain.contribution.EmployerLineOutcome
 import com.openbank.pension.domain.contribution.EmployerLineResult
 import com.openbank.pension.domain.contribution.IncomingPayment
+import com.openbank.pension.domain.contribution.MoneyBounds
 import com.openbank.pension.domain.contribution.UnmatchedPayment
 import com.openbank.pension.domain.contribution.UnmatchedReason
 import com.openbank.pension.domain.contribution.UnmatchedStatus
@@ -49,6 +51,7 @@ class UnmatchedPaymentNotFoundException(id: UUID) : RuntimeException("unmatched 
  * un-credit the money: the contribution stays without an order id and the subscription sweep
  * places it later, keyed on the same id so the fund side cannot double-buy.
  */
+@Suppress("LongParameterList", "TooManyFunctions")
 class ContributionService(
     private val directory: ContractFundingDirectory,
     private val references: ContractReferenceRepository,
@@ -57,6 +60,7 @@ class ContributionService(
     private val fund: FundAdministrationPort,
     private val employers: EmployerDirectoryPort,
     private val mandates: PaymentMandatePort,
+    private val enrolments: EmployerEnrolmentRepository,
     private val clock: Clock,
 ) {
     private val log = Logger.getLogger(ContributionService::class.java)
@@ -86,7 +90,15 @@ class ContributionService(
             "contract $contractId cannot receive this payment (status ${contract.status}, currency ${contract.currency})"
         }
         val assigned = parked.assign(contractId, actor, now())
-        val outcome = credit(contract, parked.payment.paymentId, ContributionSource.PARTICIPANT, parked.payment.channel, parked.payment, null)
+        val outcome =
+            credit(
+                contract,
+                parked.payment.paymentId,
+                ContributionSource.PARTICIPANT,
+                parked.payment.channel,
+                parked.payment,
+                null,
+            )
         unmatched.update(assigned)
         return when (outcome) {
             is ReceiptOutcome.Credited -> outcome.contribution
@@ -123,10 +135,16 @@ class ContributionService(
             val contract = references.contractFor(line.contractReference.trim())?.let { directory.find(it) }
             val outcome = if (contract == null || rejectionFor(contract, linePayment.currency) != null) {
                 park(linePayment, UnmatchedReason.EMPLOYER_LINE)
+            } else if (!enrolments.isEnrolled(contract.contractId, batch.employerPartyId)) {
+                park(linePayment, UnmatchedReason.EMPLOYER_NOT_AUTHORISED)
             } else {
                 credit(
-                    contract, linePayment.paymentId, ContributionSource.EMPLOYER,
-                    ContributionChannel.EMPLOYER_BATCH, linePayment, batch.employerPartyId,
+                    contract,
+                    linePayment.paymentId,
+                    ContributionSource.EMPLOYER,
+                    ContributionChannel.EMPLOYER_BATCH,
+                    linePayment,
+                    batch.employerPartyId,
                 )
             }
             val result = when (outcome) {
@@ -141,8 +159,26 @@ class ContributionService(
     /** State incentive money received for a claim — credited like any contribution, source STATE. */
     suspend fun creditIncentive(contractId: UUID, claimId: UUID, payment: IncomingPayment): Contribution {
         val contract = requireContract(contractId)
-        val outcome = credit(contract, "incentive:$claimId", ContributionSource.STATE, ContributionChannel.STATE_INCENTIVE, payment, null)
+        val outcome =
+            credit(
+                contract,
+                "incentive:$claimId",
+                ContributionSource.STATE,
+                ContributionChannel.STATE_INCENTIVE,
+                payment,
+                null,
+            )
         return (outcome as? ReceiptOutcome.Credited)?.contribution ?: (outcome as ReceiptOutcome.Duplicate).contribution
+    }
+
+    /** The participant authorises [employerPartyId] to pay into the contract by bulk file. */
+    suspend fun enrolEmployer(contractId: UUID, employerPartyId: UUID) {
+        val contract = requireContract(contractId)
+        check(contract.status in ACCEPTING) { "contract ${contract.contractId} is ${contract.status}" }
+        require(employers.isVerifiedEmployer(employerPartyId)) {
+            "employer $employerPartyId is not a verified business party"
+        }
+        enrolments.enrol(contractId, employerPartyId)
     }
 
     /** Sets up the participant's regular payment, quoting the contract's reference so it matches. */
@@ -150,6 +186,8 @@ class ContributionService(
         val contract = requireContract(request.contractId)
         check(contract.status in ACCEPTING) { "contract ${contract.contractId} is ${contract.status}" }
         require(request.currency == contract.currency) { "mandate currency must be ${contract.currency}" }
+        MoneyBounds.requireAmount(request.amount, "mandate amount")
+        require(IBAN.matches(request.debtorIban.replace(" ", ""))) { "debtorIban is not a well-formed IBAN" }
         return mandates.setUp(request.copy(reference = references.referenceFor(contract.contractId)))
     }
 
@@ -217,5 +255,6 @@ class ContributionService(
     companion object {
         /** SUSPENDED pauses the schedule, not the account: money that still arrives is credited. */
         val ACCEPTING = setOf("ACTIVE", "SUSPENDED")
+        private val IBAN = Regex("^[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}$")
     }
 }

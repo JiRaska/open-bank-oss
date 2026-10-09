@@ -46,6 +46,7 @@ data class TaxYearAllocation(
  * Pure: no clock, no I/O. Everything it needs is an argument, which is what lets the property
  * tests drive it with thousands of generated inputs.
  */
+@Suppress("TooManyFunctions")
 object IncentiveEngine {
 
     private const val MONEY_SCALE = 2
@@ -98,7 +99,10 @@ object IncentiveEngine {
      * Invariants the property tests hold it to: per shared group, the total allocated never exceeds
      * the cap less [external]; no contract is allocated more than its own rule would give it alone.
      */
-    fun allocateTaxYear(contracts: List<ContractYearInput>, external: Map<String, BigDecimal>): Map<UUID, TaxYearAllocation> {
+    fun allocateTaxYear(
+        contracts: List<ContractYearInput>,
+        external: Map<String, BigDecimal>,
+    ): Map<UUID, TaxYearAllocation> {
         val used = external.mapValues { (_, v) -> v.max(BigDecimal.ZERO) }.toMutableMap()
         return contracts.associate { input ->
             val before = used.toMap()
@@ -167,7 +171,13 @@ object IncentiveEngine {
             IncentiveType.TAX_RELIEF -> {
                 val years = deductibleByYear.filter { (y, v) -> inWindow(y) && v.signum() > 0 }
                 val total = years.values.fold(BigDecimal.ZERO, BigDecimal::add)
-                if (total.signum() > 0) ClawbackItem(rule.id, ClawbackKind.TAX_RECAPTURE, money(total), years.keys) else null
+                if (total.signum() >
+                    0
+                ) {
+                    ClawbackItem(rule.id, ClawbackKind.TAX_RECAPTURE, money(total), years.keys)
+                } else {
+                    null
+                }
             }
             IncentiveType.EMPLOYER_EXEMPTION -> null
             else -> {
@@ -192,7 +202,10 @@ object IncentiveEngine {
     }
 
     private fun participantSum(contributions: List<Contribution>): BigDecimal =
-        contributions.filter { it.source == ContributionSource.PARTICIPANT }.fold(BigDecimal.ZERO) { a, c -> a + c.amount }
+        contributions.filter { it.source == ContributionSource.PARTICIPANT }.fold(BigDecimal.ZERO) { a, c ->
+            a +
+                c.amount
+        }
 
     fun money(value: BigDecimal): BigDecimal = value.setScale(MONEY_SCALE, RoundingMode.HALF_EVEN)
 
