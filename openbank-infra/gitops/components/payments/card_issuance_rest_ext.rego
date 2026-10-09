@@ -82,6 +82,15 @@ allowed_reasons contains "service-delegation-card-read" if {
 	input.action == "card.read"
 }
 
+# #12328: card-processing alone may ask the issuer for a spending decision and the card it
+# needs to evaluate. Never grant card.authorization.decide to the shared services principal:
+# it is held by unrelated backends and was the over-grant fixed by GHSA-58jq-9hq3-66jr.
+allowed_reasons contains "service-card-processing-authorization" if {
+    input.principal.type == "HUMAN"
+    input.principal.id == "service-account-openbank-card-processing"
+    input.action in {"card.authorization.decide", "card.read"}
+}
+
 allowed_reasons contains "service-party-card-list" if {
 	input.principal.type == "HUMAN"
 	input.principal.id in {"service-account-openbank-party"}

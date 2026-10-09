@@ -74,7 +74,7 @@ customer to stop taking other precautions. Everything below exists to make those
 
 | STRIDE | Threat | Mitigation |
 |---|---|---|
-| **E**oP | A caller obtains approvals for a card it does not own | `@RolesAllowed(ROLE_API, ROLE_OPERATOR, ROLE_ADMIN)` + `@Authorize(action = "card.authorization.decide", resource = "#id")`; the customer-facing path reaches this only through the edge, which already enforces card ownership against the JWT party |
+| **E**oP | An unrelated backend asks the issuer to approve spend | `@RolesAllowed(ROLE_API, ROLE_OPERATOR, ROLE_ADMIN)` is only the outer gate; the issuer OPA rule pins `card.authorization.decide` to `service-account-openbank-card-processing`. The shared `openbank-services` identity has no decision grant. The issuer remains in advisory mode until all observed callers have narrow grants (#12328). |
 | **T**ampering | The caller supplies its own spend totals, so a compromised caller could under-report and slip past a limit | Accepted and explicit: the totals are inputs, because this service holds no authorisation history. The trust boundary is that only trusted rails may call it (no `ROLE_CUSTOMER`). When spend tracking lands, the totals become server-derived and this row narrows — flagged in the response today as `spendTracking: false` so no client presents them as measured |
 | **S**poofing | An unknown card id is used to fish for a permissive default | An unknown card **declines** (`CARD_NOT_ACTIVE`) rather than 404s. The acquirer needs an answer, and the safe answer to "may this unknown card spend" is no; it also avoids an existence oracle on card ids |
 | **D**oS | A customer locks themselves out of every rail | `CHIP_AND_PIN` deliberately has no toggle. A customer able to disable every channel could not pay at any terminal and could not recover from one either |
@@ -82,7 +82,7 @@ customer to stop taking other precautions. Everything below exists to make those
 | **R**epudiation | A decline cannot be explained to the customer | The decision returns a specific `declineReason`, and the evaluation order is card state, then customer switches, then amounts — so the reason shown is the one the customer can act on ("you turned gambling off"), not a downstream limit they never set |
 | **I**nfo disclosure | The taxonomy leaks something sensitive | It is public bank policy — category ids, labels and MCC ranges. Serving it is the point: a client that hardcoded MCC sets would keep enforcing a stale policy on every installed build |
 
-**DFD update:** adds `acquirer rail → POST /cards/{id}/authorizations → decision` and
+**DFD update:** adds `acquirer rail → card-processing → POST /cards/{id}/authorizations → decision` and
 `customer (via edge) → PUT /cards/{id}/category-limits`. No new downstream dependency; the decision
 reads only this service's own tables.
 **Risk class:** integrity of a money-path control (an authorisation approve/decline).
