@@ -47,21 +47,14 @@ PACTS = ROOT / "pacts"
 # Kept here rather than in rules.yaml on purpose: 25 of the 26 gen-*opa-bundle*.sh hash rules.yaml
 # into every service's OPA bundle checksum, so a line added or removed would restamp ~44 generated
 # files. The list belongs next to the code that reads it.
-KNOWN_UNCOVERED: set[str] = {
-    # ADR-0334 S6 (#12350): customer-edge's consumer pact landed before openbank-pension-service
-    # reached main; the service's @PactFolder replay arrives with it and must delete this entry.
-    "pacts/openbank-customer-edge-openbank-pension-service.json",
-}
+KNOWN_UNCOVERED: set[str] = set()
 
 # Providers with committed pacts but no @PactBroker-sourced class, i.e. nothing publishes a
 # verification result and no provider version is ever created. EMPTY: #7738 and #7834 closed the last
 # three (case-coordinator-agent, flaky-test-hunter, incentive-service). Keep it that way — an entry
 # here is a deploy that can never be proven safe, and the checks below fail on a stale entry in
 # either direction, so it cannot outlive the problem.
-KNOWN_NO_BROKER_PUBLICATION: set[str] = {
-    # ADR-0334 S6 (#12350): same debt as the KNOWN_UNCOVERED entry — the provider is not on main.
-    "openbank-pension-service",
-}
+KNOWN_NO_BROKER_PUBLICATION: set[str] = set()
 
 # Annotations that can stop a test class from running. @EnabledIf* is the live one here; the others
 # are listed so a future "temporarily disabled" class cannot be read as coverage either.
