@@ -4,33 +4,40 @@
 
 package com.openbank.sepainstant.infrastructure.kafka
 
-import com.fasterxml.jackson.databind.ObjectMapper
-import com.openbank.sepainstant.application.port.out.SctInstEventPublisher
-import com.openbank.sepainstant.domain.event.SctInstEvent
-import io.smallrye.mutiny.Uni
+import com.openbank.libs.persistence.outbox.OutboxEntry
+import com.openbank.libs.persistence.outbox.OutboxEventPublisher
+import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
+import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.smallrye.reactive.messaging.MutinyEmitter
+import io.smallrye.reactive.messaging.kafka.api.OutgoingKafkaRecordMetadata
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
+import org.apache.kafka.common.header.internals.RecordHeaders
 import org.eclipse.microprofile.reactive.messaging.Channel
+import org.eclipse.microprofile.reactive.messaging.Message
 
 @ApplicationScoped
 class KafkaSctInstEventPublisher @Inject constructor(
     @Channel("sct-inst-events-out") private val emitter: MutinyEmitter<String>,
-    private val objectMapper: ObjectMapper,
-) : SctInstEventPublisher {
+) : OutboxEventPublisher {
 
-    override fun publish(event: SctInstEvent): Uni<Void> = emitter.send(
-        objectMapper.writeValueAsString(
-            mapOf(
-                "type" to event::class.simpleName,
-                "paymentId" to event.paymentId,
-                "occurredAt" to event.occurredAt,
-                // Issue #3994/#5256: read by AuditConsumer.resolveSourceService as the strongest
-                // (EVENT-sourced) attribution. This publisher builds a HAND-BUILT map (not a
-                // serialised data class), so sourceService must be added to the map explicitly — a
-                // field on SctInstEvent alone would never reach the wire here.
-                "sourceService" to event.sourceService,
-            ),
-        ),
-    )
+    /**
+     * Keep the established four-field body; key by the payment (aggregate) id so per-payment order
+     * holds, and expose the durable event ID as ce-id/idempotency-key on every retry.
+     */
+    override suspend fun publish(entry: OutboxEntry) {
+        emitter.sendMessage(messageFor(entry)).awaitSuspending()
+    }
+
+    internal fun messageFor(entry: OutboxEntry): Message<String> {
+        val headers = RecordHeaders()
+        OutboxKafkaHeaders.headersFor(entry).forEach { (name, value) ->
+            headers.add(name, value.toByteArray(Charsets.UTF_8))
+        }
+        val metadata = OutgoingKafkaRecordMetadata.builder<String>()
+            .withKey(entry.aggregateId.toString())
+            .withHeaders(headers)
+            .build()
+        return Message.of(entry.payload).addMetadata(metadata)
+    }
 }
