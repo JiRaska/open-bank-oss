@@ -37,6 +37,8 @@ data class JurisdictionPack(
     val transfer: TransferRules,
     /** Termination, payout and death rules (slice S5); absent = exits fail closed. */
     val exit: ExitRules? = null,
+    /** Participant-settable schedule bounds (#12376); absent = schedule changes fail closed. */
+    val contributionLimits: ContributionLimits? = null,
 ) {
     init {
         require(jurisdiction.isNotBlank()) { "pack jurisdiction must not be blank" }

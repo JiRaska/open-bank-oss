@@ -24,6 +24,7 @@ tags:
   - name: Pension exit
   - name: Pension death claims
   - name: Pension simulation
+  - name: Pension contract changes
 security:
   - bearerAuth: []
 
@@ -1448,6 +1449,217 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/contracts/{contractId}/contribution-schedule:
+    get:
+      tags: [Pension contract changes]
+      operationId: getContributionSchedule
+      summary: Original, in-force and pending contribution schedule with the change history
+      parameters:
+        - name: contractId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/CustomerPartyIdOptional'
+      responses:
+        '200':
+          description: Original, in-force and pending contribution schedule with the change history
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ContributionScheduleView' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/pension/contracts/{contractId}/contribution-schedule/preview:
+    post:
+      tags: [Pension contract changes]
+      operationId: previewContributionScheduleChange
+      summary: Validate a contribution-schedule change and return what to sign
+      description: |
+        Validates amount, frequency, collection day and start date against the pinned pack's
+        contributionLimits (monthly equivalent within min/max; fails closed when the pack declares none)
+        and its incentive rules (a change that lowers the annual state incentive needs
+        `acknowledgeIncentiveReduction: true`). Returns the effective date - the first collection day at
+        least the pack's notice period ahead, never the cycle in progress - and `documentSha256`, the
+        document the participant signs under SCA. Changes nothing.
+      parameters:
+        - name: contractId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/CustomerPartyId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ScheduleChangeRequest' }
+      responses:
+        '200':
+          description: Validate a contribution-schedule change and return what to sign
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ScheduleChangePreview' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/contracts/{contractId}/contribution-schedule/changes:
+    post:
+      tags: [Pension contract changes]
+      operationId: changeContributionSchedule
+      summary: Agree a contribution-schedule change under SCA
+      description: |
+        Re-validates on the current state and requires `scaChallengeId` signed over the preview's
+        `documentSha256` (a stale preview fails SCA). Effective from the next collection cycle; a
+        not-yet-effective earlier change becomes SUPERSEDED; history is append-only. Idempotent per
+        `Idempotency-Key`. A concurrent second change loses with 409.
+      parameters:
+        - name: contractId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/CustomerPartyId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ScheduleChangeRequest' }
+      responses:
+        '201':
+          description: Agree a contribution-schedule change under SCA
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ContributionScheduleVersion' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/contracts/{contractId}/beneficiaries:
+    get:
+      tags: [Pension contract changes]
+      operationId: getBeneficiaries
+      summary: Current beneficiary designation with the designation history
+      parameters:
+        - name: contractId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/CustomerPartyIdOptional'
+      responses:
+        '200':
+          description: Current beneficiary designation with the designation history
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BeneficiaryView' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/pension/contracts/{contractId}/beneficiaries/preview:
+    post:
+      tags: [Pension contract changes]
+      operationId: previewBeneficiaryChange
+      summary: Validate a complete ordered beneficiary designation and return what to sign
+      description: |
+        The body is the WHOLE new list in order (add, remove and reorder are all a new list; an empty
+        list removes every designation). Shares must be positive, carry at most two decimals and total
+        exactly 100; nobody twice; never the participant. Identity is minimal (GDPR): name and an
+        optional known partyId only. Refused (409) once a death claim exists. Changes nothing.
+      parameters:
+        - name: contractId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/CustomerPartyId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BeneficiaryChangeRequest' }
+      responses:
+        '200':
+          description: Validate a complete ordered beneficiary designation and return what to sign
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BeneficiaryChangePreview' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/contracts/{contractId}/beneficiaries/changes:
+    post:
+      tags: [Pension contract changes]
+      operationId: changeBeneficiaries
+      summary: Replace the beneficiary designation under SCA
+      description: |
+        Requires `scaChallengeId` signed over the preview's `documentSha256`. Written together with
+        the contract's designation in one transaction that re-checks no death claim was registered
+        meanwhile (409). History is append-only. Idempotent per `Idempotency-Key`.
+      parameters:
+        - name: contractId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/CustomerPartyId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BeneficiaryChangeRequest' }
+      responses:
+        '201':
+          description: Replace the beneficiary designation under SCA
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BeneficiaryDesignationVersion' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/operator/contracts/{contractId}/contribution-schedule:
+    get:
+      tags: [Pension operations]
+      operationId: operatorGetContributionSchedule
+      summary: Staff - contribution schedule with change history (read only)
+      parameters:
+        - name: contractId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Staff - contribution schedule with change history (read only)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ContributionScheduleView' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/pension/operator/contracts/{contractId}/beneficiaries:
+    get:
+      tags: [Pension operations]
+      operationId: operatorGetBeneficiaries
+      summary: Staff - beneficiary designation with history (read only)
+      parameters:
+        - name: contractId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Staff - beneficiary designation with history (read only)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BeneficiaryView' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
 
 components:
   securitySchemes:
@@ -2272,3 +2484,80 @@ components:
         projections:
           type: array
           items: { $ref: '#/components/schemas/StrategyProjection' }
+    ScheduleChangeRequest:
+      type: object
+      required: [amount, frequency, dayOfMonth]
+      properties:
+        amount: { type: number, minimum: 0, description: Participant contribution per collection }
+        frequency: { $ref: '#/components/schemas/ContributionFrequency' }
+        dayOfMonth: { type: integer, minimum: 1, maximum: 28 }
+        startDate: { type: string, format: date, description: Earliest start; the next cycle on or after it applies }
+        acknowledgeIncentiveReduction: { type: boolean, default: false }
+        scaChallengeId: { type: string, maxLength: 128, description: Required on /changes only }
+    ScheduleChangePreview:
+      type: object
+      properties:
+        amount: { type: number }
+        employerAmount: { type: number }
+        currency: { type: string }
+        frequency: { $ref: '#/components/schemas/ContributionFrequency' }
+        dayOfMonth: { type: integer }
+        effectiveFrom: { type: string, format: date }
+        annualIncentiveBefore: { type: number }
+        annualIncentiveAfter: { type: number }
+        incentiveWarnings: { type: array, items: { type: string } }
+        documentSha256: { type: string, description: The document to sign under SCA }
+    ContributionScheduleVersion:
+      type: object
+      properties:
+        seq: { type: integer }
+        amount: { type: number }
+        employerAmount: { type: number }
+        currency: { type: string }
+        frequency: { $ref: '#/components/schemas/ContributionFrequency' }
+        dayOfMonth: { type: integer }
+        effectiveFrom: { type: string, format: date }
+        status: { type: string, enum: [SCHEDULED, SUPERSEDED] }
+        changedAt: { type: string, format: date-time }
+    ContributionScheduleView:
+      type: object
+      properties:
+        original:
+          type: object
+          description: The schedule agreed at signing; applies until the first change takes effect
+          properties:
+            amount: { type: number }
+            employerAmount: { type: number }
+            currency: { type: string }
+            frequency: { $ref: '#/components/schemas/ContributionFrequency' }
+        inForce:
+          oneOf:
+            - { $ref: '#/components/schemas/ContributionScheduleVersion' }
+            - { type: 'null' }
+        pending:
+          oneOf:
+            - { $ref: '#/components/schemas/ContributionScheduleVersion' }
+            - { type: 'null' }
+        history: { type: array, items: { $ref: '#/components/schemas/ContributionScheduleVersion' } }
+    BeneficiaryChangeRequest:
+      type: object
+      required: [beneficiaries]
+      properties:
+        beneficiaries: { type: array, maxItems: 10, items: { $ref: '#/components/schemas/Beneficiary' } }
+        scaChallengeId: { type: string, maxLength: 128, description: Required on /changes only }
+    BeneficiaryChangePreview:
+      type: object
+      properties:
+        beneficiaries: { type: array, items: { $ref: '#/components/schemas/Beneficiary' } }
+        documentSha256: { type: string, description: The document to sign under SCA }
+    BeneficiaryDesignationVersion:
+      type: object
+      properties:
+        seq: { type: integer }
+        beneficiaries: { type: array, items: { $ref: '#/components/schemas/Beneficiary' } }
+        changedAt: { type: string, format: date-time }
+    BeneficiaryView:
+      type: object
+      properties:
+        current: { type: array, items: { $ref: '#/components/schemas/Beneficiary' } }
+        history: { type: array, items: { $ref: '#/components/schemas/BeneficiaryDesignationVersion' } }

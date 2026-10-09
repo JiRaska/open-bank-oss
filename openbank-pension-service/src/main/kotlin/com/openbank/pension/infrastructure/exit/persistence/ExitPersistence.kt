@@ -151,7 +151,10 @@ internal suspend fun <E : ExitDocumentEntity> PanacheRepository<E>.upsert(
     expectedVersion: Int,
     create: () -> E,
 ): Int = Panache.withTransaction {
-    find("aggregateId", id).firstResult().flatMap { existing ->
+    // Every exit write takes the CONTRACT row lock first (#12376): a death claim registered
+    // concurrently with a beneficiary change is serialised against it, so the change either sees
+    // the claim (and is refused) or completes strictly before the claim is registered.
+    lockContractRow(contractId).flatMap { find("aggregateId", id).firstResult() }.flatMap { existing ->
         if (existing != null && existing.rowVersion != expectedVersion) {
             throw ExitConcurrentUpdateException(
                 "exit aggregate $id changed concurrently (version ${existing.rowVersion}, expected $expectedVersion)",
@@ -172,6 +175,14 @@ internal suspend fun <E : ExitDocumentEntity> PanacheRepository<E>.upsert(
         // Translate after the transaction has rolled back so callers can re-read and reapply.
         ExitConcurrentUpdateException("exit aggregate $id changed concurrently").also { it.initCause(failure) }
     }.awaitSuspending()
+
+/** `SELECT … FOR UPDATE` on the contract row, inside the caller's transaction. */
+internal fun lockContractRow(contractId: UUID): Uni<Any?> = Panache.getSession().flatMap { session ->
+    session.createNativeQuery<Any>("select contract_id from pension_contracts where contract_id = :id for update")
+        .setParameter("id", contractId)
+        .resultList
+        .map { rows -> rows.firstOrNull() }
+}
 
 /** The stored body, with the row's current version stamped in so the next save can be checked. */
 internal fun <T> ExitDocumentEntity.toDomain(type: Class<T>): T {
