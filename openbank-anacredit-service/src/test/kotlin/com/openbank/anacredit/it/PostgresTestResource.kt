@@ -33,7 +33,7 @@ class PostgresTestResource : QuarkusTestResourceLifecycleManager {
         // lifecycle cleanup must remain visible in Test Intelligence evidence.
         postgres = pg
         pg.start()
-        TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "started")
+        TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "started", containerId = pg.containerId)
         val reactiveUrl = "postgresql://${pg.host}:${pg.firstMappedPort}/${pg.databaseName}"
         return mapOf(
             "quarkus.datasource.reactive.url" to reactiveUrl,
@@ -45,8 +45,9 @@ class PostgresTestResource : QuarkusTestResourceLifecycleManager {
 
     override fun stop() {
         postgres?.let {
+            val containerId = it.containerId
             it.stop()
-            TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "stopped")
+            TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "stopped", containerId = containerId)
         }
     }
 
