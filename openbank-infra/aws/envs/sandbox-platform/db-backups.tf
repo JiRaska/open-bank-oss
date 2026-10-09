@@ -310,6 +310,9 @@ locals {
     # BEFORE the manifest lands, so WAL archiving never runs without credentials.
     pricing = { namespace = "pricing", sa = "pricing-db" }
     vop     = { namespace = "payments", sa = "vop-db" }
+    # pension-fund-db (ADR-0334 S4, #12350): association lands and is applied BEFORE the cluster
+    # that archives with it (#12355), so WAL archiving never runs without credentials.
+    pension-fund = { namespace = "pension-fund", sa = "pension-fund-db" }
     # Added by #1444 (second wave). These 11 declared NO backup at all — they never even
     # attempted an archive, so nothing alerted, and they would have had no recovery point the
     # first time anyone needed one. The matching barmanObjectStore + ScheduledBackup + a bounded
