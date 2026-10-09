@@ -111,6 +111,7 @@ export default function ProductStudioPage() {
   const [relationshipKind, setRelationshipKind] = useState<RelationshipKind>('BUNDLE')
   const [publishReason, setPublishReason] = useState('')
   const [newSpecSchema, setNewSpecSchema] = useState('')
+  const [newDraftClassSelection, setNewDraftClassSelection] = useState<{ key: string; classes: string[] }>({ key: '', classes: [] })
   const [review, setReview] = useState<CatalogReview | null>(null)
   const [reviewing, setReviewing] = useState(false)
   const [validationState, setValidationState] = useState<'idle' | 'valid' | 'invalid'>('idle')
@@ -141,6 +142,10 @@ export default function ProductStudioPage() {
     () => schemas.filter(item => !selectedSpec || item.id === selectedSpec.schemaRef.id),
     [schemas, selectedSpec],
   )
+  const newDraftSchema = compatibleSchemas.at(-1)
+  const newDraftClassKey = `${offeringId}:${newDraftSchema?.id ?? ''}:${newDraftSchema?.version ?? ''}`
+  const newDraftInstrumentClasses = newDraftClassSelection.key === newDraftClassKey
+    ? newDraftClassSelection.classes : []
   const activeSchema = selectedRevision
     ? schemas.find(item => item.id === selectedRevision.schemaRef.id && item.version === selectedRevision.schemaRef.version)
     : compatibleSchemas.at(-1)
@@ -232,9 +237,9 @@ export default function ProductStudioPage() {
     return () => window.clearTimeout(task)
   }, [selectedRevision])
 
-  const updateGuidedField = (field: CatalogSchemaField, raw: string | boolean) => {
+  const updateGuidedField = (field: CatalogSchemaField, raw: string | boolean | string[]) => {
     if (!parsedDraft) return
-    const value = field.type === 'boolean' ? raw === true : field.type === 'integer' || field.type === 'number'
+    const value = field.type === 'enum-array' ? raw : field.type === 'boolean' ? raw === true : field.type === 'integer' || field.type === 'number'
       ? (raw === '' ? '' : Number(raw)) : raw
     setDraftText(JSON.stringify(withCatalogFieldValue(parsedDraft, field.path, value), null, 2))
     setValidationState('idle')
@@ -320,12 +325,30 @@ export default function ProductStudioPage() {
   }
 
   const createDraft = () => {
-    const schema = compatibleSchemas.at(-1)
+    const schema = newDraftSchema
     if (!selectedOffering || !schema) return
+    const classField = catalogSchemaFields(schema.document).find(field => field.path.join('.') === 'instrumentClasses' && field.type === 'enum-array')
+    if (classField && newDraftInstrumentClasses.length < (classField.minItems ?? 0)) {
+      setMessage(t('Vyberte třídy nástrojů pro novou revizi', 'Select instrument classes for the new revision'))
+      return
+    }
+    const base = [selectedRevision, publishedRevision].find(item => item?.offeringId === selectedOffering.id)
+    const baseContent = base ? catalogRevisionEditorDocument(base) : null
+    const attributes = (baseContent?.attributes ?? seed(schema.document)) as Record<string, unknown>
+    const nextAttributes = classField
+      ? { ...attributes, instrumentClasses: newDraftInstrumentClasses }
+      : attributes
     const body: RevisionRequest = {
-      schemaRef: { id: schema.id, version: schema.version }, name: { en: selectedOffering.code },
-      attributes: seed(schema.document) as Record<string, unknown>,
-      prices: [], eligibility: [], relationships: [], documentCodes: [],
+      schemaRef: { id: schema.id, version: schema.version },
+      name: (baseContent?.name ?? { en: selectedOffering.code }) as RevisionRequest['name'],
+      description: (baseContent?.description ?? null) as RevisionRequest['description'],
+      attributes: nextAttributes,
+      prices: (baseContent?.prices ?? []) as RevisionRequest['prices'],
+      eligibility: (baseContent?.eligibility ?? []) as RevisionRequest['eligibility'],
+      relationships: (baseContent?.relationships ?? []) as RevisionRequest['relationships'],
+      documentCodes: (baseContent?.documentCodes ?? []) as RevisionRequest['documentCodes'],
+      effectiveFrom: null,
+      effectiveTo: null,
     }
     void run('revision:create', () => catalogV2Operation('createOfferingRevisionV2', {
       pathParameters: { id: selectedOffering.id }, body,
@@ -460,6 +483,16 @@ export default function ProductStudioPage() {
                 <label><span>{t('Lokality', 'Locales')}</span><input className="input" value={marketContextInput.locales} onChange={event => updateMarketContext('locales', event.target.value)} placeholder="cs-CZ, en" /></label>
               </div>
             </div>
+            {(() => {
+              const classField = catalogSchemaFields(newDraftSchema?.document).find(field => field.path.join('.') === 'instrumentClasses' && field.type === 'enum-array')
+              return classField && <div className={styles.schemaHint} role="group" aria-label={t('Třídy nástrojů nové revize', 'New revision instrument classes')}>
+                <strong>{t('Třídy nástrojů nové revize', 'New revision instrument classes')}</strong>
+                {classField.choices.map(choice => <label key={choice} style={{ display: 'block' }}><input type="checkbox"
+                  checked={newDraftInstrumentClasses.includes(choice)}
+                  onChange={event => setNewDraftClassSelection({ key: newDraftClassKey, classes: event.target.checked
+                    ? [...newDraftInstrumentClasses, choice] : newDraftInstrumentClasses.filter(item => item !== choice) })} /> {choice}</label>)}
+              </div>
+            })()}
             <button className="btn btn-primary" type="button" style={{ width: '100%', marginTop: 8 }} disabled={!selectedOffering || busy} aria-busy={flight.isRunning('revision:create')} onClick={createDraft}><Plus size={13} aria-hidden="true" />{flight.isRunning('revision:create') ? t('Zakládám…', 'Creating…') : t('Založit novou revizi', 'Create a new revision')}</button>
           </Can>
           <div className={styles.revisionList}>{revisions.length === 0 && <div className={styles.schemaHint}>{t('Vyberte nabídku a otevřete její rozhodovací historii.', 'Select an offer to open its decision history.')}</div>}{revisions.map(item => <button key={item.id} onClick={() => { setRevisionId(item.id); setReview(null) }} className={`${styles.revision} ${revisionId === item.id ? styles.revisionSelected : ''}`}>
@@ -498,16 +531,29 @@ export default function ProductStudioPage() {
               })}</div>}
             </div>}
             {guidedFields.length > 0 && parsedDraft && <div className={styles.guidedForm}>
-              <div className={styles.guidedHead}><span><Sparkles size={13} aria-hidden="true" />{t('Průvodce povinnými údaji', 'Guided essentials')}</span><small>{t('Pouze skalární pole; pole a složité struktury zůstávají níže v expertním dokumentu.', 'Scalar fields only; arrays and complex structures remain in the expert document below.')}</small></div>
+              <div className={styles.guidedHead}><span><Sparkles size={13} aria-hidden="true" />{t('Průvodce povinnými údaji', 'Guided essentials')}</span><small>{t('Skalární pole a výběr tříd; složité struktury zůstávají níže v expertním dokumentu.', 'Scalar fields and class selections; complex structures remain in the expert document below.')}</small></div>
               <div className={styles.fieldGrid}>{guidedFields.map(field => {
                 const value = catalogFieldValue(parsedDraft, field.path)
                 const id = `catalog-field-${field.path.join('-')}`
-                return <label key={id} className={styles.field}><span>{field.label}{field.required && <b aria-label={t('Povinné', 'Required')}> *</b>}</span>
-                  {field.type === 'boolean' ? <input id={id} type="checkbox" checked={value === true} onChange={event => updateGuidedField(field, event.target.checked)} disabled={selectedRevision?.state !== 'DRAFT'} />
+                return <div key={id} className={styles.field}>{field.type === 'enum-array'
+                  ? <span>{field.label}{field.required && <b aria-label={t('Povinné', 'Required')}> *</b>}</span>
+                  : <label htmlFor={id}>{field.label}{field.required && <b aria-label={t('Povinné', 'Required')}> *</b>}</label>}
+                  {field.type === 'enum-array' ? <span role="group" aria-label={field.label}>
+                    {field.choices.map(choice => {
+                      const selected = Array.isArray(value) && value.includes(choice)
+                      return <label key={choice} style={{ display: 'block' }}><input type="checkbox" checked={selected}
+                        onChange={() => updateGuidedField(field, selected
+                          ? (Array.isArray(value) ? value.filter(item => item !== choice) : [])
+                          : [...(Array.isArray(value) ? value : []), choice])}
+                        disabled={selectedRevision?.state !== 'DRAFT'} /> {choice}</label>
+                    })}
+                    {field.minItems && <small>{t('Vyberte alespoň', 'Select at least')} {field.minItems}</small>}
+                  </span>
+                  : field.type === 'boolean' ? <input id={id} type="checkbox" checked={value === true} onChange={event => updateGuidedField(field, event.target.checked)} disabled={selectedRevision?.state !== 'DRAFT'} />
                     : field.choices.length > 0 ? <select id={id} className="input" value={String(value ?? '')} onChange={event => updateGuidedField(field, event.target.value)} disabled={selectedRevision?.state !== 'DRAFT'}><option value="">{t('Vyberte hodnotu', 'Select a value')}</option>{field.choices.map(choice => <option key={choice}>{choice}</option>)}</select>
                       : <input id={id} className="input" inputMode={field.type === 'integer' || field.type === 'number' ? 'decimal' : undefined} value={String(value ?? '')} onChange={event => updateGuidedField(field, event.target.value)} disabled={selectedRevision?.state !== 'DRAFT'} />}
                   {field.description && <small>{field.description}</small>}
-                </label>
+                </div>
               })}</div>
             </div>}
             <details className={styles.expertDetails}><summary>{t('Expert režim · úplný dokument', 'Expert mode · full document')}</summary>
