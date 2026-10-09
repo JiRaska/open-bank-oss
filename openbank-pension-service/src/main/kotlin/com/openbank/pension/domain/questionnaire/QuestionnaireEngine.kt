@@ -35,7 +35,12 @@ data class SustainabilityPreference(
 }
 
 /** One machine-readable reason the client UI turns into a plain sentence ("why this class"). */
-data class ProfileReason(val dimension: Dimension, val questionId: String, val optionCode: String, val maxRiskClass: Int)
+data class ProfileReason(
+    val dimension: Dimension,
+    val questionId: String,
+    val optionCode: String,
+    val maxRiskClass: Int,
+)
 
 /** Knowledge and experience for one instrument class (MiFID appropriateness, DIP). */
 data class InstrumentCompetence(val instrumentClass: String, val knowledge: Int, val experience: Int)
@@ -74,6 +79,7 @@ data class QuestionnaireProgress(
 /**
  * Scores answers against a [QuestionSet]. Pure: no clock, no I/O, so the golden cases are exact.
  */
+@Suppress("TooManyFunctions")
 object QuestionnaireEngine {
 
     private const val UNSTABLE_CAP = 3
@@ -116,7 +122,9 @@ object QuestionnaireEngine {
     fun lossIllustration(set: QuestionSet, answers: Map<String, String>): Map<String, BigDecimal> {
         val savings = savings(set, answers) ?: return emptyMap()
         return set.questions.filter { it.dimension == Dimension.LOSS_CAPACITY }
-            .flatMap { q -> q.options.map { "${q.id}:${it.code}" to share(savings, checkNotNull(it.lossSharePercent)) } }
+            .flatMap { q ->
+                q.options.map { "${q.id}:${it.code}" to share(savings, checkNotNull(it.lossSharePercent)) }
+            }
             .toMap()
     }
 
@@ -130,7 +138,8 @@ object QuestionnaireEngine {
         val riskBearing = chosen.filter { (q, _) -> q.dimension in Question.RISK_BEARING }
         val stable = chosen.filter { (q, _) -> q.dimension == Dimension.FINANCIAL_SITUATION }
             .all { (_, o) -> o.stable != false }
-        var ceiling = riskBearing.minOfOrNull { (_, o) -> checkNotNull(o.maxRiskClass) } ?: StrategyOption.MAX_RISK_CLASS
+        var ceiling =
+            riskBearing.minOfOrNull { (_, o) -> checkNotNull(o.maxRiskClass) } ?: StrategyOption.MAX_RISK_CLASS
         if (!stable) ceiling = minOf(ceiling, UNSTABLE_CAP)
         val binding = riskBearing.filter { (_, o) -> o.maxRiskClass == ceiling }
             .map { (q, o) -> ProfileReason(q.dimension, q.id, o.code, ceiling) }
@@ -147,7 +156,9 @@ object QuestionnaireEngine {
                 SustainabilityPreference(o.code, m.categories, m.minSharePercent)
             } ?: SustainabilityPreference.NONE
         val savings = savings(set, answers)
-        val lossShare = chosen.firstOrNull { (q, _) -> q.dimension == Dimension.LOSS_CAPACITY }?.second?.lossSharePercent
+        val lossShare = chosen.firstOrNull { (q, _) ->
+            q.dimension == Dimension.LOSS_CAPACITY
+        }?.second?.lossSharePercent
         return QuestionnaireProfile(
             riskClass = ceiling,
             label = label(ceiling),

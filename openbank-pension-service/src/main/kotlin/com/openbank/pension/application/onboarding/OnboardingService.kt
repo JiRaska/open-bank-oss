@@ -249,7 +249,9 @@ class OnboardingService(
         val assessment = currentAssessment(application)
         val required = WarningPolicy.required(strategyCode, assessment, recommend(application, assessment))
         require(codes.isNotEmpty()) { "at least one warning code is required" }
-        require(required.containsAll(codes)) { "warnings ${(codes - required).joinToString()} do not apply to $strategyCode" }
+        require(required.containsAll(codes)) {
+            "warnings ${(codes - required).joinToString()} do not apply to $strategyCode"
+        }
         codes.forEach { code ->
             require(WarningPolicy.overridable(code, onboarding)) {
                 "warning $code cannot be overridden under the ${onboarding.questionnaire.regime} regime"

@@ -134,11 +134,14 @@ class PensionFullLifecycleJourneyE2E {
             customerPost(
                 customer,
                 "$APPS/$dpsApplication/questionnaire",
-                """{"riskAppetite":2,"lossTolerance":2,"financialSituationStable":true}""",
+                """{"answers":{"dps.objective":"GROWTH","dps.risk_reaction":"HOLD","dps.knowledge":"CORRECT",
+                    "dps.experience":"OCCASIONALLY","dps.savings":"50K_250K","dps.loss_capacity":"UP_TO_25"}}""",
             ),
         )
         val recommended = q.getString("recommendation.recommendedStrategy")
-        assertThat(recommended).describedAs("a 2/2 risk profile 20+ years out").isNotBlank()
+        assertThat(recommended).describedAs("a class-5 profile 20+ years out").isNotBlank()
+        assertThat(q.getInt("profile.riskClass")).isEqualTo(5)
+        assertThat(q.getList<String>("profile.recommendedStrategyWarnings")).isEmpty()
 
         val kid = ok(customerPost(customer, "$APPS/$dpsApplication/strategy", "{}"))
         assertThat(kid.getString("chosenStrategy")).isEqualTo(recommended)
@@ -273,8 +276,11 @@ class PensionFullLifecycleJourneyE2E {
             customerPost(
                 dipCustomer,
                 "$APPS/$dipApplication/questionnaire",
-                """{"knowledgeLevel":3,"experienceLevel":3,"riskAppetite":3,"lossTolerance":3,
-                    "financialSituationStable":true,"esgPreference":"CONSIDER"}""",
+                """{"answers":{"dip.objective":"MAX_GROWTH","dip.financial_situation":"EASILY",
+                    "dip.savings":"OVER_1M","dip.loss_capacity":"OVER_25","dip.risk_reaction":"BUY_MORE",
+                    "dip.knowledge_bonds":"CORRECT","dip.experience_bonds":"REGULARLY",
+                    "dip.knowledge_equity":"CORRECT","dip.experience_equity":"REGULARLY",
+                    "dip.sustainability":"AVOID_HARM"}}""",
             ),
         )
         val kid = ok(customerPost(dipCustomer, "$APPS/$dipApplication/strategy", "{}"))

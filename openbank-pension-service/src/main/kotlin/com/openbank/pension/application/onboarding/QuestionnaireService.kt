@@ -129,7 +129,8 @@ class QuestionnaireService(
 
     suspend fun profile(id: UUID, partyId: UUID): ProfileView {
         val application = onboarding.get(id, partyId)
-        val assessment = checkNotNull(onboarding.assessmentOf(id, partyId)) { "the questionnaire has not been answered" }
+        val assessment =
+            checkNotNull(onboarding.assessmentOf(id, partyId)) { "the questionnaire has not been answered" }
         val refresh = ReassessmentPolicy.refreshReason(assessment, today())
         // A stale profile is never shown as current: the client must answer again (409).
         check(refresh == null) { "the questionnaire answers are stale ($refresh); answer it again" }
@@ -138,15 +139,22 @@ class QuestionnaireService(
             assessment = assessment,
             questionSet = setFor(application),
             recommendation = recommendation,
-            recommendedStrategyWarnings = WarningPolicy.required(recommendation.recommended, assessment, recommendation),
+            recommendedStrategyWarnings = WarningPolicy.required(
+                recommendation.recommended,
+                assessment,
+                recommendation,
+            ),
         )
     }
 
     /** The warnings choosing [strategyCode] would require, so the UI can show them before the choice. */
     suspend fun requiredWarnings(id: UUID, partyId: UUID, strategyCode: String): Pair<QuestionSet, Set<WarningCode>> {
         val application = onboarding.get(id, partyId)
-        require(onboarding.offers(application, strategyCode)) { "strategy $strategyCode is not offered under this pack" }
-        val assessment = checkNotNull(onboarding.assessmentOf(id, partyId)) { "the questionnaire has not been answered" }
+        require(onboarding.offers(application, strategyCode)) {
+            "strategy $strategyCode is not offered under this pack"
+        }
+        val assessment =
+            checkNotNull(onboarding.assessmentOf(id, partyId)) { "the questionnaire has not been answered" }
         val recommendation = onboarding.recommendation(id, partyId)
         return setFor(application) to WarningPolicy.required(strategyCode, assessment, recommendation)
     }

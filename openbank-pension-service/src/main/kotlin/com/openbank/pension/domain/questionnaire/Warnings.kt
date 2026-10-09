@@ -90,7 +90,15 @@ object WarningPolicy {
 enum class RefreshReason { EXPIRED, SUPERSEDED, STRATEGY_CHANGE_ABOVE_PROFILE, LIFE_EVENT }
 
 /** Events the participant reports that invalidate the profile (ESMA: keep information up to date). */
-enum class LifeEvent { JOB_LOSS, INCOME_CHANGE, MARRIAGE_OR_DIVORCE, CHILD, INHERITANCE, HEALTH, RETIREMENT_PLAN_CHANGE }
+enum class LifeEvent {
+    JOB_LOSS,
+    INCOME_CHANGE,
+    MARRIAGE_OR_DIVORCE,
+    CHILD,
+    INHERITANCE,
+    HEALTH,
+    RETIREMENT_PLAN_CHANGE,
+}
 
 /**
  * Re-assessment policy. An assessment is valid for the pack's validity period; a strategy change

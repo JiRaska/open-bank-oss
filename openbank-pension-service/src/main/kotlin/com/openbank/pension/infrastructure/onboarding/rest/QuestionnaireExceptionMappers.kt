@@ -15,13 +15,12 @@ import org.jboss.resteasy.reactive.server.ServerExceptionMapper
 class QuestionnaireExceptionMappers {
 
     @ServerExceptionMapper
-    fun inconsistent(e: InconsistentAnswersException): Response =
-        Response.status(UNPROCESSABLE).entity(
-            mapOf(
-                "error" to e.message,
-                "inconsistencies" to e.inconsistencies.map { mapOf("code" to it.code, "questions" to it.questions) },
-            ),
-        ).build()
+    fun inconsistent(e: InconsistentAnswersException): Response = Response.status(UNPROCESSABLE).entity(
+        mapOf(
+            "error" to e.message,
+            "inconsistencies" to e.inconsistencies.map { mapOf("code" to it.code, "questions" to it.questions) },
+        ),
+    ).build()
 
     private companion object {
         const val UNPROCESSABLE = 422

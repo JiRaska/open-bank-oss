@@ -163,7 +163,9 @@ data class OnboardingApplication(
         val current = checkNotNull(assessmentId) { "the questionnaire must be answered before acknowledging warnings" }
         require(acks.all { it.assessmentId == current }) { "an acknowledgement must name the current assessment" }
         val kept = warningAcknowledgements.filterNot { old ->
-            acks.any { it.code == old.code && it.strategyCode == old.strategyCode && it.assessmentId == old.assessmentId }
+            acks.any {
+                it.code == old.code && it.strategyCode == old.strategyCode && it.assessmentId == old.assessmentId
+            }
         }
         return copy(warningAcknowledgements = kept + acks, updatedAt = now)
     }

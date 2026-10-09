@@ -54,6 +54,7 @@ import java.util.UUID
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @RolesAllowed(Roles.API)
+@Suppress("TooManyFunctions") // one route per onboarding step
 class OnboardingResource {
 
     @Inject
@@ -169,7 +170,9 @@ class OnboardingResource {
 
     @GET
     @Path("/{id}/questionnaire")
-    @Operation(summary = "The question set for this application, with prefill, saved draft, progress and consistency hints")
+    @Operation(
+        summary = "The question set for this application, with prefill, saved draft, progress and consistency hints",
+    )
     @Authorize(action = "pension.onboarding.read", resource = "#id")
     suspend fun questionnaireView(
         @HeaderParam(PARTY_HEADER) party: String?,
@@ -213,7 +216,8 @@ class OnboardingResource {
         @QueryParam("strategyCode") strategyCode: String?,
         @QueryParam("lang") lang: String?,
     ): List<WarningResponse> {
-        val code = requireNotNull(strategyCode?.takeIf { it.isNotBlank() }) { "query parameter 'strategyCode' is required" }
+        val code =
+            requireNotNull(strategyCode?.takeIf { it.isNotBlank() }) { "query parameter 'strategyCode' is required" }
         val (set, codes) = questionnaire.requiredWarnings(id, partyOf(party), code)
         return codes.map { WarningResponse(it, set.warning(it).text.text(lang)) }
     }
@@ -234,7 +238,9 @@ class OnboardingResource {
         val codes = requireNotNull(body.warnings) { "warnings is required" }.mapIndexed { i, c ->
             requireNotNull(c) { "warnings[$i] must not be null" }
         }.toSet()
-        return ApplicationResponse.from(onboarding.acknowledgeWarnings(id, partyOf(party), strategy, codes, body.language))
+        return ApplicationResponse.from(
+            onboarding.acknowledgeWarnings(id, partyOf(party), strategy, codes, body.language),
+        )
     }
 
     @GET

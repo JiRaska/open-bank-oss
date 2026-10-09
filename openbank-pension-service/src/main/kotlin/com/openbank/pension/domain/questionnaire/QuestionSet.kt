@@ -43,14 +43,21 @@ data class QuestionSet(
         require(version >= 1) { "question set version must be >= 1" }
         require(steps.isNotEmpty()) { "question set $id has no steps" }
         require(steps.map { it.code }.toSet().size == steps.size) { "question set $id: step codes must be unique" }
-        require(questions.map { it.id }.toSet().size == questions.size) { "question set $id: question ids must be unique" }
+        require(
+            questions.map {
+                it.id
+            }.toSet().size == questions.size,
+        ) { "question set $id: question ids must be unique" }
         val stepCodes = steps.map { it.code }.toSet()
         questions.forEach { q ->
             require(q.step in stepCodes) { "question ${q.id} names unknown step ${q.step}" }
         }
         val byId = questions.associateBy { it.id }
         consistencyRules.forEach { rule ->
-            listOf(rule.question to rule.options, rule.conflictsWith to rule.conflictingOptions).forEach { (qid, codes) ->
+            listOf(
+                rule.question to rule.options,
+                rule.conflictsWith to rule.conflictingOptions,
+            ).forEach { (qid, codes) ->
                 val q = requireNotNull(byId[qid]) { "consistency rule ${rule.code} names unknown question $qid" }
                 require(codes.all { q.option(it) != null }) {
                     "consistency rule ${rule.code} names an unknown option of $qid"
@@ -160,10 +167,18 @@ data class Question(
             "question $id: instrumentClass is required for, and only for, KNOWLEDGE/EXPERIENCE"
         }
         if (dimension in RISK_BEARING) {
-            require(options.all { it.maxRiskClass != null }) { "risk-bearing question $id: every option needs maxRiskClass" }
+            require(
+                options.all {
+                    it.maxRiskClass != null
+                },
+            ) { "risk-bearing question $id: every option needs maxRiskClass" }
         }
         if (dimension == Dimension.LOSS_CAPACITY) {
-            require(options.all { it.lossSharePercent != null }) { "loss-capacity question $id: options need lossSharePercent" }
+            require(
+                options.all {
+                    it.lossSharePercent != null
+                },
+            ) { "loss-capacity question $id: options need lossSharePercent" }
         }
         if (dimension == Dimension.SAVINGS) {
             require(options.all { it.amountCzk != null }) { "savings question $id: options need amountCzk" }

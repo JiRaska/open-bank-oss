@@ -180,7 +180,13 @@ data class ProfileResponse(
                 why = record?.bindingReasons.orEmpty().mapNotNull { r ->
                     val q = p.questionSet.question(r.questionId) ?: return@mapNotNull null
                     val o = q.option(r.optionCode) ?: return@mapNotNull null
-                    ProfileReasonResponse(r.dimension, r.questionId, q.text.text(lang), o.text.text(lang), r.maxRiskClass)
+                    ProfileReasonResponse(
+                        r.dimension,
+                        r.questionId,
+                        q.text.text(lang),
+                        o.text.text(lang),
+                        r.maxRiskClass,
+                    )
                 },
                 financialSituationStable = a.answers.financialSituationStable,
                 appropriate = a.appropriate,

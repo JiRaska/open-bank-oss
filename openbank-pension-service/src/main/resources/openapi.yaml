@@ -250,6 +250,143 @@ paths:
         '403': { description: Caller's role or principal may not use this route }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
+        '422':
+          description: The answers contradict each other; review or confirm the listed inconsistencies
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InconsistentAnswers' }
+    get:
+      tags: [Pension onboarding]
+      operationId: getPensionQuestionnaire
+      summary: The question set with prefill (years to retirement), saved draft, progress and consistency hints
+      parameters:
+        - $ref: '#/components/parameters/ApplicationId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+        - name: lang
+          in: query
+          required: false
+          description: Text language (cs default, en)
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QuestionnaireView' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Caller's role or principal may not use this route }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/onboarding/applications/{id}/questionnaire/draft:
+    put:
+      tags: [Pension onboarding]
+      operationId: savePensionQuestionnaireDraft
+      summary: Save partial answers (save-and-resume); nothing is scored until submission
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ApplicationId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+        - name: lang
+          in: query
+          required: false
+          description: Text language (cs default, en)
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/QuestionnaireDraftRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QuestionnaireView' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Caller's role or principal may not use this route }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/onboarding/applications/{id}/profile:
+    get:
+      tags: [Pension onboarding]
+      operationId: getPensionRiskProfile
+      summary: Risk profile (class 1-7), the answers that set it, and the recommended strategy; 409 when stale
+      parameters:
+        - $ref: '#/components/parameters/ApplicationId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+        - name: lang
+          in: query
+          required: false
+          description: Text language (cs default, en)
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RiskProfileView' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Caller's role or principal may not use this route }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/onboarding/applications/{id}/warnings:
+    get:
+      tags: [Pension onboarding]
+      operationId: getPensionStrategyWarnings
+      summary: The warnings choosing a strategy would require, worded for display
+      parameters:
+        - $ref: '#/components/parameters/ApplicationId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+        - name: strategyCode
+          in: query
+          required: true
+          schema: { type: string }
+        - name: lang
+          in: query
+          required: false
+          description: Text language (cs default, en)
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/QuestionnaireWarning' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Caller's role or principal may not use this route }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/onboarding/applications/{id}/warnings/acknowledge:
+    post:
+      tags: [Pension onboarding]
+      operationId: acknowledgePensionStrategyWarnings
+      summary: Acknowledge the warnings a strategy choice requires; the hash of the wording shown is recorded
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ApplicationId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AcknowledgeWarningsRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OnboardingApplication' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Caller's role or principal may not use this route }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
   /api/v1/pension/onboarding/applications/{id}/recommendation:
     get:
       tags: [Pension onboarding]
@@ -1759,8 +1896,18 @@ components:
             contractNumber: { type: string }
     QuestionnaireRequest:
       type: object
-      required: [riskAppetite, lossTolerance, financialSituationStable]
+      description: >-
+        Either `answers` (the data-driven question set, issue #12384) or the legacy 0..3 scales
+        (riskAppetite, lossTolerance, financialSituationStable required) for clients not yet migrated.
       properties:
+        answers:
+          type: object
+          description: Question id -> option code, from GET .../questionnaire
+          additionalProperties: { type: string }
+        confirmInconsistencies:
+          type: array
+          items: { type: string }
+        language: { type: string }
         knowledgeLevel: { type: integer, minimum: 0, maximum: 3 }
         experienceLevel: { type: integer, minimum: 0, maximum: 3 }
         riskAppetite: { type: integer, minimum: 0, maximum: 3 }
@@ -1829,6 +1976,151 @@ components:
       properties:
         application: { $ref: '#/components/schemas/OnboardingApplication' }
         recommendation: { $ref: '#/components/schemas/StrategyRecommendation' }
+        profile: { $ref: '#/components/schemas/RiskProfileView' }
+    QuestionnaireDraftRequest:
+      type: object
+      required: [answers]
+      properties:
+        answers:
+          type: object
+          additionalProperties: { type: string }
+    AcknowledgeWarningsRequest:
+      type: object
+      required: [strategyCode, warnings]
+      properties:
+        strategyCode: { type: string }
+        warnings:
+          type: array
+          items: { $ref: '#/components/schemas/WarningCode' }
+        language: { type: string }
+    WarningCode:
+      type: string
+      enum: [STRATEGY_ABOVE_PROFILE, PRODUCT_NOT_APPROPRIATE, SUSTAINABILITY_PREFERENCE_NOT_MET]
+    QuestionnaireWarning:
+      type: object
+      properties:
+        code: { $ref: '#/components/schemas/WarningCode' }
+        text: { type: string }
+    InconsistentAnswers:
+      type: object
+      properties:
+        error: { type: string }
+        inconsistencies:
+          type: array
+          items:
+            type: object
+            properties:
+              code: { type: string }
+              questions: { type: array, items: { type: string } }
+    QuestionDimension:
+      type: string
+      enum: [OBJECTIVE, RISK_WILLINGNESS, LOSS_CAPACITY, FINANCIAL_SITUATION, SAVINGS, KNOWLEDGE, EXPERIENCE, SUSTAINABILITY]
+    QuestionnaireView:
+      type: object
+      properties:
+        questionSetId: { type: string }
+        questionSetVersion: { type: integer }
+        legalReviewStatus: { type: string, enum: [REQUIRES_LEGAL_REVIEW, REVIEWED] }
+        steps:
+          type: array
+          items:
+            type: object
+            properties:
+              code: { type: string }
+              title: { type: string }
+              optional: { type: boolean }
+              questions:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: string }
+                    dimension: { $ref: '#/components/schemas/QuestionDimension' }
+                    instrumentClass: { type: string, nullable: true }
+                    text: { type: string }
+                    help: { type: string, nullable: true }
+                    required: { type: boolean }
+                    options:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          code: { type: string }
+                          text: { type: string }
+                          illustrationCzk: { type: number, nullable: true }
+        answers:
+          type: object
+          additionalProperties: { type: string }
+        progress:
+          type: object
+          properties:
+            answered: { type: integer }
+            required: { type: integer }
+            missingRequired: { type: array, items: { type: string } }
+            nextStep: { type: string, nullable: true }
+            complete: { type: boolean }
+        prefill:
+          type: object
+          properties:
+            birthDate: { type: string, format: date }
+            yearsToRetirement: { type: integer }
+            retirementAge: { type: integer }
+            previousAnswersAvailable: { type: boolean }
+        inconsistencies:
+          type: array
+          items:
+            type: object
+            properties:
+              code: { type: string }
+              questions: { type: array, items: { type: string } }
+              message: { type: string }
+    RiskProfileView:
+      type: object
+      properties:
+        assessmentId: { type: string, format: uuid }
+        questionSetId: { type: string, nullable: true }
+        questionSetVersion: { type: integer, nullable: true }
+        riskClass: { type: integer, minimum: 1, maximum: 7 }
+        riskLabel: { type: string, enum: [CONSERVATIVE, BALANCED, DYNAMIC] }
+        why:
+          type: array
+          items:
+            type: object
+            properties:
+              dimension: { $ref: '#/components/schemas/QuestionDimension' }
+              questionId: { type: string }
+              question: { type: string }
+              answer: { type: string }
+              maxRiskClass: { type: integer }
+        financialSituationStable: { type: boolean }
+        appropriate: { type: boolean, nullable: true }
+        competence:
+          type: array
+          items:
+            type: object
+            properties:
+              instrumentClass: { type: string }
+              knowledge: { type: integer }
+              experience: { type: integer }
+        sustainability:
+          type: object
+          nullable: true
+          properties:
+            optionCode: { type: string, nullable: true }
+            categories:
+              type: array
+              items: { type: string, enum: [TAXONOMY_ALIGNED, SFDR_SUSTAINABLE, PAI_CONSIDERED] }
+            minSharePercent: { type: integer, nullable: true }
+        savingsCzk: { type: number, nullable: true }
+        lossSharePercent: { type: integer, nullable: true }
+        lossCapacityCzk: { type: number, nullable: true }
+        confirmedInconsistencies: { type: array, items: { type: string } }
+        recommendation: { $ref: '#/components/schemas/StrategyRecommendation' }
+        recommendedStrategyWarnings:
+          type: array
+          items: { $ref: '#/components/schemas/QuestionnaireWarning' }
+        assessedAt: { type: string, format: date-time }
+        validUntil: { type: string, format: date }
     OperatorApplication:
       type: object
       properties:
