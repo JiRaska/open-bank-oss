@@ -71,7 +71,7 @@ allowed_reasons contains "service-sepa-payment-edge-m2m" if {
 	input.action in {
 		"sepaPayment.create",
 		"sepaPayment.read",
-		"sepaPayment.lookupReceipt",
+        "sepaPayment.lookupReceipt",
 	}
 }
 
@@ -90,7 +90,7 @@ allowed_reasons contains "service-sepa-payment-shared-client-m2m" if {
 allowed_reasons contains "service-standing-order-sepa-payment-create" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-standing-order"
-	input.action in {"sepaPayment.create", "sepaPayment.lookupReceipt"}
+    input.action in {"sepaPayment.create", "sepaPayment.lookupReceipt"}
 }
 
 # Edge prohibition (2026-08-05, #3734): veto the customer-facing edge client on every sepaPayment.*

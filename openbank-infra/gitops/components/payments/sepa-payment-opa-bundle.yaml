@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: sepa-payment
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "89652eb5d146b2f0"
+    openbank.tech/policy-checksum: "c3b7e43909e80c8d"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -597,6 +597,7 @@ data:
     # Actions gated (SepaPaymentResource):
     #   sepaPayment.create           — create a SEPA credit transfer (POST /)
     #   sepaPayment.read             — get payment by id (#paymentId)
+    #   sepaPayment.lookupReceipt    — resolve only the caller's own verified create receipt
     #   sepaPayment.list             — list payments
     #   sepaPayment.transitionStatus — ops status transition (#paymentId, PATCH /{id}/status)
     #   sepaPayment.handleReturn     — inbound pacs.004 return from clearing (POST /returns)
@@ -661,6 +662,7 @@ data:
     	input.action in {
     		"sepaPayment.create",
     		"sepaPayment.read",
+            "sepaPayment.lookupReceipt",
     	}
     }
 
@@ -679,7 +681,7 @@ data:
     allowed_reasons contains "service-standing-order-sepa-payment-create" if {
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-standing-order"
-    	input.action == "sepaPayment.create"
+        input.action in {"sepaPayment.create", "sepaPayment.lookupReceipt"}
     }
 
     # Edge prohibition (2026-08-05, #3734): veto the customer-facing edge client on every sepaPayment.*
