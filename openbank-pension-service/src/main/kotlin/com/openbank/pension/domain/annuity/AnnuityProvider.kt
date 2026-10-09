@@ -42,6 +42,10 @@ data class AnnuityPackRules(
     }
 }
 
+/**
+ * The LIVE state of a partner: DRAFT / PENDING_ACTIVATION = never approved (nothing is live);
+ * ACTIVE = an approved version is live; DISABLED = no new quotes or purchases.
+ */
 enum class AnnuityProviderStatus { DRAFT, PENDING_ACTIVATION, ACTIVE, DISABLED }
 
 /**
@@ -79,7 +83,9 @@ data class AnnuityProviderTerms(
 ) {
     init {
         require(legalName.isNotBlank()) { "legalName is required" }
-        require(licenceRef.isNotBlank() && licenceAuthority.isNotBlank()) { "licenceRef and licenceAuthority are required" }
+        require(licenceRef.isNotBlank() && licenceAuthority.isNotBlank()) {
+            "licenceRef and licenceAuthority are required"
+        }
         require(jurisdictions.isNotEmpty() && jurisdictions.all { it.matches(COUNTRY) }) {
             "jurisdictions must be ISO 3166-1 alpha-2 codes"
         }
@@ -101,72 +107,124 @@ data class AnnuityProviderTerms(
     }
 }
 
+/** One approved, immutable version of a partner's terms. */
+data class ApprovedTerms(
+    val versionNo: Int,
+    val terms: AnnuityProviderTerms,
+    val editedBy: String,
+    val requestedBy: String,
+    val approvedBy: String,
+    val approvedAt: Instant,
+)
+
+/** A proposed version: invisible to the marketplace until a different person approves it. */
+data class ProposedTerms(
+    val versionNo: Int,
+    val terms: AnnuityProviderTerms,
+    val editedBy: String,
+    val requestedBy: String? = null,
+)
+
 /**
- * One partner insurer in the registry, under FOUR-EYES activation: a maker drafts or amends the
- * terms and requests activation; a different checker approves it. Any amendment of an active
- * partner sends it back to DRAFT — changed terms are never live without a second person.
+ * What the marketplace and every adapter may see of a partner: ONLY an approved version, pinned by
+ * its number. A proposal never appears here, so an unapproved edit can never reach a quote or a
+ * purchase (#12383 four-eyes).
  */
+data class ApprovedPartner(val partnerId: String, val versionNo: Int, val terms: AnnuityProviderTerms)
+
+/**
+ * One partner insurer in the registry, VERSIONED under FOUR-EYES (#12383): a maker proposes terms
+ * and requests approval; a different checker approves, and only then does that version become the
+ * live one. While a proposal is pending the previously approved version stays live, untouched.
+ */
+@Suppress("TooManyFunctions") // one function per registry edge
 data class AnnuityProvider(
     val partnerId: String,
     val status: AnnuityProviderStatus,
-    val terms: AnnuityProviderTerms,
-    /** Who last wrote [terms]; may never approve them. */
-    val termsEditedBy: String,
-    val activationRequestedBy: String? = null,
-    val activatedBy: String? = null,
-    val activatedAt: Instant? = null,
+    val approved: ApprovedTerms? = null,
+    val proposal: ProposedTerms? = null,
+    /** Highest version number ever allocated; version numbers are never reused. */
+    val lastVersionNo: Int = 0,
     val updatedAt: Instant,
     val version: Int = 0,
 ) {
     init {
         require(partnerId.matches(PARTNER_ID)) { "partnerId must be 2..40 lower-case letters, digits or '-'" }
+        require(approved != null || proposal != null) { "a partner has approved or proposed terms" }
+        require(status != AnnuityProviderStatus.ACTIVE || approved != null) { "an ACTIVE partner has approved terms" }
     }
 
-    /** Whether this partner may be asked to quote [type] (or any of its types when null) for [premium] today. */
-    fun eligible(jurisdiction: String, currency: String, premium: BigDecimal, today: LocalDate): Boolean =
-        status == AnnuityProviderStatus.ACTIVE &&
-            jurisdiction in terms.jurisdictions &&
-            currency == terms.currency &&
-            premium >= terms.minPremium && premium <= terms.maxPremium &&
-            !today.isBefore(terms.effectiveFrom) &&
-            (terms.effectiveTo == null || today.isBefore(terms.effectiveTo))
+    /** The approved version live at [today], or null: never a proposal, never a disabled partner. */
+    fun live(today: LocalDate): ApprovedPartner? {
+        val a = approved ?: return null
+        if (status != AnnuityProviderStatus.ACTIVE) return null
+        if (today.isBefore(a.terms.effectiveFrom)) return null
+        if (a.terms.effectiveTo != null && !today.isBefore(a.terms.effectiveTo)) return null
+        return ApprovedPartner(partnerId, a.versionNo, a.terms)
+    }
 
-    fun amend(newTerms: AnnuityProviderTerms, by: String, now: Instant): AnnuityProvider {
-        require(by.isNotBlank()) { "an amendment needs an author" }
+    /** Whether the live version may be asked to quote [premium] in [currency] under [jurisdiction] today. */
+    fun eligible(jurisdiction: String, currency: String, premium: BigDecimal, today: LocalDate): Boolean {
+        val t = live(today)?.terms ?: return false
+        return jurisdiction in t.jurisdictions &&
+            currency == t.currency &&
+            premium >= t.minPremium &&
+            premium <= t.maxPremium
+    }
+
+    /** A new proposal replaces an unapproved one; the live version is untouched. */
+    fun propose(newTerms: AnnuityProviderTerms, by: String, now: Instant): AnnuityProvider {
+        require(by.isNotBlank()) { "a proposal needs an author" }
+        val no = lastVersionNo + 1
         return copy(
-            status = AnnuityProviderStatus.DRAFT,
-            terms = newTerms,
-            termsEditedBy = by,
-            activationRequestedBy = null,
-            activatedBy = null,
-            activatedAt = null,
+            proposal = ProposedTerms(no, newTerms, by),
+            lastVersionNo = no,
+            status = if (approved == null) AnnuityProviderStatus.DRAFT else status,
             updatedAt = now,
         )
     }
 
     fun requestActivation(by: String, now: Instant): AnnuityProvider {
-        check(status == AnnuityProviderStatus.DRAFT || status == AnnuityProviderStatus.DISABLED) {
-            "activation can be requested for a DRAFT or DISABLED partner, was $status"
-        }
-        return copy(status = AnnuityProviderStatus.PENDING_ACTIVATION, activationRequestedBy = by, updatedAt = now)
+        val p = checkNotNull(proposal) { "no proposed terms to approve; propose terms first" }
+        check(p.requestedBy == null) { "approval of version ${p.versionNo} is already requested" }
+        return copy(
+            proposal = p.copy(requestedBy = by),
+            status = if (approved == null) AnnuityProviderStatus.PENDING_ACTIVATION else status,
+            updatedAt = now,
+        )
     }
 
-    /** The four-eyes check lives HERE, not in a caller: approver != requester and != last editor. */
+    /**
+     * The four-eyes check lives HERE, not in a caller: the approver is neither the editor nor the
+     * requester of the proposal. The approved version becomes live and the partner ACTIVE.
+     */
     fun approveActivation(by: String, now: Instant): AnnuityProvider {
-        check(status == AnnuityProviderStatus.PENDING_ACTIVATION) { "no activation is pending, status $status" }
-        if (by == activationRequestedBy || by == termsEditedBy) {
+        val p = checkNotNull(proposal) { "no proposal is pending" }
+        val requester = checkNotNull(p.requestedBy) { "approval of version ${p.versionNo} was not requested" }
+        if (by == requester || by == p.editedBy) {
             throw FourEyesViolationException("the approver must differ from the editor and the requester")
         }
-        return copy(status = AnnuityProviderStatus.ACTIVE, activatedBy = by, activatedAt = now, updatedAt = now)
+        return copy(
+            approved = ApprovedTerms(p.versionNo, p.terms, p.editedBy, requester, by, now),
+            proposal = null,
+            status = AnnuityProviderStatus.ACTIVE,
+            updatedAt = now,
+        )
     }
 
+    /** Immediately stops new quotes and purchases; purchases whose premium left continue to settle. */
     fun disable(now: Instant): AnnuityProvider = copy(status = AnnuityProviderStatus.DISABLED, updatedAt = now)
 
     companion object {
         private val PARTNER_ID = Regex("^[a-z0-9][a-z0-9-]{1,39}$")
 
-        fun draft(partnerId: String, terms: AnnuityProviderTerms, by: String, now: Instant) =
-            AnnuityProvider(partnerId, AnnuityProviderStatus.DRAFT, terms, by, updatedAt = now)
+        fun draft(partnerId: String, terms: AnnuityProviderTerms, by: String, now: Instant) = AnnuityProvider(
+            partnerId,
+            AnnuityProviderStatus.DRAFT,
+            proposal = ProposedTerms(1, terms, by),
+            lastVersionNo = 1,
+            updatedAt = now,
+        )
     }
 }
 

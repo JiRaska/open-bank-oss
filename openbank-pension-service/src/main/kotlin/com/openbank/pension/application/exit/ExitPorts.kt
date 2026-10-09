@@ -98,7 +98,10 @@ sealed interface AnnuityPlacement {
 interface AnnuityPlacementPort {
     suspend fun requireBindingSelection(payoutId: UUID, premium: BigDecimal)
 
-    suspend fun place(payout: PayoutRequest, contract: com.openbank.pension.domain.model.PensionContract): AnnuityPlacement
+    suspend fun place(
+        payout: PayoutRequest,
+        contract: com.openbank.pension.domain.model.PensionContract,
+    ): AnnuityPlacement
 }
 
 /** The partner has not decided yet (policy or refund pending). NOT an IllegalStateException: it is retried. */

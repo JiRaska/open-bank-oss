@@ -36,19 +36,21 @@ class AnnuityProviderRegistryService(
 
     suspend fun amend(partnerId: String, terms: AnnuityProviderTerms, by: String): AnnuityProvider {
         validateEndpoint(terms)
-        return providers.save(get(partnerId).amend(terms, by, clock.instant()))
+        // A PROPOSAL: the approved version stays live until a different person approves this one.
+        return providers.save(get(partnerId).propose(terms, by, clock.instant()))
     }
 
     suspend fun requestActivation(partnerId: String, by: String): AnnuityProvider {
         val provider = get(partnerId)
-        requireAdapter(provider.terms)
+        requireAdapter(checkNotNull(provider.proposal) { "no proposed terms to approve" }.terms)
         return providers.save(provider.requestActivation(by, clock.instant()))
     }
 
     suspend fun approveActivation(partnerId: String, by: String): AnnuityProvider {
         val provider = get(partnerId)
-        requireAdapter(provider.terms)
-        validateEndpoint(provider.terms)
+        val proposed = checkNotNull(provider.proposal) { "no proposal is pending" }.terms
+        requireAdapter(proposed)
+        validateEndpoint(proposed)
         return providers.save(provider.approveActivation(by, clock.instant()))
     }
 

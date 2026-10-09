@@ -1618,7 +1618,7 @@ paths:
     put:
       tags: [Pension operations]
       operationId: amendAnnuityProvider
-      summary: Amend the terms; the partner returns to DRAFT and needs a new four-eyes activation
+      summary: Propose new terms; the approved version stays live until a different person approves them
       parameters:
         - $ref: '#/components/parameters/AnnuityPartnerId'
       requestBody:
@@ -2610,6 +2610,7 @@ components:
         guaranteedTotal: { $ref: '#/components/schemas/Money' }
         validUntil: { type: string, format: date-time }
         illustrative: { type: boolean, description: True when the figures are not a binding insurer price }
+        providerVersion: { type: integer, description: The approved partner version this offer was quoted under (signed) }
         selectionHash: { type: string, description: What an SCA challenge selecting this offer must be signed over }
     AnnuityPartnerFailure:
       type: object
@@ -2668,12 +2669,19 @@ components:
         terms: { $ref: '#/components/schemas/AnnuityProviderTerms' }
     AnnuityProvider:
       type: object
+      description: |
+        Versioned under four-eyes: `liveTerms` is the approved version quoting and purchase use;
+        `proposedTerms` is a pending edit, invisible to the marketplace until a different person
+        approves it. Offers pin the live version (`providerVersion`) and the selection SCA signs it.
       properties:
         partnerId: { type: string }
         status: { $ref: '#/components/schemas/AnnuityProviderStatus' }
-        terms: { $ref: '#/components/schemas/AnnuityProviderTerms' }
-        termsEditedBy: { type: string }
+        liveVersion: { type: [integer, 'null'] }
+        liveTerms: { oneOf: [{ $ref: '#/components/schemas/AnnuityProviderTerms' }, { type: 'null' }] }
+        approvedBy: { type: [string, 'null'] }
+        approvedAt: { type: [string, 'null'], format: date-time }
+        proposedVersion: { type: [integer, 'null'] }
+        proposedTerms: { oneOf: [{ $ref: '#/components/schemas/AnnuityProviderTerms' }, { type: 'null' }] }
+        proposedBy: { type: [string, 'null'] }
         activationRequestedBy: { type: [string, 'null'] }
-        activatedBy: { type: [string, 'null'] }
-        activatedAt: { type: [string, 'null'], format: date-time }
         updatedAt: { type: string, format: date-time }

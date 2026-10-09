@@ -39,6 +39,8 @@ data class AnnuityOffer(
     val validUntil: Instant,
     /** True when the figures are not a binding insurer price (the simulator always says so). */
     val illustrative: Boolean,
+    /** The APPROVED registry version of the partner this offer was produced under (pinned, signed). */
+    val providerVersion: Int = 0,
 ) {
     init {
         require(offerId.isNotBlank() && offerId.length <= MAX_REF) { "offerId must be 1..$MAX_REF characters" }
@@ -56,7 +58,17 @@ data class AnnuityOffer(
     /** What the participant is guaranteed to receive in total, whatever happens (comparison field). */
     val guaranteedTotal: BigDecimal
         get() = ExitMoney.round(
-            monthlyAmount.multiply(BigDecimal(if (type == AnnuityType.FIXED_TERM) termMonths ?: 0 else guaranteeMonths)),
+            monthlyAmount.multiply(
+                BigDecimal(
+                    if (type ==
+                        AnnuityType.FIXED_TERM
+                    ) {
+                        termMonths ?: 0
+                    } else {
+                        guaranteeMonths
+                    },
+                ),
+            ),
         )
 
     private companion object {
@@ -116,6 +128,12 @@ data class AnnuityPurchase(
     val scaChallengeId: String? = null,
     val selectedAt: Instant? = null,
     val applicationRef: String? = null,
+    /**
+     * The approved partner version the application was made under. Every later step (premium,
+     * status, cancellation, refund) uses THIS snapshot, so a later edit or disable never redirects
+     * or strands money already committed.
+     */
+    val partner: ApprovedPartner? = null,
     val premiumPaymentRef: String? = null,
     val policyRef: String? = null,
     val policyMonthlyAmount: BigDecimal? = null,
@@ -143,6 +161,7 @@ data class AnnuityPurchase(
         listOf(
             id, contractId, "annuity-selection", offer.partnerId, offer.offerId,
             premium.toPlainString(), currency, offer.monthlyAmount.toPlainString(), offer.type,
+            "provider-v${offer.providerVersion}",
         ).joinToString("|"),
     )
 
@@ -195,9 +214,15 @@ data class AnnuityPurchase(
         return offer
     }
 
-    fun markApplied(ref: String, now: Instant): AnnuityPurchase = when (status) {
+    fun markApplied(ref: String, under: ApprovedPartner, now: Instant): AnnuityPurchase = when (status) {
         AnnuityPurchaseStatus.APPLIED -> this
-        AnnuityPurchaseStatus.SELECTED -> copy(status = AnnuityPurchaseStatus.APPLIED, applicationRef = ref, updatedAt = now)
+        AnnuityPurchaseStatus.SELECTED -> {
+            val offer = checkNotNull(selectedOffer)
+            check(under.partnerId == offer.partnerId && under.versionNo == offer.providerVersion) {
+                "the application must be made under the partner version the offer was quoted under"
+            }
+            copy(status = AnnuityPurchaseStatus.APPLIED, applicationRef = ref, partner = under, updatedAt = now)
+        }
         else -> error("an application is recorded on a SELECTED purchase, was $status")
     }
 

@@ -23,10 +23,15 @@ data class AnnuityOffersRequest(
     val jointLifeBirthDate: LocalDate? = null,
     val survivorShare: BigDecimal? = null,
 ) {
-    fun toPreferences() = AnnuityPreferences(annuityTypes, guaranteeMonths, termMonths, jointLifeBirthDate, survivorShare)
+    fun toPreferences() =
+        AnnuityPreferences(annuityTypes, guaranteeMonths, termMonths, jointLifeBirthDate, survivorShare)
 }
 
-data class AnnuitySelectionRequest(val partnerId: String? = null, val offerId: String? = null, val scaChallengeId: String? = null)
+data class AnnuitySelectionRequest(
+    val partnerId: String? = null,
+    val offerId: String? = null,
+    val scaChallengeId: String? = null,
+)
 
 data class AnnuityCancellationRequest(val scaChallengeId: String? = null)
 
@@ -47,6 +52,7 @@ data class AnnuityOfferResponse(
     val guaranteedTotal: BigDecimal,
     val validUntil: Instant,
     val illustrative: Boolean,
+    val providerVersion: Int,
     /** What an SCA challenge selecting THIS offer must be signed over. */
     val selectionHash: String,
 ) {
@@ -54,7 +60,7 @@ data class AnnuityOfferResponse(
         fun from(o: AnnuityOffer, purchase: AnnuityPurchase) = AnnuityOfferResponse(
             o.partnerId, o.partnerName, o.offerId, o.type, o.premium, o.currency, o.monthlyAmount, o.guaranteeMonths,
             o.termMonths, o.indexationRate, o.survivorShare, o.oneOffFee, o.annualFeeRate, o.guaranteedTotal,
-            o.validUntil, o.illustrative, purchase.selectionHash(o),
+            o.validUntil, o.illustrative, o.providerVersion, purchase.selectionHash(o),
         )
     }
 }
@@ -144,20 +150,25 @@ data class AnnuityProviderTermsRequest(
 
 data class CreateAnnuityProviderRequest(val partnerId: String? = null, val terms: AnnuityProviderTermsRequest? = null)
 
+/** The live approved version and any pending proposal, side by side (the checker reviews the diff). */
 data class AnnuityProviderResponse(
     val partnerId: String,
     val status: String,
-    val terms: AnnuityProviderTerms,
-    val termsEditedBy: String,
+    val liveVersion: Int?,
+    val liveTerms: AnnuityProviderTerms?,
+    val approvedBy: String?,
+    val approvedAt: Instant?,
+    val proposedVersion: Int?,
+    val proposedTerms: AnnuityProviderTerms?,
+    val proposedBy: String?,
     val activationRequestedBy: String?,
-    val activatedBy: String?,
-    val activatedAt: Instant?,
     val updatedAt: Instant,
 ) {
     companion object {
         fun from(p: AnnuityProvider) = AnnuityProviderResponse(
-            p.partnerId, p.status.name, p.terms, p.termsEditedBy, p.activationRequestedBy, p.activatedBy,
-            p.activatedAt, p.updatedAt,
+            p.partnerId, p.status.name, p.approved?.versionNo, p.approved?.terms, p.approved?.approvedBy,
+            p.approved?.approvedAt, p.proposal?.versionNo, p.proposal?.terms, p.proposal?.editedBy,
+            p.proposal?.requestedBy, p.updatedAt,
         )
     }
 }

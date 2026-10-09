@@ -22,11 +22,11 @@ import com.openbank.pension.application.port.out.FundAdministrationPort
 import com.openbank.pension.domain.annuity.AnnuityCompensation
 import com.openbank.pension.domain.annuity.AnnuityOffer
 import com.openbank.pension.domain.annuity.AnnuityPackRules
-import com.openbank.pension.domain.annuity.AnnuityProvider
 import com.openbank.pension.domain.annuity.AnnuityProviderStatus
 import com.openbank.pension.domain.annuity.AnnuityPurchase
 import com.openbank.pension.domain.annuity.AnnuityPurchaseStatus
 import com.openbank.pension.domain.annuity.AnnuityType
+import com.openbank.pension.domain.annuity.ApprovedPartner
 import com.openbank.pension.domain.annuity.PartnerQuoteFailure
 import com.openbank.pension.domain.annuity.RefusedPremiumDestination
 import com.openbank.pension.domain.exit.AnnuityPolicy
@@ -101,7 +101,9 @@ class AnnuityMarketplaceService(
         caller.requireParticipant()
         val contract = contracts.get(caller, contractId)
         val payout = annuityPayout(contractId, payoutId)
-        check(payout.status == PayoutStatus.QUOTED) { "offers are requested for a QUOTED annuity payout, was ${payout.status}" }
+        check(payout.status == PayoutStatus.QUOTED) {
+            "offers are requested for a QUOTED annuity payout, was ${payout.status}"
+        }
         val rules = packRules(contract)
         val wanted = (preferences.types ?: rules.permittedTypes).intersect(rules.permittedTypes)
         require(wanted.isNotEmpty()) { "none of the requested annuity types is permitted by the pack" }
@@ -109,8 +111,11 @@ class AnnuityMarketplaceService(
         val currency = payout.quote.currency
         val today = LocalDate.now(clock)
         val jurisdiction = packs.pinnedFor(contract).jurisdiction
+        // ONLY the approved, live version of each partner is ever asked (four-eyes): a pending
+        // proposal is invisible here.
         val eligible = stores.providers.list(AnnuityProviderStatus.ACTIVE)
             .filter { it.eligible(jurisdiction, currency, premium, today) }
+            .mapNotNull { it.live(today) }
             .filter { it.terms.supportedTypes.any(wanted::contains) }
         val request = AnnuityQuoteRequest(
             requestId = payoutId.toString(),
@@ -129,7 +134,16 @@ class AnnuityMarketplaceService(
         val now = clock.instant()
         val existing = stores.purchases.findById(payoutId)
         val purchase = existing?.reoffer(offers, failures, now)
-            ?: AnnuityPurchase.offered(payoutId, contractId, contract.participantPartyId, premium, currency, offers, failures, now)
+            ?: AnnuityPurchase.offered(
+                payoutId,
+                contractId,
+                contract.participantPartyId,
+                premium,
+                currency,
+                offers,
+                failures,
+                now,
+            )
         return stores.purchases.save(purchase)
     }
 
@@ -153,7 +167,8 @@ class AnnuityMarketplaceService(
         check(payout.status == PayoutStatus.QUOTED) { "the payout is ${payout.status}; the selection is closed" }
         val purchase = load(contractId, payoutId)
         if (purchase.status == AnnuityPurchaseStatus.SELECTED &&
-            purchase.selectedPartnerId == partnerId && purchase.selectedOfferId == offerId &&
+            purchase.selectedPartnerId == partnerId &&
+            purchase.selectedOfferId == offerId &&
             purchase.scaChallengeId == scaChallengeId
         ) {
             return purchase
@@ -176,15 +191,16 @@ class AnnuityMarketplaceService(
         if (!rails.sca.verify(contract.participantPartyId, scaChallengeId, purchase.cancellationHash())) {
             throw ExitForbiddenException("strong customer authentication failed for this cancellation")
         }
-        val provider = provider(purchase)
-        val adapter = adapterOf(provider)
-        val answer = adapter.cancel(
-            provider,
+        val partner = snapshot(purchase)
+        val answer = adapterOf(partner).cancel(
+            partner,
             requireNotNull(purchase.applicationRef),
             PartnerCancellationReason.COOLING_OFF,
             key(purchase.id, "cancel"),
         )
-        check(answer.state == PartnerPolicyState.CANCELLED) { "the partner did not accept the cancellation: ${answer.reason}" }
+        check(answer.state == PartnerPolicyState.CANCELLED) {
+            "the partner did not accept the cancellation: ${answer.reason}"
+        }
         val cancelled = stores.purchases.save(purchase.cancelInCoolingOff(LocalDate.now(clock), clock.instant()))
         return if (answer.refundRef != null) refundCancelledToClient(cancelled, contract) else cancelled
     }
@@ -200,13 +216,16 @@ class AnnuityMarketplaceService(
      * running, picks the result up on its next attempt.
      */
     suspend fun sync(purchaseId: UUID): AnnuityPurchase {
-        val purchase = stores.purchases.findById(purchaseId) ?: throw ExitNotFoundException("annuity purchase $purchaseId not found")
+        val purchase =
+            stores.purchases.findById(purchaseId)
+                ?: throw ExitNotFoundException("annuity purchase $purchaseId not found")
         val contract = contracts.get(Caller.STAFF, purchase.contractId)
         return when (purchase.status) {
-            AnnuityPurchaseStatus.PREMIUM_SENT -> followPolicy(purchase, provider(purchase))
+            AnnuityPurchaseStatus.PREMIUM_SENT -> followPolicy(purchase, snapshot(purchase))
             AnnuityPurchaseStatus.CANCELLED ->
                 if (purchase.compensation == AnnuityCompensation.NONE) {
-                    val status = adapterOf(provider(purchase)).status(provider(purchase), requireNotNull(purchase.applicationRef))
+                    val partner = snapshot(purchase)
+                    val status = adapterOf(partner).status(partner, requireNotNull(purchase.applicationRef))
                     if (status.refundRef != null) refundCancelledToClient(purchase, contract) else purchase
                 } else {
                     purchase
@@ -221,16 +240,18 @@ class AnnuityMarketplaceService(
         val purchase = stores.purchases.findById(payoutId)
             ?: throw IllegalStateException("request annuity offers and select one before confirming")
         val offer = purchase.requireBindingSelection(premium, clock.instant())
-        val provider = stores.providers.find(offer.partnerId)
-        check(provider?.status == AnnuityProviderStatus.ACTIVE) { "the selected partner is no longer active" }
+        checkNotNull(livePinned(offer)) {
+            "the selected partner is no longer active under the terms it quoted; request new offers"
+        }
     }
 
     override suspend fun place(payout: PayoutRequest, contract: PensionContract): AnnuityPlacement {
-        var purchase = requireNotNull(stores.purchases.findById(payout.id)) { "payout ${payout.id} has no annuity selection" }
-        val provider = stores.providers.find(requireNotNull(purchase.selectedPartnerId))
-        if (purchase.status == AnnuityPurchaseStatus.SELECTED) purchase = apply(purchase, provider, contract)
-        if (purchase.status == AnnuityPurchaseStatus.APPLIED) purchase = sendPremium(purchase, requireNotNull(provider))
-        if (purchase.status == AnnuityPurchaseStatus.PREMIUM_SENT) purchase = followPolicy(purchase, requireNotNull(provider))
+        var purchase =
+            requireNotNull(stores.purchases.findById(payout.id)) { "payout ${payout.id} has no annuity selection" }
+        if (purchase.status == AnnuityPurchaseStatus.SELECTED) purchase = apply(purchase, contract)
+        if (purchase.status == AnnuityPurchaseStatus.APPLIED) purchase = sendPremium(purchase)
+        // From here the money has left: the pinned snapshot is used whatever the registry says now.
+        if (purchase.status == AnnuityPurchaseStatus.PREMIUM_SENT) purchase = followPolicy(purchase, snapshot(purchase))
         return when (purchase.status) {
             AnnuityPurchaseStatus.ACTIVE -> AnnuityPlacement.Issued(
                 AnnuityPolicy(
@@ -247,12 +268,21 @@ class AnnuityMarketplaceService(
     // ---- steps ----
 
     /** Application first: a partner that refuses up front never receives a premium. */
-    private suspend fun apply(purchase: AnnuityPurchase, provider: AnnuityProvider?, contract: PensionContract): AnnuityPurchase {
-        val adapter = provider?.takeIf { it.status == AnnuityProviderStatus.ACTIVE }?.let { rails.adapters.adapterFor(it.terms.adapter) }
-        if (provider == null || adapter == null) {
-            return stores.purchases.save(purchase.fail("the selected partner is not available", clock.instant()))
-        }
+    private suspend fun apply(purchase: AnnuityPurchase, contract: PensionContract): AnnuityPurchase {
         val offer = requireNotNull(purchase.selectedOffer)
+        // Re-validated at EXECUTION: the exact approved version the offer was quoted and signed
+        // under must still be the live one, and the partner enabled. Otherwise refused — nothing
+        // was sent, and the participant re-quotes.
+        val provider = livePinned(offer)
+        val adapter = provider?.let { rails.adapters.adapterFor(it.terms.adapter) }
+        if (provider == null || adapter == null) {
+            return stores.purchases.save(
+                purchase.fail(
+                    "stale quote: the partner is not active under the quoted terms; request new offers",
+                    clock.instant(),
+                ),
+            )
+        }
         val answer = adapter.purchase(
             provider,
             AnnuityApplication(
@@ -268,8 +298,11 @@ class AnnuityMarketplaceService(
         )
         val next = when (answer.state) {
             PartnerPolicyState.REFUSED, PartnerPolicyState.CANCELLED ->
-                purchase.fail("refused by ${provider.partnerId}: ${answer.reason ?: "no reason given"}", clock.instant())
-            else -> purchase.markApplied(answer.applicationRef, clock.instant())
+                purchase.fail(
+                    "refused by ${provider.partnerId}: ${answer.reason ?: "no reason given"}",
+                    clock.instant(),
+                )
+            else -> purchase.markApplied(answer.applicationRef, provider, clock.instant())
         }
         return stores.purchases.save(next)
     }
@@ -279,7 +312,17 @@ class AnnuityMarketplaceService(
      * DEFINITIVE rejection by the rail (a domain refusal, not a transport error) cancels the
      * application at the partner: premium not sent → no policy.
      */
-    private suspend fun sendPremium(purchase: AnnuityPurchase, provider: AnnuityProvider): AnnuityPurchase {
+    private suspend fun sendPremium(purchase: AnnuityPurchase): AnnuityPurchase {
+        val provider = snapshot(purchase)
+        // Last gate before money moves: still the same approved, live version (a disable or an
+        // approved edit since the application cancels it — premium not sent, no policy).
+        if (livePinned(requireNotNull(purchase.selectedOffer)) == null) {
+            return premiumNotSent(
+                purchase,
+                provider,
+                IllegalStateException("partner no longer active under the quoted terms"),
+            )
+        }
         val ref = try {
             pay(
                 key(purchase.id, "premium"),
@@ -299,8 +342,16 @@ class AnnuityMarketplaceService(
         return stores.purchases.save(purchase.markPremiumSent(ref, clock.instant()))
     }
 
-    private suspend fun premiumNotSent(purchase: AnnuityPurchase, provider: AnnuityProvider, cause: Exception): AnnuityPurchase {
-        log.warnf("annuity %s: premium rejected by the payment rail (%s); cancelling the application", purchase.id, cause.message)
+    private suspend fun premiumNotSent(
+        purchase: AnnuityPurchase,
+        provider: ApprovedPartner,
+        cause: Exception,
+    ): AnnuityPurchase {
+        log.warnf(
+            "annuity %s: premium rejected by the payment rail (%s); cancelling the application",
+            purchase.id,
+            cause.message,
+        )
         adapterOf(provider).cancel(
             provider,
             requireNotNull(purchase.applicationRef),
@@ -311,7 +362,7 @@ class AnnuityMarketplaceService(
     }
 
     /** Policy issued → ACTIVE. Refused → FAILED once the partner has RETURNED the premium; until then, pending. */
-    private suspend fun followPolicy(purchase: AnnuityPurchase, provider: AnnuityProvider): AnnuityPurchase {
+    private suspend fun followPolicy(purchase: AnnuityPurchase, provider: ApprovedPartner): AnnuityPurchase {
         val answer = adapterOf(provider).status(provider, requireNotNull(purchase.applicationRef))
         val now = clock.instant()
         return when (answer.state) {
@@ -335,9 +386,15 @@ class AnnuityMarketplaceService(
     }
 
     /** The money of a failed purchase goes where the PACK says: back into the contract, or to the client. */
-    private suspend fun compensate(purchase: AnnuityPurchase, payout: PayoutRequest, contract: PensionContract): AnnuityPlacement {
+    private suspend fun compensate(
+        purchase: AnnuityPurchase,
+        payout: PayoutRequest,
+        contract: PensionContract,
+    ): AnnuityPlacement {
         when (purchase.compensation) {
-            AnnuityCompensation.RETURNED_TO_CLIENT -> return AnnuityPlacement.ReturnedToClient(requireNotNull(purchase.compensationRef))
+            AnnuityCompensation.RETURNED_TO_CLIENT -> return AnnuityPlacement.ReturnedToClient(
+                requireNotNull(purchase.compensationRef),
+            )
             AnnuityCompensation.RETURNED_TO_CONTRACT -> return AnnuityPlacement.ReturnedToContract
             AnnuityCompensation.NONE -> Unit
         }
@@ -355,12 +412,21 @@ class AnnuityMarketplaceService(
                     purchase.currency,
                     "PENSION ANNUITY REFUND ${purchase.contractId}",
                 )
-                stores.purchases.save(purchase.markCompensated(AnnuityCompensation.RETURNED_TO_CLIENT, ref, clock.instant()))
+                stores.purchases.save(
+                    purchase.markCompensated(AnnuityCompensation.RETURNED_TO_CLIENT, ref, clock.instant()),
+                )
                 AnnuityPlacement.ReturnedToClient(ref)
             }
             RefusedPremiumDestination.CONTRACT -> {
-                val order = rails.fund.subscribe(purchase.contractId, purchase.premium, purchase.currency, key(purchase.id, "resubscribe"))
-                stores.purchases.save(purchase.markCompensated(AnnuityCompensation.RETURNED_TO_CONTRACT, order, clock.instant()))
+                val order = rails.fund.subscribe(
+                    purchase.contractId,
+                    purchase.premium,
+                    purchase.currency,
+                    key(purchase.id, "resubscribe"),
+                )
+                stores.purchases.save(
+                    purchase.markCompensated(AnnuityCompensation.RETURNED_TO_CONTRACT, order, clock.instant()),
+                )
                 AnnuityPlacement.ReturnedToContract
             }
         }
@@ -379,18 +445,23 @@ class AnnuityMarketplaceService(
             purchase.currency,
             "PENSION ANNUITY REFUND ${purchase.contractId}",
         )
-        return stores.purchases.save(purchase.markCompensated(AnnuityCompensation.RETURNED_TO_CLIENT, ref, clock.instant()))
+        return stores.purchases.save(
+            purchase.markCompensated(AnnuityCompensation.RETURNED_TO_CLIENT, ref, clock.instant()),
+        )
     }
 
     // ---- quoting ----
 
     private suspend fun quoteAll(
-        providers: List<AnnuityProvider>,
+        providers: List<ApprovedPartner>,
         request: AnnuityQuoteRequest,
         rules: AnnuityPackRules,
     ): Pair<List<AnnuityOffer>, List<PartnerQuoteFailure>> = coroutineScope {
         val answers = providers.map { provider ->
-            async { provider to quoteOne(provider, request.copy(types = request.types.intersect(provider.terms.supportedTypes))) }
+            async {
+                provider to
+                    quoteOne(provider, request.copy(types = request.types.intersect(provider.terms.supportedTypes)))
+            }
         }.awaitAll()
         val minValid = clock.instant().plus(Duration.ofHours(rules.quoteValidityMinHours.toLong()))
         val offers = mutableListOf<AnnuityOffer>()
@@ -399,19 +470,32 @@ class AnnuityMarketplaceService(
             result.fold(
                 onSuccess = { received ->
                     val (valid, invalid) = received.partition { offerFits(it, provider, request, minValid) }
-                    offers += valid.map { it.copy(partnerName = provider.terms.legalName) }
-                    if (invalid.isNotEmpty()) failures += PartnerQuoteFailure(provider.partnerId, "${invalid.size} offer(s) did not match the request")
+                    offers +=
+                        valid.map {
+                            it.copy(partnerName = provider.terms.legalName, providerVersion = provider.versionNo)
+                        }
+                    if (invalid.isNotEmpty()) {
+                        failures +=
+                            PartnerQuoteFailure(
+                                provider.partnerId,
+                                "${invalid.size} offer(s) did not match the request",
+                            )
+                    }
                     if (received.isEmpty()) failures += PartnerQuoteFailure(provider.partnerId, "no offer")
                 },
-                onFailure = { failures += PartnerQuoteFailure(provider.partnerId, it.message ?: it.javaClass.simpleName) },
+                onFailure = {
+                    failures += PartnerQuoteFailure(provider.partnerId, it.message ?: it.javaClass.simpleName)
+                },
             )
         }
         present(offers) to failures.sortedBy { it.partnerId }
     }
 
-    private suspend fun quoteOne(provider: AnnuityProvider, request: AnnuityQuoteRequest): Result<List<AnnuityOffer>> {
+    private suspend fun quoteOne(provider: ApprovedPartner, request: AnnuityQuoteRequest): Result<List<AnnuityOffer>> {
         val adapter = rails.adapters.adapterFor(provider.terms.adapter)
-            ?: return Result.failure(IllegalStateException("adapter '${provider.terms.adapter}' is not available in this build"))
+            ?: return Result.failure(
+                IllegalStateException("adapter '${provider.terms.adapter}' is not available in this build"),
+            )
         return try {
             withTimeoutOrNull(quoteTimeout.toMillis()) { Result.success(adapter.quote(provider, request)) }
                 ?: Result.failure(IllegalStateException("timed out after ${quoteTimeout.toMillis()} ms"))
@@ -428,12 +512,16 @@ class AnnuityMarketplaceService(
      * NORMALISATION is enforced here, not trusted from the adapter: an offer must answer THIS
      * request (partner, premium, currency, a requested type) and stay valid long enough to choose.
      */
-    private fun offerFits(offer: AnnuityOffer, provider: AnnuityProvider, request: AnnuityQuoteRequest, minValid: java.time.Instant) =
-        offer.partnerId == provider.partnerId &&
-            offer.premium.compareTo(request.premium) == 0 &&
-            offer.currency == request.currency &&
-            offer.type in request.types &&
-            !offer.validUntil.isBefore(minValid)
+    private fun offerFits(
+        offer: AnnuityOffer,
+        provider: ApprovedPartner,
+        request: AnnuityQuoteRequest,
+        minValid: java.time.Instant,
+    ) = offer.partnerId == provider.partnerId &&
+        offer.premium.compareTo(request.premium) == 0 &&
+        offer.currency == request.currency &&
+        offer.type in request.types &&
+        !offer.validUntil.isBefore(minValid)
 
     // ---- helpers ----
 
@@ -451,12 +539,18 @@ class AnnuityMarketplaceService(
         stores.purchases.findById(payoutId)?.takeIf { it.contractId == contractId }
             ?: throw ExitNotFoundException("no annuity offers for payout $payoutId")
 
-    private suspend fun provider(purchase: AnnuityPurchase): AnnuityProvider =
-        requireNotNull(stores.providers.find(requireNotNull(purchase.selectedPartnerId))) {
-            "partner ${purchase.selectedPartnerId} vanished from the registry"
+    /** The partner's live approved version, only if it is the very version [offer] was quoted under. */
+    private suspend fun livePinned(offer: AnnuityOffer): ApprovedPartner? =
+        stores.providers.find(offer.partnerId)?.live(LocalDate.now(clock))?.takeIf {
+            it.versionNo ==
+                offer.providerVersion
         }
 
-    private fun adapterOf(provider: AnnuityProvider): AnnuityProviderAdapter =
+    /** The version the application was made under; every step after it uses this, never the registry. */
+    private fun snapshot(purchase: AnnuityPurchase): ApprovedPartner =
+        checkNotNull(purchase.partner) { "purchase ${purchase.id} has no application snapshot" }
+
+    private fun adapterOf(provider: ApprovedPartner): AnnuityProviderAdapter =
         checkNotNull(rails.adapters.adapterFor(provider.terms.adapter)) {
             "adapter '${provider.terms.adapter}' is not available in this build"
         }
@@ -495,13 +589,12 @@ class AnnuityMarketplaceService(
          * tie-break. No offer is marked recommended, and no partner attribute other than the
          * offer's own figures influences the order.
          */
-        fun present(offers: List<AnnuityOffer>): List<AnnuityOffer> =
-            offers.sortedWith(
-                compareBy<AnnuityOffer> { it.type.ordinal }
-                    .thenByDescending { it.monthlyAmount }
-                    .thenBy { it.partnerId }
-                    .thenBy { it.offerId },
-            )
+        fun present(offers: List<AnnuityOffer>): List<AnnuityOffer> = offers.sortedWith(
+            compareBy<AnnuityOffer> { it.type.ordinal }
+                .thenByDescending { it.monthlyAmount }
+                .thenBy { it.partnerId }
+                .thenBy { it.offerId },
+        )
 
         const val PRESENTATION_ORDER = "annuityType, then monthlyAmount descending, then partnerId"
     }

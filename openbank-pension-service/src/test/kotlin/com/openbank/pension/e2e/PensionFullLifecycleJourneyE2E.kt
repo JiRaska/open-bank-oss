@@ -659,7 +659,13 @@ class PensionFullLifecycleJourneyE2E {
     @TestSecurity(user = "ops-maker", roles = ["ROLE_OPERATOR"])
     fun `g1 - two simulator partners are registered and their activation requested, which the maker cannot approve`() {
         for ((partner, yieldFactor, iban) in SIM_PARTNERS) {
-            ok(operatorPost("$PARTNERS", """{"partnerId":"$partner","terms":${simulatorTerms(partner, yieldFactor, iban)}}"""), 201)
+            ok(
+                operatorPost(
+                    "$PARTNERS",
+                    """{"partnerId":"$partner","terms":${simulatorTerms(partner, yieldFactor, iban)}}""",
+                ),
+                201,
+            )
             ok(operatorPost("$PARTNERS/$partner/activation-request", null))
             // Four-eyes: the maker who drafted and requested cannot activate.
             assertThat(operatorPost("$PARTNERS/$partner/activation-approval", null).statusCode).isEqualTo(403)
@@ -674,7 +680,7 @@ class PensionFullLifecycleJourneyE2E {
         for ((partner, _, _) in SIM_PARTNERS) {
             val approved = ok(operatorPost("$PARTNERS/$partner/activation-approval", null))
             assertThat(approved.getString("status")).isEqualTo("ACTIVE")
-            assertThat(approved.getString("activatedBy")).isEqualTo("ops-checker")
+            assertThat(approved.getString("approvedBy")).isEqualTo("ops-checker")
         }
     }
 
@@ -684,7 +690,8 @@ class PensionFullLifecycleJourneyE2E {
     fun `g3 - an annuity payout compares both partners, binds the signed offer and buys exactly that policy`() {
         val id = transferContracts.getValue("annuity")
         fundValues.setValue(UUID.fromString(id), BigDecimal("900000.00"))
-        val quote = ok(customerPost(retiree, "/api/v1/pension/contracts/$id/exit/payouts/quote", """{"form":"ANNUITY"}"""), 201)
+        val quote =
+            ok(customerPost(retiree, "/api/v1/pension/contracts/$id/exit/payouts/quote", """{"form":"ANNUITY"}"""), 201)
         val payout = quote.getString("payoutId")
         val net = quote.getObject("netAmount", BigDecimal::class.java)
         val annuity = "/api/v1/pension/contracts/$id/exit/payouts/$payout/annuity"
@@ -698,8 +705,11 @@ class PensionFullLifecycleJourneyE2E {
             ).statusCode,
         ).isEqualTo(409)
 
-        val offers = ok(customerPost(retiree, "$annuity/offers", """{"annuityTypes":["LIFELONG","GUARANTEE_PERIOD"]}"""))
-        assertThat(offers.getList<String>("offers.partnerId").toSet()).containsExactlyInAnyOrder("sim-alpha", "sim-beta")
+        val offers =
+            ok(customerPost(retiree, "$annuity/offers", """{"annuityTypes":["LIFELONG","GUARANTEE_PERIOD"]}"""))
+        assertThat(
+            offers.getList<String>("offers.partnerId").toSet(),
+        ).containsExactlyInAnyOrder("sim-alpha", "sim-beta")
         assertThat(offers.getList<String>("partnerFailures")).isEmpty()
         assertThat(offers.getList<Boolean>("offers.illustrative")).containsOnly(true)
         assertThat(offers.getList<BigDecimal>("offers.premium")).allSatisfy { assertThat(it).isEqualByComparingTo(net) }

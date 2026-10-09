@@ -10,6 +10,7 @@ import com.openbank.pension.domain.annuity.AnnuityProviderStatus
 import com.openbank.pension.domain.annuity.AnnuityPurchase
 import com.openbank.pension.domain.annuity.AnnuityPurchaseStatus
 import com.openbank.pension.domain.annuity.AnnuityType
+import com.openbank.pension.domain.annuity.ApprovedPartner
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.util.UUID
@@ -77,14 +78,14 @@ interface AnnuityProviderAdapter {
     /** The registry `adapter` value this implementation serves. */
     val kind: String
 
-    suspend fun quote(provider: AnnuityProvider, request: AnnuityQuoteRequest): List<AnnuityOffer>
+    suspend fun quote(provider: ApprovedPartner, request: AnnuityQuoteRequest): List<AnnuityOffer>
 
-    suspend fun purchase(provider: AnnuityProvider, application: AnnuityApplication): PartnerPolicyStatus
+    suspend fun purchase(provider: ApprovedPartner, application: AnnuityApplication): PartnerPolicyStatus
 
-    suspend fun status(provider: AnnuityProvider, applicationRef: String): PartnerPolicyStatus
+    suspend fun status(provider: ApprovedPartner, applicationRef: String): PartnerPolicyStatus
 
     suspend fun cancel(
-        provider: AnnuityProvider,
+        provider: ApprovedPartner,
         applicationRef: String,
         reason: PartnerCancellationReason,
         idempotencyKey: String,

@@ -18,8 +18,8 @@ import com.openbank.pension.application.annuity.PartnerCancellationReason
 import com.openbank.pension.application.annuity.PartnerPolicyState
 import com.openbank.pension.application.annuity.PartnerPolicyStatus
 import com.openbank.pension.domain.annuity.AnnuityOffer
-import com.openbank.pension.domain.annuity.AnnuityProvider
 import com.openbank.pension.domain.annuity.AnnuityType
+import com.openbank.pension.domain.annuity.ApprovedPartner
 import jakarta.enterprise.context.ApplicationScoped
 import kotlinx.coroutines.future.await
 import org.eclipse.microprofile.config.ConfigProvider
@@ -54,7 +54,10 @@ class ReferenceRestAnnuityAdapter internal constructor(
     /** CDI: credentials from `openbank.pension.annuity.partners.<partnerId>.token`. */
     constructor() : this(
         PartnerCredentials { id ->
-            ConfigProvider.getConfig().getOptionalValue("openbank.pension.annuity.partners.$id.token", String::class.java)
+            ConfigProvider.getConfig().getOptionalValue(
+                "openbank.pension.annuity.partners.$id.token",
+                String::class.java,
+            )
                 .orElse(null)
         },
         HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).followRedirects(HttpClient.Redirect.NEVER).build(),
@@ -63,7 +66,7 @@ class ReferenceRestAnnuityAdapter internal constructor(
 
     override val kind: String = KIND
 
-    override suspend fun quote(provider: AnnuityProvider, request: AnnuityQuoteRequest): List<AnnuityOffer> {
+    override suspend fun quote(provider: ApprovedPartner, request: AnnuityQuoteRequest): List<AnnuityOffer> {
         val body = WireQuoteRequest(
             requestId = request.requestId,
             premium = request.premium,
@@ -80,7 +83,7 @@ class ReferenceRestAnnuityAdapter internal constructor(
         return response.offers.mapNotNull { it.toDomain(provider) }
     }
 
-    override suspend fun purchase(provider: AnnuityProvider, application: AnnuityApplication): PartnerPolicyStatus {
+    override suspend fun purchase(provider: ApprovedPartner, application: AnnuityApplication): PartnerPolicyStatus {
         val body = WirePolicyApplication(
             requestId = application.requestId,
             offerId = application.offerId,
@@ -90,14 +93,26 @@ class ReferenceRestAnnuityAdapter internal constructor(
             birthDate = application.birthDate,
             premiumReference = application.premiumReference,
         )
-        return call<WirePolicyStatus>(provider, "POST", "/annuity/v1/policies", body, application.idempotencyKey).toDomain()
+        return call<WirePolicyStatus>(
+            provider,
+            "POST",
+            "/annuity/v1/policies",
+            body,
+            application.idempotencyKey,
+        ).toDomain()
     }
 
-    override suspend fun status(provider: AnnuityProvider, applicationRef: String): PartnerPolicyStatus =
-        call<WirePolicyStatus>(provider, "GET", "/annuity/v1/policies/${segment(applicationRef)}", null, null).toDomain()
+    override suspend fun status(provider: ApprovedPartner, applicationRef: String): PartnerPolicyStatus =
+        call<WirePolicyStatus>(
+            provider,
+            "GET",
+            "/annuity/v1/policies/${segment(applicationRef)}",
+            null,
+            null,
+        ).toDomain()
 
     override suspend fun cancel(
-        provider: AnnuityProvider,
+        provider: ApprovedPartner,
         applicationRef: String,
         reason: PartnerCancellationReason,
         idempotencyKey: String,
@@ -110,7 +125,7 @@ class ReferenceRestAnnuityAdapter internal constructor(
     ).toDomain()
 
     private suspend inline fun <reified T> call(
-        provider: AnnuityProvider,
+        provider: ApprovedPartner,
         method: String,
         path: String,
         body: Any?,
@@ -128,7 +143,10 @@ class ReferenceRestAnnuityAdapter internal constructor(
         if (body == null) {
             builder.GET()
         } else {
-            builder.header("Content-Type", JSON).method(method, HttpRequest.BodyPublishers.ofString(MAPPER.writeValueAsString(body)))
+            builder.header(
+                "Content-Type",
+                JSON,
+            ).method(method, HttpRequest.BodyPublishers.ofString(MAPPER.writeValueAsString(body)))
         }
         val response = http.sendAsync(builder.build(), HttpResponse.BodyHandlers.ofString()).await()
         check(response.statusCode() in HTTP_OK_RANGE) {
@@ -195,7 +213,7 @@ internal data class WireOffer(
     val illustrative: Boolean?,
 ) {
     /** Normalisation: an offer missing a required field, or of an unknown type, is dropped — never guessed. */
-    fun toDomain(provider: AnnuityProvider): AnnuityOffer? {
+    fun toDomain(provider: ApprovedPartner): AnnuityOffer? {
         val type = AnnuityType.entries.firstOrNull { it.name == annuityType } ?: return null
         val id = offerId ?: return null
         val amount = premium ?: return null

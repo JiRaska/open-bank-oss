@@ -20,44 +20,63 @@ class AnnuityDomainTest {
     @Test
     fun `four-eyes - the requester cannot approve their own activation`() {
         val pending = AnnuityProvider.draft("alpha", terms(), "maker", now).requestActivation("maker", now)
-        assertThatThrownBy { pending.approveActivation("maker", now) }.isInstanceOf(FourEyesViolationException::class.java)
+        assertThatThrownBy {
+            pending.approveActivation("maker", now)
+        }.isInstanceOf(FourEyesViolationException::class.java)
     }
 
     @Test
     fun `four-eyes - whoever edited the terms cannot approve them, even if someone else requested`() {
         val pending = AnnuityProvider.draft("alpha", terms(), "editor", now).requestActivation("requester", now)
-        assertThatThrownBy { pending.approveActivation("editor", now) }.isInstanceOf(FourEyesViolationException::class.java)
+        assertThatThrownBy {
+            pending.approveActivation("editor", now)
+        }.isInstanceOf(FourEyesViolationException::class.java)
         assertThat(pending.approveActivation("checker", now).status).isEqualTo(AnnuityProviderStatus.ACTIVE)
     }
 
     @Test
-    fun `amending an active partner sends it back to DRAFT - changed terms are never live unchecked`() {
+    fun `a pending edit is invisible - the approved version stays live until a checker approves the new one`() {
         val active = AnnuityProvider.draft("alpha", terms(), "maker", now)
             .requestActivation("maker", now).approveActivation("checker", now)
-        val amended = active.amend(terms(maxPremium = BigDecimal("9000000")), "checker", now)
-        assertThat(amended.status).isEqualTo(AnnuityProviderStatus.DRAFT)
-        assertThat(amended.eligible("CZ", "CZK", BigDecimal("100000"), today)).isFalse()
-        // The amender is now the editor and can no longer approve.
-        assertThatThrownBy { amended.requestActivation("x", now).approveActivation("checker", now) }
-            .isInstanceOf(FourEyesViolationException::class.java)
+        val pending = active.propose(terms(premiumIban = "CZ1208000000009876543210"), "maker", now)
+            .requestActivation("maker", now)
+        val live = requireNotNull(pending.live(today))
+        assertThat(live.versionNo).isEqualTo(1)
+        assertThat(live.terms.premiumIban).isEqualTo("CZ6508000000192000145399")
+        val approved = pending.approveActivation("checker", now)
+        assertThat(requireNotNull(approved.live(today)).versionNo).isEqualTo(2)
+        assertThat(requireNotNull(approved.live(today)).terms.premiumIban).isEqualTo("CZ1208000000009876543210")
     }
 
     @Test
-    fun `eligibility needs ACTIVE, jurisdiction, currency, premium band and effective dates`() {
-        val active = AnnuityProvider.draft("alpha", terms(), "m", now).requestActivation("m", now).approveActivation("c", now)
-        assertThat(active.eligible("CZ", "CZK", BigDecimal("100000"), today)).isTrue()
-        assertThat(active.eligible("SK", "CZK", BigDecimal("100000"), today)).isFalse()
-        assertThat(active.eligible("CZ", "EUR", BigDecimal("100000"), today)).isFalse()
-        assertThat(active.eligible("CZ", "CZK", BigDecimal("9999"), today)).isFalse()
-        assertThat(active.eligible("CZ", "CZK", BigDecimal("100000"), LocalDate.parse("2029-12-31"))).isFalse()
-        assertThat(active.disable(now).eligible("CZ", "CZK", BigDecimal("100000"), today)).isFalse()
+    fun `four-eyes - the maker cannot approve their own change to an active partner`() {
+        val active = AnnuityProvider.draft("alpha", terms(), "maker", now)
+            .requestActivation("maker", now).approveActivation("checker", now)
+        val own = active.propose(
+            terms(maxPremium = BigDecimal("9000000")),
+            "checker",
+            now,
+        ).requestActivation("other", now)
+        assertThatThrownBy {
+            own.approveActivation("checker", now)
+        }.isInstanceOf(FourEyesViolationException::class.java)
+        assertThat(own.live(today)?.versionNo).isEqualTo(1)
+    }
+
+    @Test
+    fun `an unapproved draft is never live`() {
+        val draft = AnnuityProvider.draft("alpha", terms(), "maker", now).requestActivation("maker", now)
+        assertThat(draft.live(today)).isNull()
+        assertThat(draft.eligible("CZ", "CZK", BigDecimal("100000"), today)).isFalse()
     }
 
     @Test
     fun `terms refuse a malformed registry entry`() {
         assertThatThrownBy { terms(premiumIban = "not-an-iban") }.isInstanceOf(IllegalArgumentException::class.java)
         assertThatThrownBy { terms(adapter = "Reference REST") }.isInstanceOf(IllegalArgumentException::class.java)
-        assertThatThrownBy { AnnuityProvider.draft("Bad Id", terms(), "m", now) }.isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy {
+            AnnuityProvider.draft("Bad Id", terms(), "m", now)
+        }.isInstanceOf(IllegalArgumentException::class.java)
     }
 
     @Test
@@ -68,13 +87,16 @@ class AnnuityDomainTest {
         assertThat(purchase.selectionHash(a.copy(partnerId = "beta"))).isNotEqualTo(base)
         assertThat(purchase.selectionHash(a.copy(offerId = "o2"))).isNotEqualTo(base)
         assertThat(purchase.selectionHash(a.copy(monthlyAmount = BigDecimal("4000.01")))).isNotEqualTo(base)
+        assertThat(purchase.selectionHash(a.copy(providerVersion = 2))).isNotEqualTo(base)
         assertThat(purchase.copy(premium = BigDecimal("1000000.01")).selectionHash(a)).isNotEqualTo(base)
     }
 
     @Test
     fun `only a presented, unexpired offer can be selected, and the binding selection re-checks premium and expiry`() {
         val purchase = purchase()
-        assertThatThrownBy { purchase.select("alpha", "nope", "sca", now) }.isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy {
+            purchase.select("alpha", "nope", "sca", now)
+        }.isInstanceOf(IllegalArgumentException::class.java)
         assertThatThrownBy { purchase.select("alpha", "o1", "sca", now.plusSeconds(DAY * 3)) }
             .isInstanceOf(IllegalStateException::class.java)
         val selected = purchase.select("alpha", "o1", "sca", now)
@@ -89,7 +111,7 @@ class AnnuityDomainTest {
 
     @Test
     fun `premium not sent - no policy`() {
-        val applied = purchase().select("alpha", "o1", "sca", now).markApplied("APP-1", now)
+        val applied = purchase().select("alpha", "o1", "sca", now).markApplied("APP-1", partner(), now)
         assertThatThrownBy { applied.markActive("POL", BigDecimal.TEN, today, 30, now) }
             .isInstanceOf(IllegalStateException::class.java)
         val active = applied.markPremiumSent("PAY-1", now).markActive("POL", BigDecimal.TEN, today, 30, now)
@@ -98,9 +120,16 @@ class AnnuityDomainTest {
 
     @Test
     fun `cancellation is possible only within the cooling-off period`() {
-        val active = purchase().select("alpha", "o1", "sca", now).markApplied("A", now).markPremiumSent("P", now)
+        val active = purchase().select(
+            "alpha",
+            "o1",
+            "sca",
+            now,
+        ).markApplied("A", partner(), now).markPremiumSent("P", now)
             .markActive("POL", BigDecimal.TEN, today, 30, now)
-        assertThatThrownBy { active.cancelInCoolingOff(today.plusDays(31), now) }.isInstanceOf(IllegalStateException::class.java)
+        assertThatThrownBy {
+            active.cancelInCoolingOff(today.plusDays(31), now)
+        }.isInstanceOf(IllegalStateException::class.java)
         assertThat(active.cancelInCoolingOff(today.plusDays(30), now).status).isEqualTo(AnnuityPurchaseStatus.CANCELLED)
     }
 
@@ -109,6 +138,15 @@ class AnnuityDomainTest {
         assertThatThrownBy { offer("alpha", "o1", "0") }.isInstanceOf(IllegalArgumentException::class.java)
         assertThatThrownBy { offer("alpha", "o1", "10").copy(type = AnnuityType.FIXED_TERM) }
             .isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    private fun partner() = ApprovedPartner("alpha", 0, terms())
+
+    @Test
+    fun `an application is recorded only under the very version the offer was quoted under`() {
+        val selected = purchase().select("alpha", "o1", "sca", now)
+        assertThatThrownBy { selected.markApplied("A", ApprovedPartner("alpha", 2, terms()), now) }
+            .isInstanceOf(IllegalStateException::class.java)
     }
 
     private fun purchase() = AnnuityPurchase.offered(

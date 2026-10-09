@@ -11,8 +11,8 @@ import com.openbank.pension.application.annuity.PartnerCancellationReason
 import com.openbank.pension.application.annuity.PartnerPolicyState
 import com.openbank.pension.application.annuity.PartnerPolicyStatus
 import com.openbank.pension.domain.annuity.AnnuityOffer
-import com.openbank.pension.domain.annuity.AnnuityProvider
 import com.openbank.pension.domain.annuity.AnnuityType
+import com.openbank.pension.domain.annuity.ApprovedPartner
 import com.openbank.pension.domain.exit.ExitMoney
 import io.quarkus.arc.profile.IfBuildProfile
 import jakarta.enterprise.context.ApplicationScoped
@@ -44,20 +44,33 @@ class SimulatorAnnuityAdapter(private val clock: Clock) : AnnuityProviderAdapter
 
     override val kind: String = KIND
 
-    private data class Application(val partnerId: String, val ref: String, val monthly: BigDecimal, var state: PartnerPolicyState)
+    private data class Application(
+        val partnerId: String,
+        val ref: String,
+        val monthly: BigDecimal,
+        var state: PartnerPolicyState,
+    )
 
     private val applications = ConcurrentHashMap<String, Application>()
 
-    override suspend fun quote(provider: AnnuityProvider, request: AnnuityQuoteRequest): List<AnnuityOffer> {
+    override suspend fun quote(provider: ApprovedPartner, request: AnnuityQuoteRequest): List<AnnuityOffer> {
         val s = provider.terms.adapterSettings
         val age = Period.between(request.birthDate, request.startDate).years
         val horizonMonths = maxOf(MIN_MONTHS, (s.int("horizonAge", DEFAULT_HORIZON_AGE) - age) * MONTHS_PER_YEAR)
         val fee = ExitMoney.round(request.premium.multiply(s.dec("oneOffFeeRate", "0.01")))
         val invested = request.premium - fee
         val yieldFactor = s.dec("yieldFactor", "1.10")
-        val validUntil = clock.instant().plus(Duration.ofHours(s.int("offerValidityHours", DEFAULT_VALIDITY_HOURS).toLong()))
+        val validUntil = clock.instant().plus(
+            Duration.ofHours(s.int("offerValidityHours", DEFAULT_VALIDITY_HOURS).toLong()),
+        )
         return request.types.intersect(provider.terms.supportedTypes).sortedBy { it.ordinal }.map { type ->
-            val months = if (type == AnnuityType.FIXED_TERM) request.termMonths ?: DEFAULT_TERM_MONTHS else horizonMonths
+            val months = if (type ==
+                AnnuityType.FIXED_TERM
+            ) {
+                request.termMonths ?: DEFAULT_TERM_MONTHS
+            } else {
+                horizonMonths
+            }
             val adjustment = when (type) {
                 AnnuityType.LIFELONG, AnnuityType.FIXED_TERM -> BigDecimal.ONE
                 AnnuityType.GUARANTEE_PERIOD -> BigDecimal("0.97")
@@ -65,7 +78,9 @@ class SimulatorAnnuityAdapter(private val clock: Clock) : AnnuityProviderAdapter
                     BigDecimal.ONE + (request.survivorShare ?: DEFAULT_SURVIVOR).multiply(BigDecimal("0.25")),
                     MathContext.DECIMAL64,
                 )
-                AnnuityType.INDEXED -> BigDecimal.ONE - s.dec("indexationRate", "0.02").multiply(BigDecimal(INDEX_DISCOUNT_YEARS))
+                AnnuityType.INDEXED ->
+                    BigDecimal.ONE -
+                        s.dec("indexationRate", "0.02").multiply(BigDecimal(INDEX_DISCOUNT_YEARS))
             }
             val monthly = ExitMoney.round(
                 invested.divide(BigDecimal(months), MathContext.DECIMAL64).multiply(yieldFactor).multiply(adjustment),
@@ -78,7 +93,13 @@ class SimulatorAnnuityAdapter(private val clock: Clock) : AnnuityProviderAdapter
                 premium = request.premium,
                 currency = request.currency,
                 monthlyAmount = monthly,
-                guaranteeMonths = if (type == AnnuityType.GUARANTEE_PERIOD) request.guaranteeMonths ?: DEFAULT_GUARANTEE else 0,
+                guaranteeMonths = if (type ==
+                    AnnuityType.GUARANTEE_PERIOD
+                ) {
+                    request.guaranteeMonths ?: DEFAULT_GUARANTEE
+                } else {
+                    0
+                },
                 termMonths = if (type == AnnuityType.FIXED_TERM) months else null,
                 indexationRate = if (type == AnnuityType.INDEXED) s.dec("indexationRate", "0.02") else BigDecimal.ZERO,
                 survivorShare = if (type == AnnuityType.JOINT_LIFE) request.survivorShare ?: DEFAULT_SURVIVOR else null,
@@ -90,14 +111,19 @@ class SimulatorAnnuityAdapter(private val clock: Clock) : AnnuityProviderAdapter
         }
     }
 
-    override suspend fun purchase(provider: AnnuityProvider, application: AnnuityApplication): PartnerPolicyStatus {
+    override suspend fun purchase(provider: ApprovedPartner, application: AnnuityApplication): PartnerPolicyStatus {
         val app = applications.computeIfAbsent("${provider.partnerId}|${application.idempotencyKey}") {
-            Application(provider.partnerId, "SIMAPP-${provider.partnerId}-${application.requestId}", BigDecimal.ZERO, PartnerPolicyState.APPLIED)
+            Application(
+                provider.partnerId,
+                "SIMAPP-${provider.partnerId}-${application.requestId}",
+                BigDecimal.ZERO,
+                PartnerPolicyState.APPLIED,
+            )
         }
         return PartnerPolicyStatus(app.ref, app.state)
     }
 
-    override suspend fun status(provider: AnnuityProvider, applicationRef: String): PartnerPolicyStatus {
+    override suspend fun status(provider: ApprovedPartner, applicationRef: String): PartnerPolicyStatus {
         val app = byRef(provider, applicationRef)
             ?: return PartnerPolicyStatus(applicationRef, PartnerPolicyState.REFUSED, reason = "unknown application")
         if (app.state == PartnerPolicyState.APPLIED) {
@@ -112,7 +138,7 @@ class SimulatorAnnuityAdapter(private val clock: Clock) : AnnuityProviderAdapter
     }
 
     override suspend fun cancel(
-        provider: AnnuityProvider,
+        provider: ApprovedPartner,
         applicationRef: String,
         reason: PartnerCancellationReason,
         idempotencyKey: String,
@@ -123,7 +149,7 @@ class SimulatorAnnuityAdapter(private val clock: Clock) : AnnuityProviderAdapter
         return describe(app)
     }
 
-    private fun byRef(provider: AnnuityProvider, ref: String) =
+    private fun byRef(provider: ApprovedPartner, ref: String) =
         applications.values.firstOrNull { it.partnerId == provider.partnerId && it.ref == ref }
 
     private fun describe(app: Application) = when (app.state) {
@@ -133,8 +159,18 @@ class SimulatorAnnuityAdapter(private val clock: Clock) : AnnuityProviderAdapter
             policyRef = app.ref.replace("SIMAPP", "SIMPOL"),
             issuedOn = LocalDate.now(clock),
         )
-        PartnerPolicyState.REFUSED -> PartnerPolicyStatus(app.ref, app.state, reason = "simulated refusal", refundRef = "SIMREF-${app.ref}")
-        PartnerPolicyState.CANCELLED -> PartnerPolicyStatus(app.ref, app.state, reason = "cancelled", refundRef = "SIMREF-${app.ref}")
+        PartnerPolicyState.REFUSED -> PartnerPolicyStatus(
+            app.ref,
+            app.state,
+            reason = "simulated refusal",
+            refundRef = "SIMREF-${app.ref}",
+        )
+        PartnerPolicyState.CANCELLED -> PartnerPolicyStatus(
+            app.ref,
+            app.state,
+            reason = "cancelled",
+            refundRef = "SIMREF-${app.ref}",
+        )
         else -> PartnerPolicyStatus(app.ref, app.state)
     }
 

@@ -96,7 +96,12 @@ class ExitExecutionService(private val ctx: ExitContext) {
 
     suspend fun payoutSingle(payoutId: UUID) {
         var payout = payout(payoutId)
-        if (payout.scheduled || payout.status == PayoutStatus.COMPLETED || payout.status == PayoutStatus.REVERSED) return
+        if (payout.scheduled ||
+            payout.status == PayoutStatus.COMPLETED ||
+            payout.status == PayoutStatus.REVERSED
+        ) {
+            return
+        }
         val q = payout.quote
         if (payout.status == PayoutStatus.CONFIRMED) {
             val proceeds = redeem(payout.contractId, q.grossAmount, key("payout", payoutId, "redeem"))

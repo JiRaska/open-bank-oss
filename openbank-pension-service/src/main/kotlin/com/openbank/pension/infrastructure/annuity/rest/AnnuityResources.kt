@@ -189,14 +189,20 @@ class PensionAnnuityProviderResource {
 
     @PUT
     @Path("/{partnerId}")
-    @Operation(summary = "Amend the terms; the partner returns to DRAFT and needs a new four-eyes activation")
+    @Operation(summary = "Propose new terms; the approved version stays live until a different person approves")
     @Authorize(action = "pension.operator.annuity-write")
     suspend fun amend(
         @PathParam("partnerId") partnerId: String,
         @HeaderParam(PARTY_HEADER) party: String?,
         request: AnnuityProviderTermsRequest?,
     ) = AnnuityProviderResponse.from(
-        registry.amend(partnerId, requireNotNull(request) { "request body is required" }.toTerms(), access.staffActor(party)),
+        registry.amend(
+            partnerId,
+            requireNotNull(request) {
+                "request body is required"
+            }.toTerms(),
+            access.staffActor(party),
+        ),
     )
 
     @POST
