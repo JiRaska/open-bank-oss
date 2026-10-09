@@ -18,6 +18,7 @@ import com.openbank.pension.application.port.out.IncentiveLedgerRepository
 import com.openbank.pension.application.port.out.MandateRequest
 import com.openbank.pension.application.port.out.OnboardingActivationPort
 import com.openbank.pension.application.port.out.PaymentMandatePort
+import com.openbank.pension.application.port.out.PensionMetrics
 import com.openbank.pension.application.port.out.Redemption
 import com.openbank.pension.application.port.out.TaxCertificateDocumentPort
 import com.openbank.pension.application.port.out.TaxYearSummaryRepository
@@ -49,7 +50,10 @@ import java.util.UUID
  * The default date is in April: Q1 2026 has closed, so the CZ channel may file January's claims
  * (ZDPS §16(2)). [now] can be moved to walk through filing and return deadlines.
  */
-class InMemoryFunding(var now: Instant = Instant.parse("2026-04-10T10:00:00Z")) {
+class InMemoryFunding(
+    var now: Instant = Instant.parse("2026-04-10T10:00:00Z"),
+    val metrics: PensionMetrics = PensionMetrics.NONE,
+) {
     val clock: Clock = object : Clock() {
         override fun getZone(): java.time.ZoneId = ZoneOffset.UTC
 
@@ -266,6 +270,7 @@ class InMemoryFunding(var now: Instant = Instant.parse("2026-04-10T10:00:00Z")) 
     val contributionService =
         ContributionService(
             directory, references, contributions, unmatched, fund, employers, mandates, enrolments, activation, clock,
+            metrics,
         )
 
     val notifier = RecordingParticipantNotifier()
@@ -277,6 +282,6 @@ class InMemoryFunding(var now: Instant = Instant.parse("2026-04-10T10:00:00Z")) 
 
     val incentiveService = IncentiveService(
         directory, references, contributions, claims, batches, ledger, summaries, JurisdictionPackLoader.loadRegistry(),
-        listOf(claimChannel), documents, contributionService, clock, notifier,
+        listOf(claimChannel), documents, contributionService, clock, notifier, metrics,
     )
 }
