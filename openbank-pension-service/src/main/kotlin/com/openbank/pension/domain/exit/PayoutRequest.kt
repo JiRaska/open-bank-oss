@@ -4,6 +4,7 @@
 
 package com.openbank.pension.domain.exit
 
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.pension.domain.model.PayoutForm
 import java.math.BigDecimal
 import java.time.Duration
@@ -304,7 +305,7 @@ data class PayoutRequest(
 
         fun quote(contractId: UUID, participantPartyId: UUID, quote: PayoutQuote, validityDays: Int, now: Instant) =
             PayoutRequest(
-                id = UUID.randomUUID(),
+                id = Ids.newId(),
                 contractId = contractId,
                 participantPartyId = participantPartyId,
                 status = PayoutStatus.QUOTED,

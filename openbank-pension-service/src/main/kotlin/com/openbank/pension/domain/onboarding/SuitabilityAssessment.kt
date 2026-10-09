@@ -4,6 +4,7 @@
 
 package com.openbank.pension.domain.onboarding
 
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.pension.domain.model.ProductLine
 import java.time.Instant
 import java.time.LocalDate
@@ -104,7 +105,7 @@ data class SuitabilityAssessment(
                 "esgPreference is required for this product"
             }
             return SuitabilityAssessment(
-                id = UUID.randomUUID(),
+                id = Ids.newId(),
                 partyId = partyId,
                 applicationId = applicationId,
                 productLine = productLine,

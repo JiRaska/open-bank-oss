@@ -4,6 +4,7 @@
 
 package com.openbank.pension.domain.exit
 
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.pension.domain.model.Beneficiary
 import java.math.BigDecimal
 import java.time.Instant
@@ -197,9 +198,9 @@ data class DeathClaim(
         /** Claimants from the contract's designations, or the estate when there are none and the pack allows it. */
         fun claimantsFrom(beneficiaries: List<Beneficiary>, rules: DeathRules): List<Claimant> = when {
             beneficiaries.isNotEmpty() -> beneficiaries.map {
-                Claimant(UUID.randomUUID(), it.name, it.partyId, it.sharePercent, estate = false)
+                Claimant(Ids.newId(), it.name, it.partyId, it.sharePercent, estate = false)
             }
-            rules.estateWhenNoBeneficiary -> listOf(Claimant(UUID.randomUUID(), "Estate", null, HUNDRED, estate = true))
+            rules.estateWhenNoBeneficiary -> listOf(Claimant(Ids.newId(), "Estate", null, HUNDRED, estate = true))
             else -> error("no designated beneficiary and the pack does not settle to the estate")
         }
 
@@ -213,7 +214,7 @@ data class DeathClaim(
             idempotencyKey: String,
             now: Instant,
         ) = DeathClaim(
-            id = UUID.randomUUID(),
+            id = Ids.newId(),
             contractId = contractId,
             status = DeathClaimStatus.NOTIFIED,
             dateOfDeath = dateOfDeath,

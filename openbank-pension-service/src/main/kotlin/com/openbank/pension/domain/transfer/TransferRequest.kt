@@ -4,6 +4,7 @@
 
 package com.openbank.pension.domain.transfer
 
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.pension.domain.pack.TransferRules
 import java.math.BigDecimal
 import java.math.RoundingMode
@@ -212,7 +213,7 @@ data class TransferRequest(
                 TransferStatus.REQUESTED
             }
             return TransferRequest(
-                id = UUID.randomUUID(),
+                id = Ids.newId(),
                 direction = direction,
                 origin = origin,
                 contractId = contractId,

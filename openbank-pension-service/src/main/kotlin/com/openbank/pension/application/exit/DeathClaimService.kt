@@ -4,6 +4,7 @@
 
 package com.openbank.pension.application.exit
 
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.pension.application.port.`in`.Caller
 import com.openbank.pension.application.port.`in`.PensionContractUseCase
 import com.openbank.pension.domain.exit.Claimant
@@ -78,7 +79,7 @@ class DeathClaimService(
         require(designations.size in 1..MAX_CLAIMANTS) { "1..$MAX_CLAIMANTS claimants" }
         val claim = load(claimId)
         val claimants = designations.map {
-            Claimant(UUID.randomUUID(), it.name, it.partyId, it.sharePercent, it.estate)
+            Claimant(Ids.newId(), it.name, it.partyId, it.sharePercent, it.estate)
         }
         return stores.claims.save(claim.replaceClaimants(claimants, ctx.clock.instant()))
     }
