@@ -87,6 +87,23 @@ quarkus:
 
 
 openbank:
+  # Onboarding and transfer workflows (ADR-0334 S2). Every value is an env override; the worker
+  # switch follows the fleet convention openbank.<service>.worker.enabled.
+  temporal:
+    enabled: ${OPENBANK_TEMPORAL_ENABLED:false}
+    server-url: ${OPENBANK_TEMPORAL_SERVER_URL:localhost:7233}
+    namespace: ${OPENBANK_TEMPORAL_NAMESPACE:openbank-pension}
+    task-queue: ${OPENBANK_TEMPORAL_TASK_QUEUE:openbank-pension}
+  pension:
+    worker:
+      enabled: ${OPENBANK_PENSION_WORKER_ENABLED:true}
+    onboarding:
+      # Dedicated to slice S2's workflow and activity types (ADR-0334 S2).
+      task-queue: ${OPENBANK_PENSION_ONBOARDING_TASK_QUEUE:pension-onboarding}
+    # FAIL CLOSED by default: the KYC, document, SCA, counterparty and fund ports are stubs until
+    # their real adapters land (ADR-0334 S2 follow-ups). Off, every stubbed call answers 503.
+    stub-integrations:
+      enabled: false
   rate-limit:
     enabled: true
     max-concurrent-requests: 100
@@ -110,6 +127,10 @@ authz:
     enforce: "${AUTHZ_FOUR_EYES_ENFORCE:false}"
 
 "%dev":
+  openbank:
+    pension:
+      stub-integrations:
+        enabled: true
   quarkus:
     log:
       level: DEBUG
@@ -121,6 +142,12 @@ authz:
     enforce: "false"
 
 "%test":
+  openbank:
+    pension:
+      worker:
+        enabled: false
+      stub-integrations:
+        enabled: true
   quarkus:
     datasource:
       reactive:

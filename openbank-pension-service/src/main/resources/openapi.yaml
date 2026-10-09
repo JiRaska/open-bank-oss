@@ -12,6 +12,10 @@ servers:
   - url: http://localhost:8171
 tags:
   - name: Pension
+  - name: Pension onboarding
+  - name: Pension transfers
+  - name: Pension provider transfers
+  - name: Pension operations
 security:
   - bearerAuth: []
 
@@ -189,6 +193,454 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
 
+  /api/v1/pension/onboarding/applications:
+    post:
+      tags: [Pension onboarding]
+      operationId: startOnboardingApplication
+      summary: Start an application; eligibility and KYC are checked at once
+      parameters:
+        - $ref: '#/components/parameters/CustomerPartyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StartApplicationRequest' }
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OnboardingApplication' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Caller's role or principal may not use this route }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '503': { description: A collaborator this step depends on is not available (stub integration off) }
+  /api/v1/pension/onboarding/applications/{id}:
+    get:
+      tags: [Pension onboarding]
+      operationId: getOnboardingApplication
+      summary: Status of one of the caller's applications
+      parameters:
+        - $ref: '#/components/parameters/ApplicationId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OnboardingApplication' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Caller's role or principal may not use this route }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/onboarding/applications/{id}/questionnaire:
+    post:
+      tags: [Pension onboarding]
+      operationId: submitPensionQuestionnaire
+      summary: Answer the suitability / appropriateness / ESG questionnaire
+      parameters:
+        - $ref: '#/components/parameters/ApplicationId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/QuestionnaireRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QuestionnaireResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Caller's role or principal may not use this route }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/onboarding/applications/{id}/recommendation:
+    get:
+      tags: [Pension onboarding]
+      operationId: getPensionRecommendation
+      summary: Strategy recommendation from risk profile and years to retirement
+      parameters:
+        - $ref: '#/components/parameters/ApplicationId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StrategyRecommendation' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Caller's role or principal may not use this route }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/onboarding/applications/{id}/strategy:
+    post:
+      tags: [Pension onboarding]
+      operationId: choosePensionStrategy
+      summary: Choose the strategy and issue its key-information document
+      parameters:
+        - $ref: '#/components/parameters/ApplicationId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChooseStrategyRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OnboardingApplication' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Caller's role or principal may not use this route }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '503': { description: A collaborator this step depends on is not available (stub integration off) }
+  /api/v1/pension/onboarding/applications/{id}/kid/accept:
+    post:
+      tags: [Pension onboarding]
+      operationId: acceptPensionKid
+      summary: Accept the issued key-information document
+      parameters:
+        - $ref: '#/components/parameters/ApplicationId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AcceptKidRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OnboardingApplication' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Caller's role or principal may not use this route }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/onboarding/applications/{id}/sign:
+    post:
+      tags: [Pension onboarding]
+      operationId: signPensionApplication
+      summary: SCA-sign the contract (and transfer request); starts the workflow
+      parameters:
+        - $ref: '#/components/parameters/ApplicationId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SignRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OnboardingApplication' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Caller's role or principal may not use this route }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { description: The SCA challenge was not verified (rejected, already spent, or bound elsewhere) }
+        '503': { description: A collaborator this step depends on is not available (stub integration off) }
+  /api/v1/pension/onboarding/applications/{id}/withdraw:
+    post:
+      tags: [Pension onboarding]
+      operationId: withdrawPensionApplication
+      summary: Withdraw within the cooling-off period
+      parameters:
+        - $ref: '#/components/parameters/ApplicationId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OnboardingApplication' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Caller's role or principal may not use this route }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/onboarding/applications/{id}/abandon:
+    post:
+      tags: [Pension onboarding]
+      operationId: abandonPensionApplication
+      summary: Abandon an unsigned application
+      parameters:
+        - $ref: '#/components/parameters/ApplicationId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OnboardingApplication' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Caller's role or principal may not use this route }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/transfers/out:
+    post:
+      tags: [Pension transfers]
+      operationId: requestPensionTransferOut
+      summary: Request a transfer-out of the caller's contract (SCA-signed)
+      parameters:
+        - $ref: '#/components/parameters/CustomerPartyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TransferOutRequest' }
+      responses:
+        '202':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransferRequest' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Caller's role or principal may not use this route }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { description: The SCA challenge was not verified (rejected, already spent, or bound elsewhere) }
+        '503': { description: A collaborator this step depends on is not available (stub integration off) }
+  /api/v1/pension/transfers/{id}/consent:
+    post:
+      tags: [Pension transfers]
+      operationId: consentPensionTransferOut
+      summary: SCA-consent to a provider-requested transfer-out
+      parameters:
+        - $ref: '#/components/parameters/TransferId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TransferConsentRequest' }
+      responses:
+        '202':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransferRequest' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Caller's role or principal may not use this route }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { description: The SCA challenge was not verified (rejected, already spent, or bound elsewhere) }
+  /api/v1/pension/transfers/{id}:
+    get:
+      tags: [Pension transfers]
+      operationId: getPensionTransfer
+      summary: Status of one of the caller's transfers
+      parameters:
+        - $ref: '#/components/parameters/TransferId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransferRequest' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Caller's role or principal may not use this route }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/provider/transfers/out:
+    post:
+      tags: [Pension provider transfers]
+      operationId: providerRequestPensionTransferOut
+      summary: A receiving provider requests a transfer-out; waits for participant consent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TransferOutRequest' }
+      responses:
+        '202':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransferRequest' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Caller's role or principal may not use this route }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/pension/operator/onboarding/applications:
+    get:
+      tags: [Pension operations]
+      operationId: listPensionApplications
+      summary: Onboarding applications, newest first
+      parameters:
+        - $ref: '#/components/parameters/OnboardingStatusQuery'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/OperatorApplication' } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Caller's role or principal may not use this route }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/operator/onboarding/applications/{id}:
+    get:
+      tags: [Pension operations]
+      operationId: getPensionApplicationOperator
+      summary: One onboarding application
+      parameters:
+        - $ref: '#/components/parameters/ApplicationId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OperatorApplication' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Caller's role or principal may not use this route }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/operator/onboarding/applications/{id}/contribution-received:
+    post:
+      tags: [Pension operations]
+      operationId: recordPensionFirstContribution
+      summary: Record the first contribution of a signed new contract
+      parameters:
+        - $ref: '#/components/parameters/ApplicationId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OperatorApplication' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Caller's role or principal may not use this route }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/operator/transfers:
+    get:
+      tags: [Pension operations]
+      operationId: listPensionTransfers
+      summary: Transfers, newest first
+      parameters:
+        - $ref: '#/components/parameters/TransferStatusQuery'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/TransferRequest' } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Caller's role or principal may not use this route }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/operator/transfers/{id}:
+    get:
+      tags: [Pension operations]
+      operationId: getPensionTransferOperator
+      summary: One transfer
+      parameters:
+        - $ref: '#/components/parameters/TransferId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransferRequest' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Caller's role or principal may not use this route }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/operator/transfers/{id}/counterparty-response:
+    post:
+      tags: [Pension operations]
+      operationId: relayPensionCounterpartyResponse
+      summary: Relay the ceding provider's acceptance or rejection
+      parameters:
+        - $ref: '#/components/parameters/TransferId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CounterpartyResponseRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransferRequest' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Caller's role or principal may not use this route }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/operator/transfers/{id}/funds-received:
+    post:
+      tags: [Pension operations]
+      operationId: recordPensionTransferFunds
+      summary: Record transferred funds, incentive history and original start date
+      parameters:
+        - $ref: '#/components/parameters/TransferId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FundsReceivedRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransferRequest' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Caller's role or principal may not use this route }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/contracts/transfers-in:
+    post:
+      tags: [Pension onboarding]
+      operationId: startPensionTransferIn
+      summary: Start a transfer-in application (onboarding with kind TRANSFER_IN; transferIn required)
+      parameters:
+        - $ref: '#/components/parameters/CustomerPartyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StartApplicationRequest' }
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OnboardingApplication' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Caller's role or principal may not use this route }
+        '503': { description: A collaborator this step depends on is not available (stub integration off) }
 components:
   securitySchemes:
     bearerAuth:
@@ -235,6 +687,32 @@ components:
       schema:
         type: string
         format: uuid
+
+    ApplicationId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    TransferId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    OnboardingStatusQuery:
+      name: status
+      in: query
+      required: false
+      schema: { $ref: '#/components/schemas/OnboardingStatus' }
+    TransferStatusQuery:
+      name: status
+      in: query
+      required: false
+      schema: { $ref: '#/components/schemas/TransferStatus' }
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema: { type: integer, minimum: 1, maximum: 500, default: 50 }
 
   responses:
     Contract:
@@ -392,3 +870,175 @@ components:
         notes:
           type: array
           items: { type: string }
+    OnboardingStatus:
+      type: string
+      enum: [STARTED, QUESTIONNAIRE_SUBMITTED, KID_ISSUED, KID_ACCEPTED, SIGNED, ACTIVATED, REJECTED, WITHDRAWN, EXPIRED, TRANSFER_FAILED, ABANDONED]
+    TransferStatus:
+      type: string
+      enum: [AWAITING_CONSENT, REQUESTED, SENT, ACCEPTED, FUNDS_RECEIVED, VALUATED, SETTLED, COMPLETED, REJECTED, TIMED_OUT, CANCELLED, FAILED]
+    OnboardingKind:
+      type: string
+      enum: [NEW_CONTRACT, TRANSFER_IN]
+    EsgPreference:
+      type: string
+      enum: [NONE, CONSIDER, REQUIRED]
+    StartApplicationRequest:
+      type: object
+      required: [productLine, jurisdiction, providerEntityId, providerType, schedule, birthDate]
+      properties:
+        kind: { $ref: '#/components/schemas/OnboardingKind' }
+        productLine: { $ref: '#/components/schemas/ProductLine' }
+        jurisdiction: { type: string }
+        providerEntityId: { type: string, format: uuid }
+        providerType: { $ref: '#/components/schemas/ProviderType' }
+        schedule:
+          type: object
+          required: [amount, currency, frequency]
+          properties:
+            amount: { type: number }
+            currency: { type: string }
+            frequency: { type: string, enum: [MONTHLY, QUARTERLY, ANNUALLY] }
+            employerAmount: { type: number }
+        birthDate: { type: string, format: date }
+        residencyCountry: { type: string }
+        residencyEvidence: { type: array, items: { type: string } }
+        onBehalfOfPartyId:
+          type: string
+          format: uuid
+          description: A guardian applying for a ward; honoured only after party-service verifies the relation.
+        transferIn:
+          type: object
+          required: [providerId, providerName, contractNumber]
+          properties:
+            providerId: { type: string }
+            providerName: { type: string }
+            contractNumber: { type: string }
+    QuestionnaireRequest:
+      type: object
+      required: [riskAppetite, lossTolerance, financialSituationStable]
+      properties:
+        knowledgeLevel: { type: integer, minimum: 0, maximum: 3 }
+        experienceLevel: { type: integer, minimum: 0, maximum: 3 }
+        riskAppetite: { type: integer, minimum: 0, maximum: 3 }
+        lossTolerance: { type: integer, minimum: 0, maximum: 3 }
+        financialSituationStable: { type: boolean }
+        esgPreference: { $ref: '#/components/schemas/EsgPreference' }
+    ChooseStrategyRequest:
+      type: object
+      properties:
+        strategyCode: { type: string, description: Omitted to accept the recommendation }
+        acknowledgeWarning: { type: boolean }
+        language: { type: string }
+    AcceptKidRequest:
+      type: object
+      required: [documentId]
+      properties:
+        documentId: { type: string }
+    SignRequest:
+      type: object
+      required: [scaChallengeId]
+      properties:
+        scaChallengeId: { type: string }
+    TransferConsentRequest:
+      type: object
+      required: [scaChallengeId]
+      properties:
+        scaChallengeId: { type: string }
+    StrategyRecommendation:
+      type: object
+      properties:
+        recommendedStrategy: { type: string }
+        suitableStrategies: { type: array, items: { type: string } }
+        maxRiskClass: { type: integer }
+        yearsToRetirement: { type: integer }
+        reasons:
+          type: array
+          items:
+            type: string
+            enum: [LIFECYCLE_DEFAULT, HIGHEST_SUITABLE_RISK, SUSTAINABLE_PREFERRED, NO_SUITABLE_STRATEGY_FALLBACK_MOST_CONSERVATIVE, NO_SUSTAINABLE_STRATEGY_AVAILABLE]
+    OnboardingApplication:
+      type: object
+      properties:
+        applicationId: { type: string, format: uuid }
+        kind: { $ref: '#/components/schemas/OnboardingKind' }
+        status: { $ref: '#/components/schemas/OnboardingStatus' }
+        productLine: { $ref: '#/components/schemas/ProductLine' }
+        jurisdiction: { type: string }
+        packVersion: { type: integer }
+        rejectionReasons: { type: array, items: { type: string } }
+        recommendedStrategy: { type: [string, 'null'] }
+        chosenStrategy: { type: [string, 'null'] }
+        unsuitableChoiceAcknowledged: { type: boolean }
+        keyInformationDocumentId: { type: [string, 'null'] }
+        keyInformationDocumentSha256: { type: [string, 'null'] }
+        kidAcceptedAt: { type: [string, 'null'], format: date-time }
+        signedAt: { type: [string, 'null'], format: date-time }
+        contractId: { type: [string, 'null'], format: uuid }
+        transferRequestId: { type: [string, 'null'], format: uuid }
+        coolingOffEndsOn: { type: [string, 'null'], format: date }
+        expiresOn: { type: string, format: date }
+        closedReason: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    QuestionnaireResponse:
+      type: object
+      properties:
+        application: { $ref: '#/components/schemas/OnboardingApplication' }
+        recommendation: { $ref: '#/components/schemas/StrategyRecommendation' }
+    OperatorApplication:
+      type: object
+      properties:
+        partyId: { type: string, format: uuid }
+        application: { $ref: '#/components/schemas/OnboardingApplication' }
+    TransferOutRequest:
+      type: object
+      required: [contractId, receivingProviderId, receivingProviderName, receivingContractNumber]
+      properties:
+        contractId: { type: string, format: uuid }
+        receivingProviderId: { type: string }
+        receivingProviderName: { type: string }
+        receivingContractNumber: { type: string }
+        scaChallengeId: { type: string, description: Required when the participant requests it }
+    CounterpartyResponseRequest:
+      type: object
+      required: [accepted]
+      properties:
+        accepted: { type: boolean }
+        reason: { type: string }
+    IncentiveHistoryEntry:
+      type: object
+      required: [incentiveId, year, amount]
+      properties:
+        incentiveId: { type: string }
+        year: { type: integer }
+        amount: { type: number }
+    FundsReceivedRequest:
+      type: object
+      required: [amount, currency, originalStartDate]
+      properties:
+        amount: { type: number }
+        currency: { type: string }
+        originalStartDate: { type: string, format: date }
+        incentiveHistory: { type: array, items: { $ref: '#/components/schemas/IncentiveHistoryEntry' } }
+    TransferRequest:
+      type: object
+      properties:
+        transferId: { type: string, format: uuid }
+        direction: { type: string, enum: [IN, OUT] }
+        origin: { type: string, enum: [PARTICIPANT, RECEIVING_PROVIDER] }
+        contractId: { type: string, format: uuid }
+        counterpartyProviderId: { type: string }
+        counterpartyProviderName: { type: string }
+        counterpartyContractNumber: { type: string }
+        status: { $ref: '#/components/schemas/TransferStatus' }
+        deadline: { type: string, format: date }
+        grossAmount: { type: [number, 'null'] }
+        fee: { type: [number, 'null'] }
+        netAmount: { type: [number, 'null'] }
+        currency: { type: string }
+        originalStartDate: { type: [string, 'null'], format: date }
+        incentiveHistory: { type: array, items: { $ref: '#/components/schemas/IncentiveHistoryEntry' } }
+        failureReason: { type: [string, 'null'] }
+        compensation: { type: string, enum: [NONE, CONTRACT_CLOSED, CEDING_CANCELLED_AND_CONTRACT_CLOSED, REDEMPTION_REVERSED] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }

@@ -156,7 +156,9 @@ data class PensionContract(
         require(beneficiaries.isEmpty() || total.compareTo(Beneficiary.HUNDRED) == 0) {
             "beneficiary shares must total 100"
         }
-        require(status == ContractStatus.DRAFT || status == ContractStatus.PENDING_ACTIVATION || startDate != null) {
+        // CLOSED is reachable from DRAFT / PENDING_ACTIVATION (withdrawn or never funded, ADR-0334
+        // S2), so a closed contract may never have started.
+        require(status in NEVER_STARTED_ALLOWED || startDate != null) {
             "an activated contract carries its start date"
         }
     }
@@ -185,6 +187,9 @@ data class PensionContract(
 
     fun close(now: Instant): PensionContract = moveTo(ContractStatus.CLOSED, now)
 
+    /** TERMINATING -> TRANSFERRED_OUT once a transfer-out settled (ADR-0334 slice S2). */
+    fun markTransferredOut(now: Instant): PensionContract = moveTo(ContractStatus.TRANSFERRED_OUT, now)
+
     /** Strategy can change in any non-terminal state; the previous elections stay as history. */
     fun electStrategy(strategyCode: String, effectiveFrom: LocalDate, now: Instant): PensionContract {
         check(!status.terminal && status != ContractStatus.TERMINATING) {
@@ -205,6 +210,9 @@ data class PensionContract(
     }
 
     companion object {
+        private val NEVER_STARTED_ALLOWED =
+            setOf(ContractStatus.DRAFT, ContractStatus.PENDING_ACTIVATION, ContractStatus.CLOSED)
+
         @Suppress("LongParameterList")
         fun draft(
             participantPartyId: UUID,
