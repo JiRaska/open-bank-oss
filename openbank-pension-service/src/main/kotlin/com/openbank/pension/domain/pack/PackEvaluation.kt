@@ -4,6 +4,8 @@
 
 package com.openbank.pension.domain.pack
 
+import com.openbank.pension.domain.model.Limits
+import com.openbank.pension.domain.model.PensionContract
 import com.openbank.pension.domain.model.ProductLine
 import java.math.BigDecimal
 import java.math.RoundingMode
@@ -35,6 +37,10 @@ class JurisdictionPackRegistry(packs: List<JurisdictionPack>) {
         byKey[PackKey(jurisdiction, productLine)].orEmpty()
             .lastOrNull { it.isEffectiveOn(date) }
             ?: throw PackNotFoundException("no jurisdiction pack for $jurisdiction/$productLine effective on $date")
+
+    /** The exact version [contract] pinned at creation. */
+    fun pinnedFor(contract: PensionContract): JurisdictionPack =
+        pinned(contract.jurisdiction, contract.productLine, contract.packVersion)
 
     /** The exact version a contract pinned. */
     fun pinned(jurisdiction: String, productLine: ProductLine, version: Int): JurisdictionPack =
@@ -103,8 +109,10 @@ object PackEvaluator {
         employerContributionAnnual: BigDecimal = BigDecimal.ZERO,
         sharedCapUsed: Map<String, BigDecimal> = emptyMap(),
     ): List<IncentiveResult> {
-        require(contribution.signum() >= 0) { "contribution must not be negative" }
-        require(employerContributionAnnual.signum() >= 0) { "employer contribution must not be negative" }
+        Limits.requireAmount(contribution, "contribution")
+        Limits.requireAmount(employerContributionAnnual, "employerContributionAnnual")
+        require(sharedCapUsed.size <= Limits.MAX_ENTRIES) { "too many shared-cap entries" }
+        sharedCapUsed.forEach { (group, used) -> Limits.requireAmount(used, "sharedCapUsed[$group]") }
         val annual = contribution.multiply(BigDecimal(period.periodsPerYear))
         return pack.incentives.map { rule ->
             when (rule.type) {
@@ -127,9 +135,17 @@ object PackEvaluator {
             perPeriod.multiply(rule.rate!!).min(rule.amountCap!!)
         }
         return IncentiveResult(
-            rule.id, rule.type, rule.period, money(amount), null, rule.claimChannel,
-            if (perPeriod < min) "contribution below the minimum $min per ${rule.period}" else
-                "${rule.rate} of the contribution, capped at ${rule.amountCap} per ${rule.period}",
+            rule.id,
+            rule.type,
+            rule.period,
+            money(amount),
+            null,
+            rule.claimChannel,
+            if (perPeriod < min) {
+                "contribution below the minimum $min per ${rule.period}"
+            } else {
+                "${rule.rate} of the contribution, capped at ${rule.amountCap} per ${rule.period}"
+            },
         )
     }
 
@@ -137,7 +153,12 @@ object PackEvaluator {
         val min = rule.minContribution ?: BigDecimal.ZERO
         val amount = if (perPeriod < min) BigDecimal.ZERO else rule.flatAmount!!
         return IncentiveResult(
-            rule.id, rule.type, rule.period, money(amount), null, rule.claimChannel,
+            rule.id,
+            rule.type,
+            rule.period,
+            money(amount),
+            null,
+            rule.claimChannel,
             "flat ${rule.flatAmount} per ${rule.period} from a contribution of $min",
         )
     }
@@ -156,7 +177,12 @@ object PackEvaluator {
         val deductible = above.min(remainingCap(rule, sharedCapUsed))
         val saving = rule.indicativeTaxRate?.let { money(deductible.multiply(it)) }
         return IncentiveResult(
-            rule.id, rule.type, IncentivePeriod.YEAR, money(deductible), saving, rule.claimChannel,
+            rule.id,
+            rule.type,
+            IncentivePeriod.YEAR,
+            money(deductible),
+            saving,
+            rule.claimChannel,
             "annual contribution above ${rule.threshold ?: BigDecimal.ZERO}, up to ${rule.annualCap}" +
                 (rule.sharedCapGroup?.let { " shared across group '$it'" } ?: ""),
         )
@@ -167,8 +193,12 @@ object PackEvaluator {
         employerAnnual: BigDecimal,
         sharedCapUsed: Map<String, BigDecimal>,
     ): IncentiveResult = IncentiveResult(
-        rule.id, rule.type, IncentivePeriod.YEAR, money(employerAnnual.min(remainingCap(rule, sharedCapUsed))),
-        null, rule.claimChannel,
+        rule.id,
+        rule.type,
+        IncentivePeriod.YEAR,
+        money(employerAnnual.min(remainingCap(rule, sharedCapUsed))),
+        null,
+        rule.claimChannel,
         "employer contributions exempt up to ${rule.annualCap}" +
             (rule.sharedCapGroup?.let { " shared across group '$it'" } ?: ""),
     )

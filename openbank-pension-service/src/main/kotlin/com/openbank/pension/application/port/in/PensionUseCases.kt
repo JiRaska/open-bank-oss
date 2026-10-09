@@ -30,9 +30,27 @@ data class CreateDraftCommand(
     val schedule: ContributionSchedule,
     val initialStrategy: String,
     val beneficiaries: List<Beneficiary>,
+    val idempotencyKey: String? = null,
 )
 
+/**
+ * Who is acting. A customer call (through the edge) carries the participant party and may touch
+ * only that party's contracts; a staff call carries none and is limited to reads by policy.
+ * A contract that belongs to someone else is reported as NOT FOUND, never as forbidden, so
+ * contract ids cannot be enumerated.
+ */
+data class Caller(val customerPartyId: UUID?) {
+    /** Every change acts for a participant: a staff caller never mutates a contract. */
+    fun requireParticipant() = require(customerPartyId != null) { "a contract change must be made for the participant" }
+
+    companion object {
+        fun customer(partyId: UUID) = Caller(partyId)
+        val STAFF = Caller(null)
+    }
+}
+
 data class IncentiveEvaluationCommand(
+    val caller: Caller,
     val contractId: UUID,
     val contribution: BigDecimal,
     val period: IncentivePeriod,
@@ -40,18 +58,28 @@ data class IncentiveEvaluationCommand(
     val sharedCapUsed: Map<String, BigDecimal>,
 )
 
-data class EarlyTerminationCommand(val contractId: UUID, val inputs: SurrenderInputs, val confirm: Boolean)
+data class EarlyTerminationCommand(
+    val caller: Caller,
+    val contractId: UUID,
+    val inputs: SurrenderInputs,
+    val confirm: Boolean,
+)
 
 data class EarlyTerminationResult(val contract: PensionContract, val preview: SurrenderPreview)
 
 interface PensionContractUseCase {
     suspend fun createDraft(command: CreateDraftCommand): PensionContract
-    suspend fun submit(id: UUID): PensionContract
-    suspend fun activate(id: UUID): PensionContract
-    suspend fun electStrategy(id: UUID, strategyCode: String, effectiveFrom: LocalDate?): PensionContract
-    suspend fun suspendContributions(id: UUID): PensionContract
-    suspend fun resumeContributions(id: UUID): PensionContract
-    suspend fun get(id: UUID): PensionContract
+    suspend fun submit(caller: Caller, id: UUID): PensionContract
+    suspend fun activate(caller: Caller, id: UUID): PensionContract
+    suspend fun electStrategy(
+        caller: Caller,
+        id: UUID,
+        strategyCode: String,
+        effectiveFrom: LocalDate?,
+    ): PensionContract
+    suspend fun suspendContributions(caller: Caller, id: UUID): PensionContract
+    suspend fun resumeContributions(caller: Caller, id: UUID): PensionContract
+    suspend fun get(caller: Caller, id: UUID): PensionContract
     suspend fun evaluateIncentives(command: IncentiveEvaluationCommand): List<IncentiveResult>
     suspend fun requestEarlyTermination(command: EarlyTerminationCommand): EarlyTerminationResult
 }

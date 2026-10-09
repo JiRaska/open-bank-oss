@@ -27,6 +27,7 @@ import java.util.UUID
 class PensionContractApiIT {
 
     private val base = "/api/v1/pension/contracts"
+    private val party: UUID = UUID.randomUUID()
 
     private fun createBody(providerType: String = "PENSION_COMPANY") = """
         {
@@ -42,9 +43,10 @@ class PensionContractApiIT {
         }
     """.trimIndent()
 
-    private fun create(): String = given()
+    private fun create(key: String = UUID.randomUUID().toString()): String = given()
         .contentType("application/json")
-        .header("X-Customer-Party-Id", UUID.randomUUID().toString())
+        .header("X-Customer-Party-Id", party.toString())
+        .header("Idempotency-Key", key)
         .body(createBody())
         .`when`().post(base)
         .then().statusCode(201)
@@ -52,8 +54,15 @@ class PensionContractApiIT {
         .body("packVersion", equalTo(1))
         .extract().path("contractId")
 
-    private fun post(path: String, body: String = "{}") =
-        given().contentType("application/json").body(body).`when`().post(path).then()
+    private fun post(path: String, body: String = "{}", asParty: UUID? = party) =
+        given().contentType("application/json")
+            .apply { if (asParty != null) header("X-Customer-Party-Id", asParty.toString()) }
+            .header("Idempotency-Key", UUID.randomUUID().toString())
+            .body(body).`when`().post(path).then()
+
+    private fun read(id: String, asParty: UUID?) =
+        given().apply { if (asParty != null) header("X-Customer-Party-Id", asParty.toString()) }
+            .`when`().get("$base/$id").then()
 
     @Test
     @TestSecurity(user = "edge", roles = ["ROLE_API"])
@@ -62,7 +71,8 @@ class PensionContractApiIT {
         post("$base/$id/submit").statusCode(200).body("status", equalTo("PENDING_ACTIVATION"))
         post("$base/$id/activate").statusCode(200).body("status", equalTo("ACTIVE"))
 
-        given().contentType("application/json").body("""{"strategyCode":"DYNAMIC"}""")
+        given().contentType("application/json").header("X-Customer-Party-Id", party.toString())
+            .body("""{"strategyCode":"DYNAMIC"}""")
             .`when`().put("$base/$id/strategy")
             .then().statusCode(200).body("strategyHistory", hasSize<Any>(2))
 
@@ -78,7 +88,7 @@ class PensionContractApiIT {
             .body("payoutConditionsMet", equalTo(false))
             .body("contract.status", equalTo("TERMINATING"))
 
-        given().`when`().get("$base/$id").then().statusCode(200)
+        read(id, party).statusCode(200)
             .body("status", equalTo("TERMINATING"))
             .body("currentStrategy.strategyCode", equalTo("DYNAMIC"))
             .body("beneficiaries[0].name", equalTo("Jane Doe"))
@@ -91,33 +101,67 @@ class PensionContractApiIT {
     fun `an illegal transition is a 409 and an unknown contract a 404`() {
         val id = create()
         post("$base/$id/activate").statusCode(409)
-        given().`when`().get("$base/${UUID.randomUUID()}").then().statusCode(404)
+        read(UUID.randomUUID().toString(), party).statusCode(404)
     }
 
     @Test
     @TestSecurity(user = "edge", roles = ["ROLE_API"])
     fun `a missing header or a provider the pack does not permit is a 400, not a 500`() {
-        given().contentType("application/json").body(createBody())
+        given().contentType("application/json").header("Idempotency-Key", "k").body(createBody())
+            .`when`().post(base).then().statusCode(400)
+        given().contentType("application/json").header("X-Customer-Party-Id", party.toString()).body(createBody())
             .`when`().post(base).then().statusCode(400)
         given().contentType("application/json")
-            .header("X-Customer-Party-Id", UUID.randomUUID().toString())
+            .header("X-Customer-Party-Id", party.toString())
+            .header("Idempotency-Key", UUID.randomUUID().toString())
             .body(createBody(providerType = "BANK"))
             .`when`().post(base).then().statusCode(400)
     }
 
+    @Test
+    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    fun `another customer's contract is a 404 on read and on every action, and the owner gets 200`() {
+        val id = create()
+        val stranger = UUID.randomUUID()
+        read(id, stranger).statusCode(404)
+        post("$base/$id/submit", asParty = stranger).statusCode(404)
+        post("$base/$id/incentive-evaluation", """{"contribution":1000,"period":"MONTH"}""", stranger).statusCode(404)
+        post("$base/$id/early-termination", """{"currentValue":1}""", stranger).statusCode(404)
+        given().contentType("application/json").header("X-Customer-Party-Id", stranger.toString())
+            .body("""{"strategyCode":"DYNAMIC"}""").`when`().put("$base/$id/strategy").then().statusCode(404)
+        read(id, party).statusCode(200).body("status", equalTo("DRAFT"))
+    }
+
+    @Test
+    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    fun `a customer-role caller without the party header is refused`() {
+        val id = create()
+        read(id, null).statusCode(400)
+    }
+
+    @Test
+    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    fun `a retried create with the same Idempotency-Key returns the same contract`() {
+        val key = UUID.randomUUID().toString()
+        assertThat(create(key)).isEqualTo(create(key))
+    }
+
     private fun electionRows(contractId: UUID): List<String> {
         val url = ConfigProvider.getConfig().getValue("quarkus.datasource.jdbc.url", String::class.java)
-        DriverManager.getConnection(url, "openbank", "openbank_secret").use { conn ->
-            conn.prepareStatement(
-                "select strategy_code from pension_strategy_elections where contract_id = ? order by id",
-            ).use { st ->
+        val sql = "select strategy_code from pension_strategy_elections where contract_id = ? order by id"
+        return DriverManager.getConnection(url, "openbank", "openbank_secret").use { conn ->
+            conn.prepareStatement(sql).use { st ->
                 st.setObject(1, contractId)
-                st.executeQuery().use { rs ->
-                    val out = mutableListOf<String>()
-                    while (rs.next()) out += rs.getString(1)
-                    return out
-                }
+                st.executeQuery().use { rs -> generateSequence { if (rs.next()) rs.getString(1) else null }.toList() }
             }
         }
+    }
+
+    @Test
+    @TestSecurity(user = "alice", roles = ["ROLE_OPERATOR"])
+    fun `staff may read any contract without the party header but cannot change one`() {
+        val id = create()
+        read(id, null).statusCode(200).body("contractId", equalTo(id))
+        post("$base/$id/submit", asParty = null).statusCode(400)
     }
 }

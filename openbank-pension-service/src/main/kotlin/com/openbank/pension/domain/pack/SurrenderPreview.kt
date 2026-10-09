@@ -4,6 +4,7 @@
 
 package com.openbank.pension.domain.pack
 
+import com.openbank.pension.domain.model.Limits
 import com.openbank.pension.domain.model.PensionContract
 import java.math.BigDecimal
 import java.time.LocalDate
@@ -44,7 +45,12 @@ object SurrenderCalculator {
         inputs: SurrenderInputs,
         exitDate: LocalDate,
     ): SurrenderPreview {
-        require(inputs.currentValue.signum() >= 0) { "currentValue must not be negative" }
+        Limits.requireAmount(inputs.currentValue, "currentValue")
+        require(inputs.incentivesReceived.size <= Limits.MAX_ENTRIES) { "too many incentive entries" }
+        inputs.incentivesReceived.forEach { (id, years) ->
+            require(years.size <= Limits.MAX_ENTRIES * 2) { "too many years for incentive $id" }
+            years.values.forEach { Limits.requireAmount(it, "incentivesReceived[$id]") }
+        }
         val age = Period.between(contract.participantBirthDate, exitDate).years
         val start = contract.startDate ?: exitDate
         val months = ChronoUnit.MONTHS.between(start, exitDate)

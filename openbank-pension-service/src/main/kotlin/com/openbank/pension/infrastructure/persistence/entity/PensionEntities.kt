@@ -65,6 +65,9 @@ class PensionContractEntity : PanacheEntity() {
     @Column(name = "start_date")
     var startDate: LocalDate? = null
 
+    @Column(name = "idempotency_key")
+    var idempotencyKey: String? = null
+
     @Column(name = "created_at", nullable = false)
     lateinit var createdAt: Instant
 

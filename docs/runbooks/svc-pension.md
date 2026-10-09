@@ -51,18 +51,6 @@ triaging an incident that starts on `pension`.
 - **Downstream errors:** verify the upstream dependencies above are healthy before
   assuming the fault is local.
 
-## Jurisdiction packs (ADR-0334 §3)
-
-- Packs load from `src/main/resources/jurisdiction-packs/` at **startup** (`@Startup`). A pack
-  that fails the closed schema (unknown key, missing field a rule type needs) stops the pod at
-  boot with `invalid jurisdiction pack <file>` — fix the file, do not hand-patch the pod.
-- A contract creation answering 400 `no jurisdiction pack for <J>/<line> effective on <date>` is
-  the fail-closed rule working: no pack version is in force for that pair on that date.
-- Every contract pins its pack version; adding a new version never changes an existing contract.
-  Removing a version from `index.json` that a contract pinned makes that contract's incentive and
-  termination calls fail — never delete a released version.
-- The shipped CZ packs are marked `REQUIRES_LEGAL_REVIEW`; their values are reference data.
-
 ## Disaster recovery
 
 - **RPO target:** ≤ 5 min (continuous archiving). **RTO target:** ≤ 30 min (restore + warm-up).

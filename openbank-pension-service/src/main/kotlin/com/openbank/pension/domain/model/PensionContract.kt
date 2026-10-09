@@ -18,6 +18,35 @@ enum class PayoutForm { LUMP_SUM, ANNUITY, PHASED_WITHDRAWAL, EARLY_WITHDRAWAL, 
 enum class ContributionFrequency { MONTHLY, QUARTERLY, ANNUALLY }
 
 /**
+ * Input bounds. Every amount that reaches this service is caller-supplied, so each one is bounded
+ * here rather than trusted to fit a NUMERIC(19,4) column or a sane evaluation: an unbounded
+ * BigDecimal is a 500 at flush, or a pathological multiplication, not a business answer.
+ */
+object Limits {
+    val MAX_AMOUNT: BigDecimal = BigDecimal("1000000000")
+    const val MAX_SCALE = 4
+    const val MAX_CODE_LENGTH = 64
+    const val MAX_NAME_LENGTH = 256
+    const val MAX_BENEFICIARIES = 10
+    const val MAX_ENTRIES = 20
+
+    fun requireAmount(value: BigDecimal, field: String) {
+        require(value.signum() >= 0) { "$field must not be negative" }
+        require(value <= MAX_AMOUNT) { "$field must not exceed $MAX_AMOUNT" }
+        require(value.stripTrailingZeros().scale() <= MAX_SCALE) { "$field must have at most $MAX_SCALE decimals" }
+    }
+
+    fun requireCode(value: String, field: String) {
+        require(value.isNotBlank() && value.length <= MAX_CODE_LENGTH) {
+            "$field must be 1..$MAX_CODE_LENGTH characters"
+        }
+        require(value.all { it.isLetterOrDigit() || it == '-' || it == '_' }) {
+            "$field may contain only letters, digits, '-' and '_'"
+        }
+    }
+}
+
+/**
  * Contract lifecycle (ADR-0334 §1). Every edge is listed here and nowhere else; the aggregate asks
  * [canMoveTo] before every change, so an unlisted transition is unrepresentable rather than merely
  * untested. The three terminal states have no outgoing edge.
@@ -51,13 +80,9 @@ enum class ContractStatus {
     }
 }
 
-data class StrategyElection(
-    val strategyCode: String,
-    val effectiveFrom: LocalDate,
-    val electedAt: Instant,
-) {
+data class StrategyElection(val strategyCode: String, val effectiveFrom: LocalDate, val electedAt: Instant) {
     init {
-        require(strategyCode.isNotBlank()) { "strategyCode must not be blank" }
+        Limits.requireCode(strategyCode, "strategyCode")
     }
 }
 
@@ -68,8 +93,8 @@ data class ContributionSchedule(
     val employerAmount: BigDecimal = BigDecimal.ZERO,
 ) {
     init {
-        require(amount.signum() >= 0) { "contribution amount must not be negative" }
-        require(employerAmount.signum() >= 0) { "employer contribution must not be negative" }
+        Limits.requireAmount(amount, "contribution amount")
+        Limits.requireAmount(employerAmount, "employer contribution")
         require(currency.length == ISO_CURRENCY_LENGTH) { "currency must be an ISO 4217 code" }
     }
 
@@ -78,13 +103,11 @@ data class ContributionSchedule(
     }
 }
 
-data class Beneficiary(
-    val name: String,
-    val partyId: UUID? = null,
-    val sharePercent: BigDecimal,
-) {
+data class Beneficiary(val name: String, val partyId: UUID? = null, val sharePercent: BigDecimal) {
     init {
-        require(name.isNotBlank()) { "beneficiary name must not be blank" }
+        require(name.isNotBlank() && name.length <= Limits.MAX_NAME_LENGTH) {
+            "beneficiary name must be 1..${Limits.MAX_NAME_LENGTH} characters"
+        }
         require(sharePercent.signum() > 0 && sharePercent <= HUNDRED) { "beneficiary share must be in (0, 100]" }
     }
 
@@ -115,11 +138,19 @@ data class PensionContract(
     val strategyHistory: List<StrategyElection>,
     val beneficiaries: List<Beneficiary>,
     val startDate: LocalDate?,
+    /** Client-supplied key making a retried create a no-op; unique per participant. */
+    val idempotencyKey: String? = null,
     val createdAt: Instant,
     val updatedAt: Instant,
 ) {
     init {
         require(strategyHistory.isNotEmpty()) { "a contract always carries an elected strategy" }
+        require(beneficiaries.size <= Limits.MAX_BENEFICIARIES) {
+            "at most ${Limits.MAX_BENEFICIARIES} beneficiaries"
+        }
+        require(idempotencyKey == null || idempotencyKey.length in 1..Limits.MAX_NAME_LENGTH) {
+            "idempotency key must be 1..${Limits.MAX_NAME_LENGTH} characters"
+        }
         val total = beneficiaries.fold(BigDecimal.ZERO) { acc, b -> acc + b.sharePercent }
         require(beneficiaries.isEmpty() || total.compareTo(Beneficiary.HUNDRED) == 0) {
             "beneficiary shares must total 100"
@@ -190,6 +221,7 @@ data class PensionContract(
             beneficiaries: List<Beneficiary>,
             today: LocalDate,
             now: Instant,
+            idempotencyKey: String? = null,
         ): PensionContract = PensionContract(
             id = UUID.randomUUID(),
             participantPartyId = participantPartyId,
@@ -204,6 +236,7 @@ data class PensionContract(
             strategyHistory = listOf(StrategyElection(initialStrategy, today, now)),
             beneficiaries = beneficiaries,
             startDate = null,
+            idempotencyKey = idempotencyKey,
             createdAt = now,
             updatedAt = now,
         )
