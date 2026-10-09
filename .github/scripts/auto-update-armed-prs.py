@@ -13,7 +13,8 @@ organisation-owned repository.
 WHAT IT DOES
 ------------
 For every open, non-draft, same-repository PR with auto-merge armed, whose `mergeable_state` is
-`behind` and whose REQUIRED contexts (read live from the branch rules, never hard-coded) have all
+`behind` (or whose initially `unknown` state settles to mergeable with `compare.behind_by > 0`)
+and whose REQUIRED contexts (read live from the branch rules, never hard-coded) have all
 completed successfully on the current head, it calls
 `PUT /repos/{o}/{r}/pulls/{n}/update-branch` with `expected_head_sha`. Everything else is left
 alone, with one log line per decision:
@@ -74,6 +75,7 @@ import json
 import os
 import pathlib
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -252,6 +254,47 @@ def self_test() -> int:
         ok = result == 0 and "strict up-to-date checks disabled" in output.getvalue()
         failures += not ok
         print(f"{'PASS' if ok else 'FAIL'}  non-strict mode exits before PR enumeration")
+    # GitHub can report unknown while the boolean mergeability and compare API have
+    # already settled. The complete run must update only the proven behind case.
+    def unknown_get(path: str) -> object:
+        if path.endswith("/pulls/42"):
+            return {**fixture_get(path), "mergeable_state": "unknown", "mergeable": True}
+        return fixture_get(path)
+    for name, mergeable, comparison, want_update in (
+        ("unknown + mergeable + behind", True, (200, {"behind_by": 2}), True),
+        ("unknown + dirty", False, (200, {"behind_by": 2}), False),
+        ("unknown + up to date", True, (200, {"behind_by": 0}), False),
+        ("unknown + compare API failure", True, (503, "unavailable"), False),
+        ("unknown + malformed compare", True, (200, {"status": "diverged"}), False),
+        ("unknown + undecided", None, (200, {"behind_by": 2}), False),
+    ):
+        calls = []
+        def unknown_api(method, path, body=None):
+            calls.append((method, path))
+            if "/compare/" in path:
+                return comparison
+            if method == "GET" and path.endswith("/pulls/42"):
+                return 200, {**unknown_get(path), "mergeable": mergeable}
+            if method == "PUT":
+                return 202, {}
+            raise AssertionError(f"unexpected API call {method} {path}")
+        def initial_get(path):
+            if path.endswith("/pulls/42"):
+                return {**unknown_get(path), "mergeable": mergeable}
+            return unknown_get(path)
+        with patch.dict(globals(), {"required_policy": lambda *_: (["Gitleaks"], True),
+                                    "get": initial_get, "head_checks": lambda *_: {"Gitleaks": "success"},
+                                    "api": unknown_api}), patch.object(time, "sleep"):
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                result = run("example/repo", "main", 5, 0, False, 20)
+        put_calls = [call for call in calls if call[0] == "PUT"]
+        compare_calls = [call for call in calls if "/compare/main..." in call[1]]
+        ok = (result == 0 and bool(put_calls) == want_update and
+              (bool(compare_calls) == (mergeable is True)) and
+              (mergeable is not None or len(calls) <= 2))
+        failures += not ok
+        print(f"{'PASS' if ok else 'FAIL'}  {name}: update={bool(put_calls)}")
     # Full-fleet serialization (plan()).
     t0 = "2026-09-01T00:00:00Z"
     def E(n, kind, ok=True, building=False, since=t0):
@@ -407,6 +450,40 @@ def branch_update_count(repo: str, number: int, branch: str) -> int:
     )
 
 
+def settle_mergeable_state(repo: str, branch: str, number: int, full: dict) -> tuple[dict, str]:
+    """Resolve GitHub's transient `unknown` without assuming that unknown is safe to update.
+
+    A settled conflict wins over any compare result. Comparison only answers whether the
+    PR head is behind the base; it cannot establish that the two heads can merge.
+    """
+    for attempt in range(3):
+        state = full.get("mergeable_state")
+        if state not in (None, "unknown"):
+            return full, state
+        mergeable = full.get("mergeable")
+        if mergeable is False:
+            return full, "dirty"
+        if mergeable is True:
+            head = full["head"]["sha"]
+            code, comparison = api("GET", f"/repos/{repo}/compare/{branch}...{head}")
+            if code != 200 or not isinstance(comparison, dict):
+                return full, "unknown"
+            behind_by = comparison.get("behind_by")
+            if type(behind_by) is not int or behind_by < 0:
+                return full, "unknown"
+            # In base...head, behind_by is the number of base commits missing from head.
+            return full, "behind" if behind_by > 0 else "clean"
+        if attempt < 2:
+            time.sleep(1)
+            code, refreshed = api("GET", f"/repos/{repo}/pulls/{number}")
+            if code != 200 or not isinstance(refreshed, dict):
+                return full, "unknown"
+            if refreshed.get("head", {}).get("sha") != full["head"]["sha"]:
+                return full, "unknown"
+            full = refreshed
+    return full, "unknown"
+
+
 def run(repo: str, branch: str, max_updates: int, debounce: int, dry_run: bool,
         fleet_threshold: int, max_updates_per_pr: int = 2) -> int:
     required, strict = required_policy(repo, branch)
@@ -426,10 +503,11 @@ def run(repo: str, branch: str, max_updates: int, debounce: int, dry_run: bool,
     for p in armed:
         n = p["number"]
         full = get(f"/repos/{repo}/pulls/{n}")
+        full, state = settle_mergeable_state(repo, branch, n, full)
         sha = shas[n] = full["head"]["sha"]
         pr = {"draft": full["draft"], "auto_merge": full["auto_merge"],
               "same_repo": (full["head"].get("repo") or {}).get("full_name") == repo,
-              "mergeable_state": full.get("mergeable_state")}
+              "mergeable_state": state}
         kind, building = "unknown", False
         if not pr["same_repo"]:
             ok, why = decide(pr, required, {}, now, None, debounce)
