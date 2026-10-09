@@ -137,7 +137,7 @@ class QuestionnaireService(
         val recommendation = onboarding.recommendation(id, partyId)
         return ProfileView(
             assessment = assessment,
-            questionSet = setFor(application),
+            questionSet = setFor(application, assessment),
             recommendation = recommendation,
             recommendedStrategyWarnings = WarningPolicy.required(
                 recommendation.recommended,
@@ -156,7 +156,7 @@ class QuestionnaireService(
         val assessment =
             checkNotNull(onboarding.assessmentOf(id, partyId)) { "the questionnaire has not been answered" }
         val recommendation = onboarding.recommendation(id, partyId)
-        return setFor(application) to WarningPolicy.required(strategyCode, assessment, recommendation)
+        return setFor(application, assessment) to WarningPolicy.required(strategyCode, assessment, recommendation)
     }
 
     private fun view(application: OnboardingApplication, previous: SuitabilityAssessment?): QuestionnaireView {
@@ -185,4 +185,8 @@ class QuestionnaireService(
 
     private fun setFor(application: OnboardingApplication): QuestionSet =
         questionSets.questionSet(application.jurisdiction, application.productLine)
+
+    private fun setFor(application: OnboardingApplication, assessment: SuitabilityAssessment): QuestionSet =
+        assessment.questionnaire?.let { questionSets.questionSet(it.questionSetId, it.questionSetVersion) }
+            ?: setFor(application)
 }
