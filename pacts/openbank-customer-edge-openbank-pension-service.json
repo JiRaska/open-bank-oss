@@ -22,6 +22,170 @@
       }
     },
     {
+      "description": "GET the customer party's own pension contracts",
+      "providerStates": [
+        {
+          "name": "the customer party holds an active pension contract"
+        }
+      ],
+      "request": {
+        "headers": {
+          "X-Customer-Party-Id": "11111111-1111-4111-8111-111111111111"
+        },
+        "method": "GET",
+        "path": "/api/v1/pension/contracts"
+      },
+      "response": {
+        "body": [
+          {
+            "contractId": "44444444-4444-4444-8444-444444444444",
+            "createdAt": "2026-10-01T10:00:00Z",
+            "jurisdiction": "CZ",
+            "packVersion": 1,
+            "participantPartyId": "11111111-1111-4111-8111-111111111111",
+            "productLine": "DPS",
+            "providerType": "PENSION_COMPANY",
+            "schedule": {
+              "amount": 1000,
+              "currency": "CZK",
+              "frequency": "MONTHLY"
+            },
+            "status": "ACTIVE",
+            "updatedAt": "2026-10-01T10:00:00Z"
+          }
+        ],
+        "headers": {
+          "Content-Type": "application/json; charset=UTF-8"
+        },
+        "matchingRules": {
+          "body": {
+            "$": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 1
+                }
+              ]
+            },
+            "$[*].contractId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$[*].createdAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].jurisdiction": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].packVersion": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$[*].participantPartyId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$[*].productLine": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "DPS|DIP"
+                }
+              ]
+            },
+            "$[*].providerType": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].schedule.amount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$[*].schedule.currency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[A-Z]{3}"
+                }
+              ]
+            },
+            "$[*].schedule.frequency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].status": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "DRAFT|PENDING_ACTIVATION|ACTIVE|SUSPENDED|TERMINATING|PAID_OUT|TRANSFERRED_OUT|CLOSED"
+                }
+              ]
+            },
+            "$[*].updatedAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json(;\\s?charset=[\\w\\-]+)?"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
       "description": "GET the pension contract to prove the customer holds it",
       "providerStates": [
         {
@@ -183,7 +347,21 @@
       ],
       "request": {
         "headers": {
+          "Idempotency-Key": "pact-key",
           "X-Customer-Party-Id": "11111111-1111-4111-8111-111111111111"
+        },
+        "matchingRules": {
+          "header": {
+            "Idempotency-Key": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": ".+"
+                }
+              ]
+            }
+          }
         },
         "method": "POST",
         "path": "/api/v1/pension/contracts/44444444-4444-4444-8444-444444444444/suspend"
@@ -504,7 +682,7 @@
       }
     },
     {
-      "description": "POST a draft pension contract for the customer party",
+      "description": "POST an onboarding application with the party's birth date and residency",
       "providerStates": [
         {
           "name": "the customer party holds no pension contract"
@@ -512,50 +690,50 @@
       ],
       "request": {
         "body": {
-          "beneficiaries": [
-
-          ],
-          "birthDate": "1990-05-01",
+          "birthDate": "1985-05-05",
           "jurisdiction": "CZ",
           "productLine": "DPS",
           "providerEntityId": "55555555-5555-4555-8555-555555555555",
           "providerType": "PENSION_COMPANY",
-          "residencyCountry": null,
+          "residencyCountry": "CZ",
           "schedule": {
             "amount": 1000,
             "currency": "CZK",
             "employerAmount": null,
             "frequency": "MONTHLY"
-          },
-          "strategyCode": "BALANCED"
+          }
         },
         "headers": {
           "Content-Type": "application/json",
+          "Idempotency-Key": "pact-key",
           "X-Customer-Party-Id": "11111111-1111-4111-8111-111111111111"
         },
+        "matchingRules": {
+          "header": {
+            "Idempotency-Key": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": ".+"
+                }
+              ]
+            }
+          }
+        },
         "method": "POST",
-        "path": "/api/v1/pension/contracts"
+        "path": "/api/v1/pension/onboarding/applications"
       },
       "response": {
         "body": {
-          "contractId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
-          "createdAt": "2026-10-01T10:00:00Z",
-          "jurisdiction": "CZ",
-          "packVersion": 1,
-          "participantPartyId": "11111111-1111-4111-8111-111111111111",
+          "applicationId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+          "kind": "NEW_CONTRACT",
           "productLine": "DPS",
-          "providerType": "PENSION_COMPANY",
-          "schedule": {
-            "amount": 1000,
-            "currency": "CZK",
-            "frequency": "MONTHLY"
-          },
-          "status": "DRAFT",
-          "updatedAt": "2026-10-01T10:00:00Z"
+          "status": "STARTED"
         },
         "generators": {
           "body": {
-            "$.contractId": {
+            "$.applicationId": {
               "type": "Uuid"
             }
           }
@@ -565,7 +743,7 @@
         },
         "matchingRules": {
           "body": {
-            "$.contractId": {
+            "$.applicationId": {
               "combine": "AND",
               "matchers": [
                 {
@@ -574,36 +752,11 @@
                 }
               ]
             },
-            "$.createdAt": {
+            "$.kind": {
               "combine": "AND",
               "matchers": [
                 {
                   "match": "type"
-                }
-              ]
-            },
-            "$.jurisdiction": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            },
-            "$.packVersion": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "integer"
-                }
-              ]
-            },
-            "$.participantPartyId": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "regex",
-                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
                 }
               ]
             },
@@ -616,49 +769,7 @@
                 }
               ]
             },
-            "$.providerType": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            },
-            "$.schedule.amount": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "number"
-                }
-              ]
-            },
-            "$.schedule.currency": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "regex",
-                  "regex": "[A-Z]{3}"
-                }
-              ]
-            },
-            "$.schedule.frequency": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            },
             "$.status": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "regex",
-                  "regex": "DRAFT|PENDING_ACTIVATION|ACTIVE|SUSPENDED|TERMINATING|PAID_OUT|TRANSFERRED_OUT|CLOSED"
-                }
-              ]
-            },
-            "$.updatedAt": {
               "combine": "AND",
               "matchers": [
                 {

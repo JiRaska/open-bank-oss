@@ -5,6 +5,7 @@
 package com.openbank.customeredge.contract
 
 import au.com.dius.pact.consumer.MockServer
+import au.com.dius.pact.consumer.dsl.LambdaDsl.newJsonArrayMinLike
 import au.com.dius.pact.consumer.dsl.LambdaDsl.newJsonBody
 import au.com.dius.pact.consumer.dsl.LambdaDslObject
 import au.com.dius.pact.consumer.dsl.PactDslRequestWithoutPath
@@ -31,17 +32,18 @@ import java.util.Optional
 import java.util.UUID
 
 /**
- * Consumer contract for the calls customer-edge makes to pension-service (ADR-0334 S6) on the
- * routes S1 has shipped. The real [CustomerPensionResource] and [UpstreamClient] drive every
- * interaction, and every expected path is a LITERAL.
+ * Consumer contract for the calls customer-edge makes to pension-service (ADR-0334 S6) against
+ * its API 1.1.0 (the S8 integration). The real [CustomerPensionResource] and [UpstreamClient] drive
+ * every interaction, and every expected path is a LITERAL. Every POST records the
+ * `Idempotency-Key` pension-service requires, and the application records the residency the edge
+ * derives from the party record (party-service is stubbed here; it is a separate provider).
  *
  * By-id routes are two interactions, because the edge reads the contract with the party header to
  * prove ownership before acting. The 404 for an unknown contract is what that guard relies on, and
  * the 401 records that pension-service refuses a caller with no M2M identity (ADR-0279).
  *
- * Provider replay: pension-service is not on main yet, so its `@PactFolder` replay of this pact
- * lands with the service (#12350); the pact is listed in check-pact-provider-replay.py's
- * KNOWN_UNCOVERED until then.
+ * Provider replay: `PensionPactProviderVerificationTest` and
+ * `PensionNegativeAuthProviderVerificationTest` in openbank-pension-service (`@PactFolder`, every PR).
  */
 @ExtendWith(PactConsumerTestExt::class)
 @PactTestFor(providerName = "openbank-pension-service", pactVersion = PactSpecVersion.V3)
@@ -65,6 +67,15 @@ class CustomerEdgePensionPactConsumerTest {
                 exchange.sendResponseHeaders(200, bytes.size.toLong())
                 exchange.responseBody.use { it.write(bytes) }
             }
+            // party-service is a separate provider: the record the application's eligibility facts
+            // are derived from.
+            createContext("/api/v1/parties/") { exchange ->
+                val bytes = """{"id":"$PARTY_ID","dateOfBirth":"1985-05-05","address":{"countryCode":"CZ"}}"""
+                    .toByteArray()
+                exchange.responseHeaders.add("Content-Type", "application/json")
+                exchange.sendResponseHeaders(200, bytes.size.toLong())
+                exchange.responseBody.use { it.write(bytes) }
+            }
             start()
         }
     }
@@ -73,33 +84,51 @@ class CustomerEdgePensionPactConsumerTest {
     fun stopTokenStub() = tokenStub.stop(0)
 
     @Pact(consumer = "openbank-customer-edge", provider = "openbank-pension-service")
-    fun createContract(builder: PactDslWithProvider): RequestResponsePact = builder
+    fun startApplication(builder: PactDslWithProvider): RequestResponsePact = builder
         .given(NO_CONTRACT_STATE)
-        .uponReceiving("POST a draft pension contract for the customer party")
-        .path("/api/v1/pension/contracts")
+        .uponReceiving("POST an onboarding application with the party's birth date and residency")
+        .path("/api/v1/pension/onboarding/applications")
         .method("POST")
         .headers(mapOf("Content-Type" to "application/json", "X-Customer-Party-Id" to PARTY_ID))
+        .matchHeader("Idempotency-Key", ".+", "pact-key")
         .body(
             newJsonBody { b ->
                 b.stringValue("productLine", "DPS")
                 b.stringValue("jurisdiction", "CZ")
                 b.stringValue("providerEntityId", PROVIDER_ID)
                 b.stringValue("providerType", "PENSION_COMPANY")
-                b.stringValue("birthDate", "1990-05-01")
-                b.nullValue("residencyCountry")
                 b.`object`("schedule") { s ->
                     s.numberValue("amount", 1000)
                     s.stringValue("currency", "CZK")
                     s.stringValue("frequency", "MONTHLY")
                     s.nullValue("employerAmount")
                 }
-                b.stringValue("strategyCode", "BALANCED")
-                b.array("beneficiaries") { }
+                b.stringValue("birthDate", "1985-05-05")
+                b.stringValue("residencyCountry", "CZ")
             }.build(),
         )
         .willRespondWith()
         .status(201)
-        .body(newJsonBody { c -> contract(c, "DRAFT", anyId = true) }.build())
+        .body(
+            newJsonBody { a ->
+                a.uuid("applicationId")
+                a.stringType("kind", "NEW_CONTRACT")
+                a.stringType("status", "STARTED")
+                a.stringMatcher("productLine", "DPS|DIP", "DPS")
+            }.build(),
+        )
+        .toPact()
+
+    @Pact(consumer = "openbank-customer-edge", provider = "openbank-pension-service")
+    fun listContracts(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(ACTIVE_STATE)
+        .uponReceiving("GET the customer party's own pension contracts")
+        .path("/api/v1/pension/contracts")
+        .method("GET")
+        .headers(mapOf("X-Customer-Party-Id" to PARTY_ID))
+        .willRespondWith()
+        .status(200)
+        .body(newJsonArrayMinLike(1) { a -> a.`object` { c -> contract(c, "ACTIVE") } }.build())
         .toPact()
 
     @Pact(consumer = "openbank-customer-edge", provider = "openbank-pension-service")
@@ -129,6 +158,7 @@ class CustomerEdgePensionPactConsumerTest {
         .path("/api/v1/pension/contracts/$CONTRACT_ID/suspend")
         .method("POST")
         .headers(mapOf("X-Customer-Party-Id" to PARTY_ID))
+        .matchHeader("Idempotency-Key", ".+", "pact-key")
         .willRespondWith()
         .status(200)
         .body(newJsonBody { c -> contract(c, "SUSPENDED") }.build())
@@ -157,16 +187,25 @@ class CustomerEdgePensionPactConsumerTest {
         .toPact()
 
     @Test
-    @PactTestFor(pactMethod = "createContract")
-    fun `creating a draft matches the provider`(mockServer: MockServer) {
-        val response = resource(mockServer).create(
+    @PactTestFor(pactMethod = "startApplication")
+    fun `opening an application matches the provider`(mockServer: MockServer) {
+        val response = resource(mockServer).startApplication(
             """{"productLine":"DPS","jurisdiction":"CZ","providerEntityId":"$PROVIDER_ID",
-               "providerType":"PENSION_COMPANY","birthDate":"1990-05-01","strategyCode":"BALANCED",
+               "providerType":"PENSION_COMPANY","birthDate":"2010-01-01","residencyCountry":"SK",
                "schedule":{"amount":"1000","currency":"CZK","frequency":"MONTHLY"}}""",
             "pact-key",
         )
 
         assertThat(response.status).isEqualTo(201)
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "listContracts")
+    fun `listing own contracts matches the provider`(mockServer: MockServer) {
+        val response = resource(mockServer).contracts()
+
+        assertThat(response.status).isEqualTo(200)
+        assertThat(response.entity as String).contains(CONTRACT_ID)
     }
 
     @Test
@@ -219,6 +258,7 @@ class CustomerEdgePensionPactConsumerTest {
             fundServiceUrl = "http://127.0.0.1:9"
             catalogUrl = "http://127.0.0.1:9"
             scaServiceUrl = "http://127.0.0.1:${tokenStub.address.port}"
+            partyServiceUrl = "http://127.0.0.1:${tokenStub.address.port}"
         }
     }
 

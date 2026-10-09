@@ -15,8 +15,8 @@ import java.util.UUID
 /**
  * What a customer may send to the pension routes (ADR-0334 S6), validated before anything goes
  * upstream. Each builder returns a body built from scratch — a field the customer sends that is not
- * named here never reaches pension-service, so no request can carry a participant, a current value
- * or an incentive history of the customer's choosing. A failure message names the first bad field.
+ * named here never reaches pension-service, so no request can carry a participant, a birth date or
+ * a residency of the customer's choosing. A failure message names the first bad field.
  */
 @Suppress("TooManyFunctions")
 internal object PensionInput {
@@ -31,28 +31,77 @@ internal object PensionInput {
     private val CURRENCY = Regex("^[A-Z]{3}$")
     private val IBAN = Regex("^[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}$")
     private val MAX_AMOUNT = BigDecimal("1000000000")
-    private val HUNDRED = BigDecimal("100")
+    private val LANGUAGE = Regex("^[a-z]{2}$")
+    private val ESG = setOf("NONE", "CONSIDER", "REQUIRED")
+    private val MANDATE_KINDS = setOf("STANDING_ORDER", "DIRECT_DEBIT")
     private const val MAX_NAME = 200
-    private const val MAX_BENEFICIARIES = 10
+    private const val MAX_LEVEL = 3
     private const val MAX_HORIZON_YEARS = 60
     private const val MIN_TAX_YEAR = 2000
 
-    fun createContract(node: JsonNode?): Result<Map<String, Any?>> = runCatching {
+    /**
+     * The customer's part of an onboarding application (S2). Birth date and residency are NOT taken
+     * from the customer: the edge reads them from the party record (see [CustomerPensionResource]),
+     * so eligibility runs on the facts KYC holds, never on what the app declares.
+     */
+    fun application(node: JsonNode?): Result<Map<String, Any?>> = runCatching {
         requireNotNull(node) { "body must be a JSON object" }
-        val beneficiaries = node.path("beneficiaries").takeIf { !it.isMissingNode && !it.isNull }
         mapOf(
             "productLine" to oneOf(node, "productLine", PRODUCT_LINES),
             "jurisdiction" to matching(node, "jurisdiction", JURISDICTION),
             "providerEntityId" to uuid(node, "providerEntityId"),
             "providerType" to oneOf(node, "providerType", PROVIDER_TYPES),
-            "birthDate" to pastDate(node, "birthDate"),
-            "residencyCountry" to node.text("residencyCountry")?.also {
-                require(JURISDICTION.matches(it)) { "residencyCountry must be an ISO 3166 alpha-2 code" }
-            },
             "schedule" to schedule(node.path("schedule")),
-            "strategyCode" to matching(node, "strategyCode", CODE),
-            "beneficiaries" to (beneficiaries?.let { beneficiaryList(it) } ?: emptyList<Any>()),
         )
+    }
+
+    /** An application of kind TRANSFER_IN: the application fields plus the ceding contract. */
+    fun transferIn(node: JsonNode?): Result<Map<String, Any?>> = application(node).mapCatching { base ->
+        val ceding = node!!.path("transferIn")
+        require(ceding.isObject) { "transferIn is required" }
+        base + (
+            "transferIn" to mapOf(
+                "providerId" to bounded(ceding, "providerId", "transferIn.providerId"),
+                "providerName" to bounded(ceding, "providerName", "transferIn.providerName"),
+                "contractNumber" to bounded(ceding, "contractNumber", "transferIn.contractNumber"),
+            )
+            )
+    }
+
+    fun questionnaire(node: JsonNode?): Result<Map<String, Any?>> = runCatching {
+        requireNotNull(node) { "body must be a JSON object" }
+        val stable = node.path("financialSituationStable")
+        require(stable.isBoolean) { "financialSituationStable must be true or false" }
+        mapOf(
+            "knowledgeLevel" to level(node, "knowledgeLevel", required = false),
+            "experienceLevel" to level(node, "experienceLevel", required = false),
+            "riskAppetite" to level(node, "riskAppetite", required = true),
+            "lossTolerance" to level(node, "lossTolerance", required = true),
+            "financialSituationStable" to stable.booleanValue(),
+            "esgPreference" to node.text("esgPreference")?.also {
+                require(it in ESG) { "esgPreference must be one of ${ESG.joinToString()}" }
+            },
+        )
+    }
+
+    /** Strategy choice; an omitted strategyCode accepts the recommendation. */
+    fun chooseStrategy(node: JsonNode?): Result<Map<String, Any?>> = runCatching {
+        requireNotNull(node) { "body must be a JSON object" }
+        val acknowledge = node.path("acknowledgeWarning")
+        require(acknowledge.isMissingNode || acknowledge.isNull || acknowledge.isBoolean) {
+            "acknowledgeWarning must be true or false"
+        }
+        mapOf(
+            "strategyCode" to
+                node.text("strategyCode")?.also { require(CODE.matches(it)) { "strategyCode is malformed" } },
+            "acknowledgeWarning" to acknowledge.takeIf { it.isBoolean }?.booleanValue(),
+            "language" to node.text("language")?.also { require(LANGUAGE.matches(it)) { "language is malformed" } },
+        )
+    }
+
+    fun kidAcceptance(node: JsonNode?): Result<Map<String, Any?>> = runCatching {
+        requireNotNull(node) { "body must be a JSON object" }
+        mapOf("documentId" to bounded(node, "documentId", "documentId"))
     }
 
     fun strategy(node: JsonNode?): Result<Map<String, Any?>> = runCatching {
@@ -75,39 +124,40 @@ internal object PensionInput {
         )
     }
 
-    fun beneficiaries(node: JsonNode?): Result<Map<String, Any?>> = runCatching {
+    /** A contribution payment mandate (S3 funding route): standing order or direct debit. */
+    fun mandate(node: JsonNode?): Result<Map<String, Any?>> = runCatching {
         requireNotNull(node) { "body must be a JSON object" }
-        mapOf("beneficiaries" to beneficiaryList(node.path("beneficiaries")))
+        val first =
+            date(requireNotNull(node.text("firstCollection")) { "firstCollection is required" }, "firstCollection")
+        require(!first.isBefore(LocalDate.now())) { "firstCollection must not be in the past" }
+        val amount = amount(node.decimalString("amount"), "amount")
+        require(amount > BigDecimal.ZERO && amount.scale() <= 2) { "amount must be positive with at most two decimals" }
+        mapOf(
+            "kind" to oneOf(node, "kind", MANDATE_KINDS),
+            "debtorIban" to iban(node, "debtorIban"),
+            "amount" to amount,
+            "currency" to matching(node, "currency", CURRENCY),
+            "firstCollection" to first.toString(),
+        )
     }
 
+    /** The S8 simulation request; the projection is illustrative and binds nothing. */
     fun simulation(node: JsonNode?): Result<Map<String, Any?>> = runCatching {
         requireNotNull(node) { "body must be a JSON object" }
         val horizon = requireNotNull(node.int("horizonYears")?.takeIf { it in 1..MAX_HORIZON_YEARS }) {
             "horizonYears must be between 1 and $MAX_HORIZON_YEARS"
         }
+        val monthly = amount(node.decimalString("monthlyContribution"), "monthlyContribution")
+        require(monthly > BigDecimal.ZERO) { "monthlyContribution must be positive" }
         mapOf(
             "productLine" to oneOf(node, "productLine", PRODUCT_LINES),
             "jurisdiction" to matching(node, "jurisdiction", JURISDICTION),
-            "strategyCode" to matching(node, "strategyCode", CODE),
-            "birthDate" to pastDate(node, "birthDate"),
-            "monthlyContribution" to amount(node.decimalString("monthlyContribution"), "monthlyContribution"),
+            "strategyCode" to
+                node.text("strategyCode")?.also { require(CODE.matches(it)) { "strategyCode is malformed" } },
+            "monthlyContribution" to monthly,
             "employerMonthlyContribution" to node.decimalString("employerMonthlyContribution")
                 ?.let { amount(it, "employerMonthlyContribution") },
             "horizonYears" to horizon,
-        )
-    }
-
-    fun transferIn(node: JsonNode?): Result<Map<String, Any?>> = runCatching {
-        requireNotNull(node) { "body must be a JSON object" }
-        val name = requireNotNull(node.text("cedingProviderName")?.trim()?.takeIf { it.length in 1..MAX_NAME }) {
-            "cedingProviderName is required and at most $MAX_NAME characters"
-        }
-        mapOf(
-            "cedingProviderName" to name,
-            "cedingContractNumber" to requireNotNull(
-                node.text("cedingContractNumber")?.trim()?.takeIf { it.length in 1..MAX_NAME },
-            ) { "cedingContractNumber is required" },
-            "cedingProviderId" to node.text("cedingProviderId")?.let { uuidOf(it, "cedingProviderId") },
         )
     }
 
@@ -130,13 +180,13 @@ internal object PensionInput {
         )
     }
 
-    /** Confirmation of a quoted payout: the payout IBAN. The SCA challenge travels in `X-SCA-Challenge-Id`. */
-    fun payoutConfirmation(node: JsonNode?): Result<Map<String, Any?>> = runCatching {
+    /**
+     * The account a signed exit pays to: termination sign, payout confirm and payout account change
+     * all take only `payoutIban`. The SCA challenge travels in `X-SCA-Challenge-Id`.
+     */
+    fun payoutAccount(node: JsonNode?): Result<Map<String, Any?>> = runCatching {
         requireNotNull(node) { "body must be a JSON object" }
-        val iban = requireNotNull(node.text("payoutIban")?.replace(" ", "")?.uppercase()?.takeIf(IBAN::matches)) {
-            "payoutIban must be an IBAN"
-        }
-        mapOf("payoutIban" to iban)
+        mapOf("payoutIban" to iban(node, "payoutIban"))
     }
 
     fun taxYear(raw: String?): Int? {
@@ -144,28 +194,23 @@ internal object PensionInput {
         return year.takeIf { it in MIN_TAX_YEAR..LocalDate.now().year }
     }
 
-    private fun beneficiaryList(node: JsonNode): List<Map<String, Any?>> {
-        require(node.isArray && node.size() <= MAX_BENEFICIARIES) {
-            "beneficiaries must be a list of at most $MAX_BENEFICIARIES"
+    private fun level(node: JsonNode, field: String, required: Boolean): Int? {
+        val value = node.path(field)
+        if (!required && (value.isMissingNode || value.isNull)) return null
+        return requireNotNull(value.takeIf { it.isIntegralNumber }?.intValue()?.takeIf { it in 0..MAX_LEVEL }) {
+            "$field must be an integer from 0 to $MAX_LEVEL"
         }
-        val list = node.mapIndexed { i, b ->
-            val name = requireNotNull(b.text("name")?.trim()?.takeIf { it.length in 1..MAX_NAME }) {
-                "beneficiaries[$i].name is required"
-            }
-            val share = requireNotNull(
-                b.decimalString("sharePercent")?.let(::BigDecimal)?.takeIf { it > BigDecimal.ZERO && it <= HUNDRED },
-            ) { "beneficiaries[$i].sharePercent must be greater than 0 and at most 100" }
-            mapOf(
-                "name" to name,
-                "partyId" to b.text("partyId")?.let { uuidOf(it, "beneficiaries[$i].partyId") },
-                "sharePercent" to share,
-            )
-        }
-        require(list.isEmpty() || list.sumOf { it["sharePercent"] as BigDecimal }.compareTo(HUNDRED) == 0) {
-            "beneficiary shares must total 100"
-        }
-        return list
     }
+
+    private fun bounded(node: JsonNode, field: String, label: String): String =
+        requireNotNull(node.text(field)?.trim()?.takeIf { it.length in 1..MAX_NAME }) {
+            "$label is required and at most $MAX_NAME characters"
+        }
+
+    private fun iban(node: JsonNode, field: String): String =
+        requireNotNull(node.text(field)?.replace(" ", "")?.uppercase()?.takeIf(IBAN::matches)) {
+            "$field must be an IBAN"
+        }
 
     private fun oneOf(node: JsonNode, field: String, allowed: Set<String>, label: String = field): String =
         requireNotNull(node.text(field)?.takeIf { it in allowed }) { "$label must be one of ${allowed.joinToString()}" }
@@ -181,12 +226,6 @@ internal object PensionInput {
 
     private fun date(raw: String, field: String): LocalDate =
         requireNotNull(runCatching { LocalDate.parse(raw) }.getOrNull()) { "$field must be an ISO date" }
-
-    private fun pastDate(node: JsonNode, field: String): String {
-        val value = date(requireNotNull(node.text(field)) { "$field is required" }, field)
-        require(value.isBefore(LocalDate.now())) { "$field must be in the past" }
-        return value.toString()
-    }
 
     private fun amount(raw: String?, field: String): BigDecimal =
         requireNotNull(raw?.let(::BigDecimal)?.takeIf { it >= BigDecimal.ZERO && it <= MAX_AMOUNT }) {
@@ -249,25 +288,6 @@ internal object PensionProjection {
         "amount" to t.decimalString("amount"),
         "navPerUnit" to t.decimalString("navPerUnit"),
         "pricedAt" to t.text("pricedAt"),
-    )
-
-    fun earlyTermination(e: JsonNode): Map<String, Any?> = mapOf(
-        "payoutConditionsMet" to e.path("payoutConditionsMet").asBoolean(false),
-        "earlyWithdrawalAllowed" to e.path("earlyWithdrawalAllowed").asBoolean(false),
-        "ageAtExit" to e.int("ageAtExit"),
-        "durationMonths" to e.int("durationMonths"),
-        "currentValue" to e.decimalString("currentValue"),
-        "fee" to e.decimalString("fee"),
-        "clawbacks" to e.path("clawbacks").filter { it.isObject }.map {
-            mapOf(
-                "incentiveId" to it.text("incentiveId"),
-                "mode" to it.text("mode"),
-                "amount" to it.decimalString("amount"),
-            )
-        },
-        "estimatedNetPayout" to e.decimalString("estimatedNetPayout"),
-        "notes" to e.path("notes").filter { it.isTextual }.map { it.textValue() },
-        "status" to e.path("contract").text("status"),
     )
 
     /** One published retirement offering, from its catalog projection. Null when it is not a pension product. */

@@ -3,9 +3,9 @@
 > Screen and flow contract for the customer app (`openbank-app`, a separate repository —
 > ADR-0064) for the pension lifecycle of ADR-0334. It describes **what the app shows and which
 > customer-edge route backs it**, not pixels. Domain truth lives in ADR-0334 and the
-> `openbank-pension-service` / `openbank-pension-fund-service` contracts; the app talks only to
-> `openbank-customer-edge` under `/customer/v1/pension` (API 1.80.0). When this doc and the ADR
-> disagree, the ADR wins.
+> `openbank-pension-service` (API 1.1.0) / `openbank-pension-fund-service` contracts; the app talks
+> only to `openbank-customer-edge` under `/customer/v1/pension` (API 1.80.0). When this doc and the
+> ADR disagree, the ADR wins.
 
 ## Ground rules
 
@@ -17,18 +17,19 @@
   shows an "illustrative, not an offer" banner.
 - **Money is a decimal string.** Render with the locale's grouping; never parse to a float for
   arithmetic.
-- **Backend-pending routes** (marked `x-backend-pending` in the edge spec) answer 404 until their
-  backend slice ships. The app treats a 404 on those routes as "not available yet" and hides the
-  feature, never as an error.
-- Every POST sends an `Idempotency-Key` per user intent (one tap), reused on retry.
-- **Every state change needs SCA** (submit, pause/resume, strategy, contribution, beneficiaries,
-  transfer-in, early-termination notice, payout confirm). Send the call once without
-  `X-SCA-Challenge-Id`: the edge answers 403 `SCA_REQUIRED` with `scaLinking` (purpose `APPROVAL`,
-  `approvalRequestId`, `payloadSha256`) computed from the exact request. Raise the sca-service
-  challenge with that linking, let the customer approve it on the device, then repeat the
-  identical request with the challenge id in `X-SCA-Challenge-Id`. A changed body no longer
-  matches (403 `SCA_REJECTED`) and a challenge is spent once. Payout confirm is the exception: its
-  challenge is bound by pension-service to the quoted payout.
+- **Every POST that changes something requires an `Idempotency-Key`** per user intent (one tap),
+  reused on retry; without it the edge answers 400. The simulation is the only POST without one.
+- **Every state change needs SCA**, in one of two shapes:
+  - *Edge-bound* (pause/resume, strategy change, contribution mandate, application withdrawal):
+    send the call once without `X-SCA-Challenge-Id`; the edge answers 403 `SCA_REQUIRED` with
+    `scaLinking` (purpose `APPROVAL`, `approvalRequestId`, `payloadSha256`) computed from the exact
+    request. Raise the sca-service challenge with that linking, let the customer approve it, then
+    repeat the identical request with the challenge id. A changed body no longer matches (403
+    `SCA_REJECTED`) and a challenge is spent once.
+  - *Document-bound* (application sign, termination sign, payout confirm, payout account change):
+    pension-service binds the challenge to what it issued (the key-information document, or the
+    `quoteHash` plus the payout account) and consumes it itself; the edge only refuses a call
+    without one.
 
 ## Flows
 
@@ -38,29 +39,34 @@
 |---|---|---|
 | Product list (DPS / DIP) | `GET /pension/products` | Group by `productLine`; show risk class (1–7), annual management fee, SFDR article, minimum monthly contribution. |
 | Product detail | same data | List `requiredDocuments` the customer will be asked to read. |
-| Simulator | `POST /pension/simulations` *(pending)* | Inputs: strategy, monthly and employer contribution, horizon. Output as a range, with the illustrative banner. |
+| Simulator | `POST /pension/simulations` | Inputs: monthly and employer contribution, horizon, optional strategy. One projection per offered strategy; always `illustrative: true` with the returned `disclaimer`. |
 
-### 2. Onboard — new contract
+### 2. Onboard — new contract (application flow)
 
-1. **Eligibility and identity** — reuse the KYC state (`GET /customer/v1/kyc`); stop if not verified.
-2. **Suitability and ESG questionnaire** — not yet backed by an edge route (gap; ADR-0334 §4 step 2).
-3. **Strategy choice** — from the selected offering; recommend the questionnaire's outcome.
-4. **Contribution and beneficiaries** — amount, frequency, optional employer amount; beneficiaries
-   whose shares must total 100 % (the edge refuses otherwise with a message naming the rule).
-5. **Review and documents** — key-information document and contract terms (document-service).
-6. **Create** — `POST /pension/contracts` → contract in `DRAFT`. A 400 `PENSION_RULE_REFUSED`
-   means the jurisdiction pack refused it (age, residency, provider type): show a calm explanation.
-7. **Sign and submit** — SCA, then `POST /pension/contracts/{id}/submit` → `PENDING_ACTIVATION`.
-   The cooling-off period and activation are server-side; the app shows "waiting for activation".
+1. **Eligibility and identity** — reuse the KYC state (`GET /customer/v1/kyc`); stop if not
+   verified. Birth date and residency come from the customer's profile, never from this flow: a
+   422 `PARTY_PROFILE_INCOMPLETE` means the profile lacks one — send the customer to update it.
+2. **Open the application** — `POST /pension/applications` (product line, jurisdiction, provider,
+   contribution schedule). A rejected application carries `rejectionReasons`.
+3. **Questionnaire** — `POST /pension/applications/{id}/questionnaire` (knowledge, experience,
+   risk appetite, loss tolerance, stable finances, ESG preference).
+4. **Recommendation** — `GET /pension/applications/{id}/recommendation`.
+5. **Strategy** — `POST /pension/applications/{id}/strategy`; omit `strategyCode` to accept the
+   recommendation. Choosing an unsuitable one needs `acknowledgeWarning: true`. The answer names
+   the issued key-information document.
+6. **Key-information document** — show it, then `POST /pension/applications/{id}/kid/accept`.
+7. **Sign** — `POST /pension/applications/{id}/sign` with the approved challenge. The contract is
+   activated server-side after the cooling-off period (`coolingOffEndsOn`); within it the customer
+   may `POST /pension/applications/{id}/withdraw` (edge-bound SCA).
 
 ### 3. Onboard — transfer-in
 
-Same as flow 2, then `POST /pension/contracts/{id}/transfers-in` *(pending, S2)* with the ceding
-provider's name and contract number. Show the transfer as a tracked step on the contract overview.
+`POST /pension/transfers-in` opens an application of kind `TRANSFER_IN` with the same fields plus
+`transferIn` (ceding provider id, name, contract number), then steps 3–7 of flow 2.
 
 ### 4. Contract overview
 
-`GET /pension/contracts` *(pending)* for the list; `GET /pension/contracts/{id}` for one contract:
+`GET /pension/contracts` for the list; `GET /pension/contracts/{id}` for one contract:
 
 - status badge (`DRAFT`, `PENDING_ACTIVATION`, `ACTIVE`, `SUSPENDED` = "contributions paused",
   `TERMINATING`, `PAID_OUT`, `TRANSFERRED_OUT`, `CLOSED`);
@@ -74,41 +80,42 @@ provider's name and contract number. Show the transfer as a tracked step on the 
 | Action | Route | Rule shown to the customer |
 |---|---|---|
 | Change strategy | `PUT /pension/contracts/{id}/strategy` | Units switch at the next NAV; effective date never in the past. |
-| Change contribution | `PUT /pension/contracts/{id}/contribution` *(pending, S3)* | |
+| Pay contributions | `GET …/payment-reference` (one-off), `POST …/contribution-mandates` (standing order / direct debit) | First collection today or later. |
 | Pause / resume contributions | `POST …/pause`, `POST …/resume` | Pausing keeps the contract and its units. |
-| Beneficiaries | `PUT /pension/contracts/{id}/beneficiaries` *(pending, S5)* | Shares total 100 %. |
-| Tax summary | `GET /pension/contracts/{id}/tax-summary?year=` *(pending, S3)* | Past or current year only. |
+| Tax summary | `GET /pension/contracts/{id}/tax-summary?year=` | Past or current year only. |
 
 A 409 `INVALID_CONTRACT_STATE` means the contract's state does not allow the action; disable the
 action for that state rather than letting the customer hit it.
 
 ### 6. Early termination
 
-1. **Preview** — `POST /pension/contracts/{id}/early-termination/preview`. Show current value,
-   fee, every clawback line, estimated net payout and the pack's `notes`. The value is priced by
-   the bank from the unit register; the customer never enters it.
-   - `incentiveHistoryIncluded: false` → add "state contributions you may have to return are not
-     yet included" (until backend slice S3 wires the incentive register).
-   - 409 `VALUATION_INCOMPLETE` → "some units are awaiting a price, try again after the next
-     valuation day"; 503 `VALUATION_UNAVAILABLE` → "try again later".
-2. **Confirm with SCA** → `POST …/early-termination/notice`; the contract becomes `TERMINATING`.
+1. **Quote** — `POST /pension/contracts/{id}/termination/quote` returns a binding notice: the
+   redemption value (priced by the bank from the unit register), surrender fee, incentive return,
+   deduction recaptures, net payout, `quoteHash` and `quoteExpiresAt`. Show every line.
+2. **Sign** — the customer approves a challenge bound to `quoteHash` and the payout account, then
+   `POST /pension/contracts/{id}/termination/{noticeId}/sign` with `payoutIban`. An expired quote is
+   a 409: quote again.
 
 ### 7. Regular payout
 
-Two steps, both *(pending, S5)*: `POST /pension/contracts/{id}/payouts` returns a binding quote for
-the chosen form (`LUMP_SUM`, `ANNUITY`, `PHASED_WITHDRAWAL`, `FIXED_PERIOD_PENSION`, optional
-`amount` and `months`); after the customer completes SCA,
-`POST /pension/contracts/{id}/payouts/{payoutId}/confirm` with the `scaChallengeId` and the payout
-IBAN. A 400 `PENSION_RULE_REFUSED` means the pack's payout conditions (age, duration) are not met.
+`POST /pension/contracts/{id}/payouts` returns a binding quote for the chosen form (`LUMP_SUM`,
+`ANNUITY`, `PHASED_WITHDRAWAL`, `FIXED_PERIOD_PENSION`, optional `amount` and `months`); after
+the customer approves the challenge, `POST /pension/contracts/{id}/payouts/{payoutId}/confirm`
+with `payoutIban`. A 400 `PENSION_RULE_REFUSED` means the pack's payout conditions (age, duration)
+are not met. `GET …/payouts/{payoutId}` shows the instalments and the account's last four
+characters.
+
+**Changing the payout account** of a running scheduled payout:
+`PUT /pension/contracts/{id}/payouts/{payoutId}/account` with `payoutIban` (document-bound SCA).
+The change is held: `pendingAccountLast4` shows it, and it applies only to instalments due after
+the hold — tell the customer the next payment may still go to the old account.
 
 ### 8. Death
 
 No customer flow: a death claim is reported to and handled by the back office (admin console,
-*Payouts & death claims*). Beneficiaries see only what flow 5 lets the participant set.
+*Payouts & death claims*).
 
 ## Gaps the app must not paper over
 
-- Suitability/ESG questionnaire and key-information document delivery have no edge route yet.
-- Contract list, simulation, contribution change, beneficiaries, tax summary, transfer-in and
-  payout depend on backend slices S2/S3/S5 of #12350.
-- Payout-account change has no route in any slice.
+- No route changes the contribution schedule or the beneficiary designations of an existing
+  contract; pension-service API 1.1.0 has neither.
