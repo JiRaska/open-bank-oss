@@ -44,7 +44,7 @@ info:
   # 1.74.0 -> 1.75.0 (#10016): additive — GET /capabilities (ADR-0310 D5).
   # 1.75.0 -> 1.76.0 (#11966): additive — /holdings, the customer write side of the declared
   # holdings that GET /net-worth reads (ADR-0301 D1).
-  version: 1.78.0
+  version: 1.79.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -98,6 +98,27 @@ tags:
   - name: Complaints
 
 paths:
+  /app-copy:
+    get:
+      operationId: getAppCopy
+      summary: Approved non-personal app messages; bundled client copy remains the fallback
+      security: []
+      responses:
+        '200':
+          description: Published copy; version zero and empty messages explicitly clear overrides
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [version, messages]
+                properties:
+                  version: {type: integer, minimum: 0}
+                  messages:
+                    type: object
+                    maxProperties: 332
+                    additionalProperties: {type: string, maxLength: 240}
+        '502': {description: Invalid upstream document}
+        '503': {description: Copy service unavailable; retain local fallback}
   /external-disclosures/{id}/verify-otp:
     post:
       tags: [External disclosures]
