@@ -92,7 +92,9 @@ interface OutboxRepository {
  * broker in `(created_at, id)` order, under any number of replicas; across aggregates no order
  * is promised.
  */
-interface OutboxRepositoryV2 : OutboxRepository {
+interface OutboxRepositoryV2 :
+    OutboxRepository,
+    SentOutboxRetention {
     /**
      * One `UPDATE … WHERE event_id IN (…)` for every row in [eventIds] (D6): status SENT,
      * `sent_at = updated_at = sentAt`, `attempt_count + 1`, `last_error` cleared. Transactions per
@@ -109,16 +111,49 @@ interface OutboxRepositoryV2 : OutboxRepository {
      */
     suspend fun oldestProcessableAge(now: Instant = Instant.now()): Duration?
 
+    /** Delete up to [batch] DEAD rows whose `updated_at` is older than [olderThan] (D8, 30 d). */
+    suspend fun purgeDead(olderThan: Duration, batch: Int, now: Instant = Instant.now()): Int
+}
+
+/**
+ * Retention of SENT outbox rows (ADR-0327 D8, extended to v1 outboxes by ADR-0329).
+ *
+ * A SENT row has done its job — the broker holds the event and audit-service keeps the durable
+ * record — but its `payload` still carries whatever the event carried, often personal data
+ * (IBANs, names, device decisions). Without a purge it outlives every retention period the
+ * service's own tables declare. The shared `OutboxSentRetentionJob` (openbank-libs-runtime)
+ * discovers every CDI bean of this type and purges it nightly, so an outbox opts IN by
+ * implementing this interface — and `check-outbox-sent-retention.py` fails the build for an
+ * outbox-bearing module that does not.
+ *
+ * Implemented by every [OutboxRepositoryV2] (the kernel base); a v1 repository implements it
+ * by delegation: `SentOutboxRetention by PanacheOutboxRetention(OutboxTableShape("x_outbox"))`.
+ */
+interface SentOutboxRetention {
+    /**
+     * True only when SENT rows still back a live read or replay invariant. The shared job skips
+     * this target entirely; the enforced outbox-retention gate requires a reasoned exemption.
+     * Remove the exemption after the evidence moves to a durable store.
+     */
+    val sentRetentionExempt: Boolean
+        get() = false
+
     /**
      * Delete up to [batch] SENT rows whose `sent_at` is older than [olderThan] (D8); returns the
      * number deleted so the caller can loop until short. Never touches PENDING/FAILED/DISPATCHING
-     * rows, and never DEAD rows — those are [purgeDead]'s, on their own longer window, because a
-     * DEAD row is the producer-side DLQ (D4) until an operator requeues it.
+     * rows, and never DEAD rows — those are the producer-side DLQ (D4) until an operator requeues
+     * them, and they have their own longer window.
      */
     suspend fun purgeSent(olderThan: Duration, batch: Int, now: Instant = Instant.now()): Int
 
-    /** Delete up to [batch] DEAD rows whose `updated_at` is older than [olderThan] (D8, 30 d). */
-    suspend fun purgeDead(olderThan: Duration, batch: Int, now: Instant = Instant.now()): Int
+    /**
+     * `service` label for the retention metrics. The default derives it from the class name —
+     * `ScaOutboxRepositoryImpl` becomes `sca` — after stripping an Arc-generated suffix
+     * (`_Subclass`, `_ClientProxy`; the #5143 lesson). Override where that disagrees with the
+     * service's other outbox metrics.
+     */
+    val retentionLabel: String
+        get() = OutboxRetention.deriveLabel(this::class.java.simpleName)
 }
 
 interface OutboxEventPublisher {
