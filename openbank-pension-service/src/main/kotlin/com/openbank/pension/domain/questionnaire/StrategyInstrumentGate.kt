@@ -45,6 +45,8 @@ data class StrategyInstrumentDecision(
 
 /** A missing, ambiguous, or changed catalog mapping must never inherit aggregate appropriateness. */
 object StrategyInstrumentGate {
+    private const val MAX_COMBINED_SCORE = 6
+
     fun evaluate(
         assessment: SuitabilityAssessment,
         jurisdiction: String,
@@ -52,7 +54,7 @@ object StrategyInstrumentGate {
         mappings: List<StrategyInstrumentMapping>,
         minimumCombinedScore: Int,
     ): StrategyInstrumentDecision {
-        require(minimumCombinedScore in 0..6)
+        require(minimumCombinedScore in 0..MAX_COMBINED_SCORE)
         check(mappings.size == 1) { "exactly one published instrument mapping is required for $strategyCode" }
         val mapping = mappings.single()
         check(

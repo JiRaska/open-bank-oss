@@ -315,7 +315,9 @@ class QuestionnaireWarningGateTest {
         val recommendation = mappedService.recommendation(dip.id, party)
         val profile = ProfileResponse.from(
             ProfileView(
-                assessed, questionSets.questionSet("CZ", ProductLine.DIP), recommendation,
+                assessed,
+                questionSets.questionSet("CZ", ProductLine.DIP),
+                recommendation,
                 setOf(WarningCode.PRODUCT_NOT_APPROPRIATE),
             ),
             "en",

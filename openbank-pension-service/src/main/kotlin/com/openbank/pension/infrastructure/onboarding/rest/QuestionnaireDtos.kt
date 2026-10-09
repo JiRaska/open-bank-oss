@@ -194,7 +194,11 @@ data class ProfileResponse(
                 // The profile has no selected strategy, so the aggregate best-class score is not an answer.
                 appropriate = if (a.strategyInstrumentMappings != null ||
                     a.regime == QuestionnaireRegime.MIFID_SUITABILITY
-                ) null else a.appropriate,
+                ) {
+                    null
+                } else {
+                    a.appropriate
+                },
                 competence = record?.competence.orEmpty().map {
                     CompetenceResponse(it.instrumentClass, it.knowledge, it.experience)
                 },

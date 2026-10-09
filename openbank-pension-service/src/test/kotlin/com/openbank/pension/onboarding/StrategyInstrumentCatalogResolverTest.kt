@@ -61,10 +61,9 @@ class StrategyInstrumentCatalogResolverTest {
             }),
         )
         assertThat(observed?.toInstant()).isEqualTo(at)
-        assertThat(result).singleElement().satisfies {
-            assertThat(it.revision).isEqualTo("$revisionId:7")
-            assertThat(it.instrumentClasses).containsExactlyInAnyOrder("BOND_FUNDS", "EQUITY_FUNDS")
-        }
+        val mapping = result.single()
+        assertThat(mapping.revision).isEqualTo("$revisionId:7")
+        assertThat(mapping.instrumentClasses).containsExactlyInAnyOrder("BOND_FUNDS", "EQUITY_FUNDS")
     }
 
     @Test
