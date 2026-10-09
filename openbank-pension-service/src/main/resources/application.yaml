@@ -87,23 +87,31 @@ quarkus:
 
 
 openbank:
-  # Onboarding and transfer workflows (ADR-0334 S2). Every value is an env override; the worker
-  # switch follows the fleet convention openbank.<service>.worker.enabled.
+  # Temporal (ADR-0334 S8). One client, one namespace; each workflow family polls its OWN task
+  # queue, so a worker never receives a task type it did not register. The worker switch follows
+  # the fleet convention openbank.<service>.worker.enabled. Every value is an env override.
   temporal:
     enabled: ${OPENBANK_TEMPORAL_ENABLED:false}
     server-url: ${OPENBANK_TEMPORAL_SERVER_URL:localhost:7233}
     namespace: ${OPENBANK_TEMPORAL_NAMESPACE:openbank-pension}
-    task-queue: ${OPENBANK_TEMPORAL_TASK_QUEUE:openbank-pension}
   pension:
     worker:
       enabled: ${OPENBANK_PENSION_WORKER_ENABLED:true}
     onboarding:
-      # Dedicated to slice S2's workflow and activity types (ADR-0334 S2).
+      # Onboarding, transfer-in and transfer-out workflows (S2).
       task-queue: ${OPENBANK_PENSION_ONBOARDING_TASK_QUEUE:pension-onboarding}
-    # FAIL CLOSED by default: the KYC, document, SCA, counterparty and fund ports are stubs until
-    # their real adapters land (ADR-0334 S2 follow-ups). Off, every stubbed call answers 503.
+    # FAIL CLOSED by default: the KYC, document, SCA and counterparty ports are stubs until their
+    # real adapters land. Off, every stubbed call answers 503.
     stub-integrations:
       enabled: false
+    exit:
+      # Early termination, payout and death settlement workflows (S5).
+      task-queue: ${OPENBANK_PENSION_EXIT_TASK_QUEUE:pension-exit}
+      stub:
+        # FAIL CLOSED: the SCA, own-account and beneficiary-KYC stubs refuse everything unless a
+        # profile turns them on.
+        checks-accept: false
+        default-value: "0"
   rate-limit:
     enabled: true
     max-concurrent-requests: 100
@@ -131,6 +139,12 @@ authz:
     pension:
       stub-integrations:
         enabled: true
+      worker:
+        enabled: false
+      exit:
+        stub:
+          checks-accept: true
+          default-value: "250000.00"
   quarkus:
     log:
       level: DEBUG
@@ -144,11 +158,17 @@ authz:
 "%test":
   openbank:
     pension:
+      # No Temporal frontend in @QuarkusTest: the tests register their own in-process worker.
       worker:
         enabled: false
       stub-integrations:
         enabled: true
+      exit:
+        stub:
+          checks-accept: true
   quarkus:
+    scheduler:
+      enabled: false
     datasource:
       reactive:
         url: vertx-reactive:postgresql://localhost:5433/openbank_pension_test

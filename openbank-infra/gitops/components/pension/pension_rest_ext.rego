@@ -12,6 +12,13 @@
 #   pension.contract.suspend    — POST /contracts/{id}/suspend
 #   pension.contract.resume     — POST /contracts/{id}/resume
 #   pension.contract.terminate  — POST /contracts/{id}/early-termination
+#   pension.exit.read           — GET  /contracts/{id}/exit/... (eligibility, notice, payout, statement)
+#   pension.exit.terminate      — POST /contracts/{id}/exit/termination/quote, /{noticeId}/sign   (S5)
+#   pension.exit.payout         — POST /contracts/{id}/exit/payouts/quote, /{payoutId}/confirm    (S5)
+#   pension.death.read          — GET  /death-claims/{id}                                         (S5)
+#   pension.death.notify        — POST /death-claims                                              (S5)
+#   pension.death.verify        — PUT  /death-claims/{id}/claimants, POST .../verification        (S5)
+#   pension.death.approve       — POST /death-claims/{id}/approve (four-eyes in the aggregate)    (S5)
 #
 # Narrow rules here, NOT `rules.yaml: authz.role_action_matrix`: a matrix line is a grant to a
 # MACHINE no policy can veto, because Keycloak service-accounts are classified HUMAN and hold
@@ -31,7 +38,22 @@ allowed_reasons contains "operator-pension-read" if {
 	not startswith(input.principal.id, "service-account-")
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE"}
 	role in input.principal.roles
-	input.action == "pension.contract.read"
+	input.action in {"pension.contract.read", "pension.exit.read"}
+}
+
+# Death claims are operator work on evidence: real human staff only, never a service-account, and
+# never the customer edge. Four-eyes (registrar != approver) is enforced in the DeathClaim aggregate.
+allowed_reasons contains "operator-pension-death-claim" if {
+	input.principal.type == "HUMAN"
+	not startswith(input.principal.id, "service-account-")
+	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+	role in input.principal.roles
+	input.action in {
+		"pension.death.read",
+		"pension.death.notify",
+		"pension.death.verify",
+		"pension.death.approve",
+	}
 }
 
 # The customer edge carrying the participant's own intent. Enumerated rather than a `pension.`
@@ -48,6 +70,9 @@ allowed_reasons contains "edge-service-pension" if {
 		"pension.contract.suspend",
 		"pension.contract.resume",
 		"pension.contract.terminate",
+		"pension.exit.read",
+		"pension.exit.terminate",
+		"pension.exit.payout",
 	}
 }
 

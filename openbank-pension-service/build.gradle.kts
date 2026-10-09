@@ -32,7 +32,7 @@ dependencies {
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
 
-    // Onboarding and transfer workflows (ADR-0334 S2): shared TemporalConfig + client producer (ADR-0209 D1).
+    // Onboarding/transfer (S2) and exit (S5) workflows: shared TemporalConfig + client producer (ADR-0209 D1).
     implementation(project(":openbank-libs-temporal"))
     implementation("io.temporal:temporal-sdk:1.25.1")
     implementation(project(":openbank-libs-domain"))
