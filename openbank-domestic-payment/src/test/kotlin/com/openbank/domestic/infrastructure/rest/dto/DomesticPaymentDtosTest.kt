@@ -9,8 +9,10 @@ import com.openbank.domestic.domain.model.DomesticPaymentPriority
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.domestic.domain.model.DomesticRejectReason
 import com.openbank.domestic.domain.model.DomesticTransferScope
+import com.openbank.libs.domain.error.ValidationFailure
 import com.openbank.libs.domain.money.Money
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.time.Instant
@@ -82,6 +84,18 @@ class DomesticPaymentDtosTest {
         ).toCommand("idem-3")
 
         assertThat(command.technicalAccountCode).isEqualTo("TECH-9")
+    }
+
+    @Test
+    fun `technical account submissions still require CZK`() {
+        val request = createRequest(
+            transferScope = "TECHNICAL_ACCOUNT",
+            technicalAccountCode = "TECH-9",
+        ).copy(currency = "EUR")
+
+        assertThatThrownBy { request.toCommand("idem-eur") }
+            .isInstanceOf(ValidationFailure::class.java)
+            .hasMessageContaining("currency EUR is not CZK")
     }
 
     @Test
