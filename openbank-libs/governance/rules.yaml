@@ -1133,6 +1133,17 @@ money_path_services:
                                             # stop card traffic, not add a second human; the sandbox acquirer is
                                             # ROLE_ADMIN, off by default and 404 when off. No operator endpoint
                                             # moves money by hand today — add a verb here when one ships.
+  - openbank-pension-fund-service          # ADR-0334 S4 (#12350): the unit register of segregated pension funds —
+                                            # prices participants' money into and out of fund units at a published
+                                            # NAV, so a wrong NAV or a settled order IS a money movement for every
+                                            # participant who traded at it. Assets are segregated: nothing posts to
+                                            # the bank ledger. Threat model:
+                                            # docs/threat-models/openbank-pension-fund-service.md. four-eyes
+                                            # assessed: NAV publication and strategy-change approval are maker-
+                                            # checker IN THE DOMAIN (approver != maker, refused 403, and a DB CHECK
+                                            # constraint) rather than via four_eyes.actions, because the second
+                                            # step is a distinct action with its own endpoint, not a re-submission
+                                            # of the same verb.
 
 # CNPG clusters that are not owned by a money-path service but sit on the money path one hop
 # away (ADR-0325). They get the money-path cluster shape -- instances >= 2, required hostname

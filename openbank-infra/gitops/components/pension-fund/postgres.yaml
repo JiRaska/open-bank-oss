@@ -1,0 +1,83 @@
+# Single-owner Postgres for pension-fund-service, reconciled by the cluster-wide CNPG operator. CNPG
+# generates the `pension-fund-db-app` secret (username/password for the `openbank` owner) and a
+# `pension-fund-db-rw` Service — both consumed by the pension-fund-service Deployment for the reactive
+# datasource and Flyway migrations. One instance for sandbox FinOps; prod should raise to 3.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: pension-fund-db
+  namespace: pension-fund
+spec:
+  monitoring:
+    enablePodMonitor: true
+  instances: 2
+  # ADR-0325: an update (image bump, config change) promotes the already-updated
+  # standby first and only then restarts the old primary. CNPG's default,
+  # `restart`, restarts the primary IN PLACE; on a single-instance cluster the
+  # operator has no standby and restarts either way, so this is free there.
+  primaryUpdateMethod: switchover
+  primaryUpdateStrategy: unsupervised
+  # ADR-0325 fleet wave: required anti-affinity + zone spread. Changes the pod spec, so CNPG
+  # rolls the standby first and then performs ONE switchover (a write pause of seconds).
+  affinity:
+    enablePodAntiAffinity: true
+    topologyKey: kubernetes.io/hostname
+    podAntiAffinityType: required
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          cnpg.io/cluster: pension-fund-db
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.6
+  storage:
+    storageClass: gp3
+    size: 2Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  postgresql:
+    parameters:
+      wal_keep_size: "64MB"
+  bootstrap:
+    initdb:
+      database: openbank_pension_fund
+      owner: openbank
+  # WAL archiving + base backups to S3. The unit register is the participants' record of ownership
+  # in a segregated fund (ADR-0334); governance.yaml sets retention at 10 years. Credentials from
+  # EKS Pod Identity on the pension-fund-db ServiceAccount.
+  #
+  # A backup that has never been configured reports the SAME success as one that works: CNPG's
+  # archiver is a no-op with a success exit code when no barmanObjectStore exists, and both the
+  # ContinuousArchiving condition and pg_stat_archiver agree with it. Verify by listing the
+  # objects (`aws s3 ls`), never by reading a condition.
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://openbank-sandbox-db-backups/pension-fund-db
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: pension-fund-db-daily
+  namespace: pension-fund
+spec:
+  # CNPG reads this only at creation: without it the cluster has no recovery
+  # point until the first scheduled run, while Ready and ContinuousArchiving
+  # both read True. Adding it to a cluster that already exists is inert.
+  immediate: true
+  schedule: "0 55 4 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: pension-fund-db
