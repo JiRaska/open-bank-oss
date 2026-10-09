@@ -8,6 +8,7 @@ import com.openbank.libs.api.error.ApiError
 import com.openbank.libs.api.error.IdempotencyKeyReusedExceptionMapper
 import com.openbank.libs.api.error.IdempotencyRequestInProgressExceptionMapper
 import com.openbank.libs.idempotency.IdempotencyKeyReusedException
+import com.openbank.libs.idempotency.IdempotencyRecordCorruptException
 import com.openbank.libs.idempotency.IdempotencyRequestInProgressException
 import com.openbank.libs.idempotency.RequestFingerprint
 import com.openbank.libs.idempotency.ReserveResult
@@ -83,6 +84,38 @@ class RedisIdempotencyStoreTest {
     @Test
     fun `unknown key is a miss`(): Unit = runBlocking {
         assertThat(store.lookup("nope", first)).isNull()
+    }
+
+    @Test
+    fun `truncated completed records are neither replayed nor overwritten`(): Unit = runBlocking {
+        listOf("v2|", "v2|$first", "v2|$first|201", "v2|$first|201|2026-09-01T00:00Z").forEach { raw ->
+            backing["idempotency:truncated"] = raw
+            assertThat(store.get("truncated")).isNull()
+            assertThat(store.reserve("truncated", first)).isEqualTo(ReserveResult.Mismatch)
+            assertThat(backing["idempotency:truncated"]).isEqualTo(raw)
+        }
+    }
+
+    @Test
+    fun `HTTP status boundaries and empty body decode faithfully`(): Unit = runBlocking {
+        listOf(100, 599).forEach { status ->
+            backing["idempotency:boundary"] = "v2|$first|$status|2026-09-01T00:00Z|"
+            val record = store.lookup("boundary", first)!!
+            assertThat(record.statusCode).isEqualTo(status)
+            assertThat(record.responseBody).isEmpty()
+            assertThat(record.requestHash).isEqualTo(first)
+        }
+    }
+
+    @Test
+    fun `invalid status or timestamp refuses replay`(): Unit = runBlocking {
+        listOf("99|2026-09-01T00:00Z", "600|2026-09-01T00:00Z", "bad|2026-09-01T00:00Z", "200|bad").forEach { fields ->
+            val raw = "v2|$first|$fields|{}"
+            backing["idempotency:corrupt"] = raw
+            assertThatThrownBy { runBlocking { store.lookup("corrupt", first) } }
+                .isInstanceOf(IdempotencyRecordCorruptException::class.java)
+            assertThat(backing["idempotency:corrupt"]).isEqualTo(raw)
+        }
     }
 
     @Test
