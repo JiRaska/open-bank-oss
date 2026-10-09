@@ -531,7 +531,7 @@ jobs:
               fi
               mkdir -p "${svc}/build/test-intelligence"
               cp "${RUN_JSON}" "${svc}/build/test-intelligence/run.json"
-              receipt_bindings=(--bind "${RUN_JSON#${TMPDIR_ART}/}" "${svc}/build/test-intelligence/run.json")
+              receipt_bindings=(--bind "${RUN_JSON#"${TMPDIR_ART}/"}" "${svc}/build/test-intelligence/run.json")
               # Inside the zip: test-results/*/TEST-*.xml (actions/upload-artifact@v7 strips
               # the leading service/build/ prefix). Reconstruct the full target path.
               while IFS= read -r xml; do
@@ -539,12 +539,12 @@ jobs:
                 target="${svc}/build/${rel}"
                 mkdir -p "$(dirname "${target}")"
                 cp "${xml}" "${target}"
-                receipt_bindings+=(--bind "${xml#${TMPDIR_ART}/}" "${target}")
+                receipt_bindings+=(--bind "${xml#"${TMPDIR_ART}/"}" "${target}")
               done < <(find "${TMPDIR_ART}" -path "*/test-results/*/TEST-*.xml")
               while IFS= read -r xml; do
                 mkdir -p "${svc}/build/reports/kover"
                 cp "${xml}" "${svc}/build/reports/kover/report.xml"
-                receipt_bindings+=(--bind "${xml#${TMPDIR_ART}/}" "${svc}/build/reports/kover/report.xml")
+                receipt_bindings+=(--bind "${xml#"${TMPDIR_ART}/"}" "${svc}/build/reports/kover/report.xml")
               done < <(find "${TMPDIR_ART}" -path '*/reports/kover/report.xml')
               python3 .github/scripts/record-admin-ui-artifact.py \
                 --archive "/tmp/${art_name}.zip" --ledger "$ADMIN_UI_FEED_RECEIPTS" \
