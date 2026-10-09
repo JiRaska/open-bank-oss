@@ -159,3 +159,17 @@ The edge returns small JSON error envelopes of the shape `{"error":"…"}` it ge
 `GET /customer/v1/app-copy` is anonymous and returns only `{version, messages}` projected from the published customer communication style. It exposes no customer information or internal persona instructions. Successful published responses are cacheable for 60 seconds. An absent or retired publication returns version zero and an empty map, explicitly clearing client overrides.
 
 The communication upstream is supplied through `COMMUNICATION_SERVICE_URL` at runtime. A missing configuration or unavailable upstream returns 503; an invalid upstream document returns 502. Clients retain validated cached or bundled copy on either error and must not delay startup waiting for this optional request. The upstream read uses the edge service identity without a customer party header.
+
+## Customer pension API (ADR-0334 S6)
+
+`CustomerPensionResource` serves `/customer/v1/pension` and requires `ROLE_CUSTOMER` plus the declared authorization action. The authenticated party is relayed to pension-service; contract operations first verify `participantPartyId`, returning 404 for an absent or foreign contract. Application reads also conceal upstream 403 as 404.
+
+- `GET /products` projects catalog retirement offerings; `POST /simulations` returns an illustrative projection, without binding a contract. Simulations use a fresh upstream key.
+- `POST /applications` and `POST /transfers-in` start onboarding. Birth date and residency come from the party record; an incomplete profile returns 422 `PARTY_PROFILE_INCOMPLETE`.
+- Applications expose detail, recommendation, questionnaire, strategy selection, KID acceptance, signing and withdrawal. Signing forwards the challenge to pension-service, which consumes it against the application evidence.
+- Contracts expose detail, fund transactions, pause/resume, strategy election, payment reference, contribution mandates and tax summary.
+- Exit operations expose termination quotes/notices/signing and payout quotes/status/confirmation. `PUT /contracts/{contractId}/payouts/{payoutId}/account` forwards the SCA challenge for a held account change; pension-service decides when that change becomes effective.
+
+Pension mutations carrying an `Idempotency-Key` parameter require a nonblank caller key: they reject an absent key rather than generating a replacement. SCA-protected routes require the challenge header declared in OpenAPI. Termination signing, payout confirmation and payout-account changes forward the challenge without consuming it in edge; the upstream verifies the quoted or account-change evidence. Other guarded transitions consume the challenge in edge.
+
+These are implemented routes, not evidence that the upstream services are deployed. Pension-service and pension-fund-service rollout prerequisites and remaining collaborator stubs are tracked in #12350 and their PRs; illustrative projections are not guarantees of investment returns.
