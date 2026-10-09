@@ -3194,6 +3194,7 @@ class CustomerEdgeResource(
                     extractTextField(objectMapper, body, "reference"),
                     debtor.toString(),
                     held,
+                    initiatorActorId = authenticatedActorId(),
                 ),
                 scaChallengeId,
                 "payments.sepaInstant",
@@ -3209,9 +3210,42 @@ class CustomerEdgeResource(
             customer.partyId.toString(),
             request,
             key,
+            mapOf("X-Customer-Actor-Id" to authenticatedActorId().toString()),
         )
         auditPayment(resp, customer, "payments.sepaInstant", amount, currency, creditorIban, scaChallengeId)
         return resp
+    }
+
+    /** Resolve an instant instruction only from its durable receipt; an absent row remains UNKNOWN. */
+    @POST
+    @Path("/sepa-instant/receipts/lookup")
+    @Authorize(action = "customer.payments.read")
+    @Blocking
+    fun lookupSepaInstantReceipt(body: String?): Response {
+        val customer = customer()
+        val request = runCatching { objectMapper.readTree(body) as? ObjectNode }.getOrNull()
+            ?: return badRequest("Malformed receipt request")
+        val key = request.path("idempotencyKey").takeIf { it.isTextual }?.asText()?.takeIf { it.isNotBlank() }
+            ?: return badRequest("idempotencyKey is required")
+        val accountId = parseDebtorAccountId(objectMapper, request.toString())
+            ?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+            ?: return badRequest("debtorAccountId is required")
+        val account = fetchAccount(accountId, customer.partyId)
+            ?: return forbidden("Debtor account does not belong to caller")
+        if (extractOwnerPartyId(account) != customer.partyId.toString()) {
+            return forbidden("Debtor account does not belong to caller")
+        }
+        val upstreamBody = objectMapper.createObjectNode().apply {
+            put("idempotencyKey", key)
+            put("debtorAccountId", accountId.toString())
+        }
+        return upstream.post(
+            "$sepaInstantServiceUrl/api/v1/sepa-instant/receipts/lookup",
+            customer.partyId.toString(),
+            upstreamBody.toString(),
+            null,
+            mapOf("X-Customer-Actor-Id" to authenticatedActorId().toString()),
+        )
     }
 
     /**

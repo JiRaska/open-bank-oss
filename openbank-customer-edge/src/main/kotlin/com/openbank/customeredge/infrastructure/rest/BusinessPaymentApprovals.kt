@@ -46,7 +46,7 @@ data class HeldPayment(
     val railRequest: String,
     /** Kind-specific fields a signer is shown: frequency, creditorIdentifier, mandateReference. */
     val extras: Map<String, String?> = emptyMap(),
-    /** Verified original initiator, frozen for receipt provenance on delayed SEPA release. */
+    /** Verified original initiator, frozen for receipt provenance on delayed rail release. */
     val initiatorActorId: UUID? = null,
 )
 
@@ -191,7 +191,7 @@ class BusinessPaymentApprovals(
     private fun createBody(customer: CustomerIdentity, challenge: UUID, p: HeldPayment): String {
         val payload = objectMapper.createObjectNode().apply {
             put("rail", p.rail.name)
-            if (p.rail in setOf(PaymentRail.DOMESTIC, PaymentRail.SEPA)) {
+            if (p.rail in setOf(PaymentRail.DOMESTIC, PaymentRail.SEPA, PaymentRail.SEPA_INSTANT)) {
                 put("initiatorActorId", (p.initiatorActorId ?: customer.authenticatedActor).toString())
             }
             p.amount?.let { put("amount", it) }
@@ -230,16 +230,29 @@ class BusinessPaymentApprovals(
             report(entity, approvalId, ok = false, ref = null, error = "frozen payload has no rail request")
             return mapOf("status" to "RELEASE_FAILED", "error" to "frozen payload has no rail request")
         }
-        val actor = payload.path("initiatorActorId").takeIf { it.isTextual }
-            ?.asText()?.let { runCatching { UUID.fromString(it) }.getOrNull() } ?: verifiedInitiatorId
+        val frozenActor = payload.path("initiatorActorId").takeIf { it.isTextual }
+            ?.asText()?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+        // An old instant hold has no durable original actor; a later signer is not its maker.
+        val actor = frozenActor ?: if (rail == PaymentRail.SEPA_INSTANT) null else verifiedInitiatorId
         val frozenBody = objectMapper.writeValueAsString(railRequest)
-        val resp = if (rail in setOf(PaymentRail.DOMESTIC, PaymentRail.SEPA)) {
+        val resp = if (rail in setOf(PaymentRail.DOMESTIC, PaymentRail.SEPA, PaymentRail.SEPA_INSTANT)) {
             if (actor == null) {
                 report(entity, approvalId, ok = false, ref = null, error = "initiator identity unavailable")
                 return mapOf("status" to "RELEASE_FAILED", "error" to "initiator identity unavailable")
             }
             val receiptHeaders = mapOf("X-Customer-Actor-Id" to actor.toString())
-            upstream.post(railUrl(rail), entity.toString(), frozenBody, approvalId.toString(), receiptHeaders)
+            val key = if (rail == PaymentRail.SEPA_INSTANT) {
+                val originalKey = railRequest.path("idempotencyKey").takeIf { it.isTextual }
+                    ?.asText()?.takeIf { it.isNotBlank() }
+                if (originalKey == null) {
+                    report(entity, approvalId, ok = false, ref = null, error = "original key unavailable")
+                    return mapOf("status" to "RELEASE_FAILED", "error" to "original key unavailable")
+                }
+                originalKey
+            } else {
+                approvalId.toString()
+            }
+            upstream.post(railUrl(rail), entity.toString(), frozenBody, key, receiptHeaders)
         } else {
             upstream.post(railUrl(rail), entity.toString(), frozenBody, approvalId.toString())
         }

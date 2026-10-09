@@ -44,7 +44,8 @@ info:
   # 1.74.0 -> 1.75.0 (#10016): additive — GET /capabilities (ADR-0310 D5).
   # 1.75.0 -> 1.76.0 (#11966): additive — /holdings, the customer write side of the declared
   # holdings that GET /net-worth reads (ADR-0301 D1).
-  version: 1.80.0
+  # 1.80 -> 1.81 (#12317): additive SEPA Instant receipt lookup.
+  version: 1.81.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -2827,6 +2828,41 @@ paths:
           description: >-
             Under X-Acting-For only: the company's signing policy could not be evaluated, so the
             payment is refused rather than sent with a single signature.
+
+  /sepa-instant/receipts/lookup:
+    post:
+      tags: [SEPA Instant]
+      summary: Resolve an ambiguous instant-payment submission by its original key
+      description: >-
+        The caller must still control the debit account. A missing or in-flight durable receipt
+        remains UNKNOWN; no key is placed in the URL.
+      operationId: lookupSepaInstantReceipt
+      security:
+        - customerOidc: [payments:read]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [idempotencyKey, debtorAccountId]
+              properties:
+                idempotencyKey: {type: string}
+                debtorAccountId: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Matching receipt or UNKNOWN
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [state]
+                properties:
+                  state: {type: string, enum: [FOUND, UNKNOWN]}
+                  paymentId: {type: string, format: uuid, nullable: true}
+                  status: {type: string, nullable: true}
+        '400': {description: Invalid request}
+        '403': {description: Debit account does not belong to caller}
 
   /sepa-instant/{paymentId}/recall:
     post:

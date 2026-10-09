@@ -79,6 +79,7 @@ class StubUpstreamResource : QuarkusTestResourceLifecycleManager {
             "openbank.upstream.token-url" to base,
             "openbank.edge.account-service-url" to base,
             "openbank.edge.sepa-payment-service-url" to base,
+            "openbank.edge.sepa-instant-service-url" to base,
             "openbank.edge.balance-service-url" to base,
             "openbank.edge.transaction-service-url" to base,
             "openbank.edge.statement-service-url" to base,

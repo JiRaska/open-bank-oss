@@ -46,6 +46,28 @@ class SepaReceiptLookupIT {
     }
 
     @Test
+    fun `instant receipt lookup forwards the original key and actor only after account ownership`() {
+        stubOwnAccount()
+        StubUpstreamResource.stub(
+            INSTANT_RAIL_PATH,
+            body = """{"state":"FOUND","paymentId":"$ACCOUNT","status":"PENDING"}""",
+        )
+
+        val response = RestAssured.given().contentType("application/json").body(requestBody)
+            .post("/customer/v1/sepa-instant/receipts/lookup")
+
+        assertThat(response.statusCode).isEqualTo(200)
+        assertThat(response.jsonPath().getString("state")).isEqualTo("FOUND")
+        val request = StubUpstreamResource.requests(INSTANT_RAIL_PATH).single()
+        assertThat(request.path).doesNotContain("receipt-key")
+        assertThat(request.headers.entries.single { it.key.equals("X-Customer-Party-Id", true) }.value)
+            .containsExactly(PARTY)
+        assertThat(request.headers.entries.single { it.key.equals("X-Customer-Actor-Id", true) }.value)
+            .containsExactly(PARTY)
+        assertThat(ObjectMapper().readTree(request.body).path("idempotencyKey").asText()).isEqualTo("receipt-key")
+    }
+
+    @Test
     fun `foreign account is denied before any receipt lookup`() {
         StubUpstreamResource.stub(
             ACCOUNT_PATH,
@@ -106,4 +128,5 @@ private const val COMPANY = "33333333-3333-3333-3333-333333333333"
 private const val ACCOUNT_PATH = "/api/v1/accounts/$ACCOUNT"
 private const val PARTY_PATH = "/api/v1/parties/$PARTY"
 private const val RAIL_PATH = "/api/v1/sepa-payments/receipts/lookup"
+private const val INSTANT_RAIL_PATH = "/api/v1/sepa-instant/receipts/lookup"
 private val requestBody = """{"idempotencyKey":"receipt-key","debtorAccountId":"$ACCOUNT"}"""
