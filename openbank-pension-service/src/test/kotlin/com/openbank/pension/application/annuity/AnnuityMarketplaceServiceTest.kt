@@ -70,8 +70,8 @@ class AnnuityMarketplaceServiceTest {
     fun `every eligible partner is asked in parallel and a slow or failing one does not sink the round`(): Unit =
         runBlocking {
             val w = world()
-            w.adapter.behaviour["alpha"] = Behaviour(delayMs = 300)
-            w.adapter.behaviour["beta"] = Behaviour(delayMs = 300)
+            w.adapter.behaviour["alpha"] = Behaviour(delayMs = 800)
+            w.adapter.behaviour["beta"] = Behaviour(delayMs = 800)
             w.adapter.behaviour["slow"] = Behaviour(delayMs = 5_000)
             w.adapter.behaviour["broken"] = Behaviour(fail = true)
             listOf("alpha", "beta", "slow", "broken").forEach { w.activate(it) }
@@ -89,8 +89,8 @@ class AnnuityMarketplaceServiceTest {
             assertThat(purchase.offers.map { it.partnerId }).containsExactlyInAnyOrder("alpha", "beta")
             assertThat(purchase.failures.map { it.partnerId }).containsExactly("broken", "slow")
             assertThat(purchase.failures.first { it.partnerId == "slow" }.reason).contains("timed out")
-            // Two 300 ms partners and a 1 s timeout: sequential would be >= 600 ms + the timeout.
-            assertThat(elapsedMs).isLessThan(1_500)
+            // Two 800 ms partners and a 1 s timeout: sequential would take >= 2.6 s; parallel about 1 s.
+            assertThat(elapsedMs).isLessThan(2_300)
             // An ineligible partner is never asked.
             assertThat(w.adapter.quoted).doesNotContain("abroad")
         }

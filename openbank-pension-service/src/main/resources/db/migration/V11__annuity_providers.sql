@@ -15,6 +15,11 @@
 --   ALTER TABLE pension_payout_requests ADD CONSTRAINT pension_payout_requests_status_known CHECK (status IN (
 --       'QUOTED', 'CONFIRMED', 'IN_PAYMENT', 'COMPLETED', 'EXPIRED'));
 --   DROP TABLE pension_annuity_purchases; DROP TABLE pension_annuity_providers;
+--   DROP SEQUENCE pension_annuity_purchases_seq; DROP SEQUENCE pension_annuity_providers_seq;
+
+-- Panache ids draw from <table>_seq in blocks of 50 (as V4).
+CREATE SEQUENCE IF NOT EXISTS pension_annuity_providers_seq INCREMENT BY 50;
+CREATE SEQUENCE IF NOT EXISTS pension_annuity_purchases_seq INCREMENT BY 50;
 
 CREATE TABLE pension_annuity_providers (
     id           BIGSERIAL PRIMARY KEY,
