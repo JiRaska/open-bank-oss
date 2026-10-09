@@ -54,6 +54,8 @@ dependencies {
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(project(":openbank-libs-testing"))
+    // Consumer pacts for the sca/party/account identity checks (#12377), written to pacts/.
+    testImplementation(libs.pact.consumer)
 }
 
 kover {
