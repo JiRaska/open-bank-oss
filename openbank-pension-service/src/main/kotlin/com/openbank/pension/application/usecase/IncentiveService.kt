@@ -14,6 +14,8 @@ import com.openbank.pension.application.port.out.ContributionRepository
 import com.openbank.pension.application.port.out.IncentiveClaimRepository
 import com.openbank.pension.application.port.out.IncentiveLedgerRepository
 import com.openbank.pension.application.port.out.StateIncentiveClaimPort
+import com.openbank.pension.application.port.out.ParticipantNotificationKind
+import com.openbank.pension.application.port.out.ParticipantNotifier
 import com.openbank.pension.application.port.out.TaxCertificateDocumentPort
 import com.openbank.pension.application.port.out.TaxYearSummaryRepository
 import com.openbank.pension.domain.contribution.ContributionChannel
@@ -76,6 +78,7 @@ class IncentiveService(
     private val documents: TaxCertificateDocumentPort,
     private val contributionService: ContributionService,
     private val clock: Clock,
+    private val notifier: ParticipantNotifier,
 ) {
     private val log = Logger.getLogger(IncentiveService::class.java)
 
@@ -204,6 +207,7 @@ class IncentiveService(
                         channel = ContributionChannel.STATE_INCENTIVE,
                     ),
                 )
+                notifyIncentive(ParticipantNotificationKind.INCENTIVE_RECEIVED, received, amount)
             } else {
                 claims.update(claim.reject(line.reason ?: "rejected without a stated reason", now()))
             }
@@ -220,6 +224,7 @@ class IncentiveService(
         val returned = claim.markReturned(now())
         claims.update(returned)
         ledger.append(ledgerEntry(returned, LedgerEntryKind.RETURNED, requireNotNull(claim.receivedAmount)))
+        notifyIncentive(ParticipantNotificationKind.INCENTIVE_RETURNED, returned, requireNotNull(claim.receivedAmount))
         return returned
     }
 
@@ -412,6 +417,15 @@ class IncentiveService(
 
     private fun packOf(c: ContractFundingView): JurisdictionPack =
         registry.pinned(c.jurisdiction, ProductLine.valueOf(c.productLine), c.packVersion)
+
+    /** Informational (#12379): sent after the ledger is written; its outcome never undoes it. */
+    private suspend fun notifyIncentive(kind: ParticipantNotificationKind, claim: IncentiveClaim, amount: BigDecimal) {
+        val party = requireContract(claim.contractId).participantPartyId
+        ParticipantNotices.send(
+            notifier,
+            ParticipantNotices.incentive(kind, party, claim.contractId, claim.period, amount, claim.currency),
+        )
+    }
 
     private suspend fun requireContract(id: UUID): ContractFundingView =
         directory.find(id) ?: throw ContractNotFoundException(id)

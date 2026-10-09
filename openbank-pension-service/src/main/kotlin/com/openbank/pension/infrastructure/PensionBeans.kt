@@ -5,6 +5,7 @@
 package com.openbank.pension.infrastructure
 
 import com.openbank.pension.application.port.`in`.PensionContractUseCase
+import com.openbank.pension.application.port.out.ParticipantNotifier
 import com.openbank.pension.application.port.out.PensionContractRepository
 import com.openbank.pension.application.usecase.PensionContractService
 import com.openbank.pension.domain.pack.JurisdictionPackRegistry
@@ -34,5 +35,6 @@ class PensionBeans {
         repository: PensionContractRepository,
         registry: JurisdictionPackRegistry,
         clock: Clock,
-    ): PensionContractUseCase = PensionContractService(repository, registry, clock)
+        notifier: ParticipantNotifier,
+    ): PensionContractUseCase = PensionContractService(repository, registry, clock, notifier)
 }

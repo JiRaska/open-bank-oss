@@ -9,6 +9,7 @@ import com.openbank.pension.application.port.out.MandateRequest
 import com.openbank.pension.application.port.out.PaymentMandatePort
 import com.openbank.pension.application.port.out.TaxCertificateDocumentPort
 import com.openbank.pension.domain.incentive.TaxYearSummary
+import io.quarkus.arc.profile.IfBuildProfile
 import jakarta.enterprise.context.ApplicationScoped
 import org.jboss.logging.Logger
 import java.nio.charset.StandardCharsets
@@ -51,6 +52,8 @@ class StubEmployerDirectoryAdapter : EmployerDirectoryPort {
     }
 }
 
+/** Only in `dev`/`test` builds; the real adapter is `DocumentServiceTaxCertificateAdapter` (#12379). */
+@IfBuildProfile(anyOf = ["dev", "test"])
 @ApplicationScoped
 class StubTaxCertificateDocumentAdapter : TaxCertificateDocumentPort {
     private val log = Logger.getLogger(StubTaxCertificateDocumentAdapter::class.java)

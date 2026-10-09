@@ -19,6 +19,7 @@ import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
+import com.openbank.pension.infrastructure.notification.RecordingParticipantNotifier
 import java.math.BigDecimal
 import java.time.Clock
 import java.time.Instant
@@ -44,7 +45,8 @@ class PensionContractServiceTest {
 
     private val repo = InMemoryRepo()
     private val clock = Clock.fixed(Instant.parse("2026-10-09T10:00:00Z"), ZoneOffset.UTC)
-    private val service = PensionContractService(repo, JurisdictionPackLoader.loadRegistry(), clock)
+    private val notifier = RecordingParticipantNotifier()
+    private val service = PensionContractService(repo, JurisdictionPackLoader.loadRegistry(), clock, notifier)
 
     private val party = UUID.randomUUID()
     private val me = Caller.customer(party)

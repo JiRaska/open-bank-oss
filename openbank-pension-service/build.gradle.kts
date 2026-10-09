@@ -31,6 +31,8 @@ dependencies {
     implementation(libs.quarkus.smallrye.fault.tolerance)
     // ADR-0334 S3: monthly incentive claim run + subscription sweep.
     implementation(libs.quarkus.scheduler)
+    // #12379: participant notices onto notification-service's request topic.
+    implementation(libs.quarkus.smallrye.kafka)
 
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.reactive)
@@ -54,6 +56,8 @@ dependencies {
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(project(":openbank-libs-testing"))
+    // #12379: consumer pact for the document-service render call (ADR-0063 P2).
+    testImplementation(libs.pact.consumer)
 }
 
 kover {

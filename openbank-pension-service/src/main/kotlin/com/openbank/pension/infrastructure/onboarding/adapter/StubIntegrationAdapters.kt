@@ -20,6 +20,7 @@ import com.openbank.pension.application.onboarding.TransferCounterpartyPort
 import com.openbank.pension.application.port.out.FundAdministrationPort
 import com.openbank.pension.domain.transfer.IncentiveHistoryEntry
 import com.openbank.pension.domain.transfer.TransferRequest
+import io.quarkus.arc.profile.IfBuildProfile
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
@@ -37,7 +38,8 @@ import java.util.UUID
  *
  * Real bindings to replace them:
  * - [PartyKycPort]           → party-service `GET /api/v1/parties/{id}` + kyc-service case status
- * - [KeyInformationDocumentPort] → document-service `POST /api/v1/documents/render`
+ * - [KeyInformationDocumentPort] → REAL since #12379 (`DocumentServiceKeyInformationAdapter`);
+ *   this stub exists only in `dev`/`test` builds
  * - [SignatureVerificationPort]  → sca-service `POST /api/v1/sca/challenges/{id}/consume`
  * - [TransferCounterpartyPort]   → the inter-provider transfer channel (no service yet)
  * - [FundAdministrationPort]     → pension-fund-service (not built yet, ADR-0334 §1)
@@ -76,6 +78,7 @@ class StubPartyRelationAdapter(private val stub: StubIntegrationSwitch) : PartyR
         stub.call("PartyRelationPort") { false }
 }
 
+@IfBuildProfile(anyOf = ["dev", "test"])
 @ApplicationScoped
 class StubKeyInformationDocumentAdapter(private val stub: StubIntegrationSwitch) : KeyInformationDocumentPort {
     override suspend fun generate(request: KidRequest): GeneratedDocument = stub.call("KeyInformationDocumentPort") {

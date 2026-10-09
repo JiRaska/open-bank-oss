@@ -12,6 +12,7 @@ import com.openbank.pension.domain.exit.TerminationStatus
 import com.openbank.pension.domain.model.ContractStatus
 import com.openbank.pension.domain.model.PayoutForm
 import com.openbank.pension.domain.model.PensionContract
+import com.openbank.pension.application.usecase.ParticipantNotices
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.util.UUID
@@ -238,6 +239,14 @@ class ExitExecutionService(private val ctx: ExitContext) {
             PaymentOrder(key, contract.id, creditor, iban, amount, currency, "PENSION $purpose ${contract.id}"),
         )
         stores.instructions.markSent(key, ref)
+        // #12379: only a payment to the participant is announced to them — never a death benefit
+        // to a claimant. After markSent, so a replayed activity (paymentRef already set) is silent.
+        if (creditor == contract.participantPartyId.toString()) {
+            ParticipantNotices.send(
+                gw.notifier,
+                ParticipantNotices.payoutExecuted(contract.participantPartyId, contract.id, purpose, amount, currency, iban),
+            )
+        }
         return ref
     }
 

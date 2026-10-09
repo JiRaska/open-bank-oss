@@ -1,0 +1,14 @@
+{{!-- SPDX-License-Identifier: Apache-2.0 --}}
+{{!-- Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0. --}}
+<!-- LEGAL-REVIEW-REQUIRED: draft wording, not approved by legal (ADR-0334, #12379) -->
+{{#if legalReviewRequired}}<p class="draft">DRAFT – this wording requires legal review and must not be used with clients.</p>{{/if}}
+<h1>Certificate of contributions paid, for income tax purposes, year {{taxYear}}</h1>
+<p>Contract: {{contractReference}}</p>
+<table>
+<tr><td>Participant contributions</td><td>{{participantContributions}} {{currency}}</td></tr>
+<tr><td>Of which deductible</td><td>{{deductibleAmount}} {{currency}}</td></tr>
+<tr><td>Employer contributions</td><td>{{employerContributions}} {{currency}}</td></tr>
+<tr><td>– exempt</td><td>{{employerExempt}} {{currency}}</td></tr>
+<tr><td>– taxable</td><td>{{employerTaxable}} {{currency}}</td></tr>
+<tr><td>State contributions</td><td>{{stateIncentives}} {{currency}}</td></tr>
+</table>

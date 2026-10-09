@@ -19,6 +19,7 @@ import com.openbank.pension.application.onboarding.TransferRequestRepository
 import com.openbank.pension.application.onboarding.TransferService
 import com.openbank.pension.application.port.out.FundAdministrationPort
 import com.openbank.pension.application.port.out.OnboardingActivationPort
+import com.openbank.pension.application.port.out.ParticipantNotifier
 import com.openbank.pension.application.port.out.PensionContractRepository
 import com.openbank.pension.application.usecase.ContributionService
 import com.openbank.pension.domain.pack.JurisdictionPackRegistry
@@ -94,11 +95,12 @@ class OnboardingBeans {
         contributions: ContributionService,
         tx: TransactionRunner,
         clock: Clock,
+        notifier: ParticipantNotifier,
     ): TransferService = TransferService(
         transfers, applications, contracts, packs, counterparties, funds, signatures, orchestrator, onboarding,
         { contractId, transferId, amount, currency, valueDate ->
             contributions.bookTransferIn(contractId, transferId, amount, currency, valueDate)
         },
-        tx, clock,
+        tx, clock, notifier,
     )
 }
