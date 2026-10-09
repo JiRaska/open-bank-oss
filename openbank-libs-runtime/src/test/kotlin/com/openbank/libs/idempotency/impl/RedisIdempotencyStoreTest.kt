@@ -87,6 +87,30 @@ class RedisIdempotencyStoreTest {
     }
 
     @Test
+    fun `invalid fingerprints cannot claim or write a record`(): Unit = runBlocking {
+        listOf("", "bad|hash").forEach { hash ->
+            assertThatThrownBy { runBlocking { store.reserve("invalid", hash) } }
+                .isInstanceOf(IllegalArgumentException::class.java)
+            assertThat(backing).isEmpty()
+            assertThatThrownBy { runBlocking { store.save("invalid", hash, 201, "{}") } }
+                .isInstanceOf(IllegalArgumentException::class.java)
+            assertThat(backing).isEmpty()
+        }
+    }
+
+    @Test
+    fun `invalid fingerprints cannot release another request marker`(): Unit = runBlocking {
+        store.reserve("held", first)
+        val marker = backing["idempotency:held"]
+        listOf("", "bad|hash").forEach { hash ->
+            assertThatThrownBy { runBlocking { store.release("held", hash) } }
+                .isInstanceOf(IllegalArgumentException::class.java)
+            assertThat(backing["idempotency:held"]).isEqualTo(marker)
+            assertThat(store.reserve("held", first)).isEqualTo(ReserveResult.InFlight)
+        }
+    }
+
+    @Test
     fun `truncated completed records are neither replayed nor overwritten`(): Unit = runBlocking {
         listOf("v2|", "v2|$first", "v2|$first|201", "v2|$first|201|2026-09-01T00:00Z").forEach { raw ->
             backing["idempotency:truncated"] = raw
