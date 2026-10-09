@@ -69,6 +69,8 @@ import org.junit.jupiter.api.extension.ExtendWith
  */
 @QuarkusTest
 @QuarkusTestResource(com.openbank.document.it.PostgresRedisTestResource::class)
+// The renderer sidecar is the one remote the pension render interaction (#12392) reaches.
+@QuarkusTestResource(PdfRendererStubResource::class, restrictToAnnotatedClass = true)
 @TestSecurity(user = "pact-verifier", roles = ["ROLE_API", "ROLE_OPERATOR"])
 @Provider("openbank-document-service")
 @PactFolder("../pacts")
@@ -104,8 +106,9 @@ class DocumentPactProviderVerificationTest {
 
     /**
      * No seeding needed, and that is a property of the provider rather than an omission:
-     * `DocumentTemplateSeeder` runs on EVERY boot (`@Observes StartupEvent`) and inserts the six
-     * canonical templates — including the `POTVRZENI_O_PLATBE_CS`/`_EN` payment confirmations this
+     * `DocumentTemplateSeeder` runs on EVERY boot (`@Observes StartupEvent`) and inserts the
+     * canonical templates (including the `pension-*` ones pension-service renders, #12392) —
+     * including the `POTVRZENI_O_PLATBE_CS`/`_EN` payment confirmations this
      * contract is about — into whatever database the service starts against, so the fresh
      * Testcontainer DB this test boots on already satisfies the state. Seeding again through the
      * repository would only assert that the fixture works.

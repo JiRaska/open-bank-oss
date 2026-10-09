@@ -245,7 +245,71 @@ class DocumentTemplateSeedTest {
         }
     }
 
+    /**
+     * Pension templates (#12392) are DRAFT legal wording: each must keep its LEGAL-REVIEW-REQUIRED
+     * marker, render the DRAFT banner when pension-service sends legalReviewRequired=true, and
+     * resolve every variable the pension adapters send (strict renderer — a missing one throws).
+     */
+    @TestFactory
+    fun `pension templates resolve the adapter variables and keep the draft banner`() =
+        PENSION_DATA.flatMap { (family, data) ->
+            listOf("cs", "en").map { locale ->
+                val code = "pension-$family-$locale"
+                DynamicTest.dynamicTest(code) {
+                    val template = DocumentTemplateSeed.templates.single { it.code == code }
+                    assertThat(template.status).isEqualTo(TemplateStatus.PUBLISHED)
+                    assertThat(template.locale).isEqualTo(locale)
+                    assertThat(template.bodyHtml).contains("LEGAL-REVIEW-REQUIRED")
+
+                    val draft = strict.compileInline(template.bodyHtml).apply(data + ("legalReviewRequired" to true))
+                    assertThat(draft).contains("class=\"draft\"").doesNotContain("{{")
+                    data.values.filterIsInstance<String>().forEach { assertThat(draft).contains(it) }
+
+                    val reviewed = strict.compileInline(
+                        template.bodyHtml,
+                    ).apply(data + ("legalReviewRequired" to false))
+                    assertThat(reviewed).doesNotContain("class=\"draft\"")
+                }
+            }
+        }
+
     private companion object {
+        val PENSION_DATA = listOf(
+            "dps-key-information" to mapOf(
+                "applicationId" to "a0000000-0000-4000-8000-000000000001",
+                "productLine" to "DPS",
+                "documentType" to "PRE_CONTRACTUAL_INFORMATION",
+                "strategyCode" to "BALANCED",
+            ),
+            "dip-kid" to mapOf(
+                "applicationId" to "a0000000-0000-4000-8000-000000000002",
+                "productLine" to "DIP",
+                "documentType" to "KEY_INFORMATION_DOCUMENT",
+                "strategyCode" to "DYNAMIC",
+            ),
+            "tax-certificate" to mapOf(
+                "contractReference" to "PS-2026-0001",
+                "taxYear" to "2026",
+                "currency" to "CZK",
+                "participantContributions" to "24000.00",
+                "deductibleAmount" to "12000.00",
+                "employerContributions" to "6000.00",
+                "employerExempt" to "5000.00",
+                "employerTaxable" to "1000.00",
+                "stateIncentives" to "4080.00",
+            ),
+            "annual-statement" to mapOf(
+                "contractReference" to "PS-2026-0001",
+                "year" to "2026",
+                "currency" to "CZK",
+                "participantContributions" to "24000.00",
+                "employerContributions" to "6000.00",
+                "stateIncentives" to "4080.00",
+                "transferIn" to "0.00",
+                "value" to "35210.55",
+                "valueAsOf" to "2026-12-31",
+            ),
+        )
         val BUSINESS_CODES = listOf(
             "RAMCOVA_SMLOUVA_PO_CS",
             "RAMCOVA_SMLOUVA_PO_EN",
