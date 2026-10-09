@@ -8,7 +8,7 @@ is_inert_service_path() {
   case "$1" in
     openbank-admin-ui/*|openbank-infra/*|docs/*|*/version.txt|*/CHANGELOG.md|.release-please-manifest.json|release-please-config.json)
       return 0 ;;
-    .github/scripts/check-authz-enforce-money-path.py|.github/scripts/check-flyway-version-commit-order.py|.github/scripts/check-public-workload-ha.py|.github/scripts/publish-admin-ui-pacts.py|.github/scripts/test-publish-admin-ui-pacts.py|.github/scripts/verify-dependabot-auto-merge.py|.github/scripts/test-verify-dependabot-auto-merge.py|.github/gates/gates.yaml|.github/gates/workflow-write-permissions-baseline.txt|.github/canary-rollout-realisable-baseline.txt|.github/public-workload-ha-baseline.txt)
+    .github/scripts/check-authz-enforce-money-path.py|.github/scripts/check-flyway-version-commit-order.py|.github/scripts/check-public-workload-ha.py|.github/scripts/deploy-window-inputs.sh|.github/scripts/supersede-deploy-prs.sh|.github/scripts/publish-admin-ui-pacts.py|.github/scripts/test-publish-admin-ui-pacts.py|.github/scripts/verify-dependabot-auto-merge.py|.github/scripts/test-verify-dependabot-auto-merge.py|.github/gates/gates.yaml|.github/gates/workflow-write-permissions-baseline.txt|.github/canary-rollout-realisable-baseline.txt|.github/public-workload-ha-baseline.txt)
       # Separate governance and Pact controls own these files; they do not build services.
       return 0 ;;
     .github/workflows/*)
@@ -66,6 +66,16 @@ pact_build_modules_self_test() {
   done
   ! is_inert_service_path ".github/scripts/check-public-workload-ha-test-helper.py" \
     || { echo "selector self-test: unknown gate helper must retain safe fallback" >&2; return 1; }
+  # #12295 changed only deploy-window inputs and GitOps workflows; these
+  # scripts do not enter a Gradle service build or Pact verification.
+  for deploy_input in \
+    .github/scripts/deploy-window-inputs.sh \
+    .github/scripts/supersede-deploy-prs.sh; do
+    is_inert_service_path "$deploy_input" \
+      || { echo "selector self-test: deploy input must not full-fleet: $deploy_input" >&2; return 1; }
+  done
+  ! is_inert_service_path ".github/scripts/unknown-deploy-window-helper.sh" \
+    || { echo "selector self-test: unknown deploy helper must retain safe fallback" >&2; return 1; }
   [ "$(pact_build_modules pacts/openbank-admin-ui-openbank-context-service.json)" = "openbank-context-service" ] \
     || { echo "selector self-test: Admin UI Pact must select its provider only" >&2; return 1; }
   [ "$(pact_build_modules pacts/openbank-ledger-service-openbank-balance-service.json)" = $'openbank-ledger-service\nopenbank-balance-service' ] \
