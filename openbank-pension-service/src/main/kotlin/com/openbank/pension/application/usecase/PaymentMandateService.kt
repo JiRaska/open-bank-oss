@@ -42,7 +42,8 @@ interface ParticipantAccountPort {
     suspend fun ownAccountId(partyId: UUID, iban: String): UUID?
 }
 
-class ForeignDebtorAccountException : RuntimeException("the debtor account is not a verified account of the participant")
+class ForeignDebtorAccountException :
+    RuntimeException("the debtor account is not a verified account of the participant")
 
 class PaymentMandateNotFoundException(id: UUID) : NoSuchElementException("payment mandate $id not found")
 
@@ -69,7 +70,15 @@ class PaymentMandateService(
         val externalId = contributions.setUpMandate(request.copy(debtorIban = iban, debtorAccountId = accountId))
         val now = clock.instant()
         return mandates.recordIfAbsent(
-            PaymentMandate(UUID.randomUUID(), request.contractId, request.kind, externalId, PaymentMandateStatus.ACTIVE, now, now),
+            PaymentMandate(
+                UUID.randomUUID(),
+                request.contractId,
+                request.kind,
+                externalId,
+                PaymentMandateStatus.ACTIVE,
+                now,
+                now,
+            ),
         )
     }
 

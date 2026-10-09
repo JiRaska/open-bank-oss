@@ -12,7 +12,6 @@ import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
 import io.restassured.specification.RequestSpecification
 import io.smallrye.reactive.messaging.memory.InMemoryConnector
-import jakarta.enterprise.inject.Any as CdiAny
 import jakarta.inject.Inject
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.apache.kafka.common.header.internals.RecordHeader
@@ -26,6 +25,7 @@ import java.nio.charset.StandardCharsets
 import java.sql.DriverManager
 import java.util.Optional
 import java.util.UUID
+import jakarta.enterprise.inject.Any as CdiAny
 
 /**
  * #12378 over real HTTP, a real Postgres (V7) and the real channel wiring (in-memory connector):

@@ -71,13 +71,16 @@ class MandateOrders(
 ) : PaymentMandatePort {
 
     override suspend fun setUp(request: MandateRequest): String {
-        val target = collection() ?: refuse("no collection account is configured (openbank.pension.payments.collection.*)")
+        val target =
+            collection() ?: refuse("no collection account is configured (openbank.pension.payments.collection.*)")
         val accountId = request.debtorAccountId ?: refuse("debtorAccountId is required to set up a ${request.kind}")
         return when (request.kind) {
             MandateKind.STANDING_ORDER -> rails.createStandingOrder(standingOrder(request, accountId, target)).id
             MandateKind.DIRECT_DEBIT -> {
                 val cid = target.creditorIdentifier
-                    ?: refuse("no SEPA creditor identifier is configured (openbank.pension.payments.collection.creditor-identifier)")
+                    ?: refuse(
+                        "no SEPA creditor identifier is configured (openbank.pension.payments.collection.creditor-identifier)",
+                    )
                 val debtorName = request.debtorName ?: refuse("debtorName is required for a SEPA direct-debit mandate")
                 rails.registerSddMandate(
                     RegisterSddMandateDto(
@@ -97,16 +100,26 @@ class MandateOrders(
     }
 
     override suspend fun cancel(kind: MandateKind, externalId: String) {
-        val id = runCatching { UUID.fromString(externalId) }.getOrElse { refuse("mandate id $externalId is not a rail id") }
+        val id = runCatching {
+            UUID.fromString(externalId)
+        }.getOrElse { refuse("mandate id $externalId is not a rail id") }
         when (kind) {
             MandateKind.STANDING_ORDER -> rails.cancelStandingOrder(id)
             MandateKind.DIRECT_DEBIT -> rails.cancelSddMandate(id)
         }
     }
 
-    private fun standingOrder(request: MandateRequest, accountId: UUID, target: CollectionAccount): CreateStandingOrderDto {
+    private fun standingOrder(
+        request: MandateRequest,
+        accountId: UUID,
+        target: CollectionAccount,
+    ): CreateStandingOrderDto {
         val minor = request.amount.movePointRight(MINOR_DIGITS)
-        if (minor.stripTrailingZeros().scale() > 0) refuse("amount ${request.amount} has more than $MINOR_DIGITS decimals")
+        if (minor.stripTrailingZeros().scale() >
+            0
+        ) {
+            refuse("amount ${request.amount} has more than $MINOR_DIGITS decimals")
+        }
         return CreateStandingOrderDto(
             idempotencyKey = "pension-so-" + sha256(
                 "${request.contractId}|${request.kind}|${request.firstCollection}|${request.amount.toPlainString()}",
@@ -166,10 +179,7 @@ fun interface PayoutRail {
  * be a CZ IBAN whose prefix and base pass the national mod-11 check. Anything else is refused
  * before a call — a payout is never sent to an account the rail would reject after accepting.
  */
-class PayoutOrders(
-    private val rail: PayoutRail,
-    private val payoutAccount: () -> PayoutAccount?,
-) : PayoutPaymentPort {
+class PayoutOrders(private val rail: PayoutRail, private val payoutAccount: () -> PayoutAccount?) : PayoutPaymentPort {
 
     override suspend fun pay(order: PaymentOrder): String {
         val from = payoutAccount() ?: refuse("no payout account is configured (openbank.pension.payments.payout.*)")
@@ -202,6 +212,7 @@ class PayoutOrders(
         private const val MESSAGE_MAX = 140
         private const val END_TO_END_HASH = 24
         private const val CZ_IBAN_LENGTH = 24
+        private const val BANK_CODE_START = 4
         private const val BANK_CODE_END = 8
         private const val PREFIX_END = 14
 
@@ -211,7 +222,7 @@ class PayoutOrders(
             if (iban.length != CZ_IBAN_LENGTH || !iban.startsWith("CZ") || !iban.drop(2).all { it.isDigit() }) {
                 refuse("payout account is not a Czech IBAN; domestic-payment cannot address it")
             }
-            val bankCode = iban.substring(4, BANK_CODE_END)
+            val bankCode = iban.substring(BANK_CODE_START, BANK_CODE_END)
             val prefix = iban.substring(BANK_CODE_END, PREFIX_END).trimStart('0')
             val base = iban.substring(PREFIX_END).trimStart('0')
             if (!CzechAccountNumber.isValid(prefix, base)) refuse("payout account fails the Czech mod-11 account check")
@@ -253,7 +264,8 @@ class PaymentMandateRestAdapter : PaymentMandatePort {
     private val logic by lazy {
         MandateOrders(
             object : MandateRails {
-                override suspend fun createStandingOrder(request: CreateStandingOrderDto) = standingOrders.create(request)
+                override suspend fun createStandingOrder(request: CreateStandingOrderDto) =
+                    standingOrders.create(request)
                 override suspend fun cancelStandingOrder(id: UUID) = standingOrders.cancel(id)
                 override suspend fun registerSddMandate(request: RegisterSddMandateDto) = sdd.register(request)
                 override suspend fun cancelSddMandate(id: UUID) {
@@ -306,7 +318,11 @@ class DomesticPayoutPaymentAdapter : PayoutPaymentPort {
                 val number = accountNumber.value()
                 val code = bankCode.value()
                 val holder = name.value()
-                if (id == null || number == null || code == null || holder == null) null else PayoutAccount(id, number, code, holder)
+                if (listOf(id, number, code, holder).any { it == null }) {
+                    null
+                } else {
+                    PayoutAccount(id!!, number!!, code!!, holder!!)
+                }
             },
         )
     }

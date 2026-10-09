@@ -99,8 +99,14 @@ class PaymentMandateAndSettlementTest {
     }
 
     private fun request(contract: UUID) = MandateRequest(
-        contract, UUID.randomUUID(), MandateKind.STANDING_ORDER, "CZ6508000000192000145399",
-        BigDecimal("1700"), "CZK", "", java.time.LocalDate.parse("2026-11-01"),
+        contract,
+        UUID.randomUUID(),
+        MandateKind.STANDING_ORDER,
+        "CZ6508000000192000145399",
+        BigDecimal("1700"),
+        "CZK",
+        "",
+        java.time.LocalDate.parse("2026-11-01"),
     )
 
     @Test
@@ -141,13 +147,23 @@ class PaymentMandateAndSettlementTest {
 
     private class Instructions(status: InstructionStatus) : PayoutSettlementRepository {
         var row = PaymentInstruction(
-            "pension-payout-x-1", UUID.randomUUID(), "PAYOUT", BigDecimal.TEN, "CZK",
-            "CZ6508000000192000145399", status, "pay-1",
+            "pension-payout-x-1",
+            UUID.randomUUID(),
+            "PAYOUT",
+            BigDecimal.TEN,
+            "CZK",
+            "CZ6508000000192000145399",
+            status,
+            "pay-1",
         )
 
         override suspend fun findByPaymentRef(paymentRef: String) = row.takeIf { it.paymentRef == paymentRef }
 
-        override suspend fun markSettlement(paymentRef: String, from: Set<InstructionStatus>, to: InstructionStatus): Boolean {
+        override suspend fun markSettlement(
+            paymentRef: String,
+            from: Set<InstructionStatus>,
+            to: InstructionStatus,
+        ): Boolean {
             if (row.paymentRef != paymentRef || row.status !in from) return false
             row = row.copy(status = to)
             return true
@@ -187,7 +203,11 @@ class PaymentMandateAndSettlementTest {
 
     @Test
     fun `the consumer maps terminal domestic statuses and ignores intermediate ones and poison pills`() {
-        val consumer = DomesticPaymentSettlementConsumer(ObjectMapper(), PayoutSettlementService(Instructions(InstructionStatus.SENT)))
+        val consumer =
+            DomesticPaymentSettlementConsumer(
+                ObjectMapper(),
+                PayoutSettlementService(Instructions(InstructionStatus.SENT)),
+            )
         val id = UUID.randomUUID()
         fun body(status: String) = """{"paymentId":"$id","previousStatus":"SENT_TO_CLEARING","newStatus":"$status"}"""
 

@@ -153,7 +153,12 @@ class ContractFundingResource {
         val challenge = requireNotNull(request?.scaChallengeId?.takeIf { it.isNotBlank() }) {
             "scaChallengeId is required"
         }
-        if (!sca.verify(contract.participantPartyId, challenge, PaymentMandateCancellation.documentHash(contractId, mandateId))) {
+        if (!sca.verify(
+                contract.participantPartyId,
+                challenge,
+                PaymentMandateCancellation.documentHash(contractId, mandateId),
+            )
+        ) {
             throw MandateScaFailedException()
         }
         val mandate = mandateService.cancel(contractId, mandateId)

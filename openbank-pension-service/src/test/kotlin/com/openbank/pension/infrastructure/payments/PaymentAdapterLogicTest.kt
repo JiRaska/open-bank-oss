@@ -190,7 +190,10 @@ class PaymentAdapterLogicTest {
     @Test
     fun `a payout the domestic rail cannot address is refused before it is sent`() {
         val sent = mutableListOf<String>()
-        val logic = PayoutOrders({ key, _ -> sent += key; DomesticPaymentDto(UUID.randomUUID()) }, { payoutAccount })
+        val logic = PayoutOrders({ key, _ ->
+            sent += key
+            DomesticPaymentDto(UUID.randomUUID())
+        }, { payoutAccount })
 
         assertThatThrownBy { runBlocking { logic.pay(order(currency = "EUR")) } }
             .isInstanceOf(PaymentRailRefusedException::class.java).hasMessageContaining("CZK")

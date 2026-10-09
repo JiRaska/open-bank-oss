@@ -47,7 +47,10 @@ class PgPaymentMandates(private val client: Pool) : PaymentMandateRepository {
             ),
         ).awaitSuspending()
         return checkNotNull(
-            one("SELECT * FROM pension_payment_mandates WHERE kind = $1 AND external_id = $2", Tuple.of(mandate.kind.name, mandate.externalId)),
+            one(
+                "SELECT * FROM pension_payment_mandates WHERE kind = $1 AND external_id = $2",
+                Tuple.of(mandate.kind.name, mandate.externalId),
+            ),
         ) { "mandate ${mandate.kind}/${mandate.externalId} vanished after insert" }
     }
 

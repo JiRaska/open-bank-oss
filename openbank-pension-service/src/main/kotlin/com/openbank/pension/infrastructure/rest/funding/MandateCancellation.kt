@@ -14,10 +14,9 @@ import java.util.UUID
 
 /** What the SCA challenge of a mandate cancellation signs (#12378): this contract, this mandate. */
 object PaymentMandateCancellation {
-    fun documentHash(contractId: UUID, mandateId: UUID): String =
-        MessageDigest.getInstance("SHA-256")
-            .digest("pension-mandate-cancel|$contractId|$mandateId".toByteArray(StandardCharsets.UTF_8))
-            .joinToString("") { "%02x".format(it) }
+    fun documentHash(contractId: UUID, mandateId: UUID): String = MessageDigest.getInstance("SHA-256")
+        .digest("pension-mandate-cancel|$contractId|$mandateId".toByteArray(StandardCharsets.UTF_8))
+        .joinToString("") { "%02x".format(it) }
 }
 
 class MandateScaFailedException : RuntimeException("strong customer authentication failed for this cancellation")
