@@ -262,8 +262,6 @@ def report(found, deploy_env_urls, admitted, selected=None):
 # this list, and ALSO when a listed edge no longer reproduces — a fixed entry must be
 # deleted, so the baseline can only shrink.
 KNOWN_MISSING = {
-    ("customer-edge", "audit-service", "audit", 8113):
-        "URL lives only in customer-edge's src/main/resources/application.yaml.",
     ("platform", "vllm", "copilot", 8000):
         "NO-CALLEE: gitops declares no vllm Service and the copilot namespace is "
         "empty. Dead config, not a policy gap — the fix is in the service, not here.",
