@@ -851,7 +851,7 @@ spec:
         - name: domestic-payment
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-domestic-payment:sandbox-a5b43740
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-domestic-payment:sandbox-674e4d5a
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -2538,17 +2538,18 @@ spec:
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
               value: "0.1"
-            # Advisory first (ADR-0034 Phase 5 convention): @Authorize logs "would DENY" without
-            # blocking. Flip to true only after an observation window with a clean advisory report.
-            #
-            # Advisory deliberately (#8470): ADR-0283 phase 1 makes this service money-path, so the
-            # money-path authz-enforce gate reads this value. It stays false because the observation
-            # window above cannot have run — the service does not exist yet, so there is no advisory
-            # report to confirm an empty "would DENY" population. Enforcing on the PR that creates
-            # the service would enforce against a policy nobody has watched decide.
-            # Flip target: 2026-10-05, with the other advisory money-path services.
+            # ADR-0283 phase 1 / ADR-0034 Phase 5, flipped by #12325: ENFORCED. Every @Authorize
+            # method is decided by the OPA sidecar below; a deny is a 403 and an unreachable PDP is
+            # a 503 (fail closed). The advisory window recorded no decision at all: the only
+            # callers the NetworkPolicy admits are same-namespace pods (none calls this service)
+            # and admin-ui, which forwards the staff user's bearer (operator/admin write, viewer and
+            # compliance read, via card_processing_rest_ext.rego and base compliance-read-any).
+            # This is a plain Deployment, not a Rollout: no canary analysis guards the flip.
+            # Rollback: set this back to "false" (advisory: decisions still computed and counted
+            # in openbank.authz.decisions, none blocks) and restore the allowlist entry in
+            # .github/scripts/check-authz-enforce-money-path.py.
             - name: AUTHZ_ENFORCE
-              value: "false"
+              value: "true"
           startupProbe:
             tcpSocket:
               port: management
