@@ -641,6 +641,390 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { description: Caller's role or principal may not use this route }
         '503': { description: A collaborator this step depends on is not available (stub integration off) }
+  # --- ADR-0334 S3: contributions & state incentives (info.version bumped once at integration) ---
+  /api/v1/pension/funding/contracts/{contractId}/payment-reference:
+    get:
+      tags: [Pension funding]
+      operationId: getPaymentReference
+      summary: The reference a payer quotes so a payment matches this contract
+      parameters:
+        - $ref: '#/components/parameters/FundingContractId'
+        - $ref: '#/components/parameters/CustomerPartyIdOptional'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentReference'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/pension/funding/contracts/{contractId}/contributions:
+    get:
+      tags: [Pension funding]
+      operationId: listContributions
+      summary: Every contribution credited to the contract, oldest first
+      parameters:
+        - $ref: '#/components/parameters/FundingContractId'
+        - $ref: '#/components/parameters/CustomerPartyIdOptional'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Contribution'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/pension/funding/contracts/{contractId}/mandates:
+    post:
+      tags: [Pension funding]
+      operationId: setUpMandate
+      summary: Set up a standing order or SEPA direct debit quoting the contract reference
+      parameters:
+        - $ref: '#/components/parameters/FundingContractId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MandateSetupRequest'
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Mandate'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/funding/contracts/{contractId}/employers/{employerPartyId}:
+    put:
+      tags: [Pension funding]
+      operationId: enrolEmployer
+      summary: Authorise an employer to contribute to this contract through its bulk files
+      parameters:
+        - $ref: '#/components/parameters/FundingContractId'
+        - $ref: '#/components/parameters/EmployerPartyId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+      responses:
+        '204':
+          description: Done
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/funding/contracts/{contractId}/incentives:
+    get:
+      tags: [Pension funding]
+      operationId: getIncentiveStatus
+      summary: Incentive claims and the per-incentive ledger balance
+      parameters:
+        - $ref: '#/components/parameters/FundingContractId'
+        - $ref: '#/components/parameters/CustomerPartyIdOptional'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IncentiveStatus'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/pension/funding/contracts/{contractId}/tax-years/{year}:
+    get:
+      tags: [Pension funding]
+      operationId: getTaxYear
+      summary: Contributions by source, incentives and deductible amount for one tax year
+      parameters:
+        - $ref: '#/components/parameters/FundingContractId'
+        - $ref: '#/components/parameters/CustomerPartyIdOptional'
+        - $ref: '#/components/parameters/TaxYear'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaxYearSummary'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/pension/funding/contracts/{contractId}/tax-years/{year}/external-cap-usage:
+    put:
+      tags: [Pension funding]
+      operationId: declareExternalCapUsage
+      summary: Declare shared-cap usage at other providers for the tax year
+      parameters:
+        - $ref: '#/components/parameters/FundingContractId'
+        - $ref: '#/components/parameters/TaxYear'
+        - $ref: '#/components/parameters/CustomerPartyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExternalCapUsageRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaxYearSummary'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/funding/operations/payments:
+    post:
+      tags: [Pension funding operations]
+      operationId: ingestPayment
+      summary: Ingest a payment from the collection account; matched by reference or parked
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IncomingPayment'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Receipt'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Staff only
+  /api/v1/pension/funding/operations/employer-batches:
+    post:
+      tags: [Pension funding operations]
+      operationId: ingestEmployerBatch
+      summary: One employer's bulk contribution file covering one payment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmployerBatchRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/EmployerLineResult'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Staff only
+  /api/v1/pension/funding/operations/unmatched:
+    get:
+      tags: [Pension funding operations]
+      operationId: listUnmatched
+      summary: The unmatched-payment queue, optionally filtered by status
+      parameters:
+        - $ref: '#/components/parameters/UnmatchedStatus'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UnmatchedPayment'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Staff only
+  /api/v1/pension/funding/operations/unmatched/{id}/assign:
+    post:
+      tags: [Pension funding operations]
+      operationId: assignUnmatched
+      summary: Attribute a parked payment to a contract and credit it
+      parameters:
+        - $ref: '#/components/parameters/ResourceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssignUnmatchedRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Contribution'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Staff only
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/funding/operations/unmatched/{id}/return:
+    post:
+      tags: [Pension funding operations]
+      operationId: returnUnmatched
+      summary: Mark a parked payment for return to the payer
+      parameters:
+        - $ref: '#/components/parameters/ResourceId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnmatchedPayment'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Staff only
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/funding/operations/claim-runs:
+    post:
+      tags: [Pension funding operations]
+      operationId: runClaims
+      summary: Generate the claims of a closed month and file every PENDING claim
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClaimRunRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClaimRun'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Staff only
+  /api/v1/pension/funding/operations/claim-batches:
+    get:
+      tags: [Pension funding operations]
+      operationId: listClaimBatches
+      summary: Filed claim batches, newest first, with their filed payload
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ClaimBatch'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Staff only
+  /api/v1/pension/funding/operations/claim-batches/{id}/receipt:
+    post:
+      tags: [Pension funding operations]
+      operationId: applyClaimReceipt
+      summary: Apply the agency's receipt file, crediting accepted claims and rejecting the rest
+      parameters:
+        - $ref: '#/components/parameters/ResourceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReceiptFileRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClaimBatch'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Staff only
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/funding/operations/claims/{id}/return:
+    post:
+      tags: [Pension funding operations]
+      operationId: returnClaim
+      summary: Return a received incentive to the agency; writes a RETURNED ledger entry
+      parameters:
+        - $ref: '#/components/parameters/ResourceId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IncentiveClaim'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Staff only
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/funding/operations/contracts/{contractId}/clawback-preview:
+    get:
+      tags: [Pension funding operations]
+      operationId: previewClawback
+      summary: What an early exit on the given date would have to return, per incentive
+      parameters:
+        - $ref: '#/components/parameters/FundingContractId'
+        - $ref: '#/components/parameters/ClawbackOn'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ClawbackItem'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Staff only
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/pension/funding/operations/contracts/{contractId}/tax-years/{year}/certificate:
+    post:
+      tags: [Pension funding operations]
+      operationId: issueTaxCertificate
+      summary: Freeze a closed tax year and issue its tax certificate
+      parameters:
+        - $ref: '#/components/parameters/FundingContractId'
+        - $ref: '#/components/parameters/TaxYear'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaxYearSummary'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Staff only
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
 components:
   securitySchemes:
     bearerAuth:
@@ -713,6 +1097,37 @@ components:
       in: query
       required: false
       schema: { type: integer, minimum: 1, maximum: 500, default: 50 }
+
+    FundingContractId:
+      name: contractId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    EmployerPartyId:
+      name: employerPartyId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    ResourceId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    TaxYear:
+      name: year
+      in: path
+      required: true
+      schema: { type: integer, minimum: 2000, maximum: 2200 }
+    UnmatchedStatus:
+      name: status
+      in: query
+      required: false
+      schema: { type: string, enum: [OPEN, ASSIGNED, RETURNED] }
+    ClawbackOn:
+      name: on
+      in: query
+      required: false
+      schema: { type: string, format: date }
 
   responses:
     Contract:
@@ -1042,3 +1457,202 @@ components:
         compensation: { type: string, enum: [NONE, CONTRACT_CLOSED, CEDING_CANCELLED_AND_CONTRACT_CLOSED, REDEMPTION_REVERSED] }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+
+    # --- ADR-0334 S3 ---
+    PaymentReference:
+      type: object
+      properties:
+        contractId: { type: string, format: uuid }
+        reference: { type: string }
+    Mandate:
+      type: object
+      properties:
+        mandateId: { type: string }
+    MandateSetupRequest:
+      type: object
+      required: [kind, debtorIban, amount, currency, firstCollection]
+      properties:
+        kind: { type: string, enum: [STANDING_ORDER, DIRECT_DEBIT] }
+        debtorIban: { type: string }
+        amount: { type: number, exclusiveMinimum: 0, maximum: 999999999.99, multipleOf: 0.01 }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        firstCollection: { type: string, format: date }
+    Contribution:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        contractId: { type: string, format: uuid }
+        paymentId: { type: string }
+        source: { type: string, enum: [PARTICIPANT, EMPLOYER, STATE, TRANSFER_IN] }
+        channel: { type: string, enum: [STANDING_ORDER, DIRECT_DEBIT, BANK_TRANSFER, EMPLOYER_BATCH, STATE_INCENTIVE] }
+        amount: { type: number }
+        currency: { type: string }
+        valueDate: { type: string, format: date }
+        taxYear: { type: integer }
+        employerPartyId: { type: [string, 'null'], format: uuid }
+        subscriptionOrderId: { type: [string, 'null'] }
+        receivedAt: { type: string, format: date-time }
+    IncomingPayment:
+      type: object
+      required: [paymentId, amount, currency, valueDate]
+      properties:
+        paymentId: { type: string, maxLength: 120, description: "Idempotency key; a redelivered payment credits once." }
+        amount: { type: number, exclusiveMinimum: 0, maximum: 999999999.99, multipleOf: 0.01 }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        valueDate: { type: string, format: date }
+        reference: { type: string, maxLength: 64 }
+        channel: { type: string, enum: [STANDING_ORDER, DIRECT_DEBIT, BANK_TRANSFER, EMPLOYER_BATCH, STATE_INCENTIVE] }
+        payerAccount: { type: string, maxLength: 64 }
+    Receipt:
+      type: object
+      properties:
+        outcome: { type: string, enum: [CREDITED, DUPLICATE, UNMATCHED] }
+        contribution: { $ref: '#/components/schemas/Contribution' }
+        unmatched: { $ref: '#/components/schemas/UnmatchedPayment' }
+    UnmatchedPayment:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        paymentId: { type: string }
+        amount: { type: number }
+        currency: { type: string }
+        valueDate: { type: string, format: date }
+        reference: { type: [string, 'null'] }
+        reason: { type: string, enum: [NO_REFERENCE, UNKNOWN_REFERENCE, CONTRACT_NOT_ACCEPTING, CURRENCY_MISMATCH, EMPLOYER_LINE, EMPLOYER_NOT_AUTHORISED] }
+        status: { type: string, enum: [OPEN, ASSIGNED, RETURNED] }
+        resolvedContractId: { type: [string, 'null'], format: uuid }
+        resolvedBy: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+    EmployerBatchRequest:
+      type: object
+      required: [employerPartyId, payment, lines]
+      properties:
+        employerPartyId: { type: string, format: uuid }
+        payment: { $ref: '#/components/schemas/IncomingPayment' }
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 5000
+          items:
+            type: object
+            required: [contractReference, amount]
+            properties:
+              contractReference: { type: string, maxLength: 64 }
+              amount: { type: number, exclusiveMinimum: 0, maximum: 999999999.99, multipleOf: 0.01 }
+    EmployerLineResult:
+      type: object
+      properties:
+        lineNo: { type: integer }
+        contractReference: { type: string }
+        amount: { type: number }
+        outcome: { type: string, enum: [CREDITED, DUPLICATE, UNMATCHED] }
+    AssignUnmatchedRequest:
+      type: object
+      required: [contractId]
+      properties:
+        contractId: { type: string, format: uuid }
+    ClaimRunRequest:
+      type: object
+      required: [period]
+      properties:
+        period: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' }
+    ReceiptFileRequest:
+      type: object
+      required: [payload]
+      properties:
+        payload: { type: string }
+    IncentiveClaim:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        contractId: { type: string, format: uuid }
+        incentiveId: { type: string }
+        period: { type: string }
+        basis: { type: number }
+        claimedAmount: { type: number }
+        currency: { type: string }
+        status: { type: string, enum: [PENDING, SUBMITTED, RECEIVED, REJECTED, RETURNED] }
+        batchId: { type: [string, 'null'], format: uuid }
+        receivedAmount: { type: [number, 'null'] }
+        rejectionReason: { type: [string, 'null'] }
+    IncentiveStatus:
+      type: object
+      properties:
+        claims:
+          type: array
+          items: { $ref: '#/components/schemas/IncentiveClaim' }
+        balances:
+          type: array
+          items:
+            type: object
+            properties:
+              incentiveId: { type: string }
+              received: { type: number }
+              returned: { type: number }
+              net: { type: number }
+    ClaimBatch:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        claimFormat: { type: string }
+        period: { type: string }
+        claimIds:
+          type: array
+          items: { type: string, format: uuid }
+        status: { type: string, enum: [SUBMITTED, RECONCILED] }
+        payload: { type: string }
+        createdAt: { type: string, format: date-time }
+    ClaimRun:
+      type: object
+      properties:
+        claimsCreated: { type: integer }
+        batches:
+          type: array
+          items: { $ref: '#/components/schemas/ClaimBatch' }
+        unfiledFormats:
+          type: array
+          items: { type: string }
+    ExternalCapUsageRequest:
+      type: object
+      required: [usage]
+      properties:
+        usage:
+          type: object
+          additionalProperties: { type: number, minimum: 0 }
+    TaxYearSummary:
+      type: object
+      properties:
+        contractId: { type: string, format: uuid }
+        taxYear: { type: integer }
+        currency: { type: string }
+        participantContributions: { type: number }
+        employerContributions: { type: number }
+        stateIncentives: { type: number }
+        transferIn: { type: number }
+        deductibleAmount: { type: number }
+        indicativeTaxSaving: { type: [number, 'null'] }
+        sharedCapUsedElsewhere:
+          type: object
+          additionalProperties: { type: number }
+        employerExemptions:
+          type: array
+          items:
+            type: object
+            properties:
+              employerPartyId: { type: string, format: uuid }
+              contributed: { type: number }
+              exempt: { type: number }
+              taxable: { type: number }
+        employerExempt: { type: number }
+        employerTaxable: { type: number }
+        finalized: { type: boolean }
+        certificateDocumentId: { type: [string, 'null'] }
+    ClawbackItem:
+      type: object
+      properties:
+        incentiveId: { type: string }
+        kind: { type: string, enum: [RETURN_TO_AGENCY, TAX_RECAPTURE] }
+        amount: { type: number }
+        taxYears:
+          type: array
+          items: { type: integer }

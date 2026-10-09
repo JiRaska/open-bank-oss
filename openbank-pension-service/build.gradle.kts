@@ -24,6 +24,8 @@ dependencies {
     implementation(libs.quarkus.config.yaml)
     implementation(libs.quarkus.smallrye.openapi)
     implementation(libs.quarkus.smallrye.fault.tolerance)
+    // ADR-0334 S3: monthly incentive claim run + subscription sweep.
+    implementation(libs.quarkus.scheduler)
 
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.reactive)
