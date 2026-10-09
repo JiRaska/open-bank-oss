@@ -57,6 +57,26 @@ class CaseCoordinatorBootSmokeIT {
         assertValidationErrorConforms("/api/v1/case-coordinator/cases/missing/signals")
     }
 
+    @Test
+    @TestSecurity(user = "test-viewer", roles = ["ROLE_VIEWER"])
+    fun `missing case retains its published custom 404 error body`() {
+        val path = "/api/v1/case-coordinator/cases/missing"
+        val body: Map<String, Any?> = given()
+            .`when`().get(path)
+            .then()
+            .statusCode(404)
+            .extract().jsonPath().getMap("")
+
+        assertResponseSchema(path.replace("/missing", "/{caseId}"), "get", "404", "ErrorBody")
+        assertThat(schemaViolations(body, "ErrorBody")).isEmpty()
+        assertThat(body["error"]).isEqualTo("no case with id 'missing'")
+    }
+
+    @Test
+    fun `custom error body cannot pass as the shared validation schema`() {
+        assertThat(schemaViolations(mapOf("error" to "missing"), "ProblemDetail")).isNotEmpty()
+    }
+
     @Suppress("UNCHECKED_CAST")
     private fun assertValidationErrorConforms(path: String) {
         val body: Map<String, Any?> = given()
@@ -67,27 +87,40 @@ class CaseCoordinatorBootSmokeIT {
             .statusCode(400)
             .extract().jsonPath().getMap("")
 
-        val spec = javaClass.classLoader.getResourceAsStream("openapi.yaml")!!.use {
-            Yaml().load<Map<String, Any?>>(it)
-        }
-        val paths = spec["paths"] as Map<String, Map<String, Any?>>
-        val operation = paths.getValue(path.replace(Regex("/missing(?=/signals)"), "/{caseId}"))["post"]
-            as Map<String, Any?>
-        val responses = operation["responses"] as Map<String, Map<String, Any?>>
-        val response = responses.getValue("400")
-        val content = response["content"] as Map<String, Map<String, Any?>>
-        val media = content.getValue("application/json")
-        val ref = (media["schema"] as Map<String, String>).getValue("\$ref")
-        assertThat(ref).isEqualTo("#/components/schemas/ProblemDetail")
-        val components = spec["components"] as Map<String, Any?>
-        val schemas = components["schemas"] as Map<String, Map<String, Any?>>
-        val schema = schemas.getValue(ref.substringAfterLast('/'))
-        val required = schema["required"] as List<String>
-        val properties = schema["properties"] as Map<String, Map<String, Any?>>
-        assertThat(body.keys).containsAll(required).isSubsetOf(properties.keys)
-        assertThat(schema["additionalProperties"]).isEqualTo(false)
+        assertResponseSchema(path.replace(Regex("/missing(?=/signals)"), "/{caseId}"), "post", "400", "ProblemDetail")
+        assertThat(schemaViolations(body, "ProblemDetail")).isEmpty()
         assertThat(body["status"]).isEqualTo(400)
         assertThat(body["code"]).isEqualTo("VALIDATION_ERROR")
         assertThat(body).doesNotContainKey("error")
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun assertResponseSchema(path: String, method: String, status: String, schemaName: String) {
+        val spec = loadSpec()
+        val paths = spec["paths"] as Map<String, Map<String, Any?>>
+        val operation = paths.getValue(path)[method] as Map<String, Any?>
+        val responses = operation["responses"] as Map<String, Map<String, Any?>>
+        val response = responses.getValue(status)
+        val content = response["content"] as Map<String, Map<String, Any?>>
+        val media = content.getValue("application/json")
+        val ref = (media["schema"] as Map<String, String>).getValue("\$ref")
+        assertThat(ref).isEqualTo("#/components/schemas/$schemaName")
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun schemaViolations(body: Map<String, Any?>, schemaName: String): List<String> {
+        val spec = loadSpec()
+        val components = spec["components"] as Map<String, Any?>
+        val schemas = components["schemas"] as Map<String, Map<String, Any?>>
+        val schema = schemas.getValue(schemaName)
+        val required = schema["required"] as List<String>
+        val properties = schema["properties"] as Map<String, Map<String, Any?>>
+        val missing = required.filterNot(body::containsKey)
+        val unknown = if (schema["additionalProperties"] == false) body.keys - properties.keys else emptySet()
+        return missing.map { "missing $it" } + unknown.map { "unknown $it" }
+    }
+
+    private fun loadSpec(): Map<String, Any?> = javaClass.classLoader.getResourceAsStream("openapi.yaml")!!.use {
+        Yaml().load(it)
     }
 }
