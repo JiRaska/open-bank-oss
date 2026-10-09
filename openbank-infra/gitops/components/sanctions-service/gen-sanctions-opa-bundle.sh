@@ -60,6 +60,20 @@ allowed_reasons contains "service-agent-sanctions-read" if {
 	input.principal.id == "service-account-openbank-agent"
 	input.action in {"sanctions.list", "sanctions.read"}
 }
+
+# AUTHZ_ENFORCE flip for sanctions: a compliance officer (ROLE_COMPLIANCE + ROLE_VIEWER, the
+# deployed realm's compliance personas) reaches the GET surfaces through @RolesAllowed's
+# ROLE_VIEWER, and base rest.rego grants ROLE_COMPLIANCE only `*.read`. Enforcing without this
+# would 403 the checks / hits / pending lists for the role whose job is reviewing screening hits,
+# while the same person may still read each check by id. Read-only: never a screen, a decision,
+# a watchlist edit or a refresh. Human sessions only: a service-account carrying ROLE_COMPLIANCE
+# (the CI realm's shared client) gets nothing from this rule.
+allowed_reasons contains "compliance-sanctions-list" if {
+	input.principal.type == "HUMAN"
+	not startswith(input.principal.id, "service-account-")
+	"ROLE_COMPLIANCE" in input.principal.roles
+	input.action == "sanctions.list"
+}
 REGO
 )
 
