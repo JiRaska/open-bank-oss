@@ -17,6 +17,19 @@
       "attributes": {
         "access.token.lifespan": "3600"
       }
+    },
+    {
+      "clientId": "openbank-card-processing",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "fullScopeAllowed": true,
+      "attributes": {
+        "access.token.lifespan": "3600"
+      }
     }
   ],
   "users": [
@@ -25,13 +38,22 @@
       "enabled": true,
       "serviceAccountClientId": "openbank-services",
       "realmRoles": ["ROLE_OPERATOR", "ROLE_COMPLIANCE"]
+    },
+    {
+      "username": "service-account-openbank-card-processing",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-card-processing",
+      "realmRoles": [
+        "ROLE_API"
+      ]
     }
   ],
   "roles": {
     "realm": [
       { "name": "ROLE_OPERATOR" },
       { "name": "ROLE_COMPLIANCE" },
-      { "name": "ROLE_ADMIN" }
+      { "name": "ROLE_ADMIN" },
+      { "name": "ROLE_API" }
     ]
   }
 }

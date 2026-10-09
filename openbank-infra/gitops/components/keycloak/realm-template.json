@@ -1317,6 +1317,25 @@
       "secret": "__DOCUMENT_CLIENT_SECRET__"
     },
     {
+      "clientId": "openbank-card-processing",
+      "name": "OpenBank Card Processing",
+      "description": "Dedicated ROLE_API machine identity for card-processing calls to card-issuance; issuer decision and card read only (#12328).",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__CARD_PROCESSING_CLIENT_SECRET__"
+    },
+    {
       "clientId": "openbank-party",
       "name": "OpenBank Party Service",
       "description": "Per-service M2M client for party-service's GDPR Art. 15 account and transaction reads (account.list, transaction.list) (issue #10486). Holds ROLE_API only; its actions are granted by identity in the upstream OPA rego.",
@@ -1893,6 +1912,14 @@
       "username": "service-account-openbank-document",
       "enabled": true,
       "serviceAccountClientId": "openbank-document",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-card-processing",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-card-processing",
       "realmRoles": [
         "ROLE_API"
       ]

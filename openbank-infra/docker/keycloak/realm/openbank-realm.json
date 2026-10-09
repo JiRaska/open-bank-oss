@@ -1081,6 +1081,23 @@
       "attributes": {}
     },
     {
+      "clientId": "openbank-card-processing",
+      "name": "OpenBank Card Processing",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "CHANGE_ME_LOCAL_DEV_ONLY",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "protocol": "openid-connect",
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "attributes": {}
+    },
+    {
       "clientId": "openbank-party",
       "name": "OpenBank Party Service",
       "enabled": true,
@@ -1462,6 +1479,14 @@
       "username": "service-account-openbank-document",
       "enabled": true,
       "serviceAccountClientId": "openbank-document",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-card-processing",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-card-processing",
       "realmRoles": [
         "ROLE_API"
       ]
