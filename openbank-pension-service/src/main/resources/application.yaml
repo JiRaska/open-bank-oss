@@ -137,6 +137,13 @@ openbank:
         # profile turns them on.
         checks-accept: false
         default-value: "0"
+    # CZ state contribution (ZDPS 427/2011, #12382). company-ico is deliberately NOT defined here:
+    # unset (env OPENBANK_PENSION_STATE_CONTRIBUTION_CZ_COMPANY_ICO), nothing is filed. The daily
+    # deadline job files a closed quarter in its filing month, builds the monthly return report by
+    # the 10th, and counts missed deadlines.
+    state-contribution:
+      cz:
+        deadline-cron: ${OPENBANK_PENSION_CZ_DEADLINE_CRON:0 30 5 * * ?}
   rate-limit:
     enabled: true
     max-concurrent-requests: 100
@@ -170,6 +177,9 @@ authz:
         stub:
           checks-accept: true
           default-value: "250000.00"
+      state-contribution:
+        cz:
+          company-ico: "12345678"
   quarkus:
     log:
       level: DEBUG
@@ -194,6 +204,9 @@ authz:
       exit:
         stub:
           checks-accept: true
+      state-contribution:
+        cz:
+          company-ico: "12345678"
   quarkus:
     scheduler:
       enabled: false

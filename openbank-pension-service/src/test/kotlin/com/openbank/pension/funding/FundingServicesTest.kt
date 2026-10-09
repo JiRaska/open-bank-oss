@@ -17,6 +17,7 @@ import com.openbank.pension.domain.contribution.UnmatchedStatus
 import com.openbank.pension.domain.incentive.ClaimBatchStatus
 import com.openbank.pension.domain.incentive.ClaimStatus
 import com.openbank.pension.domain.incentive.ClawbackKind
+import com.openbank.pension.e2e.support.StateAgencySimulator
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -188,7 +189,10 @@ class FundingServicesTest {
             assertThat(claim.status).isEqualTo(ClaimStatus.SUBMITTED)
             assertThat(batch.payload).contains(ref).contains(claim.id.toString())
 
-            val reconciled = f.incentiveService.reconcileReceiptFile(batch.id, "${claim.id};ACCEPTED;340.00")
+            val reconciled = f.incentiveService.reconcileReceiptFile(
+                batch.id,
+                StateAgencySimulator.receipt(batch.payload),
+            )
             assertThat(reconciled.status).isEqualTo(ClaimBatchStatus.RECONCILED)
             val state = f.contributionRows.single { it.source == ContributionSource.STATE }
             assertThat(state.amount).isEqualByComparingTo("340.00")
@@ -231,9 +235,12 @@ class FundingServicesTest {
             }
         }
             .isInstanceOf(IllegalArgumentException::class.java)
-        f.incentiveService.reconcileReceiptFile(batch.id, "${claim.id};REJECTED;participant not eligible")
+        f.incentiveService.reconcileReceiptFile(
+            batch.id,
+            StateAgencySimulator.receipt(batch.payload, reject = mapOf(claim.id.toString() to "OLD_AGE_PENSIONER")),
+        )
         assertThat(f.claimRows.getValue(claim.id).status).isEqualTo(ClaimStatus.REJECTED)
-        assertThat(f.claimRows.getValue(claim.id).rejectionReason).isEqualTo("participant not eligible")
+        assertThat(f.claimRows.getValue(claim.id).rejectionReason).startsWith("OLD_AGE_PENSIONER:")
         assertThat(f.ledgerRows).isEmpty()
         assertThat(f.contributionRows.none { it.source == ContributionSource.STATE }).isTrue()
     }
@@ -340,7 +347,7 @@ class FundingServicesTest {
         // A concurrent run files the claim between our read and our filing.
         val racing = com.openbank.pension.domain.incentive.ClaimBatch(
             UUID.randomUUID(),
-            "agency-monthly-batch-v0",
+            "cz-mf-state-contribution-v1",
             YearMonth.of(2026, 1),
             listOf(claim.id),
             "other",
@@ -427,7 +434,7 @@ class FundingServicesTest {
         val ref = f.contributionService.paymentReference(c.contractId)
         f.contributionService.receive(payment("p", "1700", ref, LocalDate.of(2026, 1, 9)))
         val batch = f.incentiveService.runMonthlyClaims(YearMonth.of(2026, 1)).batches.single()
-        f.incentiveService.reconcileReceiptFile(batch.id, "${f.claimRows.values.single().id};ACCEPTED;340.00")
+        f.incentiveService.reconcileReceiptFile(batch.id, StateAgencySimulator.receipt(batch.payload))
 
         val balance = f.incentiveService.clawbackBalance(c.contractId, LocalDate.of(2026, 6, 1))
         assertThat(balance.stateIncentivesToReturn).isEqualByComparingTo("340.00")

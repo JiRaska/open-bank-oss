@@ -179,6 +179,22 @@ interface StateIncentiveClaimPort {
 
     /** Parses the agency's receipt / response file for a batch this adapter rendered. */
     fun parseReceipt(payload: String): List<ClaimReceiptLine>
+
+    /**
+     * The filing period a claim for [claimPeriod] is filed in: claims of one filing period go in
+     * one batch. Default: the claim's own period (one batch per month).
+     */
+    fun filingPeriod(claimPeriod: YearMonth): YearMonth = claimPeriod
+
+    /**
+     * Hands a batch that is already durably filed to the agency's transport and returns the channel
+     * reference, or null for a channel without transport. Called only after the batch is stored,
+     * so a filing race never transmits anything.
+     */
+    suspend fun transmit(batch: com.openbank.pension.domain.incentive.ClaimBatch): String? = null
+
+    /** Whether a claim for [claimPeriod] may be filed on [today]. Default: at once. */
+    fun fileable(claimPeriod: YearMonth, today: java.time.LocalDate): Boolean = true
 }
 
 /** document-service: render the annual tax certificate. Returns the document id. */

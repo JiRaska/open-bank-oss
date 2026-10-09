@@ -6,7 +6,10 @@
   "currency": "CZK",
   "legalReview": {
     "status": "REQUIRES_LEGAL_REVIEW",
-    "note": "Reference values modelled on Act 427/2011 Coll. as amended from 2024 and the Income Tax Act; every value must be confirmed by legal review before any production use."
+    "note": "Reference values modelled on Act 427/2011 Coll. as amended from 2024 and the Income Tax Act; every value must be confirmed by legal review before any production use.",
+    "sources": [
+      "state-contribution: rate 0.20 from 500 CZK, cap 340 CZK reached at 1700 CZK (ZDPS 427/2011 §14(1)-(2)), rounded down to whole CZK (§14(4)); quarterly claim to MF (§16), returns (§18). VERIFIED against https://www.zakonyprolidi.cz/cs/2011-427 on 2026-10-09; see docs/research/cz-state-pension-contribution.md. Wire format cz-mf-state-contribution-v1 is a PLACEHOLDER: MF's technical specification is not public."
+    ]
   },
   "eligibility": {
     "minAge": 18,
@@ -26,8 +29,9 @@
       "rate": 0.20,
       "minContribution": 500,
       "amountCap": 340,
+      "roundDownToUnit": 1,
       "claimChannel": "STATE_AGENCY_BATCH",
-      "claimFormat": "agency-monthly-batch-v0",
+      "claimFormat": "cz-mf-state-contribution-v1",
       "clawback": { "mode": "RETURN_ALL" }
     },
     {

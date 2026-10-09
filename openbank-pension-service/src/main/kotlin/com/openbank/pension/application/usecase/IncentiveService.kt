@@ -131,14 +131,26 @@ class IncentiveService(
         val pending = claims.byStatus(ClaimStatus.PENDING)
         val unfiled = mutableSetOf<String>()
         val filed = mutableListOf<ClaimBatch>()
-        pending.groupBy { formatOf(it) to it.period }.forEach { (key, group) ->
-            val (format, period) = key
+        val today = today()
+        val byFormat = pending.groupBy { formatOf(it) }.mapValues { (format, list) ->
+            // A claim is filed only once its filing period is open (CZ: after the quarter, ZDPS §16(2)).
             val adapter = channels.firstOrNull { it.claimFormat == format }
-            if (adapter == null) {
+            if (adapter == null) list else list.filter { adapter.fileable(it.period, today) }
+        }.filterValues { it.isNotEmpty() }
+        byFormat.forEach { (format, ofFormat) ->
+            if (channels.none { it.claimFormat == format }) {
                 unfiled += format
-                log.warnf("no claim channel adapter for format '%s'; %d claim(s) stay PENDING", format, group.size)
-                return@forEach
+                log.warnf("no claim channel adapter for format '%s'; %d claim(s) stay PENDING", format, ofFormat.size)
             }
+        }
+        // The adapter decides the filing period a claim month belongs to (CZ: the quarter, ZDPS §16(2)).
+        byFormat.flatMap { (format, ofFormat) ->
+            val adapter = channels.firstOrNull { it.claimFormat == format } ?: return@flatMap emptyList()
+            ofFormat.groupBy {
+                adapter.filingPeriod(it.period)
+            }.map { (period, group) -> Triple(adapter, period, group) }
+        }.forEach { (adapter, period, group) ->
+            val format = adapter.claimFormat
             val refs = group.associate { it.contractId to references.referenceFor(it.contractId) }
             val rendered = adapter.submit(period, group, refs)
             val batch = ClaimBatch(
@@ -154,7 +166,11 @@ class IncentiveService(
             // Atomic: a concurrent run that filed any of these claims first makes this a no-op,
             // so no claim is ever filed twice (the rendered payload is simply discarded).
             if (batches.fileAtomically(batch, now())) {
-                filed += batch
+                // Transmit only what was durably filed: a lost race never reaches the agency.
+                val reference = adapter.transmit(batch)
+                val stored = if (reference != null) batch.copy(channelReference = reference) else batch
+                if (stored != batch) batches.update(stored)
+                filed += stored
             } else {
                 log.warnf(
                     "claim batch for %s/%s lost a race with a concurrent run; nothing filed twice",
@@ -189,7 +205,16 @@ class IncentiveService(
             if (claim.status != ClaimStatus.SUBMITTED) return@forEach // already reconciled: idempotent
             if (line.accepted) {
                 val amount = requireNotNull(line.amount) { "accepted line for ${line.claimId} needs an amount" }
-                val received = claim.receive(amount, now())
+                // A partial payment keeps the agency's reason code next to the shortfall.
+                val received = claim.receive(amount, now()).let { r ->
+                    if (amount < claim.claimedAmount &&
+                        line.reason != null
+                    ) {
+                        r.copy(rejectionReason = line.reason)
+                    } else {
+                        r
+                    }
+                }
                 claims.update(received)
                 ledger.append(ledgerEntry(received, LedgerEntryKind.RECEIVED, amount))
                 contributionService.creditIncentive(

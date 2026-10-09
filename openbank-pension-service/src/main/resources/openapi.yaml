@@ -995,6 +995,164 @@ paths:
           description: Staff only
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/funding/operations/state-contribution/contracts/{contractId}/ineligibility:
+    post:
+      tags: [Pension funding operations]
+      operationId: recordStateContributionIneligibility
+      summary: Record that the participant was not entitled from a month on; registers the returns owed (ZDPS §18(2))
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/FundingContractId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IneligibilityRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StateContributionReturn'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Staff only
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/funding/operations/state-contribution/returns:
+    get:
+      tags: [Pension funding operations]
+      operationId: listStateContributionReturns
+      summary: State contribution returns, optionally by status
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema: { type: string, enum: [DUE, REPORTED, CONFIRMED, SETTLED] }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StateContributionReturn'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Staff only
+  /api/v1/pension/funding/operations/state-contribution/returns/{id}/settle:
+    post:
+      tags: [Pension funding operations]
+      operationId: settleStateContributionReturn
+      summary: Record that a confirmed return was paid back to the agency
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ResourceId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StateContributionReturn'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Staff only
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/funding/operations/state-contribution/return-reports:
+    get:
+      tags: [Pension funding operations]
+      operationId: listReturnReports
+      summary: Filed return reports, newest first, with their filed payload
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ReturnReport'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Staff only
+    post:
+      tags: [Pension funding operations]
+      operationId: fileReturnReport
+      summary: File the monthly return report with every DUE return (ZDPS §18(4))
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReturnReportRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReturnReportRun'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Staff only
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/funding/operations/state-contribution/return-reports/{id}/result:
+    post:
+      tags: [Pension funding operations]
+      operationId: applyReturnReportResult
+      summary: Apply the agency's result to a return report
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ResourceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReceiptFileRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReturnReport'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Staff only
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/funding/operations/state-contribution/deadlines:
+    get:
+      tags: [Pension funding operations]
+      operationId: stateContributionDeadlines
+      summary: Missed state contribution deadlines (filing, payment, returns)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StateContributionDeadlines'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Staff only
   /api/v1/pension/funding/operations/contracts/{contractId}/clawback-preview:
     get:
       tags: [Pension funding operations]
@@ -1990,6 +2148,53 @@ components:
       required: [payload]
       properties:
         payload: { type: string }
+    IneligibilityRequest:
+      type: object
+      required: [ineligibleFrom]
+      properties:
+        ineligibleFrom: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$', description: First month without entitlement (YYYY-MM) }
+    ReturnReportRequest:
+      type: object
+      required: [month]
+      properties:
+        month: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' }
+    StateContributionReturn:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        contractId: { type: string, format: uuid }
+        claimId: { type: [string, 'null'], format: uuid }
+        cause: { type: string, enum: [CONTRACT_TERMINATED, INELIGIBILITY_DISCOVERED] }
+        amount: { type: number }
+        currency: { type: string }
+        discoveredOn: { type: string, format: date }
+        dueBy: { type: string, format: date, description: Statutory deadline (ZDPS §18(2)/(3)) }
+        status: { type: string, enum: [DUE, REPORTED, CONFIRMED, SETTLED] }
+        reportId: { type: [string, 'null'], format: uuid }
+    ReturnReport:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        month: { type: string }
+        returnIds: { type: array, items: { type: string, format: uuid } }
+        payload: { type: string, description: Filed document in the placeholder cz-mf-state-contribution-v1 format }
+        channelReference: { type: [string, 'null'], description: 'MANUAL:sha256:… means nothing was transmitted' }
+        resultApplied: { type: boolean }
+        createdAt: { type: string, format: date-time }
+    ReturnReportRun:
+      type: object
+      properties:
+        filed: { type: boolean }
+        report:
+          oneOf:
+            - $ref: '#/components/schemas/ReturnReport'
+            - type: 'null'
+    StateContributionDeadlines:
+      type: object
+      properties:
+        claimsPastFilingDeadline: { type: integer }
+        claimsPastExpectedPayment: { type: integer }
+        returnsOverdue: { type: integer }
     IncentiveClaim:
       type: object
       properties:

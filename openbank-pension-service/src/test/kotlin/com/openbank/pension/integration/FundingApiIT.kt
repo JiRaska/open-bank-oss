@@ -112,7 +112,9 @@ class FundingApiIT {
 
         spec(
             null,
-        ).body("""{"payload":"$claimId;ACCEPTED;340.00"}""").`when`().post("$ops/claim-batches/$batchId/receipt")
+        ).body(
+            """{"payload":"R;cz-mf-state-contribution-v1;RESULT;2026;1;340.00\nP;$claimId;340.00"}""",
+        ).`when`().post("$ops/claim-batches/$batchId/receipt")
             .then().statusCode(200).body("status", equalTo("RECONCILED"))
         spec(null).`when`().get("$funding/$id/incentives").then().statusCode(200)
             .body("balances[0].net", equalTo(340.0f))

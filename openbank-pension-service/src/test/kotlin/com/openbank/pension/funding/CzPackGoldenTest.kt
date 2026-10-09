@@ -143,7 +143,7 @@ class CzPackGoldenTest {
             IncentiveEngine.claimableRules(dps).map {
                 it.claimFormat
             },
-        ).containsExactly("agency-monthly-batch-v0")
+        ).containsExactly("cz-mf-state-contribution-v1")
         assertThat(IncentiveEngine.claimableRules(dip)).isEmpty()
     }
 }

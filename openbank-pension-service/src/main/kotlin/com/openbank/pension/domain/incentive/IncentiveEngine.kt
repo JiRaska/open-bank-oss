@@ -76,7 +76,7 @@ object IncentiveEngine {
             IncentiveType.MATCHING -> IncentiveBand.matched(rule, basis).min(rule.amountCap!!)
             else -> rule.flatAmount!!
         }
-        return money(raw)
+        return money(rule.roundDown(raw))
     }
 
     /**

@@ -25,9 +25,11 @@ import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestMethodOrder
 import java.math.BigDecimal
+import java.time.Clock
 import java.time.Duration
 import java.time.LocalDate
 import java.time.YearMonth
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 /**
@@ -78,6 +80,10 @@ class PensionFullLifecycleJourneyE2E {
 
     @Inject
     lateinit var temporal: PensionTemporalTestEnvironment
+
+    /** The service's clock (WorkflowTimeClock): it moves with [temporal]. */
+    @Inject
+    lateinit var appClock: Clock
 
     @Inject
     lateinit var fundValues: InMemoryFundAdministrationAdapter
@@ -215,6 +221,13 @@ class PensionFullLifecycleJourneyE2E {
         assertThat(credited.getString("outcome")).describedAs(credited.prettify()).isEqualTo("CREDITED")
         assertThat(credited.getString("contribution.source")).isEqualTo("PARTICIPANT")
 
+        // The CZ application is filed in the month after the quarter (ZDPS §16(2)): move the
+        // service's clock into the filing month of lastMonth's quarter if it is not there yet.
+        val appToday = LocalDate.now(appClock)
+        val filingOpens = lastMonth.withMonth(((lastMonth.monthValue - 1) / 3) * 3 + 3).plusMonths(1).atDay(1)
+        if (appToday.isBefore(filingOpens)) {
+            temporal.advance(Duration.ofDays(ChronoUnit.DAYS.between(appToday, filingOpens) + 1))
+        }
         val run = ok(operatorPost("$OPS/claim-runs", """{"period":"$lastMonth"}"""))
         assertThat(run.getInt("claimsCreated")).isGreaterThanOrEqualTo(1)
         val batch = run.getList<Map<String, Any>>("batches")
@@ -469,6 +482,27 @@ class PensionFullLifecycleJourneyE2E {
         )
             .describedAs("S3 ledger after S5 termination: %s", incentives.prettify())
             .isEqualByComparingTo("340")
+
+        // ZDPS §18(3): the exit registered a return owed to MF; it is reported, confirmed by the
+        // agency (simulator) and settled.
+        val owed = ok(operatorGet("$OPS/state-contribution/returns?status=DUE"))
+        val returnId = owed.getString("find { it.contractId == '$dpsContract' }.id")
+        assertThat(owed.getString("find { it.contractId == '$dpsContract' }.cause")).isEqualTo("CONTRACT_TERMINATED")
+        val filed = ok(
+            operatorPost("$OPS/state-contribution/return-reports", """{"month":"${YearMonth.now(appClock)}"}"""),
+        )
+        assertThat(filed.getBoolean("filed")).isTrue()
+        val payload = filed.getString("report.payload")
+        assertThat(BigDecimal(StateAgencySimulator.parseReturns(payload).single { it.returnId == returnId }.amount))
+            .isEqualByComparingTo("340")
+        ok(
+            operatorPost(
+                "$OPS/state-contribution/return-reports/${filed.getString("report.id")}/result",
+                """{"payload":${quote(StateAgencySimulator.returnResult(payload))}}""",
+            ),
+        )
+        assertThat(ok(operatorPost("$OPS/state-contribution/returns/$returnId/settle", null)).getString("status"))
+            .isEqualTo("SETTLED")
     }
 
     // ---- (e) regular payout and death --------------------------------------------------------------
