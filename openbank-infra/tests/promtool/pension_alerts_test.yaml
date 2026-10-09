@@ -168,6 +168,8 @@ tests:
     input_series:
       - series: 'kafka_topic_partition_current_offset{topic="openbank.dlq.pension.domestic-payment-events-in",partition="0"}'
         values: "0 0 0 0 0 1 1 1 1 1"
+      - series: 'kafka_topic_partition_oldest_offset{topic="openbank.dlq.pension.domestic-payment-events-in",partition="0"}'
+        values: "0+0x10"
     alert_rule_test:
       - eval_time: 8m
         alertname: PensionPaymentEventDeadLettered
@@ -182,9 +184,11 @@ tests:
               summary: "Pension dead-lettered a domestic-payment status event"
 
   - interval: 1m
-    name: "another service's DLQ does NOT fire PensionPaymentEventDeadLettered"
+    name: "an expired pension DLQ record and another service's DLQ do NOT fire PensionPaymentEventDeadLettered"
     input_series:
       - series: 'kafka_topic_partition_current_offset{topic="openbank.dlq.pension.domestic-payment-events-in",partition="0"}'
+        values: "4+0x10"
+      - series: 'kafka_topic_partition_oldest_offset{topic="openbank.dlq.pension.domestic-payment-events-in",partition="0"}'
         values: "4+0x10"
       - series: 'kafka_topic_partition_current_offset{topic="openbank.dlq.account.party-events-in",partition="0"}'
         values: "0+1x10"
@@ -192,6 +196,26 @@ tests:
       - eval_time: 8m
         alertname: PensionPaymentEventDeadLettered
         exp_alerts: []
+
+  - interval: 1m
+    name: "a retained pension DLQ record still alerts after the one-hour append window"
+    input_series:
+      - series: 'kafka_topic_partition_current_offset{topic="openbank.dlq.pension.domestic-payment-events-in",partition="0"}'
+        values: "1+0x100"
+      - series: 'kafka_topic_partition_oldest_offset{topic="openbank.dlq.pension.domestic-payment-events-in",partition="0"}'
+        values: "0+0x100"
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: PensionPaymentEventDeadLettered
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: pension
+            exp_annotations:
+              description: "At least one domestic-payment status change could not be applied to a pension payout instruction after retries. The payout stays in its previous state until the record in openbank.dlq.pension.domestic-payment-events-in is replayed."
+              runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/pension-alerts.md#pensionpaymenteventdeadlettered"
+              subject_period: "continuous"
+              summary: "Pension dead-lettered a domestic-payment status event"
 
   - interval: 1m
     name: "half of the notices failing fires PensionNotificationsFailing"

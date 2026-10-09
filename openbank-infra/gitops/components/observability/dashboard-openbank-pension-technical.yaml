@@ -583,7 +583,7 @@ data:
           }
         },
         {
-          "title": "DLQ records (1h)",
+          "title": "Retained DLQ records",
           "type": "stat",
           "datasource": {
             "type": "prometheus",
@@ -623,7 +623,7 @@ data:
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(increase(kafka_topic_partition_current_offset{topic=\"openbank.dlq.pension.domestic-payment-events-in\"}[1h]))"
+              "expr": "sum(kafka_topic_partition_current_offset{topic=\"openbank.dlq.pension.domestic-payment-events-in\"} - kafka_topic_partition_oldest_offset{topic=\"openbank.dlq.pension.domestic-payment-events-in\"})"
             }
           ],
           "id": 15,

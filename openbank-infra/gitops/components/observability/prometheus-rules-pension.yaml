@@ -124,10 +124,12 @@ spec:
       interval: 1m
       rules:
         # failure-strategy: dead-letter-queue on domestic-payment-events-in. The DLQ has no
-        # consumer, so any record there is a payout settlement the service could not apply.
+        # consumer, so retained records are unapplied settlements. Compare the end and start
+        # offsets per partition: an increase over one hour would stop alerting on an old record.
         - alert: PensionPaymentEventDeadLettered
           expr: |
-            sum(increase(kafka_topic_partition_current_offset{topic="openbank.dlq.pension.domestic-payment-events-in"}[1h])) > 0
+            sum(kafka_topic_partition_current_offset{topic="openbank.dlq.pension.domestic-payment-events-in"}
+              - kafka_topic_partition_oldest_offset{topic="openbank.dlq.pension.domestic-payment-events-in"}) > 0
           labels:
             severity: warning
             team: pension

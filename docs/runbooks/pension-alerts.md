@@ -86,7 +86,10 @@ Critical. The daily check found an item already past a regulatory deadline (`kin
 
 A domestic-payment status change could not be applied to a pension payout instruction after
 retries and was parked on `openbank.dlq.pension.domestic-payment-events-in`. The DLQ has no
-consumer; the payout stays in its previous state.
+consumer; the payout stays in its previous state. The alert counts retained records from each
+partition's current and oldest offsets, so it remains active beyond the first hour. Replaying
+the event does not remove the DLQ record; verify the payout state separately, and keep the
+record available for investigation until its normal retention expires.
 
 1. Read the record (key = payment reference) from the DLQ topic.
 2. Fix the cause (usually the pension database or an unknown payment reference), then replay the
