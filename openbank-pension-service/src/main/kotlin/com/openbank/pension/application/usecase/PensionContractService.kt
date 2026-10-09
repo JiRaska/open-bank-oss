@@ -12,6 +12,7 @@ import com.openbank.pension.application.port.`in`.PensionContractUseCase
 import com.openbank.pension.application.port.out.ContractNotFoundException
 import com.openbank.pension.application.port.out.ParticipantNotifier
 import com.openbank.pension.application.port.out.PensionContractRepository
+import com.openbank.pension.application.port.out.PensionMetrics
 import com.openbank.pension.domain.model.ContractStatus
 import com.openbank.pension.domain.model.Limits
 import com.openbank.pension.domain.model.PensionContract
@@ -31,6 +32,7 @@ class PensionContractService(
     private val packs: JurisdictionPackRegistry,
     private val clock: Clock,
     private val notifier: ParticipantNotifier,
+    private val metrics: PensionMetrics = PensionMetrics.NONE,
 ) : PensionContractUseCase {
 
     override suspend fun createDraft(command: CreateDraftCommand): PensionContract {
@@ -96,10 +98,19 @@ class PensionContractService(
         effectiveFrom: LocalDate?,
     ): PensionContract {
         val from = effectiveFrom ?: LocalDate.now(clock)
-        val saved = transition(caller, id, null) {
-            require(!from.isBefore(LocalDate.now(clock))) { "a strategy change cannot take effect in the past" }
-            it.electStrategy(strategyCode, from, clock.instant())
+        val saved = try {
+            transition(caller, id, null) {
+                require(!from.isBefore(LocalDate.now(clock))) { "a strategy change cannot take effect in the past" }
+                it.electStrategy(strategyCode, from, clock.instant())
+            }
+        } catch (e: IllegalArgumentException) {
+            metrics.strategyChange("refused")
+            throw e
+        } catch (e: IllegalStateException) {
+            metrics.strategyChange("refused")
+            throw e
         }
+        metrics.strategyChange("stored")
         // #12379: the participant is told when the new strategy takes effect, after it is stored.
         ParticipantNotices.send(
             notifier,

@@ -10,10 +10,12 @@ import com.openbank.pension.application.port.out.ContractFundingDirectory
 import com.openbank.pension.application.port.out.ContractNotFoundException
 import com.openbank.pension.application.port.out.ContractReferenceRepository
 import com.openbank.pension.application.port.out.IncentiveClaimRepository
+import com.openbank.pension.application.port.out.PensionMetrics
 import com.openbank.pension.application.port.out.ReturnReport
 import com.openbank.pension.application.port.out.StateAgencyGateway
 import com.openbank.pension.application.port.out.StateContributionReturnChannel
 import com.openbank.pension.application.port.out.StateContributionReturnRepository
+import com.openbank.pension.application.port.out.StateReturnEvent
 import com.openbank.pension.domain.incentive.ClaimStatus
 import com.openbank.pension.domain.statecontribution.CzStateContributionCalendar
 import com.openbank.pension.domain.statecontribution.ReturnCause
@@ -66,6 +68,7 @@ class StateContributionReturnService(
     private val gateway: StateAgencyGateway,
     private val channel: StateContributionReturnChannel,
     private val clock: Clock,
+    private val metrics: PensionMetrics = PensionMetrics.NONE,
 ) {
     private val log = Logger.getLogger(StateContributionReturnService::class.java)
 
@@ -179,6 +182,12 @@ class StateContributionReturnService(
             ),
         )
         returns.setReportChannelReference(report.id, receipt.channelReference)
+        metrics.stateContributionReturns(
+            StateReturnEvent.REPORTED,
+            due.size,
+            due.fold(java.math.BigDecimal.ZERO) { sum, r -> sum + r.amount },
+            due.first().currency,
+        )
         return report.copy(channelReference = receipt.channelReference)
     }
 
@@ -193,10 +202,14 @@ class StateContributionReturnService(
             val item = returns.findById(line.returnId) ?: throw ReturnNotFoundException(line.returnId)
             if (item.status != ReturnStatus.REPORTED || item.reportId != reportId) return@forEach
             when (line) {
-                is ReturnResultLine.Confirmed -> returns.update(item.confirm(now()))
+                is ReturnResultLine.Confirmed -> {
+                    returns.update(item.confirm(now()))
+                    metrics.stateContributionReturns(StateReturnEvent.CONFIRMED, 1, null, null)
+                }
                 is ReturnResultLine.Refused -> {
                     log.warnf("agency refused return %s: %s", item.id, line.reason)
                     returns.update(item.reopen(now()))
+                    metrics.stateContributionReturns(StateReturnEvent.REFUSED, 1, null, null)
                 }
             }
         }
@@ -222,6 +235,7 @@ class StateContributionReturnService(
             }
         }
         returns.update(settled)
+        metrics.stateContributionReturns(StateReturnEvent.SETTLED, 1, item.amount, item.currency)
         return settled
     }
 

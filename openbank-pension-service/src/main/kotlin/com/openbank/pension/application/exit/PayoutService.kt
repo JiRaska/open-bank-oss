@@ -194,17 +194,24 @@ class PayoutService(
             // Re-applied to the CURRENT row: an installment activity may have written since we read.
             current.changePayoutAccount(iban, command.scaChallengeId, today, ctx.clock.instant())
         }
-        ctx.gateways.notifications.payoutAccountChanged(
-            contract.participantPartyId,
-            request.contractId,
-            request.id,
-            iban.takeLast(LAST4),
-            effectiveFrom,
-        )
+        ctx.metrics.payoutAccountChange("held")
+        try {
+            ctx.gateways.notifications.payoutAccountChanged(
+                contract.participantPartyId,
+                request.contractId,
+                request.id,
+                iban.takeLast(LAST4),
+                effectiveFrom,
+            )
+        } catch (e: RuntimeException) {
+            // The change stays held and inert: it cannot apply without the participant hearing of it.
+            ctx.metrics.payoutAccountChange("notice_failed")
+            throw e
+        }
         return onFreshRead(saved.id) { current ->
             check(current.pendingPayoutIban == saved.pendingPayoutIban) { "the pending account change was replaced" }
             current.markAccountChangeNotified(ctx.clock.instant())
-        }
+        }.also { ctx.metrics.payoutAccountChange("notified") }
     }
 
     /**
@@ -220,6 +227,7 @@ class PayoutService(
                 return stores.payouts.save(transition(current))
             } catch (_: ExitConcurrentUpdateException) {
                 // Lost the race; read again.
+                ctx.metrics.optimisticLockConflict("payout_request", "retried")
             }
         }
         val current = requireNotNull(stores.payouts.findById(id)) { "payout $id vanished" }

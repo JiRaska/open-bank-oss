@@ -16,7 +16,10 @@ import com.openbank.pension.application.port.out.FundAdministrationPort
 import com.openbank.pension.application.port.out.MandateRequest
 import com.openbank.pension.application.port.out.OnboardingActivationPort
 import com.openbank.pension.application.port.out.PaymentMandatePort
+import com.openbank.pension.application.port.out.PensionMetrics
+import com.openbank.pension.application.port.out.ReceiptKind
 import com.openbank.pension.application.port.out.UnmatchedPaymentRepository
+import com.openbank.pension.application.port.out.UnmatchedResolution
 import com.openbank.pension.domain.contribution.Contribution
 import com.openbank.pension.domain.contribution.ContributionChannel
 import com.openbank.pension.domain.contribution.ContributionSource
@@ -65,6 +68,7 @@ class ContributionService(
     private val enrolments: EmployerEnrolmentRepository,
     private val activation: OnboardingActivationPort,
     private val clock: Clock,
+    private val metrics: PensionMetrics = PensionMetrics.NONE,
 ) {
     private val log = Logger.getLogger(ContributionService::class.java)
 
@@ -104,6 +108,7 @@ class ContributionService(
                 null,
             )
         unmatched.update(assigned)
+        metrics.unmatchedResolved(UnmatchedResolution.ASSIGNED)
         return when (outcome) {
             is ReceiptOutcome.Credited -> outcome.contribution
             is ReceiptOutcome.Duplicate -> outcome.contribution
@@ -114,7 +119,10 @@ class ContributionService(
     /** Operator decision: the parked payment goes back to the payer (the refund itself is the payment hub's). */
     suspend fun returnUnmatched(id: UUID, actor: String): UnmatchedPayment {
         val parked = unmatched.findById(id) ?: throw UnmatchedPaymentNotFoundException(id)
-        return parked.returnToPayer(actor, now()).also { unmatched.update(it) }
+        return parked.returnToPayer(actor, now()).also {
+            unmatched.update(it)
+            metrics.unmatchedResolved(UnmatchedResolution.RETURNED)
+        }
     }
 
     suspend fun unmatchedQueue(status: UnmatchedStatus?): List<UnmatchedPayment> = unmatched.list(status)
@@ -261,7 +269,11 @@ class ContributionService(
                 receivedAt = now(),
             ),
         )
-        if (!created) return ReceiptOutcome.Duplicate(stored)
+        if (!created) {
+            metrics.contributionReceived(source, channel, ReceiptKind.DUPLICATE, payment.amount, payment.currency)
+            return ReceiptOutcome.Duplicate(stored)
+        }
+        metrics.contributionReceived(source, channel, ReceiptKind.CREDITED, payment.amount, payment.currency)
         // Activation is the onboarding workflow's: it is TOLD a contribution arrived and activates only
         // once its own gates pass (signature, cooling-off). The contract is never moved from here.
         if (contract.status == PENDING) activation.firstContributionReceived(contract.contractId)
@@ -274,12 +286,19 @@ class ContributionService(
         contributions.setSubscriptionOrder(c.id, order)
     }.onFailure { log.warnf(it, "subscription for contribution %s not placed; the sweep will retry", c.id) }.isSuccess
 
-    private suspend fun park(payment: IncomingPayment, reason: UnmatchedReason): ReceiptOutcome.Unmatched =
-        ReceiptOutcome.Unmatched(
-            unmatched.insertIfAbsent(
-                UnmatchedPayment(Ids.newId(), payment, reason, UnmatchedStatus.OPEN, now()),
-            ),
-        )
+    private suspend fun park(payment: IncomingPayment, reason: UnmatchedReason): ReceiptOutcome.Unmatched {
+        val candidate = UnmatchedPayment(Ids.newId(), payment, reason, UnmatchedStatus.OPEN, now())
+        val stored = unmatched.insertIfAbsent(candidate)
+        // A redelivery answers the row parked the first time: counted as a duplicate, not a second park.
+        val kind = if (stored.id == candidate.id) ReceiptKind.UNMATCHED else ReceiptKind.DUPLICATE
+        val source = if (payment.channel == ContributionChannel.EMPLOYER_BATCH) {
+            ContributionSource.EMPLOYER
+        } else {
+            ContributionSource.PARTICIPANT
+        }
+        metrics.contributionReceived(source, payment.channel, kind, payment.amount, payment.currency)
+        return ReceiptOutcome.Unmatched(stored)
+    }
 
     /**
      * A PENDING_ACTIVATION contract takes money only while a SIGNED onboarding awaits its first

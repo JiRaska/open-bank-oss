@@ -11,6 +11,7 @@ import com.openbank.pension.application.onboarding.OnboardingApplicationReposito
 import com.openbank.pension.application.onboarding.SuitabilityAssessmentRepository
 import com.openbank.pension.application.onboarding.TransactionRunner
 import com.openbank.pension.application.onboarding.TransferRequestRepository
+import com.openbank.pension.application.port.out.PensionMetrics
 import com.openbank.pension.domain.onboarding.OnboardingApplication
 import com.openbank.pension.domain.onboarding.OnboardingStatus
 import com.openbank.pension.domain.onboarding.SuitabilityAssessment
@@ -26,6 +27,7 @@ import jakarta.persistence.LockModeType
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import java.time.Duration
 import java.util.UUID
 
 /** The payload mapper: tolerant of derived getters the domain exposes (they are not state). */
@@ -58,39 +60,72 @@ class PanacheTransactionRunner : TransactionRunner {
 private fun conflict(what: String, id: UUID, stored: Long, expected: Long): Nothing =
     throw ConcurrentModificationException("$what $id changed concurrently (stored v$stored, expected v$expected)")
 
+/** Runs a save and counts a refused optimistic write (surfaced as 409) before rethrowing it. */
+private suspend fun conflictsCounted(metrics: PensionMetrics, aggregate: String, save: suspend () -> Unit) {
+    try {
+        save()
+    } catch (e: ConcurrentModificationException) {
+        metrics.optimisticLockConflict(aggregate, "detected")
+        throw e
+    }
+}
+
 @ApplicationScoped
-class OnboardingApplicationRepositoryImpl(private val json: PayloadMapper) :
+class OnboardingApplicationRepositoryImpl(private val json: PayloadMapper, private val metrics: PensionMetrics) :
     OnboardingApplicationRepository,
     PanacheRepository<OnboardingApplicationEntity> {
 
     override suspend fun save(application: OnboardingApplication): OnboardingApplication {
         val next = application.version + 1
-        Panache.withTransaction {
-            find("applicationId", application.id).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult()
-                .flatMap { existing ->
-                    if (existing == null) {
-                        if (application.version !=
-                            0L
-                        ) {
-                            conflict("onboarding application", application.id, -1, application.version)
+        var previous: String? = null
+        conflictsCounted(metrics, "onboarding_application") {
+            Panache.withTransaction {
+                find("applicationId", application.id).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult()
+                    .flatMap { existing ->
+                        if (existing == null) {
+                            if (application.version !=
+                                0L
+                            ) {
+                                conflict("onboarding application", application.id, -1, application.version)
+                            }
+                            persist(
+                                OnboardingApplicationEntity().apply {
+                                    applicationId = application.id
+                                    createdAt = application.createdAt
+                                    fill(application, next)
+                                },
+                            ).replaceWithVoid()
+                        } else {
+                            if (existing.version != application.version) {
+                                conflict(
+                                    "onboarding application",
+                                    application.id,
+                                    existing.version,
+                                    application.version,
+                                )
+                            }
+                            previous = existing.status
+                            existing.fill(application, next)
+                            Uni.createFrom().voidItem()
                         }
-                        persist(
-                            OnboardingApplicationEntity().apply {
-                                applicationId = application.id
-                                createdAt = application.createdAt
-                                fill(application, next)
-                            },
-                        ).replaceWithVoid()
-                    } else {
-                        if (existing.version != application.version) {
-                            conflict("onboarding application", application.id, existing.version, application.version)
-                        }
-                        existing.fill(application, next)
-                        Uni.createFrom().voidItem()
                     }
-                }
-        }.awaitSuspending()
+            }.awaitSuspending()
+        }
+        recordOnboarding(previous, application)
         return application.copy(version = next)
+    }
+
+    private fun recordOnboarding(previous: String?, application: OnboardingApplication) {
+        val to = application.status.name
+        if (previous == to) return
+        metrics.transition("onboarding_application", previous, to)
+        if (application.status == OnboardingStatus.ACTIVATED) {
+            metrics.onboardingActivated(
+                application.productLine,
+                application.jurisdiction,
+                Duration.between(application.createdAt, application.updatedAt),
+            )
+        }
     }
 
     private fun OnboardingApplicationEntity.fill(application: OnboardingApplication, next: Long) {
@@ -162,37 +197,58 @@ class SuitabilityAssessmentRepositoryImpl(private val json: PayloadMapper) :
 }
 
 @ApplicationScoped
-class TransferRequestRepositoryImpl(private val json: PayloadMapper) :
+class TransferRequestRepositoryImpl(private val json: PayloadMapper, private val metrics: PensionMetrics) :
     TransferRequestRepository,
     PanacheRepository<TransferRequestEntity> {
 
     override suspend fun save(request: TransferRequest): TransferRequest {
         val next = request.version + 1
-        Panache.withTransaction {
-            find("transferId", request.id).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult()
-                .flatMap { existing ->
-                    if (existing == null) {
-                        if (request.version != 0L) conflict("transfer request", request.id, -1, request.version)
-                        persist(
-                            TransferRequestEntity().apply {
-                                transferId = request.id
-                                direction = request.direction.name
-                                contractId = request.contractId
-                                partyId = request.partyId
-                                createdAt = request.createdAt
-                                fill(request, next)
-                            },
-                        ).replaceWithVoid()
-                    } else {
-                        if (existing.version != request.version) {
-                            conflict("transfer request", request.id, existing.version, request.version)
+        var previous: String? = null
+        conflictsCounted(metrics, "transfer_request") {
+            Panache.withTransaction {
+                find("transferId", request.id).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult()
+                    .flatMap { existing ->
+                        if (existing == null) {
+                            if (request.version != 0L) conflict("transfer request", request.id, -1, request.version)
+                            persist(
+                                TransferRequestEntity().apply {
+                                    transferId = request.id
+                                    direction = request.direction.name
+                                    contractId = request.contractId
+                                    partyId = request.partyId
+                                    createdAt = request.createdAt
+                                    fill(request, next)
+                                },
+                            ).replaceWithVoid()
+                        } else {
+                            if (existing.version != request.version) {
+                                conflict("transfer request", request.id, existing.version, request.version)
+                            }
+                            previous = existing.status
+                            existing.fill(request, next)
+                            Uni.createFrom().voidItem()
                         }
-                        existing.fill(request, next)
-                        Uni.createFrom().voidItem()
                     }
-                }
-        }.awaitSuspending()
+            }.awaitSuspending()
+        }
+        recordTransfer(previous, request)
         return request.copy(version = next)
+    }
+
+    private fun recordTransfer(previous: String?, request: TransferRequest) {
+        val to = request.status.name
+        if (previous == to) return
+        metrics.transition("transfer_${request.direction.name.lowercase()}", previous, to)
+        if (request.status.terminal) {
+            val completed = request.status == TransferStatus.COMPLETED
+            metrics.transferFinished(
+                request.direction,
+                to,
+                Duration.between(request.createdAt, request.updatedAt),
+                if (completed) request.netAmount else null,
+                if (completed) request.currency else null,
+            )
+        }
     }
 
     private fun TransferRequestEntity.fill(request: TransferRequest, next: Long) {

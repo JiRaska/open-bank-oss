@@ -5,6 +5,7 @@
 package com.openbank.pension.infrastructure.rest
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.pension.application.port.out.PensionMetrics
 import io.quarkus.security.identity.SecurityIdentity
 import io.smallrye.mutiny.Uni
 import io.vertx.mutiny.sqlclient.Pool
@@ -45,6 +46,9 @@ class IdempotencyReplayFilter {
     @Inject
     lateinit var mapper: ObjectMapper
 
+    @Inject
+    lateinit var metrics: PensionMetrics
+
     @ServerRequestFilter
     fun replay(request: ContainerRequestContext): Uni<Response?> {
         val scope = scopeOf(request) ?: return Uni.createFrom().nullItem()
@@ -52,6 +56,7 @@ class IdempotencyReplayFilter {
         return pool.preparedQuery(SELECT).execute(Tuple.of(scope)).map { rows ->
             val row = rows.firstOrNull() ?: return@map null
             request.setProperty(REPLAYED_PROPERTY, true)
+            metrics.idempotencyReplay(request.method)
             Response.status(row.getInteger("status"))
                 .entity(row.getString("response_body"))
                 .type(MediaType.APPLICATION_JSON)

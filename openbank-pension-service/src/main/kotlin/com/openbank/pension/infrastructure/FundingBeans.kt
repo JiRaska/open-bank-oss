@@ -16,6 +16,7 @@ import com.openbank.pension.application.port.out.IncentiveLedgerRepository
 import com.openbank.pension.application.port.out.OnboardingActivationPort
 import com.openbank.pension.application.port.out.ParticipantNotifier
 import com.openbank.pension.application.port.out.PaymentMandatePort
+import com.openbank.pension.application.port.out.PensionMetrics
 import com.openbank.pension.application.port.out.StateIncentiveClaimPort
 import com.openbank.pension.application.port.out.TaxCertificateDocumentPort
 import com.openbank.pension.application.port.out.TaxYearSummaryRepository
@@ -46,8 +47,10 @@ class FundingBeans {
         enrolments: EmployerEnrolmentRepository,
         activation: OnboardingActivationPort,
         clock: Clock,
+        metrics: PensionMetrics,
     ): ContributionService = ContributionService(
         directory, references, contributions, unmatched, fund, employers, mandates, enrolments, activation, clock,
+        metrics,
     )
 
     @Produces
@@ -67,8 +70,9 @@ class FundingBeans {
         contributionService: ContributionService,
         clock: Clock,
         notifier: ParticipantNotifier,
+        metrics: PensionMetrics,
     ): IncentiveService = IncentiveService(
         directory, references, contributions, claims, batches, ledger, summaries, registry,
-        channels.toList(), documents, contributionService, clock, notifier,
+        channels.toList(), documents, contributionService, clock, notifier, metrics,
     )
 }

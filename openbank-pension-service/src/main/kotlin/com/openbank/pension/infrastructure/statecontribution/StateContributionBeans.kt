@@ -7,6 +7,7 @@ package com.openbank.pension.infrastructure.statecontribution
 import com.openbank.pension.application.port.out.ContractFundingDirectory
 import com.openbank.pension.application.port.out.ContractReferenceRepository
 import com.openbank.pension.application.port.out.IncentiveClaimRepository
+import com.openbank.pension.application.port.out.PensionMetrics
 import com.openbank.pension.application.port.out.StateAgencyGateway
 import com.openbank.pension.application.port.out.StateContributionReturnChannel
 import com.openbank.pension.application.port.out.StateContributionReturnRepository
@@ -32,6 +33,8 @@ class StateContributionBeans {
         gateway: StateAgencyGateway,
         channel: StateContributionReturnChannel,
         clock: Clock,
-    ): StateContributionReturnService =
-        StateContributionReturnService(returns, claims, directory, references, incentives, gateway, channel, clock)
+        metrics: PensionMetrics,
+    ): StateContributionReturnService = StateContributionReturnService(
+        returns, claims, directory, references, incentives, gateway, channel, clock, metrics,
+    )
 }

@@ -7,6 +7,7 @@ package com.openbank.pension.infrastructure
 import com.openbank.pension.application.port.`in`.PensionContractUseCase
 import com.openbank.pension.application.port.out.ParticipantNotifier
 import com.openbank.pension.application.port.out.PensionContractRepository
+import com.openbank.pension.application.port.out.PensionMetrics
 import com.openbank.pension.application.usecase.PensionContractService
 import com.openbank.pension.domain.pack.JurisdictionPackRegistry
 import com.openbank.pension.infrastructure.pack.JurisdictionPackLoader
@@ -36,5 +37,6 @@ class PensionBeans {
         registry: JurisdictionPackRegistry,
         clock: Clock,
         notifier: ParticipantNotifier,
-    ): PensionContractUseCase = PensionContractService(repository, registry, clock, notifier)
+        metrics: PensionMetrics,
+    ): PensionContractUseCase = PensionContractService(repository, registry, clock, notifier, metrics)
 }
