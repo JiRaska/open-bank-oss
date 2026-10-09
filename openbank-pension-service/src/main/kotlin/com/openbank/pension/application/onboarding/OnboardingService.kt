@@ -15,6 +15,7 @@ import com.openbank.pension.domain.onboarding.CedingContract
 import com.openbank.pension.domain.onboarding.IssuedKid
 import com.openbank.pension.domain.onboarding.OnboardingApplication
 import com.openbank.pension.domain.onboarding.OnboardingKind
+import com.openbank.pension.domain.onboarding.OnboardingRules
 import com.openbank.pension.domain.onboarding.OnboardingStatus
 import com.openbank.pension.domain.onboarding.QuestionnaireAnswers
 import com.openbank.pension.domain.onboarding.StrategyRecommendation
@@ -23,6 +24,10 @@ import com.openbank.pension.domain.onboarding.SuitabilityAssessment
 import com.openbank.pension.domain.pack.JurisdictionPackRegistry
 import com.openbank.pension.domain.pack.PackEvaluator
 import com.openbank.pension.domain.pack.ProviderType
+import com.openbank.pension.domain.questionnaire.QuestionSetRegistry
+import com.openbank.pension.domain.questionnaire.WarningAcknowledgement
+import com.openbank.pension.domain.questionnaire.WarningCode
+import com.openbank.pension.domain.questionnaire.WarningPolicy
 import com.openbank.pension.domain.transfer.Counterparty
 import com.openbank.pension.domain.transfer.TransferDirection
 import com.openbank.pension.domain.transfer.TransferOrigin
@@ -84,6 +89,7 @@ class OnboardingService(
     private val orchestrator: PensionOrchestrator,
     private val tx: TransactionRunner,
     private val clock: Clock,
+    private val questionSets: QuestionSetRegistry,
 ) {
 
     private fun today(): LocalDate = LocalDate.now(clock)
@@ -179,10 +185,8 @@ class OnboardingService(
         id: UUID,
         partyId: UUID,
         answers: QuestionnaireAnswers,
-    ): Pair<OnboardingApplication, StrategyRecommendation> {
-        val application = live(id, partyId)
-        val onboarding = rulesFor(application)
-        val assessment = SuitabilityAssessment.assess(
+    ): Pair<OnboardingApplication, StrategyRecommendation> = submitAssessment(id, partyId) { application, onboarding ->
+        SuitabilityAssessment.assess(
             partyId,
             id,
             application.productLine,
@@ -191,6 +195,19 @@ class OnboardingService(
             today(),
             now(),
         )
+    }
+
+    /**
+     * Records a new assessment built by [build] (legacy scales or the data-driven question set),
+     * superseding the previous one in the same transaction — the superseded one stays for audit.
+     */
+    suspend fun submitAssessment(
+        id: UUID,
+        partyId: UUID,
+        build: (OnboardingApplication, OnboardingRules) -> SuitabilityAssessment,
+    ): Pair<OnboardingApplication, StrategyRecommendation> {
+        val application = live(id, partyId)
+        val assessment = build(application, rulesFor(application))
         val recommendation = recommend(application, assessment)
         val saved = tx.inTransaction {
             application.assessmentId?.let { previous ->
@@ -200,6 +217,48 @@ class OnboardingService(
             applications.save(application.submitQuestionnaire(assessment.id, recommendation.recommended, now()))
         }
         return saved to recommendation
+    }
+
+    /** The assessment in force for one of the caller's applications, or null before the first answer. */
+    suspend fun assessmentOf(id: UUID, partyId: UUID): SuitabilityAssessment? =
+        get(id, partyId).assessmentId?.let { assessments.findById(it) }
+
+    /** Whether the application's pinned pack offers [strategyCode] at all. */
+    fun offers(application: OnboardingApplication, strategyCode: String): Boolean =
+        rulesFor(application).strategy(strategyCode) != null
+
+    /** Saves partial answers (save-and-resume); they are validated by the caller against the set. */
+    suspend fun saveDraft(id: UUID, partyId: UUID, answers: Map<String, String>): OnboardingApplication =
+        applications.save(live(id, partyId).saveDraft(answers, now()))
+
+    /**
+     * Acknowledges warnings for a strategy BEFORE choosing it, so the UI can show each warning as
+     * its own screen. Only warnings the choice actually requires, and only overridable ones, can be
+     * acknowledged — an acknowledgement can never unlock a choice the regime forbids.
+     */
+    suspend fun acknowledgeWarnings(
+        id: UUID,
+        partyId: UUID,
+        strategyCode: String,
+        codes: Set<WarningCode>,
+        language: String?,
+    ): OnboardingApplication {
+        val application = live(id, partyId)
+        val onboarding = rulesFor(application)
+        requireNotNull(onboarding.strategy(strategyCode)) { "strategy $strategyCode is not offered under this pack" }
+        val assessment = currentAssessment(application)
+        val required = WarningPolicy.required(strategyCode, assessment, recommend(application, assessment))
+        require(codes.isNotEmpty()) { "at least one warning code is required" }
+        require(required.containsAll(codes)) {
+            "warnings ${(codes - required).joinToString()} do not apply to $strategyCode"
+        }
+        codes.forEach { code ->
+            require(WarningPolicy.overridable(code, onboarding)) {
+                "warning $code cannot be overridden under the ${onboarding.questionnaire.regime} regime"
+            }
+        }
+        val acks = warningAcks(application, codes, assessment.id, strategyCode, language)
+        return applications.save(application.acknowledge(acks, now()))
     }
 
     suspend fun recommendation(id: UUID, partyId: UUID): StrategyRecommendation {
@@ -218,18 +277,23 @@ class OnboardingService(
         val assessment = currentAssessment(application)
         val recommendation = recommend(application, assessment)
         val code = command.strategyCode ?: recommendation.recommended
-        val option = requireNotNull(onboarding.strategy(code)) { "strategy $code is not offered under this pack" }
-        val unsuitable = option.code !in recommendation.suitable && option.code != recommendation.recommended
-        if (unsuitable) {
-            require(onboarding.questionnaire.allowUnsuitableWithWarning) {
+        requireNotNull(onboarding.strategy(code)) { "strategy $code is not offered under this pack" }
+        val required = WarningPolicy.required(code, assessment, recommendation)
+        if (WarningCode.STRATEGY_ABOVE_PROFILE in required) {
+            require(WarningPolicy.overridable(WarningCode.STRATEGY_ABOVE_PROFILE, onboarding)) {
                 "strategy $code is above the suitable risk class ${recommendation.maxRiskClass}"
             }
-            require(command.acknowledgeUnsuitable) { "choosing an unsuitable strategy needs an acknowledged warning" }
         }
-        if (assessment.appropriate == false) {
+        // A warning is acknowledged either beforehand (POST .../warnings/acknowledge, which records
+        // the exact wording) or together with the choice; never skipped (ZDPS § 136(3), MiFID 25(3)).
+        var acknowledged = application
+        val missing = WarningPolicy.missing(required, application.warningAcknowledgements, assessment.id, code)
+        if (missing.isNotEmpty()) {
             require(command.acknowledgeUnsuitable) {
-                "the product is not appropriate; the warning must be acknowledged"
+                "the choice needs acknowledged warnings: ${missing.joinToString()}"
             }
+            val acks = warningAcks(application, missing, assessment.id, code, command.language)
+            acknowledged = application.acknowledge(acks, now())
         }
         val document = documents.generate(
             KidRequest(
@@ -243,7 +307,7 @@ class OnboardingService(
             ),
         )
         val kid = IssuedKid(document.documentId, document.sha256, code, now())
-        return applications.save(application.issueKid(code, unsuitable || assessment.appropriate == false, kid, now()))
+        return applications.save(acknowledged.issueKid(code, required.isNotEmpty(), kid, now()))
     }
 
     suspend fun acceptKid(id: UUID, partyId: UUID, documentId: String): OnboardingApplication =
@@ -263,6 +327,7 @@ class OnboardingService(
         val live = live(id, partyId)
         check(live.status == OnboardingStatus.KID_ACCEPTED) { "the key-information document must be accepted first" }
         val kid = checkNotNull(live.kid)
+        requireWarningsAcknowledged(live)
         // Bound to THIS application and THIS document; the signer is the acting party (the
         // guardian, for a ward). sca-service spends the challenge, so it cannot sign twice.
         val outcome = signatures.verify(partyId, challengeId, kid.sha256, "pension-onboarding:$id:${kid.documentId}")
@@ -472,6 +537,40 @@ class OnboardingService(
             pack.payout.minAge,
             today(),
         )
+    }
+
+    /** Builds acknowledgements bound to the wording of the application's question set. */
+    internal fun warningAcks(
+        application: OnboardingApplication,
+        codes: Set<WarningCode>,
+        assessmentId: UUID,
+        strategyCode: String,
+        language: String?,
+    ): List<WarningAcknowledgement> {
+        val set = questionSets.questionSet(application.jurisdiction, application.productLine)
+        val lang = if (language?.lowercase()?.startsWith("en") == true) "en" else "cs"
+        return codes.map { code ->
+            WarningAcknowledgement(
+                code = code,
+                assessmentId = assessmentId,
+                strategyCode = strategyCode,
+                textSha256 = WarningPolicy.sha256(set.warning(code).text.text(lang)),
+                language = lang,
+                acknowledgedAt = now(),
+            )
+        }
+    }
+
+    /**
+     * Defence in depth at the signature: every warning the chosen strategy requires under the
+     * CURRENT assessment must carry an acknowledgement, whatever path issued the document.
+     */
+    private suspend fun requireWarningsAcknowledged(application: OnboardingApplication) {
+        val assessment = currentAssessment(application)
+        val strategy = checkNotNull(application.chosenStrategy) { "no strategy has been chosen" }
+        val required = WarningPolicy.required(strategy, assessment, recommend(application, assessment))
+        val missing = WarningPolicy.missing(required, application.warningAcknowledgements, assessment.id, strategy)
+        check(missing.isEmpty()) { "warnings must be acknowledged before signing: ${missing.joinToString()}" }
     }
 
     private fun rulesFor(application: OnboardingApplication) =

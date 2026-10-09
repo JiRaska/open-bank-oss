@@ -6,6 +6,8 @@ package com.openbank.pension.domain.onboarding
 
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.pension.domain.model.ProductLine
+import com.openbank.pension.domain.questionnaire.QuestionnaireProfile
+import com.openbank.pension.domain.questionnaire.QuestionnaireRecord
 import java.time.Instant
 import java.time.LocalDate
 import java.time.Period
@@ -69,6 +71,8 @@ data class SuitabilityAssessment(
     val status: AssessmentStatus,
     val assessedAt: Instant,
     val validUntil: LocalDate,
+    /** Set when the assessment came from the data-driven question set (issue #12384). */
+    val questionnaire: QuestionnaireRecord? = null,
 ) {
     val esgPreference: EsgPreference get() = answers.esgPreference ?: EsgPreference.NONE
 
@@ -122,6 +126,23 @@ data class SuitabilityAssessment(
                 validUntil = today.plusDays(rules.validityDays.toLong()),
             )
         }
+
+        /**
+         * Scores a data-driven [profile] (issue #12384): the class comes from the question set's
+         * per-answer ceilings (1..7), the regime checks and appropriateness from [assess].
+         */
+        @Suppress("LongParameterList")
+        fun fromQuestionnaire(
+            partyId: UUID,
+            applicationId: UUID,
+            productLine: ProductLine,
+            rules: QuestionnaireRules,
+            profile: QuestionnaireProfile,
+            record: QuestionnaireRecord,
+            today: LocalDate,
+            now: Instant,
+        ): SuitabilityAssessment = assess(partyId, applicationId, productLine, rules, profile.legacyAnswers, today, now)
+            .copy(riskProfile = profile.riskProfile, questionnaire = record)
 
         /**
          * The weaker of willingness (appetite) and ability (loss tolerance) bounds the class:
