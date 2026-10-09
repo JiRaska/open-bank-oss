@@ -31,3 +31,11 @@ This documentation is published by the service at the management endpoint `/q/op
 Activation happens only through the onboarding workflow (signed application, cooling-off, first
 contribution or transfer-in); termination is the S5 quote/sign flow under `/exit`. Every POST
 requires `Idempotency-Key` and a retry is answered from the first response.
+
+## Payout sweep heartbeat
+
+The payout recovery sweep registers workflow `pension-payout-schedule-sweep` at startup. Its expected interval comes from `openbank.pension.payout-sweep.every` (default `1h`), the same setting used by the scheduler. A completed sweep records a heartbeat even when there are no overdue installments. A failed repository read or failed workflow restart does not record success.
+
+`openbank_workflow_success_recorded` distinguishes a registered workflow that has not completed from a successful run. `openbank_workflow_last_success_age_seconds` is seeded at registration, so its startup value alone is not proof that a sweep ran. The existing overdue-installment gauge measures workload; the heartbeat measures execution.
+
+An `off` or `disabled` interval disables the schedule and publishes no workflow heartbeat.

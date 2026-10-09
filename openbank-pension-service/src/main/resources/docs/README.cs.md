@@ -31,3 +31,11 @@ Dokumentaci služba publikuje na management endpointu `/q/openbank/docs` (Docs-a
 Aktivace probíhá jen onboardingovým workflow (podepsaná žádost, lhůta na odstoupení, první
 příspěvek nebo převod); ukončení je tok kotace a podpisu v `/exit`. Každý POST vyžaduje
 `Idempotency-Key` a opakování dostane první odpověď.
+
+## Heartbeat výplatního sweepu
+
+Recovery sweep výplat při startu registruje workflow `pension-payout-schedule-sweep`. Očekávaný interval přebírá z `openbank.pension.payout-sweep.every` (výchozí `1h`), stejného nastavení jako scheduler. Dokončený sweep zaznamená heartbeat i bez opožděných splátek. Chyba čtení repository nebo restartu workflow úspěch nezaznamená.
+
+`openbank_workflow_success_recorded` rozlišuje registrované workflow bez dokončeného běhu od úspěchu. `openbank_workflow_last_success_age_seconds` se inicializuje při registraci, takže samotná nízká hodnota po startu nedokazuje provedení sweepu. Stávající gauge opožděných splátek měří práci; heartbeat měří provedení.
+
+Interval `off` nebo `disabled` vypíná plánování a nepublikuje heartbeat workflow.
