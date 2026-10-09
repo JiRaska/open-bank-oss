@@ -12,7 +12,7 @@ import com.openbank.sdd.application.port.`in`.ConfirmMandateUseCase
 import com.openbank.sdd.application.port.`in`.ListMandatesUseCase
 import com.openbank.sdd.application.port.`in`.ManageMandateUseCase
 import com.openbank.sdd.application.port.`in`.RegisterMandateCommand
-import com.openbank.sdd.application.port.`in`.RegisterMandateUseCase
+import com.openbank.sdd.application.usecase.ScopedMandateService
 import com.openbank.sdd.domain.authorise.CollectionInstruction
 import com.openbank.sdd.domain.authorise.DebtorControls
 import com.openbank.sdd.infrastructure.rest.dto.AmendMandateRequest
@@ -22,8 +22,10 @@ import com.openbank.sdd.infrastructure.rest.dto.MandateResponse
 import com.openbank.sdd.infrastructure.rest.dto.RefundAssessmentResponse
 import com.openbank.sdd.infrastructure.rest.dto.RegisterMandateRequest
 import io.quarkus.hibernate.reactive.panache.common.WithTransaction
+import io.quarkus.security.identity.SecurityIdentity
 import io.smallrye.mutiny.Uni
 import jakarta.annotation.security.RolesAllowed
+import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.PATCH
@@ -49,7 +51,6 @@ import java.util.UUID
 )
 @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS", "ROLE_API")
 class SddResource(
-    private val register: RegisterMandateUseCase,
     private val confirm: ConfirmMandateUseCase,
     private val manage: ManageMandateUseCase,
     private val amend: AmendMandateUseCase,
@@ -58,6 +59,14 @@ class SddResource(
     private val list: ListMandatesUseCase,
     private val clock: Clock,
 ) {
+    @Inject
+    lateinit var identity: SecurityIdentity
+
+    @Inject
+    lateinit var scoped: ScopedMandateService
+
+    @Inject
+    lateinit var initiatorScopes: MandateInitiatorScopes
 
     @POST
     @Path("/mandates")
@@ -66,7 +75,7 @@ class SddResource(
         summary = "Register a debtor mandate (Core ⇒ ACTIVE, B2B ⇒ PENDING_CONFIRMATION). Idempotent on (CID, UMR).",
     )
     @WithTransaction
-    fun registerMandate(req: RegisterMandateRequest): Uni<Response> = register.register(
+    fun registerMandate(req: RegisterMandateRequest): Uni<Response> = scoped.register(
         RegisterMandateCommand(
             accountId = req.accountId,
             debtorIban = req.debtorIban,
@@ -78,6 +87,8 @@ class SddResource(
             debtorName = req.debtorName,
             signatureDate = req.signatureDate,
         ),
+        req.partyId,
+        initiatorScopes.of(identity),
     ).map { Response.status(Response.Status.CREATED).entity(MandateResponse.of(it)).build() }
 
     // #3104 — non-suspend, so an absent `accountId` threw at the method boundary and answered 500.
@@ -128,7 +139,7 @@ class SddResource(
     @Operation(summary = "Cancel a mandate (terminal)")
     @WithTransaction
     fun cancelMandate(@PathParam("id") id: UUID): Uni<Response> =
-        manage.cancel(id).map { Response.ok(MandateResponse.of(it)).build() }
+        scoped.cancel(id, initiatorScopes.of(identity)).map { Response.ok(MandateResponse.of(it)).build() }
 
     @PATCH
     @Path("/mandates/{id}")

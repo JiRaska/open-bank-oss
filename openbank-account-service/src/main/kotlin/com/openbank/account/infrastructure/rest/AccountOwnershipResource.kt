@@ -4,6 +4,7 @@
 
 package com.openbank.account.infrastructure.rest
 
+import com.fasterxml.jackson.annotation.JsonInclude
 import com.openbank.account.application.port.`in`.VerifyAccountOwnershipQuery
 import com.openbank.account.application.port.`in`.VerifyAccountOwnershipUseCase
 import com.openbank.libs.audit.AuditChannel
@@ -26,7 +27,9 @@ import java.util.UUID
 /** Body of an ownership verification. Fields nullable so an absent one is a 400, never a 500. */
 data class OwnershipVerificationRequest(val iban: String? = null, val partyId: UUID? = null)
 
-data class OwnershipVerificationResponse(val owned: Boolean, val active: Boolean)
+/** `accountId` is present only when `owned` is true (ADR-0335 D2). */
+@JsonInclude(JsonInclude.Include.NON_NULL)
+data class OwnershipVerificationResponse(val owned: Boolean, val active: Boolean, val accountId: UUID? = null)
 
 /**
  * ADR-0335 D2 — the ownership-verification projection. A caller that needs only "does party P
@@ -64,6 +67,10 @@ class AccountOwnershipResource(
                 payload = mapOf("owned" to verdict.owned, "active" to verdict.active),
             ),
         )
-        return OwnershipVerificationResponse(owned = verdict.owned, active = verdict.active)
+        return OwnershipVerificationResponse(
+            owned = verdict.owned,
+            active = verdict.active,
+            accountId = verdict.accountId,
+        )
     }
 }

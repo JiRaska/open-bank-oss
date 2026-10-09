@@ -8,11 +8,12 @@ import java.util.UUID
 
 /**
  * The whole answer an ownership verification gives (ADR-0335 D2): does the claimed party own the
- * account, and is it usable. Deliberately nothing else — no balance, product, holder or status
+ * account, and is it usable, plus ONLY when owned the account's id, which a caller binding a
+ * mandate or an order to that account needs (#12387 item 3). Deliberately nothing else — no balance, product, holder or status
  * name — and the SAME answer for an unknown IBAN and for someone else's, so the caller learns
  * nothing about an account it does not already hold the owner of.
  */
-data class OwnershipVerdict(val owned: Boolean, val active: Boolean) {
+data class OwnershipVerdict(val owned: Boolean, val active: Boolean, val accountId: UUID? = null) {
     companion object {
         val NOT_OWNED = OwnershipVerdict(owned = false, active = false)
 
@@ -21,7 +22,7 @@ data class OwnershipVerdict(val owned: Boolean, val active: Boolean) {
             if (account == null || account.partyId != claimedPartyId) {
                 NOT_OWNED
             } else {
-                OwnershipVerdict(owned = true, active = account.status == AccountStatus.ACTIVE)
+                OwnershipVerdict(owned = true, active = account.status == AccountStatus.ACTIVE, accountId = account.id)
             }
     }
 }

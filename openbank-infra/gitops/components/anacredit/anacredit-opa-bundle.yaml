@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: anacredit-service
     app.kubernetes.io/part-of: anacredit
   annotations:
-    openbank.tech/policy-checksum: "5de83d5adbb8ca3f"
+    openbank.tech/policy-checksum: "a269c596f9658d4d"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1880,6 +1880,23 @@ data:
         actions: [scaChallenge.consume]
         purposes: [APPROVAL]
         approval_request_prefix: "pension-"
+        adr: ADR-0335
+
+    scoped_payment_initiators:
+      - principal: service-account-openbank-pension
+        service: openbank-domestic-payment
+        actions: [domestic-payment.create]
+        # Pays only FROM this account (pension payout account), CZK only (domestic scheme rule).
+        debtor_account_config: openbank.domestic-payment.scoped-initiators.pension.debtor-account-id
+        adr: ADR-0335
+      - principal: service-account-openbank-pension
+        service: openbank-sdd-service
+        actions: [sdd.create, sdd.delete]
+        # Registers/cancels only mandates whose creditor is this SEPA creditor identifier (pension
+        # collection), and registers only on a debtor account account-service verifies is owned
+        # and active by the stated subject party.
+        creditor_identifier_config: openbank.sdd.scoped-initiators.pension.creditor-identifier
+        debtor_party_verified: true
         adr: ADR-0335
   manifest.json: |
     {"roots": ["openbank/agents", "openbank/copilot", "openbank/rest", "agents", "rules"]}

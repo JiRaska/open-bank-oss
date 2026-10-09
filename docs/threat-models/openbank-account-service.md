@@ -990,3 +990,9 @@ Staff keep the action through `operator-account-write`. Pension is **not** grant
 Tests: `OwnershipVerdictTest`, `AccountOwnershipResourceTest`, `AccountOwnershipVerificationIT`
 (real HTTP: route served, exact body, indistinguishable negatives, 400 not 500, 401 anonymous).
 
+
+Update the same day (ADR-0335 D2a): when `owned` is true, the answer also carries `accountId`, for
+the caller that binds a mandate to the account (#12387). It is never present for an unknown or
+foreign IBAN, so the no-oracle property holds. A second declared caller,
+`service-account-openbank-sdd`, verifies the debtor party of a scoped mandate initiator (D6).
+Every other identity is still denied (`account_rest_ext_test.rego`).

@@ -235,3 +235,10 @@ data class DelegatedPaymentDecision(
             outcome == DelegatedPaymentOutcome.LEGACY_AUTHORIZATION ||
             outcome == DelegatedPaymentOutcome.DELEGATED
 }
+
+data class VerifyAccountOwnershipQuery(val iban: String, val partyId: UUID)
+
+/** ADR-0335 D2: answer "does this party own this IBAN, and is it active" — and nothing more. */
+interface VerifyAccountOwnershipUseCase {
+    suspend fun verifyOwnership(query: VerifyAccountOwnershipQuery): com.openbank.account.domain.model.OwnershipVerdict
+}

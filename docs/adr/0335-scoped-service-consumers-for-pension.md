@@ -7,7 +7,7 @@ supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [authz, sca, security, accounts]
-summary: "pension-service gets no broad M2M grant: it may consume only APPROVAL challenges in a reserved pension- namespace, enforced in sca-service's domain, and reads only an {owned, active} ownership verdict from account-service."
+summary: "pension-service gets no broad M2M grant: scoped consumer/initiator registers in rules.yaml, read by OPA and enforced in each provider domain (sca namespace, account ownership projection, payout debtor, SDD creditor+party)."
 ---
 
 # ADR-0335 — Scoped service consumers: a reserved SCA namespace and an ownership-verification projection for pension-service
@@ -86,6 +86,37 @@ body is `{iban, partyId}` and the answer is exactly `{owned, active}`. An unknow
 another party's IBAN both answer `owned=false`, so the endpoint is not an existence oracle and
 returns no account data. The IBAN travels in the body so it stays out of access logs. Pension
 gets that action and nothing else. `account.read` stays denied to it.
+
+**D2a — the projection names the account only to its owner's claim.** When `owned` is true the
+answer also carries the account's `accountId`, because a caller that binds a mandate or an order
+to that account needs it (#12387 item 3). It is never present when `owned` is false. The
+projection also has a second declared caller: sdd-service's own client
+(`service-account-openbank-sdd`), for D6.
+
+**D5 — domestic-payment: a scoped payment initiator.** `rules.yaml: scoped_payment_initiators`
+declares pension-service for `domestic-payment.create`, with `debtor_account_config` naming the
+config key of its one debtor account, the pension payout account. The policy
+(`service-scoped-payment-initiator`) reads `principal`, `service` and `actions`. The domain
+resolves an `InitiatorScope` from the principal. Pension may pay only **from** the configured
+account, and an unconfigured account permits nothing. Any other ROLE_API-only machine is
+`Undeclared` and may pay from no account at all. That second rule is what makes it safe to add
+`ROLE_API` to the create endpoint's `@RolesAllowed`. Staff and the operator-role edge are
+unchanged. The domestic scheme rule already restricts payments to CZK. The per-step
+`Idempotency-Key` stays mandatory, and the scope is checked before the key is claimed.
+
+**D6 — sdd-service: a scoped mandate initiator.** The same register declares pension-service
+for `sdd.create` and `sdd.delete`, with `creditor_identifier_config`. sdd-service's
+`ScopedMandateService` checks three things. Pension may register only mandates whose
+`creditorIdentifier` is its configured SEPA creditor identifier, the pension collection. It
+must state the subject `partyId`. account-service's projection (D2) must confirm that the
+debtor IBAN is owned and active by that party, and that its `accountId` is the account being
+mandated. Pension may cancel only mandates whose creditor is its own. Every refusal is a 403,
+before anything is persisted.
+
+**Why the account and creditor values are not in OPA.** Both are environment configuration, not
+repo data, and the ownership fact lives in account-service. So OPA decides "this identity, these
+actions", the domain decides "this account, this creditor, this party", and a parity test in
+each provider holds the code to the `rules.yaml` declaration.
 
 **D3 — every scoped call is audited with actor and subject.** Each consume and each verification
 emits an `AuditEvent`. `actorId` is the calling principal and `resourceId` is the data subject's

@@ -32,13 +32,21 @@ class ConsumerScopesRulesParityTest {
             assertThat(scope).`as`(entry["principal"].toString()).isInstanceOf(ConsumerScope.Reserved::class.java)
             val namespace = (scope as ConsumerScope.Reserved).namespace
             assertThat(namespace.prefix).isEqualTo(entry["approval_request_prefix"])
-            assertThat(namespace.purposes.map { it.name }).containsExactlyInAnyOrderElementsOf(entry["purposes"] as List<String>)
+            assertThat(
+                namespace.purposes.map {
+                    it.name
+                },
+            ).containsExactlyInAnyOrderElementsOf(entry["purposes"] as List<String>)
             assertThat(entry["actions"] as List<*>).containsExactly("scaChallenge.consume")
         }
     }
 
     @Test
     fun `the domain holds no reservation the rules do not declare`() {
-        assertThat(ConsumerScopes.reservedPrincipals()).containsExactlyInAnyOrderElementsOf(declared.map { it["principal"] as String })
+        assertThat(ConsumerScopes.reservedPrincipals()).containsExactlyInAnyOrderElementsOf(
+            declared.map {
+                it["principal"] as String
+            },
+        )
     }
 }

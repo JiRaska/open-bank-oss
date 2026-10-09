@@ -69,7 +69,9 @@ class ScaResourceConsumeAuditTest {
         coEvery { consume.consume(any()) } throws ScaConsumerScopeViolationException(challengeId)
 
         assertThatThrownBy {
-            runBlocking { resource("service-account-openbank-services").consume(challengeId, ConsumeScaRequest(partyId = party)) }
+            runBlocking {
+                resource("service-account-openbank-services").consume(challengeId, ConsumeScaRequest(partyId = party))
+            }
         }.isInstanceOf(ScaConsumerScopeViolationException::class.java)
 
         val event = published.single()

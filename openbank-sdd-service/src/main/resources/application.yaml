@@ -71,6 +71,10 @@ quarkus:
     transaction-service:
       url: ${TRANSACTION_SERVICE_URL:http://localhost:8102}
       scope: jakarta.inject.Singleton
+    # ADR-0335 D6: ownership verification for a scoped mandate initiator, as service-account-openbank-sdd.
+    account-service:
+      url: ${ACCOUNT_SERVICE_URL:http://localhost:8100}
+      scope: jakarta.inject.Singleton
   shutdown:
     timeout: 30S
   log:

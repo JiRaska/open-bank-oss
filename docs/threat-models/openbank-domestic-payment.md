@@ -660,3 +660,23 @@ its Ingress and NetworkPolicy peer remain until Phase 5.
   Rollout verification must exercise this caller against 8443 with valid and invalid
   client certificates and check that failures do not reroute to HTTP. Rollback restores
   the previous client URL/configuration while the AML listener remains available.
+
+## 2026-10-09 — Scoped payment initiator: pension-service (ADR-0335 D5)
+
+`POST /api/v1/domestic-payments` now admits `ROLE_API` in `@RolesAllowed`. That change on its own
+would let any machine holding `ROLE_API` reach the money path, so the domain confines every
+ROLE_API-only caller:
+
+- **Elevation of privilege / Tampering:** `service-account-openbank-pension`, declared in
+  `rules.yaml: scoped_payment_initiators`, may pay only **from** the account configured under
+  `openbank.domestic-payment.scoped-initiators.pension.debtor-account-id`, the pension payout
+  account. An unset value permits nothing. Any other ROLE_API-only principal is `Undeclared` and
+  may pay from no account. Both refusals are a 403 raised before the idempotency lookup or any
+  persistence (`DomesticPaymentServiceTest`). OPA, through `service-scoped-payment-initiator`
+  reading the same register, admits pension to `domestic-payment.create` only. Staff and the
+  operator-role edge are unchanged.
+- **Residual:** a stolen pension credential can still pay **out of the pension payout account**
+  to any CZK creditor. That is the account's purpose. Sanctions screening, fraud scoring, the
+  scheme rules and per-step idempotency still apply to every such payment. Payout limits, or a
+  creditor allow-list from pension's own records, would narrow it further and belong to
+  pension-service.

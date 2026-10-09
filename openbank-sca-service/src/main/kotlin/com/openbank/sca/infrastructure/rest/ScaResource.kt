@@ -442,27 +442,11 @@ class ScaResource(
         val challenge = try {
             consumeSca.consume(command)
         } catch (e: ScaConsumerScopeViolationException) {
-            auditConsume(consumer, request.partyId, id, AuditResult.DENIED)
+            auditPublisher.auditConsume(consumer, request.partyId, id, AuditResult.DENIED)
             throw e
         }
-        auditConsume(consumer, request.partyId, id, AuditResult.SUCCESS)
+        auditPublisher.auditConsume(consumer, request.partyId, id, AuditResult.SUCCESS)
         return ScaChallengeResponse.from(challenge)
-    }
-
-    /** ADR-0335 D3: who (the consuming principal) spent whose (the data subject's) approval. */
-    private suspend fun auditConsume(consumer: String?, partyId: UUID, challengeId: UUID, result: AuditResult) {
-        auditPublisher.publish(
-            AuditEvent(
-                actorId = consumer ?: "anonymous",
-                actorType = "SERVICE",
-                operation = "scaChallenge.consume",
-                resourceType = "party",
-                resourceId = partyId.toString(),
-                result = result,
-                channel = AuditChannel.API,
-                payload = mapOf("challengeId" to challengeId.toString()),
-            ),
-        )
     }
 
     private fun scaCreateKey(partyId: UUID, requestKey: String) = "sca:initiate:$partyId:$requestKey"
@@ -615,4 +599,25 @@ private fun SecurityIdentity.requirePartyOwnership(partyId: UUID) {
     if (principalPartyId != null && principalPartyId != partyId) {
         throw ForbiddenException("Cannot access another party's SCA data")
     }
+}
+
+/** ADR-0335 D3: who (the consuming principal) spent whose (the data subject's) approval. */
+private suspend fun AuditEventPublisher.auditConsume(
+    consumer: String?,
+    partyId: UUID,
+    challengeId: UUID,
+    result: AuditResult,
+) {
+    publish(
+        AuditEvent(
+            actorId = consumer ?: "anonymous",
+            actorType = "SERVICE",
+            operation = "scaChallenge.consume",
+            resourceType = "party",
+            resourceId = partyId.toString(),
+            result = result,
+            channel = AuditChannel.API,
+            payload = mapOf("challengeId" to challengeId.toString()),
+        ),
+    )
 }

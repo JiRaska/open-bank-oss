@@ -60,7 +60,11 @@ class ConsumerScopeTest {
         status = ScaStatus.COMPLETED,
         expiresAt = OffsetDateTime.now().plusMinutes(5),
         dynamicLinkingData = DynamicLinkingData(
-            null, null, null, null, null,
+            null,
+            null,
+            null,
+            null,
+            null,
             approvalRequestId = approvalRequestId,
             payloadSha256 = "a".repeat(64),
         ),

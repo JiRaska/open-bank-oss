@@ -17,15 +17,17 @@ class OwnershipVerdictTest {
 
     @Test
     fun `the owner's active account is owned and active`() {
-        assertThat(OwnershipVerdict.of(account(AccountStatus.ACTIVE), owner))
-            .isEqualTo(OwnershipVerdict(owned = true, active = true))
+        val account = account(AccountStatus.ACTIVE)
+        assertThat(OwnershipVerdict.of(account, owner))
+            .isEqualTo(OwnershipVerdict(owned = true, active = true, accountId = account.id))
     }
 
     @Test
     fun `the owner's unusable account is owned but not active`() {
         AccountStatus.entries.filter { it != AccountStatus.ACTIVE }.forEach { status ->
-            assertThat(OwnershipVerdict.of(account(status), owner)).`as`(status.name)
-                .isEqualTo(OwnershipVerdict(owned = true, active = false))
+            val account = account(status)
+            assertThat(OwnershipVerdict.of(account, owner)).`as`(status.name)
+                .isEqualTo(OwnershipVerdict(owned = true, active = false, accountId = account.id))
         }
     }
 

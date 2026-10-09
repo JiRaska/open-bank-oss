@@ -127,3 +127,41 @@ test_no_reason_for_unknown_action if {
 	count(allowed_reasons) == 0 with input as {"principal": viewer, "action": "zzz.frobnicate"}
 	count(allowed_reasons) == 0 with input as {"principal": operator, "action": "zzz.frobnicate"}
 }
+
+# --- ADR-0335 D6: pension-service is a scoped mandate initiator (create/cancel only) ---
+
+pension_initiators := [{
+	"principal": "service-account-openbank-pension",
+	"service": "openbank-sdd-service",
+	"actions": ["sdd.create", "sdd.delete"],
+}]
+
+pension_sa := {"type": "HUMAN", "id": "service-account-openbank-pension", "roles": ["ROLE_API"]}
+
+test_pension_may_create_and_cancel_mandates if {
+	every action in {"sdd.create", "sdd.delete"} {
+		"service-scoped-payment-initiator" in allowed_reasons with input as {"principal": pension_sa, "action": action}
+			with data.rules.scoped_payment_initiators as pension_initiators
+	}
+}
+
+test_pension_may_do_no_other_sdd_action if {
+	every action in {"sdd.read", "sdd.list", "sdd.update", "sdd.approve", "sdd.authorise"} {
+		count(allowed_reasons) == 0 with input as {"principal": pension_sa, "action": action}
+			with data.rules.scoped_payment_initiators as pension_initiators
+	}
+}
+
+test_scoped_grant_is_data_driven if {
+	count(allowed_reasons) == 0 with input as {"principal": pension_sa, "action": "sdd.create"}
+		with data.rules.scoped_payment_initiators as []
+}
+
+test_a_domestic_payment_declaration_grants_nothing_here if {
+	count(allowed_reasons) == 0 with input as {"principal": pension_sa, "action": "sdd.create"}
+		with data.rules.scoped_payment_initiators as [{
+			"principal": "service-account-openbank-pension",
+			"service": "openbank-domestic-payment",
+			"actions": ["sdd.create"],
+		}]
+}

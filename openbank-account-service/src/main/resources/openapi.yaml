@@ -251,7 +251,7 @@ paths:
       summary: Verify that a party owns an IBAN and that the account is active
       description: >-
         ADR-0335 D2 ownership projection (action `account.verifyOwnership`). The answer is exactly
-        `{owned, active}`, and an unknown IBAN answers the same as another party's IBAN
+        `{owned, active}` plus `accountId` only when owned, and an unknown IBAN answers the same as another party's IBAN
         (`owned=false, active=false`), so the endpoint is no existence oracle and returns no account
         data. The IBAN travels in the body to keep it out of access logs.
       operationId: verifyAccountOwnership
@@ -1086,6 +1086,10 @@ components:
         active:
           type: boolean
           description: The owned account is ACTIVE. Always false when owned is false.
+        accountId:
+          type: string
+          format: uuid
+          description: The account's id. Present only when owned is true.
     AuthorizationRole:
       type: string
       enum: [FULL_ACCESS, PAYMENT_ONLY, READ_ONLY, CARD_HOLDER]

@@ -35,6 +35,7 @@ class AccountOwnershipVerificationIT {
         private val owner = UUID.randomUUID()
         private val productId = UUID.fromString("00000000-2222-0000-0000-000000000001")
         private var iban: String? = null
+        private var accountId: String? = null
         private const val PATH = "/api/v1/accounts/ownership-verifications"
         private const val UNKNOWN_IBAN = "CZ6508000000192000145399"
     }
@@ -57,6 +58,8 @@ class AccountOwnershipVerificationIT {
             path("accountNumber")
         }
         assertThat(iban).isNotBlank()
+        accountId =
+            Given { this } When { get("/api/v1/accounts/iban/$iban") } Then { statusCode(200) } Extract { path("id") }
     }
 
     @Test
@@ -64,7 +67,10 @@ class AccountOwnershipVerificationIT {
     @TestSecurity(user = "service-account-openbank-pension", roles = ["ROLE_API"])
     fun `the owner's active account verifies as owned and active, and nothing else is returned`() {
         val body = verify(iban!!, owner, expect = 200)
-        assertThat(body).isEqualTo(mapOf("owned" to true, "active" to true))
+        assertThat(body.keys).containsExactlyInAnyOrder("owned", "active", "accountId")
+        assertThat(body["owned"]).isEqualTo(true)
+        assertThat(body["active"]).isEqualTo(true)
+        assertThat(body["accountId"]).isEqualTo(accountId)
     }
 
     @Test

@@ -261,7 +261,11 @@ class ScaPactFolderProviderVerificationTest {
                 completedAt = OffsetDateTime.now(),
                 consumedAt = null,
                 dynamicLinkingData = DynamicLinkingData(
-                    null, null, null, null, null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
                     approvalRequestId = PENSION_APPROVAL_REQUEST_ID,
                     payloadSha256 = PENSION_PAYLOAD_SHA256,
                 ),

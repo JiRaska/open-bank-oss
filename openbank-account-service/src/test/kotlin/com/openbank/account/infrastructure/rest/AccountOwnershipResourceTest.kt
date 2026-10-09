@@ -24,7 +24,9 @@ class AccountOwnershipResourceTest {
     fun `a verification is audited with actor and subject`(): Unit = runBlocking {
         val published = mutableListOf<AuditEvent>()
         val useCase = mockk<VerifyAccountOwnershipUseCase>()
-        coEvery { useCase.verifyOwnership(any()) } returns OwnershipVerdict(owned = true, active = false)
+        val accountId = UUID.randomUUID()
+        coEvery { useCase.verifyOwnership(any()) } returns
+            OwnershipVerdict(owned = true, active = false, accountId = accountId)
         val resource = AccountOwnershipResource(
             useCase,
             object : AuditEventPublisher {
@@ -40,7 +42,7 @@ class AccountOwnershipResourceTest {
 
         val answer = resource.verify(OwnershipVerificationRequest(iban = "CZ6508000000192000145399", partyId = party))
 
-        assertThat(answer).isEqualTo(OwnershipVerificationResponse(owned = true, active = false))
+        assertThat(answer).isEqualTo(OwnershipVerificationResponse(owned = true, active = false, accountId = accountId))
         val event = published.single()
         assertThat(event.actorId).isEqualTo("service-account-openbank-pension")
         assertThat(event.operation).isEqualTo("account.verifyOwnership")

@@ -899,18 +899,17 @@ class ScaServiceTest {
     // --- consumer scope (ADR-0335 D1) ---
 
     @Test
-    fun `a scoped consumer cannot spend a challenge outside its namespace and does not burn it`(): Unit =
-        runBlocking {
-            val ch = challenge(status = ScaStatus.COMPLETED)
-            coEvery { repository.findById(ch.id) } returns ch
-            coEvery { repository.markConsumed(ch.id) } returns true
-            assertThatThrownBy {
-                runBlocking {
-                    service.consume(ConsumeScaCommand(ch.id, ch.partyId, null, null, null, scope = pensionScope))
-                }
-            }.isInstanceOf(ScaConsumerScopeViolationException::class.java)
-            coVerify(exactly = 0) { repository.markConsumed(any()) }
-        }
+    fun `a scoped consumer cannot spend a challenge outside its namespace and does not burn it`(): Unit = runBlocking {
+        val ch = challenge(status = ScaStatus.COMPLETED)
+        coEvery { repository.findById(ch.id) } returns ch
+        coEvery { repository.markConsumed(ch.id) } returns true
+        assertThatThrownBy {
+            runBlocking {
+                service.consume(ConsumeScaCommand(ch.id, ch.partyId, null, null, null, scope = pensionScope))
+            }
+        }.isInstanceOf(ScaConsumerScopeViolationException::class.java)
+        coVerify(exactly = 0) { repository.markConsumed(any()) }
+    }
 
     @Test
     fun `a general consumer cannot spend a pension-namespaced challenge`(): Unit = runBlocking {
@@ -924,24 +923,25 @@ class ScaServiceTest {
     }
 
     @Test
-    fun `the pension consumer spends its own approval once, still bound to party and payload`(): Unit =
-        runBlocking {
-            val ch = pensionApproval()
-            coEvery { repository.findById(ch.id) } returns ch
-            coEvery { repository.markConsumed(ch.id) } returns true
-            assertThatThrownBy {
-                runBlocking { service.consume(pensionConsume(ch, pensionScope).copy(expectedPartyId = UUID.randomUUID())) }
-            }.isInstanceOf(ScaChallengePartyMismatchException::class.java)
-            assertThatThrownBy {
-                runBlocking { service.consume(pensionConsume(ch, pensionScope).copy(payloadSha256 = "b".repeat(64))) }
-            }.isInstanceOf(ScaDynamicLinkingMismatchException::class.java)
-            coVerify(exactly = 0) { repository.markConsumed(any()) }
+    fun `the pension consumer spends its own approval once, still bound to party and payload`(): Unit = runBlocking {
+        val ch = pensionApproval()
+        coEvery { repository.findById(ch.id) } returns ch
+        coEvery { repository.markConsumed(ch.id) } returns true
+        assertThatThrownBy {
+            runBlocking {
+                service.consume(pensionConsume(ch, pensionScope).copy(expectedPartyId = UUID.randomUUID()))
+            }
+        }.isInstanceOf(ScaChallengePartyMismatchException::class.java)
+        assertThatThrownBy {
+            runBlocking { service.consume(pensionConsume(ch, pensionScope).copy(payloadSha256 = "b".repeat(64))) }
+        }.isInstanceOf(ScaDynamicLinkingMismatchException::class.java)
+        coVerify(exactly = 0) { repository.markConsumed(any()) }
 
-            val result = service.consume(pensionConsume(ch, pensionScope))
+        val result = service.consume(pensionConsume(ch, pensionScope))
 
-            assertThat(result.consumedAt).isNotNull()
-            coVerify(exactly = 1) { repository.markConsumed(ch.id) }
-        }
+        assertThat(result.consumedAt).isNotNull()
+        coVerify(exactly = 1) { repository.markConsumed(ch.id) }
+    }
 
     @Test
     fun `consume throws ScaChallengeNotFoundException for unknown id`(): Unit = runBlocking {
@@ -1305,7 +1305,11 @@ class ScaServiceTest {
     private fun pensionApproval() = challenge(status = ScaStatus.COMPLETED).copy(
         purpose = ScaPurpose.APPROVAL,
         dynamicLinkingData = DynamicLinkingData(
-            null, null, null, null, null,
+            null,
+            null,
+            null,
+            null,
+            null,
             approvalRequestId = "pension-exit:${"c".repeat(64)}",
             payloadSha256 = "c".repeat(64),
         ),

@@ -159,14 +159,17 @@ allowed_reasons contains "service-party-account-read" if {
 	input.action == "account.list"
 }
 
-# ADR-0335 D2 — pension-service's own client (`openbank-pension`, ROLE_API only) verifies that a
+# ADR-0335 D2 — declared callers of the ownership projection. pension-service's own client (`openbank-pension`, ROLE_API only) verifies that a
 # payout/own-account IBAN belongs to the participant and is active. It gets the ownership
 # projection (AccountOwnershipResource: the answer is exactly {owned, active}, identical for an
 # unknown IBAN and another party's) and NOTHING else — account.read stays denied, so a stolen
 # pension credential cannot read an account, a balance or a holder. A future caller with the same
 # need is added to this set with its own evidence, never by granting it account.read.
-allowed_reasons contains "service-pension-account-verify-ownership" if {
+allowed_reasons contains "service-account-verify-ownership" if {
 	input.principal.type == "HUMAN"
-	input.principal.id in {"service-account-openbank-pension"}
+	input.principal.id in {
+		"service-account-openbank-pension", # payout / own-account checks (#12385)
+		"service-account-openbank-sdd", # debtor-party check for a scoped mandate initiator (#12387)
+	}
 	input.action == "account.verifyOwnership"
 }

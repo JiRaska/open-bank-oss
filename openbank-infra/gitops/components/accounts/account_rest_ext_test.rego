@@ -199,7 +199,7 @@ verify_input(principal) := {
 
 test_pension_may_verify_ownership if {
 	rest.allow with input as verify_input(pension) with data.rules as rules_mock
-	"service-pension-account-verify-ownership" in rest.allowed_reasons with input as verify_input(pension)
+	"service-account-verify-ownership" in rest.allowed_reasons with input as verify_input(pension)
 		with data.rules as rules_mock
 }
 
@@ -221,4 +221,12 @@ test_other_machines_may_not_verify_ownership if {
 
 test_operator_may_verify_ownership if {
 	rest.allow with input as verify_input(operator) with data.rules as rules_mock
+}
+
+sdd_sa := {"type": "HUMAN", "id": "service-account-openbank-sdd", "roles": ["ROLE_API"]}
+
+test_sdd_may_verify_ownership_and_nothing_else if {
+	rest.allow with input as verify_input(sdd_sa) with data.rules as rules_mock
+	not rest.allow with input as {"principal": sdd_sa, "action": "account.read", "resource": {"type": "account", "id": "a-1"}}
+		with data.rules as rules_mock
 }

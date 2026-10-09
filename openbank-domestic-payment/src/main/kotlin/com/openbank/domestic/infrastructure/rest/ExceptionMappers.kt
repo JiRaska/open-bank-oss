@@ -84,3 +84,19 @@ class PaymentConfirmationRenderMapper : ExceptionMapper<PaymentConfirmationRende
 // SelfApprovalNotAllowedMapper / InvalidApprovalStateMapper (403/409) moved to
 // openbank-libs-runtime's CommonExceptionMappers (issue #1394) — a service-local copy of the
 // same exact type would collide non-deterministically with the shared one (issue #526).
+
+/** ADR-0335 D5: a scoped or undeclared initiator paying from an account it may not use. */
+@Provider
+class InitiatorScopeViolationMapper :
+    ExceptionMapper<com.openbank.domestic.application.usecase.InitiatorScopeViolationException> {
+    override fun toResponse(e: com.openbank.domestic.application.usecase.InitiatorScopeViolationException): Response =
+        Response.status(Response.Status.FORBIDDEN).entity(
+            ApiError(
+                traceId = Ids.randomId().toString(),
+                status = 403,
+                code = ErrorCode.FORBIDDEN.code,
+                message = e.message ?: "Debtor account outside caller scope",
+                timestamp = Instant.now(),
+            ),
+        ).build()
+}

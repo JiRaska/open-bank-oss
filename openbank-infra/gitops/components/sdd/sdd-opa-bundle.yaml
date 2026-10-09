@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: sdd-service
     app.kubernetes.io/part-of: sdd
   annotations:
-    openbank.tech/policy-checksum: "f2caeeee949343df"
+    openbank.tech/policy-checksum: "c4e025ddc9cc2513"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -706,6 +706,20 @@ data:
     	role in input.principal.roles
     	input.action in {"sdd.read", "sdd.list"}
     }
+
+    # ADR-0335 D6 — scoped payment initiators are DATA (rules.yaml: scoped_payment_initiators). The
+    # declared identity is admitted to the declared sdd actions only; WHICH mandates (creditor = its
+    # configured SEPA creditor identifier, debtor account owned+active by the stated subject party as
+    # verified with account-service) is decided in sdd-service's domain (ScopedMandateService), because
+    # both the creditor identifier and the account ownership are facts OPA's input does not carry.
+    allowed_reasons contains "service-scoped-payment-initiator" if {
+    	input.principal.type == "HUMAN"
+    	some initiator in data.rules.scoped_payment_initiators
+    	initiator.service == "openbank-sdd-service"
+    	input.principal.id == initiator.principal
+    	input.action in initiator.actions
+    }
+
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
     # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
@@ -1953,6 +1967,23 @@ data:
         actions: [scaChallenge.consume]
         purposes: [APPROVAL]
         approval_request_prefix: "pension-"
+        adr: ADR-0335
+
+    scoped_payment_initiators:
+      - principal: service-account-openbank-pension
+        service: openbank-domestic-payment
+        actions: [domestic-payment.create]
+        # Pays only FROM this account (pension payout account), CZK only (domestic scheme rule).
+        debtor_account_config: openbank.domestic-payment.scoped-initiators.pension.debtor-account-id
+        adr: ADR-0335
+      - principal: service-account-openbank-pension
+        service: openbank-sdd-service
+        actions: [sdd.create, sdd.delete]
+        # Registers/cancels only mandates whose creditor is this SEPA creditor identifier (pension
+        # collection), and registers only on a debtor account account-service verifies is owned
+        # and active by the stated subject party.
+        creditor_identifier_config: openbank.sdd.scoped-initiators.pension.creditor-identifier
+        debtor_party_verified: true
         adr: ADR-0335
   manifest.json: |
     {"roots": ["openbank/agents", "openbank/copilot", "openbank/rest", "agents", "rules"]}

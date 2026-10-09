@@ -147,3 +147,25 @@ instruction, but the irreversible debit lives downstream.
   `SddOutboxAtomicityIT`'s same-`xmin` proof still applies), and the publish bulkhead widens from
   1 to `OutboxDispatch.SEND_CONCURRENCY` (D), bounded per batch. Rollback: revert the commit; the
   additive column and indexes are inert under the v1 repository.
+
+## 2026-10-09 — Scoped mandate initiator: pension-service (ADR-0335 D6)
+
+- **Elevation of privilege / Spoofing:** `service-account-openbank-pension` may `sdd.create` and
+  `sdd.delete`, and nothing else; OPA's `service-scoped-payment-initiator` reads
+  `rules.yaml: scoped_payment_initiators`. On top of that, `ScopedMandateService` applies three
+  checks:
+  - pension may register only mandates whose creditor identifier is its configured SEPA
+    creditor identifier (`openbank.sdd.scoped-initiators.pension.creditor-identifier`). An
+    unset value permits nothing;
+  - pension must state the subject `partyId`. account-service's ownership projection, called as
+    `service-account-openbank-sdd`, must confirm that the debtor IBAN is owned and active by
+    that party, and that it is the very `accountId` being mandated;
+  - pension may cancel only mandates whose creditor is its own.
+
+  So pension can neither mandate a collection from another party's account, nor touch another
+  creditor's mandates. Each refusal is a 403 raised before anything is persisted
+  (`ScopedMandateServiceTest`).
+- **Denial of service:** registration now depends on account-service for this one caller. An
+  unreachable account-service fails the request. It never registers.
+- **New egress:** sdd to account-service (`ACCOUNT_SERVICE_URL`; the accounts NetworkPolicy was
+  regenerated).
