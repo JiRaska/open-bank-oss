@@ -4,6 +4,7 @@
 
 package com.openbank.pension.infrastructure.exit.stub
 
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.pension.application.exit.AnnuityInsurerPort
 import com.openbank.pension.application.exit.BeneficiaryVerificationPort
 import com.openbank.pension.application.exit.ClaimantKyc
@@ -74,7 +75,7 @@ class StubPayoutPaymentAdapter(
     override suspend fun pay(order: PaymentOrder): String {
         requireStubRail(accept, "PayoutPaymentPort")
         orders.putIfAbsent(order.idempotencyKey, order)
-        return refs.computeIfAbsent(order.idempotencyKey) { "STUB-PAY-${UUID.randomUUID()}" }
+        return refs.computeIfAbsent(order.idempotencyKey) { "STUB-PAY-${Ids.randomId()}" }
     }
 }
 

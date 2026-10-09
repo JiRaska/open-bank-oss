@@ -4,6 +4,7 @@
 
 package com.openbank.pension.domain.exit
 
+import com.openbank.libs.domain.identifiers.Ids
 import java.math.BigDecimal
 import java.security.MessageDigest
 import java.time.Duration
@@ -121,7 +122,7 @@ data class TerminationNotice(
             validityDays: Int,
             now: Instant,
         ) = TerminationNotice(
-            id = UUID.randomUUID(),
+            id = Ids.newId(),
             contractId = contractId,
             participantPartyId = participantPartyId,
             status = TerminationStatus.QUOTED,

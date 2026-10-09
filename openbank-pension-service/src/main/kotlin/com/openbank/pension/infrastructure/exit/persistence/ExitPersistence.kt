@@ -166,7 +166,12 @@ internal suspend fun <E : ExitDocumentEntity> PanacheRepository<E>.upsert(
         val stored = if (existing == null) persist(entity) else Uni.createFrom().item(entity)
         stored.flatMap { Panache.getSession() }.flatMap { it.flush() }.map { entity.rowVersion }
     }
-}.awaitSuspending()
+}.onFailure { it is jakarta.persistence.OptimisticLockException || it is org.hibernate.StaleStateException }
+    .transform { failure ->
+        // A race at flush has the same port outcome as the explicit version check above.
+        // Translate after the transaction has rolled back so callers can re-read and reapply.
+        ExitConcurrentUpdateException("exit aggregate $id changed concurrently").also { it.initCause(failure) }
+    }.awaitSuspending()
 
 /** The stored body, with the row's current version stamped in so the next save can be checked. */
 internal fun <T> ExitDocumentEntity.toDomain(type: Class<T>): T {

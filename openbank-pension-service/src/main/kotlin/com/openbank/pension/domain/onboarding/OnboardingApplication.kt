@@ -4,6 +4,7 @@
 
 package com.openbank.pension.domain.onboarding
 
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.pension.domain.model.ContributionSchedule
 import com.openbank.pension.domain.model.ProductLine
 import com.openbank.pension.domain.pack.ProviderType
@@ -258,7 +259,7 @@ data class OnboardingApplication(
             expiresOn: LocalDate,
             now: Instant,
         ): OnboardingApplication = OnboardingApplication(
-            id = UUID.randomUUID(),
+            id = Ids.newId(),
             partyId = partyId,
             kind = kind,
             productLine = productLine,

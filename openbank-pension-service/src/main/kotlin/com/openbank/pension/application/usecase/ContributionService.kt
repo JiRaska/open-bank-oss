@@ -4,6 +4,7 @@
 
 package com.openbank.pension.application.usecase
 
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.pension.application.port.out.ContractFundingDirectory
 import com.openbank.pension.application.port.out.ContractFundingView
 import com.openbank.pension.application.port.out.ContractNotFoundException
@@ -202,7 +203,7 @@ class ContributionService(
         val contract = requireContract(contractId)
         val (stored, _) = contributions.insertIfAbsent(
             Contribution(
-                id = UUID.randomUUID(),
+                id = Ids.newId(),
                 contractId = contract.contractId,
                 paymentId = "transfer-in:$transferId",
                 source = ContributionSource.TRANSFER_IN,
@@ -248,7 +249,7 @@ class ContributionService(
     ): ReceiptOutcome {
         val (stored, created) = contributions.insertIfAbsent(
             Contribution(
-                id = UUID.randomUUID(),
+                id = Ids.newId(),
                 contractId = contract.contractId,
                 paymentId = paymentId,
                 source = source,
@@ -276,7 +277,7 @@ class ContributionService(
     private suspend fun park(payment: IncomingPayment, reason: UnmatchedReason): ReceiptOutcome.Unmatched =
         ReceiptOutcome.Unmatched(
             unmatched.insertIfAbsent(
-                UnmatchedPayment(UUID.randomUUID(), payment, reason, UnmatchedStatus.OPEN, now()),
+                UnmatchedPayment(Ids.newId(), payment, reason, UnmatchedStatus.OPEN, now()),
             ),
         )
 

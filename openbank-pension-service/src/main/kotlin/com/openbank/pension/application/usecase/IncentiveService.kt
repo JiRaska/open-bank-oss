@@ -4,6 +4,7 @@
 
 package com.openbank.pension.application.usecase
 
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.pension.application.port.out.ClaimBatchRepository
 import com.openbank.pension.application.port.out.ClaimReceiptLine
 import com.openbank.pension.application.port.out.ContractFundingDirectory
@@ -111,7 +112,7 @@ class IncentiveService(
         return drafts.count { draft ->
             claims.insertIfAbsent(
                 IncentiveClaim(
-                    id = UUID.randomUUID(),
+                    id = Ids.newId(),
                     contractId = contract.contractId,
                     incentiveId = draft.incentiveId,
                     period = draft.period,
@@ -142,7 +143,7 @@ class IncentiveService(
             val refs = group.associate { it.contractId to references.referenceFor(it.contractId) }
             val rendered = adapter.submit(period, group, refs)
             val batch = ClaimBatch(
-                id = UUID.randomUUID(),
+                id = Ids.newId(),
                 claimFormat = format,
                 period = period,
                 claimIds = group.map { it.id },
@@ -319,7 +320,7 @@ class IncentiveService(
             val today = today()
             ledger.append(
                 IncentiveLedgerEntry(
-                    UUID.randomUUID(), contract.contractId, incentiveId, null, LedgerEntryKind.RETURNED, part,
+                    Ids.newId(), contract.contractId, incentiveId, null, LedgerEntryKind.RETURNED, part,
                     today.year, YearMonth.from(today), now(), "$idempotencyKey:$incentiveId",
                 ),
             )
@@ -393,7 +394,7 @@ class IncentiveService(
     }
 
     private fun ledgerEntry(claim: IncentiveClaim, kind: LedgerEntryKind, amount: BigDecimal) = IncentiveLedgerEntry(
-        id = UUID.randomUUID(),
+        id = Ids.newId(),
         contractId = claim.contractId,
         incentiveId = claim.incentiveId,
         claimId = claim.id,
