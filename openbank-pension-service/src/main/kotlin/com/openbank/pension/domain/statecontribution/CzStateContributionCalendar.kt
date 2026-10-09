@@ -13,6 +13,8 @@ import java.time.YearMonth
  * `docs/research/cz-state-pension-contribution.md`. The calendar is pure, with no clock.
  * REQUIRES_LEGAL_REVIEW.
  */
+// One function per statutory date (ZDPS §§16, 18): splitting them would scatter one calendar.
+@Suppress("TooManyFunctions")
 object CzStateContributionCalendar {
 
     private const val QUARTER_MONTHS = 3

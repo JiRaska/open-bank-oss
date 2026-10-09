@@ -94,7 +94,7 @@ object CzMfStateContributionFormat {
             "result must start with an R;$FORMAT;RESULT header"
         }
         require(header[1] == FORMAT) { "result format '${header[1]}' is not $FORMAT" }
-        val aggregate = amount(header[5], "aggregate")
+        val aggregate = amount(header[AGGREGATE_FIELD], "aggregate")
         val lines = records.drop(1).mapIndexed { i, r -> resultLine(i + 2, r) }
         val paid = lines.fold(BigDecimal.ZERO) { a, l -> a + (l.amount ?: BigDecimal.ZERO) }
         require(paid.compareTo(aggregate) == 0) {
@@ -123,7 +123,12 @@ object CzMfStateContributionFormat {
     fun parseReturnResult(payload: String): List<ReturnResultLine> {
         val records = records(payload)
         val header = records.firstOrNull()
-        require(header != null && header.size >= 3 && header[0] == "R" && header[2] == "RETURNS-RESULT") {
+        require(
+            header != null &&
+                header.size >= RETURN_RESULT_HEADER_MIN &&
+                header[0] == "R" &&
+                header[2] == "RETURNS-RESULT",
+        ) {
             "return result must start with an R;$FORMAT;RETURNS-RESULT header"
         }
         require(header[1] == FORMAT) { "result format '${header[1]}' is not $FORMAT" }
@@ -135,7 +140,7 @@ object CzMfStateContributionFormat {
                     ReturnResultLine.Confirmed(uuid(r[1], n))
                 }
                 "E" -> {
-                    require(r.size == 3) { "line $n: E needs 3 fields" }
+                    require(r.size == WITH_CODE) { "line $n: E needs $WITH_CODE fields" }
                     ReturnResultLine.Refused(uuid(r[1], n), CzClaimReasonCode.parse(r[2]))
                 }
                 else -> throw IllegalArgumentException("line $n: unknown record type '${r[0]}'")
@@ -145,15 +150,15 @@ object CzMfStateContributionFormat {
 
     private fun resultLine(n: Int, r: List<String>): ClaimReceiptLine = when (r[0]) {
         "P" -> {
-            require(r.size == 3) { "line $n: P needs 3 fields" }
+            require(r.size == WITH_CODE) { "line $n: P needs $WITH_CODE fields" }
             ClaimReceiptLine(uuid(r[1], n), true, positive(r[2], n), null)
         }
         "Q" -> {
-            require(r.size == 4) { "line $n: Q needs 4 fields" }
-            ClaimReceiptLine(uuid(r[1], n), true, positive(r[2], n), CzClaimReasonCode.parse(r[3]).name)
+            require(r.size == PARTIAL_FIELDS) { "line $n: Q needs $PARTIAL_FIELDS fields" }
+            ClaimReceiptLine(uuid(r[1], n), true, positive(r[2], n), CzClaimReasonCode.parse(r[PARTIAL_CODE]).name)
         }
         "X" -> {
-            require(r.size == 3) { "line $n: X needs 3 fields" }
+            require(r.size == WITH_CODE) { "line $n: X needs $WITH_CODE fields" }
             val code = CzClaimReasonCode.parse(r[2])
             ClaimReceiptLine(uuid(r[1], n), false, null, "${code.name}: ${code.description}")
         }
@@ -174,4 +179,9 @@ object CzMfStateContributionFormat {
     }
 
     private const val RESULT_HEADER_FIELDS = 6
+    private const val AGGREGATE_FIELD = 5
+    private const val RETURN_RESULT_HEADER_MIN = 3
+    private const val WITH_CODE = 3
+    private const val PARTIAL_FIELDS = 4
+    private const val PARTIAL_CODE = 3
 }

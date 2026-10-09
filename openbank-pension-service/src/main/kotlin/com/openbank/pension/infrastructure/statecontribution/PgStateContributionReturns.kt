@@ -119,36 +119,36 @@ class PgStateContributionReturns(client: Pool) :
         exec("UPDATE pension_return_reports SET channel_reference = $2 WHERE id = $1", Tuple.of(id, reference))
     }
 
-    private fun Row.toReturn() = StateContributionReturn(
-        id = getUUID("id"),
-        contractId = getUUID("contract_id"),
-        claimId = getUUID("claim_id"),
-        cause = ReturnCause.valueOf(getString("cause")),
-        amount = getBigDecimal("amount"),
-        currency = getString("currency"),
-        discoveredOn = getLocalDate("discovered_on"),
-        dueBy = getLocalDate("due_by"),
-        sourceKey = getString("source_key"),
-        status = ReturnStatus.valueOf(getString("status")),
-        reportId = getUUID("report_id"),
-        createdAt = getOffsetDateTime("created_at").toInstant(),
-        updatedAt = getOffsetDateTime("updated_at").toInstant(),
-    )
-
-    private fun Row.toReport() = ReturnReport(
-        id = getUUID("id"),
-        month = YearMonth.parse(getString("month")),
-        returnIds = getString("return_ids").split(",").filter { it.isNotBlank() }.map(UUID::fromString),
-        payload = getString("payload"),
-        channelReference = getString("channel_reference"),
-        resultApplied = getBoolean("result_applied"),
-        createdAt = getOffsetDateTime("created_at").toInstant(),
-    )
-
-    private fun utc(i: Instant): OffsetDateTime = i.atOffset(ZoneOffset.UTC)
-
     private companion object {
         const val SELECT = "SELECT * FROM pension_state_contribution_returns"
         const val REPORT_SELECT = "SELECT * FROM pension_return_reports"
     }
 }
+
+private fun Row.toReturn() = StateContributionReturn(
+    id = getUUID("id"),
+    contractId = getUUID("contract_id"),
+    claimId = getUUID("claim_id"),
+    cause = ReturnCause.valueOf(getString("cause")),
+    amount = getBigDecimal("amount"),
+    currency = getString("currency"),
+    discoveredOn = getLocalDate("discovered_on"),
+    dueBy = getLocalDate("due_by"),
+    sourceKey = getString("source_key"),
+    status = ReturnStatus.valueOf(getString("status")),
+    reportId = getUUID("report_id"),
+    createdAt = getOffsetDateTime("created_at").toInstant(),
+    updatedAt = getOffsetDateTime("updated_at").toInstant(),
+)
+
+private fun Row.toReport() = ReturnReport(
+    id = getUUID("id"),
+    month = YearMonth.parse(getString("month")),
+    returnIds = getString("return_ids").split(",").filter { it.isNotBlank() }.map(UUID::fromString),
+    payload = getString("payload"),
+    channelReference = getString("channel_reference"),
+    resultApplied = getBoolean("result_applied"),
+    createdAt = getOffsetDateTime("created_at").toInstant(),
+)
+
+private fun utc(i: Instant): OffsetDateTime = i.atOffset(ZoneOffset.UTC)

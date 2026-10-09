@@ -205,16 +205,7 @@ class IncentiveService(
             if (claim.status != ClaimStatus.SUBMITTED) return@forEach // already reconciled: idempotent
             if (line.accepted) {
                 val amount = requireNotNull(line.amount) { "accepted line for ${line.claimId} needs an amount" }
-                // A partial payment keeps the agency's reason code next to the shortfall.
-                val received = claim.receive(amount, now()).let { r ->
-                    if (amount < claim.claimedAmount &&
-                        line.reason != null
-                    ) {
-                        r.copy(rejectionReason = line.reason)
-                    } else {
-                        r
-                    }
-                }
+                val received = receiveWithNote(claim, amount, line.reason)
                 claims.update(received)
                 ledger.append(ledgerEntry(received, LedgerEntryKind.RECEIVED, amount))
                 contributionService.creditIncentive(
@@ -237,6 +228,12 @@ class IncentiveService(
         val updated = if (open) batch else batch.copy(status = ClaimBatchStatus.RECONCILED)
         if (updated != batch) batches.update(updated)
         return updated
+    }
+
+    /** A partial payment keeps the agency's reason code next to the shortfall. */
+    private fun receiveWithNote(claim: IncentiveClaim, amount: BigDecimal, reason: String?): IncentiveClaim {
+        val received = claim.receive(amount, now())
+        return if (amount < claim.claimedAmount && reason != null) received.copy(rejectionReason = reason) else received
     }
 
     /** A received incentive goes back to the agency (correction or clawback). */

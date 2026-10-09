@@ -130,20 +130,19 @@ class StateContributionChannelTest {
     }
 
     @Test
-    fun `deadline miss - a claim PENDING after its filing month and an unpaid one are counted`(): Unit =
-        runBlocking {
-            val c = f.contract()
-            pay(c.contractId, "1700", LocalDate.of(2026, 1, 10))
-            f.incentiveService.generateClaims(YearMonth.of(2026, 1))
-            assertThat(returns.deadlines(LocalDate.of(2026, 4, 30)).claimsPastFilingDeadline).isZero()
-            assertThat(returns.deadlines(LocalDate.of(2026, 5, 1)).claimsPastFilingDeadline).isEqualTo(1)
+    fun `deadline miss - a claim PENDING after its filing month and an unpaid one are counted`(): Unit = runBlocking {
+        val c = f.contract()
+        pay(c.contractId, "1700", LocalDate.of(2026, 1, 10))
+        f.incentiveService.generateClaims(YearMonth.of(2026, 1))
+        assertThat(returns.deadlines(LocalDate.of(2026, 4, 30)).claimsPastFilingDeadline).isZero()
+        assertThat(returns.deadlines(LocalDate.of(2026, 5, 1)).claimsPastFilingDeadline).isEqualTo(1)
 
-            at("2026-04-05")
-            f.incentiveService.submitPending()
-            val d = returns.deadlines(LocalDate.of(2026, 6, 1))
-            assertThat(d.claimsPastFilingDeadline).isZero()
-            assertThat(d.claimsPastExpectedPayment).describedAs("Q1 must be paid by 31 May").isEqualTo(1)
-        }
+        at("2026-04-05")
+        f.incentiveService.submitPending()
+        val d = returns.deadlines(LocalDate.of(2026, 6, 1))
+        assertThat(d.claimsPastFilingDeadline).isZero()
+        assertThat(d.claimsPastExpectedPayment).describedAs("Q1 must be paid by 31 May").isEqualTo(1)
+    }
 
     @Test
     fun `R1 ineligibility found later - return reported, refused, re-reported, confirmed, settled`(): Unit =
