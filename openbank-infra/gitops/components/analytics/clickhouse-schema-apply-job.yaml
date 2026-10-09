@@ -1,0 +1,176 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Staged migration mechanism for the ClickHouse warehouse (#7645). Argo Skip means the Job is
+# not created at all; the script also defaults to disabled if applied manually.
+# The existing initdb.d mount still seeds fresh volumes. The Job may be enabled only after the
+# populated live warehouse has been audited and its actual applied versions baselined. Historical
+# SQL has changed, so replaying all source DDL over an unledgered volume is not evidence-safe.
+# An enabled Job rejects such a volume before any DDL. After an audited baseline, a separately
+# reviewed change must switch both the hook to PostSync and the env flag to true. PostSync wave -1
+# then completes before the unrelated CI/campaign schema hook in the default wave.
+# A successful version is recorded with the SHA-256 of the exact ConfigMap SQL; changing a
+# previously applied version fails closed. A failed partial version can be retried after a lock
+# reconciliation because every
+# statement in the current V1-V17 set is CREATE ... IF NOT EXISTS, ALTER ... IF NOT EXISTS or
+# CREATE OR REPLACE VIEW. Rollback of this Job removes only this hook; schema/data rollback needs
+# a separately reviewed forward migration and a verified warehouse backup.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: clickhouse-schema-apply
+  namespace: analytics
+  labels:
+    app.kubernetes.io/name: clickhouse-schema-apply
+    app.kubernetes.io/part-of: openbank
+  annotations:
+    argocd.argoproj.io/hook: Skip
+    argocd.argoproj.io/sync-wave: "-1"
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 900
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: clickhouse-schema-apply
+        app.kubernetes.io/part-of: openbank
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: apply
+          image: docker.io/clickhouse/clickhouse-server:26.8-alpine
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          env:
+            # Owner must change this in a separately reviewed PR after exact live baseline proof.
+            - name: CLICKHOUSE_SCHEMA_APPLY_ENABLED
+              value: "false"
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: CLICKHOUSE_HOST
+              value: clickhouse.analytics.svc
+            - name: CLICKHOUSE_USER
+              value: analytics
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: clickhouse-auth
+                  key: password
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -euo pipefail
+              if [ "$CLICKHOUSE_SCHEMA_APPLY_ENABLED" != true ]; then
+                echo 'ClickHouse schema apply staged; awaiting reviewed live baseline'
+                exit 0
+              fi
+              ch() {
+                clickhouse-client --host "$CLICKHOUSE_HOST" --port 9000 \
+                  --user "$CLICKHOUSE_USER" --password "$CLICKHOUSE_PASSWORD" "$@"
+              }
+
+              ledger_exists="$(ch --query "SELECT count() FROM system.tables
+                WHERE database = 'openbank_analytics' AND name = 'schema_migrations'")"
+              if [ "$ledger_exists" -eq 0 ]; then
+                objects="$(ch --query "SELECT count() FROM system.tables
+                  WHERE database = 'openbank_analytics'")"
+                [ "$objects" -eq 0 ] || {
+                  echo 'Existing warehouse has no migration ledger; audit and baseline before applying DDL' >&2
+                  exit 1
+                }
+              fi
+
+              ch --query 'CREATE DATABASE IF NOT EXISTS openbank_analytics'
+              # CREATE without IF NOT EXISTS is the single-node lock. A concurrent hook fails
+              # before any migration DDL. On an interrupted run it remains in the catalog:
+              # an operator must inspect partial DDL before explicitly clearing it.
+              ch --query "CREATE TABLE openbank_analytics.schema_migration_lock (
+                holder String, started_at DateTime64(3, 'UTC')
+              ) ENGINE = Memory"
+              ch --query "INSERT INTO openbank_analytics.schema_migration_lock (holder)
+                VALUES ('$POD_NAME')"
+              ch --query "CREATE TABLE IF NOT EXISTS openbank_analytics.schema_migrations (
+                version UInt16, checksum FixedString(64), applied_at DateTime64(3, 'UTC') DEFAULT now64(3)
+              ) ENGINE = MergeTree ORDER BY version"
+
+              max_applied="$(ch --query 'SELECT max(version) FROM openbank_analytics.schema_migrations')"
+              found=0
+              expected=1
+              # Preflight the entire applied prefix before sending any migration DDL. Otherwise a
+              # changed V17 could be discovered only after a missing V16 has already run.
+              for script in $(find /sql -maxdepth 1 -type f -name '[0-9]*-*.sql' | sort -V); do
+                found=$((found + 1))
+                base="${script##*/}"
+                prefix="${base%%-*}"
+                case "$prefix" in ''|*[!0-9]*) echo "Invalid migration filename: $base" >&2; exit 1;; esac
+                version="$(printf '%s' "$prefix" | sed 's/^0*//')"
+                [ "$version" = "$expected" ] || {
+                  echo "Migration gap or duplicate: expected $expected, got $base" >&2; exit 1;
+                }
+                checksum="$(sha256sum "$script" | cut -d ' ' -f1)"
+                recorded="$(ch --query "SELECT DISTINCT checksum FROM openbank_analytics.schema_migrations
+                  WHERE version = $version FORMAT TSVRaw")"
+                if [ "$version" -le "$max_applied" ]; then
+                  [ "$recorded" = "$checksum" ] || {
+                    echo "Applied migration V$version is missing or differs from $base; stop for reviewed repair" >&2
+                    exit 1
+                  }
+                else
+                  [ -z "$recorded" ] || {
+                    echo "Migration ledger has a noncontiguous version at V$version" >&2; exit 1
+                  }
+                fi
+                expected=$((expected + 1))
+              done
+              [ "$found" -gt 0 ] || { echo 'No ClickHouse migrations mounted' >&2; exit 1; }
+              [ "$max_applied" -lt "$expected" ] || {
+                echo "Ledger version $max_applied has no mounted migration" >&2; exit 1
+              }
+
+              for script in $(find /sql -maxdepth 1 -type f -name '[0-9]*-*.sql' | sort -V); do
+                base="${script##*/}"
+                version="$(printf '%s' "${base%%-*}" | sed 's/^0*//')"
+                if [ "$version" -le "$max_applied" ]; then
+                  echo "V$version already applied"
+                else
+                  checksum="$(sha256sum "$script" | cut -d ' ' -f1)"
+                  echo "Applying V$version ($base)"
+                  ch --multiquery --queries-file "$script"
+                  ch --query "INSERT INTO openbank_analytics.schema_migrations (version, checksum)
+                    VALUES ($version, '$checksum')"
+                  echo "Applied V$version"
+                fi
+              done
+              echo "ClickHouse migration apply complete: $found versions"
+              ch --query 'DROP TABLE openbank_analytics.schema_migration_lock'
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          volumeMounts:
+            - name: migrations
+              mountPath: /sql
+              readOnly: true
+      volumes:
+        - name: migrations
+          configMap:
+            name: clickhouse-init

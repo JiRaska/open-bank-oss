@@ -6130,6 +6130,22 @@ gates:
     run: |
       python3 .github/scripts/check-clickhouse-migration-configmap-sync.py --enforce
 
+  # #7645. Exercise the dormant schema runner against a disposable server on changes to
+  # its SQL, ConfigMap, Job or test. The job stays Argo Skip until the live warehouse is audited.
+  - id: clickhouse-schema-apply-proof
+    name: "disposable ClickHouse schema apply and recovery proof (#7645, enforced)"
+    group: gitops
+    mode: enforced
+    rationale: "A changed schema runner or migration must prove empty install, audited fixture upgrade, drift refusal and partial-DDL recovery against the deployed ClickHouse version before activation."
+    review_after: "2027-02-28"
+    budget_seconds: 240
+    needs_base: optional
+    selftest: python3 .github/scripts/test-clickhouse-schema-apply.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/test-clickhouse-schema-apply.py"]
+    run: |
+      python3 .github/scripts/test-clickhouse-schema-apply.py --changed-only "${PR_DIFF_BASE:-HEAD^}"
+
   # Issue #7648. openbank-admin-ui is migrating hardcoded hex colours (`#1a2b3c`, `#fff`) to the
   # shared semantic colour tokens in globals.css. #7649 landed a Vitest ratchet
   # (raw-colour-literal-ratchet.guard.test.ts) that already runs on every admin-ui-touching PR via
