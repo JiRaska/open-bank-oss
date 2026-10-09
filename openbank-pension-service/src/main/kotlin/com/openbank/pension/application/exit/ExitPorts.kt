@@ -119,7 +119,8 @@ interface DeathClaimRepository {
     suspend fun list(status: DeathClaimStatus?, limit: Int): List<DeathClaim>
 }
 
-enum class InstructionStatus { PENDING, SENT }
+/** SETTLED / REJECTED are written back from domestic-payment's status events (#12378, V7). */
+enum class InstructionStatus { PENDING, SENT, SETTLED, REJECTED }
 
 /** One money movement out of a contract, unique by its idempotency key (V4: unique index). */
 data class PaymentInstruction(

@@ -31,6 +31,8 @@ dependencies {
     implementation(libs.quarkus.smallrye.fault.tolerance)
     // ADR-0334 S3: monthly incentive claim run + subscription sweep.
     implementation(libs.quarkus.scheduler)
+    // #12378: domestic-payment status events -> payout settlement (DLQ-wired consumer).
+    implementation(libs.quarkus.smallrye.kafka)
 
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.reactive)
@@ -46,6 +48,7 @@ dependencies {
     testImplementation("io.temporal:temporal-testing:1.25.1")
     testImplementation("io.grpc:grpc-inprocess:1.68.1")
     testImplementation(libs.quarkus.junit5)
+    testImplementation(libs.smallrye.reactive.messaging.inmemory)
     testImplementation(libs.quarkus.test.security)
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)

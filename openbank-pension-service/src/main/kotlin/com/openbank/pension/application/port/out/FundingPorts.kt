@@ -13,6 +13,7 @@ import com.openbank.pension.domain.incentive.ClaimStatus
 import com.openbank.pension.domain.incentive.IncentiveClaim
 import com.openbank.pension.domain.incentive.IncentiveLedgerEntry
 import com.openbank.pension.domain.incentive.TaxYearSummary
+import com.openbank.pension.domain.model.ContributionFrequency
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.YearMonth
@@ -147,11 +148,20 @@ data class MandateRequest(
     val currency: String,
     val reference: String,
     val firstCollection: LocalDate,
+    /** The contract's contribution frequency (#12378); the standing order repeats at it. */
+    val frequency: ContributionFrequency = ContributionFrequency.MONTHLY,
+    /** account-service id of the debtor account; both downstream rails key the order/mandate on it. */
+    val debtorAccountId: UUID? = null,
+    /** Account holder's name, required by the SEPA direct-debit mandate. */
+    val debtorName: String? = null,
 )
 
 /** standing-order-service / sdd-service: set up the participant's regular payment. */
 interface PaymentMandatePort {
     suspend fun setUp(request: MandateRequest): String
+
+    /** Cancels a mandate this port set up earlier ([externalId] is what [setUp] returned). #12378. */
+    suspend fun cancel(kind: MandateKind, externalId: String)
 }
 
 /** kyb-service / party: resolve an employer and confirm it is a verified business. */

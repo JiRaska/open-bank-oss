@@ -16,6 +16,7 @@ import com.openbank.pension.application.exit.TaxWithholdingPort
 import com.openbank.pension.domain.exit.AnnuityPolicy
 import com.openbank.pension.domain.exit.ExitMoney
 import io.quarkus.arc.DefaultBean
+import io.quarkus.arc.profile.IfBuildProfile
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
@@ -61,7 +62,12 @@ class StubTaxWithholdingAdapter(
     }
 }
 
-/** domestic-payment stand-in: deduplicates by idempotency key exactly as the real scheme gateway must. */
+/**
+ * domestic-payment stand-in: deduplicates by idempotency key exactly as the real scheme gateway must.
+ * dev/test only (#12378): the real adapter is `DomesticPayoutPaymentAdapter`, the only bean in a
+ * prod build.
+ */
+@IfBuildProfile(anyOf = ["dev", "test"])
 @DefaultBean
 @ApplicationScoped
 class StubPayoutPaymentAdapter(
