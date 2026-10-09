@@ -17,9 +17,9 @@ above batch SEPA.
 ## 2. Data flow (DFD)
 
 ```
-[Channels/Operators] --> (REST /api/v1/sepa-instant) --> [sepa-instant-service] --> [(Postgres: sct_inst payments)]
+[Channels/Operators] --> (REST /api/v1/sepa-instant) --> [sepa-instant-service] --> [(Postgres: payments + outbox)]
                                                                 |
-                                                                +--> [Kafka events] (direct emit via KafkaSctInstEventPublisher) --> clearing/scheme
+                                                                +--> [outbox dispatcher] --> [Kafka events] --> clearing/scheme
                                                                 |
                                                                 +--> [fraud-service] (shadow, OIDC CC / mTLS, fail-open)
    recall <-- (POST /{paymentId}/recall)
@@ -310,3 +310,23 @@ and NetworkPolicy peer remain through Phase 5.
   Rollout verification must exercise this caller against 8443 with valid and invalid
   client certificates and check that failures do not reroute to HTTP. Rollback restores
   the previous client URL/configuration while the AML listener remains available.
+
+- **2026-10-06** — **Durable SCT Inst state events (#12181).** PROCESSING/Rejected inserts and
+  SETTLED/RECALLED updates now write the established four-field event payload to
+  `sct_inst_outbox` in the payment transaction. A failed event insert rolls back the
+  state change; the dispatcher uses the shared aggregate-head claim, retry/backoff and
+  terminal `DEAD` state after bounded failures. The separate `countDead` gauge and
+  `SepaInstantOutboxDeadLettered` alert make that terminal state visible; reviewed,
+  per-event disposition is in `docs/runbooks/sepa-instant-outbox-recovery.md`.
+  A successful Kafka acknowledgement can still precede a crash before `markSent`.
+  The unchanged outbox `ce-id` is now sent on each attempt and used by audit-service before
+  the Kafka offset when the body has no `eventId`. Deploy and verify that consumer first;
+  a retry against an older consumer can still append a second audit row.
+  Historical transitions are not backfilled. The scheme-submission GitOps flag is
+  explicitly false under its matching application env name until the settlement flow
+  and recovery owner approve a rollout. The outbox dispatcher must stay enabled for
+  the default PROCESSING flow, and pending/failed/dead counts need operational review.
+  **Rollback:** stop writers, retain V5's table while any recoverable outbox rows exist,
+  and run a compatible relay if the old app is restored because it has no dispatcher.
+  Remove the table only after an approved per-row disposition and a verified empty
+  recoverable set; never replay historical payment events automatically.

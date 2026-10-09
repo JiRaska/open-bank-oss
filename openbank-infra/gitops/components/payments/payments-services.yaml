@@ -53,7 +53,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: transaction-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-transaction-service:sandbox-631a1f05
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-transaction-service:sandbox-06b3e255
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -464,7 +464,7 @@ spec:
         - name: sepa-payment
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-payment:sandbox-631a1f05
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-payment:sandbox-06b3e255
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -851,7 +851,7 @@ spec:
         - name: domestic-payment
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-domestic-payment:sandbox-a5b43740
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-domestic-payment:sandbox-06b3e255
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -1309,8 +1309,9 @@ spec:
               value: http://clearing-simulator.payments.svc:8139
             - name: QUARKUS_REDIS_HOSTS
               value: redis://redis.payments.svc:6379
-            - name: SEPA_INSTANT_SCHEME_SUBMISSION_ENABLED
-              value: "true"
+            # Keep settlement opt-in disabled until the outbox and reconciliation rollout is approved.
+            - name: SCT_INST_SCHEME_SUBMISSION_ENABLED
+              value: "false"
             - name: TRANSACTION_SERVICE_URL
               value: http://transaction-service.payments.svc:8102
             # OPA sidecar is deployed (ADR-0034 Phase 5, issue #266). AUTHZ_ENFORCE=true
@@ -1882,7 +1883,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: standing-order-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-standing-order-service:sandbox-ed58c115
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-standing-order-service:sandbox-06b3e255
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -1969,15 +1970,18 @@ spec:
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
               value: "0.1"
-            # OPA sidecar bootstrap (ADR-0034 Phase 5, issue #1797). Advisory mode first
-            # (AUTHZ_ENFORCE=false, @Authorize logs "would DENY" without blocking) — matches every
-            # other service's rollout convention. Before this the pod inherited the libs default
-            # enforce=true with NO sidecar, so standingOrder.pause failed closed on an unreachable
-            # PDP. Flip to true only after an observation window with a clean advisory report.
-            # Dated per #8470: flip target 2026-10-05 — its money-path effect is a FUTURE scheduled
-            # debit and pause/cancel reduces money movement, so a bounded advisory window is safe.
+            # ADR-0034 Phase 5 / issue #1797, flipped by #12324: ENFORCED. standingOrder.pause (the
+            # only @Authorize method) is decided by the OPA sidecar below; a deny is a 403 and an
+            # unreachable PDP is a 503 (fail closed). The one M2M caller, customer-edge's
+            # self-service pause, arrives as service-account-openbank-edge and is granted by
+            # standing_order_rest_ext.rego (m2m-standing-order-pause); staff OPERATOR/ADMIN by
+            # operator-standing-order-pause. This is a plain Deployment, not a Rollout: there is
+            # no canary analysis, so a bad decision reaches the single replica at once.
+            # Rollback: set this back to "false" (advisory: decisions still computed and counted
+            # in openbank.authz.decisions, none blocks) and restore the allowlist entry in
+            # .github/scripts/check-authz-enforce-money-path.py.
             - name: AUTHZ_ENFORCE
-              value: "false"
+              value: "true"
           startupProbe:
             tcpSocket:
               port: management
@@ -2171,7 +2175,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: card-issuance-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-issuance-service:sandbox-43215314
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-issuance-service:sandbox-06b3e255
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -2470,7 +2474,7 @@ spec:
           # is UNVERIFIABLE forever rather than merely stale. No image carries this tag yet; the
           # first auto-deploy run rewrites the line, and until then the Deployment does not admit,
           # which is the honest state for a service whose image has never been built.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-processing-service:sandbox-a5b43740
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-processing-service:sandbox-06b3e255
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -2535,17 +2539,18 @@ spec:
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
               value: "0.1"
-            # Advisory first (ADR-0034 Phase 5 convention): @Authorize logs "would DENY" without
-            # blocking. Flip to true only after an observation window with a clean advisory report.
-            #
-            # Advisory deliberately (#8470): ADR-0283 phase 1 makes this service money-path, so the
-            # money-path authz-enforce gate reads this value. It stays false because the observation
-            # window above cannot have run — the service does not exist yet, so there is no advisory
-            # report to confirm an empty "would DENY" population. Enforcing on the PR that creates
-            # the service would enforce against a policy nobody has watched decide.
-            # Flip target: 2026-10-05, with the other advisory money-path services.
+            # ADR-0283 phase 1 / ADR-0034 Phase 5, flipped by #12325: ENFORCED. Every @Authorize
+            # method is decided by the OPA sidecar below; a deny is a 403 and an unreachable PDP is
+            # a 503 (fail closed). The advisory window recorded no decision at all: the only
+            # callers the NetworkPolicy admits are same-namespace pods (none calls this service)
+            # and admin-ui, which forwards the staff user's bearer (operator/admin write, viewer and
+            # compliance read, via card_processing_rest_ext.rego and base compliance-read-any).
+            # This is a plain Deployment, not a Rollout: no canary analysis guards the flip.
+            # Rollback: set this back to "false" (advisory: decisions still computed and counted
+            # in openbank.authz.decisions, none blocks) and restore the allowlist entry in
+            # .github/scripts/check-authz-enforce-money-path.py.
             - name: AUTHZ_ENFORCE
-              value: "false"
+              value: "true"
           startupProbe:
             tcpSocket:
               port: management
@@ -2727,7 +2732,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: settlement-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-settlement-service:sandbox-631a1f05
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-settlement-service:sandbox-06b3e255
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
