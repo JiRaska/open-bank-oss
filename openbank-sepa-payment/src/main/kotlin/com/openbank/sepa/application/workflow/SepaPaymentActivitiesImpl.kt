@@ -14,6 +14,7 @@ import com.openbank.sepa.application.port.out.OpenAmlCaseCommand
 import com.openbank.sepa.application.port.out.SanctionsScreeningPort
 import com.openbank.sepa.application.port.out.SchemeGatewayPort
 import com.openbank.sepa.application.port.out.SchemeGatewayUnavailableException
+import com.openbank.sepa.application.port.out.SchemeSubmissionDecision
 import com.openbank.sepa.application.port.out.ScreeningUnavailableException
 import com.openbank.sepa.application.port.out.SepaPaymentOutboxMessage
 import com.openbank.sepa.application.port.out.SepaPaymentRepository
@@ -225,26 +226,28 @@ open class SepaPaymentActivitiesImpl(
             return@runOnVertxContext SepaPaymentStatus.VALIDATED
         }
 
-        if (outcome.accepted) {
-            return@runOnVertxContext settleAfterAcceptance(claimed, paymentId)
-        } else {
-            val rejected = claimed.transitionTo(
-                SepaPaymentStatus.REJECTED,
-                mapSchemeReason(outcome.reasonCode),
-                "scheme reject (pacs.002): ${outcome.reasonCode ?: "unspecified"}",
-                clock = clock,
-            ).copy(schemeOutcomeUnknown = false)
-            paymentRepository.recordSchemeDecision(
-                payment = rejected,
-                outboxMessage = SepaPaymentOutboxMessage(
-                    aggregateId = rejected.id,
-                    eventType = PAYMENT_STATUS_CHANGED_EVENT,
-                    payload = """{"paymentId":"$paymentId","version":${rejected.revision},"status":"REJECTED",""" +
-                        """"occurredAt":"${rejected.updatedAt}","sourceService":"$SOURCE_SERVICE"}""",
-                    createdAt = Instant.now(clock),
-                ),
-            )
-            return@runOnVertxContext SepaPaymentStatus.REJECTED
+        when (outcome.decision) {
+            SchemeSubmissionDecision.ACCEPTED -> return@runOnVertxContext settleAfterAcceptance(claimed, paymentId)
+            SchemeSubmissionDecision.PENDING -> return@runOnVertxContext SepaPaymentStatus.VALIDATED
+            SchemeSubmissionDecision.REJECTED -> {
+                val rejected = claimed.transitionTo(
+                    SepaPaymentStatus.REJECTED,
+                    mapSchemeReason(outcome.reasonCode),
+                    "scheme reject (pacs.002): ${outcome.reasonCode ?: "unspecified"}",
+                    clock = clock,
+                ).copy(schemeOutcomeUnknown = false)
+                paymentRepository.recordSchemeDecision(
+                    payment = rejected,
+                    outboxMessage = SepaPaymentOutboxMessage(
+                        aggregateId = rejected.id,
+                        eventType = PAYMENT_STATUS_CHANGED_EVENT,
+                        payload = """{"paymentId":"$paymentId","version":${rejected.revision},"status":"REJECTED",""" +
+                            """"occurredAt":"${rejected.updatedAt}","sourceService":"$SOURCE_SERVICE"}""",
+                        createdAt = Instant.now(clock),
+                    ),
+                )
+                return@runOnVertxContext SepaPaymentStatus.REJECTED
+            }
         }
     }
 

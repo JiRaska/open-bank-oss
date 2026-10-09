@@ -9,6 +9,7 @@ import com.openbank.libs.iso20022.Pacs002Builder
 import com.openbank.libs.iso20022.PaymentStatus
 import com.openbank.libs.iso20022.PaymentStatusReport
 import com.openbank.sepa.application.port.out.SchemeGatewayUnavailableException
+import com.openbank.sepa.application.port.out.SchemeSubmissionDecision
 import com.openbank.sepa.domain.model.SepaPayment
 import com.openbank.sepa.domain.model.SepaPaymentStatus
 import com.openbank.sepa.domain.model.SepaPaymentType
@@ -59,11 +60,15 @@ class SchemeGatewayAdapterTest {
         updatedAt = Instant.now(),
     )
 
-    private fun pacs002(status: PaymentStatus, reason: String? = null): String = Pacs002Builder().build(
+    private fun pacs002(
+        status: PaymentStatus,
+        reason: String? = null,
+        originalEndToEndId: String? = "E2E-0001",
+    ): String = Pacs002Builder().build(
         PaymentStatusReport(
             messageId = "SIM-STS-1",
             creationDateTime = OffsetDateTime.now(ZoneOffset.UTC),
-            originalEndToEndId = "E2E-0001",
+            originalEndToEndId = originalEndToEndId,
             originalTransactionId = null,
             status = status,
             reasonCode = reason,
@@ -76,7 +81,7 @@ class SchemeGatewayAdapterTest {
         every { client.submitCreditTransfer(any(), any()) } returns Uni.createFrom().item(pacs002(PaymentStatus.ACSC))
         runBlocking {
             val outcome = adapter.submit(payment())
-            assertThat(outcome.accepted).isTrue()
+            assertThat(outcome.decision).isEqualTo(SchemeSubmissionDecision.ACCEPTED)
             assertThat(outcome.reasonCode).isNull()
         }
     }
@@ -87,7 +92,7 @@ class SchemeGatewayAdapterTest {
             Uni.createFrom().item(pacs002(PaymentStatus.RJCT, reason = "AC04"))
         runBlocking {
             val outcome = adapter.submit(payment())
-            assertThat(outcome.accepted).isFalse()
+            assertThat(outcome.decision).isEqualTo(SchemeSubmissionDecision.REJECTED)
             assertThat(outcome.reasonCode).isEqualTo("AC04")
         }
     }
@@ -96,7 +101,7 @@ class SchemeGatewayAdapterTest {
     fun `a missing creditor BIC is rejected RC01 without calling the gateway`() {
         runBlocking {
             val outcome = adapter.submit(payment(creditorBic = null))
-            assertThat(outcome.accepted).isFalse()
+            assertThat(outcome.decision).isEqualTo(SchemeSubmissionDecision.REJECTED)
             assertThat(outcome.reasonCode).isEqualTo("RC01")
         }
     }
@@ -105,6 +110,30 @@ class SchemeGatewayAdapterTest {
     fun `a gateway failure fails closed`() {
         every { client.submitCreditTransfer(any(), any()) } returns
             Uni.createFrom().failure(RuntimeException("connection refused"))
+        assertThatThrownBy { runBlocking { adapter.submit(payment()) } }
+            .isInstanceOf(SchemeGatewayUnavailableException::class.java)
+    }
+
+    @Test
+    fun `RCVD and ACSP are pending rather than rejected`() {
+        for (status in listOf(PaymentStatus.RCVD, PaymentStatus.ACSP)) {
+            every { client.submitCreditTransfer(any(), any()) } returns Uni.createFrom().item(pacs002(status))
+            runBlocking { assertThat(adapter.submit(payment()).decision).isEqualTo(SchemeSubmissionDecision.PENDING) }
+        }
+    }
+
+    @Test
+    fun `a definitive status for another payment cannot clear this payment fence`() {
+        every { client.submitCreditTransfer(any(), any()) } returns
+            Uni.createFrom().item(pacs002(PaymentStatus.ACSC, originalEndToEndId = "OTHER"))
+        assertThatThrownBy { runBlocking { adapter.submit(payment()) } }
+            .isInstanceOf(SchemeGatewayUnavailableException::class.java)
+    }
+
+    @Test
+    fun `a definitive status without payment correlation cannot clear this payment fence`() {
+        every { client.submitCreditTransfer(any(), any()) } returns
+            Uni.createFrom().item(pacs002(PaymentStatus.RJCT, reason = "AC04", originalEndToEndId = null))
         assertThatThrownBy { runBlocking { adapter.submit(payment()) } }
             .isInstanceOf(SchemeGatewayUnavailableException::class.java)
     }

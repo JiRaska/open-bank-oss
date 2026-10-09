@@ -19,10 +19,12 @@ interface SchemeGatewayPort {
 
 /**
  * The scheme's verdict on a submitted credit transfer, mapped from the `pacs.002` `TxSts`.
- * [accepted] is true for `ACSC` (settled at the scheme); [reasonCode] carries the ISO 20022
- * `ExternalStatusReason1Code` on a reject (e.g. `AC04`, `AM05`, `RR04`, `FF01`).
+ * `ACSC` is definitive acceptance, `RJCT` definitive refusal, and `RCVD`/`ACSP` remain pending.
+ * [reasonCode] carries the ISO 20022 `ExternalStatusReason1Code` on a reject.
  */
-data class SchemeSubmissionOutcome(val accepted: Boolean, val reasonCode: String?)
+enum class SchemeSubmissionDecision { ACCEPTED, REJECTED, PENDING }
+
+data class SchemeSubmissionOutcome(val decision: SchemeSubmissionDecision, val reasonCode: String?)
 
 /** Thrown when the scheme gateway is unreachable; the rail fails closed (holds, never releases). */
 class SchemeGatewayUnavailableException(cause: Throwable) : RuntimeException("scheme gateway unavailable", cause)

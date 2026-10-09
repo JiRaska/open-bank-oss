@@ -9,6 +9,7 @@ import com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor
 import com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo
 import com.openbank.libs.domain.money.Money
 import com.openbank.sepa.application.port.out.SchemeGatewayPort
+import com.openbank.sepa.application.port.out.SchemeSubmissionDecision
 import com.openbank.sepa.domain.model.SepaPayment
 import com.openbank.sepa.domain.model.SepaPaymentStatus
 import com.openbank.sepa.domain.model.SepaPaymentType
@@ -65,7 +66,7 @@ class SchemeGatewaySimulatorIT {
 
         val outcome = runBlocking { schemeGateway.submit(payment()) }
 
-        assertThat(outcome.accepted).isTrue()
+        assertThat(outcome.decision).isEqualTo(SchemeSubmissionDecision.ACCEPTED)
         assertThat(outcome.reasonCode).isNull()
         // Prove a genuine pacs.008 actually went on the wire to the simulator.
         ClearingSimulatorWireMockResource.server.verify(
@@ -81,7 +82,7 @@ class SchemeGatewaySimulatorIT {
 
         val outcome = runBlocking { schemeGateway.submit(payment()) }
 
-        assertThat(outcome.accepted).isFalse()
+        assertThat(outcome.decision).isEqualTo(SchemeSubmissionDecision.REJECTED)
         assertThat(outcome.reasonCode).isEqualTo("AC04")
     }
 }

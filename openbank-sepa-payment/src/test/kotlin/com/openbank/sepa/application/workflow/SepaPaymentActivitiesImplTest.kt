@@ -14,6 +14,7 @@ import com.openbank.sepa.application.port.out.FraudVerdict
 import com.openbank.sepa.application.port.out.SanctionsScreeningPort
 import com.openbank.sepa.application.port.out.SchemeGatewayPort
 import com.openbank.sepa.application.port.out.SchemeGatewayUnavailableException
+import com.openbank.sepa.application.port.out.SchemeSubmissionDecision
 import com.openbank.sepa.application.port.out.SchemeSubmissionOutcome
 import com.openbank.sepa.application.port.out.ScreeningUnavailableException
 import com.openbank.sepa.application.port.out.SepaPaymentOutboxMessage
@@ -241,7 +242,7 @@ class SepaPaymentActivitiesImplTest {
         val validated = payment.copy(status = SepaPaymentStatus.VALIDATED)
         coEvery { paymentRepository.findById(paymentId) } returns validated
         coEvery { schemeGatewayPort.submit(any()) } returns
-            SchemeSubmissionOutcome(accepted = true, reasonCode = null)
+            SchemeSubmissionOutcome(SchemeSubmissionDecision.ACCEPTED, reasonCode = null)
 
         val result = activities.submitToScheme(paymentId)
 
@@ -256,7 +257,7 @@ class SepaPaymentActivitiesImplTest {
         val validated = payment.copy(status = SepaPaymentStatus.VALIDATED)
         coEvery { paymentRepository.findById(paymentId) } returns validated
         coEvery { schemeGatewayPort.submit(any()) } returns
-            SchemeSubmissionOutcome(accepted = true, reasonCode = null)
+            SchemeSubmissionOutcome(SchemeSubmissionDecision.ACCEPTED, reasonCode = null)
         coEvery { settlementPort.settle(any()) } throws
             com.openbank.sepa.application.port.out.SettlementUnavailableException("down")
 
@@ -272,7 +273,7 @@ class SepaPaymentActivitiesImplTest {
         val validated = payment.copy(status = SepaPaymentStatus.VALIDATED)
         coEvery { paymentRepository.findById(paymentId) } returns validated
         coEvery { schemeGatewayPort.submit(any()) } returns
-            SchemeSubmissionOutcome(accepted = false, reasonCode = "AC04")
+            SchemeSubmissionOutcome(SchemeSubmissionDecision.REJECTED, reasonCode = "AC04")
 
         val result = activities.submitToScheme(paymentId)
 
@@ -311,6 +312,22 @@ class SepaPaymentActivitiesImplTest {
         assertThat(activities.submitToScheme(paymentId)).isEqualTo(SepaPaymentStatus.VALIDATED)
         assertThat(activities.submitToScheme(paymentId)).isEqualTo(SepaPaymentStatus.VALIDATED)
         coVerify(exactly = 1) { schemeGatewayPort.submit(any()) }
+    }
+
+    @Test
+    fun `pending scheme report leaves the unknown fence and cannot be resent`() {
+        val validated = payment.copy(status = SepaPaymentStatus.VALIDATED)
+        coEvery { paymentRepository.findById(paymentId) } returns validated
+        coEvery { paymentRepository.claimSchemeSubmission(paymentId) } returnsMany
+            listOf(validated.copy(revision = 1, schemeOutcomeUnknown = true), null)
+        coEvery { schemeGatewayPort.submit(any()) } returns
+            SchemeSubmissionOutcome(SchemeSubmissionDecision.PENDING, reasonCode = null)
+
+        assertThat(activities.submitToScheme(paymentId)).isEqualTo(SepaPaymentStatus.VALIDATED)
+        assertThat(activities.submitToScheme(paymentId)).isEqualTo(SepaPaymentStatus.VALIDATED)
+        coVerify(exactly = 1) { schemeGatewayPort.submit(any()) }
+        coVerify(exactly = 0) { paymentRepository.recordSchemeDecision(any(), any()) }
+        coVerify(exactly = 0) { paymentRepository.update(any(), any()) }
     }
 
     @Test
@@ -390,7 +407,8 @@ class SepaPaymentActivitiesImplTest {
         val validated = payment.copy(status = SepaPaymentStatus.VALIDATED)
         val outboxes = mutableListOf<SepaPaymentOutboxMessage>()
         coEvery { paymentRepository.findById(paymentId) } returns validated
-        coEvery { schemeGatewayPort.submit(any()) } returns SchemeSubmissionOutcome(accepted = true, reasonCode = null)
+        coEvery { schemeGatewayPort.submit(any()) } returns
+            SchemeSubmissionOutcome(SchemeSubmissionDecision.ACCEPTED, reasonCode = null)
         coEvery { paymentRepository.update(any(), capture(outboxes)) } answers { firstArg() }
         coEvery { paymentRepository.recordSchemeDecision(any(), capture(outboxes)) } answers { firstArg() }
 
@@ -430,12 +448,13 @@ class SepaPaymentActivitiesImplTest {
 
         // Scheme accept -> PROCESSING + COMPLETED.
         coEvery { paymentRepository.findById(paymentId) } returns payment.copy(status = SepaPaymentStatus.VALIDATED)
-        coEvery { schemeGatewayPort.submit(any()) } returns SchemeSubmissionOutcome(accepted = true, reasonCode = null)
+        coEvery { schemeGatewayPort.submit(any()) } returns
+            SchemeSubmissionOutcome(SchemeSubmissionDecision.ACCEPTED, reasonCode = null)
         activities.submitToScheme(paymentId)
 
         // Scheme reject -> REJECTED.
         coEvery { schemeGatewayPort.submit(any()) } returns
-            SchemeSubmissionOutcome(accepted = false, reasonCode = "AM04")
+            SchemeSubmissionOutcome(SchemeSubmissionDecision.REJECTED, reasonCode = "AM04")
         activities.submitToScheme(paymentId)
 
         assertThat(outboxes).hasSize(EXPECTED_TEMPORAL_PAYLOADS)

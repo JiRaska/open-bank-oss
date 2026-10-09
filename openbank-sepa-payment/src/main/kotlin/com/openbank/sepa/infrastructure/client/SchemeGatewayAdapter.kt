@@ -14,6 +14,7 @@ import com.openbank.libs.iso20022.PaymentStatus
 import com.openbank.libs.iso20022.SettlementMethod
 import com.openbank.sepa.application.port.out.SchemeGatewayPort
 import com.openbank.sepa.application.port.out.SchemeGatewayUnavailableException
+import com.openbank.sepa.application.port.out.SchemeSubmissionDecision
 import com.openbank.sepa.application.port.out.SchemeSubmissionOutcome
 import com.openbank.sepa.domain.model.SepaPayment
 import io.quarkus.oidc.client.OidcClient
@@ -63,7 +64,7 @@ class SchemeGatewayAdapter(
         // The creditor agent BIC is required to route the transfer; absent it the scheme would
         // reject (RC01 — bank identifier incorrect), so we surface that without a round-trip.
         val creditorAgentBic = payment.creditorBic
-            ?: return SchemeSubmissionOutcome(accepted = false, reasonCode = "RC01")
+            ?: return SchemeSubmissionOutcome(SchemeSubmissionDecision.REJECTED, reasonCode = "RC01")
 
         val pacs008 = builder.build(instruction(payment, creditorAgentBic))
         check(validator.validate(pacs008) is Iso20022ValidationResult.Valid) {
@@ -76,8 +77,15 @@ class SchemeGatewayAdapter(
         return try {
             val pacs002 = self.submitWithResilience(pacs008)
             val status = statusReader.read(pacs002)
+            check(!status.originalEndToEndId.isNullOrBlank() && status.originalEndToEndId == payment.endToEndId) {
+                "scheme status report does not identify the submitted payment"
+            }
             SchemeSubmissionOutcome(
-                accepted = status.status == PaymentStatus.ACSC,
+                decision = when (status.status) {
+                    PaymentStatus.ACSC -> SchemeSubmissionDecision.ACCEPTED
+                    PaymentStatus.RJCT -> SchemeSubmissionDecision.REJECTED
+                    PaymentStatus.RCVD, PaymentStatus.ACSP -> SchemeSubmissionDecision.PENDING
+                },
                 reasonCode = status.reasonCode,
             )
         } catch (ex: Exception) {
