@@ -105,20 +105,28 @@ data class DeathClaim(
 
     fun recordVerification(
         claimantId: UUID,
-        verified: Boolean,
+        verified: Boolean?,
         iban: String,
         operator: String,
         now: Instant,
     ): DeathClaim {
         check(status == DeathClaimStatus.NOTIFIED) { "claimants are verified while NOTIFIED, was $status" }
         claimant(claimantId)
-        val outcome = if (verified) ClaimantVerification.VERIFIED else ClaimantVerification.REJECTED
+        val outcome = when (verified) {
+            true -> ClaimantVerification.VERIFIED
+            false -> ClaimantVerification.REJECTED
+            null -> ClaimantVerification.PENDING
+        }
         return copy(
             claimants = claimants.map {
                 if (it.id ==
                     claimantId
                 ) {
-                    it.copy(verification = outcome, iban = iban.takeIf { verified }, verifiedBy = operator)
+                    it.copy(
+                        verification = outcome,
+                        iban = iban.takeIf { verified == true },
+                        verifiedBy = operator.takeIf { verified != null },
+                    )
                 } else {
                     it
                 }

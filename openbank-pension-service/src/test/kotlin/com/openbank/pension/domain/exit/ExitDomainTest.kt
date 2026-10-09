@@ -188,6 +188,18 @@ class ExitDomainTest {
     }
 
     @Test
+    fun `unavailable identity evidence keeps a claimant pending and blocks approval`() {
+        val original = claim()
+        val claimant = original.claimants.first()
+        val pending = original.recordVerification(claimant.id, null, "CZ6508000000192000145399", "op-2", now)
+        assertThat(pending.claimant(claimant.id).verification).isEqualTo(ClaimantVerification.PENDING)
+        assertThat(pending.claimant(claimant.id).iban).isNull()
+        assertThat(pending.claimant(claimant.id).verifiedBy).isNull()
+        assertThatThrownBy { pending.approve("op-2", BigDecimal("1000"), BigDecimal.ZERO, { BigDecimal.ZERO }, now) }
+            .hasMessageContaining("verified")
+    }
+
+    @Test
     fun `approval is four-eyes, needs every claimant verified, and the shares sum to the distributable value`() {
         var c = claim()
         assertThatThrownBy { c.approve("op-2", BigDecimal("1000"), BigDecimal.ZERO, { BigDecimal.ZERO }, now) }

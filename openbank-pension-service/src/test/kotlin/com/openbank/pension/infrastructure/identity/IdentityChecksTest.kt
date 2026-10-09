@@ -188,19 +188,29 @@ class IdentityChecksTest {
     }
 
     @Test
-    fun `beneficiary light kyc needs a KYC-approved holder of the IBAN under the claimed name`(): Unit = runBlocking {
+    fun `beneficiary identity refuses an unrelated holder and unverified evidence`(): Unit = runBlocking {
         val holder = UUID.randomUUID()
         val iban = "CZ6508000000192000145399"
         val accounts = mapOf(iban to AccountDto(UUID.randomUUID(), holder, "ACTIVE", "CZK"))
         var partyRecord = PartyDto(holder, "INDIVIDUAL", "ACTIVE", "Jana  Nováková", "APPROVED")
         val check = BeneficiaryLightKyc({ accounts[it] }, { if (it == holder) partyRecord else null })
+        val withVerifiedDocument = BeneficiaryLightKyc(
+            { accounts[it] },
+            { if (it == holder) partyRecord else null },
+            { _, _ -> true },
+        )
         val kyc = ClaimantKyc("jana nováková", LocalDate.of(1970, 1, 1), "OP-123", iban)
 
-        assertThat(check.verify(kyc)).isTrue()
-        assertThat(check.verify(kyc.copy(name = "Petr Novák"))).isFalse()
-        assertThat(check.verify(kyc.copy(identityDocumentRef = " "))).isFalse()
-        assertThat(check.verify(kyc.copy(iban = "CZ5508000000001234567899"))).isFalse()
+        assertThat(withVerifiedDocument.verify(kyc, UUID.randomUUID())).isFalse()
+        assertThat(withVerifiedDocument.verify(kyc, holder)).isTrue()
+        assertThat(check.verify(kyc, UUID.randomUUID())).isFalse()
+        // Same name, active account and approved KYC do not verify the document or birth date.
+        assertThat(check.verify(kyc, holder)).isNull()
+        assertThat(check.verify(kyc, null)).isNull()
+        assertThat(check.verify(kyc.copy(name = "Petr Novák"), holder)).isFalse()
+        assertThat(check.verify(kyc.copy(identityDocumentRef = " "), holder)).isFalse()
+        assertThat(check.verify(kyc.copy(iban = "CZ5508000000001234567899"), holder)).isFalse()
         partyRecord = partyRecord.copy(kycStatus = "IN_PROGRESS")
-        assertThat(check.verify(kyc)).isFalse()
+        assertThat(check.verify(kyc, holder)).isFalse()
     }
 }

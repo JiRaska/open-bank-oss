@@ -103,5 +103,5 @@ class BeneficiaryLightKycRestAdapter : BeneficiaryVerificationPort {
         )
     }
 
-    override suspend fun verify(kyc: ClaimantKyc): Boolean = check.verify(kyc)
+    override suspend fun verify(kyc: ClaimantKyc, claimantPartyId: UUID?): Boolean? = check.verify(kyc, claimantPartyId)
 }

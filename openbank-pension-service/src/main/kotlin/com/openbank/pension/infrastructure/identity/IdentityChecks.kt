@@ -172,25 +172,29 @@ object AccountOwnership {
 }
 
 /**
- * KYC-light check of a death-claim beneficiary (the operator has inspected the identity document):
- * the payout IBAN must be an ACTIVE account whose holder is an ACTIVE, KYC-approved natural person
- * whose legal name is the claimant's name. A beneficiary who is not a customer of the bank is
- * REFUSED — there is no provider today that verifies a non-customer's identity document
- * (kyc-service runs cases only for parties); that path is a follow-up, never an accept.
+ * The account holder must match a known claimant party ID. Account and party lookups cannot
+ * attest the claimant's document reference or birth date, so even a matching KYC-approved holder
+ * cannot be marked VERIFIED until a trusted provider can establish those facts.
  */
 class BeneficiaryLightKyc(
     private val accountByIban: suspend (String) -> AccountDto?,
     private val partyById: suspend (UUID) -> PartyDto?,
+    private val verifiedIdentityEvidence: suspend (ClaimantKyc, UUID) -> Boolean? = { _, _ -> null },
 ) {
-    suspend fun verify(kyc: ClaimantKyc): Boolean {
+    suspend fun verify(kyc: ClaimantKyc, claimantPartyId: UUID?): Boolean? {
         if (kyc.identityDocumentRef.isBlank() || kyc.name.isBlank()) return false
         val account = accountByIban(kyc.iban) ?: return false
         val holder = account.partyId?.takeIf { account.status == "ACTIVE" } ?: return false
+        if (claimantPartyId != null && holder != claimantPartyId) return false
         val party = partyById(holder) ?: return false
-        return party.partyType == "INDIVIDUAL" &&
+        val holderMatches = party.id == holder &&
+            party.partyType == "INDIVIDUAL" &&
             party.status == "ACTIVE" &&
             party.kycStatus == "APPROVED" &&
             normaliseName(party.legalName) == normaliseName(kyc.name)
+        if (!holderMatches) return false
+        // Neither production lookup verifies identityDocumentRef or birthDate against the claimant.
+        return verifiedIdentityEvidence(kyc, holder)
     }
 
     private fun normaliseName(name: String?): String = name.orEmpty().trim().replace(Regex("\\s+"), " ").lowercase()

@@ -140,7 +140,8 @@ class StubBeneficiaryVerificationAdapter(
     @param:ConfigProperty(name = "openbank.pension.exit.stub.checks-accept", defaultValue = "false")
     private val accept: Boolean,
 ) : BeneficiaryVerificationPort {
-    override suspend fun verify(kyc: ClaimantKyc): Boolean = accept && kyc.identityDocumentRef.isNotBlank()
+    override suspend fun verify(kyc: ClaimantKyc, claimantPartyId: UUID?): Boolean =
+        accept && kyc.identityDocumentRef.isNotBlank()
 }
 
 /**

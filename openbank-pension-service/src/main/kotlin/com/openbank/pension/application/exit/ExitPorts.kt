@@ -89,9 +89,10 @@ interface AnnuityInsurerPort {
 
 data class ClaimantKyc(val name: String, val birthDate: LocalDate, val identityDocumentRef: String, val iban: String)
 
-/** KYC-light check of a beneficiary: identity document matches, and the account is theirs. */
+/** KYC-light check of a beneficiary, bound to a known claimant party ID when present. */
 interface BeneficiaryVerificationPort {
-    suspend fun verify(kyc: ClaimantKyc): Boolean
+    /** True is attested, false is a mismatch, null means evidence is unavailable. */
+    suspend fun verify(kyc: ClaimantKyc, claimantPartyId: UUID?): Boolean?
 }
 
 interface TerminationNoticeRepository {

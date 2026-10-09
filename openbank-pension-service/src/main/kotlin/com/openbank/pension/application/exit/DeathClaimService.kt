@@ -88,7 +88,7 @@ class DeathClaimService(
         val claimant = claim.claimant(claimantId)
         require(kyc.name.equals(claimant.name, ignoreCase = true)) { "the identity document names a different person" }
         val iban = IbanRule.normalise(kyc.iban)
-        val verified = ctx.gateways.beneficiaryKyc.verify(kyc.copy(iban = iban))
+        val verified = ctx.gateways.beneficiaryKyc.verify(kyc.copy(iban = iban), claimant.partyId)
         return stores.claims.save(claim.recordVerification(claimantId, verified, iban, operator, ctx.clock.instant()))
     }
 
