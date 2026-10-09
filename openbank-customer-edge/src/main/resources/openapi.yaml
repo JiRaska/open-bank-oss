@@ -45,7 +45,8 @@ info:
   # 1.75.0 -> 1.76.0 (#11966): additive — /holdings, the customer write side of the declared
   # holdings that GET /net-worth reads (ADR-0301 D1).
   # 1.80 -> 1.81 (#12317): additive SEPA Instant receipt lookup.
-  version: 1.81.0
+  # 1.81 -> 1.82 (#12317): additive authenticated standing-order receipt lookup.
+  version: 1.82.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -1995,6 +1996,9 @@ paths:
       description: >-
         debitAccountId is ownership-checked at the edge; partyId is always taken from the JWT
         (a client-supplied value is overwritten). startDate defaults to today when omitted.
+        Supply a stable Idempotency-Key to reconcile a lost response; an edge-generated key cannot
+        be recovered after the response is lost. The original authenticated actor is sent to the
+        standing-order service and frozen for a held business approval.
       operationId: createStandingOrder
       security:
         - customerOidc: [payments:initiate]
@@ -2013,7 +2017,7 @@ paths:
             Required only when the company's signing policy holds the instruction (#10281): the
             initiator's consumed PAYMENT_INITIATION challenge is the first signature.
           schema: {type: string, format: uuid}
-        - {name: Idempotency-Key, in: header, required: false, schema: {type: string}, description: Synthesized by the edge when absent}
+        - {name: Idempotency-Key, in: header, required: false, schema: {type: string}, description: Required for lost-response recovery; synthesized by the edge when absent}
       requestBody:
         required: true
         content:
@@ -2085,6 +2089,49 @@ paths:
           description: >-
             Under X-Acting-For only: the company's signing policy could not be evaluated, so the
             instruction is refused rather than created with a single signature.
+
+  /standing-orders/receipts/lookup:
+    post:
+      tags: [Standing Orders]
+      summary: Resolve an authenticated customer's standing-order receipt
+      description: >-
+        The edge verifies debit-account ownership and forwards the original key with the
+        authenticated actor and effective party. UNKNOWN does not establish that the instruction
+        failed. The key is carried only in the request body, never in a URL.
+      operationId: lookupStandingOrderReceipt
+      security:
+        - customerOidc: [payments:read]
+      parameters:
+        - name: X-Acting-For
+          in: header
+          required: false
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [idempotencyKey, debitAccountId]
+              properties:
+                idempotencyKey: {type: string}
+                debitAccountId: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Verified receipt or UNKNOWN, including an account outside the caller's scope
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [state]
+                properties:
+                  state: {type: string, enum: [FOUND, UNKNOWN]}
+                  orderId: {type: string, format: uuid, nullable: true}
+                  status: {type: string, nullable: true}
+        '400':
+          description: Malformed lookup request
+        '403':
+          description: Caller lacks standing-order read permission
 
   /standing-orders/{id}:
     delete:

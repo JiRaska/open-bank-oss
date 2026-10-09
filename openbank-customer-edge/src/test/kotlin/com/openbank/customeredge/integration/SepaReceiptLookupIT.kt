@@ -68,6 +68,69 @@ class SepaReceiptLookupIT {
     }
 
     @Test
+    fun `standing receipt lookup forwards authenticated actor and original key over HTTP`() {
+        stubOwnAccount()
+        StubUpstreamResource.stub(STANDING_RAIL_PATH, body = """{"state":"UNKNOWN"}""")
+
+        val response = RestAssured.given().contentType("application/json")
+            .body(standingRequestBody)
+            .post("/customer/v1/standing-orders/receipts/lookup")
+
+        assertThat(response.statusCode).isEqualTo(200)
+        assertThat(response.jsonPath().getString("state")).isEqualTo("UNKNOWN")
+        val request = StubUpstreamResource.requests(STANDING_RAIL_PATH).single()
+        assertThat(request.path).doesNotContain("receipt-key")
+        assertThat(request.headers.entries.single { it.key.equals("X-Customer-Party-Id", true) }.value)
+            .containsExactly(PARTY)
+        assertThat(request.headers.entries.single { it.key.equals("X-Customer-Actor-Id", true) }.value)
+            .containsExactly(PARTY)
+        val body = ObjectMapper().readTree(request.body)
+        assertThat(body.path("idempotencyKey").asText()).isEqualTo("receipt-key")
+        assertThat(body.path("debitAccountId").asText()).isEqualTo(ACCOUNT)
+    }
+
+    @Test
+    fun `standing receipt for a foreign account returns unknown without querying the rail`() {
+        StubUpstreamResource.stub(
+            ACCOUNT_PATH,
+            body = """{"id":"$ACCOUNT","partyId":"$COMPANY","accountNumber":"CZ6508000000192000145399"}""",
+        )
+
+        val response = RestAssured.given().contentType("application/json")
+            .body(standingRequestBody)
+            .post("/customer/v1/standing-orders/receipts/lookup")
+
+        assertThat(response.statusCode).isEqualTo(200)
+        assertThat(response.jsonPath().getString("state")).isEqualTo("UNKNOWN")
+        assertThat(StubUpstreamResource.requests(STANDING_RAIL_PATH)).isEmpty()
+    }
+
+    @Test
+    fun `standing receipt acting for a company keeps effective party separate from original actor`() {
+        StubUpstreamResource.stub(
+            "/api/v1/parties/$PARTY/acting-for",
+            body = """[{"partyId":"$COMPANY","partyType":"COMPANY","status":"ACTIVE"}]""",
+        )
+        StubUpstreamResource.stub(
+            ACCOUNT_PATH,
+            body = """{"id":"$ACCOUNT","partyId":"$COMPANY","accountNumber":"CZ6508000000192000145399"}""",
+        )
+        StubUpstreamResource.stub(STANDING_RAIL_PATH, body = """{"state":"UNKNOWN"}""")
+
+        val response = RestAssured.given().contentType("application/json")
+            .header("X-Acting-For", COMPANY)
+            .body(standingRequestBody)
+            .post("/customer/v1/standing-orders/receipts/lookup")
+
+        assertThat(response.statusCode).isEqualTo(200)
+        val request = StubUpstreamResource.requests(STANDING_RAIL_PATH).single()
+        assertThat(request.headers.entries.single { it.key.equals("X-Customer-Party-Id", true) }.value)
+            .containsExactly(COMPANY)
+        assertThat(request.headers.entries.single { it.key.equals("X-Customer-Actor-Id", true) }.value)
+            .containsExactly(PARTY)
+    }
+
+    @Test
     fun `foreign account is denied before any receipt lookup`() {
         StubUpstreamResource.stub(
             ACCOUNT_PATH,
@@ -129,4 +192,6 @@ private const val ACCOUNT_PATH = "/api/v1/accounts/$ACCOUNT"
 private const val PARTY_PATH = "/api/v1/parties/$PARTY"
 private const val RAIL_PATH = "/api/v1/sepa-payments/receipts/lookup"
 private const val INSTANT_RAIL_PATH = "/api/v1/sepa-instant/receipts/lookup"
+private const val STANDING_RAIL_PATH = "/api/v1/standing-orders/receipts/lookup"
 private val requestBody = """{"idempotencyKey":"receipt-key","debtorAccountId":"$ACCOUNT"}"""
+private val standingRequestBody = """{"idempotencyKey":"receipt-key","debitAccountId":"$ACCOUNT"}"""

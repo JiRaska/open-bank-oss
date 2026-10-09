@@ -1141,7 +1141,7 @@ class CustomerEdgeResource(
      * The hold view of a standing-order create body: the per-execution amount (minor units to a
      * decimal in the currency's own exponent), currency and creditor. Null when any is unusable.
      */
-    private fun heldStandingOrder(enriched: String, debit: UUID): HeldPayment? {
+    private fun heldStandingOrder(enriched: String, debit: UUID, initiatorActorId: UUID): HeldPayment? {
         val node = runCatching { objectMapper.readTree(enriched) }.getOrNull() ?: return null
         val minor = node.path("amountMinorUnits").takeIf { it.isIntegralNumber && it.canConvertToLong() }
             ?.asLong()?.takeIf { it > 0 } ?: return null
@@ -1159,6 +1159,7 @@ class CustomerEdgeResource(
             reference = node.path("remittanceInfo").asText("").takeIf { it.isNotBlank() },
             debtorAccountId = debit.toString(),
             railRequest = enriched,
+            initiatorActorId = initiatorActorId,
             extras = mapOf(
                 "frequency" to node.path("frequency").asText("").takeIf { it.isNotBlank() },
                 "startDate" to node.path("startDate").asText("").takeIf { it.isNotBlank() },
@@ -3594,13 +3595,19 @@ class CustomerEdgeResource(
         // An edit (#10281) names the order it replaces; standing-order-service swaps them in one
         // transaction. The replaced order must be the caller's own — same guard as pause/cancel.
         replacementRefusal(body, customer.partyId)?.let { return it }
+        if (idempotencyKey != null && idempotencyKey.isBlank()) return badRequest("Idempotency-Key must not be blank")
+        val bodyKey = extractTextField(objectMapper, body, "idempotencyKey")
+        if (idempotencyKey != null && bodyKey != null && idempotencyKey != bodyKey) {
+            return badRequest("Idempotency-Key differs from body idempotencyKey")
+        }
+        val key = idempotencyKey ?: bodyKey ?: "so-${UUID.randomUUID()}"
         var enriched = injectField(objectMapper, body, "partyId", customer.partyId.toString())
             ?: return badRequest("Malformed standing-order body")
         enriched = injectField(
             objectMapper,
             enriched,
             "idempotencyKey",
-            idempotencyKey?.takeIf { it.isNotBlank() } ?: "so-${UUID.randomUUID()}",
+            key,
         ) ?: enriched
         // The app's create form has no date picker; default the upstream-required startDate to
         // today when the app omits it (or sends it blank), so a standing order can be created
@@ -3612,7 +3619,7 @@ class CustomerEdgeResource(
         // Business multi-signature (#10281): a standing order for an entity is a recurring outflow
         // and follows the entity's signing policy, banded by its per-execution amount.
         if (customer.actingFor != null) {
-            val held = heldStandingOrder(enriched, debit)
+            val held = heldStandingOrder(enriched, debit, customer.authenticatedActor)
                 ?: return badRequest("Missing or malformed amountMinorUnits/currency/creditorIban")
             holdForApproval(customer, held, scaChallengeId, "standingOrders.create")?.let { return it }
         }
@@ -3620,6 +3627,8 @@ class CustomerEdgeResource(
             "$standingOrderServiceUrl/api/v1/standing-orders",
             customer.partyId.toString(),
             enriched,
+            key,
+            mapOf("X-Customer-Actor-Id" to customer.authenticatedActor.toString()),
         )
         audit.emit(
             eventType = "STANDING_ORDER_CREATED",
@@ -3633,6 +3642,37 @@ class CustomerEdgeResource(
             ),
         )
         return resp
+    }
+
+    /** Resolve only the caller's own standing-order instruction by its original key. */
+    @POST
+    @Path("/standing-orders/receipts/lookup")
+    @Authorize(action = "customer.standing-orders.read")
+    @Blocking
+    fun lookupStandingOrderReceipt(body: String?): Response {
+        val customer = customer()
+        val request = runCatching { objectMapper.readTree(body) as? ObjectNode }.getOrNull()
+            ?: return badRequest("Malformed receipt request")
+        val key = request.path("idempotencyKey").takeIf { it.isTextual }?.asText()?.takeIf { it.isNotBlank() }
+            ?: return badRequest("idempotencyKey is required")
+        val accountId = request.path("debitAccountId").takeIf { it.isTextual }?.asText()
+            ?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+            ?: return badRequest("debitAccountId is required")
+        if (!ownsAccount(accountId, customer.partyId)) {
+            return Response.ok("""{"state":"UNKNOWN","orderId":null,"status":null}""")
+                .type(MediaType.APPLICATION_JSON).build()
+        }
+        val upstreamBody = objectMapper.createObjectNode().apply {
+            put("idempotencyKey", key)
+            put("debitAccountId", accountId.toString())
+        }
+        return upstream.post(
+            "$standingOrderServiceUrl/api/v1/standing-orders/receipts/lookup",
+            customer.partyId.toString(),
+            upstreamBody.toString(),
+            null,
+            mapOf("X-Customer-Actor-Id" to customer.authenticatedActor.toString()),
+        )
     }
 
     @POST

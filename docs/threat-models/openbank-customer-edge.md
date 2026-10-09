@@ -154,6 +154,14 @@ Trust boundaries:
 
 ## 6. Change log
 
+- **2026-10-09** — **Standing-order receipt provenance (#12317).** The edge checks the caller's
+  ownership of the debit account before forwarding a body-based receipt lookup, and passes the
+  immutable authenticated actor with the effective party to standing-order-service. For a held
+  business order, the original actor and key are frozen in the approval payload; a later signer
+  cannot replace them during release. Older held payloads without that actor fail closed and need
+  reconciliation. A client that omits its own stable key cannot recover a lost create response from
+  the edge's generated key; receipt-capable clients must retain and reuse their original key.
+
 - **2026-10-04** — **Canary customer trusted for the synthetic taint (ADR-0331).** `OPENBANK_SYNTHETIC_TRUSTED_PRINCIPALS` names `service-account-openbank-synthetic-retail`, a customers-realm service account bound to one SYNTHETIC party. The identity's shape and the trust list are held by the enforced `synthetic-customer-identity` gate. S-5 residual updated.
 
 - **2026-10-04** — **Synthetic taint survives the edge (ADR-0252 phase 1, #4348).** `UpstreamClient` builds every upstream request through `upstreamRequest()`, which forwards the edge's own trusted taint decision as `x-openbank-synthetic`. Before this the marker died at the edge, so a canary customer would have been real to every service behind it. New threat S-5.

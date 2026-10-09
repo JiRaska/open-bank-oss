@@ -1432,7 +1432,7 @@ class CustomerEdgeResourceTest {
             """"paymentType":"DOMESTIC","startDate":"2026-07-01"}"""
         val resp = soResourceFor(upstream, caller).createStandingOrder(body, null, null)
         assertThat(resp.status).isEqualTo(403)
-        verify(exactly = 0) { upstream.post(match { it.contains("/standing-orders") }, any(), any()) }
+        verify(exactly = 0) { upstream.post(match { it.contains("/standing-orders") }, any(), any(), any(), any()) }
     }
 
     @Test
@@ -1442,7 +1442,16 @@ class CustomerEdgeResourceTest {
         val upstream = mockk<UpstreamClient>()
         every { upstream.get(match { it.contains("/accounts/$acct") }, any()) } returns accountJson(acct, caller)
         var forwarded: String? = null
-        every { upstream.post(match { it.contains("/api/v1/standing-orders") }, any(), any()) } answers {
+        val forwardedHeaders = slot<Map<String, String>>()
+        every {
+            upstream.post(
+                match { it.contains("/api/v1/standing-orders") },
+                any(),
+                any(),
+                any(),
+                capture(forwardedHeaders),
+            )
+        } answers {
             forwarded = thirdArg()
             Response.status(201).entity("""{"id":"${UUID.randomUUID()}","status":"ACTIVE"}""").build()
         }
@@ -1454,6 +1463,51 @@ class CustomerEdgeResourceTest {
         val node = mapper.readTree(forwarded!!)
         assertThat(node.get("partyId").asText()).isEqualTo(caller.toString())
         assertThat(node.get("idempotencyKey").asText()).isEqualTo("idem-1")
+        assertThat(forwardedHeaders.captured["X-Customer-Actor-Id"]).isEqualTo(caller.toString())
+    }
+
+    @Test
+    fun `standing receipt lookup checks debit ownership and forwards original actor`() {
+        val caller = UUID.randomUUID()
+        val account = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(match { it.contains("/accounts/$account") }, any()) } returns accountJson(account, caller)
+        val headers = slot<Map<String, String>>()
+        val forwarded = slot<String>()
+        every {
+            upstream.post(
+                "http://so/api/v1/standing-orders/receipts/lookup",
+                caller.toString(),
+                capture(forwarded),
+                null,
+                capture(headers),
+            )
+        } returns Response.ok("""{"state":"FOUND","orderId":"${UUID.randomUUID()}","status":"ACTIVE"}""").build()
+
+        val response = soResourceFor(upstream, caller).lookupStandingOrderReceipt(
+            """{"idempotencyKey":"standing-key","debitAccountId":"$account"}""",
+        )
+
+        assertThat(response.status).isEqualTo(200)
+        assertThat(mapper.readTree(forwarded.captured).path("idempotencyKey").asText()).isEqualTo("standing-key")
+        assertThat(headers.captured["X-Customer-Actor-Id"]).isEqualTo(caller.toString())
+    }
+
+    @Test
+    fun `standing receipt lookup returns unknown for a foreign debit without calling rail`() {
+        val caller = UUID.randomUUID()
+        val account = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(match { it.contains("/accounts/$account") }, any()) } returns
+            accountJson(account, UUID.randomUUID())
+
+        val response = soResourceFor(upstream, caller).lookupStandingOrderReceipt(
+            """{"idempotencyKey":"standing-key","debitAccountId":"$account"}""",
+        )
+
+        assertThat(response.status).isEqualTo(200)
+        assertThat(response.entity.toString()).contains("\"state\":\"UNKNOWN\"")
+        verify(exactly = 0) { upstream.post(match { it.contains("/receipts/lookup") }, any(), any(), any(), any()) }
     }
 
     @Test

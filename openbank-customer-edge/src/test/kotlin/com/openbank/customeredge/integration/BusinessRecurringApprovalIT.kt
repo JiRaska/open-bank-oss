@@ -138,6 +138,7 @@ class BusinessRecurringApprovalIT {
         assertThat(created.path("kind").asText()).isEqualTo("STANDING_ORDER")
         assertThat(created.path("initiatorSignature").path("partyId").asText()).isEqualTo(INITIATOR)
         assertThat(created.path("payload").path("rail").asText()).isEqualTo("STANDING_ORDER")
+        assertThat(created.path("payload").path("initiatorActorId").asText()).isEqualTo(INITIATOR)
         assertThat(created.path("payload").path("frequency").asText()).isEqualTo("MONTHLY")
         val frozen = created.path("payload").path("railRequest")
         assertThat(frozen.path("partyId").asText()).isEqualTo(COMPANY)
@@ -310,13 +311,14 @@ class BusinessRecurringApprovalIT {
     @Test
     @TestSecurity(user = "customer:$COSIGNER", roles = ["ROLE_CUSTOMER"])
     @OidcSecurity(claims = [Claim(key = "party_id", value = COSIGNER)])
-    fun `the last signature releases the frozen standing order once, keyed by the approval id`() {
+    fun `the last signature releases the frozen standing order with original actor and key`() {
         stubLastSignature()
         BusinessApprovalStubs.stub(
             "POST",
             "$DETAIL/release-claim",
-            body = """{"claimToken":"t1","payload":{"rail":"STANDING_ORDER",""" +
-                """"railRequest":{"partyId":"$COMPANY","amountMinorUnits":150000}}}""",
+            body = """{"claimToken":"t1","payload":{"rail":"STANDING_ORDER","initiatorActorId":"$INITIATOR",""" +
+                """"railRequest":{"partyId":"$COMPANY","idempotencyKey":"standing-original", """ +
+                """"amountMinorUnits":150000}}}""",
         )
         BusinessApprovalStubs.stub("POST", SO_UPSTREAM, status = 201, body = """{"id":"so-9","status":"ACTIVE"}""")
         BusinessApprovalStubs.stub("POST", "$DETAIL/release-result", body = "{}")
@@ -327,7 +329,8 @@ class BusinessRecurringApprovalIT {
             body("release.paymentId", equalTo("so-9"))
         }
         val upstream = BusinessApprovalStubs.requests("POST", SO_UPSTREAM).single()
-        assertThat(upstream.header("Idempotency-Key")).isEqualTo(APPROVAL)
+        assertThat(upstream.header("Idempotency-Key")).isEqualTo("standing-original")
+        assertThat(upstream.header("X-Customer-Actor-Id")).isEqualTo(INITIATOR)
         assertThat(upstream.header("X-Customer-Party-Id")).isEqualTo(COMPANY)
         assertThat(readJson(upstream.body).path("amountMinorUnits").asLong()).isEqualTo(150_000L)
         val result = readJson(BusinessApprovalStubs.requests("POST", "$DETAIL/release-result").single().body)

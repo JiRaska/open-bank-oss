@@ -92,6 +92,13 @@ class BusinessPaymentApprovals(
     @ConfigProperty(name = "openbank.edge.business-approvals.enforce", defaultValue = "false")
     private val enforce: Boolean,
 ) {
+    private val actorBoundRails = setOf(
+        PaymentRail.DOMESTIC,
+        PaymentRail.SEPA,
+        PaymentRail.SEPA_INSTANT,
+        PaymentRail.STANDING_ORDER,
+    )
+    private val originalKeyRails = setOf(PaymentRail.SEPA_INSTANT, PaymentRail.STANDING_ORDER)
 
     @ConfigProperty(name = "openbank.edge.domestic-payment-service-url")
     lateinit var domesticPaymentServiceUrl: String
@@ -191,7 +198,7 @@ class BusinessPaymentApprovals(
     private fun createBody(customer: CustomerIdentity, challenge: UUID, p: HeldPayment): String {
         val payload = objectMapper.createObjectNode().apply {
             put("rail", p.rail.name)
-            if (p.rail in setOf(PaymentRail.DOMESTIC, PaymentRail.SEPA, PaymentRail.SEPA_INSTANT)) {
+            if (p.rail in actorBoundRails) {
                 put("initiatorActorId", (p.initiatorActorId ?: customer.authenticatedActor).toString())
             }
             p.amount?.let { put("amount", it) }
@@ -232,16 +239,16 @@ class BusinessPaymentApprovals(
         }
         val frozenActor = payload.path("initiatorActorId").takeIf { it.isTextual }
             ?.asText()?.let { runCatching { UUID.fromString(it) }.getOrNull() }
-        // An old instant hold has no durable original actor; a later signer is not its maker.
-        val actor = frozenActor ?: if (rail == PaymentRail.SEPA_INSTANT) null else verifiedInitiatorId
+        // A later signer cannot supply the missing original actor of an older held instruction.
+        val actor = frozenActor ?: if (rail in originalKeyRails) null else verifiedInitiatorId
         val frozenBody = objectMapper.writeValueAsString(railRequest)
-        val resp = if (rail in setOf(PaymentRail.DOMESTIC, PaymentRail.SEPA, PaymentRail.SEPA_INSTANT)) {
+        val resp = if (rail in actorBoundRails) {
             if (actor == null) {
                 report(entity, approvalId, ok = false, ref = null, error = "initiator identity unavailable")
                 return mapOf("status" to "RELEASE_FAILED", "error" to "initiator identity unavailable")
             }
             val receiptHeaders = mapOf("X-Customer-Actor-Id" to actor.toString())
-            val key = if (rail == PaymentRail.SEPA_INSTANT) {
+            val key = if (rail in originalKeyRails) {
                 val originalKey = railRequest.path("idempotencyKey").takeIf { it.isTextual }
                     ?.asText()?.takeIf { it.isNotBlank() }
                 if (originalKey == null) {
