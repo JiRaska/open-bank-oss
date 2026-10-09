@@ -18,6 +18,7 @@ import java.util.UUID
  * named here never reaches pension-service, so no request can carry a participant, a current value
  * or an incentive history of the customer's choosing. A failure message names the first bad field.
  */
+@Suppress("TooManyFunctions")
 internal object PensionInput {
     private val PRODUCT_LINES = setOf("DPS", "DIP")
     private val PROVIDER_TYPES =
