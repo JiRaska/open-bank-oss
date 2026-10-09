@@ -21,6 +21,7 @@ import com.openbank.notification.application.port.out.PushMessage
 import com.openbank.notification.application.port.out.PushMetricsPort
 import com.openbank.notification.application.port.out.PushSender
 import com.openbank.notification.domain.ApprovalCopy
+import com.openbank.notification.domain.PensionCopy
 import com.openbank.notification.domain.HtmlEscape
 import com.openbank.notification.domain.RecipientAddress
 import com.openbank.notification.domain.model.EmailSendOutcome
@@ -343,7 +344,8 @@ class NotificationConsumer @Inject constructor(
 
     private fun dispatchResolved(req: NotificationRequest): Uni<Void> {
         // #10281: approval templates carry Czech copy and render through ApprovalCopy in the request language.
-        val (subject, body) = ApprovalCopy.renderOrNull(req.template, req.variables, req.language)
+        val (subject, body) = PensionCopy.renderOrNull(req.template, req.variables, req.language)
+            ?: ApprovalCopy.renderOrNull(req.template, req.variables, req.language)
             ?: renderTemplate(req.template, req.variables)
         val entity = NotificationEntity().also {
             it.notificationId = Ids.newId()
@@ -1073,6 +1075,13 @@ class NotificationConsumer @Inject constructor(
             // #10281: reached only without a language; dispatchResolved routes these via renderOrNull.
             APPROVAL_REQUIRED, APPROVAL_COMPLETED, APPROVAL_REJECTED, APPROVAL_EXPIRED, PAYMENT_RELEASE_FAILED ->
                 ApprovalCopy.render(template, vars, null)
+            NotificationTemplate.PENSION_PAYOUT_ACCOUNT_CHANGED,
+            NotificationTemplate.PENSION_PAYOUT_EXECUTED,
+            NotificationTemplate.PENSION_STRATEGY_CHANGE_EFFECTIVE,
+            NotificationTemplate.PENSION_TRANSFER_STATUS,
+            NotificationTemplate.PENSION_INCENTIVE_RECEIVED,
+            NotificationTemplate.PENSION_INCENTIVE_RETURNED,
+            -> PensionCopy.render(template, vars, null)
             NotificationTemplate.ACCOUNT_OPENED ->
                 "Your OpenBank account is ready" to
                     "<h2>Welcome to OpenBank!</h2><p>Your account <b>${vars.v(

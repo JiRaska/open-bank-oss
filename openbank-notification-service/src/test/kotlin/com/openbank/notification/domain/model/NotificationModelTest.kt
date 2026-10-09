@@ -187,6 +187,7 @@ class NotificationModelTest {
             NotificationTemplate.TRANSACTION_FAILED,
             NotificationTemplate.DELEGATION_FIRST_USE,
             NotificationTemplate.PAYMENT_RELEASE_FAILED,
+            NotificationTemplate.PENSION_PAYOUT_ACCOUNT_CHANGED,
         )
         assertThat(NotificationTemplate.SCA_APPROVAL.noDeviceFallbackChannel).isNull()
         assertThat(NotificationTemplate.OTP_CODE.noDeviceFallbackChannel).isNull()

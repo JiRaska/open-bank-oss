@@ -127,6 +127,13 @@ enum class NotificationTemplate(val variables: Set<String>) {
 
     /** A fully approved payment was refused by the payment rail at release (PAYMENT_RELEASE_FAILED). */
     PAYMENT_RELEASE_FAILED(setOf("entityName", "amountFormatted", "payeeName", "reason")),
+
+    PENSION_PAYOUT_ACCOUNT_CHANGED(setOf("contractId", "accountLast4", "effectiveFrom")),
+    PENSION_PAYOUT_EXECUTED(setOf("contractId", "purpose", "amount", "currency", "accountLast4")),
+    PENSION_STRATEGY_CHANGE_EFFECTIVE(setOf("contractId", "strategyCode", "effectiveFrom")),
+    PENSION_TRANSFER_STATUS(setOf("contractId", "direction", "status")),
+    PENSION_INCENTIVE_RECEIVED(setOf("contractId", "period", "amount", "currency")),
+    PENSION_INCENTIVE_RETURNED(setOf("contractId", "period", "amount", "currency")),
     ;
 
     /** Keys in [vars] that this template does not accept. Empty = the request is well-formed. */
@@ -154,6 +161,7 @@ enum class NotificationTemplate(val variables: Set<String>) {
             // Same class as TRANSACTION_FAILED: an approved payment did NOT leave, and the people
             // who approved it believe it did. The fallback carries no body, only the prompt.
             PAYMENT_RELEASE_FAILED,
+            PENSION_PAYOUT_ACCOUNT_CHANGED,
             -> NotificationChannel.EMAIL
             ACCOUNT_OPENED,
             ACCOUNT_CLOSED,
@@ -178,6 +186,11 @@ enum class NotificationTemplate(val variables: Set<String>) {
             APPROVAL_COMPLETED,
             APPROVAL_REJECTED,
             APPROVAL_EXPIRED,
+            PENSION_PAYOUT_EXECUTED,
+            PENSION_STRATEGY_CHANGE_EFFECTIVE,
+            PENSION_TRANSFER_STATUS,
+            PENSION_INCENTIVE_RECEIVED,
+            PENSION_INCENTIVE_RETURNED,
             -> null
         }
 
@@ -198,11 +211,15 @@ enum class NotificationTemplate(val variables: Set<String>) {
             // A signature request is an authorisation step over company money, like SCA_APPROVAL:
             // muting it would silently stall every payment that needs this person's signature.
             APPROVAL_REQUIRED,
+            PENSION_PAYOUT_ACCOUNT_CHANGED,
             -> NotificationCategory.SECURITY
             TRANSACTION_COMPLETED, TRANSACTION_FAILED,
             APPROVAL_COMPLETED, APPROVAL_REJECTED, APPROVAL_EXPIRED, PAYMENT_RELEASE_FAILED,
+            PENSION_PAYOUT_EXECUTED, PENSION_INCENTIVE_RECEIVED, PENSION_INCENTIVE_RETURNED,
             -> NotificationCategory.PAYMENTS
-            ACCOUNT_OPENED, ACCOUNT_CLOSED, WELCOME -> NotificationCategory.PRODUCT
+            ACCOUNT_OPENED, ACCOUNT_CLOSED, WELCOME,
+            PENSION_STRATEGY_CHANGE_EFFECTIVE, PENSION_TRANSFER_STATUS,
+            -> NotificationCategory.PRODUCT
             MARKETING_PRODUCT_OFFER -> NotificationCategory.MARKETING
         }
 }
