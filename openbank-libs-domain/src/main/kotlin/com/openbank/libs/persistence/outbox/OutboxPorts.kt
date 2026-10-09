@@ -131,6 +131,14 @@ interface OutboxRepositoryV2 :
  */
 interface SentOutboxRetention {
     /**
+     * True only when SENT rows still back a live read or replay invariant. The shared job skips
+     * this target entirely; the enforced outbox-retention gate requires a reasoned exemption.
+     * Remove the exemption after the evidence moves to a durable store.
+     */
+    val sentRetentionExempt: Boolean
+        get() = false
+
+    /**
      * Delete up to [batch] SENT rows whose `sent_at` is older than [olderThan] (D8); returns the
      * number deleted so the caller can loop until short. Never touches PENDING/FAILED/DISPATCHING
      * rows, and never DEAD rows — those are the producer-side DLQ (D4) until an operator requeues

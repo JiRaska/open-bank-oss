@@ -8,7 +8,7 @@ superseded-by: []
 delivery-repos: []
 tags: [libs, database, privacy-gdpr]
 summary: "SENT outbox rows are deleted after 7 days by one shared libs-runtime job over every SentOutboxRetention bean, v1 and v2 outboxes alike; an enforced gate makes opting out a reasoned exemption."
-followup: "#11901, #11902 — risk-engine and incentive outboxes are exempt from SENT retention pending their own decisions; lending left the exemptions in #11900"
+followup: "#11896, #11901, #11902 — case-coordinator, risk-engine and incentive outboxes are exempt pending durable evidence or replay decisions; lending left the exemptions in #11900"
 ---
 
 # ADR-0329 — SENT outbox rows are purged fleet-wide by one shared libs-runtime job
@@ -34,10 +34,12 @@ nightly, configurable via `openbank.outbox.retention.sent-days` — and put `pur
    concrete bean (ADR-0013's CDI constraint, restated in `AbstractOutboxDispatcher`'s KDoc), so a
    base-class purge needs an annotated method added to all 40 dispatchers — and a 41st that forgets
    it retains forever with nothing to notice.
-5. **Some outboxes are read after SENT.** lending's `GET /applications/{id}/evidence` returns its
-   outbox rows as the ADR-0214 evidence bundle; risk-engine's `risk_outbox.dedup_key` is its replay
-   guard; incentive's outbox has a different schema (`published_at`) and its migration declares the
-   rows audit evidence. A blanket purge would silently break all three.
+5. **Some outboxes are read after SENT.** case-coordinator's `GET /cases/{caseId}` projects
+   proposal evidence from `case_outbox` without an age bound; lending's
+   `GET /applications/{id}/evidence` returns its outbox rows as the ADR-0214 evidence bundle;
+   risk-engine's `risk_outbox.dedup_key` is its replay guard; incentive's outbox has a different
+   schema (`published_at`) and its migration declares the rows audit evidence. A blanket purge
+   would silently break all four.
 
 ## Decision
 
@@ -51,23 +53,26 @@ We will purge SENT outbox rows with **one** `@ApplicationScoped` job in `openban
   `@Any Instance<SentOutboxRetention>` and purges each one.
 - **ADR-0327 D8's numbers stand:** 7 days, batches of 5 000, nightly (`0 17 3 * * ?`), keys under
   `openbank.outbox.retention.*` (`enabled`, `sent-days`, `batch-size`, `max-batches`, `cron`).
-  Seven days is right because a SENT row is replay/debug material only: the broker holds the event
-  and audit-service holds the durable record. It covers a long weekend plus triage, and is the
-  window case-coordinator's `CaseThreadProjection` already contracts on.
+  Seven days applies only where a SENT row is replay/debug material rather than a live read model.
+  It covers a long weekend plus triage. Case-coordinator has no seven-day API boundary today;
+  `CaseThreadProjection` still exposes proposal evidence from its outbox for older cases.
 - **Bounded:** at most `max-batches` (200) × `batch-size` per outbox per run, one cut-off per run,
   so a first run against years of rows takes several nights rather than one long transaction.
 - **Isolated and observable:** one outbox failing increments `openbank_outbox_purge_failed_total`
   and the rest still run; deletions count into `openbank_outbox_purged_total{status="SENT"}`; the
   ADR-0237 workflow liveness `outbox-sent-retention` is registered at `StartupEvent` (only when the
-  service has an outbox) and recorded only when every outbox succeeded.
+  service has a non-exempt retention target) and recorded only when every active outbox succeeded.
 - **Opting out is explicit.** `openbank.outbox.retention.enabled=false` is the only runtime
   switch and logs a WARN at boot. At build time the enforced gate `outbox-sent-retention` requires
   every dispatcher-owning module to declare a `SentOutboxRetention` class, or carry a reasoned
-  exemption in `check-outbox-sent-retention.py`; the exemption set may only shrink. Today it holds
-  lending, risk-engine and incentive, for the reasons in Context item 5. lending has since left it
-  (#11900): its evidence bundle reads the audit chain (ADR-0214 D3), so nothing reads a SENT
-  `lending_outbox` row; the purge is switched on per environment once the outbox↔chain parity check
-  in lending's operations runbook passes.
+  exemption in `check-outbox-sent-retention.py`; the exemption set may only shrink after this
+  decision is merged. A kernel
+  repository whose rows are still a read model sets `sentRetentionExempt=true`; the shared job
+  skips it and the gate requires a reason. Today the exemptions are billing, case-coordinator,
+  risk-engine and incentive, for the reasons in Context item 5 and billing issue #12187. lending
+  has left them (#11900): its evidence bundle reads the audit chain (ADR-0214 D3), so nothing
+  reads a SENT `lending_outbox` row; the purge is switched on per environment once the
+  outbox↔chain parity check in lending's operations runbook passes.
 - DEAD rows are out of scope here: they are the producer-side DLQ (ADR-0327 D4) and keep their own
   window (notification's janitor today, `purgeDead` when ADR-0327 Phase 4 wires it).
 
@@ -78,7 +83,7 @@ We will purge SENT outbox rows with **one** `@ApplicationScoped` job in `openban
 - **Lift `purgeSent` onto the v1 `OutboxRepository` port as abstract.** The compiler would then be
   the gate. Rejected because every hand-written test fake of every service's outbox port would
   have to implement it too (a repository concern leaking into application ports), and the three
-  outboxes that must not be purged would need a fake implementation that lies.
+  exempt outboxes that must not be purged would need a fake implementation that lies.
 - **Partition outbox tables by month and drop partitions.** Already rejected in ADR-0327 D8.
 - **Per-service janitors** (the notification-service DEAD janitor pattern). Rejected: 40 copies of
   the same job, liveness and metrics, which is the duplication ADR-0327 exists to remove.
@@ -86,7 +91,7 @@ We will purge SENT outbox rows with **one** `@ApplicationScoped` job in `openban
 ## Consequences
 
 **Positive**
-- SENT payloads stop outliving the retention periods of the tables they describe; 37 of 40
+- SENT payloads stop outliving the retention periods of the tables they describe; 36 of 41
   outboxes are purged from the first night after deploy.
 - A new outbox is purged by default (kernel base) or fails CI until it decides.
 

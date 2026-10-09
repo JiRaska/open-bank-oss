@@ -517,10 +517,10 @@ class LendingResource(
         const val APPLICATIONS_PATH = "/api/v1/lending/applications"
         const val HTTP_NOT_FOUND = 404
         const val HTTP_UNPROCESSABLE = 422
+        const val HTTP_CONFLICT = 409
         const val HTTP_UNAUTHORIZED = 401
         const val HTTP_FORBIDDEN = 403
         const val HTTP_SERVICE_UNAVAILABLE = 503
-        const val HTTP_CONFLICT = 409
         const val MAX_APPLICATION_LIST_LIMIT = 200
     }
 }
