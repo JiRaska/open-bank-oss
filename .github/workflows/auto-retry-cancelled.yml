@@ -494,18 +494,36 @@ jobs:
           PREV_ATTEMPT=$((FINAL_ATTEMPT - 1))
           echo "prev-attempt=${PREV_ATTEMPT}" >> "${GITHUB_OUTPUT}"
 
-          gh api "repos/${GH_REPO}/actions/runs/${RUN_ID}/attempts/${PREV_ATTEMPT}/jobs?per_page=100" \
-            --jq '.jobs' > "${RUNNER_TEMP}/prev-jobs.json"
+          gh api --paginate --slurp \
+            "repos/${GH_REPO}/actions/runs/${RUN_ID}/attempts/${PREV_ATTEMPT}/jobs?per_page=100" \
+            > "${RUNNER_TEMP}/prev-job-pages.json"
+          python3 .github/scripts/record-rerun-flake.py flatten-jobs \
+            --pages-file "${RUNNER_TEMP}/prev-job-pages.json" > "${RUNNER_TEMP}/prev-jobs.json"
+
+          # An admission refusal is a policy decision, not a flaky test. Both logs must
+          # prove that narrow case; unreadable logs leave the aggregate failure visible.
+          for pair in "Detect changed services:changes" "all-green:all-green"; do
+            job_name=${pair%:*}
+            log_name=${pair#*:}
+            job_id=$(jq -r --arg name "$job_name" \
+              '[.[] | select(.name == $name) | .id] | if length == 1 then .[0] else empty end' \
+              "${RUNNER_TEMP}/prev-jobs.json")
+            if [ -n "$job_id" ]; then
+              gh api --allow-escape-sequences "repos/${GH_REPO}/actions/jobs/${job_id}/logs" \
+                > "${RUNNER_TEMP}/${log_name}.log" || rm -f "${RUNNER_TEMP}/${log_name}.log"
+            fi
+          done
 
           python3 .github/scripts/record-rerun-flake.py classify \
-            --jobs-file "${RUNNER_TEMP}/prev-jobs.json" > "${RUNNER_TEMP}/candidates.json"
+            --jobs-file "${RUNNER_TEMP}/prev-jobs.json" \
+            --changes-log "${RUNNER_TEMP}/changes.log" \
+            --all-green-log "${RUNNER_TEMP}/all-green.log" > "${RUNNER_TEMP}/candidates.json"
 
           count=$(python3 -c "import json,sys; print(len(json.load(open(sys.argv[1]))))" \
             "${RUNNER_TEMP}/candidates.json")
           echo "count=${count}" >> "${GITHUB_OUTPUT}"
           if [ "${count}" -eq 0 ]; then
-            echo "Attempt ${PREV_ATTEMPT} of ${RUN_URL}: every failed job carried the spot-kill "
-            echo "signature (or none failed) -- explained by infrastructure, nothing to record."
+            echo "Attempt ${PREV_ATTEMPT} of ${RUN_URL}: no unexplained failed jobs to record."
           else
             echo "Attempt ${PREV_ATTEMPT} of ${RUN_URL}: ${count} job(s) failed for a real reason "
             echo "and the run is now green at attempt ${FINAL_ATTEMPT} -- recording as flake(s)."
