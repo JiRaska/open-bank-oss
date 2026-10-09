@@ -19,11 +19,11 @@ ADMIN_UI_MANIFEST = "openbank-infra/gitops/components/admin-ui/admin-ui.yaml"
 
 
 def materialized_context_matches(record: dict, root: Path) -> bool:
-    """Compare every signed build input with the current materialized context.
+    """Compare main source bytes; accept only explicitly signed producer materials.
 
-    The Admin UI image pin is the sole permitted byte change after the source
-    commit. Unknown or absent generated evidence fails closed: a Git comparison
-    alone cannot establish that EOL, Grype or client artifacts stayed the same.
+    A clean flusher cannot reproduce historical external responses or artifacts.
+    Their exact bytes were captured and signed by the trusted producer run. The
+    source checkout must still match every Git material (except the proven own pin).
     """
     spec = importlib.util.spec_from_file_location(
         "freeze_admin_ui_context", Path(__file__).with_name("freeze-admin-ui-context.py"))
@@ -43,27 +43,48 @@ def materialized_context_matches(record: dict, root: Path) -> bool:
         entries = record["contextManifest"]["files"]
         if len(expected) != len(entries) or not all(isinstance(path, str) for path in expected):
             return False
-        actual = {path.as_posix() for path in freeze.paths(root)}
-        if actual != set(expected):
+        source = record["sourceCommit"]
+        producer = record["contextManifest"]["producer"]
+        if (producer.get("kind") != "github-actions" or not str(producer.get("runId", "")).isdecimal()
+                or not str(producer.get("runAttempt", "")).isdecimal()
+                or not str(producer.get("workflow", "")).endswith(
+                    ".github/workflows/admin-ui-deploy.yml@refs/heads/main")):
+            return False
+        listed = subprocess.run(["git", "ls-files", "-z"], cwd=root,
+                                check=True, capture_output=True).stdout
+        tracked = {os.fsdecode(path) for path in listed.split(b"\0") if path}
+        if not tracked.issubset(expected):
+            return False
+        if not freeze.receipts_cover(entries, record["contextManifest"]["externalFeeds"]):
             return False
         for rel, entry in expected.items():
             path = root / rel
             if not path.resolve().is_relative_to(root.resolve()):
                 return False
+            material = entry.get("material")
+            if not isinstance(material, dict):
+                return False
+            content_hash = (hashlib.sha256(os.fsencode(entry["symlink"])).hexdigest()
+                            if "symlink" in entry else entry["sha256"])
+            if material != freeze.material_for(Path(rel), content_hash, source, producer):
+                return False
+            if material["kind"] == "git" and rel not in tracked:
+                return False
             if rel == ADMIN_UI_MANIFEST:
                 continue  # ancestry + exact one-line image-pin proof is checked by the caller
-            if path.is_symlink():
-                if entry.get("symlink") != os.readlink(path):
+            if material["kind"] == "git":
+                if path.is_symlink():
+                    if entry.get("symlink") != os.readlink(path):
+                        return False
+                elif path.is_file():
+                    content = path.read_bytes()
+                    if (entry.get("sha256") != hashlib.sha256(content).hexdigest()
+                            or entry.get("size") != len(content)
+                            or entry.get("executable") != bool(path.stat().st_mode & 0o111)):
+                        return False
+                else:
                     return False
-            elif path.is_file():
-                content = path.read_bytes()
-                if (entry.get("sha256") != hashlib.sha256(content).hexdigest()
-                        or entry.get("size") != len(content)
-                        or entry.get("executable") != bool(path.stat().st_mode & 0o111)):
-                    return False
-            else:
-                return False
-    except (OSError, KeyError, TypeError, ValueError):
+    except (OSError, KeyError, TypeError, ValueError, subprocess.CalledProcessError):
         return False
     return True
 

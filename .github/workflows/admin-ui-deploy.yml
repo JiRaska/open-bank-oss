@@ -254,6 +254,7 @@ jobs:
       # Read-only token for the separate private customer-app repository. It is optional:
       # missing scope/evidence renders an explicit blocked client row; it never blocks deploy.
       APP_RO_TOKEN: ${{ secrets.OPENBANK_APP_RO_TOKEN }}
+      ADMIN_UI_FEED_RECEIPTS: ${{ github.workspace }}/../admin-ui-feed-receipts-${{ github.run_id }}.jsonl
 
     outputs:
       tag: ${{ steps.build.outputs.tag }}
@@ -265,6 +266,10 @@ jobs:
           fetch-depth: 0
           # persist-credentials: true (default) — needed so git in the collectors
           # can read the repo; the gitops step uses a separate checkout.
+
+      - name: Initialize external feed receipts
+        run: |
+          : > "$ADMIN_UI_FEED_RECEIPTS"
 
       - name: Checkout mobile RUM capability metadata
         if: env.APP_RO_TOKEN != ''
@@ -407,6 +412,8 @@ jobs:
                 -L -o /tmp/per-service-sboms.zip 2>/dev/null; then
               unzip -q /tmp/per-service-sboms.zip -d sbom-downloads/ 2>/dev/null || true
               echo "Downloaded per-service-sboms artifact ${ARTIFACT_ID} (created ${ARTIFACT#* })"
+              jq -nc --arg source security-actions-artifact --arg artifactId "$ARTIFACT_ID" \
+                '{source:$source,artifactId:$artifactId}' >> "$ADMIN_UI_FEED_RECEIPTS"
               staged=true
             fi
           fi
@@ -535,6 +542,8 @@ jobs:
                 cp "${xml}" "${svc}/build/reports/kover/report.xml"
               done
               DOWNLOADED=$((DOWNLOADED + 1))
+              jq -nc --arg source test-intelligence-actions-artifact --arg artifactId "$art_id" \
+                '{source:$source,artifactId:$artifactId}' >> "$ADMIN_UI_FEED_RECEIPTS"
               echo "  ${svc}: staged"
             else
               echo "  ${svc}: artifact download failed; refusing incomplete Test Intelligence image" >&2
@@ -569,6 +578,8 @@ jobs:
             # Every producer artifact contains `openbank-app-unit.json`. Preserve a unique
             # deployment-local name or older downloads overwrite the newest observation.
             unzip -p "${archive}" "${evidence}" > "openbank-admin-ui/client-test-evidence/openbank-app-${artifact_id}.json"
+            jq -nc --arg source client-actions-artifact --arg artifactId "$artifact_id" \
+              '{source:$source,artifactId:$artifactId}' >> "$ADMIN_UI_FEED_RECEIPTS"
           done <<< "${ARTIFACTS}"
           echo "Staged $(find openbank-admin-ui/client-test-evidence -name '*.json' | wc -l | tr -d ' ') mobile client evidence artifact(s)."
 
@@ -654,7 +665,14 @@ jobs:
                 fi
                 grep -qx "${artifact_id}" openbank-admin-ui/test-run-history/.staged-ids \
                   || echo "${artifact_id}" >> openbank-admin-ui/test-run-history/.staged-ids
+                jq -nc --arg source test-intelligence-actions-artifact --arg artifactId "$artifact_id" \
+                  '{source:$source,artifactId:$artifactId}' >> "$ADMIN_UI_FEED_RECEIPTS"
               done
+          while read -r artifact_id; do
+            [ -n "$artifact_id" ] || continue
+            jq -nc --arg source test-intelligence-actions-artifact --arg artifactId "$artifact_id" \
+              '{source:$source,artifactId:$artifactId}' >> "$ADMIN_UI_FEED_RECEIPTS"
+          done < openbank-admin-ui/test-run-history/.staged-ids
           echo "Staged $(find openbank-admin-ui/test-run-history -name '*.json' | wc -l | tr -d ' ') immutable run envelopes, $(($(wc -l < openbank-admin-ui/test-run-history/.staged-ids | tr -d ' ') - KNOWN_BEFORE)) new artifact IDs recorded this build."
 
       - name: Save staged test-run history
@@ -721,6 +739,8 @@ jobs:
               # each evidence lane in a fresh private directory and publish it
               # atomically; never merge two archives or prompt on overwrite.
               python3 .github/scripts/stage-pitest-artifacts.py stage "${archive}" "${svc}" . --run-id "${RUN_ID}" || exit 1
+              jq -nc --arg source pact-and-pitest-evidence --arg artifactId "$art_id" \
+                '{source:$source,artifactId:$artifactId}' >> "$ADMIN_UI_FEED_RECEIPTS"
               DOWNLOADED=$((DOWNLOADED + 1))
             else
               echo "PIT artifact ${art_name} could not be downloaded; refusing incomplete Test Intelligence image" >&2
@@ -869,6 +889,8 @@ jobs:
               archive="/tmp/${artifact_name}.zip"
               if api "https://api.github.com/repos/${REPO}/actions/artifacts/${artifact_id}/zip" -L -o "${archive}" 2>/dev/null; then
                 unzip -q "${archive}" -d openbank-admin-ui/perf-artifacts 2>/dev/null || true
+                jq -nc --arg source performance-actions-artifact --arg artifactId "$artifact_id" \
+                  '{source:$source,artifactId:$artifactId}' >> "$ADMIN_UI_FEED_RECEIPTS"
                 DOWNLOADED=$((DOWNLOADED + 1))
               fi
             done <<< "${ARTIFACTS}"
@@ -915,6 +937,8 @@ jobs:
                   cp "${BASELINE_ENVELOPE}" openbank-admin-ui/perf-artifacts/money-path-smoke-summary.json.run.json
                   ENVELOPE_STATUS=yes
                 fi
+                jq -nc --arg source performance-actions-artifact --arg artifactId "$BASELINE_ARTIFACT" \
+                  '{source:$source,artifactId:$artifactId}' >> "$ADMIN_UI_FEED_RECEIPTS"
                 echo "Staged money-path baseline ${BASELINE_RUN_ID}: summary=${SUMMARY_STATUS} envelope=${ENVELOPE_STATUS}."
               fi
             fi
@@ -986,6 +1010,8 @@ jobs:
                 [ -n "${artifact_id}" ] || continue
                 api "https://api.github.com/repos/${REPO}/actions/artifacts/${artifact_id}/zip" -L -o "/tmp/test-intelligence-${artifact_id}.zip" 2>/dev/null || continue
                 unzip -joq "/tmp/test-intelligence-${artifact_id}.zip" '*.json' -d openbank-admin-ui/test-intelligence-history 2>/dev/null || true
+                jq -nc --arg source admin-ui-actions-artifact --arg artifactId "$artifact_id" \
+                  '{source:$source,artifactId:$artifactId}' >> "$ADMIN_UI_FEED_RECEIPTS"
               done
 
       - name: Build, collect, push

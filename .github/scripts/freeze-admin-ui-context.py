@@ -35,6 +35,106 @@ GENERATED_ROOT_JSON = (
     "test-intelligence.json", "test-results.json",
 )
 SBOM_PATH = re.compile(r"openbank-[^/]+/build/reports/bom\.json\Z")
+EXTERNAL_ROOT_SOURCES = {
+    "cost-report.json": "aws-cost-explorer",
+    "infra-lifecycle.json": "endoflife-date",
+    "infra-vulns.json": "grype-or-placeholder",
+    "gate-health.json": "github-actions-api",
+    "quality-report.json": "pact-and-pitest-evidence",
+    "test-intelligence.json": "github-actions-evidence",
+    "test-results.json": "junit-evidence",
+}
+EXTERNAL_DIR_SOURCES = {
+    "openbank-admin-ui/client-test-evidence": "client-actions-artifact",
+    "openbank-admin-ui/perf-artifacts": "performance-actions-artifact",
+    "openbank-admin-ui/test-intelligence-history": "admin-ui-actions-artifact",
+    "openbank-admin-ui/test-run-history": "test-intelligence-actions-artifact",
+    "sbom-staging": "security-actions-artifact",
+}
+
+
+def feed_receipts() -> list[dict]:
+    """Read the producer's private, append-only artifact ledger into the signed record."""
+    ledger = os.environ.get("ADMIN_UI_FEED_RECEIPTS", "")
+    if not ledger:
+        return []
+    path = Path(ledger)
+    if not path.is_file():
+        raise ValueError("external feed receipt ledger is missing")
+    receipts = []
+    for line in path.read_text().splitlines():
+        item = json.loads(line)
+        if (not isinstance(item, dict) or set(item) != {"source", "artifactId"}
+                or item["source"] not in set(EXTERNAL_DIR_SOURCES.values()) | {"security-actions-artifact", "test-intelligence-actions-artifact", "pact-and-pitest-evidence"}
+                or not isinstance(item["artifactId"], str)
+                or not item["artifactId"].isdecimal()):
+            raise ValueError("external feed receipt is malformed")
+        receipts.append(item)
+    return [{"source": source, "artifactId": artifact_id}
+            for source, artifact_id in sorted({(x["source"], x["artifactId"]) for x in receipts})]
+
+
+def receipts_cover(entries: list[dict], receipts: list[dict]) -> bool:
+    """Every artifact-backed frozen input must have a signed producer receipt."""
+    if not isinstance(receipts, list) or any(
+            not isinstance(item, dict) or set(item) != {"source", "artifactId"}
+            or item["source"] not in set(EXTERNAL_DIR_SOURCES.values()) | {"security-actions-artifact", "test-intelligence-actions-artifact", "pact-and-pitest-evidence"}
+            or not isinstance(item["artifactId"], str) or not item["artifactId"].isdecimal()
+            for item in receipts):
+        return False
+    if receipts != sorted(receipts, key=lambda item: (item["source"], item["artifactId"])):
+        return False
+    receipt_pairs = {(item["source"], item["artifactId"]) for item in receipts}
+    if len(receipt_pairs) != len(receipts):
+        return False
+    receipt_sources = {source for source, _ in receipt_pairs}
+    for entry in entries:
+        material = entry["material"]
+        source = material.get("source")
+        if source in set(EXTERNAL_DIR_SOURCES.values()) | {"security-actions-artifact"}:
+            if source not in receipt_sources:
+                return False
+            if source == "client-actions-artifact" and (source, material.get("artifactId")) not in receipt_pairs:
+                return False
+    return True
+
+
+def material_for(relative: Path, sha256: str, source_sha: str, producer: dict) -> dict:
+    """Classify every byte included after checkout; unknown provenance is fatal."""
+    root_json = relative.name if relative.parent == Path("openbank-admin-ui") else None
+    if root_json in GENERATED_ROOT_JSON:
+        source = EXTERNAL_ROOT_SOURCES.get(root_json, "repo-derived-collector")
+    elif SBOM_PATH.fullmatch(relative.as_posix()):
+        source = "security-actions-artifact"
+    else:
+        source = next((kind for directory, kind in EXTERNAL_DIR_SOURCES.items()
+                       if relative.is_relative_to(Path(directory)) and relative != Path(directory)), None)
+    if source is None:
+        return {"kind": "git", "commit": source_sha}
+    if producer.get("kind") != "github-actions":
+        # Local builds remain possible, but their material provenance cannot pass
+        # the signed CI deploy verifier.
+        return {"kind": "unverified-local", "source": source, "sha256": sha256}
+    material = {"kind": "producer-captured", "source": source, "sha256": sha256,
+                "runId": producer["runId"], "runAttempt": producer["runAttempt"]}
+    if source == "client-actions-artifact":
+        match = re.fullmatch(r"openbank-app-([0-9]+)\.json", relative.name)
+        if not match:
+            raise ValueError("client evidence has no source artifact identifier")
+        material["artifactId"] = match[1]
+    return material
+
+
+def producer_identity() -> dict:
+    run_id = os.environ.get("GITHUB_RUN_ID", "")
+    attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "")
+    workflow = os.environ.get("GITHUB_WORKFLOW_REF", "")
+    if (os.environ.get("GITHUB_ACTIONS") == "true" and run_id.isdecimal()
+            and attempt.isdecimal() and workflow.endswith(
+                ".github/workflows/admin-ui-deploy.yml@refs/heads/main")):
+        return {"kind": "github-actions", "runId": run_id,
+                "runAttempt": attempt, "workflow": workflow}
+    return {"kind": "unverified-local"}
 
 
 def paths(root: Path) -> set[Path]:
@@ -128,6 +228,9 @@ def freeze(root: Path, output: Path, manifest: Path) -> dict:
         raise ValueError("frozen context and manifest must be outside the source tree")
     require_clean_source_inputs(root)
     blobs, object_format = committed_blobs(root)
+    source_sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, check=True,
+                                capture_output=True, text=True).stdout.strip()
+    producer = producer_identity()
     output.mkdir(parents=True)
     entries = []
     for relative in sorted(paths(root), key=str):
@@ -141,7 +244,9 @@ def freeze(root: Path, output: Path, manifest: Path) -> dict:
             target = output / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             target.symlink_to(link)
-            entries.append({"path": relative.as_posix(), "symlink": link})
+            entries.append({"path": relative.as_posix(), "symlink": link,
+                            "material": material_for(relative, hashlib.sha256(os.fsencode(link)).hexdigest(),
+                                                     source_sha, producer)})
             continue
         if not source.is_file():
             raise ValueError(f"missing tracked build input: {relative}")
@@ -150,13 +255,24 @@ def freeze(root: Path, output: Path, manifest: Path) -> dict:
         shutil.copy2(source, target)
         content = target.read_bytes()
         require_committed_content(relative, content, blobs, object_format)
-        entries.append({"path": relative.as_posix(), "sha256": hashlib.sha256(content).hexdigest(),
-                        "size": len(content), "executable": bool(target.stat().st_mode & 0o111)})
+        digest = hashlib.sha256(content).hexdigest()
+        entries.append({"path": relative.as_posix(), "sha256": digest,
+                        "size": len(content), "executable": bool(target.stat().st_mode & 0o111),
+                        "material": material_for(relative, digest, source_sha, producer)})
     require_clean_source_inputs(root)
-    source_sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, check=True,
-                                capture_output=True, text=True).stdout.strip()
+    receipts = feed_receipts()
+    if producer.get("kind") == "github-actions" and not os.environ.get("ADMIN_UI_FEED_RECEIPTS"):
+        raise ValueError("external feed receipt ledger is unavailable")
+    if producer.get("kind") == "github-actions" and not receipts_cover(entries, receipts):
+        raise ValueError("frozen external input lacks a source artifact receipt")
+    staged_ids = root / "openbank-admin-ui/test-run-history/.staged-ids"
+    if producer.get("kind") == "github-actions" and staged_ids.is_file():
+        recorded_ids = {item["artifactId"] for item in receipts
+                        if item["source"] == "test-intelligence-actions-artifact"}
+        if not set(staged_ids.read_text().splitlines()).issubset(recorded_ids):
+            raise ValueError("cached test history lacks source artifact receipts")
     record = {"schema": "openbank.admin-ui.build-context/v1", "sourceCommit": source_sha,
-              "files": entries}
+              "producer": producer, "externalFeeds": receipts, "files": entries}
     manifest.write_text(json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n")
     return record
 
