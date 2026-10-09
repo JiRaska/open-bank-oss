@@ -54,6 +54,19 @@ spec:
       labels:
         app.kubernetes.io/name: redis
     spec:
+      # On-demand `stateful` pool, not spot. With two edge replicas this pod is the edge's only
+      # single point of failure: every edge request that touches a session, challenge, passkey or
+      # rate limit needs it, and while it is down those 5xx. On the spot `default` pool it moved
+      # on every reclaim, and each move is a gp3 detach/attach (the PVC is zone-pinned) on top
+      # of the pod start. The `stateful` pool (on-demand, WhenEmpty consolidation, budgeted
+      # drift) only moves it for a deliberate node roll. Same placement as langfuse-valkey.
+      nodeSelector:
+        openbank.io/pool: stateful
+      tolerations:
+        - key: openbank.io/stateful
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
       securityContext:
         runAsNonRoot: true
         runAsUser: 999
