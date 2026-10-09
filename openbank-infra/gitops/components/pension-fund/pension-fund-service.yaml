@@ -55,9 +55,24 @@ spec:
             # fleet-common 8085 here; probes below target 8090 deliberately.
             - name: http
               containerPort: 8162
+            - name: https
+              containerPort: 8443
             - name: management
               containerPort: 8090
           env:
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
+              value: /mnt/internal-tls/tls.crt
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
+              value: /mnt/internal-tls/tls.key
+            - name: QUARKUS_HTTP_SSL_PORT
+              value: "8443"
+            # Keep old callers working until the separately verified HTTPS cutover.
+            - name: QUARKUS_HTTP_INSECURE_REQUESTS
+              value: enabled
+            - name: QUARKUS_HTTP_SSL_PROTOCOLS
+              value: TLSv1.3
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_RELOAD_PERIOD
+              value: 1h
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
@@ -114,6 +129,9 @@ spec:
               drop:
                 - ALL
           volumeMounts:
+            - name: internal-tls
+              mountPath: /mnt/internal-tls
+              readOnly: true
             - name: tmp
               mountPath: /tmp
         # OPA policy decision point (ADR-0034). Co-located sidecar the app reaches on
@@ -192,6 +210,9 @@ spec:
             - name: opa-tmp
               mountPath: /tmp
       volumes:
+        - name: internal-tls
+          secret:
+            secretName: pension-fund-service-internal-tls
         - name: tmp
           emptyDir: {}
         - name: opa-tmp
@@ -216,6 +237,9 @@ spec:
     - name: http
       port: 8162
       targetPort: http
+    - name: https
+      port: 8443
+      targetPort: https
     - name: management
       port: 8090
       targetPort: management

@@ -36,3 +36,20 @@ Každá částka je `BigDecimal` s explicitní škálou:
 - jednotky zrušené za poplatek: zaokrouhlení NAHORU
 
 Poplatek za správu se počítá z hrubých aktiv, ACT/365, za dny od předchozí NAV.
+
+## Postupné nasazení interního TLS
+
+GitOps přidává TLS 1.3 na portu 8443 vedle stávajícího HTTP listeneru. Cert-manager
+vystavuje serverový certifikát interní CA; PEM certifikát a klíč se načítají
+z připojeného adresáře a obnovují každou hodinu.
+
+Nejprve nasaďte Certificate a serverový listener. Před přepnutím klienta ověřte
+Certificate Ready, DNS SAN služby, důvěryhodný TLS handshake a síťové politiky pro
+port 8443. HTTP zachovejte během souběhu verzí; jeho odstranění vyžaduje samostatnou
+inventuru klientů a nasazení. Při chybě nového listeneru ponechte původní klientskou
+URL a vraťte přidanou serverovou konfiguraci. Tato fáze ověřuje identitu serveru,
+neposkytuje vzájemné TLS.
+
+`ServerTlsIT` ověřuje načtení PEM, vyjednání TLS 1.3, odmítnutí nedůvěryhodného
+certifikátu a zachování HTTP s dočasnými testovacími klíči. Deklarace ani tento
+test nedokazují připravenost certifikátu v clusteru.
