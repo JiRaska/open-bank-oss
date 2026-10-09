@@ -7,6 +7,7 @@ package com.openbank.customeredge.infrastructure.rest
 import com.fasterxml.jackson.databind.JsonNode
 import com.openbank.customeredge.infrastructure.rest.EdgeJson.text
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.domain.identifiers.Ids
 import io.smallrye.common.annotation.Blocking
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.Consumes
@@ -107,7 +108,7 @@ class CustomerPensionResource(private val upstream: UpstreamClient, private val 
             "${api()}/simulations",
             party().toString(),
             json(input),
-            UUID.randomUUID().toString(),
+            Ids.randomId().toString(),
         )
         return if (response.status == OK) passThrough(response) else failure(response)
     }
