@@ -33,18 +33,18 @@ class PostgresRedpandaTestResource : QuarkusTestResourceLifecycleManager {
             .withUsername("openbank").withPassword("openbank_secret").withDatabaseName("openbank_ledger_it")
         pg.start()
         postgres = pg
-        TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "started")
+        TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "started", containerId = pg.containerId)
         val rp = RedpandaContainer(
             DockerImageName.parse(REDPANDA_IMAGE)
                 .asCompatibleSubstituteFor("docker.redpanda.com/redpandadata/redpanda"),
         )
         rp.start()
         redpanda = rp
-        TestInfrastructureEvidence.record("redpanda", REDPANDA_IMAGE, "started")
+        TestInfrastructureEvidence.record("redpanda", REDPANDA_IMAGE, "started", containerId = rp.containerId)
         val rd = GenericContainer(DockerImageName.parse(VALKEY_IMAGE)).withExposedPorts(6379)
         rd.start()
         redis = rd
-        TestInfrastructureEvidence.record("valkey", VALKEY_IMAGE, "started")
+        TestInfrastructureEvidence.record("valkey", VALKEY_IMAGE, "started", containerId = rd.containerId)
         val host = pg.host
         val port = pg.getMappedPort(PostgreSQLContainer.POSTGRESQL_PORT)
         val bootstrap = rp.bootstrapServers
@@ -61,16 +61,19 @@ class PostgresRedpandaTestResource : QuarkusTestResourceLifecycleManager {
     }
     override fun stop() {
         redis?.let {
+            val containerId = it.containerId
             it.stop()
-            TestInfrastructureEvidence.record("valkey", VALKEY_IMAGE, "stopped")
+            TestInfrastructureEvidence.record("valkey", VALKEY_IMAGE, "stopped", containerId = containerId)
         }
         redpanda?.let {
+            val containerId = it.containerId
             it.stop()
-            TestInfrastructureEvidence.record("redpanda", REDPANDA_IMAGE, "stopped")
+            TestInfrastructureEvidence.record("redpanda", REDPANDA_IMAGE, "stopped", containerId = containerId)
         }
         postgres?.let {
+            val containerId = it.containerId
             it.stop()
-            TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "stopped")
+            TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "stopped", containerId = containerId)
         }
     }
 }

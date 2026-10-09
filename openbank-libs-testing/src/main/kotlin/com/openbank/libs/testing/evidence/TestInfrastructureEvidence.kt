@@ -26,10 +26,11 @@ import java.util.UUID
  * see the repeat; the state has to outlive them, which is why the suppression lives in this object
  * and not in the ~14 emitters.
  *
- * So: a repeated `started` for the same (resource, image, opaque manager scope) is suppressed
+ * So: a repeated `started` for the same (resource, image, opaque manager scope, container id) is suppressed
  * until a `stopped` closes that lifecycle, and the number of suppressed reprovisions is published
  * on the terminal `stopped` record as `reprovisions` (absent when zero). Legacy emitters without
- * a scope retain the original (resource, image) grouping.
+ * a scope or container identity retain the original (resource, image) grouping. Distinct physical
+ * containers are never collapsed into one lifecycle when their identities are available.
  *
  * ## What this deliberately STOPS observing, and what compensates
  *
@@ -73,7 +74,7 @@ object TestInfrastructureEvidence {
         require(resourceScopeId == null || UUID.fromString(resourceScopeId).toString() == resourceScopeId) {
             "resource scope id must be a canonical UUID"
         }
-        val key = listOf(resource, image, resourceScopeId.orEmpty()).joinToString(" ")
+        val key = listOf(resource, image, resourceScopeId.orEmpty(), containerId.orEmpty()).joinToString(" ")
         var reprovisions = 0
         if (lifecycle == "started") {
             val open = openLifecycles[key]

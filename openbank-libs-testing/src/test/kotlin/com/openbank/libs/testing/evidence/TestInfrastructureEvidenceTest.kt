@@ -153,4 +153,25 @@ class TestInfrastructureEvidenceTest {
         assertThat(lines()).hasSize(2)
         assertThat(lines()).allSatisfy { line -> assertThat(line).contains("\"containerId\":\"$containerId\"") }
     }
+
+    @Test
+    fun `distinct physical containers do not suppress each other or legacy observations`() {
+        val image = "postgres:18.6-alpine"
+        val first = "a".repeat(64)
+        val second = "b".repeat(64)
+        TestInfrastructureEvidence.record("postgres", image, "started")
+        TestInfrastructureEvidence.record("postgres", image, "started", containerId = first)
+        TestInfrastructureEvidence.record("postgres", image, "started", containerId = second)
+        TestInfrastructureEvidence.record("postgres", image, "stopped", containerId = second)
+        TestInfrastructureEvidence.record("postgres", image, "stopped", containerId = first)
+        TestInfrastructureEvidence.record("postgres", image, "stopped")
+
+        assertThat(lines()).hasSize(6)
+        for (id in listOf(first, second)) {
+            val observations = lines().filter { it.contains("\"containerId\":\"$id\"") }
+            assertThat(observations).hasSize(2)
+            assertThat(observations[0]).contains("\"lifecycle\":\"started\"")
+            assertThat(observations[1]).contains("\"lifecycle\":\"stopped\"")
+        }
+    }
 }
