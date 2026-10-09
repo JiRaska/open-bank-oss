@@ -32,9 +32,12 @@ do not treat a JSON string as a substitute event object.
 
 The dedicated agent audit channel remains disabled by default. Its NACK path sends even a
 transient PostgreSQL failure to `openbank.dlq.audit.agent-audit-events-in`, after which the source
-offset can commit. `AgentAuditDeadLettered` detects new arrivals, but the DLQ has finite retention
-and no automatic replay. Enabling `AUDIT_AGENT_AUDIT_KAFKA_ENABLED` is blocked until operators have
-validated the alert and a controlled replay using the original event ID and payload in the target
+offset can commit. `AgentAuditDeadLettered` counts retained records from each partition's current
+and oldest offsets, so an unresolved record stays visible beyond its arrival window. Replaying an
+event does not remove its DLQ record; verify destination persistence and chain state separately.
+The DLQ has finite retention and no automatic replay. Enabling
+`AUDIT_AGENT_AUDIT_KAFKA_ENABLED` is blocked until operators have validated the alert and a
+controlled replay using the original event ID and payload in the target
 environment. A divergent payload under an existing ID must be investigated, not assigned a new ID.
 
 ## Rollout and rollback

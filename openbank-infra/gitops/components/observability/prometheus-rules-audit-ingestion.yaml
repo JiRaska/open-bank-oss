@@ -35,18 +35,14 @@ spec:
               before its retention expires. A healthy hash chain does not prove complete ingestion.
             runbook_url: docs/runbooks/audit-ingestion-recovery.md
         - alert: AgentAuditDeadLettered
-          # The second branch catches a DLQ whose first scraped offset is already positive;
-          # offset 5m bounds that startup signal so it clears without a later append.
+          # This DLQ has no consumer. A record remains unresolved while it is retained,
+          # including after the append window ages out. Pair current and oldest offsets by
+          # partition so an expired record no longer counts as present.
           expr: |
-            sum(
-              (increase(kafka_topic_partition_current_offset{
-                topic="openbank.dlq.audit.agent-audit-events-in"}[5m]) > 0)
-              or
-              (kafka_topic_partition_current_offset{
-                topic="openbank.dlq.audit.agent-audit-events-in"} > 0
-                unless kafka_topic_partition_current_offset{
-                  topic="openbank.dlq.audit.agent-audit-events-in"} offset 5m)
-            ) > 0
+            sum(kafka_topic_partition_current_offset{
+              topic="openbank.dlq.audit.agent-audit-events-in"}
+              - kafka_topic_partition_oldest_offset{
+                topic="openbank.dlq.audit.agent-audit-events-in"}) > 0
           labels:
             severity: critical
             service: audit-service
