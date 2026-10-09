@@ -54,3 +54,48 @@ test_anonymous_may_not_read if {
 		"action": "pension-fund.fund.read",
 	}
 }
+
+# Must-ALLOW / must-DENY per sensitive write: staff allowed, the shared service-account (which
+# holds ROLE_OPERATOR in some realms) and an AI agent holding ROLE_OPERATOR denied. Measured
+# against the materialised bundle with `opa eval` as well (2026-10-09).
+sensitive_writes := {
+	"pension-fund.fund.manage",
+	"pension-fund.nav.approve",
+	"pension-fund.strategy.change.approve",
+	"pension-fund.order.place",
+}
+
+test_staff_allowed_every_sensitive_write if {
+	every a in sensitive_writes {
+		rest.allow with input as {"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]}, "action": a}
+	}
+}
+
+test_machines_and_agents_denied_every_sensitive_write if {
+	every a in sensitive_writes {
+		not rest.allow with input as {
+			"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR", "ROLE_API"]},
+			"action": a,
+		}
+		not rest.allow with input as {"principal": {"type": "AI_AGENT", "id": "agent:x", "roles": ["ROLE_OPERATOR"]}, "action": a}
+	}
+}
+
+# Customers reach no route of this service: their own-contract scoping lives in pension-service,
+# which is the only caller designed to present a contractId (ADR-0334 §1).
+test_customer_cannot_read_holdings if {
+	not rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "cust-1", "roles": ["ROLE_CUSTOMER"]},
+		"action": "pension-fund.holding.read",
+		"resource": "c1",
+	}
+}
+
+# Stated, not wished away: base rest.rego's `operator-read-any` lets the shared service-account
+# READ (never write) here, and a per-service extension cannot veto it (allowed_reasons is a union).
+test_shared_service_account_reads_via_base_rule if {
+	rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]},
+		"action": "pension-fund.holding.read",
+	}
+}
