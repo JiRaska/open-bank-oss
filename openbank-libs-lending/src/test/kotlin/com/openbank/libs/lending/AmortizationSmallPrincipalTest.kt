@@ -20,6 +20,7 @@ import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.CsvSource
 import java.math.BigDecimal
 import java.time.LocalDate
+import kotlin.random.Random
 
 /**
  * Small-principal defects of [Amortization] (principal repaid per period ≈ a few minor units).
@@ -79,10 +80,49 @@ class AmortizationSmallPrincipalTest {
     }
 
     @Test
+    fun `rounded long-term annuity does not grow beyond Money range`() {
+        // CI property-test counterexample: the rounded classic payment initially covers only
+        // interest. Building every classic row before checking it grew the balance to 20 digits.
+        val s = schedule("3680.655", "KWD", "0.3000", 191, 1, AmortizationMethod.ANNUITY)
+        assertClean(s, "3680.655")
+    }
+
+    @Test
+    fun `annuity whose rounded payment is below interest falls back before balance overflow`() {
+        // The rounded level payment is below the first year's interest. The classic path
+        // compounded a negative principal portion until Money rejected a 20-digit installment.
+        assertClean(schedule("1473595", "JPY", "0.3000", 164, 1, AmortizationMethod.ANNUITY), "1473595")
+    }
+
+    @Test
+    fun `annuity whose rounded principal exceeds opening falls back before balance overflow`() {
+        // The fixed payment eventually overpays a nearly cleared balance. Continuing the
+        // classic schedule from a negative closing balance overflowed Money years later.
+        assertClean(schedule("161418", "JPY", "0.2500", 194, 1, AmortizationMethod.ANNUITY), "161418")
+    }
+
+    @Test
     fun `random schedules never go negative and repay exactly the principal`(): Unit = runBlocking {
+        // Explicit seed, named in the failure, so a CI failure replays locally:
+        // AMORTIZATION_PROPERTY_SEED=<seed> ./gradlew :openbank-libs-lending:test
+        //   --tests '*SmallPrincipal*' --rerun-tasks (otherwise Gradle may return a cached result).
+        val seed = System.getenv(SEED_ENV)?.takeIf { it.isNotBlank() }?.toLong() ?: Random.nextLong()
         val ccyArb = Arb.element("EUR", "CZK", "JPY", "KWD")
+        try {
+            randomSchedulesHold(ccyArb, seed)
+        } catch (e: AssertionError) {
+            throw AssertionError(
+                "Property failed with seed $seed " +
+                    "(replay with $SEED_ENV=$seed ./gradlew :openbank-libs-lending:test " +
+                    "--tests '*SmallPrincipal*' --rerun-tasks): ${e.message}",
+                e,
+            )
+        }
+    }
+
+    private suspend fun randomSchedulesHold(ccyArb: Arb<String>, seed: Long) {
         checkAll(
-            PropTestConfig(iterations = 2000),
+            PropTestConfig(seed = seed, iterations = 2000),
             ccyArb,
             Arb.long(1L, 5_000_000L),
             Arb.int(1, 360),
@@ -96,12 +136,19 @@ class AmortizationSmallPrincipalTest {
             val s = try {
                 Amortization.schedule(Money.of(principal, ccy), rate, n, firstDue, py, m)
             } catch (e: IllegalArgumentException) {
-                assertThat(e).hasMessageContaining("below one minor unit")
+                // Only the documented rejection is an expected outcome. InvalidMoneyException is
+                // also an IllegalArgumentException (the Money-range overflow fixed in #12159), and
+                // must surface as itself, not as a message mismatch.
+                if (e.message?.contains("below one minor unit") != true) throw AssertionError("unexpected rejection", e)
                 assertThat(m).isNotEqualTo(AmortizationMethod.BULLET)
                 return@checkAll
             }
             assertThat(s.installments).hasSize(n)
             assertClean(s, principal.toPlainString())
         }
+    }
+
+    private companion object {
+        const val SEED_ENV = "AMORTIZATION_PROPERTY_SEED"
     }
 }
