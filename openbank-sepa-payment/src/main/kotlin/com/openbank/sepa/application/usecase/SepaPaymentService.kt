@@ -7,6 +7,7 @@ package com.openbank.sepa.application.usecase
 import com.openbank.libs.domain.error.ResourceConflictException
 import com.openbank.libs.domain.error.ResourceNotFoundException
 import com.openbank.libs.idempotency.IdempotencyKeyReusedException
+import com.openbank.libs.idempotency.IdempotencyRequestInProgressException
 import com.openbank.libs.iso20022.Pacs004Reader
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.sepa.application.port.`in`.CreateSepaPaymentCommand
@@ -96,6 +97,7 @@ class SepaPaymentService(
         // provenance cannot be safely replayed.
         paymentRepository.findByIdempotencyKey(command.idempotencyKey)?.let { existing ->
             if (!matchesCreator(existing, command)) throw IdempotencyKeyReusedException()
+            if (existing.schemeOutcomeUnknown) throw IdempotencyRequestInProgressException()
             return existing
         }
 
@@ -142,6 +144,7 @@ class SepaPaymentService(
             // caller may have committed between the initial lookup and this INSERT.
             val winner = paymentRepository.findByIdempotencyKey(command.idempotencyKey) ?: throw failure
             if (!matchesCreator(winner, command)) throw IdempotencyKeyReusedException()
+            if (winner.schemeOutcomeUnknown) throw IdempotencyRequestInProgressException()
             return winner
         }
 
@@ -190,7 +193,8 @@ class SepaPaymentService(
     ): SepaPayment? {
         val payment = paymentRepository.findByIdempotencyKey(idempotencyKey) ?: return null
         return payment.takeIf {
-            it.requestHash != null &&
+            !it.schemeOutcomeUnknown &&
+                it.requestHash != null &&
                 it.initiatingPrincipal != null &&
                 it.initiatingPrincipal == initiatingPrincipal &&
                 it.initiatingPartyId == initiatingPartyId &&

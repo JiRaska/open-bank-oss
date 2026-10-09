@@ -104,6 +104,9 @@ class SepaPaymentActivitiesImplTest {
         coJustRun { amlCasePort.openCase(any()) }
         coEvery { settlementPort.settle(any()) } returns SettlementOutcome(settled = true, transactionId = null)
         coEvery { paymentRepository.update(any(), any()) } answers { firstArg() }
+        coEvery { paymentRepository.claimSchemeSubmission(paymentId) } answers {
+            payment.copy(status = SepaPaymentStatus.VALIDATED, schemeOutcomeUnknown = true)
+        }
     }
 
     @Test
@@ -292,6 +295,20 @@ class SepaPaymentActivitiesImplTest {
 
         assertThat(result).isEqualTo(SepaPaymentStatus.VALIDATED)
         coVerify(exactly = 0) { paymentRepository.update(any(), any()) }
+    }
+
+    @Test
+    fun `lost scheme response cannot send a second pacs008 on activity retry`() {
+        val validated = payment.copy(status = SepaPaymentStatus.VALIDATED)
+        coEvery { paymentRepository.findById(paymentId) } returns validated
+        coEvery { paymentRepository.claimSchemeSubmission(paymentId) } returnsMany
+            listOf(validated.copy(schemeOutcomeUnknown = true), null)
+        coEvery { schemeGatewayPort.submit(any()) } throws
+            SchemeGatewayUnavailableException(RuntimeException("response lost after send"))
+
+        assertThat(activities.submitToScheme(paymentId)).isEqualTo(SepaPaymentStatus.VALIDATED)
+        assertThat(activities.submitToScheme(paymentId)).isEqualTo(SepaPaymentStatus.VALIDATED)
+        coVerify(exactly = 1) { schemeGatewayPort.submit(any()) }
     }
 
     @Test

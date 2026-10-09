@@ -41,6 +41,9 @@ interface SepaPaymentRepository {
 
     suspend fun findByEndToEndId(endToEndId: String): SepaPayment?
 
+    /** Commit a single scheme-send fence before the external call; null means already sent or no longer eligible. */
+    suspend fun claimSchemeSubmission(paymentId: UUID): SepaPayment?
+
     suspend fun list(status: SepaPaymentStatus?, debtorAccountId: UUID?, limit: Int, offset: Int): List<SepaPayment>
 
     /** Update a payment and enqueue a domain-event outbox message, atomically. */

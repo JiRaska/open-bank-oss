@@ -39,6 +39,20 @@ class SepaPaymentRepositoryImpl(private val outboxRepository: SepaPaymentOutboxR
     override suspend fun findByEndToEndId(endToEndId: String): SepaPayment? =
         Panache.withSession { find("endToEndId", endToEndId).firstResult() }.awaitSuspending()?.toDomain()
 
+    override suspend fun claimSchemeSubmission(paymentId: UUID): SepaPayment? = Panache.withTransaction {
+        update(
+            "schemeOutcomeUnknown = true where paymentId = ?1 and status = ?2 and schemeOutcomeUnknown = false",
+            paymentId,
+            SepaPaymentStatus.VALIDATED.name,
+        ).flatMap { claimed ->
+            if (claimed == 1) {
+                find("paymentId", paymentId).firstResult().map { it?.toDomain() }
+            } else {
+                Uni.createFrom().nullItem()
+            }
+        }
+    }.awaitSuspending()
+
     override suspend fun list(
         status: SepaPaymentStatus?,
         debtorAccountId: UUID?,
@@ -90,6 +104,7 @@ class SepaPaymentRepositoryImpl(private val outboxRepository: SepaPaymentOutboxR
                 entity.completedAt = payment.completedAt
                 entity.updatedAt = payment.updatedAt
                 entity.revision = payment.revision
+                entity.schemeOutcomeUnknown = payment.schemeOutcomeUnknown
             }
             .flatMap {
                 outboxMessages.fold(Uni.createFrom().voidItem()) { chain, message ->

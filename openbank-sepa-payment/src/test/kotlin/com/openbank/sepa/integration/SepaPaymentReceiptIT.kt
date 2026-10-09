@@ -5,13 +5,18 @@
 package com.openbank.sepa.integration
 
 import com.openbank.libs.idempotency.IdempotencyScope
+import com.openbank.sepa.infrastructure.persistence.repository.SepaPaymentRepositoryImpl
 import io.quarkus.redis.datasource.ReactiveRedisDataSource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.vertx.VertxContextSupport
 import io.restassured.RestAssured
 import io.restassured.response.Response
+import io.smallrye.mutiny.coroutines.uni
 import jakarta.inject.Inject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.MethodOrderer
 import org.junit.jupiter.api.Order
@@ -31,6 +36,11 @@ class SepaPaymentReceiptIT {
     @Inject lateinit var dataSource: DataSource
 
     @Inject lateinit var redis: ReactiveRedisDataSource
+
+    @Inject lateinit var paymentRepository: SepaPaymentRepositoryImpl
+
+    private fun <T> onEventLoop(block: suspend () -> T): T =
+        VertxContextSupport.subscribeAndAwait { uni(CoroutineScope(Dispatchers.Unconfined)) { block() } }
 
     @Test
     @Order(1)
@@ -172,6 +182,80 @@ class SepaPaymentReceiptIT {
         }
     }
 
+    @Test
+    @Order(6)
+    @TestSecurity(user = "receipt-operator-a", roles = ["ROLE_PAYMENTS"])
+    fun `committed scheme claim survives a fresh repository call and suppresses the receipt`() {
+        val key = UUID.randomUUID().toString()
+        val created = create(key)
+        assertThat(created.statusCode).isEqualTo(201)
+        val id = UUID.fromString(created.jsonPath().getString("id"))
+        dataSource.connection.use { connection ->
+            connection.prepareStatement("UPDATE sepa_payments SET status = 'VALIDATED' WHERE payment_id = ?").use {
+                it.setObject(1, id)
+                assertThat(it.executeUpdate()).isEqualTo(1)
+            }
+        }
+
+        val firstClaim = onEventLoop { paymentRepository.claimSchemeSubmission(id) }
+        assertThat(firstClaim?.schemeOutcomeUnknown).isTrue()
+        assertThat(onEventLoop { paymentRepository.claimSchemeSubmission(id) }).isNull()
+        assertThat(onEventLoop { paymentRepository.findById(id) }?.schemeOutcomeUnknown).isTrue()
+        assertThat(receipt(key = key).jsonPath().getString("state")).isEqualTo("UNKNOWN")
+        evictCreatorRedisKey(key)
+        assertThat(create(key).statusCode).isEqualTo(409)
+        assertThat(countForKey("SELECT count(*) FROM sepa_payments WHERE idempotency_key = ?", key)).isEqualTo(1)
+    }
+
+    @Test
+    @Order(7)
+    @TestSecurity(user = "receipt-operator-a", roles = ["ROLE_PAYMENTS"])
+    fun `concurrent scheme claims have exactly one winner and old unknown rows cannot be resent`() {
+        val key = UUID.randomUUID().toString()
+        val created = create(key)
+        assertThat(created.statusCode).isEqualTo(201)
+        val id = UUID.fromString(created.jsonPath().getString("id"))
+        dataSource.connection.use { connection ->
+            connection.prepareStatement("UPDATE sepa_payments SET status = 'VALIDATED' WHERE payment_id = ?").use {
+                it.setObject(1, id)
+                assertThat(it.executeUpdate()).isEqualTo(1)
+            }
+        }
+
+        val executor = Executors.newFixedThreadPool(2)
+        try {
+            val start = CountDownLatch(1)
+            val attempts = (1..2).map {
+                executor.submit<Boolean> {
+                    start.await()
+                    onEventLoop { paymentRepository.claimSchemeSubmission(id) != null }
+                }
+            }
+            start.countDown()
+            assertThat(attempts.map { it.get(20, TimeUnit.SECONDS) }.count { it }).isEqualTo(1)
+        } finally {
+            executor.shutdownNow()
+        }
+        assertThat(onEventLoop { paymentRepository.findById(id) }?.schemeOutcomeUnknown).isTrue()
+        assertThat(onEventLoop { paymentRepository.claimSchemeSubmission(id) }).isNull()
+
+        // V15's historical VALIDATED backfill has this same state before any new worker starts.
+        val historicalKey = UUID.randomUUID().toString()
+        val historical = create(historicalKey)
+        assertThat(historical.statusCode).isEqualTo(201)
+        val historicalId = UUID.fromString(historical.jsonPath().getString("id"))
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "UPDATE sepa_payments SET status = 'VALIDATED', scheme_outcome_unknown = TRUE WHERE payment_id = ?",
+            ).use {
+                it.setObject(1, historicalId)
+                assertThat(it.executeUpdate()).isEqualTo(1)
+            }
+        }
+        assertThat(onEventLoop { paymentRepository.claimSchemeSubmission(historicalId) }).isNull()
+        assertThat(receipt(key = historicalKey).jsonPath().getString("state")).isEqualTo("UNKNOWN")
+    }
+
     private fun installRaceTrigger() = dataSource.connection.use { connection ->
         connection.createStatement().use { statement ->
             statement.execute("CREATE SEQUENCE sepa_receipt_race_attempt_seq START 1")
@@ -249,8 +333,8 @@ class SepaPaymentReceiptIT {
         }
     }
 
-    private fun evictCreatorRedisKey() {
-        val redisKey = "idempotency:" + IdempotencyScope("sepa-payment", "receipt-operator-a").storeKey(idempotencyKey)
+    private fun evictCreatorRedisKey(key: String = idempotencyKey) {
+        val redisKey = "idempotency:" + IdempotencyScope("sepa-payment", "receipt-operator-a").storeKey(key)
         assertThat(redis.key().del(redisKey).await().indefinitely()).isEqualTo(1)
     }
 

@@ -62,6 +62,8 @@ data class SepaPayment(
     val initiatingPrincipal: String? = null,
     val initiatingPartyId: UUID? = null,
     val initiatingActorPartyId: UUID? = null,
+    /** A scheme request may have reached the counterparty; no second send is safe until reconciled. */
+    val schemeOutcomeUnknown: Boolean = false,
 ) {
     /** ISO 4217 code of [amount], the spelling every outbound contract carries. */
     val currency: String get() = amount.currency.code

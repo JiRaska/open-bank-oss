@@ -23,7 +23,6 @@ import jakarta.enterprise.inject.Instance
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.faulttolerance.CircuitBreaker
-import org.eclipse.microprofile.faulttolerance.Retry
 import org.eclipse.microprofile.faulttolerance.Timeout
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.jboss.logging.Logger
@@ -90,7 +89,6 @@ class SchemeGatewayAdapter(
     // Resilience tuning constants (mirrors the established SanctionsScreeningAdapter values).
     @Suppress("MagicNumber")
     @CircuitBreaker(requestVolumeThreshold = 4, failureRatio = 0.5, delay = 10_000, successThreshold = 2)
-    @Retry(maxRetries = 2, delay = 300, jitter = 150)
     @Timeout(5_000)
     open suspend fun submitWithResilience(pacs008Xml: String): String {
         // Acquire the service token explicitly and pass it as the Authorization header. The

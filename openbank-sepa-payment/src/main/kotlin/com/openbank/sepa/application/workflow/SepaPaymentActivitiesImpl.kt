@@ -212,22 +212,28 @@ open class SepaPaymentActivitiesImpl(
             return@runOnVertxContext payment.status
         }
 
+        // This committed compare-and-set is the only path to a scheme send. A timeout, activity
+        // retry, worker restart or lost pacs.002 leaves the fence set, never another pacs.008.
+        val claimed = paymentRepository.claimSchemeSubmission(paymentId)
+            ?: return@runOnVertxContext paymentRepository.findById(paymentId)?.status
+                ?: error("Payment $paymentId disappeared during scheme submission")
+
         val outcome = try {
-            schemeGatewayPort.submit(payment)
+            schemeGatewayPort.submit(claimed)
         } catch (ex: SchemeGatewayUnavailableException) {
             log.warnf(ex, "Scheme gateway unavailable for payment %s; holding in VALIDATED", paymentId)
             return@runOnVertxContext SepaPaymentStatus.VALIDATED
         }
 
         if (outcome.accepted) {
-            return@runOnVertxContext settleAfterAcceptance(payment, paymentId)
+            return@runOnVertxContext settleAfterAcceptance(claimed, paymentId)
         } else {
-            val rejected = payment.transitionTo(
+            val rejected = claimed.transitionTo(
                 SepaPaymentStatus.REJECTED,
                 mapSchemeReason(outcome.reasonCode),
                 "scheme reject (pacs.002): ${outcome.reasonCode ?: "unspecified"}",
                 clock = clock,
-            )
+            ).copy(schemeOutcomeUnknown = false)
             paymentRepository.update(
                 payment = rejected,
                 outboxMessage = SepaPaymentOutboxMessage(
@@ -248,6 +254,7 @@ open class SepaPaymentActivitiesImpl(
      */
     private suspend fun settleAfterAcceptance(payment: SepaPayment, paymentId: UUID): SepaPaymentStatus {
         val processing = payment.transitionTo(SepaPaymentStatus.PROCESSING, clock = clock)
+            .copy(schemeOutcomeUnknown = false)
         paymentRepository.update(
             payment = processing,
             outboxMessage = SepaPaymentOutboxMessage(

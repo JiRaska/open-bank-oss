@@ -85,6 +85,9 @@ class SepaPaymentEntity : PanacheEntity() {
     @Column(name = "initiating_actor_party_id")
     var initiatingActorPartyId: java.util.UUID? = null
 
+    @Column(name = "scheme_outcome_unknown", nullable = false)
+    var schemeOutcomeUnknown: Boolean = false
+
     @Column(name = "created_at", nullable = false)
     lateinit var createdAt: Instant
 
