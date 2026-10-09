@@ -686,8 +686,12 @@ def main() -> int:
             return 1
         fetched = subprocess.run(["git", "rev-parse", "origin/main"], cwd=a.root,
                                  capture_output=True, text=True, check=False)
-        if fetched.returncode != 0 or fetched.stdout.strip() != a.selected_main:
-            print("::error::fetched main differs from selected main; retry on the next tick", file=sys.stderr)
+        checked_out = subprocess.run(["git", "rev-parse", "HEAD"], cwd=a.root,
+                                     capture_output=True, text=True, check=False)
+        if (fetched.returncode != 0 or checked_out.returncode != 0
+                or fetched.stdout.strip() != a.selected_main
+                or checked_out.stdout.strip() != a.selected_main):
+            print("::error::checkout differs from selected main; retry on the next tick", file=sys.stderr)
             return 1
         last = last_deploy_from_commits(json.load(open(a.commits_json)))
         manual_head = manual_deploy_head(json.load(open(a.event_json))) if a.event_json else None
@@ -717,8 +721,9 @@ def main() -> int:
 
         def read_main() -> str:
             local = checked("git", "rev-parse", "origin/main")
+            checked_out = checked("git", "rev-parse", "HEAD")
             live = checked("gh", "api", f"repos/{a.repo}/git/ref/heads/main", "--jq", ".object.sha")
-            return local if local == live else ""
+            return local if local == checked_out == live else ""
 
         def read_pr(number: int) -> dict:
             return json.loads(checked("gh", "pr", "view", str(number), "--repo", a.repo,
