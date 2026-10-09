@@ -1969,15 +1969,18 @@ spec:
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
               value: "0.1"
-            # OPA sidecar bootstrap (ADR-0034 Phase 5, issue #1797). Advisory mode first
-            # (AUTHZ_ENFORCE=false, @Authorize logs "would DENY" without blocking) — matches every
-            # other service's rollout convention. Before this the pod inherited the libs default
-            # enforce=true with NO sidecar, so standingOrder.pause failed closed on an unreachable
-            # PDP. Flip to true only after an observation window with a clean advisory report.
-            # Dated per #8470: flip target 2026-10-05 — its money-path effect is a FUTURE scheduled
-            # debit and pause/cancel reduces money movement, so a bounded advisory window is safe.
+            # ADR-0034 Phase 5 / issue #1797, flipped by #12324: ENFORCED. standingOrder.pause (the
+            # only @Authorize method) is decided by the OPA sidecar below; a deny is a 403 and an
+            # unreachable PDP is a 503 (fail closed). The one M2M caller, customer-edge's
+            # self-service pause, arrives as service-account-openbank-edge and is granted by
+            # standing_order_rest_ext.rego (m2m-standing-order-pause); staff OPERATOR/ADMIN by
+            # operator-standing-order-pause. This is a plain Deployment, not a Rollout: there is
+            # no canary analysis, so a bad decision reaches the single replica at once.
+            # Rollback: set this back to "false" (advisory: decisions still computed and counted
+            # in openbank.authz.decisions, none blocks) and restore the allowlist entry in
+            # .github/scripts/check-authz-enforce-money-path.py.
             - name: AUTHZ_ENFORCE
-              value: "false"
+              value: "true"
           startupProbe:
             tcpSocket:
               port: management
