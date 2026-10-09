@@ -114,14 +114,20 @@ def flush(prs: list[dict], now: int, last_deploy: int | None, window: int,
 
 
 def flush_eligible(prs: list[dict], now: int, last_deploy: int | None, window: int,
-                   inspect: Callable[[dict], str]) -> dict | None:
-    """Skip covered or unverifiable PRs; never arm one without positive eligibility proof."""
+                   inspect: Callable[[dict], str], manual_head: str | None = None
+                   ) -> tuple[dict | None, list[int], str]:
+    """Select a proven fresh PR and report covered ones; unknown blocks selection."""
     remaining = list(prs)
-    while pick := flush(remaining, now, last_deploy, window):
-        if inspect(pick) == "eligible":
-            return pick
+    covered: list[int] = []
+    while pick := flush(remaining, now, last_deploy, window, manual_head):
+        verdict = inspect(pick)
+        if verdict == "eligible":
+            return pick, covered, verdict
+        if verdict != "covered":
+            return None, covered, "unknown"
+        covered.append(pick["number"])
         remaining = [pr for pr in remaining if pr["number"] != pick["number"]]
-    return None
+    return None, covered, "none"
 
 
 def pins_from_diff(diff: str) -> list[tuple[str, str, str, str]]:
@@ -323,6 +329,43 @@ def inspect_deferred_pr(pr: dict, root: str, repo: str) -> str:
                                          lambda image, tag: image_source_is_current(root, image, tag)) else "unknown"
 
 
+def retire_covered(numbers: list[int], selected_main: str,
+                   read_main: Callable[[], str], read_pr: Callable[[int], dict],
+                   inspect: Callable[[dict], str], comment: Callable[[int, str], None],
+                   close: Callable[[int], None]) -> None:
+    """Close only still-unarmed service PRs whose entire pin diff is already on main."""
+    def require_main() -> None:
+        if read_main() != selected_main:
+            raise ValueError("main moved since selection; refusing to retire a deploy PR")
+
+    def safe_pr(number: int) -> dict:
+        pr = read_pr(number)
+        if (pr.get("state") != "OPEN" or pr.get("isDraft") is not False
+                or pr.get("isCrossRepository") is not False or pr.get("autoMergeRequest") is not None
+                or "blocked" in {label.get("name") for label in pr.get("labels", [])}
+                or not pr.get("headRefName", "").startswith(DEPLOY_PREFIXES[0])
+                or not re.fullmatch(r"[0-9a-f]{40}", pr.get("headRefOid", ""))):
+            raise ValueError(f"#{number} changed state or carries a deployment hold")
+        return pr
+
+    for number in numbers:
+        require_main()
+        before = safe_pr(number)
+        if inspect({"number": number, "head": before["headRefName"]}) != "covered":
+            raise ValueError(f"#{number} is not fully covered by selected main")
+        comment(number, f"Closed automatically: every proposed image pin is already on main "
+                        f"at `{selected_main}` or a proven descendant source. The complete "
+                        "GitOps diff contains only those pin substitutions; no image is being "
+                        "deployed by closing this PR. See #12182.")
+        require_main()
+        after = safe_pr(number)
+        if after["headRefOid"] != before["headRefOid"]:
+            raise ValueError(f"#{number} head changed during retirement")
+        if inspect({"number": number, "head": after["headRefName"]}) != "covered":
+            raise ValueError(f"#{number} coverage changed during retirement")
+        close(number)
+
+
 # ── self-test ─────────────────────────────────────────────────────────────────────────────────
 def self_test() -> int:
     fails = []
@@ -445,13 +488,70 @@ def self_test() -> int:
         {"number": 101, "head": "chore/gitops-auto-deploy-old", "created_at": "a", "armed": False},
         {"number": 102, "head": "chore/admin-ui-deploy-next", "created_at": "b", "armed": False},
     ]
-    pick = flush_eligible(queued, T, T - W, W,
-                          lambda pr: stale if pr["number"] == 101 else "eligible")
-    check("covered oldest is skipped and later eligible PR is selected", pick is not None and pick["number"] == 102)
-    check("unknown oldest stays unarmed", flush_eligible(queued[:1], T, T - W, W,
-          lambda _: unknown) is None)
+    pick, covered, verdict = flush_eligible(queued, T, T - W, W,
+                                             lambda pr: stale if pr["number"] == 101 else "eligible")
+    check("covered oldest is retired before later eligible PR is selected",
+          pick is not None and pick["number"] == 102 and covered == [101] and verdict == "eligible")
+    pick, covered, verdict = flush_eligible(queued, T, T - W, W,
+                                             lambda pr: unknown if pr["number"] == 101 else "eligible")
+    check("unknown oldest blocks later PR rather than silently skipping it",
+          pick is None and covered == [] and verdict == "unknown")
     check("non-pin edits cannot prove coverage", pin_only_changes(pin_diff("00000000", "11111111")
           + "+replicas: 2\n") is None)
+
+    selected = "a" * 40
+    state = {"state": "OPEN", "isDraft": False, "isCrossRepository": False,
+             "autoMergeRequest": None, "labels": [], "headRefName": DEPLOY_PREFIXES[0] + selected,
+             "headRefOid": "b" * 40}
+    actions: list[str] = []
+    def read_retirement_pr(_number: int) -> dict:
+        return dict(state)
+    def retirement_comment(_number: int, _body: str) -> None:
+        actions.append("comment")
+    def retirement_close(_number: int) -> None:
+        actions.append("close")
+    retire_covered([101], selected, lambda: selected, read_retirement_pr,
+                   lambda _pr: "covered", retirement_comment, retirement_close)
+    check("covered PR is commented before close after two live proofs", actions == ["comment", "close"])
+    actions.clear()
+    state["labels"] = [{"name": "blocked"}]
+    try:
+        retire_covered([101], selected, lambda: selected, read_retirement_pr,
+                       lambda _pr: "covered", retirement_comment, retirement_close)
+        held_refused = False
+    except ValueError:
+        held_refused = True
+    check("a held PR is never retired", held_refused and not actions)
+    state["labels"] = []
+    try:
+        retire_covered([101], selected, lambda: selected, read_retirement_pr,
+                       lambda _pr: "unknown", retirement_comment, retirement_close)
+        unknown_refused = False
+    except ValueError:
+        unknown_refused = True
+    check("unknown main coverage never retires a PR", unknown_refused and not actions)
+    def moved_head(_number: int, _body: str) -> None:
+        actions.append("comment")
+        state["headRefOid"] = "c" * 40
+    try:
+        retire_covered([101], selected, lambda: selected, read_retirement_pr,
+                       lambda _pr: "covered", moved_head, retirement_close)
+        moved_refused = False
+    except ValueError:
+        moved_refused = True
+    check("a head change after comment prevents close", moved_refused and actions == ["comment"])
+    actions.clear()
+    observed_main = [selected]
+    def moved_main(_number: int, _body: str) -> None:
+        actions.append("comment")
+        observed_main[0] = "d" * 40
+    try:
+        retire_covered([101], selected, lambda: observed_main[0], read_retirement_pr,
+                       lambda _pr: "covered", moved_main, retirement_close)
+        main_refused = False
+    except ValueError:
+        main_refused = True
+    check("main advancement after comment prevents close", main_refused and actions == ["comment"])
 
     # 5. two pushes in one window -> ONE PR pins both (carry), and a moved service is not rewound
     reg = "123.dkr.ecr.eu-north-1.amazonaws.com"
@@ -508,12 +608,24 @@ def main() -> int:
     f.add_argument("--prs-json", required=True, help="file: [{number, head, created_at, armed}]")
     f.add_argument("--commits-json", required=True)
     f.add_argument("--event-json", help="GitHub's workflow_run event payload for manual deploy intent")
+    reviewed = sub.add_parser("flush-reviewed", help="live GitOps eligibility proof before selection")
+    reviewed.add_argument("--prs-json", required=True)
+    reviewed.add_argument("--commits-json", required=True)
+    reviewed.add_argument("--event-json")
+    reviewed.add_argument("--root", required=True)
+    reviewed.add_argument("--repo", required=True)
+    reviewed.add_argument("--selected-main", required=True)
+    retire = sub.add_parser("retire-covered", help="App-token retirement of proven main-covered service PRs")
+    retire.add_argument("--numbers", required=True, help="comma-separated PR numbers from flush-reviewed")
+    retire.add_argument("--selected-main", required=True)
+    retire.add_argument("--root", required=True)
+    retire.add_argument("--repo", required=True)
     c = sub.add_parser("carry")
     c.add_argument("--root", default=".")
     c.add_argument("--skip-images", default="", help="space-separated images this run pins itself")
     v = sub.add_parser("verify")
     v.add_argument("--root", default=".")
-    for p in (d, f):
+    for p in (d, f, reviewed):
         p.add_argument("--now", type=int, required=True)
         p.add_argument("--window", type=int, default=int(os.environ.get("DEPLOY_WINDOW_SECONDS", DEFAULT_WINDOW_SECONDS)))
     a = ap.parse_args()
@@ -531,6 +643,64 @@ def main() -> int:
         pick = flush(json.load(open(a.prs_json)), a.now, last, a.window, manual_head)
         print(f"arm={pick['number'] if pick else ''}")
         print(f"arm_head={pick['head'] if pick else ''}")
+        return 0
+    if a.cmd == "flush-reviewed":
+        if not re.fullmatch(r"[0-9a-f]{40}", a.selected_main):
+            print("::error::invalid selected main SHA", file=sys.stderr)
+            return 1
+        fetched = subprocess.run(["git", "rev-parse", "origin/main"], cwd=a.root,
+                                 capture_output=True, text=True, check=False)
+        if fetched.returncode != 0 or fetched.stdout.strip() != a.selected_main:
+            print("::error::fetched main differs from selected main; retry on the next tick", file=sys.stderr)
+            return 1
+        last = last_deploy_from_commits(json.load(open(a.commits_json)))
+        manual_head = manual_deploy_head(json.load(open(a.event_json))) if a.event_json else None
+        pick, covered, verdict = flush_eligible(
+            json.load(open(a.prs_json)), a.now, last, a.window,
+            lambda pr: inspect_deferred_pr(pr, a.root, a.repo), manual_head)
+        print(f"arm={pick['number'] if pick else ''}")
+        print(f"arm_head={pick['head'] if pick else ''}")
+        print(f"retire={','.join(map(str, covered))}")
+        print(f"selection={verdict}")
+        return 0
+    if a.cmd == "retire-covered":
+        if (not re.fullmatch(r"[0-9a-f]{40}", a.selected_main)
+                or not re.fullmatch(r"[1-9][0-9]*(,[1-9][0-9]*)*", a.numbers)):
+            print("::error::invalid retirement input", file=sys.stderr)
+            return 1
+        numbers = [int(number) for number in a.numbers.split(",")]
+        if len(numbers) != len(set(numbers)):
+            print("::error::duplicate retirement PR", file=sys.stderr)
+            return 1
+
+        def checked(*command: str) -> str:
+            result = subprocess.run(command, cwd=a.root, capture_output=True, text=True, check=False)
+            if result.returncode != 0:
+                raise ValueError(f"retirement command failed: {command[0]} {command[1]}")
+            return result.stdout.strip()
+
+        def read_main() -> str:
+            local = checked("git", "rev-parse", "origin/main")
+            live = checked("gh", "api", f"repos/{a.repo}/git/ref/heads/main", "--jq", ".object.sha")
+            return local if local == live else ""
+
+        def read_pr(number: int) -> dict:
+            return json.loads(checked("gh", "pr", "view", str(number), "--repo", a.repo,
+                                      "--json", "state,isDraft,isCrossRepository,autoMergeRequest,labels,headRefName,headRefOid"))
+
+        def comment(number: int, body: str) -> None:
+            checked("gh", "pr", "comment", str(number), "--repo", a.repo, "--body", body)
+
+        def close(number: int) -> None:
+            checked("gh", "pr", "close", str(number), "--repo", a.repo, "--delete-branch")
+
+        try:
+            retire_covered(numbers, a.selected_main, read_main, read_pr,
+                           lambda pr: inspect_deferred_pr(pr, a.root, a.repo), comment, close)
+        except (ValueError, KeyError, json.JSONDecodeError) as error:
+            print(f"::error::{error}", file=sys.stderr)
+            return 1
+        print(f"retired={','.join(map(str, numbers))}")
         return 0
     if a.cmd == "carry":
         for line in carry(a.root, sys.stdin.read(), set(a.skip_images.split()),
