@@ -100,7 +100,12 @@ class QuestionnaireEngineTest {
 
     @Test
     fun `a MiFID set without a knowledge question, or a set missing warning wording, is refused`() {
-        assertThatThrownBy { dip.copy(questions = dip.questions.filterNot { it.dimension == Dimension.KNOWLEDGE }) }
+        assertThatThrownBy {
+            dip.copy(
+                questions = dip.questions.filterNot { it.dimension == Dimension.KNOWLEDGE },
+                consistencyRules = emptyList(),
+            )
+        }
             .hasMessageContaining("required KNOWLEDGE question")
         assertThatThrownBy { dps.copy(warnings = dps.warnings.drop(1)) }
             .hasMessageContaining("must word every warning code")

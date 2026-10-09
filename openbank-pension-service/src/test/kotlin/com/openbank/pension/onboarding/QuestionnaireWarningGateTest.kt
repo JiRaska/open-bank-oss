@@ -101,25 +101,31 @@ class QuestionnaireWarningGateTest {
     }
 
     @Test
-    fun `a riskier strategy without an acknowledgement is refused, with it the wording is recorded`() = runBlocking {
-        val application = submitted()
-        stub(application)
-        assertThatThrownBy {
-            runBlocking { service.chooseStrategy(application.id, party, ChooseStrategyCommand("DYNAMIC", false, null)) }
-        }.hasMessageContaining("STRATEGY_ABOVE_PROFILE")
+    fun `a riskier strategy without an acknowledgement is refused, with it the wording is recorded`(): Unit =
+        runBlocking {
+            val application = submitted()
+            stub(application)
+            assertThatThrownBy {
+                runBlocking {
+                    service.chooseStrategy(application.id, party, ChooseStrategyCommand("DYNAMIC", false, null))
+                }
+            }.hasMessageContaining("STRATEGY_ABOVE_PROFILE")
 
-        coEvery { documents.generate(any()) } returns GeneratedDocument("doc-1", "sha-doc")
-        val saved = slot<OnboardingApplication>()
-        coEvery { applications.save(capture(saved)) } answers { saved.captured }
-        val issued = service.chooseStrategy(application.id, party, ChooseStrategyCommand("DYNAMIC", true, "en"))
-        val ack = issued.warningAcknowledgements.single()
-        assertThat(ack.code).isEqualTo(WarningCode.STRATEGY_ABOVE_PROFILE)
-        assertThat(ack.strategyCode).isEqualTo("DYNAMIC")
-        assertThat(ack.assessmentId).isEqualTo(assessment.id)
-        val shown = questionSets.questionSet("CZ", ProductLine.DPS).warning(WarningCode.STRATEGY_ABOVE_PROFILE).text.en
-        assertThat(ack.textSha256).isEqualTo(WarningPolicy.sha256(shown))
-        assertThat(issued.unsuitableChoiceAcknowledged).isTrue()
-    }
+            coEvery { documents.generate(any()) } returns GeneratedDocument("doc-1", "sha-doc")
+            val saved = slot<OnboardingApplication>()
+            coEvery { applications.save(capture(saved)) } answers { saved.captured }
+            val issued = service.chooseStrategy(application.id, party, ChooseStrategyCommand("DYNAMIC", true, "en"))
+            val ack = issued.warningAcknowledgements.single()
+            assertThat(ack.code).isEqualTo(WarningCode.STRATEGY_ABOVE_PROFILE)
+            assertThat(ack.strategyCode).isEqualTo("DYNAMIC")
+            assertThat(ack.assessmentId).isEqualTo(assessment.id)
+            val shown = questionSets.questionSet(
+                "CZ",
+                ProductLine.DPS,
+            ).warning(WarningCode.STRATEGY_ABOVE_PROFILE).text.en
+            assertThat(ack.textSha256).isEqualTo(WarningPolicy.sha256(shown))
+            assertThat(issued.unsuitableChoiceAcknowledged).isTrue()
+        }
 
     @Test
     fun `a signature without the acknowledgement is refused before the SCA challenge is spent`() {
