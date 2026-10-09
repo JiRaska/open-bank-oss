@@ -13,7 +13,7 @@ import com.openbank.pension.application.exit.ExitExecutionService
 import com.openbank.pension.application.exit.ExitGateways
 import com.openbank.pension.application.exit.ExitStores
 import com.openbank.pension.application.exit.ExitWorkflowLauncher
-import com.openbank.pension.application.exit.FundAdministrationPort
+import com.openbank.pension.application.port.out.FundAdministrationPort
 import com.openbank.pension.application.exit.IncentiveClawbackPort
 import com.openbank.pension.application.exit.OwnAccountVerificationPort
 import com.openbank.pension.application.exit.PaymentInstructionRepository

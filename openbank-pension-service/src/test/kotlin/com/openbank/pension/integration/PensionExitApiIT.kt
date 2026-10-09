@@ -14,7 +14,7 @@ import com.openbank.pension.domain.model.ContributionFrequency
 import com.openbank.pension.domain.model.ContributionSchedule
 import com.openbank.pension.domain.model.ProductLine
 import com.openbank.pension.domain.pack.ProviderType
-import com.openbank.pension.infrastructure.exit.WorkflowClientTestProducer
+import com.openbank.pension.testsupport.PensionTemporalTestEnvironment
 import com.openbank.pension.infrastructure.exit.stub.StubFundAdministrationAdapter
 import com.openbank.pension.infrastructure.exit.stub.StubIncentiveClawbackAdapter
 import com.openbank.pension.infrastructure.exit.stub.StubPayoutPaymentAdapter
@@ -51,7 +51,7 @@ import java.util.UUID
 class PensionExitApiIT {
 
     @Inject
-    lateinit var temporal: WorkflowClientTestProducer
+    lateinit var temporal: PensionTemporalTestEnvironment
 
     @Inject
     lateinit var fund: StubFundAdministrationAdapter
@@ -168,9 +168,9 @@ class PensionExitApiIT {
         req(key = "sign-2").body(sign).post("$path/sign").then().statusCode(409)
         assertThat(contractStatus(id)).isEqualTo("TERMINATING")
 
-        temporal.env.sleep(Duration.ofDays(29))
+        temporal.advance(Duration.ofDays(29))
         assertThat(instructions(id)).isEmpty()
-        temporal.env.sleep(Duration.ofDays(2))
+        temporal.advance(Duration.ofDays(2))
         awaitStatus(path, "COMPLETED").body("paymentRef", org.hamcrest.Matchers.notNullValue())
 
         val rows = instructions(id)

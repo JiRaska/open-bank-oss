@@ -6,7 +6,6 @@ package com.openbank.pension.application
 
 import com.openbank.pension.application.port.`in`.Caller
 import com.openbank.pension.application.port.`in`.CreateDraftCommand
-import com.openbank.pension.application.port.`in`.EarlyTerminationCommand
 import com.openbank.pension.application.port.out.PensionContractRepository
 import com.openbank.pension.application.usecase.PensionContractService
 import com.openbank.pension.domain.model.ContractStatus
@@ -15,7 +14,6 @@ import com.openbank.pension.domain.model.ContributionSchedule
 import com.openbank.pension.domain.model.PensionContract
 import com.openbank.pension.domain.model.ProductLine
 import com.openbank.pension.domain.pack.ProviderType
-import com.openbank.pension.domain.pack.SurrenderInputs
 import com.openbank.pension.infrastructure.pack.JurisdictionPackLoader
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
@@ -100,32 +98,6 @@ class PensionContractServiceTest {
         val id = service.createDraft(command()).id
         assertThatThrownBy { runBlocking { service.electStrategy(me, id, "DYNAMIC", LocalDate.parse("2020-01-01")) } }
             .isInstanceOf(IllegalArgumentException::class.java)
-    }
-
-    @Test
-    fun `early termination previews without confirm and transitions with it`(): Unit = runBlocking {
-        val id = service.createDraft(command()).id
-        service.submit(me, id)
-        service.activate(me, id)
-        val inputs = SurrenderInputs(BigDecimal("10000"), emptyMap())
-        val preview = service.requestEarlyTermination(EarlyTerminationCommand(me, id, inputs, confirm = false))
-        assertThat(preview.contract.status).isEqualTo(ContractStatus.ACTIVE)
-        assertThat(preview.preview.payoutConditionsMet).isFalse()
-        val confirmed = service.requestEarlyTermination(EarlyTerminationCommand(me, id, inputs, confirm = true))
-        assertThat(confirmed.contract.status).isEqualTo(ContractStatus.TERMINATING)
-        assertThat(repo.rows.getValue(id).status).isEqualTo(ContractStatus.TERMINATING)
-    }
-
-    @Test
-    fun `early termination of a draft is a conflict`(): Unit = runBlocking {
-        val id = service.createDraft(command()).id
-        assertThatThrownBy {
-            runBlocking {
-                service.requestEarlyTermination(
-                    EarlyTerminationCommand(me, id, SurrenderInputs(BigDecimal.ONE, emptyMap()), confirm = true),
-                )
-            }
-        }.isInstanceOf(IllegalStateException::class.java)
     }
 
     @Test

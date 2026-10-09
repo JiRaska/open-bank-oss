@@ -7,8 +7,6 @@ package com.openbank.pension.application.usecase
 import com.openbank.pension.application.port.`in`.Caller
 import com.openbank.pension.application.port.`in`.ContractVisibility
 import com.openbank.pension.application.port.`in`.CreateDraftCommand
-import com.openbank.pension.application.port.`in`.EarlyTerminationCommand
-import com.openbank.pension.application.port.`in`.EarlyTerminationResult
 import com.openbank.pension.application.port.`in`.IncentiveEvaluationCommand
 import com.openbank.pension.application.port.`in`.PensionContractUseCase
 import com.openbank.pension.application.port.out.ContractNotFoundException
@@ -19,7 +17,6 @@ import com.openbank.pension.domain.model.PensionContract
 import com.openbank.pension.domain.pack.IncentiveResult
 import com.openbank.pension.domain.pack.JurisdictionPackRegistry
 import com.openbank.pension.domain.pack.PackEvaluator
-import com.openbank.pension.domain.pack.SurrenderCalculator
 import java.time.Clock
 import java.time.LocalDate
 import java.util.UUID
@@ -83,9 +80,6 @@ class PensionContractService(
     override suspend fun submit(caller: Caller, id: UUID) =
         transition(caller, id, ContractStatus.PENDING_ACTIVATION) { it.submit(clock.instant()) }
 
-    override suspend fun activate(caller: Caller, id: UUID) =
-        transition(caller, id, ContractStatus.ACTIVE) { it.activate(LocalDate.now(clock), clock.instant()) }
-
     override suspend fun electStrategy(caller: Caller, id: UUID, strategyCode: String, effectiveFrom: LocalDate?) =
         transition(caller, id, null) {
             val from = effectiveFrom ?: LocalDate.now(clock)
@@ -117,31 +111,6 @@ class PensionContractService(
             command.employerContributionAnnual,
             command.sharedCapUsed,
         )
-    }
-
-    override suspend fun requestEarlyTermination(command: EarlyTerminationCommand): EarlyTerminationResult {
-        val contract = get(command.caller, command.contractId)
-        if (command.confirm) command.caller.requireParticipant()
-        // A replayed confirmation finds the contract already TERMINATING and answers the same
-        // preview without a second transition.
-        val replay = command.confirm && contract.status == ContractStatus.TERMINATING
-        check(replay || contract.status == ContractStatus.ACTIVE || contract.status == ContractStatus.SUSPENDED) {
-            "early termination needs an ACTIVE or SUSPENDED contract, was ${contract.status}"
-        }
-        val preview = SurrenderCalculator.preview(
-            contract,
-            packs.pinnedFor(contract),
-            command.inputs,
-            LocalDate.now(clock),
-        )
-        val result = if (command.confirm &&
-            !replay
-        ) {
-            contracts.save(contract.requestTermination(clock.instant()))
-        } else {
-            contract
-        }
-        return EarlyTerminationResult(result, preview)
     }
 
     /**

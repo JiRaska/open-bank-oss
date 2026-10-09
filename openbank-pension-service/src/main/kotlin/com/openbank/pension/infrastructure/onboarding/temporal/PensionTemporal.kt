@@ -12,33 +12,26 @@ import com.openbank.pension.application.onboarding.TransferInTimers
 import com.openbank.pension.application.onboarding.TransferService
 import com.openbank.pension.application.onboarding.workflow.OnboardingActivities
 import com.openbank.pension.application.onboarding.workflow.OnboardingWorkflow
-import com.openbank.pension.application.onboarding.workflow.OnboardingWorkflowImpl
 import com.openbank.pension.application.onboarding.workflow.PensionWorkflowIds
 import com.openbank.pension.application.onboarding.workflow.TransferInActivities
 import com.openbank.pension.application.onboarding.workflow.TransferInWorkflow
-import com.openbank.pension.application.onboarding.workflow.TransferInWorkflowImpl
 import com.openbank.pension.application.onboarding.workflow.TransferOutActivities
 import com.openbank.pension.application.onboarding.workflow.TransferOutWorkflow
-import com.openbank.pension.application.onboarding.workflow.TransferOutWorkflowImpl
 import com.openbank.pension.domain.transfer.FundsArrival
 import com.openbank.pension.domain.transfer.TransferStatus
-import io.quarkus.runtime.StartupEvent
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.coroutines.asUni
 import io.temporal.api.enums.v1.WorkflowIdReusePolicy
 import io.temporal.client.WorkflowClient
 import io.temporal.client.WorkflowExecutionAlreadyStarted
 import io.temporal.client.WorkflowOptions
-import io.temporal.worker.WorkerFactory
 import jakarta.enterprise.context.ApplicationScoped
-import jakarta.enterprise.event.Observes
 import jakarta.enterprise.inject.Instance
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
 import org.eclipse.microprofile.config.inject.ConfigProperty
-import org.jboss.logging.Logger
 import java.util.UUID
 
 /**
@@ -174,34 +167,3 @@ class PensionActivitiesImpl(
  * them. Every S2 workflow and activity type is registered on this queue, and only here.
  */
 const val ONBOARDING_TASK_QUEUE = "pension-onboarding"
-
-/** Registers the three pension workflows and their activities on this service's task queue. */
-@ApplicationScoped
-class PensionWorkerRegistrar(
-    @ConfigProperty(name = "openbank.pension.worker.enabled", defaultValue = "true")
-    private val workerEnabled: Boolean,
-    @ConfigProperty(name = "openbank.pension.onboarding.task-queue", defaultValue = ONBOARDING_TASK_QUEUE)
-    private val taskQueue: String,
-    private val client: Instance<WorkflowClient>,
-    private val activities: PensionActivitiesImpl,
-) {
-    private val log = Logger.getLogger(PensionWorkerRegistrar::class.java)
-
-    @Suppress("UnusedParameter")
-    fun onStart(@Observes event: StartupEvent) {
-        if (!workerEnabled) {
-            log.info("Temporal pension worker registration disabled (openbank.pension.worker.enabled=false)")
-            return
-        }
-        val factory = WorkerFactory.newInstance(client.get())
-        val worker = factory.newWorker(taskQueue)
-        worker.registerWorkflowImplementationTypes(
-            OnboardingWorkflowImpl::class.java,
-            TransferInWorkflowImpl::class.java,
-            TransferOutWorkflowImpl::class.java,
-        )
-        worker.registerActivitiesImplementations(activities)
-        factory.start()
-        log.infof("Temporal pension worker started on task queue '%s'", taskQueue)
-    }
-}

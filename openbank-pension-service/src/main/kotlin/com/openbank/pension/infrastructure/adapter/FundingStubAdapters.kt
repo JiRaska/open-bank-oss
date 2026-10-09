@@ -30,21 +30,6 @@ private fun stubId(prefix: String, key: String): String =
     "$prefix-" + UUID.nameUUIDFromBytes(key.toByteArray(StandardCharsets.UTF_8))
 
 @ApplicationScoped
-class StubFundAdministrationAdapter : FundAdministrationPort {
-    private val log = Logger.getLogger(StubFundAdministrationAdapter::class.java)
-
-    override suspend fun placeSubscription(
-        contractId: UUID,
-        amount: BigDecimal,
-        currency: String,
-        idempotencyKey: String,
-    ): String {
-        log.warnf("STUB fund administration: subscription for contract %s not sent to pension-fund-service", contractId)
-        return stubId("stub-sub", idempotencyKey)
-    }
-}
-
-@ApplicationScoped
 class StubPaymentMandateAdapter : PaymentMandatePort {
     private val log = Logger.getLogger(StubPaymentMandateAdapter::class.java)
 

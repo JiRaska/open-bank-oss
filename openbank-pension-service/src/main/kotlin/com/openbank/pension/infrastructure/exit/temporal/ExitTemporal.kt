@@ -7,23 +7,17 @@ package com.openbank.pension.infrastructure.exit.temporal
 import com.openbank.pension.application.exit.ExitExecutionService
 import com.openbank.pension.application.exit.ExitWorkflowLauncher
 import com.openbank.pension.application.exit.workflow.DeathSettlementWorkflow
-import com.openbank.pension.application.exit.workflow.DeathSettlementWorkflowImpl
 import com.openbank.pension.application.exit.workflow.EXIT_TASK_QUEUE
 import com.openbank.pension.application.exit.workflow.EarlyTerminationWorkflow
-import com.openbank.pension.application.exit.workflow.EarlyTerminationWorkflowImpl
 import com.openbank.pension.application.exit.workflow.ExitActivities
 import com.openbank.pension.application.exit.workflow.PlannedInstallment
 import com.openbank.pension.application.exit.workflow.RegularPayoutWorkflow
-import com.openbank.pension.application.exit.workflow.RegularPayoutWorkflowImpl
-import io.quarkus.runtime.StartupEvent
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.coroutines.asUni
 import io.temporal.client.WorkflowClient
 import io.temporal.client.WorkflowExecutionAlreadyStarted
 import io.temporal.client.WorkflowOptions
-import io.temporal.worker.WorkerFactory
 import jakarta.enterprise.context.ApplicationScoped
-import jakarta.enterprise.event.Observes
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -104,46 +98,6 @@ class TemporalExitWorkflowLauncher(
             launch(workflowId)
         } catch (e: WorkflowExecutionAlreadyStarted) {
             log.debugf("workflow %s already running: %s", workflowId, e.message)
-        }
-    }
-}
-
-/**
- * Registers the exit worker. Switch per `rules.yaml: temporal_worker_switch_naming`:
- * `openbank.pension.worker.enabled` — off in `@QuarkusTest`, where the IT supplies its own
- * in-process TestWorkflowEnvironment worker.
- */
-@ApplicationScoped
-class ExitWorkerRegistrar(
-    @param:ConfigProperty(name = "openbank.pension.worker.enabled", defaultValue = "true")
-    private val workerEnabled: Boolean,
-    @param:ConfigProperty(name = "openbank.pension.exit.task-queue", defaultValue = EXIT_TASK_QUEUE)
-    private val taskQueue: String,
-    private val workflowClient: WorkflowClient,
-    private val activities: ExitActivitiesImpl,
-) {
-    private val log = Logger.getLogger(ExitWorkerRegistrar::class.java)
-
-    @Suppress("UnusedParameter")
-    fun onStart(@Observes event: StartupEvent) {
-        if (!workerEnabled) {
-            log.info("Temporal pension exit worker disabled (openbank.pension.worker.enabled=false)")
-            return
-        }
-        val factory = WorkerFactory.newInstance(workflowClient)
-        register(factory.newWorker(taskQueue), activities)
-        factory.start()
-        log.infof("Temporal pension exit worker started on task queue '%s'", taskQueue)
-    }
-
-    companion object {
-        fun register(worker: io.temporal.worker.Worker, activities: ExitActivities) {
-            worker.registerWorkflowImplementationTypes(
-                EarlyTerminationWorkflowImpl::class.java,
-                RegularPayoutWorkflowImpl::class.java,
-                DeathSettlementWorkflowImpl::class.java,
-            )
-            worker.registerActivitiesImplementations(activities)
         }
     }
 }

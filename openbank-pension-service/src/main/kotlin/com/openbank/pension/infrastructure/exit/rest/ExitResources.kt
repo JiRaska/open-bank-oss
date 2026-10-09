@@ -4,6 +4,8 @@
 
 package com.openbank.pension.infrastructure.exit.rest
 
+import com.openbank.pension.infrastructure.rest.IDEMPOTENCY_KEY_HEADER
+import com.openbank.pension.infrastructure.rest.requireIdempotencyKey
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import com.openbank.pension.application.exit.ClaimantDesignation
@@ -81,10 +83,14 @@ class PensionExitResource {
     @Operation(summary = "Binding early-termination preview: surrender value, fees, clawback, recapture, net payout")
     @Authorize(action = "pension.exit.terminate", resource = "#contractId")
     suspend fun quoteTermination(
+        @HeaderParam(IDEMPOTENCY_KEY_HEADER) idempotencyKey: String?,
         @PathParam("contractId") contractId: UUID,
         @HeaderParam(PARTY_HEADER) party: String?,
-    ): Response = Response.status(Response.Status.CREATED)
+    ): Response {
+        requireIdempotencyKey(idempotencyKey)
+        return Response.status(Response.Status.CREATED)
         .entity(TerminationResponse.from(terminations.quote(participant(party), contractId))).build()
+    }
 
     @POST
     @Path("/termination/{noticeId}/sign")
@@ -130,10 +136,12 @@ class PensionExitResource {
     @Operation(summary = "Binding payout preview for a form (lump sum, annuity, phased, fixed period, partial)")
     @Authorize(action = "pension.exit.payout", resource = "#contractId")
     suspend fun quotePayout(
+        @HeaderParam(IDEMPOTENCY_KEY_HEADER) idempotencyKey: String?,
         @PathParam("contractId") contractId: UUID,
         @HeaderParam(PARTY_HEADER) party: String?,
         request: PayoutQuoteRequest?,
     ): Response {
+        requireIdempotencyKey(idempotencyKey)
         val body = requireNotNull(request) { "request body is required" }
         val quoted = payouts.quote(
             PayoutQuoteCommand(
@@ -280,10 +288,12 @@ class PensionDeathClaimResource {
     @Operation(summary = "KYC-light verification of one claimant and their payout account")
     @Authorize(action = "pension.death.verify", resource = "#claimId")
     suspend fun verify(
+        @HeaderParam(IDEMPOTENCY_KEY_HEADER) idempotencyKey: String?,
         @PathParam("claimId") claimId: UUID,
         @PathParam("claimantId") claimantId: UUID,
         request: VerifyClaimantRequest?,
     ): DeathClaimResponse {
+        requireIdempotencyKey(idempotencyKey)
         val body = requireNotNull(request) { "request body is required" }
         val kyc = ClaimantKyc(
             requireNotNull(body.name) { "name is required" },

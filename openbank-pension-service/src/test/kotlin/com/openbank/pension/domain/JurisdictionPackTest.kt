@@ -17,8 +17,6 @@ import com.openbank.pension.domain.pack.LegalReviewStatus
 import com.openbank.pension.domain.pack.PackEvaluator
 import com.openbank.pension.domain.pack.PackNotFoundException
 import com.openbank.pension.domain.pack.ProviderType
-import com.openbank.pension.domain.pack.SurrenderCalculator
-import com.openbank.pension.domain.pack.SurrenderInputs
 import com.openbank.pension.infrastructure.pack.JurisdictionPackLoader
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -102,36 +100,6 @@ class JurisdictionPackTest {
         assertThat(PackEvaluator.checkEligibility(dps, minor, "CZ", emptySet(), false, on).eligible).isFalse()
         assertThat(PackEvaluator.checkEligibility(dps, minor, "CZ", emptySet(), true, on).eligible).isTrue()
         assertThat(PackEvaluator.checkEligibility(dip, minor, null, emptySet(), true, on).eligible).isFalse()
-    }
-
-    @Test
-    fun `an early exit claws back state contributions and recent tax relief`() {
-        val contract = PensionContract.draft(
-            UUID.randomUUID(), ProductLine.DPS, "CZ", 1, UUID.randomUUID(), ProviderType.PENSION_COMPANY,
-            LocalDate.parse(
-                "1990-01-01",
-            ),
-            ContributionSchedule(BigDecimal("1700"), "CZK", ContributionFrequency.MONTHLY),
-            "BALANCED", emptyList(), LocalDate.parse("2020-01-01"), Instant.EPOCH,
-        ).submit(Instant.EPOCH).activate(LocalDate.parse("2020-01-01"), Instant.EPOCH)
-        val preview = SurrenderCalculator.preview(
-            contract,
-            dps,
-            SurrenderInputs(
-                currentValue = BigDecimal("150000"),
-                incentivesReceived = mapOf(
-                    "state-contribution" to mapOf(2020 to BigDecimal("2760"), 2025 to BigDecimal("4080")),
-                    "income-tax-deduction" to mapOf(2010 to BigDecimal("999"), 2025 to BigDecimal("2340")),
-                ),
-            ),
-            on,
-        )
-        assertThat(preview.payoutConditionsMet).isFalse()
-        val claws = preview.clawbacks.associateBy { it.incentiveId }
-        assertThat(claws["state-contribution"]!!.amount).isEqualByComparingTo("6840")
-        assertThat(claws["state-contribution"]!!.mode).isEqualTo(ClawbackMode.RETURN_ALL)
-        assertThat(claws["income-tax-deduction"]!!.amount).isEqualByComparingTo("2340")
-        assertThat(preview.estimatedNetPayout).isEqualByComparingTo("140820")
     }
 
     @Test

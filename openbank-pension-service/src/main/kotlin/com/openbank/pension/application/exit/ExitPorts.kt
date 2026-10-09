@@ -19,15 +19,6 @@ import java.util.UUID
  * an activity repeats the SAME instruction and the receiving side deduplicates it.
  */
 
-/** pension-fund-service unit register (ADR-0334 §1). Clients never reach it directly. */
-interface FundAdministrationPort {
-    /** Value of all units held for the contract at the latest published NAV. */
-    suspend fun redemptionValue(contractId: UUID): BigDecimal
-
-    /** Sells units worth [amount]; returns the proceeds actually delivered. */
-    suspend fun redeem(contractId: UUID, amount: BigDecimal, idempotencyKey: String): BigDecimal
-}
-
 /** The incentive/clawback ledger slice S3 builds; read for quotes, settled on exit. */
 interface IncentiveClawbackPort {
     suspend fun balance(contractId: UUID, asOf: LocalDate): IncentiveBalance

@@ -4,6 +4,8 @@
 
 package com.openbank.pension.infrastructure.onboarding.rest
 
+import com.openbank.pension.infrastructure.rest.IDEMPOTENCY_KEY_HEADER
+import com.openbank.pension.infrastructure.rest.requireIdempotencyKey
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import com.openbank.pension.application.onboarding.OnboardingService
@@ -17,6 +19,7 @@ import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DefaultValue
 import jakarta.ws.rs.GET
+import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
@@ -71,8 +74,13 @@ class PensionOperatorResource {
     @Path("/onboarding/applications/{id}/contribution-received")
     @Operation(summary = "Record the first contribution of a signed new contract (activates it per pack)")
     @Authorize(action = "pension.operator.contribution", resource = "#id")
-    suspend fun contributionReceived(@PathParam("id") id: UUID): OperatorApplicationResponse =
-        OperatorApplicationResponse.from(onboarding.contributionReceived(id))
+    suspend fun contributionReceived(
+        @HeaderParam(IDEMPOTENCY_KEY_HEADER) idempotencyKey: String?,
+        @PathParam("id") id: UUID,
+    ): OperatorApplicationResponse {
+        requireIdempotencyKey(idempotencyKey)
+        return OperatorApplicationResponse.from(onboarding.contributionReceived(id))
+    }
 
     @GET
     @Path("/transfers")
@@ -94,9 +102,11 @@ class PensionOperatorResource {
     @Operation(summary = "Relay the ceding provider's acceptance or rejection of a transfer-in")
     @Authorize(action = "pension.operator.transfer", resource = "#id")
     suspend fun counterpartyResponse(
+        @HeaderParam(IDEMPOTENCY_KEY_HEADER) idempotencyKey: String?,
         @PathParam("id") id: UUID,
         request: CounterpartyResponseRequest?,
     ): TransferResponse {
+        requireIdempotencyKey(idempotencyKey)
         val body = requireNotNull(request) { "request body is required" }
         val accepted = requireNotNull(body.accepted) { "accepted is required" }
         val transfer = if (accepted) {
@@ -118,7 +128,11 @@ class PensionOperatorResource {
     @Path("/transfers/{id}/funds-received")
     @Operation(summary = "Record transferred funds, incentive history and original start date of a transfer-in")
     @Authorize(action = "pension.operator.transfer", resource = "#id")
-    suspend fun fundsReceived(@PathParam("id") id: UUID, request: FundsReceivedRequest?): TransferResponse {
+    suspend fun fundsReceived(
+        @HeaderParam(IDEMPOTENCY_KEY_HEADER) idempotencyKey: String?,
+        @PathParam("id") id: UUID, request: FundsReceivedRequest?,
+    ): TransferResponse {
+        requireIdempotencyKey(idempotencyKey)
         val body = requireNotNull(request) { "request body is required" }
         val arrival = FundsArrival(
             amount = requireNotNull(body.amount) { "amount is required" },

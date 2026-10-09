@@ -7,8 +7,6 @@ package com.openbank.pension.infrastructure.exit.stub
 import com.openbank.pension.application.exit.AnnuityInsurerPort
 import com.openbank.pension.application.exit.BeneficiaryVerificationPort
 import com.openbank.pension.application.exit.ClaimantKyc
-import com.openbank.pension.application.exit.FundAdministrationPort
-import com.openbank.pension.application.exit.IncentiveClawbackPort
 import com.openbank.pension.application.exit.OwnAccountVerificationPort
 import com.openbank.pension.application.exit.PaymentOrder
 import com.openbank.pension.application.exit.PayoutPaymentPort
@@ -16,7 +14,6 @@ import com.openbank.pension.application.exit.ScaVerificationPort
 import com.openbank.pension.application.exit.TaxWithholdingPort
 import com.openbank.pension.domain.exit.AnnuityPolicy
 import com.openbank.pension.domain.exit.ExitMoney
-import com.openbank.pension.domain.exit.IncentiveBalance
 import io.quarkus.arc.DefaultBean
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
@@ -36,58 +33,29 @@ import java.util.concurrent.ConcurrentHashMap
  * rather than accepting an unsigned one. Only %dev and %test enable them.
  */
 
-/** pension-fund-service unit register (slice S4). In-memory values; [setValue] is for tests and demos. */
-@DefaultBean
-@ApplicationScoped
-class StubFundAdministrationAdapter(
-    @param:ConfigProperty(name = "openbank.pension.exit.stub.default-value", defaultValue = "0")
-    private val defaultValue: BigDecimal,
-) : FundAdministrationPort {
-    private val values = ConcurrentHashMap<UUID, BigDecimal>()
-    private val redemptions = ConcurrentHashMap<String, BigDecimal>()
+/**
+ * The money-moving stubs below (tax remittance, payout payment, annuity purchase) answer only when
+ * `openbank.pension.exit.stub.checks-accept=true` (%dev / %test). Otherwise they REFUSE: a deployed
+ * pod with no real rail must fail a death settlement or payout loudly, never record a payment that
+ * never left (the PushResult.skipped lesson, ADR-0252). ADR-0334 S8.
+ */
+class ExitStubRailUnavailableException(port: String) :
+    IllegalStateException("$port is not integrated in this environment (stub refuses outside dev/test)")
 
-    fun setValue(contractId: UUID, value: BigDecimal) {
-        values[contractId] = value
-    }
-
-    fun redemptionsFor(contractId: UUID): Map<String, BigDecimal> = redemptions.filterKeys {
-        it.contains(contractId.toString())
-    }
-
-    override suspend fun redemptionValue(contractId: UUID): BigDecimal = values[contractId] ?: defaultValue
-
-    override suspend fun redeem(contractId: UUID, amount: BigDecimal, idempotencyKey: String): BigDecimal =
-        redemptions.computeIfAbsent(idempotencyKey) {
-            values.computeIfPresent(contractId) { _, v -> (v - amount).max(BigDecimal.ZERO) }
-            ExitMoney.round(amount)
-        }
-}
-
-/** Incentive/clawback ledger (slice S3). Returns an empty history unless a test sets one. */
-@DefaultBean
-@ApplicationScoped
-class StubIncentiveClawbackAdapter : IncentiveClawbackPort {
-    private val balances = ConcurrentHashMap<UUID, IncentiveBalance>()
-    val settled = ConcurrentHashMap<String, BigDecimal>()
-
-    fun setBalance(contractId: UUID, balance: IncentiveBalance) {
-        balances[contractId] = balance
-    }
-
-    override suspend fun balance(contractId: UUID, asOf: LocalDate): IncentiveBalance =
-        balances[contractId] ?: IncentiveBalance.EMPTY
-
-    override suspend fun settleClawback(contractId: UUID, amount: BigDecimal, idempotencyKey: String) {
-        settled.putIfAbsent(idempotencyKey, amount)
-    }
+private fun requireStubRail(accept: Boolean, port: String) {
+    if (!accept) throw ExitStubRailUnavailableException(port)
 }
 
 @DefaultBean
 @ApplicationScoped
-class StubTaxWithholdingAdapter : TaxWithholdingPort {
+class StubTaxWithholdingAdapter(
+    @param:ConfigProperty(name = "openbank.pension.exit.stub.checks-accept", defaultValue = "false")
+    private val accept: Boolean,
+) : TaxWithholdingPort {
     val remitted = ConcurrentHashMap<String, BigDecimal>()
 
     override suspend fun remit(contractId: UUID, kind: String, amount: BigDecimal, idempotencyKey: String) {
+        requireStubRail(accept, "TaxWithholdingPort")
         remitted.putIfAbsent(idempotencyKey, amount)
     }
 }
@@ -95,11 +63,15 @@ class StubTaxWithholdingAdapter : TaxWithholdingPort {
 /** domestic-payment stand-in: deduplicates by idempotency key exactly as the real scheme gateway must. */
 @DefaultBean
 @ApplicationScoped
-class StubPayoutPaymentAdapter : PayoutPaymentPort {
+class StubPayoutPaymentAdapter(
+    @param:ConfigProperty(name = "openbank.pension.exit.stub.checks-accept", defaultValue = "false")
+    private val accept: Boolean,
+) : PayoutPaymentPort {
     val orders = ConcurrentHashMap<String, PaymentOrder>()
     private val refs = ConcurrentHashMap<String, String>()
 
     override suspend fun pay(order: PaymentOrder): String {
+        requireStubRail(accept, "PayoutPaymentPort")
         orders.putIfAbsent(order.idempotencyKey, order)
         return refs.computeIfAbsent(order.idempotencyKey) { "STUB-PAY-${UUID.randomUUID()}" }
     }
@@ -107,15 +79,25 @@ class StubPayoutPaymentAdapter : PayoutPaymentPort {
 
 @DefaultBean
 @ApplicationScoped
-class StubAnnuityInsurerAdapter : AnnuityInsurerPort {
-    override suspend fun purchase(contractId: UUID, premium: BigDecimal, birthDate: LocalDate, idempotencyKey: String) =
-        AnnuityPolicy(
+class StubAnnuityInsurerAdapter(
+    @param:ConfigProperty(name = "openbank.pension.exit.stub.checks-accept", defaultValue = "false")
+    private val accept: Boolean,
+) : AnnuityInsurerPort {
+    override suspend fun purchase(
+        contractId: UUID,
+        premium: BigDecimal,
+        birthDate: LocalDate,
+        idempotencyKey: String,
+    ): AnnuityPolicy {
+        requireStubRail(accept, "AnnuityInsurerPort")
+        return AnnuityPolicy(
             policyRef = "STUB-ANNUITY-${idempotencyKey.hashCode().toUInt()}",
             insurerRef = "stub-insurer",
             monthlyAmount = ExitMoney.round(
                 premium.divide(BigDecimal(ILLUSTRATIVE_MONTHS), java.math.MathContext.DECIMAL64),
             ),
         )
+    }
 
     private companion object {
         /** Illustrative annuity factor only; a real insurer prices by mortality tables. */

@@ -4,6 +4,8 @@
 
 package com.openbank.pension.infrastructure.rest.funding
 
+import com.openbank.pension.infrastructure.rest.IDEMPOTENCY_KEY_HEADER
+import com.openbank.pension.infrastructure.rest.requireIdempotencyKey
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import com.openbank.pension.application.port.`in`.Caller
@@ -95,10 +97,12 @@ class ContractFundingResource {
     @Operation(summary = "Set up a standing order or SEPA direct debit quoting the contract reference")
     @Authorize(action = "pension.funding.mandate", resource = "#contractId")
     suspend fun mandate(
+        @HeaderParam(IDEMPOTENCY_KEY_HEADER) idempotencyKey: String?,
         @PathParam("contractId") contractId: UUID,
         @HeaderParam(ContractAccessGuard.PARTY_HEADER) party: String?,
         request: MandateSetupRequest?,
     ): Response {
+        requireIdempotencyKey(idempotencyKey)
         val contract = visible(guard.actingParticipant(party), contractId)
         val body = requireNotNull(request) { "request body is required" }
         val id = contributions.setUpMandate(

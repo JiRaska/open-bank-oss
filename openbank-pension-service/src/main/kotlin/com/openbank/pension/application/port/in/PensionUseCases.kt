@@ -11,8 +11,6 @@ import com.openbank.pension.domain.model.ProductLine
 import com.openbank.pension.domain.pack.IncentivePeriod
 import com.openbank.pension.domain.pack.IncentiveResult
 import com.openbank.pension.domain.pack.ProviderType
-import com.openbank.pension.domain.pack.SurrenderInputs
-import com.openbank.pension.domain.pack.SurrenderPreview
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.util.UUID
@@ -58,19 +56,9 @@ data class IncentiveEvaluationCommand(
     val sharedCapUsed: Map<String, BigDecimal>,
 )
 
-data class EarlyTerminationCommand(
-    val caller: Caller,
-    val contractId: UUID,
-    val inputs: SurrenderInputs,
-    val confirm: Boolean,
-)
-
-data class EarlyTerminationResult(val contract: PensionContract, val preview: SurrenderPreview)
-
 interface PensionContractUseCase {
     suspend fun createDraft(command: CreateDraftCommand): PensionContract
     suspend fun submit(caller: Caller, id: UUID): PensionContract
-    suspend fun activate(caller: Caller, id: UUID): PensionContract
     suspend fun electStrategy(
         caller: Caller,
         id: UUID,
@@ -81,5 +69,4 @@ interface PensionContractUseCase {
     suspend fun resumeContributions(caller: Caller, id: UUID): PensionContract
     suspend fun get(caller: Caller, id: UUID): PensionContract
     suspend fun evaluateIncentives(command: IncentiveEvaluationCommand): List<IncentiveResult>
-    suspend fun requestEarlyTermination(command: EarlyTerminationCommand): EarlyTerminationResult
 }

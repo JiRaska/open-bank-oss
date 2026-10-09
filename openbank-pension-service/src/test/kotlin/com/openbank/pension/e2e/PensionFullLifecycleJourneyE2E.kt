@@ -4,7 +4,7 @@
 
 package com.openbank.pension.e2e
 
-import com.openbank.pension.e2e.support.PensionTemporalTestEnvironment
+import com.openbank.pension.testsupport.PensionTemporalTestEnvironment
 import com.openbank.pension.e2e.support.StateAgencySimulator
 import com.openbank.pension.infrastructure.exit.stub.StubFundAdministrationAdapter
 import com.openbank.pension.infrastructure.exit.stub.StubPayoutPaymentAdapter

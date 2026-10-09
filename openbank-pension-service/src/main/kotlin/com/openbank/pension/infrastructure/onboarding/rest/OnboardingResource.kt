@@ -4,6 +4,8 @@
 
 package com.openbank.pension.infrastructure.onboarding.rest
 
+import com.openbank.pension.infrastructure.rest.IDEMPOTENCY_KEY_HEADER
+import com.openbank.pension.infrastructure.rest.requireIdempotencyKey
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import com.openbank.pension.application.onboarding.ChooseStrategyCommand
@@ -66,7 +68,11 @@ class OnboardingResource {
         summary = "Start an application; eligibility and KYC are checked at once (REJECTED with reasons if not met)",
     )
     @Authorize(action = "pension.onboarding.start")
-    suspend fun start(@HeaderParam(PARTY_HEADER) party: String?, request: StartApplicationRequest?): Response {
+    suspend fun start(
+        @HeaderParam(IDEMPOTENCY_KEY_HEADER) idempotencyKey: String?,
+        @HeaderParam(PARTY_HEADER) party: String?, request: StartApplicationRequest?,
+    ): Response {
+        requireIdempotencyKey(idempotencyKey)
         val partyId = partyOf(party)
         val body = requireNotNull(request) { "request body is required" }
         val schedule = requireNotNull(body.schedule) { "schedule is required" }
@@ -119,10 +125,12 @@ class OnboardingResource {
     @Operation(summary = "Answer the suitability / appropriateness / ESG questionnaire; returns the recommendation")
     @Authorize(action = "pension.onboarding.questionnaire", resource = "#id")
     suspend fun questionnaire(
+        @HeaderParam(IDEMPOTENCY_KEY_HEADER) idempotencyKey: String?,
         @HeaderParam(PARTY_HEADER) party: String?,
         @PathParam("id") id: UUID,
         request: QuestionnaireRequest?,
     ): QuestionnaireResponse {
+        requireIdempotencyKey(idempotencyKey)
         val body = requireNotNull(request) { "request body is required" }
         val answers = QuestionnaireAnswers(
             knowledgeLevel = body.knowledgeLevel,
@@ -152,10 +160,12 @@ class OnboardingResource {
     @Operation(summary = "Choose the strategy (default: the recommendation) and issue its key-information document")
     @Authorize(action = "pension.onboarding.strategy", resource = "#id")
     suspend fun chooseStrategy(
+        @HeaderParam(IDEMPOTENCY_KEY_HEADER) idempotencyKey: String?,
         @HeaderParam(PARTY_HEADER) party: String?,
         @PathParam("id") id: UUID,
         request: ChooseStrategyRequest?,
     ): ApplicationResponse {
+        requireIdempotencyKey(idempotencyKey)
         val body = request ?: ChooseStrategyRequest()
         return ApplicationResponse.from(
             onboarding.chooseStrategy(
@@ -171,10 +181,12 @@ class OnboardingResource {
     @Operation(summary = "Accept the key-information document that was issued (named by its id)")
     @Authorize(action = "pension.onboarding.kid", resource = "#id")
     suspend fun acceptKid(
+        @HeaderParam(IDEMPOTENCY_KEY_HEADER) idempotencyKey: String?,
         @HeaderParam(PARTY_HEADER) party: String?,
         @PathParam("id") id: UUID,
         request: AcceptKidRequest?,
     ): ApplicationResponse {
+        requireIdempotencyKey(idempotencyKey)
         val documentId = requireNotNull(request?.documentId) { "documentId is required" }
         return ApplicationResponse.from(onboarding.acceptKid(id, partyOf(party), documentId))
     }
@@ -184,10 +196,12 @@ class OnboardingResource {
     @Operation(summary = "SCA-sign the contract (and transfer request); starts the activation workflow")
     @Authorize(action = "pension.onboarding.sign", resource = "#id")
     suspend fun sign(
+        @HeaderParam(IDEMPOTENCY_KEY_HEADER) idempotencyKey: String?,
         @HeaderParam(PARTY_HEADER) party: String?,
         @PathParam("id") id: UUID,
         request: SignRequest?,
     ): ApplicationResponse {
+        requireIdempotencyKey(idempotencyKey)
         val challenge =
             requireNotNull(request?.scaChallengeId?.takeIf { it.isNotBlank() }) { "scaChallengeId is required" }
         return ApplicationResponse.from(onboarding.sign(id, partyOf(party), challenge))
@@ -197,13 +211,23 @@ class OnboardingResource {
     @Path("/{id}/withdraw")
     @Operation(summary = "Withdraw a signed application within the cooling-off period; the contract closes")
     @Authorize(action = "pension.onboarding.withdraw", resource = "#id")
-    suspend fun withdraw(@HeaderParam(PARTY_HEADER) party: String?, @PathParam("id") id: UUID): ApplicationResponse =
-        ApplicationResponse.from(onboarding.withdraw(id, partyOf(party)))
+    suspend fun withdraw(
+        @HeaderParam(IDEMPOTENCY_KEY_HEADER) idempotencyKey: String?,
+        @HeaderParam(PARTY_HEADER) party: String?, @PathParam("id") id: UUID,
+    ): ApplicationResponse {
+        requireIdempotencyKey(idempotencyKey)
+        return ApplicationResponse.from(onboarding.withdraw(id, partyOf(party)))
+    }
 
     @POST
     @Path("/{id}/abandon")
     @Operation(summary = "Abandon an unsigned application")
     @Authorize(action = "pension.onboarding.withdraw", resource = "#id")
-    suspend fun abandon(@HeaderParam(PARTY_HEADER) party: String?, @PathParam("id") id: UUID): ApplicationResponse =
-        ApplicationResponse.from(onboarding.abandon(id, partyOf(party)))
+    suspend fun abandon(
+        @HeaderParam(IDEMPOTENCY_KEY_HEADER) idempotencyKey: String?,
+        @HeaderParam(PARTY_HEADER) party: String?, @PathParam("id") id: UUID,
+    ): ApplicationResponse {
+        requireIdempotencyKey(idempotencyKey)
+        return ApplicationResponse.from(onboarding.abandon(id, partyOf(party)))
+    }
 }

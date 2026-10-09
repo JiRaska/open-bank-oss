@@ -24,7 +24,7 @@ import java.util.UUID
 
 /**
  * Onboarding and transfers over real HTTP against real Postgres, with the real workflows running
- * in an in-process Temporal (WorkflowClientTestProducer). Ownership is tested as the absence of
+ * in an in-process Temporal (PensionTemporalTestEnvironment). Ownership is tested as the absence of
  * data: another party's application or transfer answers 404 exactly like an unknown id.
  */
 @QuarkusTest

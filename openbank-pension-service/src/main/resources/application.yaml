@@ -57,6 +57,23 @@ quarkus:
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
 
+  # pension-service's OWN machine identity (ADR-0334 S8): Keycloak client `openbank-pension`,
+  # ROLE_API only. Used ONLY by the pension-fund-service rest-client (FundAdministrationPort);
+  # pension-fund-service admits holdings and orders for service-account-openbank-pension alone.
+  # Never the shared openbank-services client.
+  oidc-client:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+    client-id: openbank-pension
+    credentials:
+      secret: ${OIDC_PENSION_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    grant:
+      type: client
+
+  rest-client:
+    pension-fund-service:
+      url: ${PENSION_FUND_SERVICE_URL:http://localhost:8162}
+      connect-timeout: 2000
+      read-timeout: 5000
 
   shutdown:
     timeout: 30S
@@ -152,6 +169,9 @@ authz:
       tls:
         verification: none
       enabled: false
+    # The in-memory fund register replaces the REST adapter in dev; no token is ever minted.
+    oidc-client:
+      enabled: false
   authz:
     enforce: "false"
 
@@ -175,6 +195,8 @@ authz:
     management:
       enabled: false
     oidc:
+      enabled: false
+    oidc-client:
       enabled: false
   authz:
     enforce: "false"

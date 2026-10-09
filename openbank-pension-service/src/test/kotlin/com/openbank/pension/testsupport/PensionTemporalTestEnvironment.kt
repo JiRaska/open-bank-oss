@@ -2,15 +2,12 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
-package com.openbank.pension.e2e.support
+package com.openbank.pension.testsupport
 
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
-import com.openbank.pension.application.exit.workflow.ExitActivities
-import com.openbank.pension.application.onboarding.workflow.OnboardingWorkflowImpl
-import com.openbank.pension.application.onboarding.workflow.TransferInWorkflowImpl
-import com.openbank.pension.application.onboarding.workflow.TransferOutWorkflowImpl
-import com.openbank.pension.infrastructure.exit.temporal.ExitWorkerRegistrar
+import com.openbank.pension.infrastructure.exit.temporal.ExitActivitiesImpl
 import com.openbank.pension.infrastructure.onboarding.temporal.PensionActivitiesImpl
+import com.openbank.pension.infrastructure.temporal.PensionWorkerRegistrar
 import io.quarkus.runtime.StartupEvent
 import io.temporal.client.WorkflowClient
 import io.temporal.client.WorkflowClientOptions
@@ -30,27 +27,27 @@ import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.time.Duration
 
 /**
- * The fleet's in-process Temporal pattern (`WorkflowClientTestProducer` in domestic-payment,
- * settlement, sepa-payment): the real `WorkflowClient` is replaced by a time-skipping
- * [TestWorkflowEnvironment], and — unlike those no-op variants — the REAL pension workflows and
- * activities are registered on it, so an E2E journey runs onboarding, transfer and exit
- * orchestration exactly as a deployed worker would, only with a clock the test can advance.
- *
- * Every workflow is registered on ONE worker for the configured task queue. In a deployed pod the
- * onboarding (S2) and exit (S5) registrars each create their own worker on that same queue with a
- * disjoint set of workflow types; see the PR description for why that is a finding.
+ * The ONE in-process Temporal for every `@QuarkusTest` in this module (the fleet's
+ * `WorkflowClientTestProducer` pattern). The real `WorkflowClient` is replaced by a time-skipping
+ * [TestWorkflowEnvironment], and the REAL workflows and activities are registered through the
+ * production registrar's own [PensionWorkerRegistrar.registerOnboarding] /
+ * [PensionWorkerRegistrar.registerExit], each on its OWN configured task queue — exactly the
+ * topology a deployed pod runs, so a workflow started on the wrong queue never executes here
+ * either.
  *
  * Workers are registered on `StartupEvent`, not in `@PostConstruct`: the activity beans depend
- * (through the services) on the `WorkflowClient` this bean produces, so asking for them while the
- * client is still being created would be a cycle.
+ * (through the services) on the client this bean produces.
  */
 @ApplicationScoped
 @Alternative
 @Priority(1)
 class PensionTemporalTestEnvironment {
 
-    @ConfigProperty(name = "openbank.temporal.task-queue")
-    lateinit var taskQueue: String
+    @ConfigProperty(name = "openbank.pension.onboarding.task-queue")
+    lateinit var onboardingQueue: String
+
+    @ConfigProperty(name = "openbank.pension.exit.task-queue")
+    lateinit var exitQueue: String
 
     private lateinit var env: TestWorkflowEnvironment
 
@@ -76,16 +73,11 @@ class PensionTemporalTestEnvironment {
     fun onStart(
         @Observes event: StartupEvent,
         onboarding: Instance<PensionActivitiesImpl>,
-        exit: Instance<ExitActivities>,
+        exit: Instance<ExitActivitiesImpl>,
     ) {
-        val worker = env.newWorker(taskQueue)
-        worker.registerWorkflowImplementationTypes(
-            OnboardingWorkflowImpl::class.java,
-            TransferInWorkflowImpl::class.java,
-            TransferOutWorkflowImpl::class.java,
-        )
-        worker.registerActivitiesImplementations(onboarding.get())
-        ExitWorkerRegistrar.register(worker, exit.get())
+        PensionWorkerRegistrar.requireDistinctQueues(onboardingQueue, exitQueue)
+        PensionWorkerRegistrar.registerOnboarding(env.newWorker(onboardingQueue), onboarding.get())
+        PensionWorkerRegistrar.registerExit(env.newWorker(exitQueue), exit.get())
         env.start()
     }
 

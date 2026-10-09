@@ -4,7 +4,10 @@
 
 package com.openbank.pension.application.onboarding
 
+import com.openbank.pension.application.port.out.FundAdministrationPort
 import com.openbank.pension.application.port.out.PensionContractRepository
+import com.openbank.pension.application.port.out.Redemption
+import com.openbank.pension.application.port.out.TransferInBookingPort
 import com.openbank.pension.domain.model.ContractStatus
 import com.openbank.pension.domain.onboarding.OnboardingStatus
 import com.openbank.pension.domain.pack.JurisdictionPackRegistry
@@ -43,6 +46,7 @@ class TransferService(
     private val signatures: SignatureVerificationPort,
     private val orchestrator: PensionOrchestrator,
     private val onboarding: OnboardingService,
+    private val transferInBooking: TransferInBookingPort,
     private val tx: TransactionRunner,
     private val clock: Clock,
 ) {
@@ -199,7 +203,9 @@ class TransferService(
         } else {
             transfers.save(transfer.fundsReceived(arrival, pack.transfer.carriesIncentiveHistory, now()))
         }
-        funds.subscribeTransferIn(contract.id, id, arrival)
+        funds.subscribe(contract.id, arrival.amount, arrival.currency, "transfer-in:$id")
+        // Booked in S3's contribution ledger as TRANSFER_IN (tax year reports it apart; no second order).
+        transferInBooking.book(contract.id, id, arrival.amount, arrival.currency, today())
         tx.inTransaction {
             val current = contracts.findById(contract.id) ?: throw OnboardingNotFoundException("contract", contract.id)
             if (current.status == ContractStatus.PENDING_ACTIVATION) {
@@ -269,7 +275,12 @@ class TransferService(
         val transfer = get(id, null)
         transfer.redemptionRef?.let { return it }
         check(transfer.status == TransferStatus.VALUATED) { "transfer $id is ${transfer.status}, not VALUATED" }
-        val ref = funds.redeemForTransfer(transfer.contractId, id, checkNotNull(transfer.grossAmount))
+        val ref = funds.redeem(
+            transfer.contractId,
+            checkNotNull(transfer.grossAmount),
+            transfer.currency,
+            "transfer-out:$id",
+        ).reference
         transfers.save(transfer.copy(redemptionRef = ref, updatedAt = now()))
         return ref
     }
@@ -306,7 +317,13 @@ class TransferService(
         // SETTLED means the money left: nothing to reverse, only the local completion is pending.
         if (transfer.status.terminal || transfer.status == TransferStatus.SETTLED) return
         val ref = transfer.redemptionRef
-        if (ref != null) funds.reverseRedemption(transfer.contractId, ref)
+        if (ref != null) {
+            funds.reverseRedemption(
+                transfer.contractId,
+                Redemption(ref, checkNotNull(transfer.grossAmount)),
+                transfer.currency,
+            )
+        }
         val compensation = if (ref != null) Compensation.REDEMPTION_REVERSED else Compensation.NONE
         val failed = if (transfer.status == TransferStatus.REQUESTED) TransferStatus.REJECTED else TransferStatus.FAILED
         transfers.save(transfer.failed(failed, reason, compensation, now()))

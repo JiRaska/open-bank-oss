@@ -4,7 +4,7 @@
 
 package com.openbank.pension.application.usecase
 
-import com.openbank.pension.application.port.out.ContractActivationPort
+import com.openbank.pension.application.port.out.OnboardingActivationPort
 import com.openbank.pension.application.port.out.ContractFundingDirectory
 import com.openbank.pension.application.port.out.ContractFundingView
 import com.openbank.pension.application.port.out.ContractNotFoundException
@@ -62,7 +62,7 @@ class ContributionService(
     private val employers: EmployerDirectoryPort,
     private val mandates: PaymentMandatePort,
     private val enrolments: EmployerEnrolmentRepository,
-    private val activation: ContractActivationPort,
+    private val activation: OnboardingActivationPort,
     private val clock: Clock,
 ) {
     private val log = Logger.getLogger(ContributionService::class.java)
@@ -81,6 +81,7 @@ class ContributionService(
         val contractId = references.contractFor(reference) ?: return park(payment, UnmatchedReason.UNKNOWN_REFERENCE)
         val contract = directory.find(contractId) ?: return park(payment, UnmatchedReason.UNKNOWN_REFERENCE)
         rejectionFor(contract, payment.currency)?.let { return park(payment, it) }
+        awaitingOnboarding(contract)?.let { return park(payment, it) }
         return credit(contract, payment.paymentId, ContributionSource.PARTICIPANT, payment.channel, payment, null)
     }
 
@@ -88,7 +89,7 @@ class ContributionService(
     suspend fun assignUnmatched(id: UUID, contractId: UUID, actor: String): Contribution {
         val parked = unmatched.findById(id) ?: throw UnmatchedPaymentNotFoundException(id)
         val contract = requireContract(contractId)
-        check(rejectionFor(contract, parked.payment.currency) == null) {
+        check(rejectionFor(contract, parked.payment.currency) == null && awaitingOnboarding(contract) == null) {
             "contract $contractId cannot receive this payment (status ${contract.status}, currency ${contract.currency})"
         }
         val assigned = parked.assign(contractId, actor, now())
@@ -135,7 +136,10 @@ class ContributionService(
                 channel = ContributionChannel.EMPLOYER_BATCH,
             )
             val contract = references.contractFor(line.contractReference.trim())?.let { directory.find(it) }
-            val outcome = if (contract == null || rejectionFor(contract, linePayment.currency) != null) {
+            val outcome = if (contract == null ||
+                rejectionFor(contract, linePayment.currency) != null ||
+                awaitingOnboarding(contract) != null
+            ) {
                 park(linePayment, UnmatchedReason.EMPLOYER_LINE)
             } else if (!enrolments.isEnrolled(contract.contractId, batch.employerPartyId)) {
                 park(linePayment, UnmatchedReason.EMPLOYER_NOT_AUTHORISED)
@@ -257,13 +261,15 @@ class ContributionService(
             ),
         )
         if (!created) return ReceiptOutcome.Duplicate(stored)
-        if (contract.status == PENDING) activation.activateOnFirstContribution(contract.contractId, payment.valueDate)
+        // Activation is the onboarding workflow's: it is TOLD a contribution arrived and activates only
+        // once its own gates pass (signature, cooling-off). The contract is never moved from here.
+        if (contract.status == PENDING) activation.firstContributionReceived(contract.contractId)
         subscribe(stored)
         return ReceiptOutcome.Credited(stored)
     }
 
     private suspend fun subscribe(c: Contribution): Boolean = runCatching {
-        val order = fund.placeSubscription(c.contractId, c.amount, c.currency, "contribution:${c.paymentId}")
+        val order = fund.subscribe(c.contractId, c.amount, c.currency, "contribution:${c.paymentId}")
         contributions.setSubscriptionOrder(c.id, order)
     }.onFailure { log.warnf(it, "subscription for contribution %s not placed; the sweep will retry", c.id) }.isSuccess
 
@@ -273,6 +279,18 @@ class ContributionService(
                 UnmatchedPayment(UUID.randomUUID(), payment, reason, UnmatchedStatus.OPEN, now()),
             ),
         )
+
+    /**
+     * A PENDING_ACTIVATION contract takes money only while a SIGNED onboarding awaits its first
+     * contribution. Otherwise (never signed, a transfer-in, withdrawn) the money is parked: a payment
+     * must not stand in for the onboarding gates.
+     */
+    private suspend fun awaitingOnboarding(contract: ContractFundingView): UnmatchedReason? =
+        if (contract.status == PENDING && !activation.awaitsFirstContribution(contract.contractId)) {
+            UnmatchedReason.CONTRACT_NOT_ACCEPTING
+        } else {
+            null
+        }
 
     private fun rejectionFor(contract: ContractFundingView, currency: String): UnmatchedReason? = when {
         contract.status !in INTAKE -> UnmatchedReason.CONTRACT_NOT_ACCEPTING

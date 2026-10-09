@@ -55,7 +55,7 @@ class TerminationService(
         }
         val quote = ExitCalculator.terminationQuote(
             pack,
-            ctx.gateways.fund.redemptionValue(contractId),
+            ctx.gateways.fund.valuation(contractId, contract.schedule.currency).amount,
             ctx.gateways.incentives.balance(contractId, today),
             today.year,
         )

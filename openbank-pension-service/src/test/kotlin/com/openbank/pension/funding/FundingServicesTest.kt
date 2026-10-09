@@ -356,16 +356,45 @@ class FundingServicesTest {
     }
 
     @Test
-    fun `the first payment to a contract awaiting activation is credited and activates it`(): Unit = runBlocking {
-        val c = f.contract(status = "PENDING_ACTIVATION")
-        val outcome = f.contributionService.receive(
-            payment("first", "1700", f.contributionService.paymentReference(c.contractId)),
-        )
-        assertThat(outcome).isInstanceOf(ReceiptOutcome.Credited::class.java)
-        assertThat(f.activations).containsExactly(c.contractId)
-        f.contributionService.receive(payment("second", "1700", f.contributionService.paymentReference(c.contractId)))
-        assertThat(f.activations).hasSize(1)
-    }
+    fun `a first payment to a signed onboarding is credited and signals onboarding, never activating itself`(): Unit =
+        runBlocking {
+            val c = f.contract(status = "PENDING_ACTIVATION")
+            f.awaitingOnboarding += c.contractId
+            val outcome = f.contributionService.receive(
+                payment("first", "1700", f.contributionService.paymentReference(c.contractId)),
+            )
+            assertThat(outcome).isInstanceOf(ReceiptOutcome.Credited::class.java)
+            assertThat(f.activationSignals).containsExactly(c.contractId)
+            assertThat(f.contracts.getValue(c.contractId).status)
+                .describedAs("only the onboarding workflow activates (signature, KID, cooling-off)")
+                .isEqualTo("PENDING_ACTIVATION")
+        }
+
+    /**
+     * ADR-0334 S8 security fix: S3's default activation adapter applied S1's activate transition on
+     * the first payment, so ANY payment quoting the reference activated a PENDING_ACTIVATION
+     * contract whose onboarding was never signed (no KID, no SCA, no cooling-off). Now such money
+     * is parked and nothing is activated or subscribed.
+     */
+    @Test
+    fun `a payment to a pending contract with no signed onboarding is parked and activates nothing`(): Unit =
+        runBlocking {
+            val c = f.contract(status = "PENDING_ACTIVATION")
+            val outcome = f.contributionService.receive(
+                payment("unsigned", "1700", f.contributionService.paymentReference(c.contractId)),
+            )
+            assertThat(outcome).isInstanceOf(ReceiptOutcome.Unmatched::class.java)
+            assertThat((outcome as ReceiptOutcome.Unmatched).unmatched.reason)
+                .isEqualTo(UnmatchedReason.CONTRACT_NOT_ACCEPTING)
+            assertThat(f.activationSignals).isEmpty()
+            assertThat(f.subscriptions).isEmpty()
+            assertThat(f.contracts.getValue(c.contractId).status).isEqualTo("PENDING_ACTIVATION")
+            // An operator cannot force it in either.
+            val parked = outcome.unmatched.id
+            assertThatThrownBy {
+                runBlocking { f.contributionService.assignUnmatched(parked, c.contractId, "ops") }
+            }.isInstanceOf(IllegalStateException::class.java)
+        }
 
     @Test
     fun `transferred-in funds are booked as TRANSFER_IN once, without a second subscription`(): Unit = runBlocking {

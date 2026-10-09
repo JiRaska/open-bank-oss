@@ -5,7 +5,7 @@
 package com.openbank.pension.infrastructure
 
 import com.openbank.pension.application.port.out.ClaimBatchRepository
-import com.openbank.pension.application.port.out.ContractActivationPort
+import com.openbank.pension.application.port.out.OnboardingActivationPort
 import com.openbank.pension.application.port.out.ContractFundingDirectory
 import com.openbank.pension.application.port.out.ContractReferenceRepository
 import com.openbank.pension.application.port.out.ContributionRepository
@@ -43,7 +43,7 @@ class FundingBeans {
         employers: EmployerDirectoryPort,
         mandates: PaymentMandatePort,
         enrolments: EmployerEnrolmentRepository,
-        activation: ContractActivationPort,
+        activation: OnboardingActivationPort,
         clock: Clock,
     ): ContributionService = ContributionService(
         directory, references, contributions, unmatched, fund, employers, mandates, enrolments, activation, clock,

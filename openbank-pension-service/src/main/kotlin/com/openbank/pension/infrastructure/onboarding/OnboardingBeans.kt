@@ -4,11 +4,12 @@
 
 package com.openbank.pension.infrastructure.onboarding
 
-import com.openbank.pension.application.onboarding.FundAdministrationPort
+import com.openbank.pension.application.port.out.FundAdministrationPort
 import com.openbank.pension.application.onboarding.KeyInformationDocumentPort
 import com.openbank.pension.application.onboarding.OnboardingApplicationRepository
 import com.openbank.pension.application.onboarding.OnboardingRulesRegistry
 import com.openbank.pension.application.onboarding.OnboardingService
+import com.openbank.pension.application.usecase.ContributionService
 import com.openbank.pension.application.onboarding.PartyKycPort
 import com.openbank.pension.application.onboarding.PartyRelationPort
 import com.openbank.pension.application.onboarding.PensionOrchestrator
@@ -70,6 +71,9 @@ class OnboardingBeans {
     @ApplicationScoped
     fun onboardingActivationPort(onboarding: OnboardingService): OnboardingActivationPort =
         object : OnboardingActivationPort {
+            override suspend fun awaitsFirstContribution(contractId: UUID) =
+                onboarding.awaitsFirstContribution(contractId)
+
             override suspend fun firstContributionReceived(contractId: UUID) =
                 onboarding.firstContributionReceived(contractId)
         }
@@ -87,10 +91,14 @@ class OnboardingBeans {
         signatures: SignatureVerificationPort,
         orchestrator: PensionOrchestrator,
         onboarding: OnboardingService,
+        contributions: ContributionService,
         tx: TransactionRunner,
         clock: Clock,
     ): TransferService = TransferService(
         transfers, applications, contracts, packs, counterparties, funds, signatures, orchestrator, onboarding,
+        { contractId, transferId, amount, currency, valueDate ->
+            contributions.bookTransferIn(contractId, transferId, amount, currency, valueDate)
+        },
         tx, clock,
     )
 }

@@ -79,7 +79,7 @@ class PayoutService(
         val pack = ctx.packs.pinnedFor(contract)
         val rules = pack.exitRules()
         val today = LocalDate.now(ctx.clock)
-        val value = ctx.gateways.fund.redemptionValue(contract.id)
+        val value = ctx.gateways.fund.valuation(contract.id, contract.schedule.currency).amount
         val balance = ctx.gateways.incentives.balance(contract.id, today)
         val eligibility = ExitCalculator.eligibility(contract, pack, today)
         val (gross, months) = if (command.form == PayoutForm.EARLY_WITHDRAWAL) {

@@ -43,7 +43,7 @@ class ExitExecutionService(private val ctx: ExitContext) {
             stores.notices.save(notice.supersede(now()))
             return false
         }
-        val proceeds = gw.fund.redeem(notice.contractId, notice.quote.redemptionValue, key("term", noticeId, "redeem"))
+        val proceeds = redeem(notice.contractId, notice.quote.redemptionValue, key("term", noticeId, "redeem"))
         stores.notices.save(notice.markRedeemed(proceeds, now()))
         return true
     }
@@ -98,7 +98,7 @@ class ExitExecutionService(private val ctx: ExitContext) {
         if (payout.scheduled || payout.status == PayoutStatus.COMPLETED) return
         val q = payout.quote
         if (payout.status == PayoutStatus.CONFIRMED) {
-            val proceeds = gw.fund.redeem(payout.contractId, q.grossAmount, key("payout", payoutId, "redeem"))
+            val proceeds = redeem(payout.contractId, q.grossAmount, key("payout", payoutId, "redeem"))
             payout = stores.payouts.save(payout.markRedeemed(proceeds, now()))
         }
         remit(payout.contractId, "PAYOUT_WITHHOLDING", q.taxWithheld, key("payout", payoutId, "tax"))
@@ -134,7 +134,7 @@ class ExitExecutionService(private val ctx: ExitContext) {
         payout = stores.payouts.save(payout.startInstallments(now()))
         val installment = requireNotNull(payout.schedule).installments.first { it.seq == seq }
         if (installment.status == InstallmentStatus.PAID) return true
-        gw.fund.redeem(payout.contractId, installment.gross, key("payout", payoutId, "i$seq-redeem"))
+        redeem(payout.contractId, installment.gross, key("payout", payoutId, "i$seq-redeem"))
         remit(payout.contractId, "PAYOUT_WITHHOLDING", installment.tax, key("payout", payoutId, "i$seq-tax"))
         val contract = contract(payout.contractId)
         val ref = pay(
@@ -168,7 +168,7 @@ class ExitExecutionService(private val ctx: ExitContext) {
         if (claim.incentiveReturn.signum() > 0) {
             gw.incentives.settleClawback(claim.contractId, claim.incentiveReturn, key("death", claimId, "clawback"))
         }
-        val proceeds = gw.fund.redeem(
+        val proceeds = redeem(
             claim.contractId,
             requireNotNull(claim.valuation),
             key("death", claimId, "redeem"),
@@ -243,6 +243,10 @@ class ExitExecutionService(private val ctx: ExitContext) {
 
     private suspend fun contract(id: UUID): PensionContract =
         requireNotNull(stores.contracts.findById(id)) { "contract $id vanished" }
+
+    /** Sells units worth [amount] through the shared fund port; the proceeds are the amount ordered. */
+    private suspend fun redeem(contractId: UUID, amount: BigDecimal, idempotencyKey: String): BigDecimal =
+        gw.fund.redeem(contractId, amount, currency(contract(contractId)), idempotencyKey).amount
 
     private suspend fun payout(id: UUID): PayoutRequest = requireNotNull(stores.payouts.findById(id)) {
         "payout $id vanished"

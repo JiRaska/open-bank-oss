@@ -4,6 +4,8 @@
 
 package com.openbank.pension.infrastructure.onboarding.rest
 
+import com.openbank.pension.infrastructure.rest.IDEMPOTENCY_KEY_HEADER
+import com.openbank.pension.infrastructure.rest.requireIdempotencyKey
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import com.openbank.pension.application.onboarding.TransferOutCommand
@@ -13,6 +15,7 @@ import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.ForbiddenException
+import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.Produces
@@ -47,7 +50,11 @@ class ReceivingProviderResource {
     @Path("/out")
     @Operation(summary = "Request a transfer-out to the calling provider; waits for the participant's SCA consent")
     @Authorize(action = "pension.transfer.provider-request")
-    suspend fun requestOut(request: TransferOutRequest?): Response {
+    suspend fun requestOut(
+        @HeaderParam(IDEMPOTENCY_KEY_HEADER) idempotencyKey: String?,
+        request: TransferOutRequest?,
+    ): Response {
+        requireIdempotencyKey(idempotencyKey)
         val body = requireNotNull(request) { "request body is required" }
         val receiving = body.toCounterparty()
         if (identity.principal?.name != PROVIDER_PRINCIPAL_PREFIX + receiving.providerId) {

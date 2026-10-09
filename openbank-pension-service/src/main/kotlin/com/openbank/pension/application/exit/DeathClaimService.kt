@@ -103,7 +103,7 @@ class DeathClaimService(
         val contract = contractsUseCase.get(Caller.STAFF, claim.contractId)
         val pack = ctx.packs.pinnedFor(contract)
         val rules = pack.exitRules()
-        val value = ctx.gateways.fund.redemptionValue(contract.id)
+        val value = ctx.gateways.fund.valuation(contract.id, contract.schedule.currency).amount
         val balance = ctx.gateways.incentives.balance(contract.id, LocalDate.now(ctx.clock))
         val returned = if (rules.death.clawbackOnDeath) balance.stateIncentivesToReturn else BigDecimal.ZERO
         val approved = claim.approve(

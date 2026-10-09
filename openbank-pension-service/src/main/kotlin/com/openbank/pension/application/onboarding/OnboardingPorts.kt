@@ -138,17 +138,6 @@ interface TransferCounterpartyPort {
     suspend fun payTransferOut(request: TransferRequest, incentiveHistory: List<IncentiveHistoryEntry>): String
 }
 
-data class Valuation(val amount: BigDecimal, val currency: String, val asOf: LocalDate)
-
-/** pension-fund-service (ADR-0334 §1): the unit register behind the contract. */
-interface FundAdministrationPort {
-    /** The value of the contract's holdings, expressed in [currency] (the contract currency). */
-    suspend fun valuation(contractId: UUID, currency: String): Valuation
-    suspend fun redeemForTransfer(contractId: UUID, transferId: UUID, amount: BigDecimal): String
-    suspend fun reverseRedemption(contractId: UUID, redemptionRef: String)
-    suspend fun subscribeTransferIn(contractId: UUID, transferId: UUID, arrival: FundsArrival): String
-}
-
 // --- orchestration ------------------------------------------------------------------------------
 
 /** The timers one onboarding workflow runs on, resolved from the pinned pack at signature. */

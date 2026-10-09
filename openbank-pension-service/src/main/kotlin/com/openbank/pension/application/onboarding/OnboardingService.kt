@@ -355,13 +355,18 @@ class OnboardingService(
 
     /** [com.openbank.pension.application.port.out.OnboardingActivationPort], for slice S3. */
     suspend fun firstContributionReceived(contractId: UUID): ActivationOutcome {
-        val application = applications.findByContract(contractId) ?: return ActivationOutcome.NOT_AWAITING
-        if (application.status != OnboardingStatus.SIGNED || application.kind != OnboardingKind.NEW_CONTRACT) {
-            return ActivationOutcome.NOT_AWAITING
-        }
+        val application = awaiting(contractId) ?: return ActivationOutcome.NOT_AWAITING
         orchestrator.signalContributionReceived(application.id)
         return ActivationOutcome.SIGNALLED
     }
+
+    /** [com.openbank.pension.application.port.out.OnboardingActivationPort.awaitsFirstContribution]. */
+    suspend fun awaitsFirstContribution(contractId: UUID): Boolean = awaiting(contractId) != null
+
+    private suspend fun awaiting(contractId: UUID): OnboardingApplication? =
+        applications.findByContract(contractId)?.takeIf {
+            it.status == OnboardingStatus.SIGNED && it.kind == OnboardingKind.NEW_CONTRACT
+        }
 
     // --- workflow callbacks (idempotent: a retried activity must not fail on its own effect) -----
 

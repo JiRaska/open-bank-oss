@@ -5,7 +5,10 @@
 package com.openbank.pension.funding
 
 import com.openbank.pension.application.port.out.ClaimBatchRepository
-import com.openbank.pension.application.port.out.ContractActivationPort
+import com.openbank.pension.application.port.out.ActivationOutcome
+import com.openbank.pension.application.port.out.OnboardingActivationPort
+import com.openbank.pension.application.port.out.Redemption
+import com.openbank.pension.application.port.out.Valuation
 import com.openbank.pension.application.port.out.ContractFundingDirectory
 import com.openbank.pension.application.port.out.ContractFundingView
 import com.openbank.pension.application.port.out.ContractReferenceRepository
@@ -181,20 +184,24 @@ class InMemoryFunding(now: Instant = Instant.parse("2026-02-10T10:00:00Z")) {
             (contractId to employerPartyId) in enrolled
     }
 
-    val activations = mutableListOf<UUID>()
+    /** Contracts whose SIGNED onboarding awaits its first contribution (S2's answer). */
+    val awaitingOnboarding = mutableSetOf<UUID>()
 
-    val activation = object : ContractActivationPort {
-        override suspend fun activateOnFirstContribution(contractId: UUID, startDate: LocalDate): Boolean {
-            val c = contracts[contractId] ?: return false
-            if (c.status != "PENDING_ACTIVATION") return false
-            contracts[contractId] = c.copy(status = "ACTIVE")
-            activations += contractId
-            return true
+    /** First-contribution signals sent to onboarding. Onboarding, not this fake, would activate. */
+    val activationSignals = mutableListOf<UUID>()
+
+    val activation = object : OnboardingActivationPort {
+        override suspend fun awaitsFirstContribution(contractId: UUID) = contractId in awaitingOnboarding
+
+        override suspend fun firstContributionReceived(contractId: UUID): ActivationOutcome {
+            if (contractId !in awaitingOnboarding) return ActivationOutcome.NOT_AWAITING
+            activationSignals += contractId
+            return ActivationOutcome.SIGNALLED
         }
     }
 
     val fund = object : FundAdministrationPort {
-        override suspend fun placeSubscription(
+        override suspend fun subscribe(
             contractId: UUID,
             amount: BigDecimal,
             currency: String,
@@ -204,6 +211,14 @@ class InMemoryFunding(now: Instant = Instant.parse("2026-02-10T10:00:00Z")) {
             subscriptions += idempotencyKey
             return "order-$idempotencyKey"
         }
+
+        override suspend fun valuation(contractId: UUID, currency: String) =
+            Valuation(BigDecimal.ZERO, currency, LocalDate.now(clock))
+
+        override suspend fun redeem(contractId: UUID, amount: BigDecimal, currency: String, idempotencyKey: String) =
+            Redemption(idempotencyKey, amount)
+
+        override suspend fun reverseRedemption(contractId: UUID, redemption: Redemption, currency: String) = Unit
     }
 
     val employers = object : EmployerDirectoryPort {

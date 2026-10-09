@@ -6,7 +6,7 @@ package com.openbank.pension.infrastructure.onboarding.adapter
 
 import com.openbank.pension.application.onboarding.CounterpartyDispatch
 import com.openbank.pension.application.onboarding.CounterpartyReceipt
-import com.openbank.pension.application.onboarding.FundAdministrationPort
+import com.openbank.pension.application.port.out.FundAdministrationPort
 import com.openbank.pension.application.onboarding.GeneratedDocument
 import com.openbank.pension.application.onboarding.IntegrationUnavailableException
 import com.openbank.pension.application.onboarding.KeyInformationDocumentPort
@@ -18,7 +18,7 @@ import com.openbank.pension.application.onboarding.PartyRelationPort
 import com.openbank.pension.application.onboarding.SignatureOutcome
 import com.openbank.pension.application.onboarding.SignatureVerificationPort
 import com.openbank.pension.application.onboarding.TransferCounterpartyPort
-import com.openbank.pension.application.onboarding.Valuation
+import com.openbank.pension.application.port.out.Valuation
 import com.openbank.pension.domain.transfer.FundsArrival
 import com.openbank.pension.domain.transfer.IncentiveHistoryEntry
 import com.openbank.pension.domain.transfer.TransferRequest
@@ -133,24 +133,3 @@ class StubTransferCounterpartyAdapter(private val stub: StubIntegrationSwitch) :
     ): String = stub.call("TransferCounterpartyPort") { "stub-payment-${request.id}" }
 }
 
-@ApplicationScoped
-class StubFundAdministrationAdapter(private val stub: StubIntegrationSwitch, private val clock: Clock) :
-    FundAdministrationPort {
-    override suspend fun valuation(contractId: UUID, currency: String): Valuation =
-        stub.call("FundAdministrationPort") {
-            Valuation(STUB_VALUE, currency, LocalDate.now(clock))
-        }
-
-    override suspend fun redeemForTransfer(contractId: UUID, transferId: UUID, amount: BigDecimal): String =
-        stub.call("FundAdministrationPort") { "stub-redemption-$transferId" }
-
-    override suspend fun reverseRedemption(contractId: UUID, redemptionRef: String) =
-        stub.call("FundAdministrationPort") { }
-
-    override suspend fun subscribeTransferIn(contractId: UUID, transferId: UUID, arrival: FundsArrival): String =
-        stub.call("FundAdministrationPort") { "stub-subscription-$transferId" }
-
-    private companion object {
-        val STUB_VALUE = BigDecimal("100000.00")
-    }
-}
