@@ -100,9 +100,18 @@ data class ContractResponse(
             providerEntityId = c.providerEntityId,
             providerType = c.providerType,
             status = c.status.name,
-            schedule = ScheduleDto(c.schedule.amount, c.schedule.currency, c.schedule.frequency, c.schedule.employerAmount),
-            currentStrategy = c.currentStrategy.let { StrategyElectionDto(it.strategyCode, it.effectiveFrom, it.electedAt) },
-            strategyHistory = c.strategyHistory.map { StrategyElectionDto(it.strategyCode, it.effectiveFrom, it.electedAt) },
+            schedule = ScheduleDto(
+                c.schedule.amount,
+                c.schedule.currency,
+                c.schedule.frequency,
+                c.schedule.employerAmount,
+            ),
+            currentStrategy = c.currentStrategy.let {
+                StrategyElectionDto(it.strategyCode, it.effectiveFrom, it.electedAt)
+            },
+            strategyHistory = c.strategyHistory.map {
+                StrategyElectionDto(it.strategyCode, it.effectiveFrom, it.electedAt)
+            },
             beneficiaries = c.beneficiaries.map(BeneficiaryDto::from),
             startDate = c.startDate,
             createdAt = c.createdAt,
@@ -122,7 +131,13 @@ data class IncentiveResultResponse(
 ) {
     companion object {
         fun from(r: IncentiveResult) = IncentiveResultResponse(
-            r.incentiveId, r.type.name, r.period.name, r.amount, r.indicativeSaving, r.claimChannel.name, r.explanation,
+            r.incentiveId,
+            r.type.name,
+            r.period.name,
+            r.amount,
+            r.indicativeSaving,
+            r.claimChannel.name,
+            r.explanation,
         )
     }
 }

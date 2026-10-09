@@ -14,4 +14,6 @@ interface PensionContractRepository {
     suspend fun save(contract: PensionContract): PensionContract
 
     suspend fun findById(id: UUID): PensionContract?
+
+    suspend fun findByIdempotencyKey(participantPartyId: UUID, idempotencyKey: String): PensionContract?
 }

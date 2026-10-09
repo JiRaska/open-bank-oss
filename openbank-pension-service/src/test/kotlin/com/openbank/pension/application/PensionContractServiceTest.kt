@@ -4,6 +4,7 @@
 
 package com.openbank.pension.application
 
+import com.openbank.pension.application.port.`in`.Caller
 import com.openbank.pension.application.port.`in`.CreateDraftCommand
 import com.openbank.pension.application.port.`in`.EarlyTerminationCommand
 import com.openbank.pension.application.port.out.PensionContractRepository
@@ -33,19 +34,27 @@ class PensionContractServiceTest {
         val rows = mutableMapOf<UUID, PensionContract>()
         override suspend fun save(contract: PensionContract) = contract.also { rows[it.id] = it }
         override suspend fun findById(id: UUID) = rows[id]
+        override suspend fun findByIdempotencyKey(participantPartyId: UUID, idempotencyKey: String) =
+            rows.values.firstOrNull {
+                it.participantPartyId == participantPartyId && it.idempotencyKey == idempotencyKey
+            }
     }
 
     private val repo = InMemoryRepo()
     private val clock = Clock.fixed(Instant.parse("2026-10-09T10:00:00Z"), ZoneOffset.UTC)
     private val service = PensionContractService(repo, JurisdictionPackLoader.loadRegistry(), clock)
 
+    private val party = UUID.randomUUID()
+    private val me = Caller.customer(party)
+
     private fun command(
         line: ProductLine = ProductLine.DPS,
         provider: ProviderType = ProviderType.PENSION_COMPANY,
         birth: String = "1990-01-01",
         currency: String = "CZK",
+        key: String? = null,
     ) = CreateDraftCommand(
-        participantPartyId = UUID.randomUUID(),
+        participantPartyId = party,
         productLine = line,
         jurisdiction = "CZ",
         providerEntityId = UUID.randomUUID(),
@@ -57,6 +66,7 @@ class PensionContractServiceTest {
         schedule = ContributionSchedule(BigDecimal("1700"), currency, ContributionFrequency.MONTHLY),
         initialStrategy = "BALANCED",
         beneficiaries = emptyList(),
+        idempotencyKey = key,
     )
 
     @Test
@@ -72,7 +82,9 @@ class PensionContractServiceTest {
         assertThatThrownBy { runBlocking { service.createDraft(command(provider = ProviderType.BANK)) } }
             .isInstanceOf(IllegalArgumentException::class.java)
             .hasMessageContaining("may not provide")
-        assertThat(service.createDraft(command(ProductLine.DIP, ProviderType.BANK)).productLine).isEqualTo(ProductLine.DIP)
+        assertThat(
+            service.createDraft(command(ProductLine.DIP, ProviderType.BANK)).productLine,
+        ).isEqualTo(ProductLine.DIP)
     }
 
     @Test
@@ -86,20 +98,20 @@ class PensionContractServiceTest {
     @Test
     fun `a strategy change cannot take effect in the past`(): Unit = runBlocking {
         val id = service.createDraft(command()).id
-        assertThatThrownBy { runBlocking { service.electStrategy(id, "DYNAMIC", LocalDate.parse("2020-01-01")) } }
+        assertThatThrownBy { runBlocking { service.electStrategy(me, id, "DYNAMIC", LocalDate.parse("2020-01-01")) } }
             .isInstanceOf(IllegalArgumentException::class.java)
     }
 
     @Test
     fun `early termination previews without confirm and transitions with it`(): Unit = runBlocking {
         val id = service.createDraft(command()).id
-        service.submit(id)
-        service.activate(id)
+        service.submit(me, id)
+        service.activate(me, id)
         val inputs = SurrenderInputs(BigDecimal("10000"), emptyMap())
-        val preview = service.requestEarlyTermination(EarlyTerminationCommand(id, inputs, confirm = false))
+        val preview = service.requestEarlyTermination(EarlyTerminationCommand(me, id, inputs, confirm = false))
         assertThat(preview.contract.status).isEqualTo(ContractStatus.ACTIVE)
         assertThat(preview.preview.payoutConditionsMet).isFalse()
-        val confirmed = service.requestEarlyTermination(EarlyTerminationCommand(id, inputs, confirm = true))
+        val confirmed = service.requestEarlyTermination(EarlyTerminationCommand(me, id, inputs, confirm = true))
         assertThat(confirmed.contract.status).isEqualTo(ContractStatus.TERMINATING)
         assertThat(repo.rows.getValue(id).status).isEqualTo(ContractStatus.TERMINATING)
     }
@@ -110,9 +122,44 @@ class PensionContractServiceTest {
         assertThatThrownBy {
             runBlocking {
                 service.requestEarlyTermination(
-                    EarlyTerminationCommand(id, SurrenderInputs(BigDecimal.ONE, emptyMap()), confirm = true),
+                    EarlyTerminationCommand(me, id, SurrenderInputs(BigDecimal.ONE, emptyMap()), confirm = true),
                 )
             }
         }.isInstanceOf(IllegalStateException::class.java)
+    }
+
+    @Test
+    fun `another participant's contract is not found, and staff may read but not change it`(): Unit = runBlocking {
+        val id = service.createDraft(command()).id
+        val stranger = Caller.customer(UUID.randomUUID())
+        assertThatThrownBy { runBlocking { service.get(stranger, id) } }
+            .isInstanceOf(com.openbank.pension.application.port.out.ContractNotFoundException::class.java)
+        assertThatThrownBy { runBlocking { service.submit(stranger, id) } }
+            .isInstanceOf(com.openbank.pension.application.port.out.ContractNotFoundException::class.java)
+        assertThat(service.get(Caller.STAFF, id).id).isEqualTo(id)
+        assertThatThrownBy { runBlocking { service.submit(Caller.STAFF, id) } }
+            .isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test
+    fun `a retried create with the same key returns the first contract`(): Unit = runBlocking {
+        val first = service.createDraft(command(key = "k-1"))
+        val second = service.createDraft(command(key = "k-1"))
+        assertThat(second.id).isEqualTo(first.id)
+        assertThat(repo.rows).hasSize(1)
+    }
+
+    @Test
+    fun `a retried lifecycle action is a no-op, not a conflict`(): Unit = runBlocking {
+        val id = service.createDraft(command()).id
+        service.submit(me, id)
+        assertThat(service.submit(me, id).status).isEqualTo(ContractStatus.PENDING_ACTIVATION)
+    }
+
+    @Test
+    fun `amounts above the bound are refused`(): Unit = runBlocking {
+        assertThatThrownBy {
+            ContributionSchedule(BigDecimal("1000000000.01"), "CZK", ContributionFrequency.MONTHLY)
+        }.isInstanceOf(IllegalArgumentException::class.java)
     }
 }
