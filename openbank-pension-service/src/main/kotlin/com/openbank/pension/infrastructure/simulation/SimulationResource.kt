@@ -114,7 +114,12 @@ class SimulationResource {
         }
         val result = simulations.simulate(
             SimulationCommand(
-                jurisdiction = requireNotNull(body.jurisdiction?.takeIf { it.length in 2..8 }) {
+                jurisdiction = requireNotNull(
+                    body.jurisdiction?.takeIf {
+                        it.length in
+                            MIN_JURISDICTION..MAX_JURISDICTION
+                    },
+                ) {
                     "jurisdiction is required"
                 },
                 productLine = requireNotNull(body.productLine) { "productLine is required" },
@@ -142,5 +147,7 @@ class SimulationResource {
     private companion object {
         val MAX_AMOUNT = BigDecimal("1000000")
         const val MAX_CODE = 64
+        const val MIN_JURISDICTION = 2
+        const val MAX_JURISDICTION = 8
     }
 }

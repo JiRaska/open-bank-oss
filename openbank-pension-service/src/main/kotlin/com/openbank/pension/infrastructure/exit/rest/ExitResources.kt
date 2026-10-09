@@ -50,6 +50,7 @@ import java.util.UUID
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)
+@Suppress("TooManyFunctions") // one method per participant exit route
 class PensionExitResource {
 
     @Inject
@@ -239,12 +240,14 @@ class ExitExceptionMappers {
 
     /** A write lost an optimistic-lock race (S8): the caller re-reads and retries; nothing was changed. */
     @ServerExceptionMapper
-    fun concurrent(e: com.openbank.pension.infrastructure.exit.persistence.ExitConcurrentUpdateException): Response =
+    fun concurrent(e: com.openbank.pension.application.exit.ExitConcurrentUpdateException): Response =
         Response.status(Response.Status.CONFLICT).entity(mapOf("error" to e.message)).build()
 
+    @Suppress("UnusedParameter") // the exception TYPE selects the mapper; its message is not echoed
     @ServerExceptionMapper
     fun staleRow(e: org.hibernate.StaleStateException): Response = concurrentWrite()
 
+    @Suppress("UnusedParameter")
     @ServerExceptionMapper
     fun optimisticLock(e: jakarta.persistence.OptimisticLockException): Response = concurrentWrite()
 

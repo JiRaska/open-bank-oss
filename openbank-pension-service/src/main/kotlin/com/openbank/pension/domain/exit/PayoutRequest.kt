@@ -107,6 +107,7 @@ data class AnnuityPolicy(val policyRef: String, val insurerRef: String, val mont
  *
  * `EARLY_WITHDRAWAL` is the partial form: it leaves the contract ACTIVE. Every other form ends it.
  */
+@Suppress("TooManyFunctions") // one function per payout lifecycle edge and destination rule
 data class PayoutRequest(
     val id: UUID,
     val contractId: UUID,
@@ -120,6 +121,8 @@ data class PayoutRequest(
     /** A participant-requested new account, effective for installments due on/after [pendingPayoutIbanFrom]. */
     val pendingPayoutIban: String? = null,
     val pendingPayoutIbanFrom: LocalDate? = null,
+    /** False until the participant has been notified of the pending change; until then it never applies. */
+    val pendingPayoutIbanNotified: Boolean = false,
     val scaChallengeId: String? = null,
     val confirmedAt: Instant? = null,
     val idempotencyKey: String? = null,
@@ -154,21 +157,18 @@ data class PayoutRequest(
 
     /**
      * The participant moves the REMAINING installments of a running scheduled payout to another
-     * verified own account (ADR-0334 S8). Fraud controls:
-     * - nothing already signed is redirected: a single-payment form has no later payment, and the
-     *   signed account keeps every installment due before [effectiveFrom];
-     * - the change only takes effect after a hold period ([effectiveFrom], set by the service), so
-     *   the participant is notified and can react before any money moves to the new account;
-     * - a second change while one is pending is refused; the pending one must take effect first.
+     * verified own account (ADR-0334 S8). The fraud controls are INVARIANTS of this aggregate, not
+     * of a caller:
+     * - nothing already signed is redirected: a single-payment form has no later payment, an
+     *   unconfirmed quote has no account yet (its account is signed at confirmation);
+     * - the hold is fixed here ([ACCOUNT_CHANGE_HOLD_DAYS]); no caller can shorten it;
+     * - the new account is used only once the participant has been NOTIFIED
+     *   ([markAccountChangeNotified]) AND the hold has elapsed at PAYMENT time AND the installment
+     *   falls due after the hold — a late, early or swept installment cannot pick it up sooner;
+     * - one change at a time: a second one is refused until the first has taken effect.
      */
-    fun changePayoutAccount(
-        iban: String,
-        scaChallengeId: String,
-        today: LocalDate,
-        holdDays: Long,
-        now: Instant,
-    ): PayoutRequest {
-        val effectiveFrom = today.plusDays(holdDays)
+    fun changePayoutAccount(iban: String, scaChallengeId: String, today: LocalDate, now: Instant): PayoutRequest {
+        val effectiveFrom = today.plusDays(ACCOUNT_CHANGE_HOLD_DAYS)
         check(scheduled) { "only a scheduled payout has later payments to redirect" }
         check(status == PayoutStatus.CONFIRMED || status == PayoutStatus.IN_PAYMENT) {
             "the payout is $status; there is no running payout to redirect"
@@ -176,27 +176,42 @@ data class PayoutRequest(
         val remaining = schedule?.installments.orEmpty()
             .filter { it.status == InstallmentStatus.PENDING && !it.dueDate.isBefore(effectiveFrom) }
         check(remaining.isNotEmpty()) { "no installment falls due after the hold period; nothing to redirect" }
-        val pendingFrom = pendingPayoutIbanFrom
-        check(pendingPayoutIban == null || pendingFrom == null || !today.isBefore(pendingFrom)) {
-            "an account change is already pending until $pendingFrom"
+        check(pendingPayoutIban == null || pendingInEffect(today)) {
+            "an account change is already pending until $pendingPayoutIbanFrom"
         }
-        check(iban != accountFor(effectiveFrom)) { "the payout already goes to this account" }
         // A change that has taken effect becomes the account of record before the next one is held.
-        val current = accountFor(today)
+        val current = if (pendingInEffect(today)) pendingPayoutIban else payoutIban
+        check(iban != current) { "the payout already goes to this account" }
         return copy(
             payoutIban = current,
             pendingPayoutIban = iban,
             pendingPayoutIbanFrom = effectiveFrom,
+            pendingPayoutIbanNotified = false,
             scaChallengeId = scaChallengeId,
             updatedAt = now,
         )
     }
 
-    /** The account an installment due on [dueDate] is paid to: the signed one, or a change that has taken effect. */
-    fun accountFor(dueDate: LocalDate): String? {
+    /** The participant was told about the pending change on their known channel; only now can it apply. */
+    fun markAccountChangeNotified(now: Instant): PayoutRequest {
+        checkNotNull(pendingPayoutIban) { "no account change is pending" }
+        return copy(pendingPayoutIbanNotified = true, updatedAt = now)
+    }
+
+    private fun pendingInEffect(today: LocalDate): Boolean {
+        val from = pendingPayoutIbanFrom ?: return false
+        return pendingPayoutIban != null && pendingPayoutIbanNotified && !today.isBefore(from)
+    }
+
+    /**
+     * The account an installment due on [dueDate] and paid on [paymentDay] goes to: the signed
+     * account, unless a notified change's hold has elapsed by [paymentDay] and the installment
+     * falls due on or after it.
+     */
+    fun accountFor(dueDate: LocalDate, paymentDay: LocalDate): String? {
         val from = pendingPayoutIbanFrom
-        return if (pendingPayoutIban != null &&
-            from != null &&
+        return if (from != null &&
+            pendingInEffect(paymentDay) &&
             !dueDate.isBefore(from)
         ) {
             pendingPayoutIban
@@ -280,6 +295,12 @@ data class PayoutRequest(
 
     companion object {
         val SCHEDULED_FORMS = setOf(PayoutForm.PHASED_WITHDRAWAL, PayoutForm.FIXED_PERIOD_PENSION)
+
+        /**
+         * Hold between a payout-account change and the first payment to the new account (fraud
+         * control, ADR-0334 S8). Owned by the aggregate so no caller can shorten it.
+         */
+        const val ACCOUNT_CHANGE_HOLD_DAYS = 3L
 
         fun quote(contractId: UUID, participantPartyId: UUID, quote: PayoutQuote, validityDays: Int, now: Instant) =
             PayoutRequest(

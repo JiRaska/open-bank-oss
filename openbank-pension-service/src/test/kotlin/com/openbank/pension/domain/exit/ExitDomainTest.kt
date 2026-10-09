@@ -245,15 +245,30 @@ class ExitDomainTest {
     }
 
     @Test
-    fun `a held account change pays the signed account until it takes effect, and never twice in a row`() {
+    fun `a held account change applies only after notification, after the hold, to later installments`() {
         val p = runningPhased()
-        val from = LocalDate.parse("2026-12-01")
-        val changed = p.changePayoutAccount(otherIban, "sca-2", LocalDate.parse("2026-11-28"), 3, now)
-        assertThat(changed.payoutIban).describedAs("the signed account is never overwritten").isEqualTo(signedIban)
-        assertThat(changed.accountFor(LocalDate.parse("2026-11-01"))).isEqualTo(signedIban)
-        assertThat(changed.accountFor(from)).isEqualTo(otherIban)
-        // While the change is held, no second change.
-        assertThatThrownBy { changed.changePayoutAccount(signedIban, "sca-3", LocalDate.parse("2026-11-29"), 3, now) }
+        val changeDay = LocalDate.parse("2026-11-28")
+        val held = p.changePayoutAccount(otherIban, "sca-2", changeDay, now)
+        val from = held.pendingPayoutIbanFrom!!
+        assertThat(from).describedAs("the hold is the aggregate's, not the caller's").isEqualTo(changeDay.plusDays(3))
+        assertThat(held.payoutIban).describedAs("the signed account is never overwritten").isEqualTo(signedIban)
+        // Bypass 1: not yet notified — the new account never applies, even long after the hold.
+        assertThat(held.accountFor(from.plusMonths(2), from.plusMonths(2))).isEqualTo(signedIban)
+        val notified = held.markAccountChangeNotified(now)
+        // Bypass 2: an installment due after the hold but PAID before it ends (early/swept) keeps the signed account.
+        assertThat(notified.accountFor(from.plusDays(1), changeDay)).isEqualTo(signedIban)
+        // Bypass 3: an overdue installment due before the hold, paid after it, keeps the signed account.
+        assertThat(notified.accountFor(from.minusDays(1), from.plusDays(5))).isEqualTo(signedIban)
+        assertThat(notified.accountFor(from, from)).isEqualTo(otherIban)
+        // Bypass 4: a second change while the first is held.
+        assertThatThrownBy { notified.changePayoutAccount(signedIban, "sca-3", changeDay.plusDays(1), now) }
+            .isInstanceOf(IllegalStateException::class.java)
+    }
+
+    @Test
+    fun `confirming and changing cannot be combined - a confirmed payout cannot be confirmed onto another account`() {
+        val p = runningPhased()
+        assertThatThrownBy { p.confirm(otherIban, "sca-x", "k2", today, now) }
             .isInstanceOf(IllegalStateException::class.java)
     }
 
@@ -273,7 +288,7 @@ class ExitDomainTest {
             7,
             now,
         )
-        assertThatThrownBy { quoted.changePayoutAccount(otherIban, "s", today, 3, now) }
+        assertThatThrownBy { quoted.changePayoutAccount(otherIban, "s", today, now) }
             .isInstanceOf(IllegalStateException::class.java)
         val lump = PayoutRequest.quote(
             UUID.randomUUID(),
@@ -282,7 +297,7 @@ class ExitDomainTest {
             7,
             now,
         ).confirm(signedIban, "s", "k", today, now)
-        assertThatThrownBy { lump.changePayoutAccount(otherIban, "s2", today, 3, now) }
+        assertThatThrownBy { lump.changePayoutAccount(otherIban, "s2", today, now) }
             .isInstanceOf(IllegalStateException::class.java)
     }
 }

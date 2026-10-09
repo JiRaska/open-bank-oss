@@ -62,7 +62,7 @@ class IdempotencyReplayFilter {
 
     @ServerResponseFilter
     fun store(request: ContainerRequestContext, response: ContainerResponseContext): Uni<Void> {
-        val scope = request.getProperty(SCOPE_PROPERTY) as String?
+        val scope = request.getProperty(SCOPE_PROPERTY) as? String
         if (scope == null || request.getProperty(REPLAYED_PROPERTY) == true || response.status !in SUCCESS) {
             return Uni.createFrom().voidItem()
         }

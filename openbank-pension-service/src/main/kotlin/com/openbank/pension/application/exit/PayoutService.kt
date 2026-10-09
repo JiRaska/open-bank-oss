@@ -48,14 +48,11 @@ data class ChangePayoutAccountCommand(
     val iban: String,
 )
 
+/** Attempts at a fresh-read-and-reapply before a lost race is reported as 409. */
+private const val MAX_CONFLICT_RETRIES = 3
+
 /** Upper bound of an operator list page. */
 const val MAX_LIST = 200
-
-/**
- * Hold between a payout-account change and the first payment to the new account (fraud control,
- * ADR-0334 S8): the participant is notified at once and has this long to react.
- */
-const val ACCOUNT_CHANGE_HOLD_DAYS = 3L
 
 private const val LAST4 = 4
 
@@ -70,6 +67,7 @@ data class EligibilityView(
  * shape as early termination: [quote] fixes every amount, [confirm] accepts it under SCA and the
  * workflow executes it — a lump sum, an annuity purchase, or a monthly schedule.
  */
+@Suppress("TooManyFunctions") // one function per payout lifecycle step and operator view
 class PayoutService(
     private val contractsUseCase: PensionContractUseCase,
     private val ctx: ExitContext,
@@ -175,7 +173,6 @@ class PayoutService(
                 iban,
                 command.scaChallengeId,
                 today,
-                ACCOUNT_CHANGE_HOLD_DAYS,
                 ctx.clock.instant(),
             )
         val effectiveFrom = requireNotNull(changed.pendingPayoutIbanFrom)
@@ -185,7 +182,13 @@ class PayoutService(
             request.accountChangeHash(iban),
             iban,
         )
-        // The participant hears about it on their known channel BEFORE any money can move there.
+        // Stored first (held, NOT notified, so it cannot apply), then the participant hears about it
+        // on their known channel, and only then is it marked notified. A failed notice leaves the
+        // change inert.
+        val saved = onFreshRead(request.id) { current ->
+            // Re-applied to the CURRENT row: an installment activity may have written since we read.
+            current.changePayoutAccount(iban, command.scaChallengeId, today, ctx.clock.instant())
+        }
         ctx.gateways.notifications.payoutAccountChanged(
             contract.participantPartyId,
             request.contractId,
@@ -193,7 +196,29 @@ class PayoutService(
             iban.takeLast(LAST4),
             effectiveFrom,
         )
-        return stores.payouts.save(changed)
+        return onFreshRead(saved.id) { current ->
+            check(current.pendingPayoutIban == saved.pendingPayoutIban) { "the pending account change was replaced" }
+            current.markAccountChangeNotified(ctx.clock.instant())
+        }
+    }
+
+    /**
+     * Applies a pure transition to the stored payout and saves it under the optimistic lock,
+     * re-reading and re-applying when a concurrent writer (an installment activity, another
+     * request) got there first. The transition re-checks every invariant on the fresh row, so a
+     * retry can never apply a change the current state forbids.
+     */
+    private suspend fun onFreshRead(id: UUID, transition: (PayoutRequest) -> PayoutRequest): PayoutRequest {
+        repeat(MAX_CONFLICT_RETRIES - 1) {
+            val current = requireNotNull(stores.payouts.findById(id)) { "payout $id vanished" }
+            try {
+                return stores.payouts.save(transition(current))
+            } catch (_: ExitConcurrentUpdateException) {
+                // Lost the race; read again.
+            }
+        }
+        val current = requireNotNull(stores.payouts.findById(id)) { "payout $id vanished" }
+        return stores.payouts.save(transition(current))
     }
 
     /** Operator queue (ADR-0334 S8): newest first, optionally by status or contract. */

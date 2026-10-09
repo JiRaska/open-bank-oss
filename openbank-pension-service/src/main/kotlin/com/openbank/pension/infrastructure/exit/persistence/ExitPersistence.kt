@@ -13,6 +13,7 @@ import com.fasterxml.jackson.databind.SerializationFeature
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.pension.application.exit.DeathClaimRepository
+import com.openbank.pension.application.exit.ExitConcurrentUpdateException
 import com.openbank.pension.application.exit.InstructionStatus
 import com.openbank.pension.application.exit.PaymentInstruction
 import com.openbank.pension.application.exit.PaymentInstructionRepository
@@ -131,9 +132,6 @@ internal object ExitJson {
         .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
         .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
 }
-
-/** A write lost a race: the row changed since it was read. Mapped to 409; an activity retries on a fresh read. */
-class ExitConcurrentUpdateException(message: String) : IllegalStateException(message)
 
 /**
  * Shared upsert with OPTIMISTIC LOCKING (ADR-0334 S8). An existing row is loaded and mutated

@@ -299,11 +299,6 @@ class PensionLifecycleJourneyE2E {
     private fun money(results: JsonPath, incentiveId: String): BigDecimal =
         BigDecimal(results.getString("find { it.incentiveId == '$incentiveId' }.amount"))
 
-    private fun clawback(preview: JsonPath, incentiveId: String, mode: String): BigDecimal {
-        assertThat(preview.getString("clawbacks.find { it.incentiveId == '$incentiveId' }.mode")).isEqualTo(mode)
-        return BigDecimal(preview.getString("clawbacks.find { it.incentiveId == '$incentiveId' }.amount"))
-    }
-
     private companion object {
         const val BASE = "/api/v1/pension/contracts"
         const val JSON = "application/json"

@@ -125,6 +125,7 @@ data class Beneficiary(val name: String, val partyId: UUID? = null, val sharePer
  * The jurisdiction pack is PINNED by `(jurisdiction, productLine, packVersion)` at creation and
  * never re-resolved: a contract is judged by the law it was sold under (ADR-0212 D3).
  */
+@Suppress("TooManyFunctions") // one function per lifecycle edge of the transition table
 data class PensionContract(
     val id: UUID,
     val participantPartyId: UUID,

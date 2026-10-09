@@ -13,6 +13,7 @@ import com.openbank.pension.domain.model.ContractStatus
 import com.openbank.pension.domain.model.PayoutForm
 import com.openbank.pension.domain.model.PensionContract
 import java.math.BigDecimal
+import java.time.LocalDate
 import java.util.UUID
 
 /**
@@ -143,7 +144,7 @@ class ExitExecutionService(private val ctx: ExitContext) {
             "${payout.form.name}#$seq",
             contract.participantPartyId.toString(),
             // The signed account, or a held account change that has taken effect for this due date.
-            requireNotNull(payout.accountFor(installment.dueDate)),
+            requireNotNull(payout.accountFor(installment.dueDate, LocalDate.now(ctx.clock))),
             installment.net,
             payout.quote.currency,
         )

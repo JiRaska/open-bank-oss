@@ -44,6 +44,9 @@ interface ParticipantNotificationPort {
     )
 }
 
+/** A write lost a race: the row changed since it was read (optimistic lock, ADR-0334 S8). 409 / retry. */
+class ExitConcurrentUpdateException(message: String) : IllegalStateException(message)
+
 /** Remits tax withheld or recaptured on an exit to the tax authority. */
 interface TaxWithholdingPort {
     suspend fun remit(contractId: UUID, kind: String, amount: BigDecimal, idempotencyKey: String)
