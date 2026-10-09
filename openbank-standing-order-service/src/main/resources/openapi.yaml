@@ -69,7 +69,11 @@ paths:
       description: >-
         Read-only customer-edge request. The key is carried in the body, never the URL. The
         authenticated edge identity and its customer party/actor provenance must match the
-        durable create record, including the original debit account. Missing, in-flight,
+        durable create record, including the original debit account and, for a company profile,
+        one representation mandate verified by the edge at creation. On lookup the service
+        checks that stored ID against the edge's fresh bounded ACTIVE set, so a second current
+        role remains usable while a revoked mandate or re-grant cannot recover the former receipt.
+        Missing, in-flight,
         unbound legacy and mismatched records all return UNKNOWN; no receipt is inferred from
         an absent order. The edge must verify debit-account ownership before forwarding.
       requestBody:

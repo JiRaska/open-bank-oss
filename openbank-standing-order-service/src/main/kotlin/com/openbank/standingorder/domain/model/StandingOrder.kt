@@ -51,6 +51,7 @@ data class StandingOrder(
     @get:JsonIgnore val initiatingPrincipal: String? = null,
     @get:JsonIgnore val initiatingPartyId: UUID? = null,
     @get:JsonIgnore val initiatingActorId: UUID? = null,
+    @get:JsonIgnore val initiatingMandateId: UUID? = null,
 ) {
     fun pause(now: Instant) = also {
         require(status == StandingOrderStatus.ACTIVE) { "Only ACTIVE orders can be paused" }

@@ -57,6 +57,7 @@ class StandingOrderService(
             initiatingPrincipal = cmd.initiatingPrincipal,
             initiatingPartyId = cmd.initiatingPartyId,
             initiatingActorId = cmd.initiatingActorId,
+            initiatingMandateId = cmd.initiatingMandateId,
         )
         try {
             val replaced = cmd.replacesStandingOrderId ?: return repo.save(order)
@@ -84,6 +85,7 @@ class StandingOrderService(
         initiatingPrincipal: String,
         initiatingPartyId: UUID,
         initiatingActorId: UUID,
+        activeMandateIds: Set<UUID>,
     ): StandingOrderReceipt {
         val order = repo.findByIdempotencyKey(key) ?: return StandingOrderReceipt("UNKNOWN")
         // A key is correlation, never authorization. Legacy and rolling-deploy rows without the
@@ -93,6 +95,7 @@ class StandingOrderService(
             order.initiatingPrincipal != initiatingPrincipal ||
             order.initiatingPartyId != initiatingPartyId ||
             order.initiatingActorId != initiatingActorId ||
+            !matchesMandate(order.initiatingMandateId, activeMandateIds) ||
             order.debitAccountId != debitAccountId ||
             order.partyId != initiatingPartyId
         ) {
@@ -107,6 +110,7 @@ class StandingOrderService(
             existing.initiatingPrincipal != cmd.initiatingPrincipal ||
             existing.initiatingPartyId != cmd.initiatingPartyId ||
             existing.initiatingActorId != cmd.initiatingActorId ||
+            !matchesMandate(existing.initiatingMandateId, cmd.activeMandateIds) ||
             existing.partyId != cmd.partyId ||
             existing.debitAccountId != cmd.debitAccountId
         ) {
@@ -114,6 +118,9 @@ class StandingOrderService(
         }
         return existing
     }
+
+    private fun matchesMandate(storedId: UUID?, activeIds: Set<UUID>): Boolean =
+        if (storedId == null) activeIds.isEmpty() else storedId in activeIds
 
     private fun isIdempotencyConflict(failure: Throwable): Boolean =
         generateSequence(failure) { it.cause.takeIf { cause -> cause !== it } }

@@ -30,6 +30,8 @@ import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.jwt.JsonWebToken
 import java.util.UUID
 
+private const val MAX_ACTIVE_MANDATES = 16
+
 @Path("/api/v1/standing-orders")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
@@ -74,12 +76,41 @@ class StandingOrderResource(
         return party to actor
     }
 
+    /** Accepted only from the authenticated edge, never from a public customer request. */
+    private fun trustedMandateId(header: String?, partyId: UUID?, actorId: UUID?): UUID? {
+        if (header == null) return null
+        if (partyId == null || actorId == null) {
+            throw ForbiddenException("Customer mandate identity requires the authenticated customer edge")
+        }
+        return runCatching { UUID.fromString(header) }.getOrNull()
+            ?: throw ForbiddenException("Customer mandate identity is invalid")
+    }
+
+    private fun trustedMandateIds(header: String?, partyId: UUID?, actorId: UUID?): Set<UUID> {
+        if (header == null) return emptySet()
+        if (partyId == null || actorId == null) {
+            throw ForbiddenException("Customer mandate inventory requires the authenticated customer edge")
+        }
+        val values = header.split(',')
+        if (values.isEmpty() || values.size > MAX_ACTIVE_MANDATES) {
+            throw ForbiddenException("Customer mandate inventory is invalid")
+        }
+        val ids = values.map { raw ->
+            runCatching { UUID.fromString(raw) }.getOrNull()
+                ?: throw ForbiddenException("Customer mandate inventory is invalid")
+        }
+        if (ids.toSet().size != ids.size) throw ForbiddenException("Customer mandate inventory is duplicated")
+        return ids.toSet()
+    }
+
     @POST
     @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
     suspend fun create(
         req: CreateStandingOrderRequest,
         @HeaderParam("X-Customer-Party-Id") customerPartyHeader: String?,
         @HeaderParam("X-Customer-Actor-Id") customerActorHeader: String?,
+        @HeaderParam("X-Customer-Mandate-Id") customerMandateHeader: String?,
+        @HeaderParam("X-Customer-Mandate-Ids") activeMandatesHeader: String?,
     ): Response {
         require(req.idempotencyKey.isNotBlank() && req.idempotencyKey.length <= 255) {
             "idempotencyKey is required and must be at most 255 characters"
@@ -93,6 +124,14 @@ class StandingOrderResource(
         )
         if (partyId != null && partyId != req.partyId) {
             throw ForbiddenException("Customer party does not match standing order")
+        }
+        val mandateId = trustedMandateId(customerMandateHeader, partyId, actorId)
+        val activeMandateIds = trustedMandateIds(activeMandatesHeader, partyId, actorId)
+        if (
+            (mandateId == null) != activeMandateIds.isEmpty() ||
+            (mandateId != null && mandateId !in activeMandateIds)
+        ) {
+            throw ForbiddenException("Customer mandate selection does not match active mandates")
         }
         val principal = actorScope
         val requestHash = RequestFingerprints.of(
@@ -118,6 +157,8 @@ class StandingOrderResource(
                 initiatingPrincipal = principal,
                 initiatingPartyId = partyId,
                 initiatingActorId = actorId,
+                initiatingMandateId = mandateId,
+                activeMandateIds = activeMandateIds,
             ),
         )
         return Response.status(201).entity(order.toResponse()).build()
@@ -130,6 +171,8 @@ class StandingOrderResource(
         request: StandingOrderReceiptLookupRequest?,
         @HeaderParam("X-Customer-Party-Id") customerPartyHeader: String?,
         @HeaderParam("X-Customer-Actor-Id") customerActorHeader: String?,
+        @HeaderParam("X-Customer-Mandate-Id") customerMandateHeader: String?,
+        @HeaderParam("X-Customer-Mandate-Ids") activeMandatesHeader: String?,
     ): Response {
         requireNotNull(request) { "request body is required" }
         require(request.idempotencyKey.isNotBlank() && request.idempotencyKey.length <= 255) {
@@ -139,8 +182,17 @@ class StandingOrderResource(
         if (partyId == null || actorId == null) {
             throw ForbiddenException("Customer receipt lookup requires the authenticated customer edge")
         }
+        if (customerMandateHeader != null) throw ForbiddenException("Receipt lookup cannot select a mandate")
+        val activeMandateIds = trustedMandateIds(activeMandatesHeader, partyId, actorId)
         return Response.ok(
-            useCase.findReceipt(request.idempotencyKey, request.debitAccountId, actorScope, partyId, actorId),
+            useCase.findReceipt(
+                request.idempotencyKey,
+                request.debitAccountId,
+                actorScope,
+                partyId,
+                actorId,
+                activeMandateIds,
+            ),
         ).build()
     }
 

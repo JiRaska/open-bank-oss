@@ -43,6 +43,9 @@ class StandingOrderEntity {
     @field:Column(name = "initiating_actor_id")
     var initiatingActorId: UUID? = null
 
+    @field:Column(name = "initiating_mandate_id")
+    var initiatingMandateId: UUID? = null
+
     @field:Column(name = "debtor_iban")
     var debtorIban: String? = null
 

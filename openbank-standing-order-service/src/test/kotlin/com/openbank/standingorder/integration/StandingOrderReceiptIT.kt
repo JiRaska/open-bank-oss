@@ -77,7 +77,12 @@ class StandingOrderReceiptIT {
         assertThat(lookup(key, party, actor, account).jsonPath().getString("status")).isEqualTo("PAUSED")
         val detail = RestAssured.given().get("/api/v1/standing-orders/$id")
         assertThat(detail.statusCode).isEqualTo(200)
-        assertThat(detail.body.asString()).doesNotContain("requestHash", "initiatingPrincipal", "initiatingActorId")
+        assertThat(detail.body.asString()).doesNotContain(
+            "requestHash",
+            "initiatingPrincipal",
+            "initiatingActorId",
+            "initiatingMandateId",
+        )
         assertThat(lookup(key, party, actor, UUID.randomUUID()).jsonPath().getString("state")).isEqualTo("UNKNOWN")
         assertThat(lookup(key, party, UUID.randomUUID(), account).jsonPath().getString("state")).isEqualTo("UNKNOWN")
         assertThat(lookup(key, UUID.randomUUID(), actor, account).jsonPath().getString("state")).isEqualTo("UNKNOWN")
@@ -142,6 +147,48 @@ class StandingOrderReceiptIT {
             Claim(key = "preferred_username", value = EDGE), Claim(key = "azp", value = "openbank-edge"),
         ],
     )
+    fun `regrant for same actor and company cannot recover former mandate receipt`() {
+        val key = "mandate-${UUID.randomUUID()}"
+        val company = UUID.randomUUID()
+        val actor = UUID.randomUUID()
+        val account = UUID.randomUUID()
+        val original = UUID.randomUUID()
+        val regrant = UUID.randomUUID()
+        val created = create(key, company, actor, account, mandateId = original)
+        assertThat(created.statusCode).describedAs(created.body.asString()).isEqualTo(201)
+        assertThat(lookup(key, company, actor, account, original).jsonPath().getString("state"))
+            .isEqualTo("FOUND")
+        // A second simultaneous role must not lock the customer out of the original receipt.
+        val bothActive = setOf(original, regrant)
+        val withBoth = lookup(key, company, actor, account, activeMandateIds = bothActive)
+        assertThat(withBoth.jsonPath().getString("state")).isEqualTo("FOUND")
+        val replayed = create(key, company, actor, account, mandateId = regrant, activeMandateIds = bothActive)
+        assertThat(replayed.jsonPath().getString("id")).isEqualTo(created.jsonPath().getString("id"))
+        assertThat(lookup(key, company, actor, account, regrant).jsonPath().getString("state"))
+            .isEqualTo("UNKNOWN")
+        assertThat(lookup(key, company, actor, account).jsonPath().getString("state"))
+            .isEqualTo("UNKNOWN")
+        assertThat(create(key, company, actor, account, mandateId = regrant).statusCode).isEqualTo(409)
+        dataSource.connection.use { connection ->
+            connection.prepareStatement("select initiating_mandate_id from standing_orders where idempotency_key = ?")
+                .use { ps ->
+                    ps.setString(1, key)
+                    ps.executeQuery().use { rs ->
+                        assertThat(rs.next()).isTrue()
+                        assertThat(rs.getObject(1, UUID::class.java)).isEqualTo(original)
+                    }
+                }
+        }
+    }
+
+    @Test
+    @TestSecurity(user = EDGE, roles = ["ROLE_API"])
+    @JwtSecurity(
+        claims = [
+            Claim(key = "iss", value = ISSUER), Claim(key = "sub", value = EDGE),
+            Claim(key = "preferred_username", value = EDGE), Claim(key = "azp", value = "openbank-edge"),
+        ],
+    )
     fun `racing changed requests leave one durable instruction and a conflict`() {
         val key = "race-${UUID.randomUUID()}"
         val party = UUID.randomUUID()
@@ -186,11 +233,23 @@ class StandingOrderReceiptIT {
         assertThat(lookup(key, party, actor, account).statusCode).isEqualTo(403)
     }
 
-    private fun create(key: String, party: UUID, actor: UUID?, account: UUID, amount: Long = 2500): Response {
+    private fun create(
+        key: String,
+        party: UUID,
+        actor: UUID?,
+        account: UUID,
+        amount: Long = 2500,
+        mandateId: UUID? = null,
+        activeMandateIds: Set<UUID> = mandateId?.let { setOf(it) } ?: emptySet(),
+    ): Response {
         val request = RestAssured.given()
             .contentType("application/json")
             .header("X-Customer-Party-Id", party.toString())
         if (actor != null) request.header("X-Customer-Actor-Id", actor.toString())
+        if (mandateId != null) request.header("X-Customer-Mandate-Id", mandateId.toString())
+        if (activeMandateIds.isNotEmpty()) {
+            request.header("X-Customer-Mandate-Ids", activeMandateIds.joinToString(","))
+        }
         return request.body(
             """{
             "idempotencyKey":"$key", "partyId":"$party", "debitAccountId":"$account",
@@ -202,12 +261,24 @@ class StandingOrderReceiptIT {
             .post("/api/v1/standing-orders")
     }
 
-    private fun lookup(key: String, party: UUID, actor: UUID, account: UUID): Response = RestAssured.given()
-        .contentType("application/json")
-        .header("X-Customer-Party-Id", party.toString())
-        .header("X-Customer-Actor-Id", actor.toString())
-        .body("""{"idempotencyKey":"$key","debitAccountId":"$account"}""")
-        .post("/api/v1/standing-orders/receipts/lookup")
+    private fun lookup(
+        key: String,
+        party: UUID,
+        actor: UUID,
+        account: UUID,
+        mandateId: UUID? = null,
+        activeMandateIds: Set<UUID> = mandateId?.let { setOf(it) } ?: emptySet(),
+    ): Response {
+        val request = RestAssured.given()
+            .contentType("application/json")
+            .header("X-Customer-Party-Id", party.toString())
+            .header("X-Customer-Actor-Id", actor.toString())
+        if (activeMandateIds.isNotEmpty()) {
+            request.header("X-Customer-Mandate-Ids", activeMandateIds.joinToString(","))
+        }
+        return request.body("""{"idempotencyKey":"$key","debitAccountId":"$account"}""")
+            .post("/api/v1/standing-orders/receipts/lookup")
+    }
 
     private companion object {
         const val EDGE = "service-account-openbank-edge"

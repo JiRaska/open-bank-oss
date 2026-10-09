@@ -60,9 +60,15 @@ account and a canonical hash of the entire create request to the inserted row. A
 changed request or actor returns 409, including a database-key race. `POST /receipts/lookup`
 carries the key in a JSON body, requires the same verified edge and returns `FOUND` only when
 every stored binding matches; other and pre-migration rows return `UNKNOWN` without an identifier.
+For a company profile, the edge reads the ACTIVE representation mandate ID afresh from
+party-service. The verified edge alone supplies a deterministic ID for a new instruction and a
+bounded ACTIVE ID set in internal headers; the service stores the selected ID in nullable V9
+column `initiating_mandate_id`. Lookup and replay require the stored ID still in the current set.
+Adding another role remains valid; re-granting after revocation yields a new ID and cannot reveal
+or replay a receipt bound to the former grant.
 During a rolling deployment, an older verified edge may still send the party header without the
 actor header; that create is accepted with a NULL actor binding and remains `UNKNOWN` on lookup.
-The edge must verify current debit-account ownership before forwarding. This lookup proves an
+The edge must verify current debit-account ownership and mandate before forwarding. This lookup proves an
 accepted standing-order instruction, not that any scheduled payment settled. The nullable V8
 columns permit rolling deployment; rollback keeps them in place so new bindings survive a return
 to the previous binary. A pre-V8 row cannot safely be backfilled from the key or party alone.

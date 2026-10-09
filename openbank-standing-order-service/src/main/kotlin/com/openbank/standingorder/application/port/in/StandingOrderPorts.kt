@@ -31,6 +31,9 @@ data class CreateStandingOrderCommand(
     val initiatingPrincipal: String,
     val initiatingPartyId: UUID? = null,
     val initiatingActorId: UUID? = null,
+    val initiatingMandateId: UUID? = null,
+    /** Edge-verified ACTIVE set, used only for safe same-key replay across concurrent roles. */
+    val activeMandateIds: Set<UUID> = emptySet(),
 )
 
 data class StandingOrderReceipt(val state: String, val orderId: UUID? = null, val status: String? = null)
@@ -43,6 +46,7 @@ interface StandingOrderUseCase {
         initiatingPrincipal: String,
         initiatingPartyId: UUID,
         initiatingActorId: UUID,
+        activeMandateIds: Set<UUID> = emptySet(),
     ): StandingOrderReceipt
     suspend fun pause(id: UUID, operatorId: String): StandingOrder
     suspend fun resume(id: UUID, operatorId: String): StandingOrder
