@@ -58,6 +58,9 @@ class SepaPaymentReceiptIT {
         assertThat(replay.header("X-Idempotency-Replayed")).isEqualTo("true")
         assertThat(replay.jsonPath().getString("status")).isEqualTo("PROCESSING")
         evictCreatorRedisKey()
+        assertThat(receipt().jsonPath().getString("state")).isEqualTo("FOUND")
+        assertThat(receipt().jsonPath().getString("paymentId")).isEqualTo(paymentId)
+        assertThat(create(requestBody = body.replace("12.34", "12.35")).statusCode).isEqualTo(409)
         assertThat(create().jsonPath().getString("id")).isEqualTo(paymentId)
         assertThat(rows()).isEqualTo(1)
     }
@@ -211,12 +214,17 @@ class SepaPaymentReceiptIT {
         }
     }
 
-    private fun create(key: String = idempotencyKey, party: UUID? = null, actor: UUID? = null) = RestAssured.given()
+    private fun create(
+        key: String = idempotencyKey,
+        party: UUID? = null,
+        actor: UUID? = null,
+        requestBody: String = body,
+    ) = RestAssured.given()
         .contentType("application/json")
         .header("Idempotency-Key", key)
         .apply { if (party != null) header("X-Customer-Party-Id", party.toString()) }
         .apply { if (actor != null) header("X-Customer-Actor-Id", actor.toString()) }
-        .body(body)
+        .body(requestBody)
         .post("/api/v1/sepa-payments")
 
     private fun receipt(
