@@ -58,7 +58,7 @@ internal fun <T> onWorker(block: suspend () -> T): T =
 @Suppress("TooManyFunctions") // one start/signal per port method; splitting would scatter the id scheme
 class TemporalPensionOrchestrator(
     private val client: WorkflowClient,
-    @ConfigProperty(name = "openbank.temporal.task-queue", defaultValue = "openbank-pension")
+    @ConfigProperty(name = "openbank.pension.onboarding.task-queue", defaultValue = ONBOARDING_TASK_QUEUE)
     private val taskQueue: String,
 ) : PensionOrchestrator {
 
@@ -168,12 +168,19 @@ class PensionActivitiesImpl(
     override fun compensate(transferId: UUID, reason: String) = onWorker { transfers.compensateOut(transferId, reason) }
 }
 
+/**
+ * Slice S2's OWN task queue. Other pension slices run their own workflow types; a shared queue
+ * with each worker registering only its own types makes tasks land on a worker that cannot run
+ * them. Every S2 workflow and activity type is registered on this queue, and only here.
+ */
+const val ONBOARDING_TASK_QUEUE = "pension-onboarding"
+
 /** Registers the three pension workflows and their activities on this service's task queue. */
 @ApplicationScoped
 class PensionWorkerRegistrar(
     @ConfigProperty(name = "openbank.pension.worker.enabled", defaultValue = "true")
     private val workerEnabled: Boolean,
-    @ConfigProperty(name = "openbank.temporal.task-queue", defaultValue = "openbank-pension")
+    @ConfigProperty(name = "openbank.pension.onboarding.task-queue", defaultValue = ONBOARDING_TASK_QUEUE)
     private val taskQueue: String,
     private val client: Instance<WorkflowClient>,
     private val activities: PensionActivitiesImpl,

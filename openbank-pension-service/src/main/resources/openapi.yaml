@@ -619,6 +619,28 @@ paths:
         '403': { description: Caller's role or principal may not use this route }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/contracts/transfers-in:
+    post:
+      tags: [Pension onboarding]
+      operationId: startPensionTransferIn
+      summary: Start a transfer-in application (onboarding with kind TRANSFER_IN; transferIn required)
+      parameters:
+        - $ref: '#/components/parameters/CustomerPartyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StartApplicationRequest' }
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OnboardingApplication' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Caller's role or principal may not use this route }
+        '503': { description: A collaborator this step depends on is not available (stub integration off) }
 components:
   securitySchemes:
     bearerAuth:

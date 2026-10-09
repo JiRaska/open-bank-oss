@@ -43,7 +43,7 @@ class WorkflowClientTestProducer(private val activities: PensionActivitiesImpl) 
                 .setWorkflowClientOptions(WorkflowClientOptions.newBuilder().setDataConverter(converter).build())
                 .build(),
         )
-        val worker = testEnv.newWorker("openbank-pension")
+        val worker = testEnv.newWorker(ONBOARDING_TASK_QUEUE)
         worker.registerWorkflowImplementationTypes(
             OnboardingWorkflowImpl::class.java,
             TransferInWorkflowImpl::class.java,

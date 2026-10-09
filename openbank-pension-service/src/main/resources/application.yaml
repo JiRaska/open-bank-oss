@@ -97,6 +97,9 @@ openbank:
   pension:
     worker:
       enabled: ${OPENBANK_PENSION_WORKER_ENABLED:true}
+    onboarding:
+      # Dedicated to slice S2's workflow and activity types (ADR-0334 S2).
+      task-queue: ${OPENBANK_PENSION_ONBOARDING_TASK_QUEUE:pension-onboarding}
     # FAIL CLOSED by default: the KYC, document, SCA, counterparty and fund ports are stubs until
     # their real adapters land (ADR-0334 S2 follow-ups). Off, every stubbed call answers 503.
     stub-integrations:

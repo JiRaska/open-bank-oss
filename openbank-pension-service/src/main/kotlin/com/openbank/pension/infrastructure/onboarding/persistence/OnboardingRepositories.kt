@@ -116,6 +116,9 @@ class OnboardingApplicationRepositoryImpl(private val json: PayloadMapper) :
             query.range(0, limit - 1).list()
         }.awaitSuspending().map { it.toDomain() }
 
+    override suspend fun findByContract(contractId: UUID): OnboardingApplication? =
+        Panache.withSession { find("contractId", contractId).firstResult() }.awaitSuspending()?.toDomain()
+
     override suspend fun findByTransferRequest(transferId: UUID): OnboardingApplication? =
         Panache.withSession { find("transferRequestId", transferId).firstResult() }.awaitSuspending()?.toDomain()
 

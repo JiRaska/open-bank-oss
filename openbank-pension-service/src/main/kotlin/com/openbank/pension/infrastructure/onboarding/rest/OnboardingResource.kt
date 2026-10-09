@@ -13,6 +13,8 @@ import com.openbank.pension.domain.model.ContributionSchedule
 import com.openbank.pension.domain.onboarding.CedingContract
 import com.openbank.pension.domain.onboarding.OnboardingKind
 import com.openbank.pension.domain.onboarding.QuestionnaireAnswers
+import com.openbank.pension.infrastructure.authz.ContractAccessGuard
+import com.openbank.pension.infrastructure.authz.ContractAccessGuard.Companion.PARTY_HEADER
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
@@ -29,19 +31,14 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import java.math.BigDecimal
 import java.util.UUID
 
-/** The participant's party id, set by the customer edge from the customer JWT — never from a body. */
-internal const val PARTY_HEADER = "X-Customer-Party-Id"
-
-internal fun partyOf(header: String?): UUID =
-    UUID.fromString(requireNotNull(header?.takeIf { it.isNotBlank() }) { "header '$PARTY_HEADER' is required" })
-
 /**
  * The participant's digital onboarding (ADR-0334 slice S2): start, questionnaire, recommendation,
  * strategy + key-information document, acceptance, SCA signature, status, withdrawal.
  *
  * ## Caller and ownership
- * Only the customer edge (`ROLE_API`) calls these routes, and the party is the `X-Customer-Party-Id`
- * header the edge derives from the customer token. Every lookup is scoped to that party: an
+ * Only the customer edge (`ROLE_API`) calls these routes. The acting party is resolved by S1's
+ * shared [ContractAccessGuard]: `X-Customer-Party-Id` is trusted only from the edge relay that
+ * verified the customer's token, never from a body or any other principal. Every lookup is scoped to that party: an
  * application of another party answers 404, exactly like an id that does not exist, so the routes
  * cannot be used to probe for other participants' applications. Operators use
  * `PensionOperatorResource`, never these routes.
@@ -54,6 +51,12 @@ internal fun partyOf(header: String?): UUID =
 @Consumes(MediaType.APPLICATION_JSON)
 @RolesAllowed(Roles.API)
 class OnboardingResource {
+
+    @Inject
+    lateinit var guard: ContractAccessGuard
+
+    /** The acting participant, vouched for by the edge relay (ContractAccessGuard). */
+    private fun partyOf(header: String?): UUID = checkNotNull(guard.actingParticipant(header).customerPartyId)
 
     @Inject
     lateinit var onboarding: OnboardingService

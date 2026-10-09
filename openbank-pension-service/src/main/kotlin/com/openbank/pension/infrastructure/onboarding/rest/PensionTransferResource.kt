@@ -9,6 +9,8 @@ import com.openbank.libs.security.Roles
 import com.openbank.pension.application.onboarding.TransferOutCommand
 import com.openbank.pension.application.onboarding.TransferService
 import com.openbank.pension.domain.transfer.Counterparty
+import com.openbank.pension.infrastructure.authz.ContractAccessGuard
+import com.openbank.pension.infrastructure.authz.ContractAccessGuard.Companion.PARTY_HEADER
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
@@ -36,6 +38,12 @@ import java.util.UUID
 @Consumes(MediaType.APPLICATION_JSON)
 @RolesAllowed(Roles.API)
 class PensionTransferResource {
+
+    @Inject
+    lateinit var guard: ContractAccessGuard
+
+    /** The acting participant, vouched for by the edge relay (ContractAccessGuard). */
+    private fun partyOf(header: String?): UUID = checkNotNull(guard.actingParticipant(header).customerPartyId)
 
     @Inject
     lateinit var transfers: TransferService

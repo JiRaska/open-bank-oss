@@ -4,12 +4,16 @@
 
 package com.openbank.pension.integration
 
+import com.openbank.pension.application.port.out.ActivationOutcome
+import com.openbank.pension.application.port.out.OnboardingActivationPort
+import com.openbank.pension.infrastructure.onboarding.temporal.onWorker
 import com.openbank.pension.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
 import io.restassured.response.ValidatableResponse
+import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.config.ConfigProvider
 import org.hamcrest.Matchers.equalTo
@@ -77,7 +81,7 @@ class OnboardingApiIT {
     }
 
     @Test
-    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "edge", roles = ["ROLE_API"])
     fun `a new contract is signed, held in cooling-off, and withdrawn with its contract closed`() {
         val id = readyToSign()
         val contractId: String = call("POST", "$apps/$id/sign", """{"scaChallengeId":"sca-${UUID.randomUUID()}"}""")
@@ -90,7 +94,7 @@ class OnboardingApiIT {
     }
 
     @Test
-    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "edge", roles = ["ROLE_API"])
     fun `steps cannot be skipped and an SCA challenge cannot be spent twice`() {
         val early = start()
         call("POST", "$apps/$early/sign", """{"scaChallengeId":"sca-x"}""").statusCode(409)
@@ -103,7 +107,7 @@ class OnboardingApiIT {
     }
 
     @Test
-    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "edge", roles = ["ROLE_API"])
     fun `another party's application reads as absent, and the party comes only from the header`() {
         val id = start()
         val stranger = UUID.randomUUID()
@@ -123,7 +127,7 @@ class OnboardingApiIT {
     }
 
     @Test
-    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "edge", roles = ["ROLE_API"])
     fun `the customer edge cannot reach operator or provider routes`() {
         call("GET", "/api/v1/pension/operator/onboarding/applications").statusCode(403)
         call(
@@ -131,6 +135,13 @@ class OnboardingApiIT {
             "/api/v1/pension/provider/transfers/out",
             """{"contractId":"${UUID.randomUUID()}","receivingProviderId":"P2","receivingProviderName":"Other","receivingContractNumber":"C-1"}""",
         ).statusCode(403)
+    }
+
+    @Test
+    @TestSecurity(user = "service-account-openbank-services", roles = ["ROLE_API"])
+    fun `a party header from any principal but the edge relay is refused`() {
+        call("POST", apps, startBody()).statusCode(403)
+        call("GET", "$apps/${UUID.randomUUID()}").statusCode(403)
     }
 
     @Test
@@ -142,7 +153,7 @@ class OnboardingApiIT {
     }
 
     @Test
-    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "edge", roles = ["ROLE_API"])
     fun `a transfer-in is sent, and withdrawing before the funds cancels it at the ceding provider`() {
         val id = readyToSign(
             "TRANSFER_IN",
@@ -160,7 +171,7 @@ class OnboardingApiIT {
     }
 
     @Test
-    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "edge", roles = ["ROLE_API"])
     fun `a transfer-out of an inactive or foreign contract is refused`() {
         val body = """{"contractId":"${UUID.randomUUID()}","receivingProviderId":"P2","receivingProviderName":"Other",
             |"receivingContractNumber":"C-1","scaChallengeId":"sca-${UUID.randomUUID()}"}
@@ -172,6 +183,36 @@ class OnboardingApiIT {
         val own = body.replace(Regex("\"contractId\":\"[^\"]+\""), "\"contractId\":\"$contractId\"")
         call("POST", "$transfers/out", own, UUID.randomUUID()).statusCode(404)
         call("POST", "$transfers/out", own).statusCode(409)
+    }
+
+    @Test
+    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    fun `the edge's transfer-in route starts a TRANSFER_IN application`() {
+        val ceding = """, "transferIn": {"providerId":"P1","providerName":"Ceding","contractNumber":"OLD-2"}"""
+        call("POST", "/api/v1/pension/contracts/transfers-in", startBody("NEW_CONTRACT", ceding)).statusCode(201)
+            .body("kind", equalTo("TRANSFER_IN")).body("status", equalTo("STARTED"))
+        call("POST", "/api/v1/pension/contracts/transfers-in", startBody()).statusCode(400)
+    }
+
+    @Inject
+    lateinit var activation: OnboardingActivationPort
+
+    @Test
+    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    fun `a first contribution reaches the workflow of a signed new contract, and nothing else`() {
+        val contractId: String = call(
+            "POST",
+            "$apps/${readyToSign()}/sign",
+            """{"scaChallengeId":"sca-${UUID.randomUUID()}"}""",
+        )
+            .statusCode(200).extract().path("contractId")
+        // A bare test thread has no Vert.x context; the same bridge the activities use supplies one.
+        val signalled = onWorker { activation.firstContributionReceived(UUID.fromString(contractId)) }
+        assertThat(signalled).isEqualTo(ActivationOutcome.SIGNALLED)
+        val unknown = onWorker { activation.firstContributionReceived(UUID.randomUUID()) }
+        assertThat(unknown).isEqualTo(ActivationOutcome.NOT_AWAITING)
+        // Inside the cooling-off period the contract stays PENDING_ACTIVATION.
+        assertThat(contractStatus(contractId)).isEqualTo("PENDING_ACTIVATION")
     }
 
     private fun awaitTransfer(id: String, status: String) {

@@ -18,6 +18,7 @@ import com.openbank.pension.application.onboarding.TransactionRunner
 import com.openbank.pension.application.onboarding.TransferCounterpartyPort
 import com.openbank.pension.application.onboarding.TransferRequestRepository
 import com.openbank.pension.application.onboarding.TransferService
+import com.openbank.pension.application.port.out.OnboardingActivationPort
 import com.openbank.pension.application.port.out.PensionContractRepository
 import com.openbank.pension.domain.pack.JurisdictionPackRegistry
 import com.openbank.pension.infrastructure.onboarding.pack.OnboardingRulesLoader
@@ -26,6 +27,7 @@ import io.quarkus.runtime.Startup
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Produces
 import java.time.Clock
+import java.util.UUID
 
 /**
  * CDI wiring for slice S2 (onboarding and transfers). Kept apart from S1's `PensionBeans` so the
@@ -62,6 +64,15 @@ class OnboardingBeans {
         applications, assessments, transfers, contracts, packs, rules, kyc, relations, documents, signatures,
         orchestrator, tx, clock,
     )
+
+    /** The port slice S3 calls on a first contribution; backed by the real onboarding workflow. */
+    @Produces
+    @ApplicationScoped
+    fun onboardingActivationPort(onboarding: OnboardingService): OnboardingActivationPort =
+        object : OnboardingActivationPort {
+            override suspend fun firstContributionReceived(contractId: UUID) =
+                onboarding.firstContributionReceived(contractId)
+        }
 
     @Produces
     @ApplicationScoped

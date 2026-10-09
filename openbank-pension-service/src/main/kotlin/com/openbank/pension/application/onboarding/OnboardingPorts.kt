@@ -35,6 +35,7 @@ interface OnboardingApplicationRepository {
     suspend fun findById(id: UUID): OnboardingApplication?
     suspend fun findByStatus(status: OnboardingStatus?, limit: Int): List<OnboardingApplication>
     suspend fun findByTransferRequest(transferId: UUID): OnboardingApplication?
+    suspend fun findByContract(contractId: UUID): OnboardingApplication?
 }
 
 interface SuitabilityAssessmentRepository {

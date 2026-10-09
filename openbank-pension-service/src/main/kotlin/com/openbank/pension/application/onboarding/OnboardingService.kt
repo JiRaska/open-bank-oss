@@ -4,6 +4,7 @@
 
 package com.openbank.pension.application.onboarding
 
+import com.openbank.pension.application.port.out.ActivationOutcome
 import com.openbank.pension.application.port.out.PensionContractRepository
 import com.openbank.pension.domain.model.ContractStatus
 import com.openbank.pension.domain.model.ContributionSchedule
@@ -350,6 +351,16 @@ class OnboardingService(
         check(application.kind == OnboardingKind.NEW_CONTRACT) { "a transfer-in activates on the transferred funds" }
         orchestrator.signalContributionReceived(id)
         return application
+    }
+
+    /** [com.openbank.pension.application.port.out.OnboardingActivationPort], for slice S3. */
+    suspend fun firstContributionReceived(contractId: UUID): ActivationOutcome {
+        val application = applications.findByContract(contractId) ?: return ActivationOutcome.NOT_AWAITING
+        if (application.status != OnboardingStatus.SIGNED || application.kind != OnboardingKind.NEW_CONTRACT) {
+            return ActivationOutcome.NOT_AWAITING
+        }
+        orchestrator.signalContributionReceived(application.id)
+        return ActivationOutcome.SIGNALLED
     }
 
     // --- workflow callbacks (idempotent: a retried activity must not fail on its own effect) -----
