@@ -1,0 +1,35 @@
+{
+  "jurisdiction": "CZ",
+  "productLine": "DPS",
+  "packVersion": 1,
+  "legalReview": {
+    "status": "REQUIRES_LEGAL_REVIEW",
+    "note": "Reference onboarding values for supplementary pension savings (Act 427/2011 Coll.) and distance-contract withdrawal; cooling-off, activation deadline, questionnaire regime and strategy list must be confirmed by legal review."
+  },
+  "coolingOffDays": 14,
+  "activation": { "trigger": "FIRST_CONTRIBUTION", "deadlineDays": 90 },
+  "applicationExpiryDays": 30,
+  "questionnaire": {
+    "regime": "RISK_PROFILE_ONLY",
+    "appropriatenessTest": false,
+    "esgPreferenceRequired": false,
+    "allowUnsuitableWithWarning": true,
+    "validityDays": 365
+  },
+  "keyInformationDocument": { "type": "PRE_CONTRACTUAL_INFORMATION", "templateCode": "pension-dps-key-information" },
+  "strategies": [
+    { "code": "CONSERVATIVE", "riskClass": 1 },
+    { "code": "BALANCED", "riskClass": 3 },
+    { "code": "SUSTAINABLE_BALANCED", "riskClass": 3, "sustainable": true },
+    { "code": "DYNAMIC", "riskClass": 5 },
+    { "code": "LIFECYCLE", "riskClass": 5, "lifecycle": true }
+  ],
+  "lifecycleDefault": "LIFECYCLE",
+  "horizonCaps": [
+    { "maxYears": 2, "maxRiskClass": 1 },
+    { "maxYears": 5, "maxRiskClass": 3 },
+    { "maxYears": 10, "maxRiskClass": 5 }
+  ],
+  "guardianRequiredForLimitedCapacity": true,
+  "transferIn": { "fundsGraceDays": 30 }
+}

@@ -1,0 +1,210 @@
+quarkus:
+  application:
+    name: openbank-pension-service
+  http:
+    port: 8171
+    test-port: 0
+    cors:
+      ~: true
+      origins: http://localhost:3000
+      headers: Content-Type,Authorization,X-Customer-Party-Id
+    header:
+      X-Content-Type-Options:
+        value: nosniff
+      X-Frame-Options:
+        value: DENY
+      Referrer-Policy:
+        value: no-referrer
+      Permissions-Policy:
+        value: geolocation=(), microphone=(), camera=()
+      Content-Security-Policy:
+        value: "default-src 'self'"
+      Strict-Transport-Security:
+        value: max-age=31536000; includeSubDomains
+    limits:
+      max-body-size: 1M
+    idle-timeout: 60S
+    read-timeout: 30S
+
+  datasource:
+    db-kind: postgresql
+    username: openbank
+    password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
+    reactive:
+      url: vertx-reactive:postgresql://localhost:5432/openbank_pension
+    # A LITERAL jdbc url, not only an env expression: Flyway migrates the DEFAULT (Agroal/JDBC)
+    # datasource, and a service that boots only because the environment supplied one cannot start
+    # from this repo alone (check-flyway-default-datasource.py, #3080).
+    jdbc:
+      url: jdbc:postgresql://localhost:5432/openbank_pension
+
+  flyway:
+    # Committing migrations does not run them — this key defaults to FALSE. security-scanner
+    # shipped V2+V3 with it set nowhere and its deployed database held zero tables, every write
+    # answering 42P01 as a 500, while the pod stayed Ready (#3350).
+    migrate-at-start: true
+    connect-retries: 10
+    connect-retries-interval: 2S
+    locations: db/migration
+
+  hibernate-orm:
+    database:
+      generation: none
+
+  oidc:
+    auth-server-url: http://localhost:8080/realms/openbank
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+
+  # pension-service's OWN machine identity (ADR-0334 S8): Keycloak client `openbank-pension`,
+  # ROLE_API only. Used ONLY by the pension-fund-service rest-client (FundAdministrationPort);
+  # pension-fund-service admits holdings and orders for service-account-openbank-pension alone.
+  # Never the shared openbank-services client.
+  oidc-client:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+    client-id: openbank-pension
+    credentials:
+      secret: ${OIDC_PENSION_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    grant:
+      type: client
+
+  rest-client:
+    pension-fund-service:
+      url: ${PENSION_FUND_SERVICE_URL:http://localhost:8162}
+      connect-timeout: 2000
+      read-timeout: 5000
+
+  shutdown:
+    timeout: 30S
+
+  smallrye-health:
+    root-path: /q/health
+
+  log:
+    console:
+      format: '%d{HH:mm:ss} %-5p [%c{3.}] %s%e%n'
+
+  otel:
+    exporter:
+      otlp:
+        endpoint: http://localhost:4317
+    resource:
+      attributes:
+        service.name: openbank-pension-service
+
+  management:
+    enabled: true
+    port: 8090
+    host: 0.0.0.0
+    root-path: /q
+
+  dev-ui:
+    enabled: false
+
+
+openbank:
+  # Temporal (ADR-0334 S8). One client, one namespace; each workflow family polls its OWN task
+  # queue, so a worker never receives a task type it did not register. The worker switch follows
+  # the fleet convention openbank.<service>.worker.enabled. Every value is an env override.
+  temporal:
+    enabled: ${OPENBANK_TEMPORAL_ENABLED:false}
+    server-url: ${OPENBANK_TEMPORAL_SERVER_URL:localhost:7233}
+    namespace: ${OPENBANK_TEMPORAL_NAMESPACE:openbank-pension}
+  pension:
+    worker:
+      enabled: ${OPENBANK_PENSION_WORKER_ENABLED:true}
+    onboarding:
+      # Onboarding, transfer-in and transfer-out workflows (S2).
+      task-queue: ${OPENBANK_PENSION_ONBOARDING_TASK_QUEUE:pension-onboarding}
+    # FAIL CLOSED by default: the KYC, document, SCA and counterparty ports are stubs until their
+    # real adapters land. Off, every stubbed call answers 503.
+    stub-integrations:
+      enabled: false
+    # Retirement simulation (ADR-0334 S8): the provider's ASSUMED annual return per strategy code.
+    # Illustrative configuration, not a forecast; a strategy missing here is not projected.
+    simulation:
+      assumed-annual-returns:
+        CONSERVATIVE: "0.015"
+        BALANCED: "0.035"
+        SUSTAINABLE_BALANCED: "0.035"
+        DYNAMIC: "0.050"
+    exit:
+      # Early termination, payout and death settlement workflows (S5).
+      task-queue: ${OPENBANK_PENSION_EXIT_TASK_QUEUE:pension-exit}
+      stub:
+        # FAIL CLOSED: the SCA, own-account and beneficiary-KYC stubs refuse everything unless a
+        # profile turns them on.
+        checks-accept: false
+        default-value: "0"
+  rate-limit:
+    enabled: true
+    max-concurrent-requests: 100
+  api:
+    version: "1"
+  build:
+    time: "${BUILD_TIME:unknown}"
+  git:
+    commit: "${GIT_COMMIT:unknown}"
+
+opa:
+  url: "${OPA_URL:http://localhost:8181}"
+  path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
+  # A Duration, not a millisecond Long: see AuthzProducer for why the Kotlin field cannot carry
+  # an initializer, which a primitive would need.
+  timeout: "${OPA_TIMEOUT:PT0.5S}"
+
+authz:
+  enforce: "${AUTHZ_ENFORCE:true}"
+  four-eyes:
+    enforce: "${AUTHZ_FOUR_EYES_ENFORCE:false}"
+
+"%dev":
+  openbank:
+    pension:
+      stub-integrations:
+        enabled: true
+      worker:
+        enabled: false
+      exit:
+        stub:
+          checks-accept: true
+          default-value: "250000.00"
+  quarkus:
+    log:
+      level: DEBUG
+    oidc:
+      tls:
+        verification: none
+      enabled: false
+    # The in-memory fund register replaces the REST adapter in dev; no token is ever minted.
+    oidc-client:
+      enabled: false
+  authz:
+    enforce: "false"
+
+"%test":
+  openbank:
+    pension:
+      # No Temporal frontend in @QuarkusTest: the tests register their own in-process worker.
+      worker:
+        enabled: false
+      stub-integrations:
+        enabled: true
+      exit:
+        stub:
+          checks-accept: true
+  quarkus:
+    scheduler:
+      enabled: false
+    datasource:
+      reactive:
+        url: vertx-reactive:postgresql://localhost:5433/openbank_pension_test
+    management:
+      enabled: false
+    oidc:
+      enabled: false
+    oidc-client:
+      enabled: false
+  authz:
+    enforce: "false"
