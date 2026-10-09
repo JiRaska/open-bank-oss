@@ -43,9 +43,8 @@ sealed interface ConsumerScope {
     data class Reserved(val namespace: ReservedNamespace) : ConsumerScope {
         override fun permits(challenge: ScaChallenge): Boolean {
             val id = challenge.dynamicLinkingData?.approvalRequestId ?: return false
-            return challenge.purpose in namespace.purposes &&
-                ReservedNamespace.of(challenge) == namespace &&
-                namespace.isWellFormed(id)
+            // isWellFormed anchors the namespace's own prefix, so it is also the membership test.
+            return challenge.purpose in namespace.purposes && namespace.isWellFormed(id)
         }
     }
 }

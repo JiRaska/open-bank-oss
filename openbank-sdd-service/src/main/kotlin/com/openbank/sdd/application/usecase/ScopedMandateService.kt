@@ -54,14 +54,8 @@ class ScopedMandateService(
     fun cancel(mandateId: UUID, scope: MandateInitiatorScope): Uni<SddMandate> {
         if (scope !is MandateInitiatorScope.Scoped) return manage.cancel(mandateId)
         return list.get(mandateId).flatMap { mandate ->
-            if (scope.ownsCreditor(
-                    mandate.creditorIdentifier,
-                )
-            ) {
-                manage.cancel(mandateId)
-            } else {
-                refuse("mandate is outside the caller's scope")
-            }
+            val mine = scope.ownsCreditor(mandate.creditorIdentifier)
+            if (mine) manage.cancel(mandateId) else refuse("mandate is outside the caller's scope")
         }
     }
 
