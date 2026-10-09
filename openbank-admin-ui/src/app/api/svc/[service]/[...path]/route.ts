@@ -49,6 +49,9 @@ const SERVICE_MAP: Record<string, { container: string; port: number }> = {
   // ADR-0315: money-market deals for the treasury desk (#10618). Not in gitops yet — the
   // service-registry guard lists it in SERVICE_MAP_NOT_YET_DEPLOYED until its workload lands.
   'treasury-service':       { container: 'openbank-treasury-service',       port: 8160 },
+  // ADR-0334: the Pensions console (contracts, operator queues, payouts, death claims).
+  // pension-fund-service joins once its module lands on main (S4).
+  'pension-service':        { container: 'openbank-pension-service',        port: 8171 },
   'campaign-service':       { container: 'openbank-campaign-service',       port: 8128 },
   'sdd-service':            { container: 'openbank-sdd-service',            port: 8129 },
   'fraud-service':          { container: 'openbank-fraud-service',          port: 8133 },

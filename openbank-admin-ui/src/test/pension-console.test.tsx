@@ -141,9 +141,8 @@ describe('contract search', () => {
 })
 
 describe('contract detail', () => {
-  it('shows holdings and lets an operator activate a pending contract', async () => {
-    router = (url, init) => {
-      if (url.endsWith('/activate') && init?.method === 'POST') return json(contract('ACTIVE'))
+  it('shows holdings and offers no activation: a contract activates only through its application', async () => {
+    router = url => {
       if (url.includes(`/api/v1/pension/contracts/${CONTRACT_ID}`)) return json(contract('PENDING_ACTIVATION'))
       if (url.includes('/holdings')) return json({ contractId: CONTRACT_ID, holdings: [{ fundId: FUND_A, units: 10, navPerUnit: 1.5, navDate: '2026-10-08', value: 15, currency: 'CZK' }], pendingOrders: [] })
       if (url.includes('/transactions')) return json([])
@@ -152,17 +151,10 @@ describe('contract detail', () => {
     await renderPage(<PensionContractDetailPage params={Promise.resolve({ id: CONTRACT_ID })} />)
     expect(screen.getByText('Lifecycle timeline')).toBeTruthy()
     expect(screen.getByTitle(FUND_A)).toBeTruthy()
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Activate contract' })) })
-    const post = calls.find(c => c.init?.method === 'POST')
-    expect(post?.url).toContain(`/api/v1/pension/contracts/${CONTRACT_ID}/activate`)
-    expect(new Headers(post?.init?.headers).get('idempotency-key')).toBeTruthy()
-  })
-
-  it('hides activation from an auditor', async () => {
-    session.roles = ['ROLE_AUDITOR']
-    router = url => (url.includes('/api/v1/pension/contracts/') ? json(contract('PENDING_ACTIVATION')) : json({}, 404))
-    await renderPage(<PensionContractDetailPage params={Promise.resolve({ id: CONTRACT_ID })} />)
     expect(screen.queryByRole('button', { name: 'Activate contract' })).toBeNull()
+    expect(document.body.textContent).toMatch(/cooling-off/)
+    expect(calls.some(c => c.init?.method === 'POST')).toBe(false)
+    expect(calls.some(c => c.url.includes('/activate'))).toBe(false)
   })
 })
 
@@ -222,12 +214,31 @@ describe('strategy change four-eyes', () => {
   })
 })
 
-describe('backend-pending queues', () => {
-  it('degrades to a calm panel while the payout routes are not deployed', async () => {
+describe('payouts and death claims', () => {
+  it('reads the staff list routes and links each row to its contract', async () => {
+    router = url => {
+      if (url.includes('/api/v1/pension/operator/payouts')) {
+        return json([{ payoutId: 'pay-1', contractId: CONTRACT_ID, form: 'LUMP_SUM', status: 'CONFIRMED', grossAmount: 1000, taxWithheld: 150, netAmount: 850, currency: 'CZK', payoutAccountLast4: '5399', pendingAccountLast4: null }])
+      }
+      if (url.includes('/api/v1/pension/death-claims')) {
+        return json([{ claimId: 'claim-1', contractId: CONTRACT_ID, status: 'NOTIFIED', dateOfDeath: '2026-09-01', notifiedBy: 'olga.operator', approvedBy: null, valuation: 12000, incentiveReturn: 0 }])
+      }
+      return json({}, 404)
+    }
+    await renderPage(<PensionPayoutsPage />)
+    const urls = calls.map(c => c.url)
+    expect(urls.some(u => u.includes('/api/svc/pension-service/api/v1/pension/operator/payouts'))).toBe(true)
+    expect(urls.some(u => u.includes('/api/svc/pension-service/api/v1/pension/death-claims'))).toBe(true)
+    expect(urls.some(u => /\/api\/v1\/pension\/payouts(\?|$)/.test(u))).toBe(false)
+    expect(document.body.textContent).toContain('5399')
+    expect(document.body.textContent).toContain('2026-09-01')
+    const links = screen.getAllByRole('link').map(l => l.getAttribute('href'))
+    expect(links.filter(h => h === `/pension/contracts/${CONTRACT_ID}`).length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('degrades to a calm panel while pension-service is not deployed', async () => {
     router = () => json({ error: 'Unknown service' }, 404)
     await renderPage(<PensionPayoutsPage />)
-    expect(calls.map(c => c.url).some(u => u.includes('/api/v1/pension/payouts'))).toBe(true)
-    expect(calls.map(c => c.url).some(u => u.includes('/api/v1/pension/death-claims'))).toBe(true)
     expect(document.body.textContent).not.toMatch(/HTTP 404|alert-error/)
   })
 })

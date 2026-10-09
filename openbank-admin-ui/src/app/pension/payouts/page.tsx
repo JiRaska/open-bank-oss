@@ -3,9 +3,9 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 // Payouts and death claims (ADR-0334 lifecycle steps 6-8): payout requests from regular and early
-// termination, and death claims paid to beneficiaries or the estate. Backend slice S5 (#12350)
-// serves payouts and death claims by id only; the two list routes read here are not in it yet, so
-// both panels degrade through DataUnavailable until a list route ships.
+// termination, and death claims paid to beneficiaries or the estate. Read from pension-service's
+// staff list routes (API 1.1.0): GET /operator/payouts and GET /death-claims. Read-only: no
+// operator route writes a payout account, by design (S8).
 
 'use client'
 
@@ -36,14 +36,17 @@ function Payouts() {
       />
       <PensionQueue
         title={t('Výplaty', 'Payouts')}
-        url={pensionUrl('/payouts', { limit })}
+        url={pensionUrl('/operator/payouts', { limit })}
         service={PENSION}
         feature={t('výplaty penzijních smluv', 'pension payouts')}
         columns={[
           { key: 'form', cs: 'Forma', en: 'Form' },
           { key: 'grossAmount', cs: 'Hrubá částka', en: 'Gross amount' },
           { key: 'taxWithheld', cs: 'Sražená daň', en: 'Tax withheld' },
-          { key: 'requestedAt', cs: 'Požádáno', en: 'Requested' },
+          { key: 'netAmount', cs: 'Čistá částka', en: 'Net amount' },
+          { key: 'currency', cs: 'Měna', en: 'Currency' },
+          { key: 'payoutAccountLast4', cs: 'Účet (konec)', en: 'Account (last 4)' },
+          { key: 'pendingAccountLast4', cs: 'Čekající změna účtu', en: 'Held account change' },
         ]}
       />
       <PensionQueue
@@ -52,9 +55,11 @@ function Payouts() {
         service={PENSION}
         feature={t('pojistné události úmrtí', 'death claims')}
         columns={[
-          { key: 'reportedAt', cs: 'Nahlášeno', en: 'Reported' },
-          { key: 'payee', cs: 'Příjemce', en: 'Payee' },
-          { key: 'amount', cs: 'Částka', en: 'Amount' },
+          { key: 'dateOfDeath', cs: 'Datum úmrtí', en: 'Date of death' },
+          { key: 'notifiedBy', cs: 'Nahlásil', en: 'Notified by' },
+          { key: 'approvedBy', cs: 'Schválil', en: 'Approved by' },
+          { key: 'valuation', cs: 'Ocenění', en: 'Valuation' },
+          { key: 'incentiveReturn', cs: 'Vratka podpory', en: 'Incentive return' },
         ]}
       />
     </div>

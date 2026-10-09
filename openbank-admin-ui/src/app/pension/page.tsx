@@ -3,9 +3,8 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 // Pension contracts (ADR-0334): open a contract by id, or list contracts by status. The id is
-// validated as a UUID before any call (search rule #2). Listing by status is a pension-service
-// route that backend slice S1 has not shipped (#12350); until it does, the list degrades through
-// DataUnavailable while opening by id works.
+// validated as a UUID before any call (search rule #2). The list is pension-service's staff route
+// GET /contracts?status= (API 1.1.0), newest first.
 
 'use client'
 

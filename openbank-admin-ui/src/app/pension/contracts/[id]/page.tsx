@@ -4,27 +4,26 @@
 
 // One pension contract (ADR-0334): the contract and its pinned jurisdiction-pack version, the
 // lifecycle timeline as the contract records it, unit holdings at the latest published NAV and the
-// priced unit transactions (pension-fund-service). An operator may activate a contract waiting for
-// activation; the service refuses any other transition with 409, rendered readably.
+// priced unit transactions (pension-fund-service). Read-only: a contract is activated only by its
+// signed onboarding application once the cooling-off period ends and the first contribution arrives
+// (pension-service API 1.1.0 retired the operator activation route), so no button can skip that.
 
 'use client'
 
 import { use, useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { useSession } from 'next-auth/react'
 import { ArrowLeft, PiggyBank } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui'
-import { fundUrl, getJson, PENSION, PENSION_FUND, pensionUrl, sendJson } from '@/components/pension/api'
+import { fundUrl, getJson, PENSION, PENSION_FUND, pensionUrl } from '@/components/pension/api'
 import {
   contractValuationSchema, fundListSchema, pensionContractSchema, unitTransactionListSchema,
   type ContractValuation, type PensionContract, type UnitTransaction,
 } from '@/components/pension/contracts'
-import { contractTimeline, isUuid, refusalText, statusLabel } from '@/components/pension/model'
+import { contractTimeline, isUuid, statusLabel } from '@/components/pension/model'
 import { FundRef } from '@/components/pension/FundRef'
 import { PAGE_SIZE } from '@/components/pension/PensionQueue'
-import { hasPermission } from '@/lib/auth/roles'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 
 export default function PensionContractDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -36,12 +35,8 @@ export default function PensionContractDetailPage({ params }: { params: Promise<
   )
 }
 
-type Notice = { tone: 'success' | 'danger'; text: string }
-
 function ContractDetail({ id }: { id: string }) {
   const { t, language } = useLanguage()
-  const { data: session } = useSession()
-  const roles = useMemo(() => session?.user?.roles ?? [], [session?.user?.roles])
   const locale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const num = (v: number, digits = 2) => v.toLocaleString(locale, { minimumFractionDigits: digits, maximumFractionDigits: Math.max(digits, 6) })
 
@@ -52,8 +47,6 @@ function ContractDetail({ id }: { id: string }) {
   const [transactions, setTransactions] = useState<UnitTransaction[]>([])
   const [fundNames, setFundNames] = useState<ReadonlyMap<string, string>>(new Map())
   const [shown, setShown] = useState(PAGE_SIZE)
-  const [busy, setBusy] = useState(false)
-  const [notice, setNotice] = useState<Notice | null>(null)
 
   const valid = isUuid(id)
 
@@ -75,17 +68,6 @@ function ContractDetail({ id }: { id: string }) {
 
   useEffect(() => { void load() }, [load])
 
-  const activate = async () => {
-    setBusy(true)
-    setNotice(null)
-    const res = await sendJson('POST', pensionUrl(`/contracts/${encodeURIComponent(id)}/activate`), undefined, pensionContractSchema)
-    setBusy(false)
-    setNotice(res.ok
-      ? { tone: 'success', text: t('Smlouva aktivována.', 'Contract activated.') }
-      : { tone: 'danger', text: refusalText(res, t('Aktivace', 'Activation'), t) })
-    void load()
-  }
-
   const totals = useMemo(() => {
     const sums = new Map<string, number>()
     for (const h of valuation?.holdings ?? []) if (h.value !== null) sums.set(h.currency, (sums.get(h.currency) ?? 0) + h.value)
@@ -105,12 +87,6 @@ function ContractDetail({ id }: { id: string }) {
         actions={<Link href="/pension" className="btn btn-secondary btn-sm"><ArrowLeft size={14} aria-hidden="true" /> {t('Zpět', 'Back')}</Link>}
       />
 
-      {notice && (
-        <div role="status" className="card" style={{ marginBottom: 16, borderColor: notice.tone === 'danger' ? 'var(--danger)' : 'var(--success)' }}>
-          {notice.text}
-        </div>
-      )}
-
       {unavailable ? (
         <DataUnavailable kind={unavailable.kind} service={PENSION} feature={t('penzijní smlouva', 'pension contract')} lang={language} />
       ) : contract === null ? null : (
@@ -128,10 +104,10 @@ function ContractDetail({ id }: { id: string }) {
               <dt>{t('Obmyšlení', 'Beneficiaries')}</dt>
               <dd>{contract.beneficiaries.length ? contract.beneficiaries.map(b => `${b.name} ${b.sharePercent} %`).join(', ') : '—'}</dd>
             </dl>
-            {contract.status === 'PENDING_ACTIVATION' && hasPermission(roles, 'pension:operate') && (
-              <button type="button" className="btn btn-primary btn-sm" style={{ marginTop: 12 }} disabled={busy} onClick={() => void activate()}>
-                {t('Aktivovat smlouvu', 'Activate contract')}
-              </button>
+            {contract.status === 'PENDING_ACTIVATION' && (
+              <p style={{ fontSize: 12, marginTop: 12, marginBottom: 0 }}>
+                {t('Smlouva se aktivuje sama po uplynutí lhůty na rozmyšlenou a připsání prvního příspěvku (fronta žádostí).', 'The contract activates itself once the cooling-off period has ended and the first contribution has arrived (applications queue).')}
+              </p>
             )}
           </section>
 
