@@ -356,3 +356,53 @@ test_compliance_may_read_change_history_via_operator_view if {
 	}
 }
 
+# --- #12383 annuity marketplace ---------------------------------------------------------------
+
+test_edge_may_select_an_annuity_offer if {
+	rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": pension_edge, "roles": ["ROLE_API"]},
+		"action": "pension.annuity.select",
+	}
+}
+
+test_other_service_account_may_not_select_an_annuity_offer if {
+	not rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR", "ROLE_API"]},
+		"action": "pension.annuity.select",
+	}
+}
+
+test_edge_may_not_manage_annuity_partners if {
+	not rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": pension_edge, "roles": ["ROLE_API", "ROLE_OPERATOR"]},
+		"action": "pension.operator.annuity-write",
+	}
+}
+
+test_operator_may_approve_an_annuity_partner if {
+	rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
+		"action": "pension.operator.annuity-approve",
+	}
+}
+
+test_service_account_operator_may_not_approve_an_annuity_partner if {
+	not rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]},
+		"action": "pension.operator.annuity-approve",
+	}
+}
+
+test_compliance_may_read_annuity_partners if {
+	rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "carol", "roles": ["ROLE_COMPLIANCE"]},
+		"action": "pension.operator.annuity-read",
+	}
+}
+
+test_compliance_may_not_write_annuity_partners if {
+	not rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "carol", "roles": ["ROLE_COMPLIANCE"]},
+		"action": "pension.operator.annuity-write",
+	}
+}

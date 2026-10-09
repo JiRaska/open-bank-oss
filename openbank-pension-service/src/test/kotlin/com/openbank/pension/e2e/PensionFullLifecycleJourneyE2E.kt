@@ -118,6 +118,11 @@ class PensionFullLifecycleJourneyE2E {
         const val PARTY = "X-Customer-Party-Id"
         const val IDEMPOTENCY = "Idempotency-Key"
         const val IBAN = "CZ6508000000192000145399"
+        const val PARTNERS = "/api/v1/pension/operator/annuity-providers"
+        val SIM_PARTNERS = listOf(
+            Triple("sim-alpha", "1.12", "CZ5508000000001234567899"),
+            Triple("sim-beta", "1.10", "CZ1208000000009876543210"),
+        )
         val ORIGINAL_START: LocalDate = LocalDate.of(2010, 1, 1)
 
         /** The CZ onboarding packs' cooling-off period (jurisdiction-packs/onboarding/cz-*-v1.json). */
@@ -337,8 +342,8 @@ class PensionFullLifecycleJourneyE2E {
     @Test
     @Order(7)
     @TestSecurity(user = "edge", roles = ["ROLE_API"])
-    fun `b1 - transfer-in applications are signed for three contracts from another provider`() {
-        for (key in listOf("lump", "phased", "death")) {
+    fun `b1 - transfer-in applications are signed for four contracts from another provider`() {
+        for (key in listOf("lump", "phased", "death", "annuity")) {
             val started = ok(
                 customerPost(retiree, "/api/v1/pension/onboarding/applications", transferStart(key)),
                 201,
@@ -680,6 +685,118 @@ class PensionFullLifecycleJourneyE2E {
             customerPost(stranger, "$OPS/payments", payment("x", 1, "x", LocalDate.now())).statusCode,
         ).isEqualTo(403)
     }
+
+    // ---- (g) regular payout in the annuity form across two partner insurers (#12383) ----------
+
+    @Test
+    @Order(17)
+    @TestSecurity(user = "ops-maker", roles = ["ROLE_OPERATOR"])
+    fun `g1 - two simulator partners are registered and their activation requested, which the maker cannot approve`() {
+        for ((partner, yieldFactor, iban) in SIM_PARTNERS) {
+            ok(
+                operatorPost(
+                    "$PARTNERS",
+                    """{"partnerId":"$partner","terms":${simulatorTerms(partner, yieldFactor, iban)}}""",
+                ),
+                201,
+            )
+            ok(operatorPost("$PARTNERS/$partner/activation-request", null))
+            // Four-eyes: the maker who drafted and requested cannot activate.
+            assertThat(operatorPost("$PARTNERS/$partner/activation-approval", null).statusCode).isEqualTo(403)
+            assertThat(ok(operatorGet("$PARTNERS/$partner")).getString("status")).isEqualTo("PENDING_ACTIVATION")
+        }
+    }
+
+    @Test
+    @Order(18)
+    @TestSecurity(user = "ops-checker", roles = ["ROLE_OPERATOR"])
+    fun `g2 - a second operator activates both partners`() {
+        for ((partner, _, _) in SIM_PARTNERS) {
+            val approved = ok(operatorPost("$PARTNERS/$partner/activation-approval", null))
+            assertThat(approved.getString("status")).isEqualTo("ACTIVE")
+            assertThat(approved.getString("approvedBy")).isEqualTo("ops-checker")
+        }
+    }
+
+    @Test
+    @Order(19)
+    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    fun `g3 - an annuity payout compares both partners, binds the signed offer and buys exactly that policy`() {
+        val id = transferContracts.getValue("annuity")
+        fundValues.setValue(UUID.fromString(id), BigDecimal("900000.00"))
+        val quote =
+            ok(customerPost(retiree, "/api/v1/pension/contracts/$id/exit/payouts/quote", """{"form":"ANNUITY"}"""), 201)
+        val payout = quote.getString("payoutId")
+        val net = quote.getObject("netAmount", BigDecimal::class.java)
+        val annuity = "/api/v1/pension/contracts/$id/exit/payouts/$payout/annuity"
+
+        // No selection yet: the confirmation is refused, nothing moves.
+        assertThat(
+            customerPost(
+                retiree,
+                "/api/v1/pension/contracts/$id/exit/payouts/$payout/confirm",
+                """{"scaChallengeId":"sca-${UUID.randomUUID()}","payoutIban":"$IBAN"}""",
+            ).statusCode,
+        ).isEqualTo(409)
+
+        val offers =
+            ok(customerPost(retiree, "$annuity/offers", """{"annuityTypes":["LIFELONG","GUARANTEE_PERIOD"]}"""))
+        assertThat(
+            offers.getList<String>("offers.partnerId").toSet(),
+        ).containsExactlyInAnyOrder("sim-alpha", "sim-beta")
+        assertThat(offers.getList<String>("partnerFailures")).isEmpty()
+        assertThat(offers.getList<Boolean>("offers.illustrative")).containsOnly(true)
+        assertThat(offers.getList<BigDecimal>("offers.premium")).allSatisfy { assertThat(it).isEqualByComparingTo(net) }
+        assertThat(offers.getString("presentationOrder")).isNotBlank()
+
+        // The participant picks the beta LIFELONG offer even if it is not the top one: no steering.
+        val chosen = offers.getList<Map<String, Any>>("offers")
+            .first { it["partnerId"] == "sim-beta" && it["annuityType"] == "LIFELONG" }
+        val selected = ok(
+            customerPost(
+                retiree,
+                "$annuity/selection",
+                """{"partnerId":"sim-beta","offerId":"${chosen["offerId"]}","scaChallengeId":"sca-${UUID.randomUUID()}"}""",
+            ),
+        )
+        assertThat(selected.getString("status")).isEqualTo("SELECTED")
+
+        ok(
+            customerPost(
+                retiree,
+                "/api/v1/pension/contracts/$id/exit/payouts/$payout/confirm",
+                """{"scaChallengeId":"sca-${UUID.randomUUID()}","payoutIban":"$IBAN"}""",
+            ),
+        )
+        eventually("annuity payout completed") {
+            ok(customerGet(retiree, "/api/v1/pension/contracts/$id/exit/payouts/$payout")).getString("status") ==
+                "COMPLETED"
+        }
+        val purchase = ok(customerGet(retiree, annuity))
+        assertThat(purchase.getString("status")).isEqualTo("ACTIVE")
+        assertThat(purchase.getString("selectedPartnerId")).isEqualTo("sim-beta")
+        assertThat(purchase.getString("policyRef")).isNotBlank()
+        assertThat(purchase.getString("coolingOffEndsOn")).isNotBlank()
+        val paid = ok(customerGet(retiree, "/api/v1/pension/contracts/$id/exit/payouts/$payout"))
+        assertThat(paid.getString("annuityPolicyRef")).isEqualTo(purchase.getString("policyRef"))
+
+        // Exactly ONE premium left, to the SELECTED partner, for exactly the quoted net amount.
+        val sent = paymentRail.orders.values.filter { it.contractId == UUID.fromString(id) }
+        assertThat(sent).hasSize(1)
+        assertThat(sent.single().creditorIban).isEqualTo(SIM_PARTNERS.first { it.first == "sim-beta" }.third)
+        assertThat(sent.single().amount).isEqualByComparingTo(net)
+        assertThat(ok(customerGet(retiree, "/api/v1/pension/contracts/$id")).getString("status")).isEqualTo("PAID_OUT")
+        // Another customer cannot see it.
+        assertThat(customerGet(stranger, annuity).statusCode).isEqualTo(404)
+    }
+
+    private fun simulatorTerms(partner: String, yieldFactor: String, iban: String) = """
+        {"legalName":"Illustrative ${partner.uppercase()} Life (simulator)","legalEntityPartyId":"${UUID.randomUUID()}",
+         "licenceRef":"SIM-$partner","licenceAuthority":"SIMULATED","jurisdictions":["CZ"],
+         "supportedTypes":["LIFELONG","GUARANTEE_PERIOD","FIXED_TERM"],"currency":"CZK",
+         "minPremium":10000,"maxPremium":50000000,"coolingOffDays":30,"premiumIban":"$iban",
+         "adapter":"simulator","adapterSettings":{"yieldFactor":"$yieldFactor"},"effectiveFrom":"2020-01-01"}
+    """.trimIndent()
 
     // ---------------------------------------------------------------------------------------------
 

@@ -31,7 +31,7 @@ data class ExitGateways(
     val incentives: IncentiveClawbackPort,
     val tax: TaxWithholdingPort,
     val payments: PayoutPaymentPort,
-    val insurer: AnnuityInsurerPort,
+    val annuities: AnnuityPlacementPort,
     val accounts: OwnAccountVerificationPort,
     val sca: ScaVerificationPort,
     val beneficiaryKyc: BeneficiaryVerificationPort,

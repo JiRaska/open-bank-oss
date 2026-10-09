@@ -139,6 +139,11 @@ class PayoutService(
             "a payout needs an ACTIVE or SUSPENDED contract, was ${contract.status}"
         }
         val iban = IbanRule.normalise(command.iban)
+        if (request.form == PayoutForm.ANNUITY) {
+            // #12383: an annuity payout confirms only onto a still-valid, SCA-signed partner offer
+            // quoted for exactly this net premium.
+            ctx.gateways.annuities.requireBindingSelection(request.id, request.quote.netAmount)
+        }
         ctx.gateways.verifySignatureAndAccount(
             contract.participantPartyId,
             command.scaChallengeId,

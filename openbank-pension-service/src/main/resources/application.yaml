@@ -185,6 +185,13 @@ openbank:
     state-contribution:
       cz:
         deadline-cron: ${OPENBANK_PENSION_CZ_DEADLINE_CRON:0 30 5 * * ?}
+    # Annuity partner integration (#12383). Partners are REGISTRY data (operator, four-eyes); this is
+    # only how long a quote round waits, and whether a partner endpoint may be plain http (never in
+    # prod). A reference-protocol partner's credential is openbank.pension.annuity.partners.<id>.token
+    # (a secret, injected per environment); without one that partner is never called.
+    annuity:
+      quote-timeout: PT5S
+      allow-insecure-endpoints: false
   rate-limit:
     enabled: true
     max-concurrent-requests: 100
@@ -250,6 +257,8 @@ authz:
       state-contribution:
         cz:
           company-ico: "12345678"
+      annuity:
+        allow-insecure-endpoints: true
   quarkus:
     log:
       level: DEBUG
@@ -282,6 +291,8 @@ authz:
       state-contribution:
         cz:
           company-ico: "12345678"
+      annuity:
+        allow-insecure-endpoints: true
   quarkus:
     # The settlement channel runs on the in-memory connector in tests; no broker is started.
     kafka:

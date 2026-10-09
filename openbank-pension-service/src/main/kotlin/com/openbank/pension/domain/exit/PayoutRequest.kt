@@ -83,6 +83,9 @@ enum class PayoutStatus {
     IN_PAYMENT,
     COMPLETED,
     EXPIRED,
+
+    /** ANNUITY only: the policy failed and the pack returned the premium to the contract (#12383). */
+    REVERSED,
     ;
 
     fun canMoveTo(target: PayoutStatus): Boolean = target in EDGES.getValue(this)
@@ -91,9 +94,10 @@ enum class PayoutStatus {
         val EDGES: Map<PayoutStatus, Set<PayoutStatus>> = mapOf(
             QUOTED to setOf(CONFIRMED, EXPIRED),
             CONFIRMED to setOf(IN_PAYMENT),
-            IN_PAYMENT to setOf(COMPLETED),
+            IN_PAYMENT to setOf(COMPLETED, REVERSED),
             COMPLETED to emptySet(),
             EXPIRED to emptySet(),
+            REVERSED to emptySet(),
         )
     }
 }
@@ -258,6 +262,14 @@ data class PayoutRequest(
         return if (status == PayoutStatus.IN_PAYMENT) this else moveTo(PayoutStatus.IN_PAYMENT, now)
     }
 
+    /** ANNUITY whose premium came back to the contract (pack rule, #12383): nothing was paid out. */
+    fun reverseAnnuity(now: Instant): PayoutRequest {
+        check(form == PayoutForm.ANNUITY && annuity == null && paymentRef == null) {
+            "only an unsettled annuity payout can be reversed"
+        }
+        return if (status == PayoutStatus.REVERSED) this else moveTo(PayoutStatus.REVERSED, now)
+    }
+
     fun markPaid(ref: String, now: Instant): PayoutRequest {
         check(status == PayoutStatus.IN_PAYMENT && !scheduled) { "a single payment needs IN_PAYMENT, was $status" }
         return copy(paymentRef = paymentRef ?: ref, updatedAt = now)
@@ -280,7 +292,8 @@ data class PayoutRequest(
     fun complete(now: Instant): PayoutRequest {
         val settled = when {
             scheduled -> schedule?.allPaid == true
-            form == PayoutForm.ANNUITY -> annuity != null
+            // A refused/failed annuity whose premium went to the client is settled by that payment.
+            form == PayoutForm.ANNUITY -> annuity != null || paymentRef != null
             else -> paymentRef != null
         }
         check(settled) { "payout $id is not fully settled" }

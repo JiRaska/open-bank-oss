@@ -5,7 +5,6 @@
 package com.openbank.pension.infrastructure.exit.stub
 
 import com.openbank.libs.domain.identifiers.Ids
-import com.openbank.pension.application.exit.AnnuityInsurerPort
 import com.openbank.pension.application.exit.BeneficiaryVerificationPort
 import com.openbank.pension.application.exit.ClaimantKyc
 import com.openbank.pension.application.exit.OwnAccountVerificationPort
@@ -14,8 +13,6 @@ import com.openbank.pension.application.exit.PaymentOrder
 import com.openbank.pension.application.exit.PayoutPaymentPort
 import com.openbank.pension.application.exit.ScaVerificationPort
 import com.openbank.pension.application.exit.TaxWithholdingPort
-import com.openbank.pension.domain.exit.AnnuityPolicy
-import com.openbank.pension.domain.exit.ExitMoney
 import io.quarkus.arc.DefaultBean
 import io.quarkus.arc.profile.IfBuildProfile
 import jakarta.enterprise.context.ApplicationScoped
@@ -37,7 +34,7 @@ import java.util.concurrent.ConcurrentHashMap
  */
 
 /**
- * The money-moving stubs below (tax remittance, payout payment, annuity purchase) answer only when
+ * The money-moving stubs below (tax remittance, payout payment) answer only when
  * `openbank.pension.exit.stub.checks-accept=true` (%dev / %test). Otherwise they REFUSE: a deployed
  * pod with no real rail must fail a death settlement or payout loudly, never record a payment that
  * never left (the PushResult.skipped lesson, ADR-0252). ADR-0334 S8.
@@ -82,34 +79,6 @@ class StubPayoutPaymentAdapter(
         requireStubRail(accept, "PayoutPaymentPort")
         orders.putIfAbsent(order.idempotencyKey, order)
         return refs.computeIfAbsent(order.idempotencyKey) { "STUB-PAY-${Ids.randomId()}" }
-    }
-}
-
-@DefaultBean
-@ApplicationScoped
-class StubAnnuityInsurerAdapter(
-    @param:ConfigProperty(name = "openbank.pension.exit.stub.checks-accept", defaultValue = "false")
-    private val accept: Boolean,
-) : AnnuityInsurerPort {
-    override suspend fun purchase(
-        contractId: UUID,
-        premium: BigDecimal,
-        birthDate: LocalDate,
-        idempotencyKey: String,
-    ): AnnuityPolicy {
-        requireStubRail(accept, "AnnuityInsurerPort")
-        return AnnuityPolicy(
-            policyRef = "STUB-ANNUITY-${idempotencyKey.hashCode().toUInt()}",
-            insurerRef = "stub-insurer",
-            monthlyAmount = ExitMoney.round(
-                premium.divide(BigDecimal(ILLUSTRATIVE_MONTHS), java.math.MathContext.DECIMAL64),
-            ),
-        )
-    }
-
-    private companion object {
-        /** Illustrative annuity factor only; a real insurer prices by mortality tables. */
-        const val ILLUSTRATIVE_MONTHS = 240
     }
 }
 
