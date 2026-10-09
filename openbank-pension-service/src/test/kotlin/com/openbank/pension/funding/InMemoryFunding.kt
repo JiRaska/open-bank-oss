@@ -227,6 +227,9 @@ class InMemoryFunding(now: Instant = Instant.parse("2026-02-10T10:00:00Z")) {
 
     val mandates = object : PaymentMandatePort {
         override suspend fun setUp(request: MandateRequest) = "mandate-${request.reference}"
+
+        override suspend fun cancel(kind: com.openbank.pension.domain.contribution.MandateKind, externalId: String) =
+            Unit
     }
 
     val documents = object : TaxCertificateDocumentPort {

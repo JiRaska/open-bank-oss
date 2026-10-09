@@ -708,7 +708,43 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '403':
+          description: debtorIban is not a verified account of the participant (#12378).
         '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/funding/contracts/{contractId}/mandates/{mandateId}/cancel:
+    post:
+      tags: [Pension funding]
+      operationId: cancelMandate
+      summary: Cancel a standing order or SEPA direct-debit mandate of this contract (SCA-bound)
+      description: >-
+        The mandate must have been set up for this contract; any other id is a 404. The SCA
+        challenge signs SHA-256 of `pension-mandate-cancel|{contractId}|{mandateId}` (#12378).
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/FundingContractId'
+        - name: mandateId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/CustomerPartyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MandateCancelRequest'
+      responses:
+        '200':
+          description: Cancelled (or already cancelled)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Mandate'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Strong customer authentication failed.
+        '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/pension/funding/contracts/{contractId}/employers/{employerPartyId}:
     put:
       tags: [Pension funding]
@@ -2108,7 +2144,16 @@ components:
     Mandate:
       type: object
       properties:
-        mandateId: { type: string }
+        mandateId: { type: string, description: The standing-order / sdd mandate id downstream. }
+        id: { type: string, format: uuid, description: "pension-service's own mandate id (the cancel route takes it, #12378)." }
+        status: { type: string, enum: [ACTIVE, CANCELLED] }
+    MandateCancelRequest:
+      type: object
+      required: [scaChallengeId]
+      properties:
+        scaChallengeId:
+          type: string
+          description: SCA challenge signing this contract's cancellation of this mandate (single use).
     MandateSetupRequest:
       type: object
       required: [kind, debtorIban, amount, currency, firstCollection]
@@ -2118,6 +2163,12 @@ components:
         amount: { type: number, exclusiveMinimum: 0, maximum: 999999999.99, multipleOf: 0.01 }
         currency: { type: string, pattern: '^[A-Z]{3}$' }
         firstCollection: { type: string, format: date }
+        debtorName:
+          type: string
+          description: >-
+            Account holder's name; required for DIRECT_DEBIT. The debit account itself is resolved
+            server-side from debtorIban and must be a verified account of the participant (#12378);
+            no account id is accepted from the caller.
     Contribution:
       type: object
       properties:
