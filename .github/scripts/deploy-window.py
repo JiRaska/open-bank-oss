@@ -18,6 +18,10 @@ moment a deploy PR's auto-merge is ARMED does:
                 once the window has elapsed and nothing is armed. The caller re-runs
                 supersede-deploy-prs.sh (ancestry + coverage) on it before arming.
                 A successful manual producer run expedites only its matching PR.
+  * `flush-reviewed` — inspects every deferred service PR against selected main before arming;
+                fully covered PRs are retired, while unknown source or coverage blocks selection.
+  * `retire-covered` — with the GitOps App token, rechecks main, PR state, exact head and complete
+                pin coverage before commenting and closing a fully covered service PR.
   * `carry`   — called by auto-deploy.yml's rewrite step. Re-applies the image pins of every
                 open, UNARMED older gitops deploy PR onto the new PR, so the newest PR covers
                 every pending service and supersede-deploy-prs.sh closes the older ones. That
@@ -29,9 +33,9 @@ moment a deploy PR's auto-merge is ARMED does:
                 still represents the current main build inputs. Unknown sources fail closed.
 
 NO LOST DEPLOY. A deferred deploy is an open PR: the same durable record the pipeline used
-before this change. Nothing here closes a PR; the only closer is supersede-deploy-prs.sh, which
-closes a PR only when a newer one covers every file it touches — and `carry` is what makes the
-newer one cover them.
+before this change. It closes only when a newer PR covers its complete diff, or when every
+proposed image pin is already on main from the same or descendant source. Unknown source,
+non-pin changes and a deployment hold prevent main-coverage retirement.
 """
 from __future__ import annotations
 
@@ -119,17 +123,20 @@ def flush_eligible(prs: list[dict], now: int, last_deploy: int | None, window: i
                    inspect: Callable[[dict], str], manual_head: str | None = None
                    ) -> tuple[dict | None, list[int], str]:
     """Select a proven fresh PR and report covered ones; unknown blocks selection."""
-    remaining = list(prs)
+    if flush(prs, now, last_deploy, window, manual_head) is None:
+        return None, [], "none"
     covered: list[int] = []
-    while pick := flush(remaining, now, last_deploy, window, manual_head):
-        verdict = inspect(pick)
-        if verdict == "eligible":
-            return pick, covered, verdict
-        if verdict != "covered":
+    for pr in sorted(prs, key=lambda item: (item["created_at"], item["number"])):
+        if pr.get("armed") or not pr["head"].startswith(DEPLOY_PREFIXES[0]):
+            continue
+        verdict = inspect(pr)
+        if verdict == "covered":
+            covered.append(pr["number"])
+        elif verdict != "eligible":
             return None, covered, "unknown"
-        covered.append(pick["number"])
-        remaining = [pr for pr in remaining if pr["number"] != pick["number"]]
-    return None, covered, "none"
+    remaining = [pr for pr in prs if pr["number"] not in covered]
+    pick = flush(remaining, now, last_deploy, window, manual_head)
+    return pick, covered, "eligible" if pick else "none"
 
 
 def pins_from_diff(diff: str) -> list[tuple[str, str, str, str]]:
@@ -179,7 +186,7 @@ def pin_only_changes(diff: str) -> list[tuple[str, str, str, str]] | None:
     for path, sides in changes.items():
         if not sides["old"] or len(sides["old"]) != len(sides["new"]):
             return None
-        for old, new in zip(sides["old"], sides["new"]):
+        for old, new in zip(sides["old"], sides["new"], strict=True):
             if old[0] != new[0] or old[2] != new[2] or old[1] == new[1]:
                 return None
             pins.append((path, old[0], old[1], new[1]))
@@ -312,9 +319,11 @@ def inspect_deferred_pr(pr: dict, root: str, repo: str) -> str:
         return "unknown"
     helper = os.path.join(root, ".github/scripts/supersede-deploy-prs.sh")
 
+    @lru_cache(maxsize=128)
     def classify(*args: str) -> str:
         result = subprocess.run(["bash", helper, *args], cwd=root, capture_output=True,
-                                text=True, check=False)
+                                text=True, check=False,
+                                env={**os.environ, "GITHUB_REPOSITORY": repo})
         return result.stdout.strip() if result.returncode == 0 else "SKIP"
 
     def read_main(path: str) -> str | None:
@@ -501,7 +510,7 @@ def self_test() -> int:
                                 lambda _: main_text, relation, lambda _a, _b: "SKIP") == "unknown")
     queued = [
         {"number": 101, "head": "chore/gitops-auto-deploy-old", "created_at": "a", "armed": False},
-        {"number": 102, "head": "chore/admin-ui-deploy-next", "created_at": "b", "armed": False},
+        {"number": 102, "head": "chore/gitops-auto-deploy-next", "created_at": "b", "armed": False},
     ]
     pick, covered, verdict = flush_eligible(queued, T, T - W, W,
                                              lambda pr: stale if pr["number"] == 101 else "eligible")
@@ -567,6 +576,12 @@ def self_test() -> int:
     except ValueError:
         main_refused = True
     check("main advancement after comment prevents close", main_refused and actions == ["comment"])
+    workflow = os.path.join(os.path.dirname(__file__), "../workflows/deploy-window-flush.yml")
+    with open(workflow, encoding="utf-8") as source:
+        wiring = source.read()
+    check("scheduled flusher invokes reviewed selection and guarded retirement",
+          "deploy-window.py flush-reviewed" in wiring and "deploy-window.py retire-covered" in wiring
+          and "deploy-window.py flush --" not in wiring)
 
     # 5. two pushes in one window -> ONE PR pins both (carry), and a moved service is not rewound
     reg = "123.dkr.ecr.eu-north-1.amazonaws.com"

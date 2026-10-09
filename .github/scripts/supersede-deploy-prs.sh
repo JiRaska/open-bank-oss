@@ -546,6 +546,8 @@ if [ "${1:-}" = "--self-test" ]; then
   exit $?
 fi
 
+REPO="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY must be set}"
+
 # The deploy-window flusher also needs the same ancestry and file-coverage verdicts when
 # comparing a deferred PR's image pins with main. Keep one fail-closed classifier (#12182).
 if [ "${1:-}" = "--classify" ]; then
@@ -559,7 +561,6 @@ fi
 
 PREFIX="${1:?usage: supersede-deploy-prs.sh <branch-prefix> <keep-pr-number> | --self-test}"
 KEEP="${2:?usage: supersede-deploy-prs.sh <branch-prefix> <keep-pr-number> | --self-test}"
-REPO="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY must be set}"
 
 # The sha THIS run's deploy PR pins. Without it nothing can be classified, and "cannot classify"
 # must mean "close nothing" — never "close everything", which is the pre-#6231 behaviour.
