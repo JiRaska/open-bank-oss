@@ -81,6 +81,8 @@ data class DeathClaim(
     val redeemedAmount: BigDecimal? = null,
     val createdAt: Instant,
     val updatedAt: Instant,
+    /** Optimistic-lock version of the stored row (set on load, checked on save; ADR-0334 S8). */
+    val version: Int = 0,
 ) {
     init {
         require(evidenceRef.isNotBlank()) { "death evidence reference is required" }

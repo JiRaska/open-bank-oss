@@ -142,7 +142,8 @@ class ExitExecutionService(private val ctx: ExitContext) {
             contract,
             "${payout.form.name}#$seq",
             contract.participantPartyId.toString(),
-            requireNotNull(payout.payoutIban),
+            // The signed account, or a held account change that has taken effect for this due date.
+            requireNotNull(payout.accountFor(installment.dueDate)),
             installment.net,
             payout.quote.currency,
         )

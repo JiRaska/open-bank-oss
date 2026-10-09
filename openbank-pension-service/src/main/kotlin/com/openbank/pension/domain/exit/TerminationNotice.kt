@@ -62,9 +62,18 @@ data class TerminationNotice(
     val redeemedAmount: BigDecimal? = null,
     val paymentRef: String? = null,
     val updatedAt: Instant,
+    /** Optimistic-lock version of the stored row (set on load, checked on save; ADR-0334 S8). */
+    val version: Int = 0,
 ) {
     /** SHA-256 of the quote the participant signs; bound into the SCA challenge (RTS Art. 5). */
     val quoteHash: String get() = sha256("$id|$contractId|${quote.canonical()}|$quoteExpiresAt")
+
+    /**
+     * What the SCA challenge signs (ADR-0334 S8): the quote AND the destination account. Execution
+     * pays only the account stored with this signature, so the account cannot be swapped after the
+     * participant approved the amount.
+     */
+    fun signingHash(iban: String): String = sha256("$quoteHash|payout-account|$iban")
 
     /** Fund proceeds minus the binding quote: positive = provider gain, negative = provider loss. */
     val navVariance: BigDecimal? get() = redeemedAmount?.subtract(quote.redemptionValue)

@@ -25,8 +25,7 @@ class PensionFundOrdersTest {
     private val bonds = UUID.fromString("00000000-0000-4000-8000-0000000000b1")
     private val contract = UUID.randomUUID()
 
-    private class FakeRegister(var holdings: List<HoldingDto>, val strategies: List<StrategyDto>) :
-        PensionFundRestClient {
+    private class FakeRegister(var holdings: List<HoldingDto>, val strategies: List<StrategyDto>) : FundRegister {
         val orders = linkedMapOf<String, OrderRequestDto>()
 
         override suspend fun holdings(contractId: UUID) = ContractValuationDto(contractId, holdings)

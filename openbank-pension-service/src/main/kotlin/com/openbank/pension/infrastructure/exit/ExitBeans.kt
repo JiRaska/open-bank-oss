@@ -15,6 +15,7 @@ import com.openbank.pension.application.exit.ExitStores
 import com.openbank.pension.application.exit.ExitWorkflowLauncher
 import com.openbank.pension.application.exit.IncentiveClawbackPort
 import com.openbank.pension.application.exit.OwnAccountVerificationPort
+import com.openbank.pension.application.exit.ParticipantNotificationPort
 import com.openbank.pension.application.exit.PaymentInstructionRepository
 import com.openbank.pension.application.exit.PayoutPaymentPort
 import com.openbank.pension.application.exit.PayoutRequestRepository
@@ -58,7 +59,8 @@ class ExitBeans {
         accounts: OwnAccountVerificationPort,
         sca: ScaVerificationPort,
         beneficiaryKyc: BeneficiaryVerificationPort,
-    ) = ExitGateways(fund, incentives, tax, payments, insurer, accounts, sca, beneficiaryKyc)
+        notifications: ParticipantNotificationPort,
+    ) = ExitGateways(fund, incentives, tax, payments, insurer, accounts, sca, beneficiaryKyc, notifications)
 
     @Produces
     @Singleton

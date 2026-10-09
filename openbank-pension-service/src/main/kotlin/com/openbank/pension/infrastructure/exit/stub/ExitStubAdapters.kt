@@ -8,6 +8,7 @@ import com.openbank.pension.application.exit.AnnuityInsurerPort
 import com.openbank.pension.application.exit.BeneficiaryVerificationPort
 import com.openbank.pension.application.exit.ClaimantKyc
 import com.openbank.pension.application.exit.OwnAccountVerificationPort
+import com.openbank.pension.application.exit.ParticipantNotificationPort
 import com.openbank.pension.application.exit.PaymentOrder
 import com.openbank.pension.application.exit.PayoutPaymentPort
 import com.openbank.pension.application.exit.ScaVerificationPort
@@ -140,4 +141,30 @@ class StubBeneficiaryVerificationAdapter(
     private val accept: Boolean,
 ) : BeneficiaryVerificationPort {
     override suspend fun verify(kyc: ClaimantKyc): Boolean = accept && kyc.identityDocumentRef.isNotBlank()
+}
+
+/**
+ * notification-service stand-in (ADR-0334 S8): records the payout-account-change notice. Refuses
+ * outside dev/test, so a deployed pod cannot change a payout account without telling the
+ * participant — the change is refused instead. Real target: notification-service on the
+ * participant's verified channel (follow-up, #12350).
+ */
+@DefaultBean
+@ApplicationScoped
+class StubParticipantNotificationAdapter(
+    @param:ConfigProperty(name = "openbank.pension.exit.stub.checks-accept", defaultValue = "false")
+    private val accept: Boolean,
+) : ParticipantNotificationPort {
+    val sent = java.util.concurrent.CopyOnWriteArrayList<String>()
+
+    override suspend fun payoutAccountChanged(
+        partyId: UUID,
+        contractId: UUID,
+        payoutId: UUID,
+        accountLast4: String,
+        effectiveFrom: LocalDate,
+    ) {
+        requireStubRail(accept, "ParticipantNotificationPort")
+        sent += "$payoutId|$accountLast4|$effectiveFrom"
+    }
 }

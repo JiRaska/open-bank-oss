@@ -93,7 +93,8 @@ class TerminationService(
         ctx.gateways.verifySignatureAndAccount(
             contract.participantPartyId,
             command.scaChallengeId,
-            notice.quoteHash,
+            // The signature covers the quote AND the account (S8): what is approved is where it goes.
+            notice.signingHash(iban),
             iban,
         )
         val signed = stores.notices.save(

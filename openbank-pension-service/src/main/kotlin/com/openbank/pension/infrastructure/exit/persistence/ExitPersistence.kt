@@ -132,7 +132,17 @@ internal object ExitJson {
         .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
 }
 
-/** Shared upsert: an existing row is loaded and mutated in-session, never re-persisted (#1521). */
+/** A write lost a race: the row changed since it was read. Mapped to 409; an activity retries on a fresh read. */
+class ExitConcurrentUpdateException(message: String) : IllegalStateException(message)
+
+/**
+ * Shared upsert with OPTIMISTIC LOCKING (ADR-0334 S8). An existing row is loaded and mutated
+ * in-session, never re-persisted (#1521), and only when its `row_version` still equals the
+ * [expectedVersion] the aggregate was read at — otherwise another writer got there first and this
+ * write is refused rather than silently overwriting it (a confirmation racing an account change, an
+ * activity racing an operator). Hibernate's `@Version` then guards the flush itself, so two
+ * transactions that both pass the in-memory check cannot both commit. Returns the new version.
+ */
 internal suspend fun <E : ExitDocumentEntity> PanacheRepository<E>.upsert(
     id: UUID,
     contractId: UUID,
@@ -140,47 +150,55 @@ internal suspend fun <E : ExitDocumentEntity> PanacheRepository<E>.upsert(
     idempotencyKey: String?,
     body: Any,
     updatedAt: Instant,
+    expectedVersion: Int,
     create: () -> E,
-) {
-    Panache.withTransaction {
-        find("aggregateId", id).firstResult().flatMap { existing ->
-            val entity = existing ?: create().also { it.aggregateId = id }
-            entity.contractId = contractId
-            entity.status = status
-            entity.idempotencyKey = idempotencyKey
-            entity.body = ExitJson.mapper.writeValueAsString(body)
-            entity.updatedAt = updatedAt
-            if (existing == null) persist(entity).replaceWithVoid() else Uni.createFrom().voidItem()
+): Int = Panache.withTransaction {
+    find("aggregateId", id).firstResult().flatMap { existing ->
+        if (existing != null && existing.rowVersion != expectedVersion) {
+            throw ExitConcurrentUpdateException(
+                "exit aggregate $id changed concurrently (version ${existing.rowVersion}, expected $expectedVersion)",
+            )
         }
-    }.awaitSuspending()
+        val entity = existing ?: create().also { it.aggregateId = id }
+        entity.contractId = contractId
+        entity.status = status
+        entity.idempotencyKey = idempotencyKey
+        entity.body = ExitJson.mapper.writeValueAsString(body)
+        entity.updatedAt = updatedAt
+        val stored = if (existing == null) persist(entity) else Uni.createFrom().item(entity)
+        stored.flatMap { Panache.getSession() }.flatMap { it.flush() }.map { entity.rowVersion }
+    }
+}.awaitSuspending()
+
+/** The stored body, with the row's current version stamped in so the next save can be checked. */
+internal fun <T> ExitDocumentEntity.toDomain(type: Class<T>): T {
+    val tree = ExitJson.mapper.readTree(body) as com.fasterxml.jackson.databind.node.ObjectNode
+    tree.put("version", rowVersion)
+    return ExitJson.mapper.treeToValue(tree, type)
 }
 
 internal suspend inline fun <E : ExitDocumentEntity, reified T> PanacheRepository<E>.load(
     query: String,
     vararg params: Any,
 ): List<T> = Panache.withSession { find(query, *params).list() }.awaitSuspending()
-    .map { ExitJson.mapper.readValue(it.body, T::class.java) }
+    .map { it.toDomain(T::class.java) }
 
-/** Newest first, optionally in one status, at most [limit] rows (operator queues, ADR-0334 S8). */
+/** Newest first, optionally in one status and/or contract, at most [limit] rows (operator queues, ADR-0334 S8). */
 internal suspend inline fun <E : ExitDocumentEntity, reified T> PanacheRepository<E>.page(
     status: String?,
     contractId: UUID?,
     limit: Int,
 ): List<T> {
-    val clauses =
-        listOfNotNull(
-            "status = :status".takeIf { status != null },
-            "contractId = :contractId".takeIf {
-                contractId !=
-                    null
-            },
-        )
+    val clauses = listOfNotNull(
+        "status = :status".takeIf { status != null },
+        "contractId = :contractId".takeIf { contractId != null },
+    )
     val where = if (clauses.isEmpty()) "" else clauses.joinToString(" and ", postfix = " ")
     val params = io.quarkus.panache.common.Parameters()
     if (status != null) params.and("status", status)
     if (contractId != null) params.and("contractId", contractId)
     return Panache.withSession { find("${where}order by id desc", params).page(0, limit).list() }.awaitSuspending()
-        .map { ExitJson.mapper.readValue(it.body, T::class.java) }
+        .map { it.toDomain(T::class.java) }
 }
 
 @ApplicationScoped
@@ -188,16 +206,17 @@ class TerminationNoticeRepositoryImpl :
     TerminationNoticeRepository,
     PanacheRepository<TerminationNoticeEntity> {
     override suspend fun save(notice: TerminationNotice): TerminationNotice {
-        upsert(
+        val version = upsert(
             notice.id,
             notice.contractId,
             notice.status.name,
             notice.idempotencyKey,
             notice,
             notice.updatedAt,
+            notice.version,
             ::TerminationNoticeEntity,
         )
-        return notice
+        return notice.copy(version = version)
     }
 
     override suspend fun findById(id: UUID): TerminationNotice? =
@@ -216,16 +235,17 @@ class PayoutRequestRepositoryImpl :
     PayoutRequestRepository,
     PanacheRepository<PayoutRequestEntity> {
     override suspend fun save(request: PayoutRequest): PayoutRequest {
-        upsert(
+        val version = upsert(
             request.id,
             request.contractId,
             request.status.name,
             request.idempotencyKey,
             request,
             request.updatedAt,
+            request.version,
             ::PayoutRequestEntity,
         )
-        return request
+        return request.copy(version = version)
     }
 
     override suspend fun findById(id: UUID): PayoutRequest? =
@@ -246,16 +266,17 @@ class DeathClaimRepositoryImpl :
     DeathClaimRepository,
     PanacheRepository<DeathClaimEntity> {
     override suspend fun save(claim: DeathClaim): DeathClaim {
-        upsert(
+        val version = upsert(
             claim.id,
             claim.contractId,
             claim.status.name,
             claim.idempotencyKey,
             claim,
             claim.updatedAt,
+            claim.version,
             ::DeathClaimEntity,
         )
-        return claim
+        return claim.copy(version = version)
     }
 
     override suspend fun findById(id: UUID): DeathClaim? =

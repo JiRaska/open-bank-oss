@@ -140,8 +140,11 @@ data class PayoutResponse(
     val annuityPolicyRef: String?,
     val annuityMonthlyAmount: BigDecimal?,
     val paymentRef: String?,
-    /** Last four characters of the account the remaining payments go to (never the full IBAN). */
+    /** Last four characters of the signed payout account (never the full IBAN). */
     val payoutAccountLast4: String?,
+    /** A held account change: last four characters and the first due date it applies to. */
+    val pendingAccountLast4: String?,
+    val pendingAccountFrom: java.time.LocalDate?,
 ) {
     companion object {
         fun from(p: PayoutRequest) = PayoutResponse(
@@ -150,6 +153,7 @@ data class PayoutResponse(
             p.quoteHash,
             p.quoteExpiresAt, p.schedule?.installments.orEmpty().map(InstallmentResponse::from), p.annuity?.policyRef,
             p.annuity?.monthlyAmount, p.paymentRef, p.payoutIban?.takeLast(LAST4),
+            p.pendingPayoutIban?.takeLast(LAST4), p.pendingPayoutIbanFrom,
         )
 
         private const val LAST4 = 4

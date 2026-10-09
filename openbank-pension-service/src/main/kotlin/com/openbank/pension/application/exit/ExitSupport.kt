@@ -34,6 +34,7 @@ data class ExitGateways(
     val accounts: OwnAccountVerificationPort,
     val sca: ScaVerificationPort,
     val beneficiaryKyc: BeneficiaryVerificationPort,
+    val notifications: ParticipantNotificationPort,
 )
 
 data class ExitContext(

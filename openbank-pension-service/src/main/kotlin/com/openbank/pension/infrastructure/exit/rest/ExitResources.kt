@@ -237,6 +237,22 @@ class ExitExceptionMappers {
     fun notFound(e: ExitNotFoundException): Response =
         Response.status(Response.Status.NOT_FOUND).entity(mapOf("error" to e.message)).build()
 
+    /** A write lost an optimistic-lock race (S8): the caller re-reads and retries; nothing was changed. */
+    @ServerExceptionMapper
+    fun concurrent(e: com.openbank.pension.infrastructure.exit.persistence.ExitConcurrentUpdateException): Response =
+        Response.status(Response.Status.CONFLICT).entity(mapOf("error" to e.message)).build()
+
+    @ServerExceptionMapper
+    fun staleRow(e: org.hibernate.StaleStateException): Response = concurrentWrite()
+
+    @ServerExceptionMapper
+    fun optimisticLock(e: jakarta.persistence.OptimisticLockException): Response = concurrentWrite()
+
+    /** Two writers raced at flush (@Version): the loser changed nothing and may re-read and retry. */
+    private fun concurrentWrite(): Response = Response.status(
+        Response.Status.CONFLICT,
+    ).entity(mapOf("error" to "the record changed concurrently; retry")).build()
+
     @ServerExceptionMapper
     fun forbidden(e: ExitForbiddenException): Response =
         Response.status(Response.Status.FORBIDDEN).entity(mapOf("error" to e.message)).build()

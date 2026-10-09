@@ -51,6 +51,14 @@ data class ChangePayoutAccountCommand(
 /** Upper bound of an operator list page. */
 const val MAX_LIST = 200
 
+/**
+ * Hold between a payout-account change and the first payment to the new account (fraud control,
+ * ADR-0334 S8): the participant is notified at once and has this long to react.
+ */
+const val ACCOUNT_CHANGE_HOLD_DAYS = 3L
+
+private const val LAST4 = 4
+
 data class EligibilityView(
     val eligibility: PayoutEligibility,
     val allowedForms: Set<PayoutForm>,
@@ -136,7 +144,8 @@ class PayoutService(
         ctx.gateways.verifySignatureAndAccount(
             contract.participantPartyId,
             command.scaChallengeId,
-            request.quoteHash,
+            // The signature covers the quote AND the account (S8): what is approved is where it goes.
+            request.signingHash(iban),
             iban,
         )
         val confirmed = stores.payouts.save(
@@ -157,14 +166,34 @@ class PayoutService(
         val contract = contractsUseCase.get(command.caller, command.contractId)
         val request = load(command.contractId, command.payoutId)
         val iban = IbanRule.normalise(command.iban)
-        if (request.payoutIban == iban && request.scaChallengeId == command.scaChallengeId) return request
+        if (request.pendingPayoutIban == iban && request.scaChallengeId == command.scaChallengeId) return request
+        // Fail fast on state before spending the participant's challenge; the save re-checks under
+        // the optimistic lock, so a confirmation or an installment racing this change cannot be lost.
+        val today = LocalDate.now(ctx.clock)
+        val changed =
+            request.changePayoutAccount(
+                iban,
+                command.scaChallengeId,
+                today,
+                ACCOUNT_CHANGE_HOLD_DAYS,
+                ctx.clock.instant(),
+            )
+        val effectiveFrom = requireNotNull(changed.pendingPayoutIbanFrom)
         ctx.gateways.verifySignatureAndAccount(
             contract.participantPartyId,
             command.scaChallengeId,
             request.accountChangeHash(iban),
             iban,
         )
-        return stores.payouts.save(request.changePayoutAccount(iban, command.scaChallengeId, ctx.clock.instant()))
+        // The participant hears about it on their known channel BEFORE any money can move there.
+        ctx.gateways.notifications.payoutAccountChanged(
+            contract.participantPartyId,
+            request.contractId,
+            request.id,
+            iban.takeLast(LAST4),
+            effectiveFrom,
+        )
+        return stores.payouts.save(changed)
     }
 
     /** Operator queue (ADR-0334 S8): newest first, optionally by status or contract. */

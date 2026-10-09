@@ -72,12 +72,34 @@ quote moves NAV risk to the provider for the notice period (`navVariance` is rec
 charged to the participant). A death during a phased withdrawal stops the remaining installments;
 handing the unpaid remainder to the claim is a follow-up.
 
+## 4b. Integration (slice S8)
+
+S8 joins S1/S2/S3/S5 into one service and adds the routes customer-edge needs. New trust boundary:
+pension-fund-service (the unit register), reached over REST as pension-service's OWN Keycloak
+client `openbank-pension` (client_credentials, ROLE_API only); pension-fund-service admits holdings
+and orders for that identity alone, never the shared `openbank-services` account.
+
+| STRIDE | Threat | Mitigation |
+|---|---|---|
+| **Elevation of privilege** | A payment quoting a contract's reference activates a contract whose onboarding was never signed (no KID, no SCA, no cooling-off) — S3's default activation adapter applied S1's `activate` directly | Activation is the onboarding workflow's alone: a contribution only SIGNALS a SIGNED new-contract application; a pending contract with no such application parks the money (`CONTRACT_NOT_ACCEPTING`), also for operator assignment and employer lines. S1's participant `/activate` and caller-valued `/early-termination` routes are retired |
+| **Tampering** | The payout account is swapped after the participant approved the amount | The SCA challenge signs the quote AND the destination (`signingHash(iban)`) for termination and payout; execution pays only the stored, signed account |
+| **Tampering** | A payout-account change redirects money (account takeover) | SCA-bound to this payout and IBAN; own verified account only; never on an unsigned or single-payment payout; HELD 3 days and applied only to installments due after that; the participant is notified at once on the known channel (fails closed if the notice cannot be sent); a second change while one is pending is refused |
+| **Tampering** | Check-then-act races on money-moving state (confirm vs account change, two confirms, activity vs operator) lose an update | Optimistic locking on every exit aggregate and on the contract row (`row_version`, checked on save and by Hibernate `@Version` at flush): the loser gets 409, an activity retries on a fresh read. Two parallel confirmations: exactly one wins (IT) |
+| **Denial of service / repudiation** | A retried POST runs twice (second application, second order) | `Idempotency-Key` required on every POST; the first 2xx response is stored per (principal, participant, method, path, key) and replayed |
+| **Information disclosure** | The simulation is mistaken for advice | Always `illustrative: true` with a disclaimer; assumed returns are configuration; nothing about the caller is read or stored |
+| **Spoofing** | The fund register is called with a borrowed identity | Own client, own Vault entry (`keycloak/pension-service`), env ref `optional: false`; in-memory register exists only in dev/test builds |
+
+Residual: two concurrent FIRST attempts with one idempotency key can both run (the store is written
+after the response) — every money step beneath is idempotent on its own key/unique index. The stub
+SCA does not compare the signed hash; the binding is enforced by sca-service's consume once the
+real adapter replaces the stub (fails closed until then). The notification port is a stub that
+refuses outside dev/test. Orders are forward-priced: a redemption returns the amount ordered, the
+proceeds settle at the next NAV.
+
 ## 5. Residual risks / assumptions
 
-- **Surrender preview inputs are caller-supplied.** Until pension-fund-service owns the unit
-  register, the current value and incentive history in an early-termination request come from the
-  caller; the preview is arithmetic over the pinned pack and moves nothing. Confirming moves the
-  contract to `TERMINATING` only — no payout exists in S1.
+- **(Resolved in S8)** S1's caller-valued surrender preview is retired; termination is S5's quote
+  over the unit register and the incentive ledger.
 - **Pack activation is a deploy, not a four-eyes runtime act** in S1. ADR-0212 D4's maker-checker
   activation is a follow-up; until then the pull-request review is the second pair of eyes.
 - **Concurrent creates with one key.** Two simultaneous first attempts with the same key race to
@@ -91,3 +113,4 @@ handing the unpaid remainder to the claim is a follow-up.
 
 - 2026-10-09 — initial model with the S1 bootstrap (ADR-0334, #12350).
 - 2026-10-09 — S5 exits: termination, payout, death claims (§4a).
+- 2026-10-09 — S8 integration: fund REST client identity, onboarding-only activation, account-bound SCA, held account change, optimistic locking, POST replay (§4b).

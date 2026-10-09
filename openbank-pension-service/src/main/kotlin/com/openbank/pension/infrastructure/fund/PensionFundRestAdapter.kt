@@ -94,6 +94,18 @@ data class StrategyDto(
     val allocations: List<AllocationTargetDto> = emptyList(),
 )
 
+/**
+ * The three register calls the adapter's logic needs, WITHOUT the JAX-RS annotations: a test fake
+ * implementing the annotated [PensionFundRestClient] would itself be registered as a resource.
+ */
+interface FundRegister {
+    suspend fun holdings(contractId: UUID): ContractValuationDto
+
+    suspend fun placeOrder(contractId: UUID, idempotencyKey: String, order: OrderRequestDto): UnitOrderDto
+
+    suspend fun strategies(): List<StrategyDto>
+}
+
 /** Refusal from the unit register that the caller must not paper over (no NAV, no strategy, short). */
 class FundAdministrationRefusedException(message: String) : IllegalStateException(message)
 
@@ -130,7 +142,18 @@ class PensionFundRestAdapter : FundAdministrationPort {
     lateinit var clock: Clock
 
     private val logic by lazy {
-        PensionFundOrders(client, { id -> contracts.findById(id)?.currentStrategy?.strategyCode }, clock)
+        PensionFundOrders(
+            object : FundRegister {
+                override suspend fun holdings(contractId: UUID) = client.holdings(contractId)
+
+                override suspend fun placeOrder(contractId: UUID, idempotencyKey: String, order: OrderRequestDto) =
+                    client.placeOrder(contractId, idempotencyKey, order)
+
+                override suspend fun strategies() = client.strategies()
+            },
+            { id -> contracts.findById(id)?.currentStrategy?.strategyCode },
+            clock,
+        )
     }
 
     override suspend fun valuation(contractId: UUID, currency: String) = logic.valuation(contractId, currency)
@@ -147,7 +170,7 @@ class PensionFundRestAdapter : FundAdministrationPort {
 
 /** The adapter's decisions, free of CDI so they are unit-tested against a fake register. */
 class PensionFundOrders(
-    private val client: PensionFundRestClient,
+    private val client: FundRegister,
     private val strategyOf: suspend (UUID) -> String?,
     private val clock: Clock,
 ) : FundAdministrationPort {

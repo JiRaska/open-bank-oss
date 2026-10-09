@@ -81,8 +81,17 @@ class PensionTemporalTestEnvironment {
         env.start()
     }
 
-    /** Advance workflow time (cooling-off, notice period, instalment due dates) without waiting. */
-    fun advance(duration: Duration) = env.sleep(duration)
+    @jakarta.inject.Inject
+    lateinit var clock: WorkflowTimeClock
+
+    /**
+     * Advance workflow time (cooling-off, notice period, instalment due dates) without waiting —
+     * and the service clock with it where the profile asks for that ([WorkflowTimeClock]).
+     */
+    fun advance(duration: Duration) {
+        clock.advance(duration)
+        env.sleep(duration)
+    }
 
     @PreDestroy
     fun stop() {

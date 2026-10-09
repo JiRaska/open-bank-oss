@@ -68,6 +68,8 @@ class PensionFullLifecycleJourneyE2E {
             "openbank.pension.stub-integrations.enabled" to "true",
             "openbank.pension.exit.stub.checks-accept" to "true",
             "openbank.pension.worker.enabled" to "false",
+            // Workflow timers and the aggregates' date checks move together (WorkflowTimeClock).
+            "pension.test.clock-follows-workflow-time" to "true",
             // Each workflow family on its own queue, exactly as deployed (S8).
             "openbank.pension.onboarding.task-queue" to "e2e-pension-onboarding",
             "openbank.pension.exit.task-queue" to "e2e-pension-exit",
@@ -378,6 +380,9 @@ class PensionFullLifecycleJourneyE2E {
                 ),
             )
         }
+        // A transfer-in completes only once its cooling-off period has run (the participant may still
+        // withdraw until then), exactly as for a new contract.
+        temporal.advance(Duration.ofDays(COOLING_OFF_DAYS + 1))
         for ((key, transfer) in transferIds) {
             eventually("transfer $key completed") {
                 ok(operatorGet("/api/v1/pension/operator/transfers/$transfer")).getString("status") == "COMPLETED"

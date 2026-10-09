@@ -1250,7 +1250,10 @@ paths:
       summary: Move the remaining payments of a running scheduled payout to another verified own account
       description: |
         SCA-bound: `scaChallengeId` must be signed over this payout and the new IBAN, and the IBAN
-        must be a verified account of the participant. Paid installments keep their account.
+        must be a verified account of the participant. Fraud controls: the change is HELD for
+        3 days and applies only to installments due after that; the participant is notified at
+        once; a single payment or anything already signed is never redirected; a concurrent
+        confirmation, installment or second change loses with 409 (optimistic lock).
       parameters:
         - name: contractId
           in: path
@@ -1910,7 +1913,7 @@ components:
         contractId: { type: string, format: uuid }
         paymentId: { type: string }
         source: { type: string, enum: [PARTICIPANT, EMPLOYER, STATE, TRANSFER_IN] }
-        channel: { type: string, enum: [STANDING_ORDER, DIRECT_DEBIT, BANK_TRANSFER, EMPLOYER_BATCH, STATE_INCENTIVE] }
+        channel: { type: string, enum: [STANDING_ORDER, DIRECT_DEBIT, BANK_TRANSFER, EMPLOYER_BATCH, STATE_INCENTIVE, TRANSFER] }
         amount: { type: number }
         currency: { type: string }
         valueDate: { type: string, format: date }
@@ -1927,7 +1930,7 @@ components:
         currency: { type: string, pattern: '^[A-Z]{3}$' }
         valueDate: { type: string, format: date }
         reference: { type: string, maxLength: 64 }
-        channel: { type: string, enum: [STANDING_ORDER, DIRECT_DEBIT, BANK_TRANSFER, EMPLOYER_BATCH, STATE_INCENTIVE] }
+        channel: { type: string, enum: [STANDING_ORDER, DIRECT_DEBIT, BANK_TRANSFER, EMPLOYER_BATCH, STATE_INCENTIVE, TRANSFER] }
         payerAccount: { type: string, maxLength: 64 }
     Receipt:
       type: object
@@ -2165,7 +2168,9 @@ components:
         annuityPolicyRef: { type: string, nullable: true }
         annuityMonthlyAmount: { type: number, nullable: true }
         paymentRef: { type: string, nullable: true }
-        payoutAccountLast4: { type: [string, 'null'], description: Last four characters of the payout account (S8) }
+        payoutAccountLast4: { type: [string, 'null'], description: Last four characters of the SIGNED payout account (S8) }
+        pendingAccountLast4: { type: [string, 'null'], description: A held account change (S8) - last four characters }
+        pendingAccountFrom: { type: [string, 'null'], format: date, description: First due date the held change applies to }
     PayoutStatement:
       type: object
       properties:

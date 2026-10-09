@@ -13,3 +13,8 @@ CREATE TABLE pension_idempotency_records (
 );
 
 CREATE INDEX pension_idempotency_records_created_idx ON pension_idempotency_records (created_at);
+
+-- ADR-0334 S8: optimistic locking on the contract row. Every lifecycle write checks the version it
+-- read; a concurrent change (termination vs payout, death vs strategy) loses with 409 instead of
+-- silently overwriting the winner. Rollback: ALTER TABLE pension_contracts DROP COLUMN row_version;
+ALTER TABLE pension_contracts ADD COLUMN row_version INTEGER NOT NULL DEFAULT 0;

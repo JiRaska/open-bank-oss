@@ -210,4 +210,79 @@ class ExitDomainTest {
         assertThatThrownBy { DeathClaim.claimantsFrom(emptyList(), rules.copy(estateWhenNoBeneficiary = false)) }
             .isInstanceOf(IllegalStateException::class.java)
     }
+
+    // ---- ADR-0334 S8: payout-destination fraud controls --------------------------------------
+
+    private val signedIban = "CZ6508000000192000145399"
+    private val otherIban = "CZ5508000000001234567899"
+
+    private fun runningPhased(): PayoutRequest {
+        val q = ExitCalculator.payoutQuote(
+            dps,
+            PayoutForm.PHASED_WITHDRAWAL,
+            BigDecimal("12000"),
+            BigDecimal("12000"),
+            balance,
+            12,
+        )
+        return PayoutRequest.quote(UUID.randomUUID(), UUID.randomUUID(), q, 7, now)
+            .confirm(signedIban, "sca", "k1", today, now)
+    }
+
+    @Test
+    fun `the confirmation signature covers the account - another account is another hash`() {
+        val p = runningPhased()
+        assertThat(p.signingHash(signedIban)).isNotEqualTo(p.signingHash(otherIban))
+        assertThat(p.signingHash(signedIban)).isNotEqualTo(p.quoteHash)
+        val notice = TerminationNotice.quote(
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            ExitCalculator.terminationQuote(dps, BigDecimal("5000"), IncentiveBalance.EMPTY, 2026),
+            7,
+            now,
+        )
+        assertThat(notice.signingHash(signedIban)).isNotEqualTo(notice.signingHash(otherIban))
+    }
+
+    @Test
+    fun `a held account change pays the signed account until it takes effect, and never twice in a row`() {
+        val p = runningPhased()
+        val from = LocalDate.parse("2026-12-01")
+        val changed = p.changePayoutAccount(otherIban, "sca-2", LocalDate.parse("2026-11-28"), 3, now)
+        assertThat(changed.payoutIban).describedAs("the signed account is never overwritten").isEqualTo(signedIban)
+        assertThat(changed.accountFor(LocalDate.parse("2026-11-01"))).isEqualTo(signedIban)
+        assertThat(changed.accountFor(from)).isEqualTo(otherIban)
+        // While the change is held, no second change.
+        assertThatThrownBy { changed.changePayoutAccount(signedIban, "sca-3", LocalDate.parse("2026-11-29"), 3, now) }
+            .isInstanceOf(IllegalStateException::class.java)
+    }
+
+    @Test
+    fun `nothing unsigned or single-payment is redirected`() {
+        val quoted = PayoutRequest.quote(
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            ExitCalculator.payoutQuote(
+                dps,
+                PayoutForm.PHASED_WITHDRAWAL,
+                BigDecimal("12000"),
+                BigDecimal("12000"),
+                balance,
+                12,
+            ),
+            7,
+            now,
+        )
+        assertThatThrownBy { quoted.changePayoutAccount(otherIban, "s", today, 3, now) }
+            .isInstanceOf(IllegalStateException::class.java)
+        val lump = PayoutRequest.quote(
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            ExitCalculator.payoutQuote(dps, PayoutForm.LUMP_SUM, BigDecimal("1000"), BigDecimal("1000"), balance),
+            7,
+            now,
+        ).confirm(signedIban, "s", "k", today, now)
+        assertThatThrownBy { lump.changePayoutAccount(otherIban, "s2", today, 3, now) }
+            .isInstanceOf(IllegalStateException::class.java)
+    }
 }

@@ -6,6 +6,7 @@ package com.openbank.pension.integration
 
 import com.openbank.pension.application.port.`in`.PensionContractUseCase
 import com.openbank.pension.application.port.out.PensionContractRepository
+import com.openbank.pension.infrastructure.exit.stub.StubParticipantNotificationAdapter
 import com.openbank.pension.infrastructure.fund.InMemoryFundAdministrationAdapter
 import com.openbank.pension.it.PostgresTestResource
 import com.openbank.pension.testsupport.ContractFixtures
@@ -45,6 +46,9 @@ class PensionIntegrationRoutesIT {
 
     @Inject
     lateinit var fund: InMemoryFundAdministrationAdapter
+
+    @Inject
+    lateinit var notifications: StubParticipantNotificationAdapter
 
     private val party: UUID = UUID.randomUUID()
 
@@ -158,21 +162,68 @@ class PensionIntegrationRoutesIT {
 
     @Test
     @TestSecurity(user = "edge", roles = ["ROLE_API"])
-    fun `the remaining payments of a phased payout move to another own account under a fresh SCA`() {
+    fun `an account change is held, notified and never redirects the signed account or a pending change`() {
         val contract = retiredContract()
         val payout = confirmedPayout(contract, "PHASED_WITHDRAWAL")
         val path = "/api/v1/pension/contracts/$contract/exit/payouts/$payout/account"
-        val challenge = "sca-${UUID.randomUUID()}"
 
-        edge(key = null).body("""{"scaChallengeId":"$challenge","payoutIban":"$OTHER_IBAN"}""").put(path)
-            .then().statusCode(200).body("payoutAccountLast4", equalTo(OTHER_IBAN.takeLast(4)))
-        // The challenge is single-use: spending it again on a different account is refused.
-        edge(key = null).body("""{"scaChallengeId":"$challenge","payoutIban":"$IBAN"}""").put(path)
-            .then().statusCode(403)
+        edge(key = null).body("""{"scaChallengeId":"sca-${UUID.randomUUID()}","payoutIban":"$OTHER_IBAN"}""").put(path)
+            .then().statusCode(200)
+            // The signed account is untouched; the new one is pending for later installments only.
+            .body("payoutAccountLast4", equalTo(IBAN.takeLast(4)))
+            .body("pendingAccountLast4", equalTo(OTHER_IBAN.takeLast(4)))
+            .body("pendingAccountFrom", equalTo(LocalDate.now().plusDays(3).toString()))
+        assertThat(notifications.sent).anySatisfy { assertThat(it).startsWith("$payout|${OTHER_IBAN.takeLast(4)}") }
+
+        // A second change while one is pending is refused (no rapid chain of redirects).
+        edge(key = null).body("""{"scaChallengeId":"sca-${UUID.randomUUID()}","payoutIban":"$IBAN"}""").put(path)
+            .then().statusCode(409)
         // Another participant cannot even see the payout.
         edge(asParty = UUID.randomUUID(), key = null)
             .body("""{"scaChallengeId":"sca-${UUID.randomUUID()}","payoutIban":"$IBAN"}""").put(path)
             .then().statusCode(404)
+    }
+
+    @Test
+    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    fun `an account change before the payout is confirmed is refused - the account is part of the signature`() {
+        val contract = retiredContract()
+        val payout: String = edge().body("""{"form":"PHASED_WITHDRAWAL","months":12}""")
+            .post("/api/v1/pension/contracts/$contract/exit/payouts/quote").then().statusCode(201)
+            .extract().path("payoutId")
+        edge(key = null).body("""{"scaChallengeId":"sca-${UUID.randomUUID()}","payoutIban":"$OTHER_IBAN"}""")
+            .put("/api/v1/pension/contracts/$contract/exit/payouts/$payout/account").then().statusCode(409)
+    }
+
+    /**
+     * Two confirmations of one quote race, each with its own valid SCA challenge and its own
+     * account: exactly one wins (optimistic lock), and the stored, signed account is the winner's.
+     */
+    @Test
+    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    fun `concurrent confirmations of one quote - exactly one wins and its signed account is the one stored`() {
+        val contract = retiredContract()
+        val payout: String = edge().body("""{"form":"PHASED_WITHDRAWAL","months":12}""")
+            .post("/api/v1/pension/contracts/$contract/exit/payouts/quote").then().statusCode(201)
+            .extract().path("payoutId")
+        val confirm = "/api/v1/pension/contracts/$contract/exit/payouts/$payout/confirm"
+        val pool = java.util.concurrent.Executors.newFixedThreadPool(2)
+        val start = java.util.concurrent.CountDownLatch(1)
+        val attempts = listOf(IBAN, OTHER_IBAN).map { iban ->
+            pool.submit<Pair<String, Int>> {
+                start.await()
+                iban to edge().body("""{"scaChallengeId":"sca-${UUID.randomUUID()}","payoutIban":"$iban"}""")
+                    .post(confirm).then().extract().statusCode()
+            }
+        }
+        start.countDown()
+        val results = attempts.map { it.get() }
+        pool.shutdown()
+        val winners = results.filter { it.second == 200 }
+        assertThat(winners).describedAs("results %s", results).hasSize(1)
+        assertThat(results.filter { it.second != 200 }.map { it.second }).allMatch { it == 409 }
+        edge(key = null).get("/api/v1/pension/contracts/$contract/exit/payouts/$payout").then().statusCode(200)
+            .body("payoutAccountLast4", equalTo(winners.single().first.takeLast(4)))
     }
 
     @Test

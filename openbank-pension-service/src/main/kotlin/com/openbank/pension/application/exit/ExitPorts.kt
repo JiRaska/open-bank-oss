@@ -29,6 +29,21 @@ interface IncentiveClawbackPort {
     suspend fun settleClawback(contractId: UUID, amount: BigDecimal, idempotencyKey: String)
 }
 
+/**
+ * Tells the participant, on their already-known channel, that the payout account changed and from
+ * when it applies (ADR-0334 S8 fraud control). Throws when it cannot deliver: the change is then
+ * refused, so no account change ever takes effect unannounced.
+ */
+interface ParticipantNotificationPort {
+    suspend fun payoutAccountChanged(
+        partyId: UUID,
+        contractId: UUID,
+        payoutId: UUID,
+        accountLast4: String,
+        effectiveFrom: LocalDate,
+    )
+}
+
 /** Remits tax withheld or recaptured on an exit to the tax authority. */
 interface TaxWithholdingPort {
     suspend fun remit(contractId: UUID, kind: String, amount: BigDecimal, idempotencyKey: String)

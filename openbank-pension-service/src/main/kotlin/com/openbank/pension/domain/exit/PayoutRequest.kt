@@ -117,6 +117,9 @@ data class PayoutRequest(
     val quoteExpiresAt: Instant,
     val schedule: PayoutSchedule? = null,
     val payoutIban: String? = null,
+    /** A participant-requested new account, effective for installments due on/after [pendingPayoutIbanFrom]. */
+    val pendingPayoutIban: String? = null,
+    val pendingPayoutIbanFrom: LocalDate? = null,
     val scaChallengeId: String? = null,
     val confirmedAt: Instant? = null,
     val idempotencyKey: String? = null,
@@ -124,6 +127,8 @@ data class PayoutRequest(
     val paymentRef: String? = null,
     val annuity: AnnuityPolicy? = null,
     val updatedAt: Instant,
+    /** Optimistic-lock version of the stored row (set on load, checked on save; ADR-0334 S8). */
+    val version: Int = 0,
 ) {
     init {
         if (schedule != null) {
@@ -138,22 +143,66 @@ data class PayoutRequest(
 
     val quoteHash: String get() = sha256("$id|$contractId|${quote.canonical()}|$quoteExpiresAt")
 
+    /**
+     * What the confirmation's SCA challenge signs (ADR-0334 S8): the quote AND the destination
+     * account. Execution pays only the account stored with this signature.
+     */
+    fun signingHash(iban: String): String = sha256("$quoteHash|payout-account|$iban")
+
     /** What an SCA challenge must be bound to for moving the remaining payments to [iban]. */
-    fun accountChangeHash(iban: String): String = sha256("$id|$contractId|payout-account|$iban")
+    fun accountChangeHash(iban: String): String = sha256("$id|$contractId|payout-account-change|$iban")
 
     /**
      * The participant moves the REMAINING installments of a running scheduled payout to another
-     * verified own account (ADR-0334 S8). Paid installments keep the account they were paid to; a
-     * single-payment form has nothing left to redirect once confirmed.
+     * verified own account (ADR-0334 S8). Fraud controls:
+     * - nothing already signed is redirected: a single-payment form has no later payment, and the
+     *   signed account keeps every installment due before [effectiveFrom];
+     * - the change only takes effect after a hold period ([effectiveFrom], set by the service), so
+     *   the participant is notified and can react before any money moves to the new account;
+     * - a second change while one is pending is refused; the pending one must take effect first.
      */
-    fun changePayoutAccount(iban: String, scaChallengeId: String, now: Instant): PayoutRequest {
+    fun changePayoutAccount(
+        iban: String,
+        scaChallengeId: String,
+        today: LocalDate,
+        holdDays: Long,
+        now: Instant,
+    ): PayoutRequest {
+        val effectiveFrom = today.plusDays(holdDays)
         check(scheduled) { "only a scheduled payout has later payments to redirect" }
         check(status == PayoutStatus.CONFIRMED || status == PayoutStatus.IN_PAYMENT) {
             "the payout is $status; there is no running payout to redirect"
         }
-        check(schedule?.allPaid != true) { "every installment is already paid" }
-        check(iban != payoutIban) { "the payout already goes to this account" }
-        return copy(payoutIban = iban, scaChallengeId = scaChallengeId, updatedAt = now)
+        val remaining = schedule?.installments.orEmpty()
+            .filter { it.status == InstallmentStatus.PENDING && !it.dueDate.isBefore(effectiveFrom) }
+        check(remaining.isNotEmpty()) { "no installment falls due after the hold period; nothing to redirect" }
+        val pendingFrom = pendingPayoutIbanFrom
+        check(pendingPayoutIban == null || pendingFrom == null || !today.isBefore(pendingFrom)) {
+            "an account change is already pending until $pendingFrom"
+        }
+        check(iban != accountFor(effectiveFrom)) { "the payout already goes to this account" }
+        // A change that has taken effect becomes the account of record before the next one is held.
+        val current = accountFor(today)
+        return copy(
+            payoutIban = current,
+            pendingPayoutIban = iban,
+            pendingPayoutIbanFrom = effectiveFrom,
+            scaChallengeId = scaChallengeId,
+            updatedAt = now,
+        )
+    }
+
+    /** The account an installment due on [dueDate] is paid to: the signed one, or a change that has taken effect. */
+    fun accountFor(dueDate: LocalDate): String? {
+        val from = pendingPayoutIbanFrom
+        return if (pendingPayoutIban != null &&
+            from != null &&
+            !dueDate.isBefore(from)
+        ) {
+            pendingPayoutIban
+        } else {
+            payoutIban
+        }
     }
 
     fun confirm(
