@@ -80,8 +80,32 @@ interface PayoutPaymentPort {
 }
 
 /** sca-service: consumes a challenge bound to [documentSha256] for [partyId] (RTS Art. 5). */
+/**
+ * The pension operation a document-bound SCA challenge was raised for. sca-service reserves the
+ * `pension-` namespace for pension-service's identity (ADR-0335): the device signs
+ * `approvalRequestId = pension-<code>:<documentSha256>`, so a challenge raised for one operation can
+ * never be spent on another, and no other consumer can spend a pension challenge.
+ */
+enum class ScaOperation(val code: String) {
+    /** Termination signing, payout confirmation, payout-account change (hash covers quote + IBAN). */
+    EXIT("exit"),
+    SCHEDULE_CHANGE("schedule-change"),
+    BENEFICIARY_CHANGE("beneficiary-change"),
+    ANNUITY_SELECTION("annuity-selection"),
+    ANNUITY_CANCELLATION("annuity-cancellation"),
+    MANDATE_CANCELLATION("mandate-cancellation"),
+    ;
+
+    /** The exact `approvalRequestId` the client must raise the sca-service challenge with. */
+    fun approvalRequestId(documentSha256: String): String = "$PREFIX$code:${documentSha256.lowercase()}"
+
+    companion object {
+        const val PREFIX = "pension-"
+    }
+}
+
 interface ScaVerificationPort {
-    suspend fun verify(partyId: UUID, challengeId: String, documentSha256: String): Boolean
+    suspend fun verify(partyId: UUID, challengeId: String, documentSha256: String, operation: ScaOperation): Boolean
 }
 
 /** How an ANNUITY payout's money ended up (#12383). */
@@ -114,7 +138,14 @@ interface AnnuityPlacementPort {
 /** The partner has not decided yet (policy or refund pending). NOT an IllegalStateException: it is retried. */
 class AnnuityStepPendingException(message: String) : RuntimeException(message)
 
-data class ClaimantKyc(val name: String, val birthDate: LocalDate, val identityDocumentRef: String, val iban: String)
+data class ClaimantKyc(
+    val name: String,
+    val birthDate: LocalDate,
+    val identityDocumentRef: String,
+    val iban: String,
+    /** The designated claimant's party, set from the claim (never from the request); null = not a customer. */
+    val partyId: UUID? = null,
+)
 
 /** KYC-light check of a beneficiary: identity document matches, and the account is theirs. */
 interface BeneficiaryVerificationPort {

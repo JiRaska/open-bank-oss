@@ -84,6 +84,7 @@ class MandateOrders(
                 val debtorName = request.debtorName ?: refuse("debtorName is required for a SEPA direct-debit mandate")
                 rails.registerSddMandate(
                     RegisterSddMandateDto(
+                        partyId = request.participantPartyId,
                         accountId = accountId,
                         debtorIban = request.debtorIban.replace(" ", "").uppercase(),
                         creditorIdentifier = cid,

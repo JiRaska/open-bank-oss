@@ -8,6 +8,8 @@ import com.openbank.pension.application.exit.PaymentOrder
 import com.openbank.pension.application.port.out.MandateRequest
 import com.openbank.pension.domain.contribution.MandateKind
 import com.openbank.pension.domain.model.ContributionFrequency
+import com.openbank.pension.infrastructure.identity.AccountOwnership
+import com.openbank.pension.infrastructure.identity.OwnershipVerificationDto
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -110,6 +112,8 @@ class PaymentAdapterLogicTest {
         assertThat(mandate.creditorIdentifier).isEqualTo("CZ00ZZZ12345678")
         assertThat(mandate.sequenceType).isEqualTo("RCUR")
         assertThat(mandate.accountId).isEqualTo(account)
+        // sdd-service verifies THIS party owns the debtor IBAN behind accountId (#12419).
+        assertThat(mandate.partyId).isEqualTo(UUID.fromString("00000000-0000-4000-8000-00000000a001"))
         assertThat(mandate.signatureDate).isEqualTo(LocalDate.parse("2026-10-09"))
     }
 
@@ -210,5 +214,16 @@ class PaymentAdapterLogicTest {
     @Test
     fun `a Czech IBAN without a prefix maps to the bare base number`() {
         assertThat(PayoutOrders.czechAccount("CZ00 0800 0000 0020 0014 5399")).isEqualTo("2000145399" to "0800")
+    }
+
+    @Test
+    fun `the debtor account id comes only from an owned and active ownership verdict`() {
+        val id = UUID.randomUUID()
+        assertThat(
+            AccountOwnership.ownAccountId(OwnershipVerificationDto(owned = true, active = true, id)),
+        ).isEqualTo(id)
+        assertThat(AccountOwnership.ownAccountId(OwnershipVerificationDto(owned = true, active = false, id))).isNull()
+        assertThat(AccountOwnership.ownAccountId(OwnershipVerificationDto(owned = false, active = true, id))).isNull()
+        assertThat(AccountOwnership.ownAccountId(null)).isNull()
     }
 }

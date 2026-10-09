@@ -15,6 +15,7 @@ import com.openbank.pension.application.exit.PaymentInstructionRepository
 import com.openbank.pension.application.exit.PaymentOrder
 import com.openbank.pension.application.exit.PayoutPaymentPort
 import com.openbank.pension.application.exit.PayoutRequestRepository
+import com.openbank.pension.application.exit.ScaOperation
 import com.openbank.pension.application.exit.ScaVerificationPort
 import com.openbank.pension.application.port.`in`.Caller
 import com.openbank.pension.application.port.`in`.PensionContractUseCase
@@ -175,7 +176,13 @@ class AnnuityMarketplaceService(
             return purchase
         }
         val selected = purchase.select(partnerId, offerId, scaChallengeId, clock.instant())
-        if (!rails.sca.verify(contract.participantPartyId, scaChallengeId, requireNotNull(selected.selectionHash))) {
+        if (!rails.sca.verify(
+                contract.participantPartyId,
+                scaChallengeId,
+                requireNotNull(selected.selectionHash),
+                ScaOperation.ANNUITY_SELECTION,
+            )
+        ) {
             throw ExitForbiddenException("strong customer authentication failed for this offer")
         }
         return stores.purchases.save(selected)
@@ -189,7 +196,13 @@ class AnnuityMarketplaceService(
         if (purchase.status == AnnuityPurchaseStatus.CANCELLED) return purchase
         // Fail fast on state before spending the participant's challenge.
         purchase.cancelInCoolingOff(LocalDate.now(clock), clock.instant())
-        if (!rails.sca.verify(contract.participantPartyId, scaChallengeId, purchase.cancellationHash())) {
+        if (!rails.sca.verify(
+                contract.participantPartyId,
+                scaChallengeId,
+                purchase.cancellationHash(),
+                ScaOperation.ANNUITY_CANCELLATION,
+            )
+        ) {
             throw ExitForbiddenException("strong customer authentication failed for this cancellation")
         }
         val partner = snapshot(purchase)

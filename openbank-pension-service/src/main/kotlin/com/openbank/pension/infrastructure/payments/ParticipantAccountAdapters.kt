@@ -5,27 +5,34 @@
 package com.openbank.pension.infrastructure.payments
 
 import com.openbank.pension.application.usecase.ParticipantAccountPort
+import com.openbank.pension.infrastructure.identity.AccountOwnership
+import com.openbank.pension.infrastructure.identity.AccountRestClient
+import com.openbank.pension.infrastructure.identity.OwnershipVerificationRequestDto
+import com.openbank.pension.infrastructure.identity.readOrNull
 import io.quarkus.arc.profile.IfBuildProfile
 import io.quarkus.arc.profile.UnlessBuildProfile
 import jakarta.enterprise.context.ApplicationScoped
-import org.jboss.logging.Logger
+import jakarta.inject.Inject
+import org.eclipse.microprofile.rest.client.inject.RestClient
 import java.nio.charset.StandardCharsets
 import java.util.UUID
 
 /**
- * Prod: FAILS CLOSED. account-service exposes no "account id of this IBAN, if held by this party"
- * lookup pension-service may call with its own client (#12387), so no mandate is set
- * up rather than one debiting an account the participant was never shown to own.
+ * Prod: account-service's ownership projection (`account.verifyOwnership`, ADR-0335 D2, #12419).
+ * The debtor account id is returned ONLY when the IBAN is an ACTIVE account of exactly this party;
+ * anything else (foreign, unknown, inactive) is null, so no mandate debits an account the
+ * participant was never shown to own. A provider that cannot answer is 503, never a pass.
  */
 @UnlessBuildProfile(anyOf = ["dev", "test"])
 @ApplicationScoped
-class UnavailableParticipantAccountAdapter : ParticipantAccountPort {
-    private val log = Logger.getLogger(UnavailableParticipantAccountAdapter::class.java)
+class AccountServiceParticipantAccountAdapter : ParticipantAccountPort {
+    @Inject
+    @RestClient
+    lateinit var client: AccountRestClient
 
-    override suspend fun ownAccountId(partyId: UUID, iban: String): UUID? {
-        log.warn("participant account lookup is not integrated; mandate refused (fail closed)")
-        return null
-    }
+    override suspend fun ownAccountId(partyId: UUID, iban: String): UUID? = AccountOwnership.ownAccountId(
+        readOrNull("account-service") { client.verifyOwnership(OwnershipVerificationRequestDto(iban, partyId)) },
+    )
 }
 
 /**

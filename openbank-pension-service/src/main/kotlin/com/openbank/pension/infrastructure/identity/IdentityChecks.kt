@@ -5,6 +5,7 @@
 package com.openbank.pension.infrastructure.identity
 
 import com.openbank.pension.application.exit.ClaimantKyc
+import com.openbank.pension.application.exit.ScaOperation
 import com.openbank.pension.application.onboarding.IntegrationUnavailableException
 import com.openbank.pension.application.onboarding.KycProfile
 import com.openbank.pension.application.onboarding.KycStatus
@@ -41,20 +42,25 @@ data class ScaBinding(val approvalRequestId: String, val payloadSha256: String) 
         }
 
         /**
-         * Exit (ScaVerificationPort): the hash already covers the quote AND the payout IBAN
-         * (`TerminationNotice/PayoutRequest.signingHash`), so a signature over another account or
-         * another quote has a different payload and a different approval request id.
+         * Document-bound operations (ScaVerificationPort): `pension-<operation>:<hash>`. For exit the
+         * hash already covers the quote AND the payout IBAN, so a signature over another account or
+         * another quote has a different payload and a different approval request id; the operation
+         * code means a challenge raised for one operation cannot be spent on another.
          */
-        fun forExit(signingHash: String): ScaBinding? = if (HEX64.matches(
-                signingHash,
-            )
-        ) {
-            ScaBinding("$EXIT_PREFIX${signingHash.lowercase()}", signingHash.lowercase())
-        } else {
-            null
-        }
+        fun forDocument(operation: ScaOperation, documentSha256: String): ScaBinding? =
+            if (HEX64.matches(documentSha256)) {
+                ScaBinding(operation.approvalRequestId(documentSha256), documentSha256.lowercase())
+            } else {
+                null
+            }
 
-        const val EXIT_PREFIX = "pension-exit:"
+        /** sca-service's reserved pension namespace (ADR-0335): `pension-<op>:<ref>`, at most 160 chars. */
+        private val RESERVED = Regex("^pension-[a-z]+(-[a-z]+)*:\\S+$")
+        const val MAX_APPROVAL_REQUEST_ID = 160
+
+        /** Only an id sca-service will let pension spend; anything else would be a 403 and is refused here. */
+        fun isReserved(approvalRequestId: String): Boolean =
+            approvalRequestId.length <= MAX_APPROVAL_REQUEST_ID && RESERVED.matches(approvalRequestId)
     }
 }
 
@@ -76,7 +82,7 @@ fun sha256Hex(value: String): String = MessageDigest.getInstance("SHA-256")
 class ScaConsumeGate(private val consume: suspend (UUID, ScaConsumeRequestDto) -> ScaChallengeDto) {
 
     suspend fun spend(partyId: UUID, challengeId: String, binding: ScaBinding?): Boolean {
-        if (binding == null) return false
+        if (binding == null || !ScaBinding.isReserved(binding.approvalRequestId)) return false
         val id = runCatching { UUID.fromString(challengeId.trim()) }.getOrNull() ?: return false
         val answer = call(id, ScaConsumeRequestDto(partyId, binding.approvalRequestId, binding.payloadSha256))
             ?: return false
@@ -165,28 +171,31 @@ object PartyKycMapping {
     }
 }
 
-/** account-service: the IBAN is an ACTIVE account held by exactly this party. */
+/** account-service's ownership projection: the IBAN is an ACTIVE account held by exactly this party. */
 object AccountOwnership {
-    fun owns(partyId: UUID, account: AccountDto?): Boolean =
-        account != null && account.partyId == partyId && account.status == "ACTIVE"
+    fun owns(verdict: OwnershipVerificationDto?): Boolean = verdict != null && verdict.owned && verdict.active
+
+    /** F3's debtor account: the account id, only for an owned AND active account (never a foreign one). */
+    fun ownAccountId(verdict: OwnershipVerificationDto?): java.util.UUID? = verdict?.accountId?.takeIf { owns(verdict) }
 }
 
 /**
  * KYC-light check of a death-claim beneficiary (the operator has inspected the identity document):
- * the payout IBAN must be an ACTIVE account whose holder is an ACTIVE, KYC-approved natural person
- * whose legal name is the claimant's name. A beneficiary who is not a customer of the bank is
- * REFUSED — there is no provider today that verifies a non-customer's identity document
- * (kyc-service runs cases only for parties); that path is a follow-up, never an accept.
+ * the designated claimant must be an ACTIVE, KYC-approved natural person whose legal name is the
+ * claimant's name, and the payout IBAN must be an ACTIVE account of THAT party — asked as
+ * "is this the claimant's IBAN" (ADR-0335 ownership projection), never by reading the holder. A
+ * claimant with no party (not a customer of the bank) is REFUSED — there is no provider today that
+ * verifies a non-customer's identity document; that path is a follow-up, never an accept.
  */
 class BeneficiaryLightKyc(
-    private val accountByIban: suspend (String) -> AccountDto?,
+    private val ownership: suspend (String, UUID) -> OwnershipVerificationDto?,
     private val partyById: suspend (UUID) -> PartyDto?,
 ) {
     suspend fun verify(kyc: ClaimantKyc): Boolean {
         if (kyc.identityDocumentRef.isBlank() || kyc.name.isBlank()) return false
-        val account = accountByIban(kyc.iban) ?: return false
-        val holder = account.partyId?.takeIf { account.status == "ACTIVE" } ?: return false
-        val party = partyById(holder) ?: return false
+        val claimant = kyc.partyId ?: return false
+        val party = partyById(claimant) ?: return false
+        if (!AccountOwnership.owns(ownership(kyc.iban, claimant))) return false
         return party.partyType == "INDIVIDUAL" &&
             party.status == "ACTIVE" &&
             party.kycStatus == "APPROVED" &&

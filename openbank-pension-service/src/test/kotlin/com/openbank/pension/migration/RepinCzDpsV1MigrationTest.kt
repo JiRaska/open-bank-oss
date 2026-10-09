@@ -5,8 +5,8 @@
 package com.openbank.pension.migration
 
 import com.openbank.pension.domain.model.ProductLine
-import com.openbank.pension.it.PostgresTestResource
 import com.openbank.pension.infrastructure.pack.JurisdictionPackLoader
+import com.openbank.pension.it.PostgresTestResource
 import org.assertj.core.api.Assertions.assertThat
 import org.flywaydb.core.Flyway
 import org.junit.jupiter.api.Assumptions.assumeTrue
@@ -33,25 +33,25 @@ class RepinCzDpsV1MigrationTest {
             .withUsername("openbank")
             .withPassword("openbank_secret")
             .use { pg ->
-            pg.start()
-            fun flyway(target: String) = Flyway.configure()
-                .dataSource(pg.jdbcUrl, pg.username, pg.password)
-                .locations("classpath:db/migration")
-                .target(target)
-                .load()
-            flyway("11").migrate()
-            val dpsV1 = UUID.randomUUID()
-            val dipV1 = UUID.randomUUID()
-            DriverManager.getConnection(pg.jdbcUrl, pg.username, pg.password).use { c ->
-                c.insert(dpsV1, "DPS", 1)
-                c.insert(dipV1, "DIP", 1)
+                pg.start()
+                fun flyway(target: String) = Flyway.configure()
+                    .dataSource(pg.jdbcUrl, pg.username, pg.password)
+                    .locations("classpath:db/migration")
+                    .target(target)
+                    .load()
+                flyway("11").migrate()
+                val dpsV1 = UUID.randomUUID()
+                val dipV1 = UUID.randomUUID()
+                DriverManager.getConnection(pg.jdbcUrl, pg.username, pg.password).use { c ->
+                    c.insert(dpsV1, "DPS", 1)
+                    c.insert(dipV1, "DIP", 1)
+                }
+                flyway("12").migrate()
+                DriverManager.getConnection(pg.jdbcUrl, pg.username, pg.password).use { c ->
+                    assertThat(c.versionOf(dpsV1)).isEqualTo(2)
+                    assertThat(c.versionOf(dipV1)).isEqualTo(1)
+                }
             }
-            flyway("12").migrate()
-            DriverManager.getConnection(pg.jdbcUrl, pg.username, pg.password).use { c ->
-                assertThat(c.versionOf(dpsV1)).isEqualTo(2)
-                assertThat(c.versionOf(dipV1)).isEqualTo(1)
-            }
-        }
     }
 
     @Test

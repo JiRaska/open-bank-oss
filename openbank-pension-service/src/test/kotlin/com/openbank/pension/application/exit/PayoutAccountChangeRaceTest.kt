@@ -110,7 +110,13 @@ class PayoutAccountChangeRaceTest {
     private fun world(): World = runBlocking {
         val packs = JurisdictionPackLoader.loadRegistry()
         val contracts = Contracts()
-        val useCase = PensionContractService(contracts, packs, clock, com.openbank.pension.infrastructure.notification.RecordingParticipantNotifier())
+        val useCase =
+            PensionContractService(
+                contracts,
+                packs,
+                clock,
+                com.openbank.pension.infrastructure.notification.RecordingParticipantNotifier(),
+            )
         val id = ContractFixtures.activeContract(
             useCase,
             contracts,
@@ -138,7 +144,7 @@ class PayoutAccountChangeRaceTest {
                 coEvery { it.isOwnVerifiedAccount(any(), any()) } returns
                     true
             },
-            sca = mockk<ScaVerificationPort>().also { coEvery { it.verify(any(), any(), any()) } returns true },
+            sca = mockk<ScaVerificationPort>().also { coEvery { it.verify(any(), any(), any(), any()) } returns true },
             beneficiaryKyc = mockk(relaxed = true),
             notifications = object : ParticipantNotificationPort {
                 override suspend fun payoutAccountChanged(

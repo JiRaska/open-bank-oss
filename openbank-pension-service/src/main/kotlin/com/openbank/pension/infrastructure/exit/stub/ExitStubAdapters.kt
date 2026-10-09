@@ -11,6 +11,7 @@ import com.openbank.pension.application.exit.OwnAccountVerificationPort
 import com.openbank.pension.application.exit.ParticipantNotificationPort
 import com.openbank.pension.application.exit.PaymentOrder
 import com.openbank.pension.application.exit.PayoutPaymentPort
+import com.openbank.pension.application.exit.ScaOperation
 import com.openbank.pension.application.exit.ScaVerificationPort
 import com.openbank.pension.application.exit.TaxWithholdingPort
 import io.quarkus.arc.DefaultBean
@@ -91,7 +92,12 @@ class StubScaVerificationAdapter(
     private val log = Logger.getLogger(StubScaVerificationAdapter::class.java)
     private val consumed = ConcurrentHashMap.newKeySet<String>()
 
-    override suspend fun verify(partyId: UUID, challengeId: String, documentSha256: String): Boolean {
+    override suspend fun verify(
+        partyId: UUID,
+        challengeId: String,
+        documentSha256: String,
+        operation: ScaOperation,
+    ): Boolean {
         if (!accept) {
             log.warn("SCA stub is fail-closed (openbank.pension.exit.stub.checks-accept=false): sca-service not wired")
             return false

@@ -5,6 +5,7 @@
 package com.openbank.pension.infrastructure.identity
 
 import com.openbank.pension.application.exit.ClaimantKyc
+import com.openbank.pension.application.exit.ScaOperation
 import com.openbank.pension.application.onboarding.IntegrationUnavailableException
 import com.openbank.pension.application.onboarding.KycStatus
 import com.openbank.pension.domain.exit.sha256
@@ -70,12 +71,18 @@ class IdentityChecksTest {
     fun `a signature over one payout account is refused for another account`(): Unit = runBlocking {
         val signedIban = "CZ6508000000192000145399"
         val otherIban = "CZ5508000000001234567899"
-        val challenge = sca.raise(party, ScaBinding.forExit(signingHash(signedIban))!!)
+        val challenge = sca.raise(party, ScaBinding.forDocument(ScaOperation.EXIT, signingHash(signedIban))!!)
 
-        assertThat(gate.spend(party, challenge.toString(), ScaBinding.forExit(signingHash(otherIban)))).isFalse()
+        assertThat(
+            gate.spend(party, challenge.toString(), ScaBinding.forDocument(ScaOperation.EXIT, signingHash(otherIban))),
+        ).isFalse()
         // A mismatch does not burn the challenge: the operation it WAS signed for still passes, once.
-        assertThat(gate.spend(party, challenge.toString(), ScaBinding.forExit(signingHash(signedIban)))).isTrue()
-        assertThat(gate.spend(party, challenge.toString(), ScaBinding.forExit(signingHash(signedIban)))).isFalse()
+        assertThat(
+            gate.spend(party, challenge.toString(), ScaBinding.forDocument(ScaOperation.EXIT, signingHash(signedIban))),
+        ).isTrue()
+        assertThat(
+            gate.spend(party, challenge.toString(), ScaBinding.forDocument(ScaOperation.EXIT, signingHash(signedIban))),
+        ).isFalse()
     }
 
     @Test
@@ -105,14 +112,14 @@ class IdentityChecksTest {
 
     @Test
     fun `another party's challenge is refused`(): Unit = runBlocking {
-        val binding = ScaBinding.forExit(signingHash("CZ6508000000192000145399"))!!
+        val binding = ScaBinding.forDocument(ScaOperation.EXIT, signingHash("CZ6508000000192000145399"))!!
         val challenge = sca.raise(UUID.randomUUID(), binding)
         assertThat(gate.spend(party, "$challenge", binding)).isFalse()
     }
 
     @Test
     fun `a consumed challenge raised for another purpose is still refused`(): Unit = runBlocking {
-        val binding = ScaBinding.forExit(signingHash("CZ6508000000192000145399"))!!
+        val binding = ScaBinding.forDocument(ScaOperation.EXIT, signingHash("CZ6508000000192000145399"))!!
         val challenge = sca.raise(party, binding, purpose = "DELEGATION_GRANT")
         assertThat(gate.spend(party, "$challenge", binding)).isFalse()
     }
@@ -120,13 +127,17 @@ class IdentityChecksTest {
     @Test
     fun `a 2xx that is not a consumed challenge (four-eyes parked) is refused`(): Unit = runBlocking {
         val parked = ScaConsumeGate { id, req -> ScaChallengeDto(id, req.partyId, "APPROVAL", "COMPLETED", null) }
-        assertThat(parked.spend(party, "${UUID.randomUUID()}", ScaBinding.forExit(quoteHash))).isFalse()
+        assertThat(
+            parked.spend(party, "${UUID.randomUUID()}", ScaBinding.forDocument(ScaOperation.EXIT, quoteHash)),
+        ).isFalse()
     }
 
     @Test
     fun `malformed input never reaches sca-service`(): Unit = runBlocking {
-        assertThat(gate.spend(party, "not-a-uuid", ScaBinding.forExit(quoteHash))).isFalse()
-        assertThat(gate.spend(party, "${UUID.randomUUID()}", ScaBinding.forExit("not-hex"))).isFalse()
+        assertThat(gate.spend(party, "not-a-uuid", ScaBinding.forDocument(ScaOperation.EXIT, quoteHash))).isFalse()
+        assertThat(
+            gate.spend(party, "${UUID.randomUUID()}", ScaBinding.forDocument(ScaOperation.EXIT, "not-hex")),
+        ).isFalse()
         assertThat(gate.spend(party, "${UUID.randomUUID()}", ScaBinding.forOperation("op", "short"))).isFalse()
         assertThat(sca.calls).isZero()
     }
@@ -136,13 +147,17 @@ class IdentityChecksTest {
         for (status in listOf(401, 500, 503)) {
             val down = ScaConsumeGate { _, _ -> throw WebApplicationException(status) }
             assertThatThrownBy {
-                runBlocking { down.spend(party, "${UUID.randomUUID()}", ScaBinding.forExit(quoteHash)) }
+                runBlocking {
+                    down.spend(party, "${UUID.randomUUID()}", ScaBinding.forDocument(ScaOperation.EXIT, quoteHash))
+                }
             }
                 .isInstanceOf(IntegrationUnavailableException::class.java)
         }
         val refused = ScaConsumeGate { _, _ -> throw java.net.ConnectException("refused") }
         assertThatThrownBy {
-            runBlocking { refused.spend(party, "${UUID.randomUUID()}", ScaBinding.forExit(quoteHash)) }
+            runBlocking {
+                refused.spend(party, "${UUID.randomUUID()}", ScaBinding.forDocument(ScaOperation.EXIT, quoteHash))
+            }
         }
             .isInstanceOf(IntegrationUnavailableException::class.java)
     }
@@ -170,13 +185,33 @@ class IdentityChecksTest {
     }
 
     @Test
-    fun `an own account is an ACTIVE account held by exactly that party`() {
-        assertThat(AccountOwnership.owns(party, AccountDto(UUID.randomUUID(), party, "ACTIVE", "CZK"))).isTrue()
+    fun `an own account is an owned AND active verdict of the ownership projection`() {
         assertThat(
-            AccountOwnership.owns(party, AccountDto(UUID.randomUUID(), UUID.randomUUID(), "ACTIVE", "CZK")),
+            AccountOwnership.owns(OwnershipVerificationDto(owned = true, active = true, UUID.randomUUID())),
+        ).isTrue()
+        assertThat(AccountOwnership.owns(OwnershipVerificationDto(owned = false, active = false))).isFalse()
+        assertThat(AccountOwnership.owns(OwnershipVerificationDto(owned = true, active = false))).isFalse()
+        assertThat(AccountOwnership.owns(null)).isFalse()
+    }
+
+    @Test
+    fun `a challenge raised for one pension operation cannot be spent on another`(): Unit = runBlocking {
+        val hash = sha256("schedule-plan")
+        val challenge = sca.raise(party, ScaBinding.forDocument(ScaOperation.SCHEDULE_CHANGE, hash)!!)
+        assertThat(
+            gate.spend(party, "$challenge", ScaBinding.forDocument(ScaOperation.BENEFICIARY_CHANGE, hash)),
         ).isFalse()
-        assertThat(AccountOwnership.owns(party, AccountDto(UUID.randomUUID(), party, "FROZEN", "CZK"))).isFalse()
-        assertThat(AccountOwnership.owns(party, null)).isFalse()
+        assertThat(gate.spend(party, "$challenge", ScaBinding.forDocument(ScaOperation.SCHEDULE_CHANGE, hash))).isTrue()
+    }
+
+    @Test
+    fun `an id outside the reserved pension namespace never reaches sca-service`(): Unit = runBlocking {
+        val hash = sha256("x")
+        assertThat(gate.spend(party, "${UUID.randomUUID()}", ScaBinding.forOperation("transfer:t1", hash))).isFalse()
+        val tooLong = "pension-transfer-out:" + "a".repeat(ScaBinding.MAX_APPROVAL_REQUEST_ID)
+        assertThat(gate.spend(party, "${UUID.randomUUID()}", ScaBinding.forOperation(tooLong, hash))).isFalse()
+        assertThat(sca.calls).isZero()
+        assertThat(ScaOperation.entries.map { ScaBinding.isReserved(it.approvalRequestId(hash)) }).containsOnly(true)
     }
 
     @Test
@@ -188,19 +223,28 @@ class IdentityChecksTest {
     }
 
     @Test
-    fun `beneficiary light kyc needs a KYC-approved holder of the IBAN under the claimed name`(): Unit = runBlocking {
-        val holder = UUID.randomUUID()
-        val iban = "CZ6508000000192000145399"
-        val accounts = mapOf(iban to AccountDto(UUID.randomUUID(), holder, "ACTIVE", "CZK"))
-        var partyRecord = PartyDto(holder, "INDIVIDUAL", "ACTIVE", "Jana  Nováková", "APPROVED")
-        val check = BeneficiaryLightKyc({ accounts[it] }, { if (it == holder) partyRecord else null })
-        val kyc = ClaimantKyc("jana nováková", LocalDate.of(1970, 1, 1), "OP-123", iban)
+    fun `beneficiary light kyc needs a KYC-approved claimant who owns the IBAN under the claimed name`(): Unit =
+        runBlocking {
+            val holder = UUID.randomUUID()
+            val iban = "CZ6508000000192000145399"
+            val asked = mutableListOf<Pair<String, UUID>>()
+            val ownership: suspend (String, UUID) -> OwnershipVerificationDto? = { i, p ->
+                asked += i to p
+                OwnershipVerificationDto(owned = i == iban && p == holder, active = i == iban && p == holder)
+            }
+            var partyRecord = PartyDto(holder, "INDIVIDUAL", "ACTIVE", "Jana  Nováková", "APPROVED")
+            val check = BeneficiaryLightKyc(ownership, { if (it == holder) partyRecord else null })
+            val kyc = ClaimantKyc("jana nováková", LocalDate.of(1970, 1, 1), "OP-123", iban, holder)
 
-        assertThat(check.verify(kyc)).isTrue()
-        assertThat(check.verify(kyc.copy(name = "Petr Novák"))).isFalse()
-        assertThat(check.verify(kyc.copy(identityDocumentRef = " "))).isFalse()
-        assertThat(check.verify(kyc.copy(iban = "CZ5508000000001234567899"))).isFalse()
-        partyRecord = partyRecord.copy(kycStatus = "IN_PROGRESS")
-        assertThat(check.verify(kyc)).isFalse()
-    }
+            assertThat(check.verify(kyc)).isTrue()
+            // The question is "is this the CLAIMANT's IBAN", never "who holds this IBAN".
+            assertThat(asked).containsExactly(iban to holder)
+            assertThat(check.verify(kyc.copy(name = "Petr Novák"))).isFalse()
+            assertThat(check.verify(kyc.copy(identityDocumentRef = " "))).isFalse()
+            assertThat(check.verify(kyc.copy(iban = "CZ5508000000001234567899"))).isFalse()
+            assertThat(check.verify(kyc.copy(partyId = UUID.randomUUID()))).isFalse()
+            assertThat(check.verify(kyc.copy(partyId = null))).isFalse()
+            partyRecord = partyRecord.copy(kycStatus = "IN_PROGRESS")
+            assertThat(check.verify(kyc)).isFalse()
+        }
 }

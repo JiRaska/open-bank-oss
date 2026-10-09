@@ -5,6 +5,7 @@
 package com.openbank.pension.application.maintenance
 
 import com.openbank.pension.application.exit.DeathClaimRepository
+import com.openbank.pension.application.exit.ScaOperation
 import com.openbank.pension.application.exit.ScaVerificationPort
 import com.openbank.pension.application.port.`in`.Caller
 import com.openbank.pension.application.port.`in`.PensionContractUseCase
@@ -98,7 +99,13 @@ class ContractMaintenanceService(
         history.byIdempotencyKey(command.idempotencyKey)?.let { return it }
         val today = today()
         val plan = history.plan(contract, packs.pinnedFor(contract), command.request, today)
-        if (!sca.verify(contract.participantPartyId, command.scaChallengeId, plan.documentSha256)) {
+        if (!sca.verify(
+                contract.participantPartyId,
+                command.scaChallengeId,
+                plan.documentSha256,
+                ScaOperation.SCHEDULE_CHANGE,
+            )
+        ) {
             throw ChangeNotAuthorisedException("strong customer authentication failed for this change")
         }
         val saved = store.saveSchedule(
@@ -131,7 +138,13 @@ class ContractMaintenanceService(
         history.byIdempotencyKey(command.idempotencyKey)?.let { return it }
         val claimed = deathClaimed(contract)
         val plan = history.plan(contract, command.beneficiaries, claimed)
-        if (!sca.verify(contract.participantPartyId, command.scaChallengeId, plan.documentSha256)) {
+        if (!sca.verify(
+                contract.participantPartyId,
+                command.scaChallengeId,
+                plan.documentSha256,
+                ScaOperation.BENEFICIARY_CHANGE,
+            )
+        ) {
             throw ChangeNotAuthorisedException("strong customer authentication failed for this change")
         }
         val now = clock.instant()

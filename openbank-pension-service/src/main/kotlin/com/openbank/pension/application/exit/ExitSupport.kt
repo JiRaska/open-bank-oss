@@ -64,7 +64,7 @@ internal suspend fun ExitGateways.verifySignatureAndAccount(
     hash: String,
     iban: String,
 ) {
-    if (!sca.verify(partyId, challenge, hash)) {
+    if (!sca.verify(partyId, challenge, hash, ScaOperation.EXIT)) {
         throw ExitForbiddenException("strong customer authentication failed for this quote")
     }
     if (!accounts.isOwnVerifiedAccount(partyId, iban)) {

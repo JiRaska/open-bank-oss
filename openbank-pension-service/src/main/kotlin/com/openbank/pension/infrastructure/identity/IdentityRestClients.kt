@@ -78,22 +78,28 @@ data class PartyDto(
     val address: PartyAddressDto? = null,
 )
 
-/** account-service `GET /api/v1/accounts/iban/{iban}` (action `account.read`). */
+/**
+ * account-service `POST /api/v1/accounts/ownership-verifications` (action `account.verifyOwnership`,
+ * ADR-0335 D2). A boolean projection: pension never reads an account. An unknown IBAN and another
+ * party's IBAN answer the same; the IBAN travels in the body, never in a path or access log.
+ */
 @Path("/api/v1/accounts")
 @Produces(MediaType.APPLICATION_JSON)
+@Consumes(MediaType.APPLICATION_JSON)
 @OidcClientFilter
 @RegisterRestClient(configKey = "account-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
 interface AccountRestClient {
-    @GET
-    @Path("/iban/{iban}")
-    suspend fun byIban(@PathParam("iban") iban: String): AccountDto
+    @POST
+    @Path("/ownership-verifications")
+    suspend fun verifyOwnership(request: OwnershipVerificationRequestDto): OwnershipVerificationDto
 }
 
+data class OwnershipVerificationRequestDto(val iban: String, val partyId: UUID)
+
 @JsonIgnoreProperties(ignoreUnknown = true)
-data class AccountDto(
-    val id: UUID? = null,
-    val partyId: UUID? = null,
-    val status: String? = null,
-    val currencyCode: String? = null,
+data class OwnershipVerificationDto(
+    val owned: Boolean = false,
+    val active: Boolean = false,
+    val accountId: UUID? = null,
 )

@@ -5,6 +5,7 @@
 package com.openbank.pension.maintenance
 
 import com.openbank.pension.application.exit.DeathClaimRepository
+import com.openbank.pension.application.exit.ScaOperation
 import com.openbank.pension.application.exit.ScaVerificationPort
 import com.openbank.pension.application.maintenance.ChangeBeneficiariesCommand
 import com.openbank.pension.application.maintenance.ChangeNotAuthorisedException
@@ -32,6 +33,7 @@ import com.openbank.pension.domain.model.ProductLine
 import com.openbank.pension.domain.pack.ContributionLimits
 import com.openbank.pension.domain.pack.JurisdictionPack
 import com.openbank.pension.domain.pack.ProviderType
+import com.openbank.pension.infrastructure.notification.RecordingParticipantNotifier
 import com.openbank.pension.infrastructure.pack.JurisdictionPackLoader
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
@@ -40,7 +42,6 @@ import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.time.Clock
 import java.time.Instant
-import com.openbank.pension.infrastructure.notification.RecordingParticipantNotifier
 import java.time.LocalDate
 import java.time.ZoneOffset
 import java.util.UUID
@@ -256,8 +257,15 @@ class ContractMaintenanceTest {
     }
 
     private class Sca(var accept: Boolean = true) : ScaVerificationPort {
+        val operations = java.util.concurrent.CopyOnWriteArrayList<ScaOperation>()
         val signed = mutableListOf<String>()
-        override suspend fun verify(partyId: UUID, challengeId: String, documentSha256: String): Boolean {
+        override suspend fun verify(
+            partyId: UUID,
+            challengeId: String,
+            documentSha256: String,
+            operation: ScaOperation,
+        ): Boolean {
+            operations += operation
             signed += documentSha256
             return accept
         }
@@ -293,6 +301,7 @@ class ContractMaintenanceTest {
         val preview = service.previewSchedule(me, c.id, req("2000"))
         val v = service.changeSchedule(ChangeScheduleCommand(me, c.id, req("2000"), "sca", "k1"))
         assertThat(sca.signed).containsExactly(preview.documentSha256)
+        assertThat(sca.operations).containsExactly(ScaOperation.SCHEDULE_CHANGE)
         assertThat(v.documentSha256).isEqualTo(preview.documentSha256)
     }
 
@@ -321,6 +330,7 @@ class ContractMaintenanceTest {
         val again = service.changeBeneficiaries(cmd)
         assertThat(again).isEqualTo(first)
         assertThat(sca.signed).hasSize(1)
+        assertThat(sca.operations).containsExactly(ScaOperation.BENEFICIARY_CHANGE)
         assertThat(repo.rows.getValue(c.id).beneficiaries.single().name).isEqualTo("X")
     }
 

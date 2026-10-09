@@ -98,6 +98,11 @@ data class CreateStandingOrderDto(
 data class StandingOrderDto(val id: UUID, val status: String? = null)
 
 data class RegisterSddMandateDto(
+    /**
+     * The debtor party (#12419, ADR-0335): sdd-service asks account-service that THIS party owns
+     * the debtor IBAN and that its id is [accountId] before it accepts a scoped initiator's mandate.
+     */
+    val partyId: UUID,
     val accountId: UUID,
     val debtorIban: String,
     val creditorIdentifier: String,

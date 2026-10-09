@@ -7,6 +7,7 @@ package com.openbank.pension.infrastructure.identity
 import com.openbank.pension.application.exit.BeneficiaryVerificationPort
 import com.openbank.pension.application.exit.ClaimantKyc
 import com.openbank.pension.application.exit.OwnAccountVerificationPort
+import com.openbank.pension.application.exit.ScaOperation
 import com.openbank.pension.application.exit.ScaVerificationPort
 import com.openbank.pension.application.onboarding.KycProfile
 import com.openbank.pension.application.onboarding.PartyKycPort
@@ -46,18 +47,22 @@ class ScaSignatureVerificationAdapter : SignatureVerificationPort {
     }
 }
 
-/** Exit (termination, payout, payout-account change) SCA -> sca-service consume over the signing hash. */
+/** Document-bound SCA (exit, schedule, beneficiaries, annuity, mandate) -> sca-service consume. */
 @UnlessBuildProfile(anyOf = ["dev", "test"])
 @ApplicationScoped
-class ScaExitVerificationAdapter : ScaVerificationPort {
+class ScaDocumentVerificationAdapter : ScaVerificationPort {
     @Inject
     @RestClient
     lateinit var client: ScaConsumeRestClient
 
     private val gate by lazy { ScaConsumeGate { id, req -> client.consume(id, req) } }
 
-    override suspend fun verify(partyId: UUID, challengeId: String, documentSha256: String): Boolean =
-        gate.spend(partyId, challengeId, ScaBinding.forExit(documentSha256))
+    override suspend fun verify(
+        partyId: UUID,
+        challengeId: String,
+        documentSha256: String,
+        operation: ScaOperation,
+    ): Boolean = gate.spend(partyId, challengeId, ScaBinding.forDocument(operation, documentSha256))
 }
 
 /** party-service party record (with kyc-service's mirrored verdict). Unknown party -> null. */
@@ -80,8 +85,9 @@ class AccountOwnershipRestAdapter : OwnAccountVerificationPort {
     @RestClient
     lateinit var client: AccountRestClient
 
-    override suspend fun isOwnVerifiedAccount(partyId: UUID, iban: String): Boolean =
-        AccountOwnership.owns(partyId, readOrNull("account-service") { client.byIban(iban) })
+    override suspend fun isOwnVerifiedAccount(partyId: UUID, iban: String): Boolean = AccountOwnership.owns(
+        readOrNull("account-service") { client.verifyOwnership(OwnershipVerificationRequestDto(iban, partyId)) },
+    )
 }
 
 /** account-service + party-service KYC-light check of a beneficiary. */
@@ -98,7 +104,9 @@ class BeneficiaryLightKycRestAdapter : BeneficiaryVerificationPort {
 
     private val check by lazy {
         BeneficiaryLightKyc(
-            { iban -> readOrNull("account-service") { accounts.byIban(iban) } },
+            { iban, party ->
+                readOrNull("account-service") { accounts.verifyOwnership(OwnershipVerificationRequestDto(iban, party)) }
+            },
             { id -> readOrNull("party-service") { parties.party(id) } },
         )
     }

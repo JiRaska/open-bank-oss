@@ -13,6 +13,7 @@ import com.openbank.pension.application.exit.PaymentInstructionRepository
 import com.openbank.pension.application.exit.PaymentOrder
 import com.openbank.pension.application.exit.PayoutPaymentPort
 import com.openbank.pension.application.exit.PayoutRequestRepository
+import com.openbank.pension.application.exit.ScaOperation
 import com.openbank.pension.application.exit.ScaVerificationPort
 import com.openbank.pension.application.port.`in`.Caller
 import com.openbank.pension.application.port.out.FundAdministrationPort
@@ -374,7 +375,13 @@ class AnnuityMarketplaceServiceTest {
             }
             val registry = JurisdictionPackRegistry(packs)
             val repo = Contracts()
-            val contracts = PensionContractService(repo, registry, clock, com.openbank.pension.infrastructure.notification.RecordingParticipantNotifier())
+            val contracts =
+                PensionContractService(
+                    repo,
+                    registry,
+                    clock,
+                    com.openbank.pension.infrastructure.notification.RecordingParticipantNotifier(),
+                )
             val id = ContractFixtures.activeContract(
                 contracts,
                 repo,
@@ -549,8 +556,15 @@ class AnnuityMarketplaceServiceTest {
 
     class Sca : ScaVerificationPort {
         var accept = true
+        val operations = java.util.concurrent.CopyOnWriteArrayList<ScaOperation>()
         val signed = CopyOnWriteArrayList<String>()
-        override suspend fun verify(partyId: UUID, challengeId: String, documentSha256: String): Boolean {
+        override suspend fun verify(
+            partyId: UUID,
+            challengeId: String,
+            documentSha256: String,
+            operation: ScaOperation,
+        ): Boolean {
+            operations += operation
             signed += documentSha256
             return accept
         }

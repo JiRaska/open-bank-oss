@@ -6,6 +6,7 @@ package com.openbank.pension.infrastructure.rest.funding
 
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
+import com.openbank.pension.application.exit.ScaOperation
 import com.openbank.pension.application.exit.ScaVerificationPort
 import com.openbank.pension.application.port.`in`.Caller
 import com.openbank.pension.application.port.out.ContractNotFoundException
@@ -157,6 +158,7 @@ class ContractFundingResource {
                 contract.participantPartyId,
                 challenge,
                 PaymentMandateCancellation.documentHash(contractId, mandateId),
+                ScaOperation.MANDATE_CANCELLATION,
             )
         ) {
             throw MandateScaFailedException()
