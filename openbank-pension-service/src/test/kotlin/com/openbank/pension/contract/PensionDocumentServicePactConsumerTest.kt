@@ -45,7 +45,7 @@ import java.util.UUID
  * LITERAL. That asymmetry is the test (#2290): a client pointed at any other route goes red here.
  *
  * Provider state: the render needs the `pension-*` templates published in document-service, which
- * its canonical seed (`DocumentTemplateSeed`) does not contain yet — tracked as the follow-up on
+ * its canonical seed (`DocumentTemplateSeed`) does not contain yet — tracked as follow-up #12392 on
  * #12350. Until it lands, document-service's `@PactFolder` replay of the happy interaction is
  * expected to fail, which is the signal that the KID cannot be rendered in a deployed environment.
  * The unauthenticated twin replays today against the existing negative-auth state.

@@ -45,7 +45,7 @@ fun interface NotificationRequestSender {
  * `failed`. There is no `delivered`: delivery is notification-service's to observe, not ours.
  *
  * `openbank.pension.notifications.enabled` defaults to FALSE: notification-service's template
- * vocabulary is a closed enum and does not yet contain the `PENSION_*` templates (follow-up on
+ * vocabulary is a closed enum and does not yet contain the `PENSION_*` templates (follow-up #12392 on
  * #12350), so it would reject every notice. Until it does, every notice is SKIPPED — visibly, in
  * the metric — and a step that REQUIRES a notice (a payout-account change) is refused.
  */

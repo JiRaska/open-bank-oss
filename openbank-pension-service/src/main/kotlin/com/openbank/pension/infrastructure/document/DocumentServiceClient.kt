@@ -102,24 +102,26 @@ class DocumentRendering(private val call: DocumentRenderCall) {
             )
         } catch (e: WebApplicationException) {
             log.warnf("document-service refused %s: HTTP %d", templateCode, e.response?.status ?: 0)
-            throw IntegrationUnavailableException("document-service refused to render $templateCode")
+            unavailable("document-service refused to render $templateCode")
         } catch (e: java.io.IOException) {
             log.warnf(e, "document-service unreachable rendering %s", templateCode)
-            throw IntegrationUnavailableException("document-service is unreachable")
+            unavailable("document-service is unreachable")
         } catch (e: jakarta.ws.rs.ProcessingException) {
             log.warnf(e, "document-service unreachable rendering %s", templateCode)
-            throw IntegrationUnavailableException("document-service is unreachable")
+            unavailable("document-service is unreachable")
         }
         val id = response.id?.takeIf { it.isNotBlank() }
-            ?: throw IntegrationUnavailableException(
+            ?: unavailable(
                 "document-service answered without a document id for $templateCode",
             )
         val sha = response.sha256?.lowercase()?.takeIf { SHA256.matches(it) }
-            ?: throw IntegrationUnavailableException(
+            ?: unavailable(
                 "document-service answered without a valid SHA-256 for $templateCode",
             )
         return RenderedDocument(id, sha)
     }
+
+    private fun unavailable(message: String): Nothing = throw IntegrationUnavailableException(message)
 
     companion object {
         const val LEGAL_REVIEW_KEY = "legalReviewRequired"
