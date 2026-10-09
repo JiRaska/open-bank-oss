@@ -5,6 +5,7 @@
 package com.openbank.pension.application.usecase
 
 import com.openbank.pension.application.port.`in`.Caller
+import com.openbank.pension.application.port.`in`.ContractVisibility
 import com.openbank.pension.application.port.`in`.CreateDraftCommand
 import com.openbank.pension.application.port.`in`.EarlyTerminationCommand
 import com.openbank.pension.application.port.`in`.EarlyTerminationResult
@@ -104,10 +105,7 @@ class PensionContractService(
      */
     override suspend fun get(caller: Caller, id: UUID): PensionContract {
         val contract = contracts.findById(id) ?: throw ContractNotFoundException(id)
-        if (caller.customerPartyId != null && contract.participantPartyId != caller.customerPartyId) {
-            throw ContractNotFoundException(id)
-        }
-        return contract
+        return ContractVisibility.requireVisible(caller, contract)
     }
 
     override suspend fun evaluateIncentives(command: IncentiveEvaluationCommand): List<IncentiveResult> {

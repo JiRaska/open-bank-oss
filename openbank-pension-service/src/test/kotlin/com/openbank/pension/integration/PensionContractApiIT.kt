@@ -160,8 +160,44 @@ class PensionContractApiIT {
     @Test
     @TestSecurity(user = "alice", roles = ["ROLE_OPERATOR"])
     fun `staff may read any contract without the party header but cannot change one`() {
-        val id = create()
+        val id = seedContract()
         read(id, null).statusCode(200).body("contractId", equalTo(id))
         post("$base/$id/submit", asParty = null).statusCode(400)
+    }
+
+    @Test
+    @TestSecurity(user = "some-other-service", roles = ["ROLE_API"])
+    fun `a party header from a principal that is not the trusted relay is refused`() {
+        val id = seedContract()
+        read(id, party).statusCode(403)
+        post("$base/$id/submit").statusCode(403)
+    }
+
+    /** Inserted directly: a staff or untrusted principal cannot create one over HTTP, by design. */
+    private fun seedContract(): String {
+        val id = UUID.randomUUID()
+        val url = ConfigProvider.getConfig().getValue("quarkus.datasource.jdbc.url", String::class.java)
+        DriverManager.getConnection(url, "openbank", "openbank_secret").use { conn ->
+            conn.prepareStatement(
+                "insert into pension_contracts (id, contract_id, participant_party_id, product_line, jurisdiction, " +
+                    "pack_version, provider_entity_id, provider_type, participant_birth_date, status, " +
+                    "contribution_amount, contribution_currency, contribution_frequency, created_at, updated_at) " +
+                    "values (nextval('pension_contracts_seq'), ?, ?, 'DPS', 'CZ', 1, ?, 'PENSION_COMPANY', " +
+                    "date '1985-05-05', 'DRAFT', 1700, 'CZK', 'MONTHLY', now(), now())",
+            ).use { st ->
+                st.setObject(1, id)
+                st.setObject(2, party)
+                st.setObject(3, UUID.randomUUID())
+                st.executeUpdate()
+            }
+            conn.prepareStatement(
+                "insert into pension_strategy_elections (id, contract_id, strategy_code, effective_from, elected_at) " +
+                    "values (nextval('pension_strategy_elections_seq'), ?, 'BALANCED', current_date, now())",
+            ).use { st ->
+                st.setObject(1, id)
+                st.executeUpdate()
+            }
+        }
+        return id.toString()
     }
 }
