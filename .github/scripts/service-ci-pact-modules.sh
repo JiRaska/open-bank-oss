@@ -8,7 +8,7 @@ is_inert_service_path() {
   case "$1" in
     openbank-admin-ui/*|openbank-infra/*|docs/*|*/version.txt|*/CHANGELOG.md|.release-please-manifest.json|release-please-config.json)
       return 0 ;;
-    .github/scripts/check-authz-enforce-money-path.py|.github/scripts/check-flyway-version-commit-order.py|.github/scripts/check-public-workload-ha.py|.github/scripts/deploy-window-inputs.sh|.github/scripts/supersede-deploy-prs.sh|.github/scripts/publish-admin-ui-pacts.py|.github/scripts/test-publish-admin-ui-pacts.py|.github/scripts/verify-dependabot-auto-merge.py|.github/scripts/test-verify-dependabot-auto-merge.py|.github/gates/gates.yaml|.github/gates/workflow-write-permissions-baseline.txt|.github/canary-rollout-realisable-baseline.txt|.github/public-workload-ha-baseline.txt)
+    .github/scripts/check-authz-enforce-money-path.py|.github/scripts/check-flyway-version-commit-order.py|.github/scripts/check-public-workload-ha.py|.github/scripts/auto-update-armed-prs.py|.github/scripts/deploy-window-inputs.sh|.github/scripts/supersede-deploy-prs.sh|.github/scripts/publish-admin-ui-pacts.py|.github/scripts/test-publish-admin-ui-pacts.py|.github/scripts/verify-dependabot-auto-merge.py|.github/scripts/test-verify-dependabot-auto-merge.py|.github/gates/gates.yaml|.github/gates/workflow-write-permissions-baseline.txt|.github/canary-rollout-realisable-baseline.txt|.github/public-workload-ha-baseline.txt)
       # Separate governance and Pact controls own these files; they do not build services.
       return 0 ;;
     .github/scripts/test-service-ci-job-roster.py)
@@ -69,9 +69,10 @@ pact_build_modules_self_test() {
   done
   ! is_inert_service_path ".github/scripts/check-public-workload-ha-test-helper.py" \
     || { echo "selector self-test: unknown gate helper must retain safe fallback" >&2; return 1; }
-  # #12295 changed only deploy-window inputs and GitOps workflows; these
-  # scripts do not enter a Gradle service build or Pact verification.
+  # Exact deploy automation inputs do not enter a Gradle service build or Pact
+  # verification; unknown scripts still retain the full-fleet fallback.
   for deploy_input in \
+    .github/scripts/auto-update-armed-prs.py \
     .github/scripts/deploy-window-inputs.sh \
     .github/scripts/supersede-deploy-prs.sh; do
     is_inert_service_path "$deploy_input" \
