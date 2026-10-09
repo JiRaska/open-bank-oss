@@ -5,6 +5,7 @@
 package com.openbank.sdd.infrastructure.client
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import com.openbank.sdd.application.port.out.DebtorAccountOwnership
 import com.openbank.sdd.application.port.out.DebtorAccountOwnershipPort
 import io.quarkus.oidc.client.filter.OidcClientFilter
@@ -12,6 +13,7 @@ import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
+import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import java.util.UUID
@@ -27,6 +29,7 @@ data class OwnershipVerificationResponseDto(
 
 /** account-service `POST /api/v1/accounts/ownership-verifications` (`account.verifyOwnership`), as service-account-openbank-sdd. */
 @RegisterRestClient(configKey = "account-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @OidcClientFilter("m2m")
 @Path("/api/v1/accounts/ownership-verifications")
 interface AccountOwnershipClient {
