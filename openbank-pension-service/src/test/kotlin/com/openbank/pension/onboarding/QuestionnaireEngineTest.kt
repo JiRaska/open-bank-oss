@@ -312,12 +312,29 @@ class QuestionnaireEngineTest {
     @Test
     fun `an acknowledgement counts only for its own assessment and strategy`() {
         val assessmentId = UUID.randomUUID()
-        val ack = WarningAcknowledgement(WarningCode.STRATEGY_ABOVE_PROFILE, assessmentId, "DYNAMIC", "sha", "cs", now)
+        val ack = WarningAcknowledgement(
+            WarningCode.STRATEGY_ABOVE_PROFILE,
+            assessmentId,
+            "DYNAMIC",
+            WarningPolicy.sha256("current"),
+            "cs",
+            now,
+        )
         val required = setOf(WarningCode.STRATEGY_ABOVE_PROFILE)
-        assertThat(WarningPolicy.missing(required, listOf(ack), assessmentId, "DYNAMIC")).isEmpty()
-        assertThat(WarningPolicy.missing(required, listOf(ack), assessmentId, "EQUITY_GLOBAL")).isEqualTo(required)
-        assertThat(WarningPolicy.missing(required, listOf(ack), UUID.randomUUID(), "DYNAMIC")).isEqualTo(required)
-        assertThat(WarningPolicy.missing(required, emptyList(), assessmentId, "DYNAMIC")).isEqualTo(required)
+        val currentText: (WarningCode, String) -> String = { _, _ -> "current" }
+        fun missing(
+            acknowledgements: List<WarningAcknowledgement> = listOf(ack),
+            id: UUID = assessmentId,
+            strategy: String = "DYNAMIC",
+            text: (WarningCode, String) -> String = currentText,
+            language: String? = null,
+        ) = WarningPolicy.missing(required, acknowledgements, id, strategy, text, language)
+        assertThat(missing(language = "cs")).isEmpty()
+        assertThat(missing(strategy = "EQUITY_GLOBAL")).isEqualTo(required)
+        assertThat(missing(id = UUID.randomUUID())).isEqualTo(required)
+        assertThat(missing(acknowledgements = emptyList())).isEqualTo(required)
+        assertThat(missing(language = "en")).isEqualTo(required)
+        assertThat(missing(text = { _, _ -> "revised" })).isEqualTo(required)
     }
 
     @Test

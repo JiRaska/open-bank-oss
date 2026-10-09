@@ -284,17 +284,8 @@ class OnboardingService(
                 "strategy $code is above the suitable risk class ${recommendation.maxRiskClass}"
             }
         }
-        // A warning is acknowledged either beforehand (POST .../warnings/acknowledge, which records
-        // the exact wording) or together with the choice; never skipped (ZDPS § 136(3), MiFID 25(3)).
-        var acknowledged = application
-        val missing = WarningPolicy.missing(required, application.warningAcknowledgements, assessment.id, code)
-        if (missing.isNotEmpty()) {
-            require(command.acknowledgeUnsuitable) {
-                "the choice needs acknowledged warnings: ${missing.joinToString()}"
-            }
-            val acks = warningAcks(application, missing, assessment.id, code, command.language)
-            acknowledged = application.acknowledge(acks, now())
-        }
+        val missing = missingWarnings(application, required, assessment.id, code, command.language ?: "cs")
+        require(missing.isEmpty()) { "the choice needs acknowledged warnings: ${missing.joinToString()}" }
         val document = documents.generate(
             KidRequest(
                 applicationId = id,
@@ -307,7 +298,7 @@ class OnboardingService(
             ),
         )
         val kid = IssuedKid(document.documentId, document.sha256, code, now())
-        return applications.save(acknowledged.issueKid(code, required.isNotEmpty(), kid, now()))
+        return applications.save(application.issueKid(code, required.isNotEmpty(), kid, now()))
     }
 
     suspend fun acceptKid(id: UUID, partyId: UUID, documentId: String): OnboardingApplication =
@@ -569,8 +560,27 @@ class OnboardingService(
         val assessment = currentAssessment(application)
         val strategy = checkNotNull(application.chosenStrategy) { "no strategy has been chosen" }
         val required = WarningPolicy.required(strategy, assessment, recommend(application, assessment))
-        val missing = WarningPolicy.missing(required, application.warningAcknowledgements, assessment.id, strategy)
+        val missing = missingWarnings(application, required, assessment.id, strategy)
         check(missing.isEmpty()) { "warnings must be acknowledged before signing: ${missing.joinToString()}" }
+    }
+
+    private fun missingWarnings(
+        application: OnboardingApplication,
+        required: Set<WarningCode>,
+        assessmentId: UUID,
+        strategyCode: String,
+        language: String? = null,
+    ): Set<WarningCode> {
+        val set = questionSets.questionSet(application.jurisdiction, application.productLine)
+        val selectedLanguage = language?.let { if (it.lowercase().startsWith("en")) "en" else "cs" }
+        return WarningPolicy.missing(
+            required,
+            application.warningAcknowledgements,
+            assessmentId,
+            strategyCode,
+            { code, lang -> set.warning(code).text.text(lang) },
+            selectedLanguage,
+        )
     }
 
     private fun rulesFor(application: OnboardingApplication) =
