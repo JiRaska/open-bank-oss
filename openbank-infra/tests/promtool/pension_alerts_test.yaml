@@ -121,23 +121,34 @@ tests:
     alert_rule_test:
       - {eval_time: 7m, alertname: PensionStateGaugeRefreshStale, exp_alerts: []}
   - interval: 1m
-    name: newly dead-lettered payment events fire
+    name: retained DLQ record fires even when no new records arrive
     input_series:
       - series: 'kafka_topic_partition_current_offset{topic="openbank.dlq.pension.domestic-payment-events-in",partition="0"}'
-        values: '1+1x15'
+        values: '7+0x15'
+      - series: 'kafka_topic_partition_oldest_offset{topic="openbank.dlq.pension.domestic-payment-events-in",partition="0"}'
+        values: '5+0x15'
     alert_rule_test:
-      - eval_time: 6m
-        alertname: PensionPaymentEventsDeadLettered
+      - eval_time: 7m
+        alertname: PensionPaymentEventsDlqNonEmpty
         exp_alerts:
           - exp_labels: {severity: warning, team: pension}
             exp_annotations:
-              summary: Pension payment event was dead-lettered
-              description: Investigate the pension payment-event DLQ and reconcile the affected instruction before replay.
+              summary: Pension payment-event DLQ contains retained records
+              description: The pension payment-event DLQ has a positive retained offset span. Reconcile affected instructions before replay; verify that both offset series are scraped.
               runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/svc-pension.md
   - interval: 1m
-    name: unchanged DLQ offset stays quiet
+    name: expired DLQ log is empty even though current offset is positive
+    input_series:
+      - series: 'kafka_topic_partition_current_offset{topic="openbank.dlq.pension.domestic-payment-events-in",partition="0"}'
+        values: '5+0x15'
+      - series: 'kafka_topic_partition_oldest_offset{topic="openbank.dlq.pension.domestic-payment-events-in",partition="0"}'
+        values: '5+0x15'
+    alert_rule_test:
+      - {eval_time: 7m, alertname: PensionPaymentEventsDlqNonEmpty, exp_alerts: []}
+  - interval: 1m
+    name: missing oldest offset cannot assert DLQ backlog
     input_series:
       - series: 'kafka_topic_partition_current_offset{topic="openbank.dlq.pension.domestic-payment-events-in",partition="0"}'
         values: '5+0x15'
     alert_rule_test:
-      - {eval_time: 6m, alertname: PensionPaymentEventsDeadLettered, exp_alerts: []}
+      - {eval_time: 7m, alertname: PensionPaymentEventsDlqNonEmpty, exp_alerts: []}

@@ -63,16 +63,17 @@ spec:
             summary: "Pension state snapshot has not refreshed for over three minutes"
             description: "Contract counts and queue gauges may be stale; check pension database and the snapshot scheduler before trusting dashboard zeros."
             runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/svc-pension.md
-        # Kafka's current offset is a cumulative cursor, not a retained-record count. Alert on
-        # newly dead-lettered records; a true persistent non-empty backlog needs an exporter of
-        # the DLQ's retained-record count (or a controlled consumer cursor) before it is safe.
-        - alert: PensionPaymentEventsDeadLettered
-          expr: sum(increase(kafka_topic_partition_current_offset{topic="openbank.dlq.pension.domestic-payment-events-in"}[10m])) > 0
-          for: 2m
+        # The Kafka exporter exposes both next/end and oldest retained offsets per partition.
+        # This delete-only DLQ has no replay consumer: a positive span means at least one
+        # retained record is still in the log. Current offset alone would remain positive even
+        # after retention made the topic empty. The span is not an exact record count.
+        - alert: PensionPaymentEventsDlqNonEmpty
+          expr: sum(kafka_topic_partition_current_offset{topic="openbank.dlq.pension.domestic-payment-events-in"} - kafka_topic_partition_oldest_offset{topic="openbank.dlq.pension.domestic-payment-events-in"}) > 0
+          for: 5m
           labels:
             severity: warning
             team: pension
           annotations:
-            summary: "Pension payment event was dead-lettered"
-            description: "Investigate the pension payment-event DLQ and reconcile the affected instruction before replay."
+            summary: "Pension payment-event DLQ contains retained records"
+            description: "The pension payment-event DLQ has a positive retained offset span. Reconcile affected instructions before replay; verify that both offset series are scraped."
             runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/svc-pension.md

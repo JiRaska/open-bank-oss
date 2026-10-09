@@ -66,11 +66,13 @@ displayed old queue value as evidence that the queue is still empty or unchanged
 | `PensionPaymentInstructionsStuck` | Check the pending instruction and downstream settlement outcome. | Confirm one settled instruction or a documented cancellation before any replay, so a payout is not duplicated. |
 | `PensionNotificationsSkippedWhileEnabled` | Check the publisher's enabled gauge, request outcome and available template. | One broker-acknowledged request after correction; `enqueued` does not mean delivered to a device. |
 | `PensionStateGaugeRefreshStale` | Check the snapshot scheduler and pension database availability. | A new recorded workflow success and fresh state-gauge scrape. |
-| `PensionPaymentEventsDeadLettered` | Inspect the payment-event DLQ and consumer errors. | Reconcile and safely replay the affected event, then verify the resulting contract/payment state. |
+| `PensionPaymentEventsDlqNonEmpty` | Inspect the retained payment-event DLQ and consumer errors. | Reconcile and safely replay the affected event, then verify the resulting contract/payment state. |
 
-The DLQ alert detects **new arrivals** from a Kafka offset increase. Kafka's
-`current_offset` is cumulative and cannot prove whether retained DLQ records remain;
-do not interpret a quiet alert as an empty DLQ.
+The DLQ alert compares each partition's latest and oldest retained offsets from
+Kafka Exporter. A positive span means a record remains in this delete-only topic;
+the span is **not** an exact message count. The technical dashboard separately
+shows new arrivals. A quiet alert requires both offset series to be scraped;
+missing telemetry is not proof that the DLQ is empty.
 
 ## Disaster recovery
 
