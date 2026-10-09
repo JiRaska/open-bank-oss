@@ -9,9 +9,9 @@ package com.openbank.sca.domain.model
  * namespace when its DEVICE-SIGNED [DynamicLinkingData.approvalRequestId] starts with [prefix] —
  * read from the stored challenge, never from what a consumer states.
  */
-enum class ReservedNamespace(val prefix: String, private val shape: Regex) {
+enum class ReservedNamespace(val prefix: String, val purposes: Set<ScaPurpose>, private val shape: Regex) {
     /** pension-service operations: `pension-onboarding:…`, `pension-transfer-out:…`, `pension-exit:…`. */
-    PENSION("pension-", Regex("^pension-[a-z]+(-[a-z]+)*:\\S+$")),
+    PENSION("pension-", setOf(ScaPurpose.APPROVAL), Regex("^pension-[a-z]+(-[a-z]+)*:\\S+$")),
     ;
 
     /** Is [approvalRequestId] a well-formed id of this namespace (operation token, colon, reference)? */
@@ -39,11 +39,11 @@ sealed interface ConsumerScope {
         override fun permits(challenge: ScaChallenge): Boolean = ReservedNamespace.of(challenge) == null
     }
 
-    /** A scoped consumer: only APPROVAL challenges signed into its own namespace, well formed. */
+    /** A scoped consumer: only challenges of its namespace's purposes, signed into its own namespace, well formed. */
     data class Reserved(val namespace: ReservedNamespace) : ConsumerScope {
         override fun permits(challenge: ScaChallenge): Boolean {
             val id = challenge.dynamicLinkingData?.approvalRequestId ?: return false
-            return challenge.purpose == ScaPurpose.APPROVAL &&
+            return challenge.purpose in namespace.purposes &&
                 ReservedNamespace.of(challenge) == namespace &&
                 namespace.isWellFormed(id)
         }

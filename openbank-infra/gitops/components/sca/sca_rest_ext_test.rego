@@ -29,6 +29,12 @@ rules_mock := {
 	"four_eyes": {"verbs": [], "actions": []},
 	"feature_flags": {"prohibited_flag_combinations": [], "money_path_flags": []},
 	"shared_m2m_write_prohibition": {"reasons": []},
+	"scoped_sca_consumers": [{
+		"principal": "service-account-openbank-pension",
+		"actions": ["scaChallenge.consume"],
+		"purposes": ["APPROVAL"],
+		"approval_request_prefix": "pension-",
+	}],
 }
 
 operator := {"type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
@@ -210,7 +216,7 @@ test_pension_may_consume if {
 	decision := rest.allow with input as {"principal": pension, "action": "scaChallenge.consume", "resource": {"type": "scaChallenge", "id": "c-1"}}
 		with data.rules as rules_mock
 	decision.allow == true
-	"service-sca-pension-consume" in rest.allowed_reasons with input as {"principal": pension, "action": "scaChallenge.consume"}
+	"service-sca-scoped-consumer" in rest.allowed_reasons with input as {"principal": pension, "action": "scaChallenge.consume"}
 		with data.rules as rules_mock
 }
 
@@ -235,4 +241,10 @@ test_pension_id_as_ai_agent_may_not_consume if {
 	# same id is a different principal type and gets nothing.
 	rest.allow == false with input as {"principal": agent, "action": "scaChallenge.consume"}
 		with data.rules as rules_mock
+}
+
+test_pension_denied_when_not_declared if {
+	# The grant exists only because the data declares it: an empty register denies.
+	rest.allow == false with input as {"principal": pension, "action": "scaChallenge.consume"}
+		with data.rules as object.union(rules_mock, {"scoped_sca_consumers": []})
 }

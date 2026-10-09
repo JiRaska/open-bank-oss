@@ -67,8 +67,16 @@ consume, from the authenticated principal:
 
 The existing checks stay as they are: the party must match, the binding must be exact, and a
 challenge is spent once. The namespace is read from the **stored** linking data, which the
-customer's device signed, and never from the request. OPA admits the principal for
-`scaChallenge.consume` only, through an identity-scoped rule (`service-sca-pension-consume`).
+customer's device signed, and never from the request.
+
+The scope is **structured data, not a comment**. `rules.yaml: scoped_sca_consumers` declares
+`{principal, actions, purposes, approval_request_prefix}`. `sca_rest_ext.rego`
+(`service-sca-scoped-consumer`) reads `principal` and `actions`, so the identity is admitted to
+`scaChallenge.consume` only. `ConsumerScopesRulesParityTest` holds the domain's `ConsumerScopes`
+to `purposes` and `approval_request_prefix`, so the two layers cannot drift. The party and the
+namespace cannot be decided in OPA: the consume's OPA input carries the challenge id, while the
+challenge's party and its device-signed approval id exist only in sca-service's database. The
+domain is the only layer that sees them.
 `rules.yaml four_eyes.exemptions.scaChallenge.consume` lists the principal under ADR-0280's bar:
 it is a `service-account-*` identity and a ceremony-only caller, and no human path rides on it.
 

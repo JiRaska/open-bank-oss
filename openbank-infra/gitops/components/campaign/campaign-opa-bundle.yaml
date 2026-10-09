@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: campaign-service
     app.kubernetes.io/part-of: campaign
   annotations:
-    openbank.tech/policy-checksum: "39a9b1c195f6bbe7"
+    openbank.tech/policy-checksum: "45720cf51ca46dbe"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1569,7 +1569,7 @@ data:
         scaChallenge.consume:                                          # ADR-0021 settlement gate + ceremonies
           - service-account-openbank-edge                              # scaGate before every money-path forward
           - service-account-openbank-services                          # delegation grant-accept, document-signing (#3734)
-          - service-account-openbank-pension                           # ADR-0335: consume-only scoped consumer, pension- namespace
+          - service-account-openbank-pension                           # ADR-0335: scope is DATA, see scoped_sca_consumers
 
     feature_flags:
       # Disabling any of these via a flag flip is never permitted — they guard SCA (ADR-0021),
@@ -1898,5 +1898,12 @@ data:
         operator-domestic-payment-write: "1 identity-pinned rule; action coverage unverified"
         operator-party-write: "1 identity-pinned rule, but onboarding-service PUTs party.kyc-status via the shared client (latent: AUTHZ_ENFORCE=false there today)"
       adr: ADR-0034
+
+    scoped_sca_consumers:
+      - principal: service-account-openbank-pension
+        actions: [scaChallenge.consume]
+        purposes: [APPROVAL]
+        approval_request_prefix: "pension-"
+        adr: ADR-0335
   manifest.json: |
     {"roots": ["openbank/agents", "openbank/copilot", "openbank/rest", "agents", "rules"]}

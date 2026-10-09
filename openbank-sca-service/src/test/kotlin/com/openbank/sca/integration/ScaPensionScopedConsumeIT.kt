@@ -82,7 +82,10 @@ class ScaPensionScopedConsumeIT {
             body(
                 """
                     {"partyId":"$human","purpose":"APPROVAL","preferredMethod":"PUSH_NOTIFICATION",
-                     "dynamicLinkingData":{"approvalRequestId":"$approvalId","payloadSha256":"$sha"}}
+                     "redirectUrl":null,
+                     "dynamicLinkingData":{"amount":null,"currency":null,"creditorIban":null,
+                       "creditorName":null,"reference":null,
+                       "approvalRequestId":"$approvalId","payloadSha256":"$sha"}}
                 """.trimIndent(),
             )
         } When {

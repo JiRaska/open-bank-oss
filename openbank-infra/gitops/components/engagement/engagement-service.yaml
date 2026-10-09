@@ -48,7 +48,7 @@ spec:
       annotations:
         # Rolls the Deployment when the OPA policy bundle changes (subPath mounts don't
         # hot-reload). Kept in sync by gen-engagement-opa-bundle.sh.
-        openbank.tech/policy-checksum: "a1029aa13a786ccc"
+        openbank.tech/policy-checksum: "4a1c8ab3d9528f91"
       labels:
         app.kubernetes.io/name: engagement-service
         app.kubernetes.io/part-of: engagement

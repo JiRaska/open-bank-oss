@@ -75,6 +75,9 @@ class ScaMethodNotDeliverableException(method: ScaMethod) :
  */
 private val UNDELIVERABLE_METHODS = setOf(ScaMethod.TOTP)
 
+/** Column width of `sca_challenges.dynamic_approval_request_id` (V17). */
+const val MAX_APPROVAL_REQUEST_ID = 160
+
 class ScaChallengeNotFoundException(id: UUID) : RuntimeException("SCA challenge not found: $id")
 class ScaChallengeExpiredException(id: UUID) : RuntimeException("SCA challenge expired: $id")
 class ScaChallengeMaxAttemptsException(id: UUID) : RuntimeException("Max attempts exceeded for challenge: $id")
@@ -511,6 +514,9 @@ class ScaService(
             "APPROVAL challenge requires dynamicLinkingData.approvalRequestId and payloadSha256"
         }
         require(SHA256_HEX.matches(payloadSha256)) { "payloadSha256 must be 64 hex characters" }
+        require(approvalRequestId.length <= MAX_APPROVAL_REQUEST_ID) {
+            "approvalRequestId must be at most $MAX_APPROVAL_REQUEST_ID characters"
+        }
         // A payment approval signs amount, currency and creditor in canonical form (see
         // approvalLinkingPayload): all three or none, and an amount that has a canonical form.
         val dl = requireNotNull(command.dynamicLinkingData)
