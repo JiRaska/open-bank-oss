@@ -14,7 +14,7 @@ info:
   # 1.14 -> 1.15: additive — ApprovalResponse.summary (what the approval binds, rendered once
   # at creation: device handle, key fingerprint, masked creditor) and decidedAt on the GET views.
   # 1.15 -> 1.16 (#11588): additive verified makerActorKind on approval responses.
-  version: 1.16.0
+  version: 1.16.1
   description: >-
     Strong Customer Authentication — initiate and verify SCA challenges (OTP, TOTP, push,
     biometric). Decoupled device approval per ADR-0021: enrol a device credential and record a
@@ -367,7 +367,11 @@ paths:
         '400':
           description: Invalid request or challenge not approved
         '403':
-          description: The challenge belongs to another party
+          description: >-
+            The challenge belongs to another party, or lies outside the caller's consumer scope
+            (ADR-0335 D1): an APPROVAL challenge whose device-signed approvalRequestId begins
+            `pension-` is spendable only by pension-service, which may spend nothing else. A
+            refusal never burns the challenge.
         '404':
           description: Challenge not found
         '409':

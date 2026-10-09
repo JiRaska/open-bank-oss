@@ -1475,6 +1475,7 @@ four_eyes:
     scaChallenge.consume:                                          # ADR-0021 settlement gate + ceremonies
       - service-account-openbank-edge                              # scaGate before every money-path forward
       - service-account-openbank-services                          # delegation grant-accept, document-signing (#3734)
+      - service-account-openbank-pension                           # ADR-0335: consume-only scoped consumer, pension- namespace
 
 # ---------------------------------------------------------------------------------------
 # Feature-flag flip governance (ADR-0067 follow-up, issue #419). The OPA PEP (rest.rego)

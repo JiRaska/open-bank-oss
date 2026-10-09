@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: sca-service
     app.kubernetes.io/part-of: sca
   annotations:
-    openbank.tech/policy-checksum: "c9192e67c25585e0"
+    openbank.tech/policy-checksum: "aa5a2f2ce961542f"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -690,6 +690,20 @@ data:
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-services"
     	input.action in {"scaChallenge.read", "scaChallenge.consume"}
+    }
+
+    # ADR-0335 D1 — pension-service's own Keycloak client (`openbank-pension`, ROLE_API only) is a
+    # SCOPED consumer: consume and nothing else. No initiate (customer-edge raises pension challenges),
+    # no read, no decide, no verify. This rule admits the identity to the action; WHICH challenges it
+    # may spend is decided in sca-service's domain (ConsumerScope.Reserved(PENSION): APPROVAL purpose,
+    # device-signed approvalRequestId `pension-<operation>:<ref>`), because the OPA resource is only
+    # the challenge id and the device-signed namespace exists nowhere but sca-service's database.
+    # Paired with rules.yaml four_eyes.exemptions.scaChallenge.consume (ADR-0280 bar: ceremony-only
+    # service account, no human path rides on it).
+    allowed_reasons contains "service-sca-pension-consume" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-pension"
+    	input.action == "scaChallenge.consume"
     }
 
     # Operator-approval queue (ApprovalResource, /api/v1/sca/approvals, #10041 slice 9b): the queue
@@ -1615,6 +1629,7 @@ data:
         scaChallenge.consume:                                          # ADR-0021 settlement gate + ceremonies
           - service-account-openbank-edge                              # scaGate before every money-path forward
           - service-account-openbank-services                          # delegation grant-accept, document-signing (#3734)
+          - service-account-openbank-pension                           # ADR-0335: consume-only scoped consumer, pension- namespace
 
     feature_flags:
       # Disabling any of these via a flag flip is never permitted — they guard SCA (ADR-0021),

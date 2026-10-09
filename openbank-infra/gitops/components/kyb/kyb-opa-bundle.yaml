@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: kyb-service
     app.kubernetes.io/part-of: kyb
   annotations:
-    openbank.tech/policy-checksum: "51e71fd6f6cff537"
+    openbank.tech/policy-checksum: "ef772ed310babbc4"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1569,6 +1569,7 @@ data:
         scaChallenge.consume:                                          # ADR-0021 settlement gate + ceremonies
           - service-account-openbank-edge                              # scaGate before every money-path forward
           - service-account-openbank-services                          # delegation grant-accept, document-signing (#3734)
+          - service-account-openbank-pension                           # ADR-0335: consume-only scoped consumer, pension- namespace
 
     feature_flags:
       # Disabling any of these via a flag flip is never permitted — they guard SCA (ADR-0021),

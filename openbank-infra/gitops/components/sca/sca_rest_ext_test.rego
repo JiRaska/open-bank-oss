@@ -197,3 +197,42 @@ test_edge_may_not_decide_approval if {
 	rest.allow == false with input as {"principal": edge, "action": "scaChallenge.approval.decide", "resource": {"type": "scaChallenge", "id": "a-1"}}
 		with data.rules as rules_mock
 }
+
+# --- ADR-0335 D1: pension-service is a consume-only scoped consumer ---
+
+pension := {"type": "HUMAN", "id": "service-account-openbank-pension", "roles": ["ROLE_API"]}
+
+other_sa := {"type": "HUMAN", "id": "service-account-openbank-billing", "roles": ["ROLE_API"]}
+
+agent := {"type": "AI_AGENT", "id": "service-account-openbank-pension", "roles": ["ROLE_API"]}
+
+test_pension_may_consume if {
+	decision := rest.allow with input as {"principal": pension, "action": "scaChallenge.consume", "resource": {"type": "scaChallenge", "id": "c-1"}}
+		with data.rules as rules_mock
+	decision.allow == true
+	"service-sca-pension-consume" in rest.allowed_reasons with input as {"principal": pension, "action": "scaChallenge.consume"}
+		with data.rules as rules_mock
+}
+
+test_pension_may_do_nothing_else if {
+	every action in {
+		"scaChallenge.initiate", "scaChallenge.read", "scaChallenge.verify", "scaChallenge.decide",
+		"scaChallenge.approval.read", "scaChallenge.approval.decide",
+		"device.enroll", "device.list", "device.revoke",
+	} {
+		rest.allow == false with input as {"principal": pension, "action": action, "resource": {"type": "party", "id": "p-1"}}
+			with data.rules as rules_mock
+	}
+}
+
+test_other_service_account_may_not_consume if {
+	rest.allow == false with input as {"principal": other_sa, "action": "scaChallenge.consume"}
+		with data.rules as rules_mock
+}
+
+test_pension_id_as_ai_agent_may_not_consume if {
+	# The rule keys on a HUMAN-classified client_credentials token; an agent presenting the
+	# same id is a different principal type and gets nothing.
+	rest.allow == false with input as {"principal": agent, "action": "scaChallenge.consume"}
+		with data.rules as rules_mock
+}

@@ -7,6 +7,10 @@ package com.openbank.sca.infrastructure.rest
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.api.error.ApiError
 import com.openbank.libs.api.error.ErrorCode
+import com.openbank.libs.audit.AuditChannel
+import com.openbank.libs.audit.AuditEvent
+import com.openbank.libs.audit.AuditEventPublisher
+import com.openbank.libs.audit.AuditResult
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.idempotency.IdempotencyKeyReusedException
@@ -43,6 +47,7 @@ import com.openbank.sca.application.usecase.ScaChallengeNotApprovedException
 import com.openbank.sca.application.usecase.ScaChallengeNotAwaitingException
 import com.openbank.sca.application.usecase.ScaChallengeNotFoundException
 import com.openbank.sca.application.usecase.ScaChallengePartyMismatchException
+import com.openbank.sca.application.usecase.ScaConsumerScopeViolationException
 import com.openbank.sca.application.usecase.ScaDynamicLinkingMismatchException
 import com.openbank.sca.application.usecase.ScaMethodNotDeliverableException
 import com.openbank.sca.application.usecase.ScaVerificationFailedException
@@ -243,6 +248,9 @@ class ScaResource(
     @Inject
     lateinit var identity: SecurityIdentity
 
+    @Inject
+    lateinit var auditPublisher: AuditEventPublisher
+
     @POST
     @Path("/challenges")
     @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
@@ -415,23 +423,46 @@ class ScaResource(
     @RolesAllowed("ROLE_OPERATOR", "ROLE_API", "ROLE_ADMIN")
     @Authorize(action = "scaChallenge.consume", resource = "#id")
     suspend fun consume(@PathParam("id") id: UUID, request: ConsumeScaRequest): ScaChallengeResponse {
-        val challenge = consumeSca.consume(
-            ConsumeScaCommand(
-                challengeId = id,
-                expectedPartyId = request.partyId,
-                amount = request.amount,
-                currency = request.currency,
-                creditor = request.creditor,
-                reference = request.reference,
-                documentSha256 = request.documentSha256,
-                ceremonyId = request.ceremonyId,
-                cardId = request.cardId,
-                cardAction = request.cardAction,
-                approvalRequestId = request.approvalRequestId,
-                payloadSha256 = request.payloadSha256,
+        val consumer = identity.principal?.name
+        val command = ConsumeScaCommand(
+            challengeId = id,
+            expectedPartyId = request.partyId,
+            amount = request.amount,
+            currency = request.currency,
+            creditor = request.creditor,
+            reference = request.reference,
+            documentSha256 = request.documentSha256,
+            ceremonyId = request.ceremonyId,
+            cardId = request.cardId,
+            cardAction = request.cardAction,
+            approvalRequestId = request.approvalRequestId,
+            payloadSha256 = request.payloadSha256,
+            scope = ConsumerScopes.forPrincipal(consumer),
+        )
+        val challenge = try {
+            consumeSca.consume(command)
+        } catch (e: ScaConsumerScopeViolationException) {
+            auditConsume(consumer, request.partyId, id, AuditResult.DENIED)
+            throw e
+        }
+        auditConsume(consumer, request.partyId, id, AuditResult.SUCCESS)
+        return ScaChallengeResponse.from(challenge)
+    }
+
+    /** ADR-0335 D3: who (the consuming principal) spent whose (the data subject's) approval. */
+    private suspend fun auditConsume(consumer: String?, partyId: UUID, challengeId: UUID, result: AuditResult) {
+        auditPublisher.publish(
+            AuditEvent(
+                actorId = consumer ?: "anonymous",
+                actorType = "SERVICE",
+                operation = "scaChallenge.consume",
+                resourceType = "party",
+                resourceId = partyId.toString(),
+                result = result,
+                channel = AuditChannel.API,
+                payload = mapOf("challengeId" to challengeId.toString()),
             ),
         )
-        return ScaChallengeResponse.from(challenge)
     }
 
     private fun scaCreateKey(partyId: UUID, requestKey: String) = "sca:initiate:$partyId:$requestKey"
@@ -543,6 +574,14 @@ class ScaPartyMismatchMapper : ExceptionMapper<ScaChallengePartyMismatchExceptio
     override fun toResponse(e: ScaChallengePartyMismatchException): Response =
         Response.status(Response.Status.FORBIDDEN)
             .entity(err(ErrorCode.FORBIDDEN, e.message ?: "Challenge party mismatch")).build()
+}
+
+/** ADR-0335 D1: 403, like a party mismatch — the caller may not spend this challenge at all. */
+@Provider
+class ScaConsumerScopeViolationMapper : ExceptionMapper<ScaConsumerScopeViolationException> {
+    override fun toResponse(e: ScaConsumerScopeViolationException): Response =
+        Response.status(Response.Status.FORBIDDEN)
+            .entity(err(ErrorCode.FORBIDDEN, e.message ?: "Challenge outside consumer scope")).build()
 }
 
 @Provider

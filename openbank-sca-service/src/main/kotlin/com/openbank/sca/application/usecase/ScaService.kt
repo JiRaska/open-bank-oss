@@ -83,6 +83,8 @@ class ScaChallengeNotAwaitingException(id: UUID) : RuntimeException("SCA challen
 class ScaChallengeNotApprovedException(id: UUID) : RuntimeException("SCA challenge is not approved: $id")
 class ScaChallengeAlreadyConsumedException(id: UUID) : RuntimeException("SCA challenge already consumed: $id")
 class ScaChallengePartyMismatchException(id: UUID) : RuntimeException("SCA challenge belongs to another party: $id")
+class ScaConsumerScopeViolationException(id: UUID) :
+    RuntimeException("SCA challenge is outside this consumer's scope: $id")
 class ScaDynamicLinkingMismatchException(id: UUID) :
     RuntimeException("Operation does not match what the device signed for challenge: $id")
 class DeviceNotEnrolledException(credentialId: String) :
@@ -432,6 +434,10 @@ class ScaService(
         if (challenge.partyId != command.expectedPartyId) {
             throw ScaChallengePartyMismatchException(command.challengeId)
         }
+        // ADR-0335 D1: a scoped consumer spends only its own reserved namespace, and nobody else
+        // spends that namespace. Checked on the STORED (device-signed) linking data, before anything
+        // that could burn the challenge.
+        if (!command.scope.permits(challenge)) throw ScaConsumerScopeViolationException(command.challengeId)
         if (challenge.consumedAt != null) throw ScaChallengeAlreadyConsumedException(command.challengeId)
         if (challenge.isExpired(now)) throw ScaChallengeExpiredException(command.challengeId)
         // A decoupled challenge may hold a signature-verified device decision that nobody has

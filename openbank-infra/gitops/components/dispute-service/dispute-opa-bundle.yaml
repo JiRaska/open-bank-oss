@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: dispute-service
     app.kubernetes.io/part-of: dispute
   annotations:
-    openbank.tech/policy-checksum: "83522cc07bedd0d6"
+    openbank.tech/policy-checksum: "0e366136bc3b1cd1"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1683,6 +1683,7 @@ data:
         scaChallenge.consume:                                          # ADR-0021 settlement gate + ceremonies
           - service-account-openbank-edge                              # scaGate before every money-path forward
           - service-account-openbank-services                          # delegation grant-accept, document-signing (#3734)
+          - service-account-openbank-pension                           # ADR-0335: consume-only scoped consumer, pension- namespace
 
     feature_flags:
       # Disabling any of these via a flag flip is never permitted — they guard SCA (ADR-0021),
