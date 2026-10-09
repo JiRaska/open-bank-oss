@@ -57,7 +57,6 @@ COMPONENTS = pathlib.Path("openbank-infra/gitops/components")
 # living only here would drift from the file a deployer actually reads.
 ADVISORY_ALLOWLIST = {
     "openbank-card-issuance-service": "2026-10-05",
-    "openbank-card-processing-service": "2026-10-05",
 }
 
 ISSUE_REF = "#8470"
