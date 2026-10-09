@@ -39,12 +39,11 @@ class ScaSignatureVerificationAdapter : SignatureVerificationPort {
         challengeId: String,
         documentSha256: String?,
         operationRef: String,
-    ): SignatureOutcome =
-        if (gate.spend(partyId, challengeId, ScaBinding.forOperation(operationRef, documentSha256))) {
-            SignatureOutcome.VERIFIED
-        } else {
-            SignatureOutcome.REJECTED
-        }
+    ): SignatureOutcome = if (gate.spend(partyId, challengeId, ScaBinding.forOperation(operationRef, documentSha256))) {
+        SignatureOutcome.VERIFIED
+    } else {
+        SignatureOutcome.REJECTED
+    }
 }
 
 /** Exit (termination, payout, payout-account change) SCA -> sca-service consume over the signing hash. */

@@ -41,18 +41,22 @@ class IdentityChecksTest {
         val challenges = mutableMapOf<UUID, Challenge>()
         var calls = 0
 
-        fun raise(party: UUID, binding: ScaBinding, purpose: String = "APPROVAL"): UUID =
-            UUID.randomUUID().also { challenges[it] = Challenge(party, purpose, binding.approvalRequestId, binding.payloadSha256) }
+        fun raise(party: UUID, binding: ScaBinding, purpose: String = "APPROVAL"): UUID = UUID.randomUUID().also {
+            challenges[it] =
+                Challenge(party, purpose, binding.approvalRequestId, binding.payloadSha256)
+        }
+
+        private fun reject(status: Int): Nothing = throw WebApplicationException(status)
 
         fun consume(id: UUID, req: ScaConsumeRequestDto): ScaChallengeDto {
             calls++
-            val c = challenges[id] ?: throw WebApplicationException(404)
-            if (c.party != req.partyId) throw WebApplicationException(403)
-            if (c.consumed) throw WebApplicationException(409)
+            val c = challenges[id] ?: reject(404)
+            if (c.party != req.partyId) reject(403)
+            if (c.consumed) reject(409)
             if (c.approvalRequestId != req.approvalRequestId ||
                 !c.payloadSha256.equals(req.payloadSha256, ignoreCase = true)
             ) {
-                throw WebApplicationException(409)
+                reject(409)
             }
             c.consumed = true
             return ScaChallengeDto(id, c.party, c.purpose, "COMPLETED", "2026-10-09T10:00:00Z")
@@ -79,8 +83,12 @@ class IdentityChecksTest {
         val kid = sha256("kid-v1")
         val challenge = sca.raise(party, ScaBinding.forOperation("pension-onboarding:a:kid-1", kid)!!)
 
-        assertThat(gate.spend(party, "$challenge", ScaBinding.forOperation("pension-onboarding:a:kid-1", sha256("kid-v2")))).isFalse()
-        assertThat(gate.spend(party, "$challenge", ScaBinding.forOperation("pension-onboarding:b:kid-1", kid))).isFalse()
+        assertThat(
+            gate.spend(party, "$challenge", ScaBinding.forOperation("pension-onboarding:a:kid-1", sha256("kid-v2"))),
+        ).isFalse()
+        assertThat(
+            gate.spend(party, "$challenge", ScaBinding.forOperation("pension-onboarding:b:kid-1", kid)),
+        ).isFalse()
         assertThat(gate.spend(party, "$challenge", ScaBinding.forOperation("pension-onboarding:a:kid-1", kid))).isTrue()
     }
 
@@ -89,7 +97,9 @@ class IdentityChecksTest {
         val binding = ScaBinding.forOperation("pension-transfer:t1:IBAN-X", null)!!
         assertThat(binding.payloadSha256).isEqualTo(sha256Hex("pension-transfer:t1:IBAN-X"))
         val challenge = sca.raise(party, binding)
-        assertThat(gate.spend(party, "$challenge", ScaBinding.forOperation("pension-transfer:t1:IBAN-Y", null))).isFalse()
+        assertThat(
+            gate.spend(party, "$challenge", ScaBinding.forOperation("pension-transfer:t1:IBAN-Y", null)),
+        ).isFalse()
         assertThat(gate.spend(party, "$challenge", binding)).isTrue()
     }
 
@@ -125,18 +135,24 @@ class IdentityChecksTest {
     fun `an sca-service that cannot answer is unavailable, never a pass`() {
         for (status in listOf(401, 500, 503)) {
             val down = ScaConsumeGate { _, _ -> throw WebApplicationException(status) }
-            assertThatThrownBy { runBlocking { down.spend(party, "${UUID.randomUUID()}", ScaBinding.forExit(quoteHash)) } }
+            assertThatThrownBy {
+                runBlocking { down.spend(party, "${UUID.randomUUID()}", ScaBinding.forExit(quoteHash)) }
+            }
                 .isInstanceOf(IntegrationUnavailableException::class.java)
         }
         val refused = ScaConsumeGate { _, _ -> throw java.net.ConnectException("refused") }
-        assertThatThrownBy { runBlocking { refused.spend(party, "${UUID.randomUUID()}", ScaBinding.forExit(quoteHash)) } }
+        assertThatThrownBy {
+            runBlocking { refused.spend(party, "${UUID.randomUUID()}", ScaBinding.forExit(quoteHash)) }
+        }
             .isInstanceOf(IntegrationUnavailableException::class.java)
     }
 
     @Test
     fun `party kyc verdicts map without ever upgrading`() {
         fun p(kyc: String?, status: String = "ACTIVE", type: String = "INDIVIDUAL", country: String? = "cz") =
-            PartyKycMapping.profile(PartyDto(UUID.randomUUID(), type, status, "Jan Novák", kyc, PartyAddressDto(country)))
+            PartyKycMapping.profile(
+                PartyDto(UUID.randomUUID(), type, status, "Jan Novák", kyc, PartyAddressDto(country)),
+            )
 
         val ok = p("APPROVED")
         assertThat(ok.status).isEqualTo(KycStatus.VERIFIED)
@@ -156,7 +172,9 @@ class IdentityChecksTest {
     @Test
     fun `an own account is an ACTIVE account held by exactly that party`() {
         assertThat(AccountOwnership.owns(party, AccountDto(UUID.randomUUID(), party, "ACTIVE", "CZK"))).isTrue()
-        assertThat(AccountOwnership.owns(party, AccountDto(UUID.randomUUID(), UUID.randomUUID(), "ACTIVE", "CZK"))).isFalse()
+        assertThat(
+            AccountOwnership.owns(party, AccountDto(UUID.randomUUID(), UUID.randomUUID(), "ACTIVE", "CZK")),
+        ).isFalse()
         assertThat(AccountOwnership.owns(party, AccountDto(UUID.randomUUID(), party, "FROZEN", "CZK"))).isFalse()
         assertThat(AccountOwnership.owns(party, null)).isFalse()
     }

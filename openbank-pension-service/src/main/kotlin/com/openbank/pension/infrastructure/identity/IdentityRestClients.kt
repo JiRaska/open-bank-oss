@@ -42,11 +42,7 @@ interface ScaConsumeRestClient {
 
 /** The APPROVAL-shaped subset of sca-service's ConsumeScaRequest; null fields are not sent. */
 @JsonInclude(JsonInclude.Include.NON_NULL)
-data class ScaConsumeRequestDto(
-    val partyId: UUID,
-    val approvalRequestId: String,
-    val payloadSha256: String,
-)
+data class ScaConsumeRequestDto(val partyId: UUID, val approvalRequestId: String, val payloadSha256: String)
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class ScaChallengeDto(

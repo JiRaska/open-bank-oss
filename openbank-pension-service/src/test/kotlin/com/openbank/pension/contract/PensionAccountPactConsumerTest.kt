@@ -96,7 +96,9 @@ class PensionAccountPactConsumerTest {
 
     private fun clientPath(iban: String): String {
         val base = AccountRestClient::class.java.getAnnotation(Path::class.java).value
-        val sub = AccountRestClient::class.java.methods.single { it.name == "byIban" }.getAnnotation(Path::class.java).value
+        val sub = AccountRestClient::class.java.methods.single {
+            it.name == "byIban"
+        }.getAnnotation(Path::class.java).value
         return (base + sub).replace("{iban}", iban)
     }
 

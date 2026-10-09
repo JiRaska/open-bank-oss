@@ -69,7 +69,9 @@ class PensionPartyPactConsumerTest {
     @PactTestFor(pactMethod = "knownPartyPact")
     fun `a KYC-approved person maps to VERIFIED`(mockServer: MockServer) {
         assertThat(clientPath(PERSON_ID)).isEqualTo("$EXPECTED_PATH/$PERSON_ID")
-        val raw = given().baseUri(mockServer.getUrl()).get(clientPath(PERSON_ID)).then().statusCode(200).extract().asString()
+        val raw = given().baseUri(
+            mockServer.getUrl(),
+        ).get(clientPath(PERSON_ID)).then().statusCode(200).extract().asString()
         val profile = PartyKycMapping.profile(mapper.readValue(raw, PartyDto::class.java))
         assertThat(profile.status).isEqualTo(KycStatus.VERIFIED)
         assertThat(profile.fullLegalCapacity).isTrue()
@@ -83,7 +85,9 @@ class PensionPartyPactConsumerTest {
 
     private fun clientPath(id: String): String {
         val base = PartyRestClient::class.java.getAnnotation(Path::class.java).value
-        val sub = PartyRestClient::class.java.methods.single { it.name == "party" }.getAnnotation(Path::class.java).value
+        val sub = PartyRestClient::class.java.methods.single {
+            it.name == "party"
+        }.getAnnotation(Path::class.java).value
         return (base + sub).replace("{id}", id)
     }
 

@@ -45,7 +45,8 @@ class PensionScaPactConsumerTest {
 
     private val mapper = jacksonObjectMapper()
     private val binding = ScaBinding.forExit(SIGNING_HASH)!!
-    private val request = ScaConsumeRequestDto(UUID.fromString(PARTY_ID), binding.approvalRequestId, binding.payloadSha256)
+    private val request =
+        ScaConsumeRequestDto(UUID.fromString(PARTY_ID), binding.approvalRequestId, binding.payloadSha256)
 
     @Pact(consumer = CONSUMER, provider = PROVIDER)
     fun consumeMismatchPact(builder: PactDslWithProvider): RequestResponsePact = builder

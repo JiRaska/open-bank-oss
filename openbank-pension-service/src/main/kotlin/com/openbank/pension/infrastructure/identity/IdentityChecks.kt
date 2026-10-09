@@ -45,8 +45,14 @@ data class ScaBinding(val approvalRequestId: String, val payloadSha256: String) 
          * (`TerminationNotice/PayoutRequest.signingHash`), so a signature over another account or
          * another quote has a different payload and a different approval request id.
          */
-        fun forExit(signingHash: String): ScaBinding? =
-            if (HEX64.matches(signingHash)) ScaBinding("$EXIT_PREFIX${signingHash.lowercase()}", signingHash.lowercase()) else null
+        fun forExit(signingHash: String): ScaBinding? = if (HEX64.matches(
+                signingHash,
+            )
+        ) {
+            ScaBinding("$EXIT_PREFIX${signingHash.lowercase()}", signingHash.lowercase())
+        } else {
+            null
+        }
 
         const val EXIT_PREFIX = "pension-exit:"
     }
@@ -72,25 +78,27 @@ class ScaConsumeGate(private val consume: suspend (UUID, ScaConsumeRequestDto) -
     suspend fun spend(partyId: UUID, challengeId: String, binding: ScaBinding?): Boolean {
         if (binding == null) return false
         val id = runCatching { UUID.fromString(challengeId.trim()) }.getOrNull() ?: return false
-        val answer = try {
-            consume(id, ScaConsumeRequestDto(partyId, binding.approvalRequestId, binding.payloadSha256))
-        } catch (e: WebApplicationException) {
-            when (e.response?.status) {
-                // 400 not approved / invalid, 403 another party's challenge, 404 unknown,
-                // 409 already consumed or a dynamic-linking mismatch, 422 expired.
-                BAD_REQUEST, FORBIDDEN, NOT_FOUND, CONFLICT, UNPROCESSABLE -> return false
-                else -> throw IntegrationUnavailableException("sca-service could not verify the challenge (${e.response?.status})")
-            }
-        } catch (e: IntegrationUnavailableException) {
-            throw e
-        } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
-            throw IntegrationUnavailableException("sca-service unreachable: ${e.javaClass.simpleName}")
-        }
+        val answer = call(id, ScaConsumeRequestDto(partyId, binding.approvalRequestId, binding.payloadSha256))
+            ?: return false
         return answer.id == id &&
             answer.partyId == partyId &&
             answer.purpose == REQUIRED_PURPOSE &&
             answer.status == "COMPLETED" &&
             !answer.consumedAt.isNullOrBlank()
+    }
+
+    /** The provider's answer, or null when sca-service SAYS NO; unavailable when it cannot answer. */
+    private suspend fun call(id: UUID, request: ScaConsumeRequestDto): ScaChallengeDto? = try {
+        consume(id, request)
+    } catch (expected: WebApplicationException) {
+        when (expected.response?.status) {
+            // 400 not approved / invalid, 403 another party's challenge, 404 unknown,
+            // 409 already consumed or a dynamic-linking mismatch, 422 expired.
+            BAD_REQUEST, FORBIDDEN, NOT_FOUND, CONFLICT, UNPROCESSABLE -> null
+            else -> unavailable("sca-service could not verify the challenge (${expected.response?.status})", expected)
+        }
+    } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+        unavailable("sca-service unreachable: ${e.javaClass.simpleName}", e)
     }
 
     companion object {
@@ -106,17 +114,19 @@ class ScaConsumeGate(private val consume: suspend (UUID, ScaConsumeRequestDto) -
 /** Runs a read; 404 becomes null, anything but a 2xx becomes IntegrationUnavailableException. */
 internal suspend fun <T> readOrNull(provider: String, block: suspend () -> T): T? = try {
     block()
-} catch (e: WebApplicationException) {
-    if (e.response?.status == HTTP_NOT_FOUND) {
+} catch (expected: WebApplicationException) {
+    if (expected.response?.status == HTTP_NOT_FOUND) {
         null
     } else {
-        throw IntegrationUnavailableException("$provider refused the lookup (${e.response?.status})")
+        unavailable("$provider refused the lookup (${expected.response?.status})", expected)
     }
-} catch (e: IntegrationUnavailableException) {
-    throw e
 } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
-    throw IntegrationUnavailableException("$provider unreachable: ${e.javaClass.simpleName}")
+    unavailable("$provider unreachable: ${e.javaClass.simpleName}", e)
 }
+
+/** 503, keeping the provider failure as the cause for the log. */
+internal fun unavailable(message: String, cause: Throwable): Nothing =
+    throw IntegrationUnavailableException(message).apply { initCause(cause) }
 
 private const val HTTP_NOT_FOUND = 404
 
@@ -183,6 +193,5 @@ class BeneficiaryLightKyc(
             normaliseName(party.legalName) == normaliseName(kyc.name)
     }
 
-    private fun normaliseName(name: String?): String =
-        name.orEmpty().trim().replace(Regex("\\s+"), " ").lowercase()
+    private fun normaliseName(name: String?): String = name.orEmpty().trim().replace(Regex("\\s+"), " ").lowercase()
 }
