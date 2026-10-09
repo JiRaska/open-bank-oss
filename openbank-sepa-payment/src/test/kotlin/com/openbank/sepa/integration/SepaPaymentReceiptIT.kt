@@ -25,9 +25,9 @@ import org.junit.jupiter.api.MethodOrderer
 import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestMethodOrder
-import java.util.UUID
 import java.time.Clock
 import java.time.Instant
+import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -315,7 +315,8 @@ class SepaPaymentReceiptIT {
                     "post-claim status attempt",
                     Clock.systemUTC(),
                 )
-                assertThat(runCatching { onEventLoop { paymentRepository.update(afterClaim, event) } }.isFailure).isTrue()
+                val statusRejected = runCatching { onEventLoop { paymentRepository.update(afterClaim, event) } }
+                assertThat(statusRejected.isFailure).isTrue()
             } else {
                 assertThat(current.status).isEqualTo(SepaPaymentStatus.REJECTED)
                 assertThat(current.schemeOutcomeUnknown).isFalse()

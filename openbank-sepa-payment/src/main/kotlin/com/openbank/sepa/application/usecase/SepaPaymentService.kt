@@ -96,9 +96,7 @@ class SepaPaymentService(
         // be refused here too, not answered with the first payment. Rows without durable creator
         // provenance cannot be safely replayed.
         paymentRepository.findByIdempotencyKey(command.idempotencyKey)?.let { existing ->
-            if (!matchesCreator(existing, command)) throw IdempotencyKeyReusedException()
-            if (existing.schemeOutcomeUnknown) throw IdempotencyRequestInProgressException()
-            return existing
+            return replayExisting(existing, command)
         }
 
         val now = Instant.now(clock)
@@ -143,9 +141,7 @@ class SepaPaymentService(
             // The losing transaction (including its outbox write) was rolled back. A concurrent
             // caller may have committed between the initial lookup and this INSERT.
             val winner = paymentRepository.findByIdempotencyKey(command.idempotencyKey) ?: throw failure
-            if (!matchesCreator(winner, command)) throw IdempotencyKeyReusedException()
-            if (winner.schemeOutcomeUnknown) throw IdempotencyRequestInProgressException()
-            return winner
+            return replayExisting(winner, command)
         }
 
         metrics.paymentSubmitted(payment.type.name.lowercase(), payment.currency)
@@ -163,6 +159,12 @@ class SepaPaymentService(
         )
         WorkflowClient.start(stub::process, received.id)
         return received
+    }
+
+    private fun replayExisting(existing: SepaPayment, command: CreateSepaPaymentCommand): SepaPayment {
+        if (!matchesCreator(existing, command)) throw IdempotencyKeyReusedException()
+        if (existing.schemeOutcomeUnknown) throw IdempotencyRequestInProgressException()
+        return existing
     }
 
     private fun matchesCreator(existing: SepaPayment, command: CreateSepaPaymentCommand): Boolean {
