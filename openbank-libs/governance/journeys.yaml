@@ -459,6 +459,12 @@ money_path_accountability:
         off in every deployed environment. When the journey lands it should assert the posted
         transaction by its ledger key (card-clearing:<authorizationId>:<key> once #11990 lands), not the HTTP status
         — a SKIPPED_DISABLED posting also answers 200.
+    - service: openbank-pension-service
+      note: >-
+        ADR-0334 S1 (#12350). Listed as money-path from the bootstrap; S1 itself moves no money
+        (contract lifecycle and pack evaluation only). A journey belongs with the first slice that
+        collects a contribution or pays out, and is then blocked by the default blocker like the
+        other posting services until the SYNTHETIC taint reaches the ledger.
     - service: openbank-treasury-service
       note: >-
         ADR-0315. A journey here would book, approve and settle a deal, which posts a real journal
