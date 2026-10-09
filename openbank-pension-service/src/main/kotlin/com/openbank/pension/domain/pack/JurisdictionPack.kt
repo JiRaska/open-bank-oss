@@ -44,8 +44,8 @@ data class JurisdictionPack(
         require(jurisdiction.isNotBlank()) { "pack jurisdiction must not be blank" }
         require(version >= 1) { "pack version must be >= 1" }
         require(currency.length == ISO_CURRENCY_LENGTH) { "pack currency must be an ISO 4217 code" }
-        require(effectiveTo == null || effectiveTo.isAfter(effectiveFrom)) {
-            "pack effectiveTo must be after effectiveFrom"
+        require(effectiveTo == null || !effectiveTo.isBefore(effectiveFrom)) {
+            "pack effectiveTo must not be before effectiveFrom"
         }
         require(permittedProviderTypes.isNotEmpty()) { "pack must permit at least one provider type" }
         require(incentives.map { it.id }.toSet().size == incentives.size) { "incentive ids must be unique" }
@@ -60,9 +60,9 @@ data class JurisdictionPack(
 
     val key: PackKey get() = PackKey(jurisdiction, productLine)
 
-    /** True when [date] falls inside this version's validity window. */
+    /** True when [date] falls inside this version's validity window; [effectiveTo] is INCLUSIVE (the last day). */
     fun isEffectiveOn(date: LocalDate): Boolean =
-        !date.isBefore(effectiveFrom) && (effectiveTo == null || date.isBefore(effectiveTo))
+        !date.isBefore(effectiveFrom) && (effectiveTo == null || !date.isAfter(effectiveTo))
 
     private companion object {
         const val ISO_CURRENCY_LENGTH = 3

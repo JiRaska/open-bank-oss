@@ -110,7 +110,7 @@ class PayoutAccountChangeRaceTest {
     private fun world(): World = runBlocking {
         val packs = JurisdictionPackLoader.loadRegistry()
         val contracts = Contracts()
-        val useCase = PensionContractService(contracts, packs, clock)
+        val useCase = PensionContractService(contracts, packs, clock, com.openbank.pension.infrastructure.notification.RecordingParticipantNotifier())
         val id = ContractFixtures.activeContract(
             useCase,
             contracts,
@@ -151,6 +151,7 @@ class PayoutAccountChangeRaceTest {
                     notified += "$payoutId|$accountLast4"
                 }
             },
+            notifier = com.openbank.pension.infrastructure.notification.RecordingParticipantNotifier(),
         )
         val stores = ExitStores(contracts, mockk(relaxed = true), payouts, mockk(relaxed = true), mockk(relaxed = true))
         val service = PayoutService(useCase, ExitContext(stores, gateways, packs, clock), mockk(relaxed = true))

@@ -374,7 +374,7 @@ class AnnuityMarketplaceServiceTest {
             }
             val registry = JurisdictionPackRegistry(packs)
             val repo = Contracts()
-            val contracts = PensionContractService(repo, registry, clock)
+            val contracts = PensionContractService(repo, registry, clock, com.openbank.pension.infrastructure.notification.RecordingParticipantNotifier())
             val id = ContractFixtures.activeContract(
                 contracts,
                 repo,

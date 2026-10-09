@@ -3,6 +3,7 @@
   "productLine": "DPS",
   "version": 1,
   "effectiveFrom": "2024-07-01",
+  "effectiveTo": "2025-12-31",
   "currency": "CZK",
   "legalReview": {
     "status": "REQUIRES_LEGAL_REVIEW",
