@@ -28,7 +28,7 @@ import java.util.UUID
 class CzPackGoldenTest {
 
     private val registry = JurisdictionPackLoader.loadRegistry()
-    private val dps = registry.pinned("CZ", ProductLine.DPS, 1)
+    private val dps = registry.pinned("CZ", ProductLine.DPS, 2)
     private val dip = registry.pinned("CZ", ProductLine.DIP, 1)
 
     private fun pay(

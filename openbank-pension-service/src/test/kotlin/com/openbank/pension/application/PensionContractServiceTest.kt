@@ -75,7 +75,7 @@ class PensionContractServiceTest {
     fun `a draft pins the pack version in force`(): Unit = runBlocking {
         val draft = service.createDraft(command())
         assertThat(draft.status).isEqualTo(ContractStatus.DRAFT)
-        assertThat(draft.packVersion).isEqualTo(1)
+        assertThat(draft.packVersion).isEqualTo(2)
         assertThat(repo.rows).containsKey(draft.id)
     }
 

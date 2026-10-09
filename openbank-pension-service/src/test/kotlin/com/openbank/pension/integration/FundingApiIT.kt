@@ -48,7 +48,7 @@ class FundingApiIT {
                     "pack_version, " +
                     "provider_entity_id, provider_type, participant_birth_date, status, contribution_amount, " +
                     "contribution_currency, contribution_frequency, start_date, created_at, updated_at) " +
-                    "VALUES (1000000000000 + (random() * 1000000000)::bigint, ?, ?, 'DPS', 'CZ', 1, ?, " +
+                    "VALUES (1000000000000 + (random() * 1000000000)::bigint, ?, ?, 'DPS', 'CZ', 2, ?, " +
                     "'PENSION_COMPANY', DATE '1985-05-05', 'ACTIVE', 1700, 'CZK', " +
                     "'MONTHLY', DATE '2025-01-01', now(), now())",
             ).use { st ->

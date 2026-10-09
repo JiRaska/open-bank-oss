@@ -69,7 +69,14 @@ class StateContributionReturnService(
 ) {
     private val log = Logger.getLogger(StateContributionReturnService::class.java)
 
-    /** Registers the return an executed early exit owes (§18(3)). Idempotent on [sourceKey]. */
+    /**
+     * Registers the return an executed early exit owes (§18(3)). Idempotent on [sourceKey].
+     *
+     * [amount] is what S5 wrote back to the ledger: the whole net state balance. Part of that
+     * balance may already be owed through an ineligibility return that is registered but not yet
+     * settled (§18(2)). That part is netted off, so MF is paid each crown once. The months the
+     * exit covers are recorded under the (contract, month) key that ineligibility also uses.
+     */
     suspend fun registerTermination(
         contractId: UUID,
         amount: BigDecimal,
@@ -78,38 +85,46 @@ class StateContributionReturnService(
     ): StateContributionReturn? {
         if (amount.signum() <= 0) return null
         val contract = directory.find(contractId) ?: throw ContractNotFoundException(contractId)
-        return returns.insertIfAbsent(
-            newReturn(
+        repeat(REGISTRATION_ATTEMPTS) {
+            returns.bySourceKey("exit:$sourceKey")?.let { return it }
+            val open = returns.byContract(contractId)
+                .filter { it.cause == ReturnCause.INELIGIBILITY_DISCOVERED && it.status != ReturnStatus.SETTLED }
+            val net = amount - open.fold(BigDecimal.ZERO) { a, r -> a + r.amount }
+            if (net.signum() <= 0) return null
+            val covered = returns.coveredMonths(contractId)
+            val months = claims.byContract(contractId)
+                .filter { it.status == ClaimStatus.RECEIVED && it.period !in covered }
+                .associate { it.period to requireNotNull(it.receivedAmount) }
+            val item = newReturn(
                 contractId,
                 null,
                 ReturnCause.CONTRACT_TERMINATED,
-                amount,
+                net,
                 contract.currency,
                 terminatedOn,
                 CzStateContributionCalendar.terminationReturnDue(terminatedOn),
                 "exit:$sourceKey",
-            ),
-        ).first
+            )
+            if (returns.insertWithMonths(item, months)) return item
+        }
+        error("could not register the exit return of $contractId: concurrent registrations kept winning")
     }
 
     /**
      * The participant was not entitled from [ineligibleFrom] on, for example because an old-age
      * pension was granted (§13(1)). Every RECEIVED claim from that month is owed back by the §18(2)
-     * deadline. Idempotent per claim.
+     * deadline. A month already covered by another return (for example an executed exit) is
+     * skipped, because the (contract, month) key is unique. Idempotent per claim.
      */
     suspend fun registerIneligibility(contractId: UUID, ineligibleFrom: YearMonth): List<StateContributionReturn> {
         val contract = directory.find(contractId) ?: throw ContractNotFoundException(contractId)
         val today = today()
-        // An executed exit already returns the whole net balance (§18(3)); a second return per claim
-        // would pay the same money back twice.
-        check(returns.byContract(contractId).none { it.cause == ReturnCause.CONTRACT_TERMINATED }) {
-            "contract $contractId already returns its whole state contribution on exit"
-        }
         return claims.byContract(contractId)
             .filter { it.status == ClaimStatus.RECEIVED && it.period >= ineligibleFrom }
-            .map { claim ->
-                returns.insertIfAbsent(
-                    newReturn(
+            .mapNotNull { claim ->
+                val key = "ineligible:${claim.id}"
+                returns.bySourceKey(key) ?: run {
+                    val item = newReturn(
                         contractId,
                         claim.id,
                         ReturnCause.INELIGIBILITY_DISCOVERED,
@@ -117,9 +132,19 @@ class StateContributionReturnService(
                         contract.currency,
                         today,
                         CzStateContributionCalendar.unlawfulReturnDue(today),
-                        "ineligible:${claim.id}",
-                    ),
-                ).first
+                        key,
+                    )
+                    if (returns.insertWithMonths(item, mapOf(claim.period to item.amount))) {
+                        item
+                    } else {
+                        log.infof(
+                            "month %s of %s is already covered by another return; not owed twice",
+                            claim.period,
+                            contractId,
+                        )
+                        null
+                    }
+                }
             }
     }
 
@@ -185,7 +210,16 @@ class StateContributionReturnService(
         if (item.status == ReturnStatus.SETTLED) return item
         val settled = item.settle(now())
         item.claimId?.let { claimId ->
-            if (claims.findById(claimId)?.status == ClaimStatus.RECEIVED) incentives.returnClaim(claimId)
+            val claim = claims.findById(claimId)
+            if (claim?.status == ClaimStatus.RECEIVED) {
+                val exitWroteLedger = returns.byContract(item.contractId).any {
+                    it.cause ==
+                        ReturnCause.CONTRACT_TERMINATED
+                }
+                // After an exit, S5 has already written the whole balance back to the ledger
+                // (this month included). Writing it again would return it twice.
+                if (exitWroteLedger) claims.update(claim.markReturned(now())) else incentives.returnClaim(claimId)
+            }
         }
         returns.update(settled)
         return settled
@@ -228,6 +262,10 @@ class StateContributionReturnService(
     )
 
     private fun now(): Instant = clock.instant()
+
+    private companion object {
+        const val REGISTRATION_ATTEMPTS = 3
+    }
 
     private fun today(): LocalDate = LocalDate.ofInstant(clock.instant(), ZoneOffset.UTC)
 }

@@ -8,6 +8,7 @@ import com.openbank.pension.domain.statecontribution.ReturnReportLine
 import com.openbank.pension.domain.statecontribution.ReturnResultLine
 import com.openbank.pension.domain.statecontribution.ReturnStatus
 import com.openbank.pension.domain.statecontribution.StateContributionReturn
+import java.math.BigDecimal
 import java.time.Instant
 import java.time.YearMonth
 import java.util.UUID
@@ -62,9 +63,21 @@ data class ReturnReport(
     val createdAt: Instant,
 )
 
+// One repository for the return lifecycle and its reports, which share a transaction (fileReportAtomically).
+@Suppress("TooManyFunctions")
 interface StateContributionReturnRepository {
-    /** Idempotent on [StateContributionReturn.sourceKey]; the flag says whether this call created it. */
-    suspend fun insertIfAbsent(item: StateContributionReturn): Pair<StateContributionReturn, Boolean>
+    suspend fun bySourceKey(sourceKey: String): StateContributionReturn?
+
+    /**
+     * Stores [item] and claims [months] (contribution month → amount) for it in ONE transaction,
+     * under a lock on the contract row. The (contract, month) key is unique across all returns, so
+     * a month can be owed back only once. False if any month is already claimed by another return,
+     * or if [item]'s source key already exists. In that case nothing is written.
+     */
+    suspend fun insertWithMonths(item: StateContributionReturn, months: Map<YearMonth, BigDecimal>): Boolean
+
+    /** Contribution months of [contractId] already claimed by some return. */
+    suspend fun coveredMonths(contractId: UUID): Set<YearMonth>
 
     suspend fun findById(id: UUID): StateContributionReturn?
 

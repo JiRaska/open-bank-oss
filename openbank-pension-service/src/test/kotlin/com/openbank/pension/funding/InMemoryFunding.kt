@@ -74,9 +74,23 @@ class InMemoryFunding(var now: Instant = Instant.parse("2026-04-10T10:00:00Z")) 
         status: String = "ACTIVE",
         productLine: String = "DPS",
         createdAt: Instant = Instant.parse("2025-01-01T00:00:00Z"),
-    ): ContractFundingView =
-        ContractFundingView(UUID.randomUUID(), participant, "CZ", productLine, 1, status, "CZK", createdAt)
-            .also { contracts[it.contractId] = it }
+    ): ContractFundingView = ContractFundingView(
+        UUID.randomUUID(),
+        participant,
+        "CZ",
+        productLine,
+        if (productLine ==
+            "DPS"
+        ) {
+            2
+        } else {
+            1
+        },
+        status,
+        "CZK",
+        createdAt,
+    )
+        .also { contracts[it.contractId] = it }
 
     val directory = object : ContractFundingDirectory {
         override suspend fun find(contractId: UUID) = contracts[contractId]

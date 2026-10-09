@@ -68,7 +68,7 @@ class PensionLifecycleJourneyE2E {
         assertThat(draft.getString("status")).isEqualTo("DRAFT")
         assertThat(draft.getString("productLine")).isEqualTo("DPS")
         assertThat(draft.getString("jurisdiction")).isEqualTo("CZ")
-        assertThat(draft.getInt("packVersion")).isEqualTo(1)
+        assertThat(draft.getInt("packVersion")).isEqualTo(2)
         assertThat(draft.getString("startDate")).isNull()
 
         assertThat(post(party, "$BASE/$id/submit").jsonPath().getString("status")).isEqualTo("PENDING_ACTIVATION")

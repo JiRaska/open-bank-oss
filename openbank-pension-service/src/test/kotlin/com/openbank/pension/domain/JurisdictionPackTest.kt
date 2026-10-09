@@ -37,8 +37,8 @@ class JurisdictionPackTest {
             .associateBy { it.incentiveId }
 
     @Test
-    fun `both reference packs load and are marked as requiring legal review`() {
-        assertThat(registry.all()).hasSize(2)
+    fun `all reference packs load and are marked as requiring legal review`() {
+        assertThat(registry.all()).hasSize(3)
         assertThat(registry.all().map { it.legalReview.status }).containsOnly(LegalReviewStatus.REQUIRES_LEGAL_REVIEW)
     }
 

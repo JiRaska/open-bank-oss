@@ -15,7 +15,9 @@ import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.vertx.mutiny.sqlclient.Pool
 import io.vertx.mutiny.sqlclient.Row
 import io.vertx.mutiny.sqlclient.Tuple
+import io.vertx.pgclient.PgException
 import jakarta.inject.Singleton
+import java.math.BigDecimal
 import java.time.Instant
 import java.time.OffsetDateTime
 import java.time.YearMonth
@@ -27,30 +29,57 @@ import java.util.UUID
  * `ON CONFLICT (source_key) DO NOTHING`, so the idempotency guarantee is in the statement itself
  * (V10).
  */
+// One repository for the return lifecycle and its reports, which share a transaction (fileReportAtomically).
+@Suppress("TooManyFunctions")
 @Singleton
 class PgStateContributionReturns(client: Pool) :
     PgFundingSupport(client),
     StateContributionReturnRepository {
 
-    override suspend fun insertIfAbsent(item: StateContributionReturn): Pair<StateContributionReturn, Boolean> {
-        val created = exec(
-            """
-            INSERT INTO pension_state_contribution_returns (id, contract_id, claim_id, cause, amount, currency,
-                discovered_on, due_by, source_key, status, report_id, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-            ON CONFLICT (source_key) DO NOTHING
-            """.trimIndent(),
-            Tuple.tuple(
-                listOf(
-                    item.id, item.contractId, item.claimId, item.cause.name, item.amount, item.currency,
-                    item.discoveredOn, item.dueBy, item.sourceKey, item.status.name, item.reportId,
-                    utc(item.createdAt), utc(item.updatedAt),
-                ),
-            ),
-        ) == 1
-        val stored = rows("$SELECT WHERE source_key = $1", Tuple.of(item.sourceKey)).first().toReturn()
-        return stored to created
-    }
+    override suspend fun bySourceKey(sourceKey: String): StateContributionReturn? =
+        rows("$SELECT WHERE source_key = $1", Tuple.of(sourceKey)).firstOrNull()?.toReturn()
+
+    override suspend fun insertWithMonths(item: StateContributionReturn, months: Map<YearMonth, BigDecimal>): Boolean =
+        client.withTransaction { conn ->
+            conn.preparedQuery("SELECT 1 FROM pension_contracts WHERE contract_id = $1 FOR UPDATE")
+                .execute(Tuple.of(item.contractId))
+                .flatMap {
+                    conn.preparedQuery(
+                        """
+                        INSERT INTO pension_state_contribution_returns (id, contract_id, claim_id, cause, amount,
+                            currency, discovered_on, due_by, source_key, status, report_id, created_at, updated_at)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                        ON CONFLICT (source_key) DO NOTHING
+                        """.trimIndent(),
+                    ).execute(
+                        Tuple.tuple(
+                            listOf(
+                                item.id, item.contractId, item.claimId, item.cause.name, item.amount, item.currency,
+                                item.discoveredOn, item.dueBy, item.sourceKey, item.status.name, item.reportId,
+                                utc(item.createdAt), utc(item.updatedAt),
+                            ),
+                        ),
+                    )
+                }
+                .flatMap { inserted ->
+                    if (inserted.rowCount() != 1) return@flatMap Uni.createFrom().failure<Boolean>(MonthTaken())
+                    if (months.isEmpty()) return@flatMap Uni.createFrom().item(true)
+                    conn.preparedQuery(
+                        "INSERT INTO pension_state_contribution_return_months " +
+                            "(contract_id, claim_month, return_id, amount) " +
+                            "VALUES ($1, $2, $3, $4)",
+                    ).executeBatch(months.map { (m, amt) -> Tuple.of(item.contractId, m.toString(), item.id, amt) })
+                        .map { true }
+                }
+        }.onFailure { it is MonthTaken || (it is PgException && it.sqlState == UNIQUE_VIOLATION) }
+            .recoverWithItem(false).awaitSuspending()
+
+    private class MonthTaken : RuntimeException("a contribution month is already owed back by another return")
+
+    override suspend fun coveredMonths(contractId: UUID): Set<YearMonth> = rows(
+        "SELECT claim_month FROM pension_state_contribution_return_months WHERE contract_id = $1",
+        Tuple.of(contractId),
+    ).map { YearMonth.parse(it.getString("claim_month")) }.toSet()
 
     override suspend fun findById(id: UUID): StateContributionReturn? =
         rows("$SELECT WHERE id = $1", Tuple.of(id)).firstOrNull()?.toReturn()
@@ -121,6 +150,7 @@ class PgStateContributionReturns(client: Pool) :
 
     private companion object {
         const val SELECT = "SELECT * FROM pension_state_contribution_returns"
+        const val UNIQUE_VIOLATION = "23505"
         const val REPORT_SELECT = "SELECT * FROM pension_return_reports"
     }
 }

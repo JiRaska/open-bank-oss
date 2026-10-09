@@ -202,37 +202,92 @@ class StateContributionChannelTest {
         }
 
     @Test
-    fun `R2 an early exit owes its return six months on and then per-claim ineligibility is refused`(): Unit =
-        runBlocking {
-            val c = f.contract()
-            val r =
-                requireNotNull(
-                    returns.registerTermination(
-                        c.contractId,
-                        BigDecimal("680.00"),
-                        LocalDate.of(2026, 3, 15),
-                        "term-1",
-                    ),
-                )
-            assertThat(r.dueBy).isEqualTo(LocalDate.of(2026, 9, 30))
-            assertThat(
+    fun `R2 an early exit owes its return six months on and is idempotent`(): Unit = runBlocking {
+        val c = f.contract()
+        val r =
+            requireNotNull(
                 returns.registerTermination(
                     c.contractId,
                     BigDecimal("680.00"),
                     LocalDate.of(2026, 3, 15),
                     "term-1",
-                )!!.id,
+                ),
             )
-                .describedAs("a replayed exit activity registers nothing twice").isEqualTo(r.id)
-            assertThat(
-                returns.registerTermination(c.contractId, BigDecimal.ZERO, LocalDate.of(2026, 3, 15), "term-2"),
-            ).isNull()
-            assertThatThrownBy { runBlocking { returns.registerIneligibility(c.contractId, YearMonth.of(2026, 1)) } }
-                .isInstanceOf(IllegalStateException::class.java)
+        assertThat(r.dueBy).isEqualTo(LocalDate.of(2026, 9, 30))
+        assertThat(
+            returns.registerTermination(
+                c.contractId,
+                BigDecimal("680.00"),
+                LocalDate.of(2026, 3, 15),
+                "term-1",
+            )!!.id,
+        )
+            .describedAs("a replayed exit activity registers nothing twice").isEqualTo(r.id)
+        assertThat(
+            returns.registerTermination(c.contractId, BigDecimal.ZERO, LocalDate.of(2026, 3, 15), "term-2"),
+        ).isNull()
 
-            at("2026-10-01")
-            assertThat(returns.deadlines().returnsOverdue).isEqualTo(1)
+        at("2026-10-01")
+        assertThat(returns.deadlines().returnsOverdue).isEqualTo(1)
+    }
+
+    /** Two received months (Jan, Feb: 340 each), reconciled; ledger net 680. */
+    private suspend fun twoReceivedMonths(): UUID {
+        val c = f.contract()
+        pay(c.contractId, "1700", LocalDate.of(2026, 1, 10))
+        pay(c.contractId, "1700", LocalDate.of(2026, 2, 10))
+        at("2026-04-05")
+        f.incentiveService.generateClaims(YearMonth.of(2026, 1))
+        f.incentiveService.generateClaims(YearMonth.of(2026, 2))
+        val batch = f.incentiveService.submitPending().first.single()
+        f.incentiveService.reconcileReceiptFile(batch.id, StateAgencySimulator.receipt(batch.payload))
+        at("2026-06-03")
+        return c.contractId
+    }
+
+    /** What S5's executed exit does through IncentiveLedgerClawbackAdapter. */
+    private suspend fun exit(contractId: UUID, key: String) {
+        val balance = f.incentiveService.clawbackBalance(contractId, LocalDate.of(2026, 6, 3)).stateIncentivesToReturn
+        f.incentiveService.settleClawback(contractId, balance, key)
+        returns.registerTermination(contractId, balance, LocalDate.of(2026, 6, 3), key)
+    }
+
+    private fun owedToAgency(contractId: UUID) =
+        store.rows.values.filter { it.contractId == contractId }.fold(BigDecimal.ZERO) { a, r -> a + r.amount }
+
+    private fun returnedInLedger(contractId: UUID) = f.ledgerRows
+        .filter { it.contractId == contractId && it.kind == LedgerEntryKind.RETURNED }
+        .fold(BigDecimal.ZERO) { a, e -> a + e.amount }
+
+    @Test
+    fun `ineligibility then exit - the exit nets off the open return and nothing is returned twice`(): Unit =
+        runBlocking {
+            val c = twoReceivedMonths()
+            val inel = returns.registerIneligibility(c, YearMonth.of(2026, 2)).single()
+            exit(c, "exit-a")
+            val exitReturn = store.rows.values.single { it.cause == ReturnCause.CONTRACT_TERMINATED }
+            assertThat(
+                exitReturn.amount,
+            ).describedAs("680 balance less the open 340 ineligibility").isEqualByComparingTo("340")
+            assertThat(store.coveredMonths(c)).containsExactlyInAnyOrder(YearMonth.of(2026, 1), YearMonth.of(2026, 2))
+
+            val report = requireNotNull(returns.fileReturnReport(YearMonth.of(2026, 6)))
+            returns.applyReturnResult(report.id, StateAgencySimulator.returnResult(report.payload))
+            returns.settle(inel.id)
+            returns.settle(exitReturn.id)
+            assertThat(owedToAgency(c)).isEqualByComparingTo("680")
+            assertThat(returnedInLedger(c)).describedAs("the ledger holds the 680 once").isEqualByComparingTo("680")
+            assertThat(f.incentiveService.status(c).balances.single().net).isEqualByComparingTo("0")
         }
+
+    @Test
+    fun `exit then ineligibility - a month the exit already returns is not owed a second time`(): Unit = runBlocking {
+        val c = twoReceivedMonths()
+        exit(c, "exit-b")
+        assertThat(returns.registerIneligibility(c, YearMonth.of(2026, 2))).isEmpty()
+        assertThat(owedToAgency(c)).isEqualByComparingTo("680")
+        assertThat(returnedInLedger(c)).isEqualByComparingTo("680")
+    }
 
     @Test
     fun `nothing is filed without the company ICO - the channel fails closed`(): Unit = runBlocking {
@@ -246,11 +301,21 @@ class InMemoryReturns : StateContributionReturnRepository {
     val rows = linkedMapOf<UUID, StateContributionReturn>()
     private val reportRows = linkedMapOf<UUID, ReturnReport>()
 
-    override suspend fun insertIfAbsent(item: StateContributionReturn): Pair<StateContributionReturn, Boolean> {
-        rows.values.firstOrNull { it.sourceKey == item.sourceKey }?.let { return it to false }
+    /** (contract, month) → return id: the same uniqueness as the V10 primary key. */
+    val months = linkedMapOf<Pair<UUID, YearMonth>, UUID>()
+
+    override suspend fun bySourceKey(sourceKey: String) = rows.values.firstOrNull { it.sourceKey == sourceKey }
+
+    override suspend fun insertWithMonths(item: StateContributionReturn, months: Map<YearMonth, BigDecimal>): Boolean {
+        if (bySourceKey(item.sourceKey) != null) return false
+        if (months.keys.any { (item.contractId to it) in this.months }) return false
         rows[item.id] = item
-        return item to true
+        months.keys.forEach { this.months[item.contractId to it] = item.id }
+        return true
     }
+
+    override suspend fun coveredMonths(contractId: UUID) =
+        months.keys.filter { it.first == contractId }.map { it.second }.toSet()
 
     override suspend fun findById(id: UUID) = rows[id]
 

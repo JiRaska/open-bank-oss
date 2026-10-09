@@ -1,7 +1,8 @@
 -- ADR-0334 / #12382: CZ state-contribution returns (vratky, ZDPS 427/2011 §18) and the monthly
 -- return reports that carry them to the Ministry of Finance.
 --
--- Rollback: DROP TABLE pension_state_contribution_returns; DROP TABLE pension_return_reports;
+-- Rollback: DROP TABLE pension_state_contribution_return_months; DROP TABLE pension_state_contribution_returns;
+--   DROP TABLE pension_return_reports;
 -- (nothing else references them; open returns would then have to be tracked by hand).
 
 CREATE TABLE pension_return_reports (
@@ -37,3 +38,13 @@ CREATE TABLE pension_state_contribution_returns (
 
 CREATE INDEX idx_pension_sc_returns_status ON pension_state_contribution_returns (status);
 CREATE INDEX idx_pension_sc_returns_contract ON pension_state_contribution_returns (contract_id);
+
+-- One return per (contract, contribution month), whatever its cause: an exit and an ineligibility
+-- finding can never both owe the same month back to MF (the primary key is the guard).
+CREATE TABLE pension_state_contribution_return_months (
+    contract_id  UUID NOT NULL REFERENCES pension_contracts (contract_id),
+    claim_month  CHAR(7) NOT NULL,
+    return_id    UUID NOT NULL REFERENCES pension_state_contribution_returns (id),
+    amount       NUMERIC(19, 4) NOT NULL CHECK (amount > 0),
+    PRIMARY KEY (contract_id, claim_month)
+);

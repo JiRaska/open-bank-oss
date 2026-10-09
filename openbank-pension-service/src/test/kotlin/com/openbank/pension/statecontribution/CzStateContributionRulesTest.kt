@@ -31,7 +31,7 @@ import java.util.UUID
  */
 class CzStateContributionRulesTest {
 
-    private val pack = JurisdictionPackLoader.loadRegistry().pinned("CZ", ProductLine.DPS, 1)
+    private val pack = JurisdictionPackLoader.loadRegistry().pinned("CZ", ProductLine.DPS, 2)
     private val rule = pack.incentives.single { it.id == "state-contribution" }
 
     private fun monthly(amount: String): BigDecimal = IncentiveEngine.periodAmount(
@@ -71,6 +71,15 @@ class CzStateContributionRulesTest {
         val raw = rule.copy(roundDownToUnit = null)
         assertThat(raw.roundDown(BigDecimal("246.80"))).isEqualByComparingTo("246.80")
         assertThat(rule.roundDown(BigDecimal("246.80"))).isEqualByComparingTo("246")
+    }
+
+    @Test
+    fun `v1 is left exactly as contracts pinned it - the rounding arrives only in v2`() {
+        val registry = JurisdictionPackLoader.loadRegistry()
+        val v1 = registry.pinned("CZ", ProductLine.DPS, 1).incentives.single { it.id == "state-contribution" }
+        assertThat(v1.roundDownToUnit).isNull()
+        assertThat(v1.claimFormat).isEqualTo("agency-monthly-batch-v0")
+        assertThat(registry.resolve("CZ", ProductLine.DPS, LocalDate.of(2026, 10, 9)).version).isEqualTo(2)
     }
 
     @Test
