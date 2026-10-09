@@ -96,6 +96,8 @@ Content-Type: application/json
 
 Edge obohatí `debtorAccountNumber`/`debtorBankCode` (z českého IBANu účtu), `debtorName` (party-service), rozdělí kredit `number/bankcode`, namapuje `reference`→`messageForPayee`, nastaví `priority=STANDARD` a přepošle na `domestic-payment-service`. Peníze se nehýbou — iniciace jen vytvoří a proscreenuje; settlement je pod SCA.
 
+Domácí platební rail přijímá pouze CZK. Jiná měna vrátí `400 CURRENCY_NOT_ALLOWED` ještě před dohledáním účtu, rezervací delegovaného limitu nebo SCA; `Idempotency-Key` zůstane použitelný pro platný pokus. Volající bez práva odepsat peníze dostane stejnou odpověď `403` bez ohledu na existenci účtu či delegace, takže odpověď jejich existenci neprozrazuje.
+
 ### Začátek onboardingu (anonymně)
 
 ```http
