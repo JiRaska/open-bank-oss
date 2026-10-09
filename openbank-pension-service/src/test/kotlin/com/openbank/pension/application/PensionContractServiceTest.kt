@@ -6,6 +6,7 @@ package com.openbank.pension.application
 
 import com.openbank.pension.application.port.`in`.Caller
 import com.openbank.pension.application.port.`in`.CreateDraftCommand
+import com.openbank.pension.application.port.out.ParticipantNotificationKind
 import com.openbank.pension.application.port.out.PensionContractRepository
 import com.openbank.pension.application.usecase.PensionContractService
 import com.openbank.pension.domain.model.ContractStatus
@@ -14,6 +15,7 @@ import com.openbank.pension.domain.model.ContributionSchedule
 import com.openbank.pension.domain.model.PensionContract
 import com.openbank.pension.domain.model.ProductLine
 import com.openbank.pension.domain.pack.ProviderType
+import com.openbank.pension.infrastructure.notification.RecordingParticipantNotifier
 import com.openbank.pension.infrastructure.pack.JurisdictionPackLoader
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
@@ -44,7 +46,8 @@ class PensionContractServiceTest {
 
     private val repo = InMemoryRepo()
     private val clock = Clock.fixed(Instant.parse("2026-10-09T10:00:00Z"), ZoneOffset.UTC)
-    private val service = PensionContractService(repo, JurisdictionPackLoader.loadRegistry(), clock)
+    private val notifier = RecordingParticipantNotifier()
+    private val service = PensionContractService(repo, JurisdictionPackLoader.loadRegistry(), clock, notifier)
 
     private val party = UUID.randomUUID()
     private val me = Caller.customer(party)
@@ -102,6 +105,20 @@ class PensionContractServiceTest {
         val id = service.createDraft(command()).id
         assertThatThrownBy { runBlocking { service.electStrategy(me, id, "DYNAMIC", LocalDate.parse("2020-01-01")) } }
             .isInstanceOf(IllegalArgumentException::class.java)
+        // A refused change tells the participant nothing.
+        assertThat(notifier.sent).isEmpty()
+    }
+
+    @Test
+    fun `an accepted strategy change notifies the participant of its effective date (#12379)`(): Unit = runBlocking {
+        val id = service.createDraft(command()).id
+        service.electStrategy(me, id, "DYNAMIC", LocalDate.parse("2026-11-01"))
+        val notice = notifier.sent.single()
+        assertThat(notice.kind).isEqualTo(ParticipantNotificationKind.STRATEGY_CHANGE_EFFECTIVE)
+        assertThat(notice.partyId).isEqualTo(party)
+        assertThat(
+            notice.variables,
+        ).containsEntry("effectiveFrom", "2026-11-01").containsEntry("strategyCode", "DYNAMIC")
     }
 
     @Test

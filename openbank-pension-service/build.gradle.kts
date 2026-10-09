@@ -32,6 +32,7 @@ dependencies {
     // ADR-0334 S3: monthly incentive claim run + subscription sweep.
     implementation(libs.quarkus.scheduler)
     // #12378: domestic-payment status events -> payout settlement (DLQ-wired consumer).
+    // #12379: participant notices onto notification-service's request topic.
     implementation(libs.quarkus.smallrye.kafka)
 
     implementation(libs.kotlinx.coroutines.core)
@@ -58,6 +59,7 @@ dependencies {
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(project(":openbank-libs-testing"))
     // Consumer pacts for the sca/party/account identity checks (#12377), written to pacts/.
+    // #12379: consumer pact for the document-service render call (ADR-0063 P2).
     testImplementation(libs.pact.consumer)
 }
 

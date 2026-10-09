@@ -34,6 +34,7 @@ import com.openbank.pension.domain.incentive.IncentiveClaim
 import com.openbank.pension.domain.incentive.IncentiveLedgerEntry
 import com.openbank.pension.domain.incentive.TaxYearSummary
 import com.openbank.pension.infrastructure.adapter.AgencyMonthlyBatchClaimAdapter
+import com.openbank.pension.infrastructure.notification.RecordingParticipantNotifier
 import com.openbank.pension.infrastructure.pack.JurisdictionPackLoader
 import java.math.BigDecimal
 import java.time.Clock
@@ -242,8 +243,10 @@ class InMemoryFunding(now: Instant = Instant.parse("2026-02-10T10:00:00Z")) {
             directory, references, contributions, unmatched, fund, employers, mandates, enrolments, activation, clock,
         )
 
+    val notifier = RecordingParticipantNotifier()
+
     val incentiveService = IncentiveService(
         directory, references, contributions, claims, batches, ledger, summaries, JurisdictionPackLoader.loadRegistry(),
-        listOf(AgencyMonthlyBatchClaimAdapter()), documents, contributionService, clock,
+        listOf(AgencyMonthlyBatchClaimAdapter()), documents, contributionService, clock, notifier,
     )
 }

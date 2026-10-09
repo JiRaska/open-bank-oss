@@ -10,6 +10,7 @@ import com.openbank.pension.application.port.`in`.CreateDraftCommand
 import com.openbank.pension.application.port.`in`.IncentiveEvaluationCommand
 import com.openbank.pension.application.port.`in`.PensionContractUseCase
 import com.openbank.pension.application.port.out.ContractNotFoundException
+import com.openbank.pension.application.port.out.ParticipantNotifier
 import com.openbank.pension.application.port.out.PensionContractRepository
 import com.openbank.pension.domain.model.ContractStatus
 import com.openbank.pension.domain.model.Limits
@@ -29,6 +30,7 @@ class PensionContractService(
     private val contracts: PensionContractRepository,
     private val packs: JurisdictionPackRegistry,
     private val clock: Clock,
+    private val notifier: ParticipantNotifier,
 ) : PensionContractUseCase {
 
     override suspend fun createDraft(command: CreateDraftCommand): PensionContract {
@@ -87,12 +89,24 @@ class PensionContractService(
         return contracts.findByParticipant(party, page).filter { status == null || it.status == status }
     }
 
-    override suspend fun electStrategy(caller: Caller, id: UUID, strategyCode: String, effectiveFrom: LocalDate?) =
-        transition(caller, id, null) {
-            val from = effectiveFrom ?: LocalDate.now(clock)
+    override suspend fun electStrategy(
+        caller: Caller,
+        id: UUID,
+        strategyCode: String,
+        effectiveFrom: LocalDate?,
+    ): PensionContract {
+        val from = effectiveFrom ?: LocalDate.now(clock)
+        val saved = transition(caller, id, null) {
             require(!from.isBefore(LocalDate.now(clock))) { "a strategy change cannot take effect in the past" }
             it.electStrategy(strategyCode, from, clock.instant())
         }
+        // #12379: the participant is told when the new strategy takes effect, after it is stored.
+        ParticipantNotices.send(
+            notifier,
+            ParticipantNotices.strategyChange(saved.participantPartyId, saved.id, strategyCode, from),
+        )
+        return saved
+    }
 
     override suspend fun suspendContributions(caller: Caller, id: UUID) =
         transition(caller, id, ContractStatus.SUSPENDED) { it.suspendContributions(clock.instant()) }

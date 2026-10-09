@@ -5,6 +5,7 @@
 package com.openbank.pension.funding
 
 import com.openbank.pension.application.port.out.ClaimReceiptLine
+import com.openbank.pension.application.port.out.ParticipantNotificationKind
 import com.openbank.pension.application.usecase.ReceiptOutcome
 import com.openbank.pension.domain.contribution.ContributionChannel
 import com.openbank.pension.domain.contribution.ContributionSource
@@ -196,6 +197,10 @@ class FundingServicesTest {
             // re-applying the same receipt changes nothing
             f.incentiveService.reconcile(batch.id, listOf(ClaimReceiptLine(claim.id, true, BigDecimal("340.00"), null)))
             assertThat(f.ledgerRows).hasSize(1)
+            // #12379: the participant hears once that the incentive arrived — not again on a re-applied receipt.
+            assertThat(f.notifier.sent.map { it.kind }).containsExactly(ParticipantNotificationKind.INCENTIVE_RECEIVED)
+            assertThat(f.notifier.sent.single().partyId).isEqualTo(c.participantPartyId)
+            assertThat(f.notifier.sent.single().variables["amount"]).isEqualTo("340.00")
 
             val preview = f.incentiveService.clawbackPreview(c.contractId, LocalDate.of(2026, 6, 1))
             assertThat(
@@ -205,6 +210,10 @@ class FundingServicesTest {
             ).isEqualByComparingTo("340.00")
 
             f.incentiveService.returnClaim(claim.id)
+            assertThat(f.notifier.sent.map { it.kind }).containsExactly(
+                ParticipantNotificationKind.INCENTIVE_RECEIVED,
+                ParticipantNotificationKind.INCENTIVE_RETURNED,
+            )
             assertThat(f.incentiveService.status(c.contractId).balances.single().net).isEqualByComparingTo("0")
             assertThat(
                 f.incentiveService.clawbackPreview(c.contractId, LocalDate.of(2026, 6, 1)).filter {

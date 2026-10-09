@@ -5,6 +5,7 @@
 package com.openbank.pension.application.exit
 
 import com.openbank.pension.application.port.out.FundAdministrationPort
+import com.openbank.pension.application.port.out.ParticipantNotifier
 import com.openbank.pension.application.port.out.PensionContractRepository
 import com.openbank.pension.domain.pack.JurisdictionPackRegistry
 import java.time.Clock
@@ -35,6 +36,8 @@ data class ExitGateways(
     val sca: ScaVerificationPort,
     val beneficiaryKyc: BeneficiaryVerificationPort,
     val notifications: ParticipantNotificationPort,
+    /** Informational participant notices (#12379), e.g. a payout handed to the rail. */
+    val notifier: ParticipantNotifier,
 )
 
 data class ExitContext(

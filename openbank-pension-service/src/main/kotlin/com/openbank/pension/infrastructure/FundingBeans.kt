@@ -14,6 +14,7 @@ import com.openbank.pension.application.port.out.FundAdministrationPort
 import com.openbank.pension.application.port.out.IncentiveClaimRepository
 import com.openbank.pension.application.port.out.IncentiveLedgerRepository
 import com.openbank.pension.application.port.out.OnboardingActivationPort
+import com.openbank.pension.application.port.out.ParticipantNotifier
 import com.openbank.pension.application.port.out.PaymentMandatePort
 import com.openbank.pension.application.port.out.StateIncentiveClaimPort
 import com.openbank.pension.application.port.out.TaxCertificateDocumentPort
@@ -65,8 +66,9 @@ class FundingBeans {
         documents: TaxCertificateDocumentPort,
         contributionService: ContributionService,
         clock: Clock,
+        notifier: ParticipantNotifier,
     ): IncentiveService = IncentiveService(
         directory, references, contributions, claims, batches, ledger, summaries, registry,
-        channels.toList(), documents, contributionService, clock,
+        channels.toList(), documents, contributionService, clock, notifier,
     )
 }

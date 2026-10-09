@@ -62,6 +62,8 @@ class StubEmployerDirectoryAdapter : EmployerDirectoryPort {
     }
 }
 
+/** Only in `dev`/`test` builds; the real adapter is `DocumentServiceTaxCertificateAdapter` (#12379). */
+@IfBuildProfile(anyOf = ["dev", "test"])
 @ApplicationScoped
 class StubTaxCertificateDocumentAdapter : TaxCertificateDocumentPort {
     private val log = Logger.getLogger(StubTaxCertificateDocumentAdapter::class.java)

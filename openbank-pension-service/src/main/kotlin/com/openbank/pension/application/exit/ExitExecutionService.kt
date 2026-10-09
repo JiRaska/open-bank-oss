@@ -4,6 +4,7 @@
 
 package com.openbank.pension.application.exit
 
+import com.openbank.pension.application.usecase.ParticipantNotices
 import com.openbank.pension.domain.exit.DeathClaimStatus
 import com.openbank.pension.domain.exit.InstallmentStatus
 import com.openbank.pension.domain.exit.PayoutRequest
@@ -238,6 +239,21 @@ class ExitExecutionService(private val ctx: ExitContext) {
             PaymentOrder(key, contract.id, creditor, iban, amount, currency, "PENSION $purpose ${contract.id}"),
         )
         stores.instructions.markSent(key, ref)
+        // #12379: only a payment to the participant is announced to them — never a death benefit
+        // to a claimant. After markSent, so a replayed activity (paymentRef already set) is silent.
+        if (creditor == contract.participantPartyId.toString()) {
+            ParticipantNotices.send(
+                gw.notifier,
+                ParticipantNotices.payoutExecuted(
+                    contract.participantPartyId,
+                    contract.id,
+                    purpose,
+                    amount,
+                    currency,
+                    iban,
+                ),
+            )
+        }
         return ref
     }
 
