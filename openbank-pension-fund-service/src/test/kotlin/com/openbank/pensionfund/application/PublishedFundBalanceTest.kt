@@ -74,4 +74,34 @@ class PublishedFundBalanceTest {
         assertThatThrownBy { runBlocking { service.publishedBalance(fundId, date) } }
             .isInstanceOf(NotFoundException::class.java)
     }
+
+    @Test
+    fun `period maximum uses only approved current NAVs and identifies its source`(): Unit = runBlocking {
+        val low = nav(NavStatus.PUBLISHED, date.minusDays(2))
+            .let { it.copy(figures = it.figures.copy(navPerUnit = BigDecimal("1.20"))) }
+        val supersededHigh = nav(NavStatus.SUPERSEDED, date.minusDays(1))
+            .let { it.copy(figures = it.figures.copy(navPerUnit = BigDecimal("5.00"))) }
+        val unpublishedHigh = nav(NavStatus.CALCULATED, date)
+            .let { it.copy(figures = it.figures.copy(navPerUnit = BigDecimal("6.00"))) }
+        val high = nav(NavStatus.PUBLISHED, date)
+            .let { it.copy(figures = it.figures.copy(navPerUnit = BigDecimal("1.30"))) }
+        val outside = nav(NavStatus.PUBLISHED, date.plusDays(1))
+            .let { it.copy(figures = it.figures.copy(navPerUnit = BigDecimal("7.00"))) }
+        listOf(low, supersededHigh, unpublishedHigh, high, outside).forEach { store.navs[it.id] = it }
+
+        val maximum = service.publishedNavMaximum(fundId, date.minusDays(2), date)
+        assertThat(maximum.maximumNavPerUnit).isEqualByComparingTo("1.30")
+        assertThat(maximum.maximumValuationDate).isEqualTo(date)
+        assertThat(maximum.sourceNavId).isEqualTo(high.id)
+        assertThat(maximum.observedValuations).isEqualTo(2)
+    }
+
+    @Test
+    fun `period maximum refuses inverted or unobserved periods`(): Unit = runBlocking {
+        store.navs[UUID.randomUUID()] = nav(NavStatus.CALCULATED)
+        assertThatThrownBy { runBlocking { service.publishedNavMaximum(fundId, date, date.minusDays(1)) } }
+            .isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy { runBlocking { service.publishedNavMaximum(fundId, date, date) } }
+            .isInstanceOf(NotFoundException::class.java)
+    }
 }

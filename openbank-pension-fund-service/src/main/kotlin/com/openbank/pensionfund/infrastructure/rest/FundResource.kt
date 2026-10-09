@@ -122,6 +122,17 @@ class FundResource {
         @PathParam("fundId") fundId: UUID,
         @PathParam("valuationDate") valuationDate: LocalDate,
     ) = navs.publishedBalance(fundId, valuationDate)
+
+    @GET
+    @Path("/{fundId}/reporting/nav-maximum/{fromDate}/{toDate}")
+    @Operation(summary = "Read the observed maximum published unit NAV in an inclusive period")
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, Roles.AUDITOR)
+    @Authorize(action = "pension-fund.nav.read", resource = "#fundId")
+    suspend fun publishedNavMaximum(
+        @PathParam("fundId") fundId: UUID,
+        @PathParam("fromDate") fromDate: LocalDate,
+        @PathParam("toDate") toDate: LocalDate,
+    ) = navs.publishedNavMaximum(fundId, fromDate, toDate)
 }
 
 data class NavResponse(

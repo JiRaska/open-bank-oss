@@ -40,6 +40,17 @@ data class PublishedFundBalance(
     val totalEquity: BigDecimal,
 )
 
+/** Observed maximum only: missing valuation dates are not imputed or certified as complete. */
+data class PublishedNavMaximum(
+    val fundId: UUID,
+    val fromDate: LocalDate,
+    val toDate: LocalDate,
+    val maximumNavPerUnit: BigDecimal,
+    val maximumValuationDate: LocalDate,
+    val sourceNavId: UUID,
+    val observedValuations: Int,
+)
+
 /**
  * NAV lifecycle: calculate (maker) → publish (checker). Publishing an ordinary NAV settles every
  * order queued for the fund before that moment; publishing a CORRECTION supersedes the original
@@ -122,6 +133,29 @@ class NavService(private val store: PensionFundStore, private val prices: Market
             totalAssets = nav.figures.grossAssets,
             totalLiabilities = liabilities,
             totalEquity = nav.figures.netAssets,
+        )
+    }
+
+    suspend fun publishedNavMaximum(fundId: UUID, fromDate: LocalDate, toDate: LocalDate): PublishedNavMaximum {
+        require(!fromDate.isAfter(toDate)) { "fromDate must not be after toDate" }
+        val observed = store.navs(fundId).filter {
+            it.fundId == fundId &&
+                it.status == NavStatus.PUBLISHED &&
+                it.publishedAt != null &&
+                !it.valuationDate.isBefore(fromDate) &&
+                !it.valuationDate.isAfter(toDate)
+        }
+        val maximum = observed.maxWithOrNull(
+            compareBy<NavRecord>({ it.navPerUnit }, { it.valuationDate }, { it.id }),
+        ) ?: throw NotFoundException("no published NAV for fund $fundId from $fromDate to $toDate")
+        return PublishedNavMaximum(
+            fundId = fundId,
+            fromDate = fromDate,
+            toDate = toDate,
+            maximumNavPerUnit = maximum.navPerUnit,
+            maximumValuationDate = maximum.valuationDate,
+            sourceNavId = maximum.id,
+            observedValuations = observed.size,
         )
     }
 

@@ -124,6 +124,29 @@ paths:
       responses:
         '200': { description: Published NAV balance, content: { application/json: { schema: { $ref: '#/components/schemas/PublishedFundNavBalance' } } } }
         '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/funds/{fundId}/reporting/nav-maximum/{fromDate}/{toDate}:
+    parameters:
+      - { $ref: '#/components/parameters/FundId' }
+      - name: fromDate
+        in: path
+        required: true
+        schema: { type: string, format: date }
+      - name: toDate
+        in: path
+        required: true
+        schema: { type: string, format: date }
+    get:
+      tags: [Funds]
+      operationId: getPublishedFundNavMaximum
+      summary: Observed maximum published unit NAV in an inclusive period
+      description: |
+        Uses only PUBLISHED NAV records in the inclusive range. The response identifies the
+        source NAV and number of observed valuations. Missing valuation dates are not imputed;
+        this source read model does not certify a complete statutory period or enable filing.
+      responses:
+        '200': { description: Observed maximum, content: { application/json: { schema: { $ref: '#/components/schemas/PublishedFundNavMaximum' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/navs/{navId}:
     parameters: [ { $ref: '#/components/parameters/NavId' } ]
     get:
@@ -348,6 +371,17 @@ components:
         totalAssets: { type: number }
         totalLiabilities: { type: number }
         totalEquity: { type: number }
+    PublishedFundNavMaximum:
+      type: object
+      required: [fundId, fromDate, toDate, maximumNavPerUnit, maximumValuationDate, sourceNavId, observedValuations]
+      properties:
+        fundId: { type: string, format: uuid }
+        fromDate: { type: string, format: date }
+        toDate: { type: string, format: date }
+        maximumNavPerUnit: { type: number }
+        maximumValuationDate: { type: string, format: date }
+        sourceNavId: { type: string, format: uuid }
+        observedValuations: { type: integer, minimum: 1 }
     Error:
       type: object
       properties:
