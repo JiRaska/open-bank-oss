@@ -100,15 +100,18 @@ class DocumentServiceTaxCertificateAdapter(
     @param:ConfigProperty(name = "openbank.pension.documents.language", defaultValue = "cs")
     private val language: String,
 ) : TaxCertificateDocumentPort {
-    override suspend fun generate(summary: TaxYearSummary, participantPartyId: UUID, contractReference: String): String =
-        renderer.rendering.render(
-            templateBase = PensionDocumentTemplates.TAX_CERTIFICATE,
-            language = language,
-            data = PensionDocumentData.taxCertificate(summary, contractReference),
-            partyRef = participantPartyId.toString(),
-            caseRef = "${summary.contractId}:${summary.taxYear}",
-            productRef = "pension",
-        ).documentId
+    override suspend fun generate(
+        summary: TaxYearSummary,
+        participantPartyId: UUID,
+        contractReference: String,
+    ): String = renderer.rendering.render(
+        templateBase = PensionDocumentTemplates.TAX_CERTIFICATE,
+        language = language,
+        data = PensionDocumentData.taxCertificate(summary, contractReference),
+        partyRef = participantPartyId.toString(),
+        caseRef = "${summary.contractId}:${summary.taxYear}",
+        productRef = "pension",
+    ).documentId
 }
 
 /** The REAL [AnnualStatementDocumentPort]. */
@@ -119,13 +122,12 @@ class DocumentServiceAnnualStatementAdapter(
     @param:ConfigProperty(name = "openbank.pension.documents.language", defaultValue = "cs")
     private val language: String,
 ) : AnnualStatementDocumentPort {
-    override suspend fun generate(content: AnnualStatementContent): RenderedDocument =
-        renderer.rendering.render(
-            templateBase = PensionDocumentTemplates.ANNUAL_STATEMENT,
-            language = language,
-            data = PensionDocumentData.annualStatement(content),
-            partyRef = content.participantPartyId.toString(),
-            caseRef = "${content.summary.contractId}:${content.summary.taxYear}",
-            productRef = "pension",
-        )
+    override suspend fun generate(content: AnnualStatementContent): RenderedDocument = renderer.rendering.render(
+        templateBase = PensionDocumentTemplates.ANNUAL_STATEMENT,
+        language = language,
+        data = PensionDocumentData.annualStatement(content),
+        partyRef = content.participantPartyId.toString(),
+        caseRef = "${content.summary.contractId}:${content.summary.taxYear}",
+        productRef = "pension",
+    )
 }

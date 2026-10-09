@@ -25,9 +25,16 @@ class StubAnnualStatementDocumentAdapter : AnnualStatementDocumentPort {
 
     override suspend fun generate(content: AnnualStatementContent): RenderedDocument {
         val key = PensionDocumentData.annualStatement(content).toSortedMap().toString()
-        log.warnf("STUB annual statement %d for contract %s not rendered", content.summary.taxYear, content.summary.contractId)
+        log.warnf(
+            "STUB annual statement %d for contract %s not rendered",
+            content.summary.taxYear,
+            content.summary.contractId,
+        )
         val sha = MessageDigest.getInstance("SHA-256").digest(key.toByteArray(StandardCharsets.UTF_8))
             .joinToString("") { "%02x".format(it) }
-        return RenderedDocument("stub-statement-${UUID.nameUUIDFromBytes(key.toByteArray(StandardCharsets.UTF_8))}", sha)
+        return RenderedDocument(
+            "stub-statement-${UUID.nameUUIDFromBytes(key.toByteArray(StandardCharsets.UTF_8))}",
+            sha,
+        )
     }
 }

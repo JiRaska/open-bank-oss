@@ -29,7 +29,7 @@ data class AnnualStatementContent(
 )
 
 /** document-service: renders the annual statement; returns the stored document and its hash. */
-interface AnnualStatementDocumentPort {
+fun interface AnnualStatementDocumentPort {
     suspend fun generate(content: AnnualStatementContent): RenderedDocument
 }
 

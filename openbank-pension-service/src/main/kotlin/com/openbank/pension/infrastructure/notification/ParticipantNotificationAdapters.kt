@@ -68,7 +68,12 @@ class ParticipantNotificationPublisher(
             } catch (
                 @Suppress("TooGenericExceptionCaught") e: Exception,
             ) {
-                log.warnf(e, "participant notice %s for party %s was not enqueued", notification.kind, notification.partyId)
+                log.warnf(
+                    e,
+                    "participant notice %s for party %s was not enqueued",
+                    notification.kind,
+                    notification.partyId,
+                )
                 NotificationDispatch.FAILED
             }
         }

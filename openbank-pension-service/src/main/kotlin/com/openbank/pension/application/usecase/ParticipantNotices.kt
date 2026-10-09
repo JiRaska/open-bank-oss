@@ -91,7 +91,10 @@ object ParticipantNotices {
         amount: BigDecimal,
         currency: String,
     ): ParticipantNotification {
-        require(kind == ParticipantNotificationKind.INCENTIVE_RECEIVED || kind == ParticipantNotificationKind.INCENTIVE_RETURNED)
+        require(
+            kind == ParticipantNotificationKind.INCENTIVE_RECEIVED ||
+                kind == ParticipantNotificationKind.INCENTIVE_RETURNED,
+        )
         return ParticipantNotification(
             partyId,
             kind,

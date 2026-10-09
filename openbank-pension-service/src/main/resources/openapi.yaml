@@ -1039,6 +1039,52 @@ paths:
           description: Staff only
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/funding/operations/contracts/{contractId}/annual-statements/{year}:
+    post:
+      tags: [Pension funding operations]
+      operationId: issueAnnualStatement
+      summary: Issue a closed year's annual statement through document-service (once per year)
+      description: >-
+        Renders the statement through document-service and stores its document id and SHA-256.
+        Insert-once per (contract, year): a repeated call returns the statement already issued.
+        503 when document-service cannot render it (fail closed — no statement is invented).
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/FundingContractId'
+        - $ref: '#/components/parameters/TaxYear'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnnualStatement'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Staff only
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503':
+          description: document-service unavailable or the template is not published
+  /api/v1/pension/contracts/{contractId}/annual-statements/{year}:
+    get:
+      tags: [Pension]
+      operationId: getAnnualStatement
+      summary: Read the issued annual statement for a year (404 until issued)
+      parameters:
+        - $ref: '#/components/parameters/FundingContractId'
+        - $ref: '#/components/parameters/TaxYear'
+        - $ref: '#/components/parameters/CustomerPartyIdOptional'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnnualStatement'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/pension/contracts/{contractId}/exit/payout-eligibility:
     get:
       tags: [Pension exits]
@@ -2048,6 +2094,20 @@ components:
         usage:
           type: object
           additionalProperties: { type: number, minimum: 0 }
+    AnnualStatement:
+      type: object
+      required: [contractId, year, documentId, sha256, issuedAt]
+      properties:
+        contractId: { type: string, format: uuid }
+        year: { type: integer }
+        documentId:
+          type: string
+          description: document-service's id of the rendered statement
+        sha256:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          description: document-service's SHA-256 of the stored statement
+        issuedAt: { type: string, format: date-time }
     TaxYearSummary:
       type: object
       properties:

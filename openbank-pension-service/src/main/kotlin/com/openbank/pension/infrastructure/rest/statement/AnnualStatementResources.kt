@@ -71,7 +71,7 @@ class AnnualStatementOperationsResource {
 }
 
 /** The participant's (or staff's) read of an issued annual statement: its document id and hash. */
-@Tag(name = "Pension contracts")
+@Tag(name = "Pension")
 @Path("/api/v1/pension/contracts/{contractId}/annual-statements/{year}")
 @Produces(MediaType.APPLICATION_JSON)
 @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)

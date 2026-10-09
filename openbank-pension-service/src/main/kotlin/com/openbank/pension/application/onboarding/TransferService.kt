@@ -5,9 +5,9 @@
 package com.openbank.pension.application.onboarding
 
 import com.openbank.pension.application.port.out.FundAdministrationPort
+import com.openbank.pension.application.port.out.ParticipantNotifier
 import com.openbank.pension.application.port.out.PensionContractRepository
 import com.openbank.pension.application.port.out.Redemption
-import com.openbank.pension.application.port.out.ParticipantNotifier
 import com.openbank.pension.application.port.out.TransferInBookingPort
 import com.openbank.pension.application.usecase.ParticipantNotices
 import com.openbank.pension.domain.model.ContractStatus

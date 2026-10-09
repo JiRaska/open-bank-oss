@@ -111,9 +111,13 @@ class DocumentRendering(private val call: DocumentRenderCall) {
             throw IntegrationUnavailableException("document-service is unreachable")
         }
         val id = response.id?.takeIf { it.isNotBlank() }
-            ?: throw IntegrationUnavailableException("document-service answered without a document id for $templateCode")
+            ?: throw IntegrationUnavailableException(
+                "document-service answered without a document id for $templateCode",
+            )
         val sha = response.sha256?.lowercase()?.takeIf { SHA256.matches(it) }
-            ?: throw IntegrationUnavailableException("document-service answered without a valid SHA-256 for $templateCode")
+            ?: throw IntegrationUnavailableException(
+                "document-service answered without a valid SHA-256 for $templateCode",
+            )
         return RenderedDocument(id, sha)
     }
 

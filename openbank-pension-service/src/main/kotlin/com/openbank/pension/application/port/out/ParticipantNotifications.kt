@@ -20,7 +20,10 @@ enum class ParticipantNotificationKind(val template: String, val variables: Set<
     PAYOUT_EXECUTED("PENSION_PAYOUT_EXECUTED", setOf("contractId", "purpose", "amount", "currency", "accountLast4")),
 
     /** An investment-strategy election was accepted and takes effect on [effectiveFrom]. */
-    STRATEGY_CHANGE_EFFECTIVE("PENSION_STRATEGY_CHANGE_EFFECTIVE", setOf("contractId", "strategyCode", "effectiveFrom")),
+    STRATEGY_CHANGE_EFFECTIVE(
+        "PENSION_STRATEGY_CHANGE_EFFECTIVE",
+        setOf("contractId", "strategyCode", "effectiveFrom"),
+    ),
 
     /** A provider transfer reached a status the participant must know about. */
     TRANSFER_STATUS("PENSION_TRANSFER_STATUS", setOf("contractId", "direction", "status")),
@@ -59,6 +62,6 @@ enum class NotificationDispatch { ENQUEUED, SKIPPED, FAILED }
  * counted. A caller whose step REQUIRES the notice (a payout-account change) must check for
  * [NotificationDispatch.ENQUEUED] itself.
  */
-interface ParticipantNotifier {
+fun interface ParticipantNotifier {
     suspend fun send(notification: ParticipantNotification): NotificationDispatch
 }

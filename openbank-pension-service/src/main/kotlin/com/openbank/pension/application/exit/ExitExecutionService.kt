@@ -4,6 +4,7 @@
 
 package com.openbank.pension.application.exit
 
+import com.openbank.pension.application.usecase.ParticipantNotices
 import com.openbank.pension.domain.exit.DeathClaimStatus
 import com.openbank.pension.domain.exit.InstallmentStatus
 import com.openbank.pension.domain.exit.PayoutRequest
@@ -12,7 +13,6 @@ import com.openbank.pension.domain.exit.TerminationStatus
 import com.openbank.pension.domain.model.ContractStatus
 import com.openbank.pension.domain.model.PayoutForm
 import com.openbank.pension.domain.model.PensionContract
-import com.openbank.pension.application.usecase.ParticipantNotices
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.util.UUID
@@ -244,7 +244,14 @@ class ExitExecutionService(private val ctx: ExitContext) {
         if (creditor == contract.participantPartyId.toString()) {
             ParticipantNotices.send(
                 gw.notifier,
-                ParticipantNotices.payoutExecuted(contract.participantPartyId, contract.id, purpose, amount, currency, iban),
+                ParticipantNotices.payoutExecuted(
+                    contract.participantPartyId,
+                    contract.id,
+                    purpose,
+                    amount,
+                    currency,
+                    iban,
+                ),
             )
         }
         return ref
