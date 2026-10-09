@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.annotation.JsonSerialize
 import com.fasterxml.jackson.databind.ser.std.ToStringSerializer
 import com.openbank.domestic.application.port.`in`.CreateDomesticPaymentCommand
 import com.openbank.domestic.application.port.`in`.TransitionDomesticPaymentStatusCommand
+import com.openbank.domestic.domain.error.DomesticSchemeRules
 import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentPriority
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
@@ -73,8 +74,10 @@ data class CreateDomesticPaymentRequest(
 }
 
 /** A domestic payment moves a strictly positive amount; Money itself admits zero and negatives. */
-internal fun inboundAmount(amount: BigDecimal?, currency: String?): Money = Money.parseInbound(amount, currency).also {
-    requireValid(it.isPositive(), "amount") { "amount must be greater than zero" }
+internal fun inboundAmount(amount: BigDecimal?, currency: String?): Money {
+    val parsed = Money.parseInbound(amount, currency)
+    requireValid(parsed.isPositive(), "amount") { "amount must be greater than zero" }
+    return DomesticSchemeRules.requireSchemeCurrency(parsed)
 }
 
 data class TransitionDomesticPaymentStatusRequest(
