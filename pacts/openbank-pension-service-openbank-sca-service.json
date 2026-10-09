@@ -1,0 +1,64 @@
+{
+  "consumer": {
+    "name": "openbank-pension-service"
+  },
+  "interactions": [
+    {
+      "description": "POST consume a challenge signed over another operation with the pension exit binding",
+      "providerStates": [
+        {
+          "name": "a COMPLETED SAVINGS_WITHDRAW_APPROVAL SCA challenge exists"
+        }
+      ],
+      "request": {
+        "body": {
+          "approvalRequestId": "pension-exit:3f0c7a3f7c5e4d1b9a2e6f8d0c4b1a7e9d3c5b2a1f0e8d7c6b5a4f3e2d1c0b9a",
+          "partyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "payloadSha256": "3f0c7a3f7c5e4d1b9a2e6f8d0c4b1a7e9d3c5b2a1f0e8d7c6b5a4f3e2d1c0b9a"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/sca/challenges/5a5a5a5a-5a5a-4a5a-8a5a-5a5a5a5a5a5a/consume"
+      },
+      "response": {
+        "status": 409
+      }
+    },
+    {
+      "description": "POST consume with no M2M identity is refused",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "body": {
+          "approvalRequestId": "pension-exit:3f0c7a3f7c5e4d1b9a2e6f8d0c4b1a7e9d3c5b2a1f0e8d7c6b5a4f3e2d1c0b9a",
+          "partyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "payloadSha256": "3f0c7a3f7c5e4d1b9a2e6f8d0c4b1a7e9d3c5b2a1f0e8d7c6b5a4f3e2d1c0b9a"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/sca/challenges/5a5a5a5a-5a5a-4a5a-8a5a-5a5a5a5a5a5a/consume"
+      },
+      "response": {
+        "status": 401
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-sca-service"
+  }
+}
