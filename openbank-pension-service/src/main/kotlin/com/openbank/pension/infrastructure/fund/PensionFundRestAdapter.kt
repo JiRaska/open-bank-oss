@@ -162,7 +162,12 @@ class PensionFundOrders(
         return Valuation(total.setScale(MONEY_SCALE, RoundingMode.HALF_EVEN), currency, LocalDate.now(clock))
     }
 
-    override suspend fun subscribe(contractId: UUID, amount: BigDecimal, currency: String, idempotencyKey: String): String {
+    override suspend fun subscribe(
+        contractId: UUID,
+        amount: BigDecimal,
+        currency: String,
+        idempotencyKey: String,
+    ): String {
         require(amount.signum() > 0) { "subscription amount must be positive" }
         val code = strategyOf(contractId) ?: refuse("contract $contractId has no elected strategy")
         val strategy = client.strategies().firstOrNull { it.name == code && it.status != "CLOSED" }
@@ -178,7 +183,12 @@ class PensionFundOrders(
         return ids.joinToString(",").takeIf { it.length <= MAX_REF } ?: "${ids.first()}+${ids.size - 1}"
     }
 
-    override suspend fun redeem(contractId: UUID, amount: BigDecimal, currency: String, idempotencyKey: String): Redemption {
+    override suspend fun redeem(
+        contractId: UUID,
+        amount: BigDecimal,
+        currency: String,
+        idempotencyKey: String,
+    ): Redemption {
         require(amount.signum() > 0) { "redemption amount must be positive" }
         val holdings = client.holdings(contractId).holdings.filter { it.units.signum() > 0 }
         val total = valuation(contractId, currency).amount
@@ -191,7 +201,11 @@ class PensionFundOrders(
                 h.units.multiply(ratio).setScale(UNIT_SCALE, RoundingMode.HALF_UP).min(h.units)
             }
             if (units.signum() > 0) {
-                client.placeOrder(contractId, legKey(idempotencyKey, h.fundId), OrderRequestDto(h.fundId, "REDEEM", units = units))
+                client.placeOrder(
+                    contractId,
+                    legKey(idempotencyKey, h.fundId),
+                    OrderRequestDto(h.fundId, "REDEEM", units = units),
+                )
             }
         }
         return Redemption(idempotencyKey, amount.setScale(MONEY_SCALE, RoundingMode.HALF_EVEN))

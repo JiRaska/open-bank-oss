@@ -4,8 +4,6 @@
 
 package com.openbank.pension.infrastructure.rest.funding
 
-import com.openbank.pension.infrastructure.rest.IDEMPOTENCY_KEY_HEADER
-import com.openbank.pension.infrastructure.rest.requireIdempotencyKey
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import com.openbank.pension.application.usecase.ContributionService
@@ -16,6 +14,7 @@ import com.openbank.pension.domain.contribution.EmployerBatch
 import com.openbank.pension.domain.contribution.EmployerBatchLine
 import com.openbank.pension.domain.contribution.IncomingPayment
 import com.openbank.pension.domain.contribution.UnmatchedStatus
+import com.openbank.pension.infrastructure.rest.requireIdempotencyKey
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
@@ -70,11 +69,17 @@ class FundingOperationsResource {
     @Operation(summary = "Ingest a payment from the collection account; matched by reference or parked")
     @Authorize(action = "pension.funding.ingest")
     suspend fun ingest(
-        @HeaderParam(IDEMPOTENCY_KEY_HEADER) idempotencyKey: String?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         request: IncomingPaymentRequest?,
     ): ReceiptResponse {
         requireIdempotencyKey(idempotencyKey)
-        return when (val outcome = contributions.receive(requireNotNull(request) { "request body is required" }.toDomain())) {
+        return when (
+            val outcome = contributions.receive(
+                requireNotNull(request) {
+                    "request body is required"
+                }.toDomain(),
+            )
+        ) {
             is ReceiptOutcome.Credited -> ReceiptResponse(
                 "CREDITED",
                 ContributionResponse.from(outcome.contribution),
@@ -94,7 +99,7 @@ class FundingOperationsResource {
     @Operation(summary = "One employer's bulk contribution file covering one payment")
     @Authorize(action = "pension.funding.ingest")
     suspend fun employerBatch(
-        @HeaderParam(IDEMPOTENCY_KEY_HEADER) idempotencyKey: String?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         request: EmployerBatchRequest?,
     ): List<EmployerLineResponse> {
         requireIdempotencyKey(idempotencyKey)
@@ -127,8 +132,9 @@ class FundingOperationsResource {
     @Operation(summary = "Attribute a parked payment to a contract and credit it")
     @Authorize(action = "pension.funding.operate", resource = "#id")
     suspend fun assign(
-        @HeaderParam(IDEMPOTENCY_KEY_HEADER) idempotencyKey: String?,
-        @PathParam("id") id: UUID, request: AssignUnmatchedRequest?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        @PathParam("id") id: UUID,
+        request: AssignUnmatchedRequest?,
     ): ContributionResponse {
         requireIdempotencyKey(idempotencyKey)
         val contractId = requireNotNull(request?.contractId) { "contractId is required" }
@@ -140,7 +146,7 @@ class FundingOperationsResource {
     @Operation(summary = "Mark a parked payment for return to the payer")
     @Authorize(action = "pension.funding.operate", resource = "#id")
     suspend fun returnToPayer(
-        @HeaderParam(IDEMPOTENCY_KEY_HEADER) idempotencyKey: String?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         @PathParam("id") id: UUID,
     ): UnmatchedResponse {
         requireIdempotencyKey(idempotencyKey)
@@ -152,7 +158,7 @@ class FundingOperationsResource {
     @Operation(summary = "Generate the claims of a closed month and file every PENDING claim")
     @Authorize(action = "pension.funding.operate")
     suspend fun claimRun(
-        @HeaderParam(IDEMPOTENCY_KEY_HEADER) idempotencyKey: String?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         request: ClaimRunRequest?,
     ): ClaimRunResponse {
         requireIdempotencyKey(idempotencyKey)
@@ -181,8 +187,9 @@ class FundingOperationsResource {
     @Operation(summary = "Apply the agency's receipt file, crediting accepted claims and rejecting the rest")
     @Authorize(action = "pension.funding.operate", resource = "#id")
     suspend fun receipt(
-        @HeaderParam(IDEMPOTENCY_KEY_HEADER) idempotencyKey: String?,
-        @PathParam("id") id: UUID, request: ReceiptFileRequest?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        @PathParam("id") id: UUID,
+        request: ReceiptFileRequest?,
     ): ClaimBatchResponse {
         requireIdempotencyKey(idempotencyKey)
         val payload = requireNotNull(request?.payload?.takeIf { it.isNotBlank() }) { "payload is required" }
@@ -194,7 +201,7 @@ class FundingOperationsResource {
     @Operation(summary = "Return a received incentive to the agency; writes a RETURNED ledger entry")
     @Authorize(action = "pension.funding.operate", resource = "#id")
     suspend fun returnClaim(
-        @HeaderParam(IDEMPOTENCY_KEY_HEADER) idempotencyKey: String?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         @PathParam("id") id: UUID,
     ): ClaimResponse {
         requireIdempotencyKey(idempotencyKey)
@@ -216,7 +223,7 @@ class FundingOperationsResource {
     @Operation(summary = "Freeze a closed tax year and issue its tax certificate")
     @Authorize(action = "pension.funding.operate", resource = "#contractId")
     suspend fun certificate(
-        @HeaderParam(IDEMPOTENCY_KEY_HEADER) idempotencyKey: String?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         @PathParam("contractId") contractId: UUID,
         @PathParam("year") year: Int,
     ): TaxYearSummaryResponse {

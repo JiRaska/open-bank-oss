@@ -36,6 +36,10 @@ class PensionContractServiceTest {
             rows.values.firstOrNull {
                 it.participantPartyId == participantPartyId && it.idempotencyKey == idempotencyKey
             }
+        override suspend fun findByParticipant(participantPartyId: UUID, limit: Int) =
+            rows.values.filter { it.participantPartyId == participantPartyId }.take(limit)
+        override suspend fun findByStatus(status: ContractStatus?, limit: Int) =
+            rows.values.filter { status == null || it.status == status }.take(limit)
     }
 
     private val repo = InMemoryRepo()

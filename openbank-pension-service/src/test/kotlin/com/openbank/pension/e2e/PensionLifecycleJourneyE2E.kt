@@ -4,16 +4,25 @@
 
 package com.openbank.pension.e2e
 
+import com.openbank.pension.application.port.out.PensionContractRepository
+import com.openbank.pension.infrastructure.fund.InMemoryFundAdministrationAdapter
 import com.openbank.pension.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.vertx.VertxContextSupport
 import io.restassured.RestAssured.given
 import io.restassured.path.json.JsonPath
 import io.restassured.response.Response
+import io.smallrye.mutiny.coroutines.asUni
+import jakarta.inject.Inject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
+import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 
@@ -27,6 +36,11 @@ import java.util.UUID
  * `X-Customer-Party-Id` header the edge stamps from the token it validated.
  *
  * ### Service boundaries — stated, not pretended
+ *
+ * Activation is the onboarding workflow's alone since S8 (KID, SCA signature, cooling-off); it is
+ * journeyed in [PensionFullLifecycleJourneyE2E]. Contracts here are created and submitted over
+ * HTTP and then activated by a repository FIXTURE, because this class's subject is what an active
+ * contract does, not how it became active.
  *
  * The unit register, NAV and strategy administration live in pension-fund-service and are
  * journeyed by `PensionFundUnitJourneyE2E` there. This class covers what pension-service owns
@@ -44,7 +58,7 @@ class PensionLifecycleJourneyE2E {
      * booking and the state-agency claim/receipt (S3).
      */
     @Test
-    @TestSecurity(user = "customer-edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "edge", roles = ["ROLE_API"])
     fun `a new DPS contract is onboarded, activated and earns the capped state contribution`() {
         val party = UUID.randomUUID()
         val created = create(party, dps(monthly = 1700))
@@ -58,8 +72,11 @@ class PensionLifecycleJourneyE2E {
         assertThat(draft.getString("startDate")).isNull()
 
         assertThat(post(party, "$BASE/$id/submit").jsonPath().getString("status")).isEqualTo("PENDING_ACTIVATION")
-        val active = post(party, "$BASE/$id/activate")
-        assertThat(active.statusCode).isEqualTo(200)
+        // The participant cannot activate it themselves (S8): activation is the onboarding
+        // workflow's, journeyed in PensionFullLifecycleJourneyE2E (a1/a2). Fixture from here.
+        assertThat(post(party, "$BASE/$id/activate").statusCode).isEqualTo(404)
+        activateByFixture(id)
+        val active = read(party, id)
         assertThat(active.jsonPath().getString("status")).isEqualTo("ACTIVE")
         assertThat(active.jsonPath().getString("startDate"))
             .describedAs("activation pins the contract start date, which the payout rules count from")
@@ -92,7 +109,7 @@ class PensionLifecycleJourneyE2E {
      * wiring that would trigger it from here is S3.
      */
     @Test
-    @TestSecurity(user = "customer-edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "edge", roles = ["ROLE_API"])
     fun `a strategy change is appended to the history and the earlier election is kept`() {
         val party = UUID.randomUUID()
         val id = activeContract(party, dps(monthly = 1000))
@@ -109,52 +126,31 @@ class PensionLifecycleJourneyE2E {
     }
 
     /**
-     * Scenario (d) — early termination: the preview is a pure read, and confirming with the same
-     * inputs executes exactly the previewed figures. The state contribution is returned in full,
-     * the tax deduction is recaptured for the pack's 10-year window only. Not yet exercisable:
-     * the actual redemption of units, the payout transfer and the state-agency return (S5).
+     * Scenario (d) — early termination: the S5 quote is binding and computed from the unit
+     * register and the incentive ledger, never from caller-supplied values (S1's caller-valued
+     * preview is retired). Quoting is a pure read: the contract stays ACTIVE until the participant
+     * signs under SCA; signing and paying out are journeyed in PensionFullLifecycleJourneyE2E (d1).
      */
     @Test
-    @TestSecurity(user = "customer-edge", roles = ["ROLE_API"])
-    fun `early termination executes exactly the previewed surrender, returning incentives and recapturing tax`() {
+    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    fun `early termination is quoted from the unit register and returns incentives, without moving the contract`() {
         val party = UUID.randomUUID()
         val id = activeContract(party, dps(monthly = 1700))
-        val thisYear = LocalDate.now().year
-        val inputs = """
-            "currentValue": 50000,
-            "incentivesReceived": {
-              "state-contribution": { "${thisYear - 1}": 4080, "$thisYear": 2720 },
-              "income-tax-deduction": { "${thisYear - 11}": 9999, "${thisYear - 1}": 3600 }
-            }
-        """.trimIndent()
+        fund.setValue(UUID.fromString(id), BigDecimal("50000.00"))
 
-        val preview = post(party, "$BASE/$id/early-termination", "{ $inputs, \"confirm\": false }")
-        assertThat(preview.statusCode).describedAs(preview.body.asString()).isEqualTo(200)
-        val p = preview.jsonPath()
-        assertThat(p.getBoolean("payoutConditionsMet")).isFalse()
-        assertThat(p.getBoolean("earlyWithdrawalAllowed")).isTrue()
-        assertThat(clawback(p, "state-contribution", "RETURN_ALL")).isEqualByComparingTo("6800.00")
-        assertThat(clawback(p, "income-tax-deduction", "RECAPTURE_YEARS"))
-            .describedAs("only deductions inside the 10-year window are recaptured")
-            .isEqualByComparingTo("3600.00")
-        assertThat(BigDecimal(p.getString("estimatedNetPayout")))
-            .isEqualByComparingTo(
-                BigDecimal("50000").subtract(BigDecimal(p.getString("fee"))).subtract(BigDecimal("10400")),
-            )
-        assertThat(p.getString("contract.status")).isEqualTo("ACTIVE")
+        val retired = post(party, "$BASE/$id/early-termination", """{"currentValue":1,"confirm":true}""")
+        assertThat(retired.statusCode).describedAs("the caller-valued S1 preview is gone").isEqualTo(404)
+
+        val quoted = post(party, "$BASE/$id/exit/termination/quote")
+        assertThat(quoted.statusCode).describedAs(quoted.body.asString()).isEqualTo(201)
+        val q = quoted.jsonPath()
+        assertThat(BigDecimal(q.getString("quote.redemptionValue"))).isEqualByComparingTo("50000")
+        assertThat(BigDecimal(q.getString("quote.netPayout")))
+            .isLessThanOrEqualTo(BigDecimal(q.getString("quote.redemptionValue")))
+        assertThat(q.getString("status")).isEqualTo("QUOTED")
         assertThat(read(party, id).jsonPath().getString("status"))
-            .describedAs("a preview must not move the contract")
+            .describedAs("a quote must not move the contract")
             .isEqualTo("ACTIVE")
-
-        val executed = post(party, "$BASE/$id/early-termination", "{ $inputs, \"confirm\": true }")
-        assertThat(executed.statusCode).describedAs(executed.body.asString()).isEqualTo(200)
-        val e = executed.jsonPath()
-        assertThat(e.getString("contract.status")).isEqualTo("TERMINATING")
-        for (field in listOf("currentValue", "fee", "estimatedNetPayout")) {
-            assertThat(BigDecimal(e.getString(field))).describedAs(field).isEqualByComparingTo(p.getString(field))
-        }
-        assertThat(e.getList<Map<String, Any>>("clawbacks")).isEqualTo(p.getList<Map<String, Any>>("clawbacks"))
-        assertThat(read(party, id).jsonPath().getString("status")).isEqualTo("TERMINATING")
     }
 
     /**
@@ -163,7 +159,7 @@ class PensionLifecycleJourneyE2E {
      * designation those payouts will read is stored as submitted.
      */
     @Test
-    @TestSecurity(user = "customer-edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "edge", roles = ["ROLE_API"])
     fun `beneficiary designations are stored as submitted for the later death payout`() {
         val party = UUID.randomUUID()
         val beneficiary = UUID.randomUUID()
@@ -183,7 +179,7 @@ class PensionLifecycleJourneyE2E {
 
     /** Scenario (f) — DIP happy path: a bank may provide it, and it earns tax relief, never a state contribution. */
     @Test
-    @TestSecurity(user = "customer-edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "edge", roles = ["ROLE_API"])
     fun `a DIP contract provided by the bank activates and earns tax relief only`() {
         val party = UUID.randomUUID()
         val id = activeContract(party, dip(providerType = "BANK"))
@@ -208,7 +204,7 @@ class PensionLifecycleJourneyE2E {
 
     /** Scenario (f) — authorisation negatives: another customer sees a 404 on every route, never a 403 or the data. */
     @Test
-    @TestSecurity(user = "customer-edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "edge", roles = ["ROLE_API"])
     fun `another customer gets 404 on every route of a contract that is not theirs`() {
         val owner = UUID.randomUUID()
         val stranger = UUID.randomUUID()
@@ -221,8 +217,7 @@ class PensionLifecycleJourneyE2E {
             post(stranger, "$BASE/$id/incentive-evaluation", """{"contribution":1,"period":"MONTH"}""").statusCode,
         )
             .isEqualTo(404)
-        assertThat(post(stranger, "$BASE/$id/early-termination", """{"currentValue":1,"confirm":true}""").statusCode)
-            .isEqualTo(404)
+        assertThat(post(stranger, "$BASE/$id/exit/termination/quote").statusCode).isEqualTo(404)
         assertThat(
             given().contentType(JSON).header(PARTY, stranger.toString()).body("""{"strategyCode":"DYNAMIC"}""")
                 .`when`().put("$BASE/$id/strategy").statusCode,
@@ -265,8 +260,24 @@ class PensionLifecycleJourneyE2E {
         assertThat(created.statusCode).describedAs(created.body.asString()).isEqualTo(201)
         val id = created.jsonPath().getString("contractId")
         assertThat(post(party, "$BASE/$id/submit").statusCode).isEqualTo(200)
-        assertThat(post(party, "$BASE/$id/activate").statusCode).isEqualTo(200)
+        activateByFixture(id)
         return id
+    }
+
+    @Inject
+    lateinit var contracts: PensionContractRepository
+
+    @Inject
+    lateinit var fund: InMemoryFundAdministrationAdapter
+
+    /** Fixture: the product activates only through onboarding (S8); see the class KDoc. */
+    private fun activateByFixture(id: String) {
+        VertxContextSupport.subscribeAndAwait {
+            CoroutineScope(Dispatchers.Unconfined).async {
+                val pending = requireNotNull(contracts.findById(UUID.fromString(id)))
+                contracts.save(pending.activate(LocalDate.now(), Instant.now()))
+            }.asUni()
+        }
     }
 
     private fun post(party: UUID, path: String, body: String = "{}"): Response = given().contentType(JSON)

@@ -80,6 +80,13 @@ class PensionContractService(
     override suspend fun submit(caller: Caller, id: UUID) =
         transition(caller, id, ContractStatus.PENDING_ACTIVATION) { it.submit(clock.instant()) }
 
+    override suspend fun list(caller: Caller, status: ContractStatus?, limit: Int): List<PensionContract> {
+        val page = limit.coerceIn(1, MAX_LIST)
+        val party = caller.customerPartyId ?: return contracts.findByStatus(status, page)
+        // The participant's own rows only; the status filter narrows, it never widens.
+        return contracts.findByParticipant(party, page).filter { status == null || it.status == status }
+    }
+
     override suspend fun electStrategy(caller: Caller, id: UUID, strategyCode: String, effectiveFrom: LocalDate?) =
         transition(caller, id, null) {
             val from = effectiveFrom ?: LocalDate.now(clock)
@@ -129,3 +136,5 @@ class PensionContractService(
         return if (target != null && current.status == target) current else contracts.save(change(current))
     }
 }
+
+private const val MAX_LIST = 100

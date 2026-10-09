@@ -5,6 +5,7 @@
 package com.openbank.pension.application.port.`in`
 
 import com.openbank.pension.domain.model.Beneficiary
+import com.openbank.pension.domain.model.ContractStatus
 import com.openbank.pension.domain.model.ContributionSchedule
 import com.openbank.pension.domain.model.PensionContract
 import com.openbank.pension.domain.model.ProductLine
@@ -68,5 +69,8 @@ interface PensionContractUseCase {
     suspend fun suspendContributions(caller: Caller, id: UUID): PensionContract
     suspend fun resumeContributions(caller: Caller, id: UUID): PensionContract
     suspend fun get(caller: Caller, id: UUID): PensionContract
+
+    /** A participant sees exactly their own contracts; staff list by status. */
+    suspend fun list(caller: Caller, status: ContractStatus?, limit: Int): List<PensionContract>
     suspend fun evaluateIncentives(command: IncentiveEvaluationCommand): List<IncentiveResult>
 }

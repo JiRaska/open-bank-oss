@@ -40,6 +40,17 @@ data class ConfirmPayoutCommand(
     val idempotencyKey: String,
 )
 
+data class ChangePayoutAccountCommand(
+    val caller: Caller,
+    val contractId: UUID,
+    val payoutId: UUID,
+    val scaChallengeId: String,
+    val iban: String,
+)
+
+/** Upper bound of an operator list page. */
+const val MAX_LIST = 200
+
 data class EligibilityView(
     val eligibility: PayoutEligibility,
     val allowedForms: Set<PayoutForm>,
@@ -135,6 +146,30 @@ class PayoutService(
         launcher.startPayout(confirmed.id)
         return confirmed
     }
+
+    /**
+     * Payout-account change (ADR-0334 S8), SCA-bound: the challenge must be signed over
+     * [PayoutRequest.accountChangeHash] for exactly this payout and IBAN, and the IBAN must be a
+     * verified account of the participant — the same two checks a confirmation passes.
+     */
+    suspend fun changePayoutAccount(command: ChangePayoutAccountCommand): PayoutRequest {
+        command.caller.requireParticipant()
+        val contract = contractsUseCase.get(command.caller, command.contractId)
+        val request = load(command.contractId, command.payoutId)
+        val iban = IbanRule.normalise(command.iban)
+        if (request.payoutIban == iban && request.scaChallengeId == command.scaChallengeId) return request
+        ctx.gateways.verifySignatureAndAccount(
+            contract.participantPartyId,
+            command.scaChallengeId,
+            request.accountChangeHash(iban),
+            iban,
+        )
+        return stores.payouts.save(request.changePayoutAccount(iban, command.scaChallengeId, ctx.clock.instant()))
+    }
+
+    /** Operator queue (ADR-0334 S8): newest first, optionally by status or contract. */
+    suspend fun list(status: PayoutStatus?, contractId: UUID?, limit: Int): List<PayoutRequest> =
+        stores.payouts.list(status, contractId, limit.coerceIn(1, MAX_LIST))
 
     suspend fun get(caller: Caller, contractId: UUID, payoutId: UUID): PayoutRequest {
         contractsUseCase.get(caller, contractId)

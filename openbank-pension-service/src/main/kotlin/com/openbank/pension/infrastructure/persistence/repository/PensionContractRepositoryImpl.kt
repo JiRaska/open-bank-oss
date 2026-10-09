@@ -66,6 +66,33 @@ class PensionContractRepositoryImpl(
         }
     }.awaitSuspending()
 
+    override suspend fun findByParticipant(participantPartyId: UUID, limit: Int): List<PensionContract> =
+        loadAll { find("participantPartyId = ?1 order by createdAt desc", participantPartyId).page(0, limit).list() }
+
+    override suspend fun findByStatus(status: ContractStatus?, limit: Int): List<PensionContract> = loadAll {
+        if (status == null) {
+            find("order by createdAt desc").page(0, limit).list()
+        } else {
+            find("status = ?1 order by createdAt desc", status.name).page(0, limit).list()
+        }
+    }
+
+    /** Each row with its own strategy history (bounded by the caller's page size). */
+    private suspend fun loadAll(rows: () -> Uni<List<PensionContractEntity>>): List<PensionContract> =
+        Panache.withSession {
+            rows().flatMap { entities ->
+                if (entities.isEmpty()) {
+                    Uni.createFrom().item(emptyList())
+                } else {
+                    elections.find("contractId in ?1 order by id", entities.map { it.contractId }).list()
+                        .map { history ->
+                            val byContract = history.groupBy { it.contractId }
+                            entities.map { it.toDomain(byContract[it.contractId].orEmpty()) }
+                        }
+                }
+            }
+        }.awaitSuspending()
+
     override suspend fun findByIdempotencyKey(participantPartyId: UUID, idempotencyKey: String): PensionContract? =
         Panache.withSession {
             find("participantPartyId = ?1 and idempotencyKey = ?2", participantPartyId, idempotencyKey)

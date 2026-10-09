@@ -4,8 +4,6 @@
 
 package com.openbank.pension.infrastructure.onboarding.rest
 
-import com.openbank.pension.infrastructure.rest.IDEMPOTENCY_KEY_HEADER
-import com.openbank.pension.infrastructure.rest.requireIdempotencyKey
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import com.openbank.pension.application.onboarding.TransferOutCommand
@@ -13,6 +11,7 @@ import com.openbank.pension.application.onboarding.TransferService
 import com.openbank.pension.domain.transfer.Counterparty
 import com.openbank.pension.infrastructure.authz.ContractAccessGuard
 import com.openbank.pension.infrastructure.authz.ContractAccessGuard.Companion.PARTY_HEADER
+import com.openbank.pension.infrastructure.rest.requireIdempotencyKey
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
@@ -55,8 +54,9 @@ class PensionTransferResource {
     @Operation(summary = "Request a transfer-out of the caller's contract to another provider (SCA-signed)")
     @Authorize(action = "pension.transfer.request-out")
     suspend fun requestOut(
-        @HeaderParam(IDEMPOTENCY_KEY_HEADER) idempotencyKey: String?,
-        @HeaderParam(PARTY_HEADER) party: String?, request: TransferOutRequest?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        @HeaderParam(PARTY_HEADER) party: String?,
+        request: TransferOutRequest?,
     ): Response {
         requireIdempotencyKey(idempotencyKey)
         val body = requireNotNull(request) { "request body is required" }
@@ -80,7 +80,7 @@ class PensionTransferResource {
     @Operation(summary = "SCA-consent to a transfer-out a receiving provider requested for the caller's contract")
     @Authorize(action = "pension.transfer.consent", resource = "#id")
     suspend fun consent(
-        @HeaderParam(IDEMPOTENCY_KEY_HEADER) idempotencyKey: String?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         @HeaderParam(PARTY_HEADER) party: String?,
         @PathParam("id") id: UUID,
         request: TransferConsentRequest?,

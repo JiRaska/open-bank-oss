@@ -4,18 +4,23 @@
 # Mounted alongside rest.rego in the same OPA bundle — OPA merges same-package rules.
 #
 # Actions gated (PensionContractResource):
-#   pension.contract.read       — GET /contracts/{id}, POST /contracts/{id}/incentive-evaluation
+#   pension.contract.read       — GET /contracts (own list / staff by status), GET /contracts/{id},
+#                                 POST /contracts/{id}/incentive-evaluation
 #   pension.contract.create     — POST /contracts
 #   pension.contract.submit     — POST /contracts/{id}/submit
-#   pension.contract.activate   — POST /contracts/{id}/activate
 #   pension.contract.strategy   — PUT  /contracts/{id}/strategy
 #   pension.contract.suspend    — POST /contracts/{id}/suspend
 #   pension.contract.resume     — POST /contracts/{id}/resume
-#   pension.contract.terminate  — POST /contracts/{id}/early-termination
 #   pension.exit.read           — GET  /contracts/{id}/exit/... (eligibility, notice, payout, statement)
 #   pension.exit.terminate      — POST /contracts/{id}/exit/termination/quote, /{noticeId}/sign   (S5)
 #   pension.exit.payout         — POST /contracts/{id}/exit/payouts/quote, /{payoutId}/confirm    (S5)
-#   pension.death.read          — GET  /death-claims/{id}                                         (S5)
+#                                 PUT  /contracts/{id}/exit/payouts/{payoutId}/account (SCA)      (S8)
+#   pension.simulation.run      — POST /simulations (illustrative projection)                    (S8)
+#   pension.operator.exit-read  — GET  /operator/payouts (staff payout queue)                     (S8)
+#   pension.death.read          — GET  /death-claims, /death-claims/{id}                          (S5/S8)
+#
+# Retired at integration (S8): pension.contract.activate (activation is the onboarding workflow's
+# alone) and pension.contract.terminate (S1's preview; S5's pension.exit.terminate replaces it).
 #   pension.death.notify        — POST /death-claims                                              (S5)
 #   pension.death.verify        — PUT  /death-claims/{id}/claimants, POST .../verification        (S5)
 #   pension.death.approve       — POST /death-claims/{id}/approve (four-eyes in the aggregate)    (S5)
@@ -38,7 +43,7 @@ allowed_reasons contains "operator-pension-read" if {
 	not startswith(input.principal.id, "service-account-")
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE"}
 	role in input.principal.roles
-	input.action in {"pension.contract.read", "pension.exit.read"}
+	input.action in {"pension.contract.read", "pension.exit.read", "pension.operator.exit-read", "pension.simulation.run"}
 }
 
 # Death claims are operator work on evidence: real human staff only, never a service-account, and
@@ -65,12 +70,11 @@ allowed_reasons contains "edge-service-pension" if {
 		"pension.contract.read",
 		"pension.contract.create",
 		"pension.contract.submit",
-		"pension.contract.activate",
 		"pension.contract.strategy",
 		"pension.contract.suspend",
 		"pension.contract.resume",
-		"pension.contract.terminate",
 		"pension.exit.read",
+		"pension.simulation.run",
 		"pension.exit.terminate",
 		"pension.exit.payout",
 	}

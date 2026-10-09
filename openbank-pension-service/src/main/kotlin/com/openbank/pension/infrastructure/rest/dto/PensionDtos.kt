@@ -132,4 +132,3 @@ data class IncentiveResultResponse(
         )
     }
 }
-

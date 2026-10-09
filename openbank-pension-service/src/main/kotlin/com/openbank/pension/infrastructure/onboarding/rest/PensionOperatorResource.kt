@@ -4,8 +4,6 @@
 
 package com.openbank.pension.infrastructure.onboarding.rest
 
-import com.openbank.pension.infrastructure.rest.IDEMPOTENCY_KEY_HEADER
-import com.openbank.pension.infrastructure.rest.requireIdempotencyKey
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import com.openbank.pension.application.onboarding.OnboardingService
@@ -14,6 +12,7 @@ import com.openbank.pension.domain.onboarding.OnboardingStatus
 import com.openbank.pension.domain.transfer.FundsArrival
 import com.openbank.pension.domain.transfer.IncentiveHistoryEntry
 import com.openbank.pension.domain.transfer.TransferStatus
+import com.openbank.pension.infrastructure.rest.requireIdempotencyKey
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
@@ -75,7 +74,7 @@ class PensionOperatorResource {
     @Operation(summary = "Record the first contribution of a signed new contract (activates it per pack)")
     @Authorize(action = "pension.operator.contribution", resource = "#id")
     suspend fun contributionReceived(
-        @HeaderParam(IDEMPOTENCY_KEY_HEADER) idempotencyKey: String?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         @PathParam("id") id: UUID,
     ): OperatorApplicationResponse {
         requireIdempotencyKey(idempotencyKey)
@@ -102,7 +101,7 @@ class PensionOperatorResource {
     @Operation(summary = "Relay the ceding provider's acceptance or rejection of a transfer-in")
     @Authorize(action = "pension.operator.transfer", resource = "#id")
     suspend fun counterpartyResponse(
-        @HeaderParam(IDEMPOTENCY_KEY_HEADER) idempotencyKey: String?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         @PathParam("id") id: UUID,
         request: CounterpartyResponseRequest?,
     ): TransferResponse {
@@ -129,8 +128,9 @@ class PensionOperatorResource {
     @Operation(summary = "Record transferred funds, incentive history and original start date of a transfer-in")
     @Authorize(action = "pension.operator.transfer", resource = "#id")
     suspend fun fundsReceived(
-        @HeaderParam(IDEMPOTENCY_KEY_HEADER) idempotencyKey: String?,
-        @PathParam("id") id: UUID, request: FundsReceivedRequest?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        @PathParam("id") id: UUID,
+        request: FundsReceivedRequest?,
     ): TransferResponse {
         requireIdempotencyKey(idempotencyKey)
         val body = requireNotNull(request) { "request body is required" }

@@ -4,11 +4,11 @@
 
 package com.openbank.pension.e2e
 
-import com.openbank.pension.testsupport.PensionTemporalTestEnvironment
 import com.openbank.pension.e2e.support.StateAgencySimulator
-import com.openbank.pension.infrastructure.exit.stub.StubFundAdministrationAdapter
 import com.openbank.pension.infrastructure.exit.stub.StubPayoutPaymentAdapter
+import com.openbank.pension.infrastructure.fund.InMemoryFundAdministrationAdapter
 import com.openbank.pension.it.PostgresTestResource
+import com.openbank.pension.testsupport.PensionTemporalTestEnvironment
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
@@ -44,10 +44,12 @@ import java.util.UUID
  *  - the ceding provider of a transfer-in is played through the operator relay routes that exist
  *    for exactly that (`counterparty-response`, `funds-received`);
  *  - the state agency is [StateAgencySimulator], answering the filed claim file with a receipt file;
- *  - the fund valuation is seeded into S5's own stub ([StubFundAdministrationAdapter.setValue]),
- *    because no slice binds a valuation to pension-fund-service yet — that seam, and the read of
- *    the stub payment rail ([StubPayoutPaymentAdapter.orders]) to compare executed with quoted
- *    amounts, are the only places this class looks behind the HTTP surface.
+ *  - the fund valuation is seeded into the dev/test in-memory unit register
+ *    ([InMemoryFundAdministrationAdapter.setValue]) — the ONE FundAdministrationPort since S8, whose
+ *    prod bean is the pension-fund-service REST adapter; the fund side is journeyed against the
+ *    real service in pension-fund-service's own `PensionFundUnitJourneyE2E`. That seam, and the
+ *    read of the stub payment rail ([StubPayoutPaymentAdapter.orders]) to compare executed with
+ *    quoted amounts, are the only places this class looks behind the HTTP surface.
  *
  * Customer calls carry `ROLE_API` + `X-Customer-Party-Id` as customer-edge sends them; operator
  * steps run as `ROLE_OPERATOR` under two different principals so four-eyes is real. Steps share
@@ -66,7 +68,9 @@ class PensionFullLifecycleJourneyE2E {
             "openbank.pension.stub-integrations.enabled" to "true",
             "openbank.pension.exit.stub.checks-accept" to "true",
             "openbank.pension.worker.enabled" to "false",
-            "openbank.temporal.task-queue" to "openbank-pension-e2e",
+            // Each workflow family on its own queue, exactly as deployed (S8).
+            "openbank.pension.onboarding.task-queue" to "e2e-pension-onboarding",
+            "openbank.pension.exit.task-queue" to "e2e-pension-exit",
         )
     }
 
@@ -74,7 +78,7 @@ class PensionFullLifecycleJourneyE2E {
     lateinit var temporal: PensionTemporalTestEnvironment
 
     @Inject
-    lateinit var fundValues: StubFundAdministrationAdapter
+    lateinit var fundValues: InMemoryFundAdministrationAdapter
 
     @Inject
     lateinit var paymentRail: StubPayoutPaymentAdapter
@@ -107,6 +111,9 @@ class PensionFullLifecycleJourneyE2E {
         const val IDEMPOTENCY = "Idempotency-Key"
         const val IBAN = "CZ6508000000192000145399"
         val ORIGINAL_START: LocalDate = LocalDate.of(2010, 1, 1)
+
+        /** The CZ onboarding packs' cooling-off period (jurisdiction-packs/onboarding/cz-*-v1.json). */
+        const val COOLING_OFF_DAYS = 14L
         val EXACT: JsonPathConfig =
             JsonPathConfig.jsonPathConfig().numberReturnType(JsonPathConfig.NumberReturnType.BIG_DECIMAL)
     }
@@ -115,7 +122,7 @@ class PensionFullLifecycleJourneyE2E {
 
     @Test
     @Order(1)
-    @TestSecurity(user = "customer-edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "edge", roles = ["ROLE_API"])
     fun `a1 - a new DPS is onboarded through questionnaire, recommendation, KID and SCA signature`() {
         val started = ok(customerPost(customer, "/api/v1/pension/onboarding/applications", dpsStart("1985-05-05")), 201)
         dpsApplication = started.getString("applicationId")
@@ -165,6 +172,9 @@ class PensionFullLifecycleJourneyE2E {
     @Order(2)
     @TestSecurity(user = "ops-maker", roles = ["ROLE_OPERATOR"])
     fun `a2 - the first contribution paid to the contract reference is credited and activates the contract`() {
+        // Before the first payment the contract is still pending: nothing but onboarding activates it.
+        assertThat(ok(operatorGet("/api/v1/pension/contracts/$dpsContract")).getString("status"))
+            .isEqualTo("PENDING_ACTIVATION")
         val receipt =
             ok(
                 operatorPost(
@@ -179,7 +189,12 @@ class PensionFullLifecycleJourneyE2E {
                 receipt.prettify(),
             )
             .isEqualTo("CREDITED")
-        eventually("contract ACTIVE after first contribution") {
+        // The payment only SIGNALS onboarding; the workflow activates once cooling-off has ended.
+        assertThat(ok(operatorGet("/api/v1/pension/contracts/$dpsContract")).getString("status"))
+            .describedAs("a payment must not stand in for the cooling-off period")
+            .isEqualTo("PENDING_ACTIVATION")
+        temporal.advance(Duration.ofDays(COOLING_OFF_DAYS + 1))
+        eventually("contract ACTIVE after first contribution and cooling-off") {
             ok(operatorGet("/api/v1/pension/contracts/$dpsContract")).getString("status") == "ACTIVE"
         }
     }
@@ -188,8 +203,6 @@ class PensionFullLifecycleJourneyE2E {
     @Order(3)
     @TestSecurity(user = "ops-maker", roles = ["ROLE_OPERATOR"])
     fun `a3 - a contribution earns the state incentive, which is claimed from and paid by the agency`() {
-        activateIfStillSigned(dpsApplication, dpsContract)
-
         val credited =
             ok(
                 operatorPost(
@@ -225,7 +238,7 @@ class PensionFullLifecycleJourneyE2E {
 
     @Test
     @Order(4)
-    @TestSecurity(user = "customer-edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "edge", roles = ["ROLE_API"])
     fun `a4 - the participant sees the received incentive and the tax year`() {
         val incentives = ok(customerGet(customer, "$FUNDING/$dpsContract/incentives"))
         assertThat(
@@ -250,7 +263,7 @@ class PensionFullLifecycleJourneyE2E {
 
     @Test
     @Order(5)
-    @TestSecurity(user = "customer-edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "edge", roles = ["ROLE_API"])
     fun `f1 - a DIP is onboarded under MiFID suitability with an ESG preference`() {
         val started = ok(customerPost(dipCustomer, "/api/v1/pension/onboarding/applications", dipStart()), 201)
         dipApplication = started.getString("applicationId")
@@ -288,7 +301,6 @@ class PensionFullLifecycleJourneyE2E {
     @Order(6)
     @TestSecurity(user = "ops-maker", roles = ["ROLE_OPERATOR"])
     fun `f2 - the DIP activates on its first contribution and earns no state incentive`() {
-        activateIfStillSigned(dipApplication, dipContract)
         val ref = ok(operatorGet("$FUNDING/$dipContract/payment-reference")).getString("reference")
         assertThat(
             ok(
@@ -296,6 +308,10 @@ class PensionFullLifecycleJourneyE2E {
             ).getString("outcome"),
         )
             .isEqualTo("CREDITED")
+        temporal.advance(Duration.ofDays(COOLING_OFF_DAYS + 1))
+        eventually("DIP ACTIVE after its first contribution") {
+            ok(operatorGet("/api/v1/pension/contracts/$dipContract")).getString("status") == "ACTIVE"
+        }
         ok(operatorPost("$OPS/claim-runs", """{"period":"$lastMonth"}"""))
         val incentives = ok(operatorGet("$FUNDING/$dipContract/incentives"))
         assertThat(incentives.getList<Any>("claims")).describedAs("DIP has no state matching contribution").isEmpty()
@@ -305,7 +321,7 @@ class PensionFullLifecycleJourneyE2E {
 
     @Test
     @Order(7)
-    @TestSecurity(user = "customer-edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "edge", roles = ["ROLE_API"])
     fun `b1 - transfer-in applications are signed for three contracts from another provider`() {
         for (key in listOf("lump", "phased", "death")) {
             val started = ok(
@@ -371,7 +387,7 @@ class PensionFullLifecycleJourneyE2E {
 
     @Test
     @Order(9)
-    @TestSecurity(user = "customer-edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "edge", roles = ["ROLE_API"])
     fun `b3 - the transferred contract is active from its original start date and its strategy can change`() {
         val id = transferContracts.getValue("lump")
         val contract = ok(customerGet(retiree, "/api/v1/pension/contracts/$id"))
@@ -397,7 +413,7 @@ class PensionFullLifecycleJourneyE2E {
 
     @Test
     @Order(10)
-    @TestSecurity(user = "customer-edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "edge", roles = ["ROLE_API"])
     fun `d1 - early termination pays exactly the quote, returning the received state incentive`() {
         fundValues.setValue(UUID.fromString(dpsContract), BigDecimal("50000.00"))
         val quoted =
@@ -454,7 +470,7 @@ class PensionFullLifecycleJourneyE2E {
 
     @Test
     @Order(12)
-    @TestSecurity(user = "customer-edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "edge", roles = ["ROLE_API"])
     fun `e1 - a lump sum is paid exactly as quoted once the payout conditions are met`() {
         val id = transferContracts.getValue("lump")
         fundValues.setValue(UUID.fromString(id), BigDecimal("250000.00"))
@@ -493,7 +509,7 @@ class PensionFullLifecycleJourneyE2E {
 
     @Test
     @Order(13)
-    @TestSecurity(user = "customer-edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "edge", roles = ["ROLE_API"])
     fun `e2 - a phased withdrawal pays every instalment on its due date`() {
         val id = transferContracts.getValue("phased")
         fundValues.setValue(UUID.fromString(id), BigDecimal("120000.00"))
@@ -588,7 +604,7 @@ class PensionFullLifecycleJourneyE2E {
 
     @Test
     @Order(16)
-    @TestSecurity(user = "customer-edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "edge", roles = ["ROLE_API"])
     fun `f3 - another customer gets 404 on the onboarding, transfer, funding and exit routes of someone else`() {
         val contract = transferContracts.getValue("phased")
         assertThat(customerGet(stranger, "$APPS/$dpsApplication").statusCode).isEqualTo(404)
@@ -627,21 +643,6 @@ class PensionFullLifecycleJourneyE2E {
     }
 
     // ---------------------------------------------------------------------------------------------
-
-    /** The operator fallback for a/f when the payment path did not activate the contract (see a2). */
-    private fun activateIfStillSigned(application: String, contract: String) {
-        if (ok(operatorGet("/api/v1/pension/contracts/$contract")).getString("status") != "ACTIVE") {
-            ok(
-                operatorPost(
-                    "/api/v1/pension/operator/onboarding/applications/$application/contribution-received",
-                    null,
-                ),
-            )
-        }
-        eventually("contract $contract ACTIVE") {
-            ok(operatorGet("/api/v1/pension/contracts/$contract")).getString("status") == "ACTIVE"
-        }
-    }
 
     private fun dpsStart(birthDate: String) = """
         {"kind":"NEW_CONTRACT","productLine":"DPS","jurisdiction":"CZ","providerEntityId":"${UUID.randomUUID()}",

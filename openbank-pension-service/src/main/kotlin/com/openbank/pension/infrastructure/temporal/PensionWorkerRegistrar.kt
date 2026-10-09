@@ -67,10 +67,9 @@ class PensionWorkerRegistrar(
     }
 
     companion object {
-        fun requireDistinctQueues(onboardingQueue: String, exitQueue: String) =
-            require(onboardingQueue != exitQueue) {
-                "pension onboarding and exit workflows must poll different task queues (both '$exitQueue')"
-            }
+        fun requireDistinctQueues(onboardingQueue: String, exitQueue: String) = require(onboardingQueue != exitQueue) {
+            "pension onboarding and exit workflows must poll different task queues (both '$exitQueue')"
+        }
 
         /** Onboarding, transfer-in and transfer-out workflows with their activities. */
         fun registerOnboarding(worker: Worker, activities: PensionActivitiesImpl) {

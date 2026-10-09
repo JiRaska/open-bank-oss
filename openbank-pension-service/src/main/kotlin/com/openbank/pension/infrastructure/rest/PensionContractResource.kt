@@ -9,6 +9,7 @@ import com.openbank.libs.security.Roles
 import com.openbank.pension.application.port.`in`.CreateDraftCommand
 import com.openbank.pension.application.port.`in`.IncentiveEvaluationCommand
 import com.openbank.pension.application.port.`in`.PensionContractUseCase
+import com.openbank.pension.domain.model.ContractStatus
 import com.openbank.pension.domain.model.ContributionSchedule
 import com.openbank.pension.infrastructure.authz.ContractAccessGuard
 import com.openbank.pension.infrastructure.rest.dto.ContractResponse
@@ -19,6 +20,7 @@ import com.openbank.pension.infrastructure.rest.dto.IncentiveResultResponse
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
+import jakarta.ws.rs.DefaultValue
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
@@ -26,6 +28,7 @@ import jakarta.ws.rs.PUT
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
+import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.openapi.annotations.Operation
@@ -98,6 +101,15 @@ class PensionContractResource {
         )
         return Response.status(Response.Status.CREATED).entity(ContractResponse.from(contract)).build()
     }
+
+    @GET
+    @Operation(summary = "The participant's own contracts (edge), or staff: contracts by status, newest first")
+    @Authorize(action = "pension.contract.read")
+    suspend fun list(
+        @HeaderParam("X-Customer-Party-Id") party: String?,
+        @QueryParam("status") status: ContractStatus?,
+        @QueryParam("limit") @DefaultValue("50") limit: Int,
+    ): List<ContractResponse> = contracts.list(access.readerFor(party), status, limit).map(ContractResponse::from)
 
     @GET
     @Path("/{id}")

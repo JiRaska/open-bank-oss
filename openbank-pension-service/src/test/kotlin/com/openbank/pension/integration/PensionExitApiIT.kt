@@ -5,20 +5,16 @@
 package com.openbank.pension.integration
 
 import com.openbank.pension.application.exit.DeathClaimService
-import com.openbank.pension.application.port.`in`.Caller
-import com.openbank.pension.application.port.`in`.CreateDraftCommand
 import com.openbank.pension.application.port.`in`.PensionContractUseCase
-import com.openbank.pension.domain.exit.IncentiveBalance
-import com.openbank.pension.domain.model.Beneficiary
-import com.openbank.pension.domain.model.ContributionFrequency
-import com.openbank.pension.domain.model.ContributionSchedule
-import com.openbank.pension.domain.model.ProductLine
-import com.openbank.pension.domain.pack.ProviderType
-import com.openbank.pension.testsupport.PensionTemporalTestEnvironment
-import com.openbank.pension.infrastructure.exit.stub.StubFundAdministrationAdapter
-import com.openbank.pension.infrastructure.exit.stub.StubIncentiveClawbackAdapter
+import com.openbank.pension.application.port.out.IncentiveLedgerRepository
+import com.openbank.pension.application.port.out.PensionContractRepository
+import com.openbank.pension.domain.incentive.IncentiveLedgerEntry
+import com.openbank.pension.domain.incentive.LedgerEntryKind
 import com.openbank.pension.infrastructure.exit.stub.StubPayoutPaymentAdapter
+import com.openbank.pension.infrastructure.fund.InMemoryFundAdministrationAdapter
 import com.openbank.pension.it.PostgresTestResource
+import com.openbank.pension.testsupport.ContractFixtures
+import com.openbank.pension.testsupport.PensionTemporalTestEnvironment
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
@@ -54,10 +50,14 @@ class PensionExitApiIT {
     lateinit var temporal: PensionTemporalTestEnvironment
 
     @Inject
-    lateinit var fund: StubFundAdministrationAdapter
+    lateinit var fund: InMemoryFundAdministrationAdapter
+
+    /** S3's real incentive ledger: S5 quotes and settles against it since S8 (no stub in between). */
+    @Inject
+    lateinit var ledger: IncentiveLedgerRepository
 
     @Inject
-    lateinit var incentives: StubIncentiveClawbackAdapter
+    lateinit var contractRepository: PensionContractRepository
 
     @Inject
     lateinit var payments: StubPayoutPaymentAdapter
@@ -72,25 +72,9 @@ class PensionExitApiIT {
         VertxContextSupport.subscribeAndAwait { CoroutineScope(Dispatchers.Unconfined).async { block() }.asUni() }
 
     /** An active contract created through the use case — an operator is not the edge relay, so cannot create over HTTP. */
+    /** An active contract (fixture: onboarding is not this class's subject). */
     private fun activeContractDirect(): UUID = onVertx {
-        val caller = Caller.customer(party)
-        val draft = contractUseCase.createDraft(
-            CreateDraftCommand(
-                participantPartyId = party, productLine = ProductLine.DPS, jurisdiction = "CZ",
-                providerEntityId = UUID.randomUUID(), providerType = ProviderType.PENSION_COMPANY,
-                birthDate = LocalDate.parse("1985-05-05"), residencyCountry = "CZ", residencyEvidence = emptySet(),
-                hasGuardian = false,
-                schedule = ContributionSchedule(BigDecimal("1700"), "CZK", ContributionFrequency.MONTHLY),
-                initialStrategy = "BALANCED",
-                beneficiaries = listOf(
-                    Beneficiary("Jane Doe", null, BigDecimal("60")),
-                    Beneficiary("John Doe", null, BigDecimal("40")),
-                ),
-                idempotencyKey = UUID.randomUUID().toString(),
-            ),
-        )
-        contractUseCase.submit(caller, draft.id)
-        contractUseCase.activate(caller, draft.id).id
+        ContractFixtures.activeContract(contractUseCase, contractRepository, party)
     }
 
     private val contracts = "/api/v1/pension/contracts"
@@ -102,19 +86,7 @@ class PensionExitApiIT {
         .apply { if (asParty != null) header("X-Customer-Party-Id", asParty.toString()) }
         .apply { if (key != null) header("Idempotency-Key", key) }
 
-    private fun activeContract(): UUID {
-        val id: String = req().body(
-            """
-            {"productLine":"DPS","jurisdiction":"CZ","providerEntityId":"${UUID.randomUUID()}",
-             "providerType":"PENSION_COMPANY","birthDate":"1985-05-05","residencyCountry":"CZ",
-             "schedule":{"amount":1700,"currency":"CZK","frequency":"MONTHLY"},"strategyCode":"BALANCED",
-             "beneficiaries":[{"name":"Jane Doe","sharePercent":60},{"name":"John Doe","sharePercent":40}]}
-            """.trimIndent(),
-        ).post(contracts).then().statusCode(201).extract().path("contractId")
-        req().post("$contracts/$id/submit").then().statusCode(200)
-        req().post("$contracts/$id/activate").then().statusCode(200)
-        return UUID.fromString(id)
-    }
+    private fun activeContract(): UUID = activeContractDirect()
 
     private fun staffStatus(id: UUID): String =
         req(null, null).get("$contracts/$id").then().statusCode(200).extract().path("status")
@@ -138,24 +110,23 @@ class PensionExitApiIT {
     fun `early termination pays exactly the signed quote after the notice period, once`() {
         val id = activeContract()
         fund.setValue(id, BigDecimal("150000.00"))
-        incentives.setBalance(
-            id,
-            IncentiveBalance(
-                BigDecimal("8160.00"),
-                BigDecimal("8160.00"),
-                mapOf(2026 to BigDecimal("20000")),
-                emptyMap(),
-                BigDecimal.ZERO,
-            ),
-        )
+        // A state contribution the agency paid, in S3's ledger: the quote must return it.
+        onVertx {
+            ledger.append(
+                IncentiveLedgerEntry(
+                    UUID.randomUUID(), id, "state-contribution", null, LedgerEntryKind.RECEIVED, BigDecimal("8160.00"),
+                    LocalDate.now().year - 1, java.time.YearMonth.now().minusMonths(12), java.time.Instant.now(),
+                ),
+            )
+        }
         val quote = req().post("$contracts/$id/exit/termination/quote").then().statusCode(201)
             .body("status", equalTo("QUOTED"))
             .body("quote.incentiveReturn", equalTo(8160.00f))
-            .body("quote.deductionRecapture", equalTo(3000.00f))
+            .body("quote.deductionRecapture", equalTo(0.00f))
             .extract()
         val noticeId: String = quote.path("noticeId")
         val quotedNet = BigDecimal(quote.path<Any>("quote.netPayout").toString())
-        assertThat(quotedNet).isEqualByComparingTo("138840.00")
+        assertThat(quotedNet).isEqualByComparingTo("141840.00")
         val sign = """{"scaChallengeId":"${UUID.randomUUID()}","payoutIban":"$iban"}"""
         val path = "$contracts/$id/exit/termination/$noticeId"
 

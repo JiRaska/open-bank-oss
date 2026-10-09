@@ -120,6 +120,10 @@ class DeathClaimService(
 
     suspend fun get(claimId: UUID): DeathClaim = load(claimId)
 
+    /** Operator queue (ADR-0334 S8): newest first, optionally by status. */
+    suspend fun list(status: DeathClaimStatus?, limit: Int): List<DeathClaim> =
+        stores.claims.list(status, limit.coerceIn(1, MAX_LIST))
+
     suspend fun findByContract(contractId: UUID): DeathClaim {
         contractsUseCase.get(Caller.STAFF, contractId)
         return stores.claims.findByContract(contractId) ?: throw ExitNotFoundException("no death claim for $contractId")

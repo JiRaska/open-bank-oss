@@ -31,6 +31,9 @@ class IncentiveClaimSchedulerCronIT {
     class EverySecond : QuarkusTestProfile {
         // Literals only: a profile loads in another classloader (CLAUDE.md, scheduler test footgun).
         override fun getConfigOverrides(): Map<String, String> = mapOf(
+            // %test disables the scheduler fleet-wide (S5 added it at integration); this IT exists
+            // to drive the REAL cron thread, so it re-enables it (root CLAUDE.md scheduler bullet).
+            "quarkus.scheduler.enabled" to "true",
             "openbank.pension.incentive-claim-cron" to "* * * * * ?",
             "openbank.pension.subscription-sweep-cron" to "* * * * * ?",
         )

@@ -4,12 +4,10 @@
 
 package com.openbank.pension.infrastructure.onboarding
 
-import com.openbank.pension.application.port.out.FundAdministrationPort
 import com.openbank.pension.application.onboarding.KeyInformationDocumentPort
 import com.openbank.pension.application.onboarding.OnboardingApplicationRepository
 import com.openbank.pension.application.onboarding.OnboardingRulesRegistry
 import com.openbank.pension.application.onboarding.OnboardingService
-import com.openbank.pension.application.usecase.ContributionService
 import com.openbank.pension.application.onboarding.PartyKycPort
 import com.openbank.pension.application.onboarding.PartyRelationPort
 import com.openbank.pension.application.onboarding.PensionOrchestrator
@@ -19,8 +17,10 @@ import com.openbank.pension.application.onboarding.TransactionRunner
 import com.openbank.pension.application.onboarding.TransferCounterpartyPort
 import com.openbank.pension.application.onboarding.TransferRequestRepository
 import com.openbank.pension.application.onboarding.TransferService
+import com.openbank.pension.application.port.out.FundAdministrationPort
 import com.openbank.pension.application.port.out.OnboardingActivationPort
 import com.openbank.pension.application.port.out.PensionContractRepository
+import com.openbank.pension.application.usecase.ContributionService
 import com.openbank.pension.domain.pack.JurisdictionPackRegistry
 import com.openbank.pension.infrastructure.onboarding.pack.OnboardingRulesLoader
 import com.openbank.pension.infrastructure.onboarding.pack.StaticOnboardingRulesRegistry

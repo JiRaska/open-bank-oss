@@ -138,6 +138,24 @@ data class PayoutRequest(
 
     val quoteHash: String get() = sha256("$id|$contractId|${quote.canonical()}|$quoteExpiresAt")
 
+    /** What an SCA challenge must be bound to for moving the remaining payments to [iban]. */
+    fun accountChangeHash(iban: String): String = sha256("$id|$contractId|payout-account|$iban")
+
+    /**
+     * The participant moves the REMAINING installments of a running scheduled payout to another
+     * verified own account (ADR-0334 S8). Paid installments keep the account they were paid to; a
+     * single-payment form has nothing left to redirect once confirmed.
+     */
+    fun changePayoutAccount(iban: String, scaChallengeId: String, now: Instant): PayoutRequest {
+        check(scheduled) { "only a scheduled payout has later payments to redirect" }
+        check(status == PayoutStatus.CONFIRMED || status == PayoutStatus.IN_PAYMENT) {
+            "the payout is $status; there is no running payout to redirect"
+        }
+        check(schedule?.allPaid != true) { "every installment is already paid" }
+        check(iban != payoutIban) { "the payout already goes to this account" }
+        return copy(payoutIban = iban, scaChallengeId = scaChallengeId, updatedAt = now)
+    }
+
     fun confirm(
         iban: String,
         scaChallengeId: String,

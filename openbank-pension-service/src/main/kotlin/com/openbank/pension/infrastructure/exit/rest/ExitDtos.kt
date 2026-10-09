@@ -140,6 +140,8 @@ data class PayoutResponse(
     val annuityPolicyRef: String?,
     val annuityMonthlyAmount: BigDecimal?,
     val paymentRef: String?,
+    /** Last four characters of the account the remaining payments go to (never the full IBAN). */
+    val payoutAccountLast4: String?,
 ) {
     companion object {
         fun from(p: PayoutRequest) = PayoutResponse(
@@ -147,8 +149,10 @@ data class PayoutResponse(
             p.quote.taxableAmount, p.quote.taxWithheld, p.quote.netAmount, p.quote.currency, p.quote.months,
             p.quoteHash,
             p.quoteExpiresAt, p.schedule?.installments.orEmpty().map(InstallmentResponse::from), p.annuity?.policyRef,
-            p.annuity?.monthlyAmount, p.paymentRef,
+            p.annuity?.monthlyAmount, p.paymentRef, p.payoutIban?.takeLast(LAST4),
         )
+
+        private const val LAST4 = 4
     }
 }
 

@@ -100,6 +100,17 @@ spec:
                 secretKeyRef:
                   name: pension-service-oidc
                   key: OIDC_CLIENT_SECRET
+            # ADR-0334 S8: pension-service's OWN client (openbank-pension, ROLE_API only) for the
+            # FundAdministrationPort REST adapter to pension-fund-service. optional: false so an
+            # unseeded Vault entry is a loud CreateContainerConfigError, never an empty credential.
+            - name: OIDC_PENSION_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: pension-service-m2m-oidc
+                  key: OIDC_PENSION_CLIENT_SECRET
+                  optional: false
+            - name: PENSION_FUND_SERVICE_URL
+              value: http://pension-fund-service.pension-fund.svc:8162
             # OPA sidecar enforced from the first rollout: pension_rest_ext.rego grants the
             # participant actions to the edge principal only, and no service-account reaches a
             # write by any rule.

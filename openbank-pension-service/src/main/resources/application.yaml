@@ -121,6 +121,14 @@ openbank:
     # real adapters land. Off, every stubbed call answers 503.
     stub-integrations:
       enabled: false
+    # Retirement simulation (ADR-0334 S8): the provider's ASSUMED annual return per strategy code.
+    # Illustrative configuration, not a forecast; a strategy missing here is not projected.
+    simulation:
+      assumed-annual-returns:
+        CONSERVATIVE: "0.015"
+        BALANCED: "0.035"
+        SUSTAINABLE_BALANCED: "0.035"
+        DYNAMIC: "0.050"
     exit:
       # Early termination, payout and death settlement workflows (S5).
       task-queue: ${OPENBANK_PENSION_EXIT_TASK_QUEUE:pension-exit}

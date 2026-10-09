@@ -4,11 +4,7 @@
 
 package com.openbank.pension.domain
 
-import com.openbank.pension.domain.model.ContributionFrequency
-import com.openbank.pension.domain.model.ContributionSchedule
-import com.openbank.pension.domain.model.PensionContract
 import com.openbank.pension.domain.model.ProductLine
-import com.openbank.pension.domain.pack.ClawbackMode
 import com.openbank.pension.domain.pack.IncentivePeriod
 import com.openbank.pension.domain.pack.IncentiveRule
 import com.openbank.pension.domain.pack.IncentiveType
@@ -22,9 +18,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
-import java.time.Instant
 import java.time.LocalDate
-import java.util.UUID
 
 /**
  * Evaluates the shipped reference packs. The numbers asserted here restate the pack DATA, not law:

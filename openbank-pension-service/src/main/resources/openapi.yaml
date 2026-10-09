@@ -2,11 +2,16 @@ openapi: 3.1.0
 info:
   title: OpenBank Pension Service API
   # 1.0.0: first contract (ADR-0334 slice S1, issue #12350).
-  version: 1.0.0
+  # 1.1.0: integration of slices S2 (onboarding, transfers), S3 (contributions, incentives) and S5
+  #        (termination, payout, death) plus the S8 routes: contract list, simulation, payout
+  #        account change, operator payout and death-claim lists, Idempotency-Key on every POST.
+  #        Bumped ONCE for all slices (ADR-0048). S1's unreleased /activate and /early-termination
+  #        were retired in the same change; no released client ever called them.
+  version: 1.1.0
   description: |
     Participant-side pension contracts (ADR-0334). A contract is created under the jurisdiction
     pack in force on its creation date and PINS that pack version for life; incentive evaluation
-    and the early-termination preview always use the pinned version. Pack values are reference
+    and every exit quote always use the pinned version. Pack values are reference
     data pending legal review, not advice.
 servers:
   - url: http://localhost:8171
@@ -16,11 +21,39 @@ tags:
   - name: Pension transfers
   - name: Pension provider transfers
   - name: Pension operations
+  - name: Pension exit
+  - name: Pension death claims
+  - name: Pension simulation
 security:
   - bearerAuth: []
 
 paths:
   /api/v1/pension/contracts:
+    get:
+      tags: [Pension]
+      operationId: listContracts
+      summary: The participant's own contracts (edge), or staff - contracts by status, newest first
+      parameters:
+        - $ref: '#/components/parameters/CustomerPartyIdOptional'
+        - name: status
+          in: query
+          required: false
+          schema: { $ref: '#/components/schemas/ContractStatus' }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        '200':
+          description: Contracts
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Contract' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
     post:
       tags: [Pension]
       operationId: createContract
@@ -64,20 +97,6 @@ paths:
       tags: [Pension]
       operationId: submitContract
       summary: DRAFT -> PENDING_ACTIVATION
-      parameters:
-        - $ref: '#/components/parameters/ContractId'
-        - $ref: '#/components/parameters/CustomerPartyIdOptional'
-        - $ref: '#/components/parameters/IdempotencyKey'
-      responses:
-        '200': { $ref: '#/components/responses/Contract' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/contracts/{id}/activate:
-    post:
-      tags: [Pension]
-      operationId: activateContract
-      summary: PENDING_ACTIVATION -> ACTIVE; the start date is set today
       parameters:
         - $ref: '#/components/parameters/ContractId'
         - $ref: '#/components/parameters/CustomerPartyIdOptional'
@@ -162,43 +181,13 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
-  /api/v1/pension/contracts/{id}/early-termination:
-    post:
-      tags: [Pension]
-      operationId: requestEarlyTermination
-      summary: "Surrender preview; with confirm=true the contract moves to TERMINATING"
-      description: |
-        The unit register is not built yet (ADR-0334 pension-fund-service), so the current value
-        and the incentive history are supplied by the caller; the preview is arithmetic over the
-        pinned pack, not a valuation.
-      parameters:
-        - $ref: '#/components/parameters/ContractId'
-        - $ref: '#/components/parameters/CustomerPartyIdOptional'
-        - $ref: '#/components/parameters/IdempotencyKey'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/EarlyTerminationRequest'
-      responses:
-        '200':
-          description: Surrender preview, and the contract after the optional transition
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/EarlyTermination'
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409': { $ref: '#/components/responses/Conflict' }
-
   /api/v1/pension/onboarding/applications:
     post:
       tags: [Pension onboarding]
       operationId: startOnboardingApplication
       summary: Start an application; eligibility and KYC are checked at once
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/CustomerPartyId'
       requestBody:
         required: true
@@ -242,6 +231,7 @@ paths:
       operationId: submitPensionQuestionnaire
       summary: Answer the suitability / appropriateness / ESG questionnaire
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/ApplicationId'
         - $ref: '#/components/parameters/CustomerPartyId'
       requestBody:
@@ -285,6 +275,7 @@ paths:
       operationId: choosePensionStrategy
       summary: Choose the strategy and issue its key-information document
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/ApplicationId'
         - $ref: '#/components/parameters/CustomerPartyId'
       requestBody:
@@ -310,6 +301,7 @@ paths:
       operationId: acceptPensionKid
       summary: Accept the issued key-information document
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/ApplicationId'
         - $ref: '#/components/parameters/CustomerPartyId'
       requestBody:
@@ -334,6 +326,7 @@ paths:
       operationId: signPensionApplication
       summary: SCA-sign the contract (and transfer request); starts the workflow
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/ApplicationId'
         - $ref: '#/components/parameters/CustomerPartyId'
       requestBody:
@@ -360,6 +353,7 @@ paths:
       operationId: withdrawPensionApplication
       summary: Withdraw within the cooling-off period
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/ApplicationId'
         - $ref: '#/components/parameters/CustomerPartyId'
       responses:
@@ -379,6 +373,7 @@ paths:
       operationId: abandonPensionApplication
       summary: Abandon an unsigned application
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/ApplicationId'
         - $ref: '#/components/parameters/CustomerPartyId'
       responses:
@@ -398,6 +393,7 @@ paths:
       operationId: requestPensionTransferOut
       summary: Request a transfer-out of the caller's contract (SCA-signed)
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/CustomerPartyId'
       requestBody:
         required: true
@@ -423,6 +419,7 @@ paths:
       operationId: consentPensionTransferOut
       summary: SCA-consent to a provider-requested transfer-out
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/TransferId'
         - $ref: '#/components/parameters/CustomerPartyId'
       requestBody:
@@ -465,6 +462,8 @@ paths:
     post:
       tags: [Pension provider transfers]
       operationId: providerRequestPensionTransferOut
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
       summary: A receiving provider requests a transfer-out; waits for participant consent
       requestBody:
         required: true
@@ -524,6 +523,7 @@ paths:
       operationId: recordPensionFirstContribution
       summary: Record the first contribution of a signed new contract
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/ApplicationId'
       responses:
         '200':
@@ -578,6 +578,7 @@ paths:
       operationId: relayPensionCounterpartyResponse
       summary: Relay the ceding provider's acceptance or rejection
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/TransferId'
       requestBody:
         required: true
@@ -601,6 +602,7 @@ paths:
       operationId: recordPensionTransferFunds
       summary: Record transferred funds, incentive history and original start date
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/TransferId'
       requestBody:
         required: true
@@ -624,6 +626,7 @@ paths:
       operationId: startPensionTransferIn
       summary: Start a transfer-in application (onboarding with kind TRANSFER_IN; transferIn required)
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/CustomerPartyId'
       requestBody:
         required: true
@@ -685,6 +688,7 @@ paths:
       operationId: setUpMandate
       summary: Set up a standing order or SEPA direct debit quoting the contract reference
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/FundingContractId'
         - $ref: '#/components/parameters/CustomerPartyId'
       requestBody:
@@ -787,6 +791,8 @@ paths:
     post:
       tags: [Pension funding operations]
       operationId: ingestPayment
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
       summary: Ingest a payment from the collection account; matched by reference or parked
       requestBody:
         required: true
@@ -809,6 +815,8 @@ paths:
     post:
       tags: [Pension funding operations]
       operationId: ingestEmployerBatch
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
       summary: One employer's bulk contribution file covering one payment
       requestBody:
         required: true
@@ -855,6 +863,7 @@ paths:
       operationId: assignUnmatched
       summary: Attribute a parked payment to a contract and credit it
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/ResourceId'
       requestBody:
         required: true
@@ -881,6 +890,7 @@ paths:
       operationId: returnUnmatched
       summary: Mark a parked payment for return to the payer
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/ResourceId'
       responses:
         '200':
@@ -899,6 +909,8 @@ paths:
     post:
       tags: [Pension funding operations]
       operationId: runClaims
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
       summary: Generate the claims of a closed month and file every PENDING claim
       requestBody:
         required: true
@@ -941,6 +953,7 @@ paths:
       operationId: applyClaimReceipt
       summary: Apply the agency's receipt file, crediting accepted claims and rejecting the rest
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/ResourceId'
       requestBody:
         required: true
@@ -967,6 +980,7 @@ paths:
       operationId: returnClaim
       summary: Return a received incentive to the agency; writes a RETURNED ledger entry
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/ResourceId'
       responses:
         '200':
@@ -1009,6 +1023,7 @@ paths:
       operationId: issueTaxCertificate
       summary: Freeze a closed tax year and issue its tax certificate
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/FundingContractId'
         - $ref: '#/components/parameters/TaxYear'
       responses:
@@ -1048,6 +1063,7 @@ paths:
       operationId: quoteTermination
       summary: "Binding early-termination preview (ADR-0334 S5)"
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/ExitContractId'
         - $ref: '#/components/parameters/CustomerPartyIdOptional'
       responses:
@@ -1114,6 +1130,7 @@ paths:
       operationId: quotePayout
       summary: "Binding payout preview for one form"
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/ExitContractId'
         - $ref: '#/components/parameters/CustomerPartyIdOptional'
       requestBody:
@@ -1199,7 +1216,121 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/pension/simulations:
+    post:
+      tags: [Pension simulation]
+      operationId: simulateRetirement
+      summary: ILLUSTRATIVE retirement projection per strategy under the pack in force today
+      description: |
+        Projects each strategy the pack offers at the provider's configured ASSUMED annual return,
+        with the pack's MATCHING/FLAT incentive on the monthly contribution. Not advice, not a
+        forecast: the response is always `illustrative: true` with a disclaimer the client must
+        show. Nothing is stored.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CustomerPartyIdOptional'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SimulationRequest' }
+      responses:
+        '200':
+          description: Illustrative projection
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Simulation' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/pension/contracts/{contractId}/exit/payouts/{payoutId}/account:
+    put:
+      tags: [Pension exit]
+      operationId: changePayoutAccount
+      summary: Move the remaining payments of a running scheduled payout to another verified own account
+      description: |
+        SCA-bound: `scaChallengeId` must be signed over this payout and the new IBAN, and the IBAN
+        must be a verified account of the participant. Paid installments keep their account.
+      parameters:
+        - name: contractId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: payoutId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/CustomerPartyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ExitSignRequest' }
+      responses:
+        '200':
+          description: The payout with its new account
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Payout' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/operator/payouts:
+    get:
+      tags: [Pension operations]
+      operationId: listPayouts
+      summary: Payouts newest first, optionally by status and contract (staff)
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema: { type: string, enum: [QUOTED, CONFIRMED, IN_PAYMENT, COMPLETED, EXPIRED] }
+        - name: contractId
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        '200':
+          description: Payouts
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Payout' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /api/v1/pension/death-claims:
+    get:
+      tags: [Pension death claims]
+      operationId: listDeathClaims
+      summary: Death claims newest first, optionally by status (staff)
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema: { type: string, enum: [NOTIFIED, APPROVED, IN_PAYMENT, SETTLED] }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        '200':
+          description: Death claims
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/DeathClaim' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
     post:
       tags: [Pension death claims]
       operationId: notifyDeath
@@ -1273,6 +1404,7 @@ paths:
       operationId: verifyClaimant
       summary: "KYC-light verification of one claimant"
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/ClaimId'
         - $ref: '#/components/parameters/ClaimantId'
       requestBody:
@@ -1346,9 +1478,10 @@ components:
       in: header
       required: true
       description: |
-        Required on every POST. On create, a retry with the same key for the same participant
-        returns the contract the first attempt created. Lifecycle actions are idempotent by state:
-        a retry that finds the contract already in the target state returns it unchanged.
+        Required on every POST. The first successful response for a key (per caller, participant,
+        method and path) is stored, and a retry with the same key is answered from it without
+        running the operation again (header `Idempotent-Replayed: true`). A failed attempt is not
+        stored, so a corrected retry runs.
       schema:
         type: string
         minLength: 1
@@ -1540,18 +1673,6 @@ components:
           type: object
           description: Annual cap already consumed by other products, per shared-cap group.
           additionalProperties: { type: number, minimum: 0, maximum: 1000000000 }
-    EarlyTerminationRequest:
-      type: object
-      required: [currentValue]
-      properties:
-        currentValue: { type: number, minimum: 0, maximum: 1000000000 }
-        incentivesReceived:
-          type: object
-          description: Incentive id -> (calendar year -> amount received).
-          additionalProperties:
-            type: object
-            additionalProperties: { type: number }
-        confirm: { type: boolean, description: When true the contract moves to TERMINATING }
     StrategyElection:
       type: object
       properties:
@@ -1590,28 +1711,6 @@ components:
         indicativeSaving: { type: [number, 'null'] }
         claimChannel: { type: string, enum: [STATE_AGENCY_BATCH, TAX_RETURN, PAYROLL, NONE] }
         explanation: { type: string }
-    EarlyTermination:
-      type: object
-      properties:
-        contract: { $ref: '#/components/schemas/Contract' }
-        payoutConditionsMet: { type: boolean }
-        ageAtExit: { type: integer }
-        durationMonths: { type: integer }
-        earlyWithdrawalAllowed: { type: boolean }
-        currentValue: { type: number }
-        fee: { type: number }
-        clawbacks:
-          type: array
-          items:
-            type: object
-            properties:
-              incentiveId: { type: string }
-              mode: { type: string, enum: [RETURN_ALL, RECAPTURE_YEARS] }
-              amount: { type: number }
-        estimatedNetPayout: { type: number }
-        notes:
-          type: array
-          items: { type: string }
     OnboardingStatus:
       type: string
       enum: [STARTED, QUESTIONNAIRE_SUBMITTED, KID_ISSUED, KID_ACCEPTED, SIGNED, ACTIVATED, REJECTED, WITHDRAWN, EXPIRED, TRANSFER_FAILED, ABANDONED]
@@ -2066,6 +2165,7 @@ components:
         annuityPolicyRef: { type: string, nullable: true }
         annuityMonthlyAmount: { type: number, nullable: true }
         paymentRef: { type: string, nullable: true }
+        payoutAccountLast4: { type: [string, 'null'], description: Last four characters of the payout account (S8) }
     PayoutStatement:
       type: object
       properties:
@@ -2133,3 +2233,37 @@ components:
         valuation: { type: number, nullable: true }
         incentiveReturn: { $ref: '#/components/schemas/Money' }
         claimants: { type: array, items: { $ref: '#/components/schemas/Claimant' } }
+    SimulationRequest:
+      type: object
+      required: [jurisdiction, productLine, monthlyContribution, horizonYears]
+      properties:
+        jurisdiction: { type: string, minLength: 2, maxLength: 8 }
+        productLine: { $ref: '#/components/schemas/ProductLine' }
+        strategyCode: { type: string, maxLength: 64, description: Marked as requested; must be offered by the pack }
+        monthlyContribution: { type: number, exclusiveMinimum: 0, maximum: 1000000 }
+        employerMonthlyContribution: { type: number, minimum: 0, maximum: 1000000 }
+        horizonYears: { type: integer, minimum: 1, maximum: 60 }
+    StrategyProjection:
+      type: object
+      properties:
+        strategyCode: { type: string }
+        riskClass: { type: integer }
+        assumedAnnualReturn: { type: number, description: Provider assumption, not a forecast }
+        ownContributions: { type: number }
+        employerContributions: { type: number }
+        stateIncentives: { type: number }
+        projectedValue: { type: number }
+    Simulation:
+      type: object
+      properties:
+        illustrative: { type: boolean, const: true }
+        disclaimer: { type: string }
+        jurisdiction: { type: string }
+        productLine: { $ref: '#/components/schemas/ProductLine' }
+        packVersion: { type: integer }
+        currency: { type: string }
+        horizonYears: { type: integer }
+        requestedStrategy: { type: [string, 'null'] }
+        projections:
+          type: array
+          items: { $ref: '#/components/schemas/StrategyProjection' }

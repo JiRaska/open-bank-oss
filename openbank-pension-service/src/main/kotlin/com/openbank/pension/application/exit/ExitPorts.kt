@@ -6,8 +6,10 @@ package com.openbank.pension.application.exit
 
 import com.openbank.pension.domain.exit.AnnuityPolicy
 import com.openbank.pension.domain.exit.DeathClaim
+import com.openbank.pension.domain.exit.DeathClaimStatus
 import com.openbank.pension.domain.exit.IncentiveBalance
 import com.openbank.pension.domain.exit.PayoutRequest
+import com.openbank.pension.domain.exit.PayoutStatus
 import com.openbank.pension.domain.exit.TerminationNotice
 import java.math.BigDecimal
 import java.time.LocalDate
@@ -85,12 +87,18 @@ interface PayoutRequestRepository {
     suspend fun findById(id: UUID): PayoutRequest?
     suspend fun findByContract(contractId: UUID): List<PayoutRequest>
     suspend fun findInPayment(): List<PayoutRequest>
+
+    /** Operator queue: newest first, optionally by status and contract. */
+    suspend fun list(status: PayoutStatus?, contractId: UUID?, limit: Int): List<PayoutRequest>
 }
 
 interface DeathClaimRepository {
     suspend fun save(claim: DeathClaim): DeathClaim
     suspend fun findById(id: UUID): DeathClaim?
     suspend fun findByContract(contractId: UUID): DeathClaim?
+
+    /** Operator queue: newest first, optionally by status. */
+    suspend fun list(status: DeathClaimStatus?, limit: Int): List<DeathClaim>
 }
 
 enum class InstructionStatus { PENDING, SENT }

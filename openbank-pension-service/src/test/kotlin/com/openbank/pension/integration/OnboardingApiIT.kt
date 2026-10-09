@@ -53,6 +53,8 @@ class OnboardingApiIT {
         given().contentType("application/json")
             .apply { if (asParty != null) header("X-Customer-Party-Id", asParty.toString()) }
             .apply { if (body != null) body(body) }
+            // Every POST requires an Idempotency-Key since S8; a fresh one per call, so each call runs.
+            .apply { if (method == "POST") header("Idempotency-Key", UUID.randomUUID().toString()) }
             .`when`().request(method, path).then()
 
     private fun start(kind: String = "NEW_CONTRACT", extra: String = ""): String =

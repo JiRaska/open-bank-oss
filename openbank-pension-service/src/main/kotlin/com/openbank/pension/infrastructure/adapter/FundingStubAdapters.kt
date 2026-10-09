@@ -5,14 +5,12 @@
 package com.openbank.pension.infrastructure.adapter
 
 import com.openbank.pension.application.port.out.EmployerDirectoryPort
-import com.openbank.pension.application.port.out.FundAdministrationPort
 import com.openbank.pension.application.port.out.MandateRequest
 import com.openbank.pension.application.port.out.PaymentMandatePort
 import com.openbank.pension.application.port.out.TaxCertificateDocumentPort
 import com.openbank.pension.domain.incentive.TaxYearSummary
 import jakarta.enterprise.context.ApplicationScoped
 import org.jboss.logging.Logger
-import java.math.BigDecimal
 import java.nio.charset.StandardCharsets
 import java.util.UUID
 

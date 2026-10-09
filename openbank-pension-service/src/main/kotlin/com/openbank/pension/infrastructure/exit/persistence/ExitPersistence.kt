@@ -19,6 +19,7 @@ import com.openbank.pension.application.exit.PaymentInstructionRepository
 import com.openbank.pension.application.exit.PayoutRequestRepository
 import com.openbank.pension.application.exit.TerminationNoticeRepository
 import com.openbank.pension.domain.exit.DeathClaim
+import com.openbank.pension.domain.exit.DeathClaimStatus
 import com.openbank.pension.domain.exit.PayoutRequest
 import com.openbank.pension.domain.exit.PayoutStatus
 import com.openbank.pension.domain.exit.TerminationNotice
@@ -160,6 +161,28 @@ internal suspend inline fun <E : ExitDocumentEntity, reified T> PanacheRepositor
 ): List<T> = Panache.withSession { find(query, *params).list() }.awaitSuspending()
     .map { ExitJson.mapper.readValue(it.body, T::class.java) }
 
+/** Newest first, optionally in one status, at most [limit] rows (operator queues, ADR-0334 S8). */
+internal suspend inline fun <E : ExitDocumentEntity, reified T> PanacheRepository<E>.page(
+    status: String?,
+    contractId: UUID?,
+    limit: Int,
+): List<T> {
+    val clauses =
+        listOfNotNull(
+            "status = :status".takeIf { status != null },
+            "contractId = :contractId".takeIf {
+                contractId !=
+                    null
+            },
+        )
+    val where = if (clauses.isEmpty()) "" else clauses.joinToString(" and ", postfix = " ")
+    val params = io.quarkus.panache.common.Parameters()
+    if (status != null) params.and("status", status)
+    if (contractId != null) params.and("contractId", contractId)
+    return Panache.withSession { find("${where}order by id desc", params).page(0, limit).list() }.awaitSuspending()
+        .map { ExitJson.mapper.readValue(it.body, T::class.java) }
+}
+
 @ApplicationScoped
 class TerminationNoticeRepositoryImpl :
     TerminationNoticeRepository,
@@ -211,6 +234,9 @@ class PayoutRequestRepositoryImpl :
     override suspend fun findByContract(contractId: UUID): List<PayoutRequest> =
         load("contractId = ?1 order by id", contractId)
 
+    override suspend fun list(status: PayoutStatus?, contractId: UUID?, limit: Int): List<PayoutRequest> =
+        page<PayoutRequestEntity, PayoutRequest>(status?.name, contractId, limit)
+
     override suspend fun findInPayment(): List<PayoutRequest> =
         load("status in ?1", listOf(PayoutStatus.CONFIRMED.name, PayoutStatus.IN_PAYMENT.name))
 }
@@ -234,6 +260,9 @@ class DeathClaimRepositoryImpl :
 
     override suspend fun findById(id: UUID): DeathClaim? =
         load<DeathClaimEntity, DeathClaim>("aggregateId", id).firstOrNull()
+
+    override suspend fun list(status: DeathClaimStatus?, limit: Int): List<DeathClaim> =
+        page<DeathClaimEntity, DeathClaim>(status?.name, null, limit)
 
     override suspend fun findByContract(contractId: UUID): DeathClaim? =
         load<DeathClaimEntity, DeathClaim>("contractId", contractId).firstOrNull()

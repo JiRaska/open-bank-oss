@@ -6,7 +6,6 @@ package com.openbank.pension.infrastructure.onboarding.adapter
 
 import com.openbank.pension.application.onboarding.CounterpartyDispatch
 import com.openbank.pension.application.onboarding.CounterpartyReceipt
-import com.openbank.pension.application.port.out.FundAdministrationPort
 import com.openbank.pension.application.onboarding.GeneratedDocument
 import com.openbank.pension.application.onboarding.IntegrationUnavailableException
 import com.openbank.pension.application.onboarding.KeyInformationDocumentPort
@@ -18,17 +17,13 @@ import com.openbank.pension.application.onboarding.PartyRelationPort
 import com.openbank.pension.application.onboarding.SignatureOutcome
 import com.openbank.pension.application.onboarding.SignatureVerificationPort
 import com.openbank.pension.application.onboarding.TransferCounterpartyPort
-import com.openbank.pension.application.port.out.Valuation
-import com.openbank.pension.domain.transfer.FundsArrival
+import com.openbank.pension.application.port.out.FundAdministrationPort
 import com.openbank.pension.domain.transfer.IncentiveHistoryEntry
 import com.openbank.pension.domain.transfer.TransferRequest
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
-import java.math.BigDecimal
 import java.security.MessageDigest
-import java.time.Clock
-import java.time.LocalDate
 import java.util.UUID
 
 /**
@@ -132,4 +127,3 @@ class StubTransferCounterpartyAdapter(private val stub: StubIntegrationSwitch) :
         incentiveHistory: List<IncentiveHistoryEntry>,
     ): String = stub.call("TransferCounterpartyPort") { "stub-payment-${request.id}" }
 }
-

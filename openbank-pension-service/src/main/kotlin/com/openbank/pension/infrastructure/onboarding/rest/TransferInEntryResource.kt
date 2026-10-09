@@ -4,12 +4,11 @@
 
 package com.openbank.pension.infrastructure.onboarding.rest
 
-import com.openbank.pension.infrastructure.rest.IDEMPOTENCY_KEY_HEADER
-import com.openbank.pension.infrastructure.rest.requireIdempotencyKey
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import com.openbank.pension.domain.onboarding.OnboardingKind
 import com.openbank.pension.infrastructure.authz.ContractAccessGuard.Companion.PARTY_HEADER
+import com.openbank.pension.infrastructure.rest.requireIdempotencyKey
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
@@ -41,8 +40,9 @@ class TransferInEntryResource {
     @Operation(summary = "Start a transfer-in application (onboarding with kind TRANSFER_IN)")
     @Authorize(action = "pension.onboarding.start")
     suspend fun start(
-        @HeaderParam(IDEMPOTENCY_KEY_HEADER) idempotencyKey: String?,
-        @HeaderParam(PARTY_HEADER) party: String?, request: StartApplicationRequest?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        @HeaderParam(PARTY_HEADER) party: String?,
+        request: StartApplicationRequest?,
     ): Response {
         requireIdempotencyKey(idempotencyKey)
         val body = requireNotNull(request) { "request body is required" }

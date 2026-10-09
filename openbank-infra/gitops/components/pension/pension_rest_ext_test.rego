@@ -15,10 +15,53 @@ test_edge_may_create_a_contract if {
 	}
 }
 
-test_edge_may_terminate if {
-	rest.allow with input as {
+# S8: the S1 shortcuts are retired — no principal reaches them.
+test_edge_may_not_use_the_retired_s1_termination if {
+	not rest.allow with input as {
 		"principal": {"type": "HUMAN", "id": pension_edge, "roles": ["ROLE_API"]},
 		"action": "pension.contract.terminate",
+	}
+}
+
+test_edge_may_not_activate_a_contract_directly if {
+	not rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": pension_edge, "roles": ["ROLE_API"]},
+		"action": "pension.contract.activate",
+	}
+}
+
+test_edge_may_simulate if {
+	rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": pension_edge, "roles": ["ROLE_API"]},
+		"action": "pension.simulation.run",
+	}
+}
+
+test_other_service_account_may_not_simulate if {
+	not rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR", "ROLE_API"]},
+		"action": "pension.simulation.run",
+	}
+}
+
+test_operator_may_read_the_payout_queue if {
+	rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
+		"action": "pension.operator.exit-read",
+	}
+}
+
+test_edge_may_not_read_the_payout_queue if {
+	not rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": pension_edge, "roles": ["ROLE_API", "ROLE_OPERATOR"]},
+		"action": "pension.operator.exit-read",
+	}
+}
+
+test_service_account_may_not_read_the_payout_queue if {
+	not rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]},
+		"action": "pension.operator.exit-read",
 	}
 }
 

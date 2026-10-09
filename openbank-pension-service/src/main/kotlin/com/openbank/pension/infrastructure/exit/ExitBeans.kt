@@ -13,7 +13,6 @@ import com.openbank.pension.application.exit.ExitExecutionService
 import com.openbank.pension.application.exit.ExitGateways
 import com.openbank.pension.application.exit.ExitStores
 import com.openbank.pension.application.exit.ExitWorkflowLauncher
-import com.openbank.pension.application.port.out.FundAdministrationPort
 import com.openbank.pension.application.exit.IncentiveClawbackPort
 import com.openbank.pension.application.exit.OwnAccountVerificationPort
 import com.openbank.pension.application.exit.PaymentInstructionRepository
@@ -25,6 +24,7 @@ import com.openbank.pension.application.exit.TaxWithholdingPort
 import com.openbank.pension.application.exit.TerminationNoticeRepository
 import com.openbank.pension.application.exit.TerminationService
 import com.openbank.pension.application.port.`in`.PensionContractUseCase
+import com.openbank.pension.application.port.out.FundAdministrationPort
 import com.openbank.pension.application.port.out.PensionContractRepository
 import com.openbank.pension.domain.pack.JurisdictionPackRegistry
 import jakarta.enterprise.context.ApplicationScoped

@@ -4,7 +4,6 @@
 
 package com.openbank.pension.application.usecase
 
-import com.openbank.pension.application.port.out.OnboardingActivationPort
 import com.openbank.pension.application.port.out.ContractFundingDirectory
 import com.openbank.pension.application.port.out.ContractFundingView
 import com.openbank.pension.application.port.out.ContractNotFoundException
@@ -14,6 +13,7 @@ import com.openbank.pension.application.port.out.EmployerDirectoryPort
 import com.openbank.pension.application.port.out.EmployerEnrolmentRepository
 import com.openbank.pension.application.port.out.FundAdministrationPort
 import com.openbank.pension.application.port.out.MandateRequest
+import com.openbank.pension.application.port.out.OnboardingActivationPort
 import com.openbank.pension.application.port.out.PaymentMandatePort
 import com.openbank.pension.application.port.out.UnmatchedPaymentRepository
 import com.openbank.pension.domain.contribution.Contribution

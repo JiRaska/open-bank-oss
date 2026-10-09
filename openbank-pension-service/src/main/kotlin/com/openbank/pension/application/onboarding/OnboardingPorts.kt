@@ -15,7 +15,6 @@ import com.openbank.pension.domain.transfer.FundsArrival
 import com.openbank.pension.domain.transfer.IncentiveHistoryEntry
 import com.openbank.pension.domain.transfer.TransferRequest
 import com.openbank.pension.domain.transfer.TransferStatus
-import java.math.BigDecimal
 import java.time.LocalDate
 import java.util.UUID
 

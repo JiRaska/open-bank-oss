@@ -4,12 +4,11 @@
 
 package com.openbank.pension.infrastructure.onboarding.rest
 
-import com.openbank.pension.infrastructure.rest.IDEMPOTENCY_KEY_HEADER
-import com.openbank.pension.infrastructure.rest.requireIdempotencyKey
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import com.openbank.pension.application.onboarding.TransferOutCommand
 import com.openbank.pension.application.onboarding.TransferService
+import com.openbank.pension.infrastructure.rest.requireIdempotencyKey
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
@@ -51,7 +50,7 @@ class ReceivingProviderResource {
     @Operation(summary = "Request a transfer-out to the calling provider; waits for the participant's SCA consent")
     @Authorize(action = "pension.transfer.provider-request")
     suspend fun requestOut(
-        @HeaderParam(IDEMPOTENCY_KEY_HEADER) idempotencyKey: String?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         request: TransferOutRequest?,
     ): Response {
         requireIdempotencyKey(idempotencyKey)

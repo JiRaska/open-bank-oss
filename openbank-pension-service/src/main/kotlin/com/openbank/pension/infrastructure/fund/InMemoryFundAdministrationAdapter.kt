@@ -54,7 +54,12 @@ class InMemoryFundAdministrationAdapter(
         return Valuation(amount.setScale(2, RoundingMode.HALF_EVEN), currency, LocalDate.now(clock))
     }
 
-    override suspend fun subscribe(contractId: UUID, amount: BigDecimal, currency: String, idempotencyKey: String): String {
+    override suspend fun subscribe(
+        contractId: UUID,
+        amount: BigDecimal,
+        currency: String,
+        idempotencyKey: String,
+    ): String {
         log.warnf("IN-MEMORY fund administration (dev/test): subscribe %s for %s", amount, contractId)
         orders.computeIfAbsent(idempotencyKey) {
             values.computeIfPresent(contractId) { _, v -> v + amount }
@@ -63,7 +68,12 @@ class InMemoryFundAdministrationAdapter(
         return "mem-sub-" + UUID.nameUUIDFromBytes(idempotencyKey.toByteArray())
     }
 
-    override suspend fun redeem(contractId: UUID, amount: BigDecimal, currency: String, idempotencyKey: String): Redemption {
+    override suspend fun redeem(
+        contractId: UUID,
+        amount: BigDecimal,
+        currency: String,
+        idempotencyKey: String,
+    ): Redemption {
         log.warnf("IN-MEMORY fund administration (dev/test): redeem %s for %s", amount, contractId)
         orders.computeIfAbsent(idempotencyKey) {
             values.computeIfPresent(contractId) { _, v -> (v - amount).max(BigDecimal.ZERO) }
