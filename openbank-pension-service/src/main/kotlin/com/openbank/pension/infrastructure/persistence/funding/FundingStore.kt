@@ -354,14 +354,16 @@ class PgIncentiveLedger(client: Pool) :
     override suspend fun append(entry: IncentiveLedgerEntry) {
         client.preparedQuery(
             """
-            INSERT INTO pension_incentive_ledger (id, contract_id, incentive_id, claim_id, kind, amount, tax_year, period, occurred_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            INSERT INTO pension_incentive_ledger (id, contract_id, incentive_id, claim_id, kind, amount, tax_year, period, occurred_at,
+                idempotency_key)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            ON CONFLICT (idempotency_key) DO NOTHING
             """.trimIndent(),
         ).execute(
             Tuple.tuple(
                 listOf(
                     entry.id, entry.contractId, entry.incentiveId, entry.claimId, entry.kind.name, entry.amount,
-                    entry.taxYear, entry.period.toString(), utc(entry.occurredAt),
+                    entry.taxYear, entry.period.toString(), utc(entry.occurredAt), entry.idempotencyKey,
                 ),
             ),
         ).awaitSuspending()
@@ -507,6 +509,7 @@ private fun Row.toLedger() = IncentiveLedgerEntry(
     taxYear = getInteger("tax_year"),
     period = YearMonth.parse(getString("period")),
     occurredAt = instant("occurred_at"),
+    idempotencyKey = getString("idempotency_key"),
 )
 
 /** Storage shape of a certified summary — kept apart so the domain type stays annotation-free. */

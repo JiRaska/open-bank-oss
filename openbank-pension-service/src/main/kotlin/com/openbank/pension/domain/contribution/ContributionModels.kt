@@ -38,7 +38,14 @@ object MoneyBounds {
 enum class ContributionSource { PARTICIPANT, EMPLOYER, STATE, TRANSFER_IN }
 
 /** How the money arrived. */
-enum class ContributionChannel { STANDING_ORDER, DIRECT_DEBIT, BANK_TRANSFER, EMPLOYER_BATCH, STATE_INCENTIVE }
+enum class ContributionChannel {
+    STANDING_ORDER,
+    DIRECT_DEBIT,
+    BANK_TRANSFER,
+    EMPLOYER_BATCH,
+    STATE_INCENTIVE,
+    TRANSFER,
+}
 
 /**
  * One credited contribution to a contract (ADR-0334 S3). Immutable and append-only; the

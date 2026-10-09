@@ -53,7 +53,7 @@ class FundingServicesTest {
 
     @Test
     fun `unattributable payments are parked with the reason, idempotently`(): Unit = runBlocking {
-        val suspended = f.contract(status = "PENDING_ACTIVATION")
+        val suspended = f.contract(status = "DRAFT")
         val ref = f.contributionService.paymentReference(suspended.contractId)
         val noRef = f.contributionService.receive(payment("a", "100", null)) as ReceiptOutcome.Unmatched
         val unknown = f.contributionService.receive(payment("b", "100", "999")) as ReceiptOutcome.Unmatched
@@ -353,5 +353,68 @@ class FundingServicesTest {
         val (filed, _) = f.incentiveService.submitPending()
         assertThat(filed).isEmpty()
         assertThat(f.batchRows).hasSize(1)
+    }
+
+    @Test
+    fun `the first payment to a contract awaiting activation is credited and activates it`(): Unit = runBlocking {
+        val c = f.contract(status = "PENDING_ACTIVATION")
+        val outcome = f.contributionService.receive(
+            payment("first", "1700", f.contributionService.paymentReference(c.contractId)),
+        )
+        assertThat(outcome).isInstanceOf(ReceiptOutcome.Credited::class.java)
+        assertThat(f.activations).containsExactly(c.contractId)
+        f.contributionService.receive(payment("second", "1700", f.contributionService.paymentReference(c.contractId)))
+        assertThat(f.activations).hasSize(1)
+    }
+
+    @Test
+    fun `transferred-in funds are booked as TRANSFER_IN once, without a second subscription`(): Unit = runBlocking {
+        val c = f.contract()
+        val transfer = UUID.randomUUID()
+        f.contributionService.bookTransferIn(
+            c.contractId,
+            transfer,
+            BigDecimal("80000"),
+            "CZK",
+            LocalDate.of(2026, 1, 3),
+        )
+        f.contributionService.bookTransferIn(
+            c.contractId,
+            transfer,
+            BigDecimal("80000"),
+            "CZK",
+            LocalDate.of(2026, 1, 3),
+        )
+        val year = f.incentiveService.taxSummary(c.contractId, 2026)
+        assertThat(year.transferIn).isEqualByComparingTo("80000.00")
+        assertThat(year.participantContributions).isEqualByComparingTo("0")
+        assertThat(f.subscriptions).isEmpty()
+        assertThat(f.contributionService.placeMissingSubscriptions(listOf(c.contractId))).isZero()
+    }
+
+    @Test
+    fun `the clawback balance reports the real received incentive and settlement is idempotent`(): Unit = runBlocking {
+        val c = f.contract()
+        val ref = f.contributionService.paymentReference(c.contractId)
+        f.contributionService.receive(payment("p", "1700", ref, LocalDate.of(2026, 1, 9)))
+        val batch = f.incentiveService.runMonthlyClaims(YearMonth.of(2026, 1)).batches.single()
+        f.incentiveService.reconcileReceiptFile(batch.id, "${f.claimRows.values.single().id};ACCEPTED;340.00")
+
+        val balance = f.incentiveService.clawbackBalance(c.contractId, LocalDate.of(2026, 6, 1))
+        assertThat(balance.stateIncentivesToReturn).isEqualByComparingTo("340.00")
+        assertThat(balance.stateIncentivesReceived).isEqualByComparingTo("340.00")
+        assertThat(balance.ownContributionsNotDeducted).isEqualByComparingTo("1700.00")
+
+        f.incentiveService.settleClawback(c.contractId, BigDecimal("340.00"), "exit-1")
+        f.incentiveService.settleClawback(c.contractId, BigDecimal("340.00"), "exit-1")
+        assertThat(
+            f.ledgerRows.filter {
+                it.kind == com.openbank.pension.domain.incentive.LedgerEntryKind.RETURNED
+            },
+        ).hasSize(1)
+        assertThat(f.incentiveService.clawbackBalance(c.contractId, LocalDate.of(2026, 6, 1)).stateIncentivesToReturn)
+            .isEqualByComparingTo("0")
+        assertThatThrownBy { runBlocking { f.incentiveService.settleClawback(c.contractId, BigDecimal.ONE, "exit-2") } }
+            .isInstanceOf(IllegalArgumentException::class.java)
     }
 }

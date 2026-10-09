@@ -104,6 +104,8 @@ data class IncentiveLedgerEntry(
     val taxYear: Int,
     val period: YearMonth,
     val occurredAt: Instant,
+    /** Set on entries written for an external instruction (S5 clawback settlement); unique when set. */
+    val idempotencyKey: String? = null,
 ) {
     init {
         require(amount.signum() > 0) { "a ledger entry amount is positive; the kind carries the sign" }
@@ -146,5 +148,17 @@ data class TaxYearSummary(
 
 /** What must go back on early exit for one incentive (consumed by S5). */
 enum class ClawbackKind { RETURN_TO_AGENCY, TAX_RECAPTURE }
+
+/**
+ * Field-for-field what S5's `IncentiveClawbackPort.balance` returns (`domain.exit.IncentiveBalance`),
+ * so S5's adapter is a plain mapping with no arithmetic of its own.
+ */
+data class ClawbackBalance(
+    val stateIncentivesToReturn: BigDecimal,
+    val stateIncentivesReceived: BigDecimal,
+    val deductedContributionsByYear: Map<Int, BigDecimal>,
+    val employerExemptByYear: Map<Int, BigDecimal>,
+    val ownContributionsNotDeducted: BigDecimal,
+)
 
 data class ClawbackItem(val incentiveId: String, val kind: ClawbackKind, val amount: BigDecimal, val taxYears: Set<Int>)

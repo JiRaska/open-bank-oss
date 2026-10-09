@@ -27,7 +27,6 @@ import java.util.UUID
 @QuarkusTestResource(PostgresTestResource::class)
 class FundingApiIT {
 
-    private val contracts = "/api/v1/pension/contracts"
     private val funding = "/api/v1/pension/funding/contracts"
     private val ops = "/api/v1/pension/funding/operations"
 
@@ -35,18 +34,39 @@ class FundingApiIT {
         .header("Idempotency-Key", UUID.randomUUID().toString())
         .apply { if (party != null) header("X-Customer-Party-Id", party.toString()) }
 
-    /** An ACTIVE DPS contract of [party], created through S1's own routes. */
-    private fun activeContract(party: UUID): String {
-        val id: String = spec(party).body(
-            """
-            {"productLine":"DPS","jurisdiction":"CZ","providerEntityId":"${UUID.randomUUID()}","providerType":"PENSION_COMPANY",
-             "birthDate":"1985-05-05","residencyCountry":"CZ","schedule":{"amount":1700,"currency":"CZK","frequency":"MONTHLY"},
-             "strategyCode":"BALANCED","beneficiaries":[{"name":"Jane Doe","sharePercent":100}]}
-            """.trimIndent(),
-        ).`when`().post(contracts).then().statusCode(201).extract().path("contractId")
-        spec(party).body("{}").`when`().post("$contracts/$id/submit").then().statusCode(200)
-        spec(party).body("{}").`when`().post("$contracts/$id/activate").then().statusCode(200)
-        return id
+    /**
+     * An ACTIVE contract written straight to S1's table, for staff tests: staff may not create a
+     * contract over HTTP (writes act for a participant, and only the edge relay may name one).
+     */
+    private fun seededContract(party: UUID): String {
+        val id = UUID.randomUUID()
+        jdbc { c ->
+            c.prepareStatement(
+                // An explicit id far above Hibernate's pooled-sequence range: the BIGSERIAL default and
+                // the entity's `pension_contracts_seq` blocks are different sequences and collide.
+                "INSERT INTO pension_contracts (id, contract_id, participant_party_id, product_line, jurisdiction, " +
+                    "pack_version, " +
+                    "provider_entity_id, provider_type, participant_birth_date, status, contribution_amount, " +
+                    "contribution_currency, contribution_frequency, start_date, created_at, updated_at) " +
+                    "VALUES (1000000000000 + (random() * 1000000000)::bigint, ?, ?, 'DPS', 'CZ', 1, ?, " +
+                    "'PENSION_COMPANY', DATE '1985-05-05', 'ACTIVE', 1700, 'CZK', " +
+                    "'MONTHLY', DATE '2025-01-01', now(), now())",
+            ).use { st ->
+                st.setObject(1, id)
+                st.setObject(2, party)
+                st.setObject(3, UUID.randomUUID())
+                st.executeUpdate()
+            }
+            // The aggregate requires a strategy; S1 rehydrates the contract through it.
+            c.prepareStatement(
+                "INSERT INTO pension_strategy_elections (id, contract_id, strategy_code, effective_from, elected_at) " +
+                    "VALUES (1000000000000 + (random() * 1000000000)::bigint, ?, 'BALANCED', DATE '2025-01-01', now())",
+            ).use { st ->
+                st.setObject(1, id)
+                st.executeUpdate()
+            }
+        }
+        return id.toString()
     }
 
     private fun reference(id: String, party: UUID?): String =
@@ -56,7 +76,7 @@ class FundingApiIT {
     @TestSecurity(user = "alice", roles = ["ROLE_OPERATOR"])
     fun `intake, unmatched queue, claim batch and receipt run end to end`() {
         val party = UUID.randomUUID()
-        val id = activeContract(party)
+        val id = seededContract(party)
         val ref = reference(id, null)
         val payment = """{"paymentId":"it-${UUID.randomUUID()}","amount":1700,"currency":"CZK",""" +
             """"valueDate":"2026-01-15","reference":"$ref"}"""
@@ -109,7 +129,7 @@ class FundingApiIT {
     @Test
     @TestSecurity(user = "alice", roles = ["ROLE_OPERATOR"])
     fun `staff read without the header but never write for a participant, and bad input is a 400`() {
-        val id = activeContract(UUID.randomUUID())
+        val id = seededContract(UUID.randomUUID())
         spec(null).`when`().get("$funding/$id/contributions").then().statusCode(200)
         spec(
             null,
@@ -128,7 +148,7 @@ class FundingApiIT {
     @TestSecurity(user = "edge", roles = ["ROLE_API"])
     fun `the edge reaches only its participant's contract and never an operator route`() {
         val owner = UUID.randomUUID()
-        val id = activeContract(owner)
+        val id = seededContract(owner)
         spec(owner).`when`().get("$funding/$id/contributions").then().statusCode(200)
         spec(
             owner,
@@ -160,25 +180,34 @@ class FundingApiIT {
     @TestSecurity(user = "edge", roles = ["ROLE_API"])
     fun `an employer bulk line only credits a contract that enrolled that employer`() {
         val owner = UUID.randomUUID()
-        val id = activeContract(owner)
+        val id = seededContract(owner)
         val employer = UUID.randomUUID()
         spec(owner).body("{}").`when`().put("$funding/$id/employers/$employer").then().statusCode(204)
         assertThat(rows("SELECT count(*) FROM pension_employer_enrolments WHERE contract_id = '$id'")).isEqualTo(1)
     }
 
-    private fun rows(sql: String): Int {
+    private fun <T> jdbc(block: (java.sql.Connection) -> T): T {
         val cfg = ConfigProvider.getConfig()
-        DriverManager.getConnection(
+        return DriverManager.getConnection(
             cfg.getValue("quarkus.datasource.jdbc.url", String::class.java),
             cfg.getValue("quarkus.datasource.username", String::class.java),
             cfg.getValue("quarkus.datasource.password", String::class.java),
-        ).use { c ->
-            c.createStatement().use { s ->
-                s.executeQuery(sql).use { r ->
-                    r.next()
-                    return r.getInt(1)
-                }
+        ).use(block)
+    }
+
+    private fun rows(sql: String): Int = jdbc { c ->
+        c.createStatement().use { st ->
+            st.executeQuery(sql).use { r ->
+                r.next()
+                r.getInt(1)
             }
         }
+    }
+
+    @Test
+    @TestSecurity(user = "mallory", roles = ["ROLE_API"])
+    fun `a party header from anyone but the edge relay is refused`() {
+        val id = seededContract(UUID.randomUUID())
+        spec(UUID.randomUUID()).`when`().get("$funding/$id/contributions").then().statusCode(403)
     }
 }

@@ -4,6 +4,7 @@
 
 package com.openbank.pension.application.usecase
 
+import com.openbank.pension.application.port.out.ContractActivationPort
 import com.openbank.pension.application.port.out.ContractFundingDirectory
 import com.openbank.pension.application.port.out.ContractFundingView
 import com.openbank.pension.application.port.out.ContractNotFoundException
@@ -61,6 +62,7 @@ class ContributionService(
     private val employers: EmployerDirectoryPort,
     private val mandates: PaymentMandatePort,
     private val enrolments: EmployerEnrolmentRepository,
+    private val activation: ContractActivationPort,
     private val clock: Clock,
 ) {
     private val log = Logger.getLogger(ContributionService::class.java)
@@ -181,6 +183,36 @@ class ContributionService(
         enrolments.enrol(contractId, employerPartyId)
     }
 
+    /**
+     * Funds transferred in from another provider (S2 calls this on arrival). Booked as source
+     * TRANSFER_IN so the tax year reports them apart from new contributions. NO subscription is
+     * placed: S2's transfer completion already buys the units, and a second order would double-buy.
+     */
+    suspend fun bookTransferIn(
+        contractId: UUID,
+        transferId: UUID,
+        amount: java.math.BigDecimal,
+        currency: String,
+        valueDate: java.time.LocalDate,
+    ): Contribution {
+        val contract = requireContract(contractId)
+        val (stored, _) = contributions.insertIfAbsent(
+            Contribution(
+                id = UUID.randomUUID(),
+                contractId = contract.contractId,
+                paymentId = "transfer-in:$transferId",
+                source = ContributionSource.TRANSFER_IN,
+                channel = ContributionChannel.TRANSFER,
+                amount = amount,
+                currency = currency,
+                valueDate = valueDate,
+                subscriptionOrderId = "transfer-in:$transferId",
+                receivedAt = now(),
+            ),
+        )
+        return stored
+    }
+
     /** Sets up the participant's regular payment, quoting the contract's reference so it matches. */
     suspend fun setUpMandate(request: MandateRequest): String {
         val contract = requireContract(request.contractId)
@@ -225,6 +257,7 @@ class ContributionService(
             ),
         )
         if (!created) return ReceiptOutcome.Duplicate(stored)
+        if (contract.status == PENDING) activation.activateOnFirstContribution(contract.contractId, payment.valueDate)
         subscribe(stored)
         return ReceiptOutcome.Credited(stored)
     }
@@ -242,7 +275,7 @@ class ContributionService(
         )
 
     private fun rejectionFor(contract: ContractFundingView, currency: String): UnmatchedReason? = when {
-        contract.status !in ACCEPTING -> UnmatchedReason.CONTRACT_NOT_ACCEPTING
+        contract.status !in INTAKE -> UnmatchedReason.CONTRACT_NOT_ACCEPTING
         contract.currency != currency -> UnmatchedReason.CURRENCY_MISMATCH
         else -> null
     }
@@ -255,6 +288,10 @@ class ContributionService(
     companion object {
         /** SUSPENDED pauses the schedule, not the account: money that still arrives is credited. */
         val ACCEPTING = setOf("ACTIVE", "SUSPENDED")
+        const val PENDING = "PENDING_ACTIVATION"
+
+        /** Money may also arrive for a signed contract awaiting activation: the first payment activates it. */
+        val INTAKE = ACCEPTING + PENDING
         private val IBAN = Regex("^[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}$")
     }
 }

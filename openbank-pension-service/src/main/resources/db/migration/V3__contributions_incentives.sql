@@ -112,6 +112,8 @@ CREATE TABLE pension_incentive_ledger (
     tax_year      INTEGER NOT NULL,
     period        CHAR(7) NOT NULL,
     occurred_at   TIMESTAMPTZ NOT NULL,
+    -- S5 settlement instructions are replayed by Temporal; the key makes each one land once.
+    idempotency_key VARCHAR(200) UNIQUE,
     CONSTRAINT pension_incentive_ledger_positive CHECK (amount > 0),
     CONSTRAINT pension_incentive_ledger_kind_known CHECK (kind IN ('RECEIVED', 'RETURNED'))
 );

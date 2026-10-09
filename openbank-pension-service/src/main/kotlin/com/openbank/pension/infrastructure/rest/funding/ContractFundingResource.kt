@@ -6,10 +6,14 @@ package com.openbank.pension.infrastructure.rest.funding
 
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
+import com.openbank.pension.application.port.`in`.Caller
+import com.openbank.pension.application.port.out.ContractNotFoundException
 import com.openbank.pension.application.port.out.MandateRequest
+import com.openbank.pension.application.port.out.PensionContractRepository
 import com.openbank.pension.application.usecase.ContributionService
 import com.openbank.pension.application.usecase.IncentiveService
-import io.quarkus.security.identity.SecurityIdentity
+import com.openbank.pension.domain.model.PensionContract
+import com.openbank.pension.infrastructure.authz.ContractAccessGuard
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
@@ -33,7 +37,9 @@ import java.util.UUID
  * Its own root, NOT under S1's `/api/v1/pension/contracts`: two resource classes sharing a path
  * prefix with a template segment compete in JAX-RS class matching, and the loser's routes 404.
  * `@Path` sits directly above `class` (#3371). Every route resolves the contract through
- * [ContractAccessGuard] before doing anything else — a foreign contract is a 404.
+ * S1's shared [ContractAccessGuard] before doing anything else: the party header is trusted only
+ * from the edge relay, header-less callers are staff readers, writes act for the participant, and a
+ * foreign contract is a 404.
  */
 @Tag(name = "Pension funding", description = "Contributions, state incentives and tax years of a pension contract")
 @Path("/api/v1/pension/funding/contracts/{contractId}")
@@ -52,7 +58,13 @@ class ContractFundingResource {
     lateinit var guard: ContractAccessGuard
 
     @Inject
-    lateinit var identity: SecurityIdentity
+    lateinit var contractRepository: PensionContractRepository
+
+    /** S1's single ownership rule, applied to the contract as S1 stores it — never re-implemented here. */
+    private suspend fun visible(caller: Caller, contractId: UUID): PensionContract = guard.requireVisible(
+        caller,
+        contractRepository.findById(contractId) ?: throw ContractNotFoundException(contractId),
+    )
 
     @GET
     @Path("/payment-reference")
@@ -62,7 +74,7 @@ class ContractFundingResource {
         @PathParam("contractId") contractId: UUID,
         @HeaderParam(ContractAccessGuard.PARTY_HEADER) party: String?,
     ): PaymentReferenceResponse {
-        guard.forRead(identity, party, contractId)
+        visible(guard.readerFor(party), contractId)
         return PaymentReferenceResponse(contractId, contributions.paymentReference(contractId))
     }
 
@@ -74,7 +86,7 @@ class ContractFundingResource {
         @PathParam("contractId") contractId: UUID,
         @HeaderParam(ContractAccessGuard.PARTY_HEADER) party: String?,
     ): List<ContributionResponse> {
-        guard.forRead(identity, party, contractId)
+        visible(guard.readerFor(party), contractId)
         return contributions.list(contractId).map(ContributionResponse::from)
     }
 
@@ -87,7 +99,7 @@ class ContractFundingResource {
         @HeaderParam(ContractAccessGuard.PARTY_HEADER) party: String?,
         request: MandateSetupRequest?,
     ): Response {
-        val contract = guard.forWrite(identity, party, contractId)
+        val contract = visible(guard.actingParticipant(party), contractId)
         val body = requireNotNull(request) { "request body is required" }
         val id = contributions.setUpMandate(
             MandateRequest(
@@ -113,7 +125,7 @@ class ContractFundingResource {
         @PathParam("employerPartyId") employerPartyId: UUID,
         @HeaderParam(ContractAccessGuard.PARTY_HEADER) party: String?,
     ): Response {
-        guard.forWrite(identity, party, contractId)
+        visible(guard.actingParticipant(party), contractId)
         contributions.enrolEmployer(contractId, employerPartyId)
         return Response.noContent().build()
     }
@@ -126,7 +138,7 @@ class ContractFundingResource {
         @PathParam("contractId") contractId: UUID,
         @HeaderParam(ContractAccessGuard.PARTY_HEADER) party: String?,
     ): IncentiveStatusResponse {
-        guard.forRead(identity, party, contractId)
+        visible(guard.readerFor(party), contractId)
         val status = incentives.status(contractId)
         return IncentiveStatusResponse(
             status.claims.map(ClaimResponse::from),
@@ -143,7 +155,7 @@ class ContractFundingResource {
         @PathParam("year") year: Int,
         @HeaderParam(ContractAccessGuard.PARTY_HEADER) party: String?,
     ): TaxYearSummaryResponse {
-        guard.forRead(identity, party, contractId)
+        visible(guard.readerFor(party), contractId)
         return TaxYearSummaryResponse.from(incentives.taxSummary(contractId, year))
     }
 
@@ -157,7 +169,7 @@ class ContractFundingResource {
         @HeaderParam(ContractAccessGuard.PARTY_HEADER) party: String?,
         request: ExternalCapUsageRequest?,
     ): TaxYearSummaryResponse {
-        guard.forWrite(identity, party, contractId)
+        visible(guard.actingParticipant(party), contractId)
         val usage = requireNotNull(request?.usage) { "usage is required" }
             .mapValues { (group, v) -> requireNotNull(v) { "usage['$group'] must not be null" } }
         incentives.declareExternalCapUsage(contractId, year, usage)

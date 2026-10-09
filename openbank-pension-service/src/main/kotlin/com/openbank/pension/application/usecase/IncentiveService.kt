@@ -22,7 +22,9 @@ import com.openbank.pension.domain.contribution.IncomingPayment
 import com.openbank.pension.domain.incentive.ClaimBatch
 import com.openbank.pension.domain.incentive.ClaimBatchStatus
 import com.openbank.pension.domain.incentive.ClaimStatus
+import com.openbank.pension.domain.incentive.ClawbackBalance
 import com.openbank.pension.domain.incentive.ClawbackItem
+import com.openbank.pension.domain.incentive.ClawbackKind
 import com.openbank.pension.domain.incentive.ContractYearInput
 import com.openbank.pension.domain.incentive.IncentiveClaim
 import com.openbank.pension.domain.incentive.IncentiveEngine
@@ -246,6 +248,82 @@ class IncentiveService(
         val firstYear = contributions.byContract(contractId).minOfOrNull { it.taxYear } ?: on.year
         val deductible = (firstYear..on.year).associateWith { year -> taxYear(contract, year).deductibleAmount }
         return IncentiveEngine.clawback(packOf(contract), ledger.byContract(contractId), deductible, on.year)
+    }
+
+    /** The S5 `IncentiveClawbackPort.balance` query: what an exit on [asOf] must return, and the tax bases. */
+    suspend fun clawbackBalance(contractId: UUID, asOf: LocalDate): ClawbackBalance {
+        val contract = requireContract(contractId)
+        val all = contributions.byContract(contractId)
+        val years = ((all.minOfOrNull { it.taxYear } ?: asOf.year)..asOf.year).map { taxYear(contract, it) }
+        val entries = ledger.byContract(contractId)
+        val toReturn = IncentiveEngine.clawback(
+            packOf(contract),
+            entries,
+            years.associate {
+                it.taxYear to
+                    it.deductibleAmount
+            },
+            asOf.year,
+        )
+            .filter { it.kind == ClawbackKind.RETURN_TO_AGENCY }
+            .fold(BigDecimal.ZERO) { a, i -> a + i.amount }
+        val deducted = years.filter { it.deductibleAmount.signum() > 0 }.associate { it.taxYear to it.deductibleAmount }
+        val own = all.filter { it.source == ContributionSource.PARTICIPANT }.fold(BigDecimal.ZERO) { a, c ->
+            a +
+                c.amount
+        }
+        return ClawbackBalance(
+            stateIncentivesToReturn = IncentiveEngine.money(toReturn),
+            stateIncentivesReceived = IncentiveEngine.money(
+                entries.filter { it.kind == LedgerEntryKind.RECEIVED }.fold(BigDecimal.ZERO) { a, e -> a + e.amount },
+            ),
+            deductedContributionsByYear = deducted,
+            employerExemptByYear = years.filter { it.employerExempt.signum() > 0 }.associate {
+                it.taxYear to
+                    it.employerExempt
+            },
+            ownContributionsNotDeducted = IncentiveEngine.money(
+                (
+                    own -
+                        deducted.values.fold(BigDecimal.ZERO, BigDecimal::add)
+                    ).max(BigDecimal.ZERO),
+            ),
+        )
+    }
+
+    /**
+     * The S5 `IncentiveClawbackPort.settleClawback` command: writes RETURNED ledger entries for
+     * [amount], spread over the incentives with a positive balance. Each entry is keyed on
+     * [idempotencyKey], so a replayed activity changes nothing. Over-returning is refused.
+     */
+    suspend fun settleClawback(contractId: UUID, amount: BigDecimal, idempotencyKey: String) {
+        require(amount.signum() > 0) { "clawback amount must be positive" }
+        val contract = requireContract(contractId)
+        val entries = ledger.byContract(contractId)
+        if (entries.any { it.idempotencyKey?.startsWith("$idempotencyKey:") == true }) return
+        val balances = entries.groupBy { it.incentiveId }.mapValues { (_, l) ->
+            l.fold(BigDecimal.ZERO) { a, e ->
+                a +
+                    e.signed
+            }
+        }
+            .filterValues { it.signum() > 0 }
+        require(amount <= balances.values.fold(BigDecimal.ZERO, BigDecimal::add)) {
+            "clawback $amount exceeds the incentive balance"
+        }
+        var left = amount
+        balances.forEach { (incentiveId, balance) ->
+            if (left.signum() == 0) return@forEach
+            val part = left.min(balance)
+            left -= part
+            val today = today()
+            ledger.append(
+                IncentiveLedgerEntry(
+                    UUID.randomUUID(), contract.contractId, incentiveId, null, LedgerEntryKind.RETURNED, part,
+                    today.year, YearMonth.from(today), now(), "$idempotencyKey:$incentiveId",
+                ),
+            )
+        }
     }
 
     suspend fun taxSummary(contractId: UUID, year: Int): TaxYearSummary {

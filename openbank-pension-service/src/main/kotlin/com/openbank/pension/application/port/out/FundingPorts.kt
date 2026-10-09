@@ -138,6 +138,16 @@ interface ContractFundingDirectory {
 // Other services (ADR-0334 §4 Contribute) — ports; adapters may be stubs until the API exists.
 // ---------------------------------------------------------------------------------------------
 
+/**
+ * Activates a PENDING_ACTIVATION contract when its first money arrives (ADR-0334 §4: the first
+ * contribution activates). S2 (onboarding) owns activation; until its port is wired the default
+ * adapter applies S1's own `PensionContract.activate` transition. Idempotent: false when the
+ * contract was not pending.
+ */
+interface ContractActivationPort {
+    suspend fun activateOnFirstContribution(contractId: UUID, startDate: LocalDate): Boolean
+}
+
 /** pension-fund-service (S4): turn credited money into units at the next NAV. */
 interface FundAdministrationPort {
     /** Idempotent on [idempotencyKey]; returns the fund-side order id. */

@@ -5,6 +5,7 @@
 package com.openbank.pension.funding
 
 import com.openbank.pension.application.port.out.ClaimBatchRepository
+import com.openbank.pension.application.port.out.ContractActivationPort
 import com.openbank.pension.application.port.out.ContractFundingDirectory
 import com.openbank.pension.application.port.out.ContractFundingView
 import com.openbank.pension.application.port.out.ContractReferenceRepository
@@ -146,6 +147,7 @@ class InMemoryFunding(now: Instant = Instant.parse("2026-02-10T10:00:00Z")) {
 
     val ledger = object : IncentiveLedgerRepository {
         override suspend fun append(entry: IncentiveLedgerEntry) {
+            if (entry.idempotencyKey != null && ledgerRows.any { it.idempotencyKey == entry.idempotencyKey }) return
             ledgerRows += entry
         }
         override suspend fun byContract(contractId: UUID) = ledgerRows.filter { it.contractId == contractId }
@@ -179,6 +181,18 @@ class InMemoryFunding(now: Instant = Instant.parse("2026-02-10T10:00:00Z")) {
             (contractId to employerPartyId) in enrolled
     }
 
+    val activations = mutableListOf<UUID>()
+
+    val activation = object : ContractActivationPort {
+        override suspend fun activateOnFirstContribution(contractId: UUID, startDate: LocalDate): Boolean {
+            val c = contracts[contractId] ?: return false
+            if (c.status != "PENDING_ACTIVATION") return false
+            contracts[contractId] = c.copy(status = "ACTIVE")
+            activations += contractId
+            return true
+        }
+    }
+
     val fund = object : FundAdministrationPort {
         override suspend fun placeSubscription(
             contractId: UUID,
@@ -207,7 +221,7 @@ class InMemoryFunding(now: Instant = Instant.parse("2026-02-10T10:00:00Z")) {
 
     val contributionService =
         ContributionService(
-            directory, references, contributions, unmatched, fund, employers, mandates, enrolments, clock,
+            directory, references, contributions, unmatched, fund, employers, mandates, enrolments, activation, clock,
         )
 
     val incentiveService = IncentiveService(
