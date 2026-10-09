@@ -62,9 +62,7 @@ class ContractMaintenanceResource {
     suspend fun schedule(
         @PathParam("contractId") contractId: UUID,
         @HeaderParam(PARTY_HEADER) party: String?,
-    ): ScheduleViewResponse {
-        return ScheduleViewResponse.from(maintenance.schedule(access.readerFor(party), contractId))
-    }
+    ): ScheduleViewResponse = ScheduleViewResponse.from(maintenance.schedule(access.readerFor(party), contractId))
 
     @POST
     @Path("/contribution-schedule/preview")
@@ -78,7 +76,9 @@ class ContractMaintenanceResource {
     ): SchedulePreviewResponse {
         requireIdempotencyKey(idempotencyKey)
         val body = requireNotNull(request) { "request body is required" }
-        return SchedulePreviewResponse.from(maintenance.previewSchedule(participant(party), contractId, body.toDomain()))
+        return SchedulePreviewResponse.from(
+            maintenance.previewSchedule(participant(party), contractId, body.toDomain()),
+        )
     }
 
     @POST
@@ -94,7 +94,13 @@ class ContractMaintenanceResource {
         val key = requireIdempotencyKey(idempotencyKey)
         val body = requireNotNull(request) { "request body is required" }
         val version = maintenance.changeSchedule(
-            ChangeScheduleCommand(participant(party), contractId, body.toDomain(), requireChallenge(body.scaChallengeId), key),
+            ChangeScheduleCommand(
+                participant(party),
+                contractId,
+                body.toDomain(),
+                requireChallenge(body.scaChallengeId),
+                key,
+            ),
         )
         return Response.status(Response.Status.CREATED).entity(ScheduleVersionResponse.from(version)).build()
     }

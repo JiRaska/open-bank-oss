@@ -28,7 +28,9 @@ data class ContributionLimits(
 ) {
     init {
         require(minMonthly.signum() >= 0) { "contributionLimits.minMonthly must not be negative" }
-        require(maxMonthly == null || maxMonthly >= minMonthly) { "contributionLimits.maxMonthly must be >= minMonthly" }
+        require(maxMonthly == null || maxMonthly >= minMonthly) {
+            "contributionLimits.maxMonthly must be >= minMonthly"
+        }
         require(allowedFrequencies.isNotEmpty()) { "contributionLimits.allowedFrequencies must not be empty" }
         require(minDayOfMonth in 1..maxDayOfMonth && maxDayOfMonth <= LAST_SAFE_DAY) {
             "contributionLimits days must satisfy 1 <= minDayOfMonth <= maxDayOfMonth <= $LAST_SAFE_DAY"

@@ -136,7 +136,9 @@ data class ContributionScheduleHistory(val contractId: UUID, val versions: List<
         today: LocalDate,
     ): PlannedScheduleChange {
         require(contract.id == contractId) { "history belongs to another contract" }
-        check(contract.status in CHANGEABLE) { "the contribution schedule cannot change on a ${contract.status} contract" }
+        check(contract.status in CHANGEABLE) {
+            "the contribution schedule cannot change on a ${contract.status} contract"
+        }
         val limits = checkNotNull(pack.contributionLimits) {
             "pack ${pack.jurisdiction}/${pack.productLine} v${pack.version} declares no contribution limits"
         }

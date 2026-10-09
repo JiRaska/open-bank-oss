@@ -43,7 +43,10 @@ class ChangeNotAuthorisedException(message: String) : RuntimeException(message)
 
 data class ScheduleView(
     val contract: PensionContract,
-    val history: ContributionScheduleHistory, val inForce: ScheduleVersion?, val pending: ScheduleVersion?)
+    val history: ContributionScheduleHistory,
+    val inForce: ScheduleVersion?,
+    val pending: ScheduleVersion?,
+)
 
 data class ChangeScheduleCommand(
     val caller: Caller,
@@ -78,7 +81,11 @@ class ContractMaintenanceService(
     private val clock: Clock,
 ) {
 
-    suspend fun previewSchedule(caller: Caller, contractId: UUID, request: ScheduleChangeRequest): PlannedScheduleChange {
+    suspend fun previewSchedule(
+        caller: Caller,
+        contractId: UUID,
+        request: ScheduleChangeRequest,
+    ): PlannedScheduleChange {
         caller.requireParticipant()
         val contract = contracts.get(caller, contractId)
         return store.scheduleHistory(contractId).plan(contract, packs.pinnedFor(contract), request, today())

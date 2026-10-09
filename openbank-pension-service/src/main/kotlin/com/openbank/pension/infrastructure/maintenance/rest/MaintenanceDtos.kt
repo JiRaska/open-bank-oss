@@ -134,10 +134,7 @@ data class BeneficiaryVersionResponse(val seq: Int, val beneficiaries: List<Bene
     }
 }
 
-data class BeneficiaryViewResponse(
-    val current: List<BeneficiaryDto>,
-    val history: List<BeneficiaryVersionResponse>,
-) {
+data class BeneficiaryViewResponse(val current: List<BeneficiaryDto>, val history: List<BeneficiaryVersionResponse>) {
     companion object {
         fun from(contract: PensionContract, history: BeneficiaryDesignationHistory) = BeneficiaryViewResponse(
             contract.beneficiaries.map(BeneficiaryDto::from),

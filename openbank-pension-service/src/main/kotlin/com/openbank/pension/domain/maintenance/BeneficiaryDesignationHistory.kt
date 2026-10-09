@@ -16,11 +16,7 @@ import java.util.UUID
  * A complete, ordered designation the participant signs (add, remove and reorder are all "the new
  * list"). [documentSha256] binds the exact list, in order, and the history version it replaces.
  */
-data class PlannedBeneficiaryChange(
-    val contractId: UUID,
-    val baseSeq: Int,
-    val beneficiaries: List<Beneficiary>,
-) {
+data class PlannedBeneficiaryChange(val contractId: UUID, val baseSeq: Int, val beneficiaries: List<Beneficiary>) {
     val documentSha256: String
         get() = Sha256.hex(
             (
@@ -61,7 +57,9 @@ data class BeneficiaryDesignationHistory(val contractId: UUID, val versions: Lis
 
     val latestSeq: Int get() = versions.size
 
-    fun byIdempotencyKey(key: String): BeneficiaryDesignationVersion? = versions.firstOrNull { it.idempotencyKey == key }
+    fun byIdempotencyKey(key: String): BeneficiaryDesignationVersion? = versions.firstOrNull {
+        it.idempotencyKey == key
+    }
 
     fun plan(
         contract: PensionContract,

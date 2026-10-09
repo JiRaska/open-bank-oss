@@ -14,6 +14,7 @@ import com.openbank.pension.domain.maintenance.ScheduleVersion
 import com.openbank.pension.domain.maintenance.ScheduleVersionStatus
 import com.openbank.pension.domain.model.ContributionFrequency
 import com.openbank.pension.domain.model.PensionContract
+import com.openbank.pension.infrastructure.exit.persistence.lockContractRow
 import com.openbank.pension.infrastructure.persistence.entity.PensionContractEntity
 import com.openbank.pension.infrastructure.persistence.repository.ConcurrentContractUpdateException
 import com.openbank.pension.infrastructure.persistence.repository.PensionContractRepositoryImpl.BeneficiaryRow
@@ -129,7 +130,9 @@ class ContractChangeStoreImpl(
 
     override suspend fun saveSchedule(history: ContributionScheduleHistory): ContributionScheduleHistory {
         Panache.withTransaction {
-            schedules.find("contractId = ?1 order by seq", history.contractId).list().flatMap { stored ->
+            lockContractRow(history.contractId).flatMap {
+                schedules.find("contractId = ?1 order by seq", history.contractId).list()
+            }.flatMap { stored ->
                 val bySeq = stored.associateBy { it.seq }
                 history.versions.filter { it.seq in bySeq }.forEach { v ->
                     // The only mutation history allows: SCHEDULED -> SUPERSEDED.
@@ -156,7 +159,9 @@ class ContractChangeStoreImpl(
             rows.map {
                 BeneficiaryDesignationVersion(
                     seq = it.seq,
-                    beneficiaries = objectMapper.readValue<List<BeneficiaryRow>>(it.beneficiaries).map { r -> r.toDomain() },
+                    beneficiaries = objectMapper.readValue<List<BeneficiaryRow>>(it.beneficiaries).map { r ->
+                        r.toDomain()
+                    },
                     documentSha256 = it.documentSha256,
                     scaChallengeId = it.scaChallengeId,
                     idempotencyKey = it.idempotencyKey,
@@ -171,35 +176,45 @@ class ContractChangeStoreImpl(
             version.beneficiaries.map { BeneficiaryRow(it.name, it.partyId?.toString(), it.sharePercent) },
         )
         Panache.withTransaction {
-            contractRows.find("contractId", contract.id).firstResult().flatMap { row ->
-                checkNotNull(row) { "contract ${contract.id} disappeared" }
-                if (row.rowVersion != contract.version) {
-                    throw ConcurrentContractUpdateException(contract.id, row.rowVersion, contract.version)
+            // 1. Row lock on the contract: the check and the write below are one critical section,
+            //    serialised against a concurrent designation AND against a death-claim insert
+            //    (every exit write takes the same lock, see ExitPersistence.lockContractRow).
+            lockContractRow(contract.id)
+                .flatMap { contractRows.find("contractId", contract.id).firstResult() }
+                .flatMap { row ->
+                    checkNotNull(row) { "contract ${contract.id} disappeared" }
+                    // 2. Optimistic version re-checked UNDER the lock: a designation that won the
+                    //    race bumped row_version, so the loser is a 409 and writes nothing.
+                    if (row.rowVersion != contract.version) {
+                        throw ConcurrentContractUpdateException(contract.id, row.rowVersion, contract.version)
+                    }
+                    // 3. Death claim read under the same lock: a claim registered first always wins.
+                    Panache.getSession().flatMap { session ->
+                        session.createNativeQuery<Long>(
+                            "select count(*) from pension_death_claims where contract_id = :id",
+                            Long::class.javaObjectType,
+                        ).setParameter("id", contract.id).singleResult
+                    }.flatMap { claims ->
+                        check(claims == 0L) { "beneficiaries cannot change once a death claim is registered" }
+                        row.beneficiaries = json
+                        row.updatedAt = contract.updatedAt
+                        // 4. History row (with its unique (contract_id, idempotency_key)) in the same
+                        //    transaction: designation, history and key commit together or not at all.
+                        designations.persist(
+                            BeneficiaryDesignationEntity().apply {
+                                contractId = contract.id
+                                seq = version.seq
+                                beneficiaries = json
+                                documentSha256 = version.documentSha256
+                                scaChallengeId = version.scaChallengeId
+                                idempotencyKey = version.idempotencyKey
+                                changedAt = version.changedAt
+                            },
+                        )
+                    }
                 }
-                row.beneficiaries = json
-                row.updatedAt = contract.updatedAt
-                Panache.getSession().flatMap { session ->
-                    // Re-checked INSIDE the write: a death registered after the service's read
-                    // must still stop the change (pension_death_claims.contract_id is UNIQUE).
-                    session.createNativeQuery<Long>(
-                        "select count(*) from pension_death_claims where contract_id = :id",
-                        Long::class.javaObjectType,
-                    ).setParameter("id", contract.id).singleResult
-                }.flatMap { claims ->
-                    check(claims == 0L) { "beneficiaries cannot change once a death claim is registered" }
-                    designations.persist(
-                        BeneficiaryDesignationEntity().apply {
-                            contractId = contract.id
-                            seq = version.seq
-                            beneficiaries = json
-                            documentSha256 = version.documentSha256
-                            scaChallengeId = version.scaChallengeId
-                            idempotencyKey = version.idempotencyKey
-                            changedAt = version.changedAt
-                        },
-                    )
-                }.flatMap { Panache.getSession() }.flatMap { it.flush() }
-            }
+                .flatMap { Panache.getSession() }
+                .flatMap { it.flush() }
         }.awaitSuspending()
     }
 
