@@ -89,6 +89,9 @@ class PensionFundApiIT {
 
         nav = post("/api/v1/funds/$fundA/navs", """{"valuationDate":"${LocalDate.now(ZoneOffset.UTC)}","cash":0}""")
             .then().statusCode(201).body("status", equalTo("CALCULATED")).extract().path("id")
+        // A maker's calculated NAV is not a regulatory read model.
+        given().`when`().get("/api/v1/funds/$fundA/reporting/nav-balance/${LocalDate.now(ZoneOffset.UTC)}")
+            .then().statusCode(404)
 
         // The maker cannot be the checker, for a NAV or a strategy change.
         post("/api/v1/navs/$nav/approve").then().statusCode(403)
@@ -102,6 +105,12 @@ class PensionFundApiIT {
         post("/api/v1/navs/$nav/approve").then().statusCode(200)
             .body("nav.status", equalTo("PUBLISHED"))
             .body("settledOrders", equalTo(1))
+        given().`when`().get("/api/v1/funds/$fundA/reporting/nav-balance/${LocalDate.now(ZoneOffset.UTC)}")
+            .then().statusCode(200)
+            .body("sourceNavId", equalTo(nav))
+            .body("valuationDate", equalTo(LocalDate.now(ZoneOffset.UTC).toString()))
+        given().`when`().get("/api/v1/funds/$fundA/reporting/nav-balance/${LocalDate.now(ZoneOffset.UTC).minusDays(1)}")
+            .then().statusCode(404)
 
         post("/api/v1/strategy-changes/$change/approve").then().statusCode(200)
             .body("status", equalTo("APPROVED"))

@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: OpenBank Pension Fund Service API
   # 1.0.0: first contract (ADR-0334 slice S4, issue #12350).
-  version: 1.0.0
+  version: 1.1.0
   description: |
     Provider side of the pension platform (ADR-0334 §1): segregated funds, fund strategies with
     lifecycle glide paths, the unit register and NAV.
@@ -105,6 +105,25 @@ paths:
         '200':
           description: NAVs
           content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Nav' } } } }
+  /api/v1/funds/{fundId}/reporting/nav-balance/{valuationDate}:
+    parameters:
+      - { $ref: '#/components/parameters/FundId' }
+      - name: valuationDate
+        in: path
+        required: true
+        schema: { type: string, format: date }
+    get:
+      tags: [Funds]
+      operationId: getPublishedFundNavBalance
+      summary: Exact-date balance derived from a four-eyes published fund NAV
+      description: |
+        Returns only figures from a PUBLISHED NAV for this exact valuation date. Missing,
+        calculated, rejected and superseded valuations do not yield a report. The response
+        records its source NAV id. This NAV-derived read model does not attest a complete
+        statutory balance sheet or make the tax-reporting data port available.
+      responses:
+        '200': { description: Published NAV balance, content: { application/json: { schema: { $ref: '#/components/schemas/PublishedFundNavBalance' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/navs/{navId}:
     parameters: [ { $ref: '#/components/parameters/NavId' } ]
     get:
@@ -319,6 +338,16 @@ components:
     FourEyes: { description: The maker cannot be the checker, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   schemas:
+    PublishedFundNavBalance:
+      type: object
+      required: [fundId, valuationDate, sourceNavId, totalAssets, totalLiabilities, totalEquity]
+      properties:
+        fundId: { type: string, format: uuid }
+        valuationDate: { type: string, format: date }
+        sourceNavId: { type: string, format: uuid }
+        totalAssets: { type: number }
+        totalLiabilities: { type: number }
+        totalEquity: { type: number }
     Error:
       type: object
       properties:

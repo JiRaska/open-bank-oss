@@ -25,6 +25,7 @@ import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
+import java.time.LocalDate
 import java.util.UUID
 
 /**
@@ -111,6 +112,16 @@ class FundResource {
     @Authorize(action = "pension-fund.nav.read", resource = "#fundId")
     suspend fun navHistory(@PathParam("fundId") fundId: UUID): List<NavResponse> =
         navs.navs(fundId).map(NavResponse::from)
+
+    @GET
+    @Path("/{fundId}/reporting/nav-balance/{valuationDate}")
+    @Operation(summary = "Read an exact-date balance derived from a published fund NAV")
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, Roles.AUDITOR)
+    @Authorize(action = "pension-fund.nav.read", resource = "#fundId")
+    suspend fun publishedNavBalance(
+        @PathParam("fundId") fundId: UUID,
+        @PathParam("valuationDate") valuationDate: LocalDate,
+    ) = navs.publishedBalance(fundId, valuationDate)
 }
 
 data class NavResponse(

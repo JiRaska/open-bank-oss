@@ -24,10 +24,21 @@ import com.openbank.pensionfund.domain.model.UnitTransaction
 import jakarta.enterprise.context.ApplicationScoped
 import java.math.BigDecimal
 import java.time.Clock
+import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 data class NavPublication(val nav: NavRecord, val settledOrders: Int, val corrections: List<TransactionCorrection>)
+
+/** An exact-date, four-eyes published NAV snapshot; never inferred from a later valuation. */
+data class PublishedFundBalance(
+    val fundId: UUID,
+    val valuationDate: LocalDate,
+    val sourceNavId: UUID,
+    val totalAssets: BigDecimal,
+    val totalLiabilities: BigDecimal,
+    val totalEquity: BigDecimal,
+)
 
 /**
  * NAV lifecycle: calculate (maker) → publish (checker). Publishing an ordinary NAV settles every
@@ -93,6 +104,26 @@ class NavService(private val store: PensionFundStore, private val prices: Market
     suspend fun nav(id: UUID): NavRecord = store.nav(id) ?: throw NotFoundException("NAV $id not found")
 
     suspend fun navs(fundId: UUID): List<NavRecord> = store.navs(fundId)
+
+    suspend fun publishedBalance(fundId: UUID, valuationDate: LocalDate): PublishedFundBalance {
+        val nav = store.publishedNav(fundId, valuationDate)
+            ?: throw NotFoundException("no published NAV for fund $fundId on $valuationDate")
+        check(nav.status == NavStatus.PUBLISHED && nav.valuationDate == valuationDate && nav.publishedAt != null) {
+            "published NAV lookup returned an unapproved or wrong-date valuation"
+        }
+        val liabilities = nav.figures.accruedManagementFee + nav.figures.otherLiabilities
+        check(nav.figures.grossAssets.compareTo(liabilities + nav.figures.netAssets) == 0) {
+            "published NAV does not balance"
+        }
+        return PublishedFundBalance(
+            fundId = fundId,
+            valuationDate = valuationDate,
+            sourceNavId = nav.id,
+            totalAssets = nav.figures.grossAssets,
+            totalLiabilities = liabilities,
+            totalEquity = nav.figures.netAssets,
+        )
+    }
 
     suspend fun reject(id: UUID, actor: String): NavRecord {
         val rejected = nav(id).reject(actor)
