@@ -166,7 +166,19 @@ internal suspend fun <E : ExitDocumentEntity> PanacheRepository<E>.upsert(
         val stored = if (existing == null) persist(entity) else Uni.createFrom().item(entity)
         stored.flatMap { Panache.getSession() }.flatMap { it.flush() }.map { entity.rowVersion }
     }
+}.onFailure(::isLostRace).transform { e ->
+    // Two writers that both passed the in-memory check race at FLUSH; Hibernate's @Version then
+    // refuses the loser. That is the same lost race as above and must be retryable by the same
+    // callers (PayoutService.onFreshRead), not an unrelated 500/409 (#12383 race review).
+    ExitConcurrentUpdateException("exit aggregate $id changed concurrently at flush: ${e.javaClass.simpleName}")
 }.awaitSuspending()
+
+/** An optimistic-lock failure raised at flush, possibly wrapped by the reactive session. */
+internal fun isLostRace(e: Throwable): Boolean = generateSequence(e) { it.cause }.take(MAX_CAUSE_DEPTH).any {
+    it is org.hibernate.StaleStateException || it is jakarta.persistence.OptimisticLockException
+}
+
+private const val MAX_CAUSE_DEPTH = 8
 
 /** The stored body, with the row's current version stamped in so the next save can be checked. */
 internal fun <T> ExitDocumentEntity.toDomain(type: Class<T>): T {

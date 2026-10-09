@@ -44,8 +44,15 @@ interface ParticipantNotificationPort {
     )
 }
 
-/** A write lost a race: the row changed since it was read (optimistic lock, ADR-0334 S8). 409 / retry. */
-class ExitConcurrentUpdateException(message: String) : IllegalStateException(message)
+/**
+ * A write lost a race: the row changed since it was read (optimistic lock, ADR-0334 S8). 409 with
+ * Retry-After at the edge; re-read and retried by [PayoutService] internally.
+ *
+ * Deliberately NOT an IllegalStateException: the exit workflows mark IllegalState as do-not-retry,
+ * so an instalment activity that lost to a concurrent account change used to FAIL the payout
+ * workflow for good instead of re-reading. Every activity step is idempotent, so a retry is safe.
+ */
+class ExitConcurrentUpdateException(message: String) : RuntimeException(message)
 
 /** Remits tax withheld or recaptured on an exit to the tax authority. */
 interface TaxWithholdingPort {
