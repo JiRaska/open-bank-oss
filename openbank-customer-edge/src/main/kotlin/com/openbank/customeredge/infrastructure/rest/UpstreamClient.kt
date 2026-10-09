@@ -249,15 +249,15 @@ class UpstreamClient {
         return builder.build()
     }
 
-    fun get(url: String, partyId: String): Response = get(url, partyId, requestTimeoutMs)
+    fun get(url: String, partyId: String? = null): Response = get(url, partyId, requestTimeoutMs)
 
     /** Cap a single call by the caller's remaining aggregate budget. */
-    fun get(url: String, partyId: String, timeoutMs: Long): Response = try {
+    fun get(url: String, partyId: String?, timeoutMs: Long): Response = try {
         val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs.coerceIn(1, requestTimeoutMs))
         val request = upstreamRequest()
             .uri(validatedUri(url))
             .header("Authorization", "Bearer ${serviceToken(deadline)}")
-            .header(PARTY_HEADER, partyId)
+            .apply { if (partyId != null) header(PARTY_HEADER, partyId) }
             .header("Accept", "application/json")
             .timeout(Duration.ofMillis(remainingMillis(deadline)))
             .GET().build()
