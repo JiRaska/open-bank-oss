@@ -172,7 +172,7 @@ class PensionIntegrationRoutesIT {
             // The signed account is untouched; the new one is pending for later installments only.
             .body("payoutAccountLast4", equalTo(IBAN.takeLast(4)))
             .body("pendingAccountLast4", equalTo(OTHER_IBAN.takeLast(4)))
-            .body("pendingAccountFrom", equalTo(LocalDate.now().plusDays(3).toString()))
+            .body("pendingAccountFrom", equalTo(LocalDate.now(java.time.ZoneOffset.UTC).plusDays(3).toString()))
         assertThat(notifications.sent).anySatisfy { assertThat(it).startsWith("$payout|${OTHER_IBAN.takeLast(4)}") }
 
         // A second change while one is pending is refused (no rapid chain of redirects).

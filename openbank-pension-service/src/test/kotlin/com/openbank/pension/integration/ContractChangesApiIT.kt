@@ -199,7 +199,7 @@ class ContractChangesApiIT {
         val contract = onVertx { contractRepository.findById(id)!! }
         val base = onVertx { store.scheduleHistory(id) }
         val pack = com.openbank.pension.infrastructure.pack.JurisdictionPackLoader.loadRegistry().pinnedFor(contract)
-        val today = LocalDate.now()
+        val today = LocalDate.now(java.time.ZoneOffset.UTC)
         val start = CountDownLatch(1)
         val pool = Executors.newFixedThreadPool(2)
         val results = listOf("2000", "2100").map { amount ->

@@ -40,6 +40,7 @@ import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.time.Clock
 import java.time.Instant
+import com.openbank.pension.infrastructure.notification.RecordingParticipantNotifier
 import java.time.LocalDate
 import java.time.ZoneOffset
 import java.util.UUID
@@ -275,7 +276,7 @@ class ContractMaintenanceTest {
     private val sca = Sca()
     private val deaths = Deaths()
     private val service = ContractMaintenanceService(
-        PensionContractService(repo, registry, clock),
+        PensionContractService(repo, registry, clock, RecordingParticipantNotifier()),
         store,
         deaths,
         sca,
