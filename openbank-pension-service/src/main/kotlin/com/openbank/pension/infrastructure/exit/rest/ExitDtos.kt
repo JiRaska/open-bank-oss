@@ -12,6 +12,7 @@ import com.openbank.pension.domain.exit.PayoutRequest
 import com.openbank.pension.domain.exit.TerminationNotice
 import com.openbank.pension.domain.exit.TerminationQuote
 import com.openbank.pension.domain.model.PayoutForm
+import org.eclipse.microprofile.openapi.annotations.media.Schema
 import java.math.BigDecimal
 import java.time.Instant
 import java.time.LocalDate
@@ -22,6 +23,7 @@ import java.util.UUID
  * with a 400 there, never as a Kotlin NPE before it (#3104).
  */
 
+@Schema(name = "ExitSignRequest")
 data class SignRequest(val scaChallengeId: String? = null, val payoutIban: String? = null)
 
 data class PayoutQuoteRequest(val form: PayoutForm? = null, val amount: BigDecimal? = null, val months: Int? = null)
