@@ -62,6 +62,8 @@ is the **authentication assurance gate** for payments and consent — defeating 
 
 ## 6. Change log
 
+- **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `sca_outbox` kept every SENT row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; its v1 repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`. PENDING, FAILED, DISPATCHING and DEAD rows are never touched. For this service the payloads at stake are `DEVICE_ENROLLED` (party id, credential id) and `SCA_DEVICE_DECIDED` with the signed payment payload (creditor IBAN). This closes the residual the durable-decision entry below records: the outbox copy no longer outlives the 1 826-day retention of `sca_device_decisions`. Information disclosure: shrinks the window in which a database read (replica, backup, operator query) exposes past event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now comes from the broker or audit-service, not this table.
+
 - **2026-10-06** — SCA approval GET and pending-list responses expose `makerActorKind` from
   the durable approval record (#11588). The `ROLE_OPERATOR`/`ROLE_ADMIN` and
   `scaChallenge.approval.read` checks are unchanged. This is informational maker provenance,
