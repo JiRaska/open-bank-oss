@@ -280,24 +280,38 @@ class DemoBrokerExtraTest {
     bare = '@PactBroker(enablePendingPacts = "true")'
     broker_src_bare_ok = broker_src_ok.replace(bare, "@PactBroker")
     broker_src_bare_drift = broker_src_drift.replace(bare, "@PactBroker")
+    folder_src_bare_ok = folder_src.replace('@PactFolder("../pacts")', "@PactFolder")
+    folder_src_bare_drift = folder_src_bare_ok.replace(
+        "    fun b() {}", '    fun b() {}\n    @State("only the folder knows this")\n    fun c() {}'
+    )
+    folder_src_with_broker_comment = folder_src.replace(
+        "class DemoFolderTest {", "/* @PactBroker */\nclass DemoFolderTest {"
+    )
+    broker_src_with_folder_comment = broker_src_ok.replace(
+        "class DemoBrokerTest {", "// @PactFolder\nclass DemoBrokerTest {"
+    )
 
     cases = [
-        ("identical twins", broker_src_ok, 0),
-        ("identical twins, bare @PactBroker", broker_src_bare_ok, 0),
-        ("handler missing from a bare @PactBroker twin", broker_src_bare_drift, 1),
-        ("handler missing from the broker twin", broker_src_drift, 1),
-        ("handler only the broker twin has (warn, not fail)", broker_src_extra, 0),
-        ("state argument that cannot be resolved", broker_src_unresolved, 1),
+        ("identical twins", folder_src, broker_src_ok, 0),
+        ("identical twins, bare @PactBroker", folder_src, broker_src_bare_ok, 0),
+        ("handler missing from a bare @PactBroker twin", folder_src, broker_src_bare_drift, 1),
+        ("identical twins, bare @PactFolder", folder_src_bare_ok, broker_src_ok, 0),
+        ("handler missing from a bare @PactFolder twin", folder_src_bare_drift, broker_src_ok, 1),
+        ("opposite loader names in comments", folder_src_with_broker_comment,
+         broker_src_with_folder_comment, 0),
+        ("handler missing from the broker twin", folder_src, broker_src_drift, 1),
+        ("handler only the broker twin has (warn, not fail)", folder_src, broker_src_extra, 0),
+        ("state argument that cannot be resolved", folder_src, broker_src_unresolved, 1),
     ]
     global REPO
     real_repo = REPO
     try:
-        for label, broker_src, want in cases:
+        for label, folder_src_case, broker_src, want in cases:
             with tempfile.TemporaryDirectory() as tmp:
                 root = pathlib.Path(tmp)
                 pkg = root / "openbank-demo-service" / "src" / "test" / "kotlin"
                 pkg.mkdir(parents=True)
-                (pkg / "DemoFolderTest.kt").write_text(folder_src)
+                (pkg / "DemoFolderTest.kt").write_text(folder_src_case)
                 (pkg / "DemoBrokerTest.kt").write_text(broker_src)
                 REPO = root
                 rc = main_for_selftest()
