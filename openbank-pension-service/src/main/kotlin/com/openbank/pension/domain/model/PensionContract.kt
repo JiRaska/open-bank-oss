@@ -13,7 +13,7 @@ import java.util.UUID
 /** The two product lines ADR-0334 §2a ships from the start; the difference between them is pack data. */
 enum class ProductLine { DPS, DIP }
 
-enum class PayoutForm { LUMP_SUM, ANNUITY, PHASED_WITHDRAWAL, EARLY_WITHDRAWAL, SURRENDER }
+enum class PayoutForm { LUMP_SUM, ANNUITY, PHASED_WITHDRAWAL, FIXED_PERIOD_PENSION, EARLY_WITHDRAWAL, SURRENDER }
 
 enum class ContributionFrequency { MONTHLY, QUARTERLY, ANNUALLY }
 
@@ -183,6 +183,8 @@ data class PensionContract(
     fun requestTermination(now: Instant): PensionContract = moveTo(ContractStatus.TERMINATING, now)
 
     fun close(now: Instant): PensionContract = moveTo(ContractStatus.CLOSED, now)
+
+    fun markPaidOut(now: Instant): PensionContract = moveTo(ContractStatus.PAID_OUT, now)
 
     /** Strategy can change in any non-terminal state; the previous elections stay as history. */
     fun electStrategy(strategyCode: String, effectiveFrom: LocalDate, now: Instant): PensionContract {

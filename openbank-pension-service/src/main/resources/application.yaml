@@ -87,6 +87,23 @@ quarkus:
 
 
 openbank:
+  temporal:
+    # ADR-0334 S5 exit workflows (early termination, payout, death settlement). The namespace must
+    # be in temporal-namespace-config and the `pension` k8s namespace in
+    # temporal-platform-ingress, or the worker's gRPC is dropped / polls a namespace that never exists.
+    server-url: ${TEMPORAL_FRONTEND_URL:temporal-frontend.temporal.svc.cluster.local:7233}
+    namespace: ${OPENBANK_TEMPORAL_NAMESPACE:openbank-pension}
+    task-queue: ${OPENBANK_TEMPORAL_TASK_QUEUE:openbank-pension-exit}
+  pension:
+    worker:
+      enabled: ${PENSION_EXIT_WORKER_ENABLED:true}
+    exit:
+      stub:
+        # FAIL CLOSED: the SCA, own-account and beneficiary-KYC stubs refuse everything unless a
+        # profile turns them on. Until sca-service / account-service are wired (S5 follow-up), a
+        # deployed pod therefore refuses every signature instead of accepting an unsigned exit.
+        checks-accept: false
+        default-value: "0"
   rate-limit:
     enabled: true
     max-concurrent-requests: 100
@@ -110,6 +127,14 @@ authz:
     enforce: "${AUTHZ_FOUR_EYES_ENFORCE:false}"
 
 "%dev":
+  openbank:
+    pension:
+      worker:
+        enabled: false
+      exit:
+        stub:
+          checks-accept: true
+          default-value: "250000.00"
   quarkus:
     log:
       level: DEBUG
@@ -121,7 +146,17 @@ authz:
     enforce: "false"
 
 "%test":
+  openbank:
+    pension:
+      # No Temporal frontend in @QuarkusTest: the IT registers its own in-process worker.
+      worker:
+        enabled: false
+      exit:
+        stub:
+          checks-accept: true
   quarkus:
+    scheduler:
+      enabled: false
     datasource:
       reactive:
         url: vertx-reactive:postgresql://localhost:5433/openbank_pension_test

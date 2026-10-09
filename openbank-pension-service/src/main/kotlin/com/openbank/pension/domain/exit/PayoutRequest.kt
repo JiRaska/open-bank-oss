@@ -1,0 +1,216 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+
+package com.openbank.pension.domain.exit
+
+import com.openbank.pension.domain.model.PayoutForm
+import java.math.BigDecimal
+import java.time.Duration
+import java.time.Instant
+import java.time.LocalDate
+import java.util.UUID
+
+enum class InstallmentStatus { PENDING, PAID }
+
+data class Installment(
+    val seq: Int,
+    val dueDate: LocalDate,
+    val gross: BigDecimal,
+    val tax: BigDecimal,
+    val net: BigDecimal,
+    val status: InstallmentStatus = InstallmentStatus.PENDING,
+    val paymentRef: String? = null,
+) {
+    init {
+        require(seq >= 1) { "installment seq starts at 1" }
+        require(net.compareTo(gross - tax) == 0) { "installment net must equal gross - tax" }
+    }
+}
+
+/**
+ * The decumulation plan of a phased withdrawal or fixed-period pension: monthly installments whose
+ * gross and tax are each split with [ExitMoney.splitEvenly], so the schedule sums EXACTLY to the
+ * binding quote — the installments are the quote, cut into months.
+ */
+data class PayoutSchedule(val installments: List<Installment>) {
+    init {
+        require(installments.isNotEmpty()) { "a schedule has at least one installment" }
+        require(installments.map { it.seq } == (1..installments.size).toList()) { "installments are numbered 1..n" }
+    }
+
+    val totalGross: BigDecimal get() = ExitMoney.sum(installments.map { it.gross })
+    val totalTax: BigDecimal get() = ExitMoney.sum(installments.map { it.tax })
+    val totalNet: BigDecimal get() = ExitMoney.sum(installments.map { it.net })
+    val allPaid: Boolean get() = installments.all { it.status == InstallmentStatus.PAID }
+
+    fun overdue(today: LocalDate): List<Installment> =
+        installments.filter { it.status == InstallmentStatus.PENDING && it.dueDate.isBefore(today) }
+
+    /** Idempotent: paying an already-paid installment again keeps the first reference. */
+    fun markPaid(seq: Int, ref: String): PayoutSchedule = copy(
+        installments = installments.map {
+            if (it.seq == seq && it.status == InstallmentStatus.PENDING) {
+                it.copy(status = InstallmentStatus.PAID, paymentRef = ref)
+            } else {
+                it
+            }
+        },
+    )
+
+    companion object {
+        fun monthly(firstDue: LocalDate, months: Int, quote: PayoutQuote): PayoutSchedule {
+            require(months >= 1) { "a schedule needs at least one month" }
+            val gross = ExitMoney.splitEvenly(quote.grossAmount, months)
+            val tax = if (quote.taxWithheld.signum() == 0) {
+                List(months) { BigDecimal.ZERO.setScale(ExitMoney.SCALE) }
+            } else {
+                ExitMoney.splitEvenly(quote.taxWithheld, months)
+            }
+            return PayoutSchedule(
+                (0 until months).map { i ->
+                    Installment(i + 1, firstDue.plusMonths(i.toLong()), gross[i], tax[i], gross[i] - tax[i])
+                },
+            )
+        }
+    }
+}
+
+enum class PayoutStatus {
+    QUOTED,
+    CONFIRMED,
+    IN_PAYMENT,
+    COMPLETED,
+    EXPIRED,
+    ;
+
+    fun canMoveTo(target: PayoutStatus): Boolean = target in EDGES.getValue(this)
+
+    private companion object {
+        val EDGES: Map<PayoutStatus, Set<PayoutStatus>> = mapOf(
+            QUOTED to setOf(CONFIRMED, EXPIRED),
+            CONFIRMED to setOf(IN_PAYMENT),
+            IN_PAYMENT to setOf(COMPLETED),
+            COMPLETED to emptySet(),
+            EXPIRED to emptySet(),
+        )
+    }
+}
+
+/** An annuity bought from an insurer with the net payout (ANNUITY form). */
+data class AnnuityPolicy(val policyRef: String, val insurerRef: String, val monthlyAmount: BigDecimal)
+
+/**
+ * A regular payout or a partial (early) withdrawal (ADR-0334 §4 step 7). Like the termination
+ * notice, QUOTED is binding: the participant confirms the exact quote under SCA, and execution
+ * pays [quote] — or [schedule], which is [quote] split into months — never a recomputation.
+ *
+ * `EARLY_WITHDRAWAL` is the partial form: it leaves the contract ACTIVE. Every other form ends it.
+ */
+data class PayoutRequest(
+    val id: UUID,
+    val contractId: UUID,
+    val participantPartyId: UUID,
+    val status: PayoutStatus,
+    val quote: PayoutQuote,
+    val quotedAt: Instant,
+    val quoteExpiresAt: Instant,
+    val schedule: PayoutSchedule? = null,
+    val payoutIban: String? = null,
+    val scaChallengeId: String? = null,
+    val confirmedAt: Instant? = null,
+    val idempotencyKey: String? = null,
+    val redeemedAmount: BigDecimal? = null,
+    val paymentRef: String? = null,
+    val annuity: AnnuityPolicy? = null,
+    val updatedAt: Instant,
+) {
+    init {
+        if (schedule != null) {
+            require(schedule.totalGross.compareTo(quote.grossAmount) == 0) { "schedule must sum to the quoted gross" }
+            require(schedule.totalNet.compareTo(quote.netAmount) == 0) { "schedule must sum to the quoted net" }
+        }
+    }
+
+    val form: PayoutForm get() = quote.form
+    val partial: Boolean get() = quote.form == PayoutForm.EARLY_WITHDRAWAL
+    val scheduled: Boolean get() = quote.form in SCHEDULED_FORMS
+
+    val quoteHash: String get() = sha256("$id|$contractId|${quote.canonical()}|$quoteExpiresAt")
+
+    fun confirm(iban: String, scaChallengeId: String, idempotencyKey: String, today: LocalDate, now: Instant): PayoutRequest {
+        check(now.isBefore(quoteExpiresAt)) { "the payout quote expired at $quoteExpiresAt; request a new one" }
+        val plan = if (scheduled) {
+            PayoutSchedule.monthly(today.plusMonths(1).withDayOfMonth(1), requireNotNull(quote.months), quote)
+        } else {
+            null
+        }
+        return moveTo(PayoutStatus.CONFIRMED, now).copy(
+            payoutIban = iban,
+            scaChallengeId = scaChallengeId,
+            confirmedAt = now,
+            idempotencyKey = idempotencyKey,
+            schedule = plan,
+        )
+    }
+
+    /** Idempotent: a retried redemption keeps the first proceeds. */
+    fun markRedeemed(proceeds: BigDecimal, now: Instant): PayoutRequest =
+        if (status == PayoutStatus.IN_PAYMENT) this else moveTo(PayoutStatus.IN_PAYMENT, now).copy(redeemedAmount = ExitMoney.round(proceeds))
+
+    /** Scheduled forms redeem per installment; entering IN_PAYMENT is idempotent. */
+    fun startInstallments(now: Instant): PayoutRequest {
+        check(scheduled) { "only a scheduled payout pays in installments" }
+        return if (status == PayoutStatus.IN_PAYMENT) this else moveTo(PayoutStatus.IN_PAYMENT, now)
+    }
+
+    fun markPaid(ref: String, now: Instant): PayoutRequest {
+        check(status == PayoutStatus.IN_PAYMENT && !scheduled) { "a single payment needs IN_PAYMENT, was $status" }
+        return copy(paymentRef = paymentRef ?: ref, updatedAt = now)
+    }
+
+    fun markAnnuityPurchased(policy: AnnuityPolicy, now: Instant): PayoutRequest {
+        check(status == PayoutStatus.IN_PAYMENT && form == PayoutForm.ANNUITY) { "no annuity purchase in $status/$form" }
+        return copy(annuity = annuity ?: policy, updatedAt = now)
+    }
+
+    fun markInstallmentPaid(seq: Int, ref: String, now: Instant): PayoutRequest {
+        check(status == PayoutStatus.IN_PAYMENT) { "installments are paid IN_PAYMENT, was $status" }
+        val plan = checkNotNull(schedule) { "payout $id has no schedule" }
+        require(plan.installments.any { it.seq == seq }) { "installment $seq does not exist" }
+        return copy(schedule = plan.markPaid(seq, ref), updatedAt = now)
+    }
+
+    fun complete(now: Instant): PayoutRequest {
+        val settled = when {
+            scheduled -> schedule?.allPaid == true
+            form == PayoutForm.ANNUITY -> annuity != null
+            else -> paymentRef != null
+        }
+        check(settled) { "payout $id is not fully settled" }
+        return moveTo(PayoutStatus.COMPLETED, now)
+    }
+
+    fun expire(now: Instant) = moveTo(PayoutStatus.EXPIRED, now)
+
+    private fun moveTo(target: PayoutStatus, now: Instant): PayoutRequest {
+        check(status.canMoveTo(target)) { "payout $status -> $target is not allowed" }
+        return copy(status = target, updatedAt = now)
+    }
+
+    companion object {
+        val SCHEDULED_FORMS = setOf(PayoutForm.PHASED_WITHDRAWAL, PayoutForm.FIXED_PERIOD_PENSION)
+
+        fun quote(contractId: UUID, participantPartyId: UUID, quote: PayoutQuote, validityDays: Int, now: Instant) =
+            PayoutRequest(
+                id = UUID.randomUUID(),
+                contractId = contractId,
+                participantPartyId = participantPartyId,
+                status = PayoutStatus.QUOTED,
+                quote = quote,
+                quotedAt = now,
+                quoteExpiresAt = now.plus(Duration.ofDays(validityDays.toLong())),
+                updatedAt = now,
+            )
+    }
+}

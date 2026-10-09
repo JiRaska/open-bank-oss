@@ -4,6 +4,7 @@
 
 package com.openbank.pension.domain.pack
 
+import com.openbank.pension.domain.exit.ExitRules
 import com.openbank.pension.domain.model.PayoutForm
 import com.openbank.pension.domain.model.ProductLine
 import java.math.BigDecimal
@@ -34,6 +35,8 @@ data class JurisdictionPack(
     val incentives: List<IncentiveRule> = emptyList(),
     val payout: PayoutConditions,
     val transfer: TransferRules,
+    /** Termination, payout and death rules (slice S5); absent = exits fail closed. */
+    val exit: ExitRules? = null,
 ) {
     init {
         require(jurisdiction.isNotBlank()) { "pack jurisdiction must not be blank" }

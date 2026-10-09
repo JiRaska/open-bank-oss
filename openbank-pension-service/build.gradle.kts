@@ -32,6 +32,11 @@ dependencies {
 
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
+    // ADR-0334 S5: termination, payout and death settlement run as Temporal workflows; the
+    // worker is switched by openbank.pension.worker.enabled (temporal_worker_switch_naming).
+    implementation(project(":openbank-libs-temporal"))
+    implementation("io.temporal:temporal-sdk:1.25.1")
+    implementation(libs.quarkus.scheduler)
 
     testImplementation(libs.quarkus.junit5)
     testImplementation(libs.quarkus.test.security)
@@ -42,6 +47,8 @@ dependencies {
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(project(":openbank-libs-testing"))
+    testImplementation("io.temporal:temporal-testing:1.25.1")
+    testImplementation("io.grpc:grpc-inprocess:1.68.1")
 }
 
 kover {

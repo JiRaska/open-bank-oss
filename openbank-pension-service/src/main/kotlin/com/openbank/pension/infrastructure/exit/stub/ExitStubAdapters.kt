@@ -1,0 +1,157 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+
+package com.openbank.pension.infrastructure.exit.stub
+
+import com.openbank.pension.application.exit.AnnuityInsurerPort
+import com.openbank.pension.application.exit.BeneficiaryVerificationPort
+import com.openbank.pension.application.exit.ClaimantKyc
+import com.openbank.pension.application.exit.FundAdministrationPort
+import com.openbank.pension.application.exit.IncentiveClawbackPort
+import com.openbank.pension.application.exit.OwnAccountVerificationPort
+import com.openbank.pension.application.exit.PaymentOrder
+import com.openbank.pension.application.exit.PayoutPaymentPort
+import com.openbank.pension.application.exit.ScaVerificationPort
+import com.openbank.pension.application.exit.TaxWithholdingPort
+import com.openbank.pension.domain.exit.AnnuityPolicy
+import com.openbank.pension.domain.exit.ExitMoney
+import com.openbank.pension.domain.exit.IncentiveBalance
+import io.quarkus.arc.DefaultBean
+import jakarta.enterprise.context.ApplicationScoped
+import org.eclipse.microprofile.config.inject.ConfigProperty
+import org.jboss.logging.Logger
+import java.math.BigDecimal
+import java.time.LocalDate
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
+
+/*
+ * STUB adapters for the exit slice (ADR-0334 S5). Each one stands in for a service whose API this
+ * slice needs and which is not wired yet; every one is a `@DefaultBean`, so the real adapter
+ * replaces it by merely existing. Follow-ups are listed in the S5 PR.
+ *
+ * The three CHECKS (SCA, own account, beneficiary KYC) FAIL CLOSED unless a profile explicitly
+ * turns the stub on — a deployment that forgot to wire sca-service refuses every termination
+ * rather than accepting an unsigned one. Only %dev and %test enable them.
+ */
+
+/** pension-fund-service unit register (slice S4). In-memory values; [setValue] is for tests and demos. */
+@DefaultBean
+@ApplicationScoped
+class StubFundAdministrationAdapter(
+    @param:ConfigProperty(name = "openbank.pension.exit.stub.default-value", defaultValue = "0")
+    private val defaultValue: BigDecimal,
+) : FundAdministrationPort {
+    private val values = ConcurrentHashMap<UUID, BigDecimal>()
+    private val redemptions = ConcurrentHashMap<String, BigDecimal>()
+
+    fun setValue(contractId: UUID, value: BigDecimal) {
+        values[contractId] = value
+    }
+
+    fun redemptionsFor(contractId: UUID): Map<String, BigDecimal> = redemptions.filterKeys { it.contains(contractId.toString()) }
+
+    override suspend fun redemptionValue(contractId: UUID): BigDecimal = values[contractId] ?: defaultValue
+
+    override suspend fun redeem(contractId: UUID, amount: BigDecimal, idempotencyKey: String): BigDecimal =
+        redemptions.computeIfAbsent(idempotencyKey) {
+            values.computeIfPresent(contractId) { _, v -> (v - amount).max(BigDecimal.ZERO) }
+            ExitMoney.round(amount)
+        }
+}
+
+/** Incentive/clawback ledger (slice S3). Returns an empty history unless a test sets one. */
+@DefaultBean
+@ApplicationScoped
+class StubIncentiveClawbackAdapter : IncentiveClawbackPort {
+    private val balances = ConcurrentHashMap<UUID, IncentiveBalance>()
+    val settled = ConcurrentHashMap<String, BigDecimal>()
+
+    fun setBalance(contractId: UUID, balance: IncentiveBalance) {
+        balances[contractId] = balance
+    }
+
+    override suspend fun balance(contractId: UUID, asOf: LocalDate): IncentiveBalance =
+        balances[contractId] ?: IncentiveBalance.EMPTY
+
+    override suspend fun settleClawback(contractId: UUID, amount: BigDecimal, idempotencyKey: String) {
+        settled.putIfAbsent(idempotencyKey, amount)
+    }
+}
+
+@DefaultBean
+@ApplicationScoped
+class StubTaxWithholdingAdapter : TaxWithholdingPort {
+    val remitted = ConcurrentHashMap<String, BigDecimal>()
+
+    override suspend fun remit(contractId: UUID, kind: String, amount: BigDecimal, idempotencyKey: String) {
+        remitted.putIfAbsent(idempotencyKey, amount)
+    }
+}
+
+/** domestic-payment stand-in: deduplicates by idempotency key exactly as the real scheme gateway must. */
+@DefaultBean
+@ApplicationScoped
+class StubPayoutPaymentAdapter : PayoutPaymentPort {
+    val orders = ConcurrentHashMap<String, PaymentOrder>()
+    private val refs = ConcurrentHashMap<String, String>()
+
+    override suspend fun pay(order: PaymentOrder): String {
+        orders.putIfAbsent(order.idempotencyKey, order)
+        return refs.computeIfAbsent(order.idempotencyKey) { "STUB-PAY-${UUID.randomUUID()}" }
+    }
+}
+
+@DefaultBean
+@ApplicationScoped
+class StubAnnuityInsurerAdapter : AnnuityInsurerPort {
+    override suspend fun purchase(contractId: UUID, premium: BigDecimal, birthDate: LocalDate, idempotencyKey: String) =
+        AnnuityPolicy(
+            policyRef = "STUB-ANNUITY-${idempotencyKey.hashCode().toUInt()}",
+            insurerRef = "stub-insurer",
+            monthlyAmount = ExitMoney.round(premium.divide(BigDecimal(ILLUSTRATIVE_MONTHS), java.math.MathContext.DECIMAL64)),
+        )
+
+    private companion object {
+        /** Illustrative annuity factor only; a real insurer prices by mortality tables. */
+        const val ILLUSTRATIVE_MONTHS = 240
+    }
+}
+
+@DefaultBean
+@ApplicationScoped
+class StubScaVerificationAdapter(
+    @param:ConfigProperty(name = "openbank.pension.exit.stub.checks-accept", defaultValue = "false")
+    private val accept: Boolean,
+) : ScaVerificationPort {
+    private val log = Logger.getLogger(StubScaVerificationAdapter::class.java)
+    private val consumed = ConcurrentHashMap.newKeySet<String>()
+
+    override suspend fun verify(partyId: UUID, challengeId: String, documentSha256: String): Boolean {
+        if (!accept) {
+            log.warn("SCA stub is fail-closed (openbank.pension.exit.stub.checks-accept=false): sca-service not wired")
+            return false
+        }
+        // Single use, like sca-service's consume (RTS Art. 5): a replayed challenge is refused.
+        return challengeId.isNotBlank() && consumed.add(challengeId)
+    }
+}
+
+@DefaultBean
+@ApplicationScoped
+class StubOwnAccountVerificationAdapter(
+    @param:ConfigProperty(name = "openbank.pension.exit.stub.checks-accept", defaultValue = "false")
+    private val accept: Boolean,
+) : OwnAccountVerificationPort {
+    override suspend fun isOwnVerifiedAccount(partyId: UUID, iban: String): Boolean = accept
+}
+
+@DefaultBean
+@ApplicationScoped
+class StubBeneficiaryVerificationAdapter(
+    @param:ConfigProperty(name = "openbank.pension.exit.stub.checks-accept", defaultValue = "false")
+    private val accept: Boolean,
+) : BeneficiaryVerificationPort {
+    override suspend fun verify(kyc: ClaimantKyc): Boolean = accept && kyc.identityDocumentRef.isNotBlank()
+}
