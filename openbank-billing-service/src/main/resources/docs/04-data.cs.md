@@ -4,10 +4,8 @@ Tato stránka zatím popisuje jen životní cyklus outboxu; zbytek datového mod
 
 ## Retence outboxu (řádky SENT)
 
-`billing_outbox` je doručovací buffer, ne záznam. Řádky, které už dorazily do brokeru (`status = 'SENT'`), se mažou, jakmile je jejich `sent_at` starší než `openbank.outbox.retention.sent-days` (výchozí **7**), sdíleným jobem `OutboxSentRetentionJob` z libs-runtime (ADR-0329, ADR-0327 D8). Repozitář se zapojuje delegací `SentOutboxRetention` na `PanacheOutboxRetention`.
+`billing_outbox` je doručovací buffer, ale jeho SENT řádky ročních souhrnů jsou zatím jediným trvalým záznamem, že byl souhrn pro `(accountId, year)` vydán. Sdílený job `OutboxSentRetentionJob` z libs-runtime repozitář vidí, ale `sentRetentionExempt=true` přeskočí **všechny** billing SENT řádky (ADR-0329, #12187). Na billing tedy zatím neplatí sedmidenní mazání flotily.
 
-- Běží každou noc (`openbank.outbox.retention.cron`, výchozí `0 17 3 * * ?`) na každé replice; každé mazání je omezené (`batch-size` 5 000, nejvýš `max-batches` 200 za běh), takže dlouho nečištěná tabulka se vyprázdní během několika nocí.
-- Řádků PENDING, FAILED, DISPATCHING a DEAD se nikdy nedotkne — DEAD řádky jsou DLQ na straně producenta.
-- Replay události starší než okno jde z Kafka topicu nebo z audit-service, ne z této tabulky.
-- Signály: `openbank_outbox_purged_total{service,status="SENT"}`, `openbank_outbox_purge_failed_total` a workflow liveness `outbox-sent-retention`.
-- Vypnutí: `openbank.outbox.retention.enabled=false` (při startu zaloguje WARN). Nesnižujte `sent-days` pod potřebu kteréhokoli čtenáře SENT řádků.
+PR #12311 přidává nezávislý klíč `(account_id, calendar_year)`, migraci odmítající chybná historická data a databázové testy smazání a opakovaného běhu. Nejprve nasaďte tuto ochranu a ověřte pokrytí historie; teprve potom odstraňte výjimku v repozitáři i v governance pravidle. Do té doby billing SENT řádky nemažte ani nezapínejte samostatný billing purge.
+
+Sdílený job běží každou noc a maže jen staré SENT řádky repozitářů bez výjimky. Řádků PENDING, FAILED, DISPATCHING a DEAD se nedotýká. Dokud výjimka platí, metrika `openbank_outbox_purged_total` nemá vykazovat smazání billing řádků.

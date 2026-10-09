@@ -33,9 +33,16 @@ DISPATCHER_SUPERTYPE = re.compile(r":\s*AbstractOutboxDispatcher\s*\(")
 # or to the first blank line for a body-less class (`class CaseOutboxRepositoryImpl(...) : Base(...), P`).
 CLASS_HEADER = re.compile(r"\bclass\s+\w+(?:(?!\n\s*\n)[^{])*", re.S)
 RETENTION_SUPERTYPE = re.compile(r"\bSentOutboxRetention\b|\bAbstractPanacheOutboxRepository\s*<")
+RETENTION_EXEMPT_OVERRIDE = re.compile(
+    r"\boverride\s+val\s+sentRetentionExempt\s*:\s*Boolean\s*=\s*true\b"
+)
 
 # Each entry: why that outbox's SENT rows must not be purged yet. Measured 2026-10-03 (#11896).
 EXEMPT: dict[str, str] = {
+    "openbank-billing-service": (
+        "Annual fee-summary reruns still use SENT billing_outbox rows as the issuance guard; "
+        "keep retention off until the durable account/year key in #12311 is merged and deployed (#12187)"
+    ),
     "openbank-lending-service": (
         "SENT rows ARE the ADR-0214 evidence bundle (LendingResource GET /applications/{id}/evidence "
         "reads them via findByAggregateId); purge only after that evidence moves to a durable store (#11900)"
@@ -43,6 +50,10 @@ EXEMPT: dict[str, str] = {
     "openbank-incentive-service": (
         "incentive_outbox has no sent_at (published_at) and its V2 migration declares rows audit evidence; "
         "needs an owner decision before a purge (#11902)"
+    ),
+    "openbank-case-coordinator-agent": (
+        "GET /cases/{caseId} projects proposal evidence directly from SENT case_outbox rows; "
+        "purge only after that evidence has an independent durable source (#11896)"
     ),
 }
 
@@ -89,21 +100,24 @@ def opts_in(src: str) -> bool:
     return False
 
 
-def scan(root: pathlib.Path) -> tuple[set[str], set[str]]:
-    """(dispatcher owners, owners whose src/main declares a SentOutboxRetention class)."""
+def scan(root: pathlib.Path) -> tuple[set[str], set[str], set[str]]:
+    """(dispatcher owners, type-covered owners, owners with an explicit runtime exemption)."""
     owners: set[str] = set()
     covered: set[str] = set()
+    runtime_exempt: set[str] = set()
     for module in sorted(root.glob("openbank-*")):
         main = sources(module / "src" / "main")
         if any(DISPATCHER_SUPERTYPE.search(s) for s in main):
             owners.add(module.name)
             if any(opts_in(s) for s in main):
                 covered.add(module.name)
-    return owners, covered
+            if any(RETENTION_EXEMPT_OVERRIDE.search(s) for s in main):
+                runtime_exempt.add(module.name)
+    return owners, covered, runtime_exempt
 
 
 def check(root: pathlib.Path, exempt: dict[str, str]) -> tuple[list[str], int]:
-    owners, covered = scan(root)
+    owners, covered, runtime_exempt = scan(root)
     me = pathlib.Path(__file__).name
     findings: list[str] = []
     for m in sorted(owners - covered - exempt.keys()):
@@ -112,8 +126,12 @@ def check(root: pathlib.Path, exempt: dict[str, str]) -> tuple[list[str], int]:
             "its SENT outbox rows (and their payloads) are kept forever. Implement it on the outbox repository "
             "(`SentOutboxRetention by PanacheOutboxRetention(OutboxTableShape(\"<table>\"))`), or add a reasoned exemption to " + me
         )
-    for m in sorted(exempt.keys() & covered):
+    for m in sorted((exempt.keys() & covered) - runtime_exempt):
         findings.append(f"{m}: exempt but now implements SentOutboxRetention — remove the entry from {me}")
+    for m in sorted(runtime_exempt - exempt.keys()):
+        findings.append(f"{m}: disables SENT retention at runtime but has no reasoned exemption in {me}")
+    for m in sorted(runtime_exempt - covered):
+        findings.append(f"{m}: declares a runtime exemption without a SentOutboxRetention target")
     for m in sorted(exempt.keys() - owners):
         findings.append(f"{m}: exempt but no longer extends AbstractOutboxDispatcher — remove the entry from {me}")
     for m, why in exempt.items():
@@ -151,17 +169,24 @@ def self_test() -> int:
             "class CRepo : CPort {\n    val s = \"SentOutboxRetention\"\n    suspend fun purgeSent() = 0\n}\n",
         )
         write("openbank-d/src/main/kotlin/R.kt", "class DRepo : SentOutboxRetention {}\n")  # not an owner
+        write("openbank-f/src/main/kotlin/D.kt", disp)
+        write(
+            "openbank-f/src/main/kotlin/R.kt",
+            "class FRepo : AbstractPanacheOutboxRepository<E>(S, E::class.java, c) {\n"
+            "    override val sentRetentionExempt: Boolean = true\n}\n",
+        )
         reason = "a reason that is long enough to count"
         cases = [
-            ("a, b covered and c exempt is clean", {"openbank-c": reason}, False),
+            ("a, b covered and c, f exempt is clean", {"openbank-c": reason, "openbank-f": reason}, False),
             ("c without exemption is flagged (import/comment/string/method name do not count)", {}, True),
-            ("an exempt module that opted in is stale", {"openbank-a": reason, "openbank-c": reason}, True),
-            ("an exempt module that owns no dispatcher is stale", {"openbank-c": reason, "openbank-d": reason}, True),
-            ("an exemption without a reason is flagged", {"openbank-c": "todo"}, True),
+            ("an exempt module that opted in is stale", {"openbank-a": reason, "openbank-c": reason, "openbank-f": reason}, True),
+            ("an exempt module that owns no dispatcher is stale", {"openbank-c": reason, "openbank-d": reason, "openbank-f": reason}, True),
+            ("an exemption without a reason is flagged", {"openbank-c": "todo", "openbank-f": reason}, True),
+            ("runtime exemption without a reason is flagged", {"openbank-c": reason}, True),
         ]
         for name, ex, expect in cases:
             findings, subjects = check(root, ex)
-            if bool(findings) != expect or subjects != 4:
+            if bool(findings) != expect or subjects != 5:
                 print(f"SELF-TEST FAIL: {name}: findings={findings} subjects={subjects}")
                 ok = False
     print("self-test: " + ("pass" if ok else "FAIL"))

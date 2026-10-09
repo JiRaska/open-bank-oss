@@ -14,6 +14,7 @@ import io.quarkus.runtime.StartupEvent
 import jakarta.enterprise.inject.Instance
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.time.Duration
@@ -30,6 +31,7 @@ class OutboxSentRetentionJobTest {
         override val retentionLabel: String,
         private val rows: Int,
         private val fail: Boolean = false,
+        override val sentRetentionExempt: Boolean = false,
     ) : SentOutboxRetention {
         var seen: Duration? = null
         private var left = rows
@@ -42,14 +44,24 @@ class OutboxSentRetentionJobTest {
         }
     }
 
-    private fun job(vararg targets: SentOutboxRetention, enabled: Boolean = true): OutboxSentRetentionJob {
+    private fun job(
+        vararg targets: SentOutboxRetention,
+        enabled: Boolean = true,
+        batchSize: Int = 2,
+        maxBatches: Int = 100,
+    ): OutboxSentRetentionJob {
         val regInst = mockk<Instance<MeterRegistry>>()
         every { regInst.isResolvable } returns true
         every { regInst.get() } returns registry
         val targetInst = mockk<Instance<SentOutboxRetention>>()
         every { targetInst.iterator() } answers { targets.toList().toMutableList().iterator() }
         every { targetInst.stream() } answers { Stream.of(*targets) }
-        return OutboxSentRetentionJob(enabled = enabled, sentDays = 7, batchSize = 2, maxBatches = 100).apply {
+        return OutboxSentRetentionJob(
+            enabled = enabled,
+            sentDays = 7,
+            batchSize = batchSize,
+            maxBatches = maxBatches,
+        ).apply {
             this.targets = targetInst
             metrics = DomainMetrics().apply { registryInstance = regInst }
             clock = Clock.fixed(now, ZoneOffset.UTC)
@@ -94,8 +106,65 @@ class OutboxSentRetentionJobTest {
     }
 
     @Test
+    fun `a full purge cap is observable even when the bounded run succeeds`(): Unit = runBlocking {
+        val full = Target("full", rows = 201)
+        val quiet = Target("quiet", rows = 0)
+        val j = job(full, quiet)
+        j.registerLiveness(StartupEvent())
+
+        assertThat(registry.find("openbank.outbox.purge.cap.reached").tag("service", "full").gauge()?.value())
+            .isEqualTo(0.0)
+        assertThat(j.purgeAll(now)).containsEntry("full", 200L).containsEntry("quiet", 0L)
+        assertThat(registry.find("openbank.outbox.purge.cap.reached").tag("service", "full").gauge()?.value())
+            .isEqualTo(1.0)
+        assertThat(registry.find("openbank.outbox.purge.cap.reached").tag("service", "quiet").gauge()?.value())
+            .isEqualTo(0.0)
+        assertThat(j.purgeAll(now.plusSeconds(86_400))).containsEntry("full", 1L)
+        assertThat(registry.find("openbank.outbox.purge.cap.reached").tag("service", "full").gauge()?.value())
+            .isEqualTo(0.0)
+        assertThat(successRecorded()).isEqualTo(1.0)
+    }
+
+    @Test
+    fun `invalid batch limits fail service startup before a scheduled purge`() {
+        val invalidLimits = listOf(
+            "batch-size" to job(Target("sca", rows = 1), batchSize = 0),
+            "max-batches" to job(Target("sca", rows = 1), maxBatches = 0),
+        )
+        for ((name, invalid) in invalidLimits) {
+            assertThatThrownBy { invalid.registerLiveness(StartupEvent()) }
+                .isInstanceOf(IllegalArgumentException::class.java)
+                .hasMessageContaining("openbank.outbox.retention.$name must be positive")
+        }
+    }
+
+    @Test
     fun `a service with no outbox registers no liveness gauge`() {
         job().registerLiveness(StartupEvent())
+        assertThat(successRecorded()).isNull()
+    }
+
+    @Test
+    fun `a live evidence reader is not purged or reported as a retention target`(): Unit = runBlocking {
+        val evidence = Target("case", rows = 3, sentRetentionExempt = true)
+        val ordinary = Target("sca", rows = 2)
+        val j = job(evidence, ordinary)
+        j.registerLiveness(StartupEvent())
+
+        assertThat(j.purgeAll(now)).containsOnlyKeys("sca").containsEntry("sca", 2L)
+        assertThat(evidence.seen).isNull()
+        assertThat(registry.find("openbank.outbox.purge.cap.reached").tag("service", "case").gauge()).isNull()
+        assertThat(successRecorded()).isEqualTo(1.0)
+    }
+
+    @Test
+    fun `an exempt-only service has no misleading retention heartbeat`(): Unit = runBlocking {
+        val evidence = Target("case", rows = 3, sentRetentionExempt = true)
+        val j = job(evidence)
+        j.registerLiveness(StartupEvent())
+
+        assertThat(j.purgeAll(now)).isEmpty()
+        assertThat(evidence.seen).isNull()
         assertThat(successRecorded()).isNull()
     }
 
