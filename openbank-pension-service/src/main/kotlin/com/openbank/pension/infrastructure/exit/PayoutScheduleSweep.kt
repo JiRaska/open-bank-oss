@@ -4,12 +4,15 @@
 
 package com.openbank.pension.infrastructure.exit
 
+import com.openbank.libs.observability.DomainMetrics
 import com.openbank.pension.application.exit.ExitWorkflowLauncher
 import com.openbank.pension.application.exit.PayoutService
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.runtime.Startup
+import io.quarkus.runtime.configuration.DurationConverter
 import io.quarkus.scheduler.Scheduled
 import jakarta.enterprise.context.ApplicationScoped
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.LocalDate
@@ -32,9 +35,22 @@ class PayoutScheduleSweep(
     private val launcher: ExitWorkflowLauncher,
     private val clock: Clock,
     meterRegistry: MeterRegistry,
+    domainMetrics: DomainMetrics,
+    @ConfigProperty(name = "openbank.pension.payout-sweep.every", defaultValue = "1h")
+    private val interval: String,
 ) {
     private val log = Logger.getLogger(PayoutScheduleSweep::class.java)
     private val overdue = AtomicInteger(0)
+    private val liveness = if (
+        interval.equals("off", ignoreCase = true) || interval.equals("disabled", ignoreCase = true)
+    ) {
+        null
+    } else {
+        domainMetrics.registerWorkflowLiveness(
+            "pension-payout-schedule-sweep",
+            DurationConverter.parseDuration(interval),
+        )
+    }
 
     init {
         meterRegistry.gauge("openbank_pension_payout_installments_overdue", overdue)
@@ -53,5 +69,6 @@ class PayoutScheduleSweep(
             log.warnf("payout %s has an overdue installment; re-starting its workflow", it.id)
             launcher.startPayout(it.id)
         }
+        liveness?.recordSuccess()
     }
 }
