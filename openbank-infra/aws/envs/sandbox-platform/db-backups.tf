@@ -260,19 +260,19 @@ locals {
     audit        = { namespace = "audit", sa = "audit-db" }
     sanctions    = { namespace = "sanctions", sa = "sanctions-db" }
     # Extended fleet — all remaining clusters with barmanObjectStore to openbank-sandbox-db-backups
-    aml           = { namespace = "aml", sa = "aml-db" }
-    dispute       = { namespace = "dispute", sa = "dispute-db" }
-    fraud         = { namespace = "fraud", sa = "fraud-db" }
-    fx            = { namespace = "fx", sa = "fx-db" }
-    keycloak      = { namespace = "iam", sa = "keycloak-db" }
-    interest      = { namespace = "interest", sa = "interest-db" }
-    lending       = { namespace = "lending", sa = "lending-db" }
-    apicurio      = { namespace = "messaging", sa = "apicurio-db" }
-    notifications = { namespace = "notifications", sa = "notifications-db" }
-    onboarding    = { namespace = "onboarding", sa = "onboarding-db" }
-    pact-broker   = { namespace = "pact-broker", sa = "pact-broker-db" }
-    party         = { namespace = "party", sa = "party-db" }
-    card-issuance = { namespace = "payments", sa = "card-issuance-db" }
+    aml              = { namespace = "aml", sa = "aml-db" }
+    dispute          = { namespace = "dispute", sa = "dispute-db" }
+    fraud            = { namespace = "fraud", sa = "fraud-db" }
+    fx               = { namespace = "fx", sa = "fx-db" }
+    keycloak         = { namespace = "iam", sa = "keycloak-db" }
+    interest         = { namespace = "interest", sa = "interest-db" }
+    lending          = { namespace = "lending", sa = "lending-db" }
+    apicurio         = { namespace = "messaging", sa = "apicurio-db" }
+    notifications    = { namespace = "notifications", sa = "notifications-db" }
+    onboarding       = { namespace = "onboarding", sa = "onboarding-db" }
+    pact-broker      = { namespace = "pact-broker", sa = "pact-broker-db" }
+    party            = { namespace = "party", sa = "party-db" }
+    card-issuance    = { namespace = "payments", sa = "card-issuance-db" }
     # ADR-0283 phase 1 (#8809). Added in the same PR as the cluster, which is the WRONG order:
     # GitOps created the Cluster ~4 min after merge, this association existed only after a later
     # `tofu apply`, and EKS Pod Identity injects credentials at pod ADMISSION — so the primary
