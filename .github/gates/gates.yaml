@@ -670,6 +670,32 @@ gates:
         --baseline .github/single-replica-rollout-strategy-baseline.txt \
         --canary-baseline .github/canary-rollout-realisable-baseline.txt
 
+  - id: public-workload-ha
+    name: "publicly routed workloads run >= 2 replicas, a PDB and a node spread (enforced, baseline-ratcheted)"
+    group: gitops
+    mode: enforced
+    budget_seconds: 20
+    rationale: >-
+      customer-edge, the public entry point, ran one replica, so the 2026-10-03 04:40Z pod rotation
+      failed the journey-public-edge probe, and so does every rollout, eviction or spot move. The
+      scope is derived from Ingress/HTTPRoute backends, so a new public workload is checked without
+      anyone adding it to a list; a backend Service no gitops manifest declares is a finding
+      ("cannot check"), never a silent pass.
+    review_after: "2027-04-01"
+    verified: >-
+      2026-10-04 -- 16 publicly routed workloads, 50 findings on origin/main (customer-edge: one
+      replica, no PDB, no spread); 47 after the customer-edge fix, all baselined. Setting
+      customer-edge back to replicas 1 in the real manifest fails the gate with exactly that one NEW
+      finding. The self-test covers a compliant workload, each missing control on its own, an HPA
+      floor standing in for replicas, and an undeclared backend Service.
+    min_subjects: 10   # 16 publicly routed workloads today (2026-10-04)
+    selftest: python3 .github/scripts/check-public-workload-ha.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-public-workload-ha.py"]
+    run: |
+      python3 .github/scripts/check-public-workload-ha.py --enforce \
+        --baseline .github/public-workload-ha-baseline.txt
+
   - id: gen-network-policies-drift-gate
     name: "gen-network-policies drift gate (ADR-0081, issue #854)"
     group: gitops
