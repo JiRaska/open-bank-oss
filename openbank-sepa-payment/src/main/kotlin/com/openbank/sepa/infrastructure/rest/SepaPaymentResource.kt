@@ -113,11 +113,22 @@ class SepaPaymentResource(
                 IdempotencyStore.DEFAULT_IN_FLIGHT_TTL_SECONDS,
             )
         ) {
-            is ReserveResult.Replay -> return Response.status(reservation.record.statusCode)
-                .entity(reservation.record.responseBody)
-                .type(MediaType.APPLICATION_JSON)
-                .header("X-Idempotency-Replayed", "true")
-                .build()
+            is ReserveResult.Replay -> {
+                // Redis binds the payload, but its saved response can lag later payment transitions.
+                // Read the durable row and recheck its original caller before returning a receipt.
+                val current = paymentUseCase.findReceipt(
+                    idempotencyKey,
+                    request.debtorAccountId,
+                    identity.principal.name,
+                    partyId,
+                    actorPartyId,
+                ) ?: throw IdempotencyRequestInProgressException()
+                if (current.requestHash != requestHash) throw IdempotencyKeyReusedException()
+                return Response.created(URI.create("/api/v1/sepa-payments/${current.id}"))
+                    .entity(current.toResponse())
+                    .header("X-Idempotency-Replayed", "true")
+                    .build()
+            }
             ReserveResult.Mismatch -> throw IdempotencyKeyReusedException()
             ReserveResult.InFlight -> throw IdempotencyRequestInProgressException()
             ReserveResult.Reserved -> Unit

@@ -190,7 +190,8 @@ class SepaPaymentService(
     ): SepaPayment? {
         val payment = paymentRepository.findByIdempotencyKey(idempotencyKey) ?: return null
         return payment.takeIf {
-            it.initiatingPrincipal != null &&
+            it.requestHash != null &&
+                it.initiatingPrincipal != null &&
                 it.initiatingPrincipal == initiatingPrincipal &&
                 it.initiatingPartyId == initiatingPartyId &&
                 (it.initiatingPartyId == null || it.initiatingActorPartyId != null) &&

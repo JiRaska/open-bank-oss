@@ -44,7 +44,8 @@ class SepaPaymentReceiptIT {
         assertThat(receipt(key = UUID.randomUUID().toString()).jsonPath().getString("state")).isEqualTo("UNKNOWN")
         dataSource.connection.use { connection ->
             connection.prepareStatement(
-                "UPDATE sepa_payments SET debtor_name = 'Updated Name', debtor_iban = 'DE89370400440532013000' " +
+                "UPDATE sepa_payments SET debtor_name = 'Updated Name', debtor_iban = 'DE89370400440532013000', " +
+                    "status = 'PROCESSING' " +
                     "WHERE idempotency_key = ?",
             ).use { statement ->
                 statement.setString(1, idempotencyKey)
@@ -52,6 +53,10 @@ class SepaPaymentReceiptIT {
             }
         }
         assertThat(receipt().jsonPath().getString("paymentId")).isEqualTo(paymentId)
+        val replay = create()
+        assertThat(replay.statusCode).isEqualTo(201)
+        assertThat(replay.header("X-Idempotency-Replayed")).isEqualTo("true")
+        assertThat(replay.jsonPath().getString("status")).isEqualTo("PROCESSING")
         evictCreatorRedisKey()
         assertThat(create().jsonPath().getString("id")).isEqualTo(paymentId)
         assertThat(rows()).isEqualTo(1)
@@ -82,8 +87,19 @@ class SepaPaymentReceiptIT {
             }
         }
         assertThat(receipt().jsonPath().getString("state")).isEqualTo("UNKNOWN")
-        // The existing Redis response still replays to its original scope. Evicting it exercises
-        // the durable fallback, where the legacy row is refused.
+        // A matching Redis record is only a payload hint; it cannot authorize a stale receipt.
+        assertThat(create().statusCode).isEqualTo(409)
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "UPDATE sepa_payments SET initiating_principal = ?, request_hash = NULL WHERE idempotency_key = ?",
+            ).use { statement ->
+                statement.setString(1, "receipt-operator-a")
+                statement.setString(2, idempotencyKey)
+                assertThat(statement.executeUpdate()).isEqualTo(1)
+            }
+        }
+        assertThat(receipt().jsonPath().getString("state")).isEqualTo("UNKNOWN")
+        assertThat(create().statusCode).isEqualTo(409)
         evictCreatorRedisKey()
         assertThat(create().statusCode).isEqualTo(409)
     }
