@@ -6,6 +6,7 @@ package com.openbank.pension.application.onboarding
 
 import com.openbank.pension.application.port.out.ActivationOutcome
 import com.openbank.pension.application.port.out.PensionContractRepository
+import com.openbank.pension.application.port.out.ReassessmentRequiredException
 import com.openbank.pension.domain.model.ContractStatus
 import com.openbank.pension.domain.model.ContributionSchedule
 import com.openbank.pension.domain.model.PensionContract
@@ -25,6 +26,8 @@ import com.openbank.pension.domain.pack.JurisdictionPackRegistry
 import com.openbank.pension.domain.pack.PackEvaluator
 import com.openbank.pension.domain.pack.ProviderType
 import com.openbank.pension.domain.questionnaire.QuestionSetRegistry
+import com.openbank.pension.domain.questionnaire.ReassessmentPolicy
+import com.openbank.pension.domain.questionnaire.RefreshReason
 import com.openbank.pension.domain.questionnaire.WarningAcknowledgement
 import com.openbank.pension.domain.questionnaire.WarningCode
 import com.openbank.pension.domain.questionnaire.WarningPolicy
@@ -217,6 +220,46 @@ class OnboardingService(
             applications.save(application.submitQuestionnaire(assessment.id, recommendation.recommended, now()))
         }
         return saved to recommendation
+    }
+
+    /**
+     * Re-assessment of an ACTIVATED application's contract: the same scoring as onboarding, but the
+     * lifecycle stays ACTIVATED. Superseded assessments are kept for audit.
+     */
+    suspend fun reassess(
+        id: UUID,
+        partyId: UUID,
+        build: (OnboardingApplication, OnboardingRules) -> SuitabilityAssessment,
+    ): Pair<OnboardingApplication, StrategyRecommendation> {
+        val application = get(id, partyId)
+        val assessment = build(application, rulesFor(application))
+        val recommendation = recommend(application, assessment)
+        val saved = tx.inTransaction {
+            application.assessmentId?.let { previous ->
+                assessments.findById(previous)?.let { assessments.save(it.supersede()) }
+            }
+            assessments.save(assessment)
+            applications.save(application.recordReassessment(assessment.id, recommendation.recommended, now()))
+        }
+        return saved to recommendation
+    }
+
+    /**
+     * The re-assessment rule on a strategy change of an EXISTING contract ([ReassessmentPolicy]):
+     * an expired or superseded assessment, or a requested strategy above the profile's risk class,
+     * refuses the change (409) until the participant answers the questionnaire again on
+     * [ReassessmentRequiredException.applicationId]. A contract created without onboarding (the S1
+     * draft API) has no assessment on record and is not judged here — tracked as an open item.
+     */
+    suspend fun requireSuitableStrategyChange(contract: PensionContract, strategyCode: String) {
+        val application = applications.findByContract(contract.id) ?: return
+        val assessment = application.assessmentId?.let { assessments.findById(it) }
+            ?: throw ReassessmentRequiredException(application.id, RefreshReason.NO_ASSESSMENT)
+        val riskClass = rules.rules(contract.jurisdiction, contract.productLine, contract.packVersion)
+            .strategy(strategyCode)?.riskClass
+        ReassessmentPolicy.refreshReason(assessment, today(), riskClass)?.let {
+            throw ReassessmentRequiredException(application.id, it)
+        }
     }
 
     /** The assessment in force for one of the caller's applications, or null before the first answer. */

@@ -149,6 +149,16 @@ data class OnboardingApplication(
         )
     }
 
+    /**
+     * Re-assessment of an EXISTING contract (ADR-0334, #12384): the participant answered again
+     * after the application was activated. The lifecycle does not move; only the assessment in
+     * force (and its recommendation) is replaced. The superseded assessment stays on record.
+     */
+    fun recordReassessment(assessmentId: UUID, recommendation: String, now: Instant): OnboardingApplication {
+        check(status == OnboardingStatus.ACTIVATED) { "only an activated contract's application is re-assessed" }
+        return copy(assessmentId = assessmentId, recommendedStrategy = recommendation, updatedAt = now)
+    }
+
     /** Save-and-resume: answers are kept as given; nothing is scored until submission. */
     fun saveDraft(answers: Map<String, String>, now: Instant): OnboardingApplication {
         check(status.preSignature) { "a $status application can no longer be edited" }

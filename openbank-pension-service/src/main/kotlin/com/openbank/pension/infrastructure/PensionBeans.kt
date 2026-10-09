@@ -36,5 +36,9 @@ class PensionBeans {
         registry: JurisdictionPackRegistry,
         clock: Clock,
         notifier: ParticipantNotifier,
-    ): PensionContractUseCase = PensionContractService(repository, registry, clock, notifier)
+        onboarding: jakarta.enterprise.inject.Instance<com.openbank.pension.application.onboarding.OnboardingService>,
+    ): PensionContractUseCase = PensionContractService(repository, registry, clock, notifier) { contract, code ->
+        // Resolved per call: OnboardingService is the owner of the assessment in force (#12384).
+        onboarding.get().requireSuitableStrategyChange(contract, code)
+    }
 }

@@ -22,6 +22,18 @@ class QuestionnaireExceptionMappers {
         ),
     ).build()
 
+    /** 409: the strategy change needs a renewed assessment; the client re-answers on applicationId. */
+    @ServerExceptionMapper
+    fun reassessment(e: com.openbank.pension.application.port.out.ReassessmentRequiredException): Response =
+        Response.status(Response.Status.CONFLICT).entity(
+            mapOf(
+                "error" to e.message,
+                "code" to "REASSESSMENT_REQUIRED",
+                "reason" to e.reason.name,
+                "applicationId" to e.applicationId.toString(),
+            ),
+        ).build()
+
     private companion object {
         const val UNPROCESSABLE = 422
     }

@@ -12,6 +12,7 @@ import com.openbank.pension.application.port.`in`.PensionContractUseCase
 import com.openbank.pension.application.port.out.ContractNotFoundException
 import com.openbank.pension.application.port.out.ParticipantNotifier
 import com.openbank.pension.application.port.out.PensionContractRepository
+import com.openbank.pension.application.port.out.StrategySuitabilityPort
 import com.openbank.pension.domain.model.ContractStatus
 import com.openbank.pension.domain.model.Limits
 import com.openbank.pension.domain.model.PensionContract
@@ -31,6 +32,8 @@ class PensionContractService(
     private val packs: JurisdictionPackRegistry,
     private val clock: Clock,
     private val notifier: ParticipantNotifier,
+    /** Re-assessment rule on a strategy change of an EXISTING (active) contract (#12384). */
+    private val suitability: StrategySuitabilityPort = StrategySuitabilityPort { _, _ -> },
 ) : PensionContractUseCase {
 
     override suspend fun createDraft(command: CreateDraftCommand): PensionContract {
@@ -96,6 +99,11 @@ class PensionContractService(
         effectiveFrom: LocalDate?,
     ): PensionContract {
         val from = effectiveFrom ?: LocalDate.now(clock)
+        contracts.findById(id)?.takeIf {
+            it.status == ContractStatus.ACTIVE &&
+                it.participantPartyId == caller.customerPartyId
+        }
+            ?.let { suitability.requireSuitable(it, strategyCode) }
         val saved = transition(caller, id, null) {
             require(!from.isBefore(LocalDate.now(clock))) { "a strategy change cannot take effect in the past" }
             it.electStrategy(strategyCode, from, clock.instant())

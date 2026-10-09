@@ -112,8 +112,22 @@ class QuestionnaireService(
             lossCapacityCzk = profile.lossCapacityCzk,
             confirmedInconsistencies = profile.inconsistencies.map { it.code },
         )
-        onboarding.saveDraft(id, partyId, answers)
-        return onboarding.submitAssessment(id, partyId) { app, rules ->
+        val reassessment = application.status == com.openbank.pension.domain.onboarding.OnboardingStatus.ACTIVATED
+        // The draft is onboarding's save-and-resume; a re-assessment is scored from the answers directly.
+        if (!reassessment) onboarding.saveDraft(id, partyId, answers)
+        // An activated application is a RE-assessment of its contract (strategy change, expiry,
+        // life event): same scoring, lifecycle unchanged.
+        val submit: suspend (
+            UUID,
+            UUID,
+            (OnboardingApplication, com.openbank.pension.domain.onboarding.OnboardingRules) -> SuitabilityAssessment,
+        ) -> Pair<OnboardingApplication, StrategyRecommendation> =
+            if (reassessment) {
+                onboarding::reassess
+            } else {
+                onboarding::submitAssessment
+            }
+        return submit(id, partyId) { app, rules ->
             SuitabilityAssessment.fromQuestionnaire(
                 partyId,
                 app.id,

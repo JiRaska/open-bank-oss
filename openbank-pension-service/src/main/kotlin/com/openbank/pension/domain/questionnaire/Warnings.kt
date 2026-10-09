@@ -87,7 +87,7 @@ object WarningPolicy {
 }
 
 /** Why an assessment must be answered again. */
-enum class RefreshReason { EXPIRED, SUPERSEDED, STRATEGY_CHANGE_ABOVE_PROFILE, LIFE_EVENT }
+enum class RefreshReason { EXPIRED, SUPERSEDED, STRATEGY_CHANGE_ABOVE_PROFILE, LIFE_EVENT, NO_ASSESSMENT }
 
 /** Events the participant reports that invalidate the profile (ESMA: keep information up to date). */
 enum class LifeEvent {
