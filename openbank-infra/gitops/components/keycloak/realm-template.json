@@ -1274,7 +1274,8 @@
       "defaultClientScopes": [
         "openid",
         "profile",
-        "roles"
+        "roles",
+        "catalog:read"
       ],
       "secret": "__PENSION_CLIENT_SECRET__"
     },
