@@ -694,6 +694,7 @@ def observations(service: Path) -> list[dict]:
     for observed_at, item in recorder:
         duplicate = any(
             same_lifecycle(observed_at, item, previous_at, previous)
+            and item.get("_dockerContainerId") == previous.get("_dockerContainerId")
             and (not item.get("resourceScopeId") or not previous.get("resourceScopeId")
                  or item["resourceScopeId"] == previous["resourceScopeId"])
             for previous_at, previous in deduplicated_recorder
@@ -1242,6 +1243,24 @@ def main() -> None:
             unmatched_observed = observations(exact_service)
             assert [item["lifecycle"] for item in unmatched_observed].count("started") == 3
             assert [item["lifecycle"] for item in unmatched_observed].count("stopped") == 3
+            recorder_only_service = service / "distinct-recorder-containers"
+            recorder_only_runtime = recorder_only_service / "build/test-intelligence/runtime"
+            recorder_only_runtime.mkdir(parents=True)
+            recorder_rows = [
+                {"resource": "postgres", "image": "postgres:18.6-alpine", "containerId": identity,
+                 "lifecycle": lifecycle, "observedAt": timestamp}
+                for lifecycle, timestamp in (("started", "2026-08-22T21:12:00Z"),
+                                             ("stopped", "2026-08-22T21:13:00Z"))
+                for identity in ("pg-a", "pg-b", "pg-a")
+            ]
+            (recorder_only_runtime / "testcontainers.jsonl").write_text(
+                "\n".join(json.dumps(item) for item in recorder_rows) + "\n"
+            )
+            recorder_only_observed = observations(recorder_only_service)
+            assert [item["lifecycle"] for item in recorder_only_observed].count("started") == 2
+            assert [item["lifecycle"] for item in recorder_only_observed].count("stopped") == 2
+            assert all("containerId" not in item and "_dockerContainerId" not in item
+                       for item in recorder_only_observed)
             pact_runtime = runtime / "providerPactTest"
             pact_runtime.mkdir()
             (pact_runtime / "testcontainers.jsonl").write_text(
