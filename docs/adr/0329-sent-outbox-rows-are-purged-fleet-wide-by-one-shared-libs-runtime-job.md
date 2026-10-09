@@ -68,8 +68,8 @@ We will purge SENT outbox rows with **one** `@ApplicationScoped` job in `openban
   exemption in `check-outbox-sent-retention.py`; the exemption set may only shrink after this
   decision is merged. A kernel
   repository whose rows are still a read model sets `sentRetentionExempt=true`; the shared job
-  skips it and the gate requires a reason. Today the exemptions are billing, case-coordinator,
-  lending, for the reasons in Context item 5 and billing issue #12187. incentive has left them
+  skips it and the gate requires a reason. Today the exemptions are billing, case-coordinator
+  and lending, for the reasons in Context item 5 and billing issue #12187. incentive has left them
   (#11902): its rows are not evidence (`incentive_audit_event` is, with the actor), and
   `OutboxTableShape.sentAtColumn` covers its `published_at` column without a migration. risk-engine
   has left them too (#11901): the dedup claim moved to a permanent `risk_limit_event_dedup` table, so
