@@ -54,7 +54,9 @@ class JurisdictionPackTest {
     fun `no pack effective before its start fails closed`() {
         assertThatThrownBy { registry.resolve("CZ", ProductLine.DPS, LocalDate.parse("2000-01-01")) }
             .isInstanceOf(PackNotFoundException::class.java)
-        assertThatThrownBy { registry.resolve("ZZ", ProductLine.DPS, on) }.isInstanceOf(PackNotFoundException::class.java)
+        assertThatThrownBy {
+            registry.resolve("ZZ", ProductLine.DPS, on)
+        }.isInstanceOf(PackNotFoundException::class.java)
     }
 
     @Test
@@ -106,7 +108,10 @@ class JurisdictionPackTest {
     fun `an early exit claws back state contributions and recent tax relief`() {
         val contract = PensionContract.draft(
             UUID.randomUUID(), ProductLine.DPS, "CZ", 1, UUID.randomUUID(), ProviderType.PENSION_COMPANY,
-            LocalDate.parse("1990-01-01"), ContributionSchedule(BigDecimal("1700"), "CZK", ContributionFrequency.MONTHLY),
+            LocalDate.parse(
+                "1990-01-01",
+            ),
+            ContributionSchedule(BigDecimal("1700"), "CZK", ContributionFrequency.MONTHLY),
             "BALANCED", emptyList(), LocalDate.parse("2020-01-01"), Instant.EPOCH,
         ).submit(Instant.EPOCH).activate(LocalDate.parse("2020-01-01"), Instant.EPOCH)
         val preview = SurrenderCalculator.preview(

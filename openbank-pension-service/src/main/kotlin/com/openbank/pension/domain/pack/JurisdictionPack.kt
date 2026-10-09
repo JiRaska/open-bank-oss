@@ -104,7 +104,12 @@ data class ResidencyRule(
 
 enum class IncentiveType { MATCHING, FLAT, TAX_RELIEF, EMPLOYER_EXEMPTION }
 
-enum class IncentivePeriod(val periodsPerYear: Int) { MONTH(12), QUARTER(4), YEAR(1) }
+@Suppress("MagicNumber") // calendar facts, not tunables
+enum class IncentivePeriod(val periodsPerYear: Int) {
+    MONTH(12),
+    QUARTER(4),
+    YEAR(1),
+}
 
 enum class ClaimChannel { STATE_AGENCY_BATCH, TAX_RETURN, PAYROLL, NONE }
 

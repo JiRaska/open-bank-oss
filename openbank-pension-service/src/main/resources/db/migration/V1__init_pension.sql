@@ -21,6 +21,8 @@ CREATE TABLE pension_contracts (
     contribution_frequency         VARCHAR(16) NOT NULL,
     beneficiaries                  TEXT NOT NULL DEFAULT '[]',
     start_date                     DATE,
+    -- Client-supplied key that makes a retried create a no-op (unique per participant below).
+    idempotency_key                VARCHAR(256),
     created_at                     TIMESTAMPTZ NOT NULL,
     updated_at                     TIMESTAMPTZ NOT NULL,
     CONSTRAINT pension_contracts_status_known CHECK (status IN (
@@ -30,6 +32,10 @@ CREATE TABLE pension_contracts (
     CONSTRAINT pension_contracts_start_date_when_active CHECK (
         status IN ('DRAFT', 'PENDING_ACTIVATION') OR start_date IS NOT NULL)
 );
+
+CREATE UNIQUE INDEX uq_pension_contracts_idempotency
+    ON pension_contracts (participant_party_id, idempotency_key)
+    WHERE idempotency_key IS NOT NULL;
 
 CREATE INDEX idx_pension_contracts_participant ON pension_contracts (participant_party_id, status);
 

@@ -66,6 +66,20 @@ class PensionContractRepositoryImpl(
         }
     }.awaitSuspending()
 
+    override suspend fun findByIdempotencyKey(participantPartyId: UUID, idempotencyKey: String): PensionContract? =
+        Panache.withSession {
+            find("participantPartyId = ?1 and idempotencyKey = ?2", participantPartyId, idempotencyKey)
+                .firstResult()
+                .flatMap { entity ->
+                    if (entity == null) {
+                        Uni.createFrom().nullItem()
+                    } else {
+                        elections.find("contractId = ?1 order by id", entity.contractId).list()
+                            .map { history -> entity.toDomain(history) }
+                    }
+                }
+        }.awaitSuspending()
+
     private fun PensionContractEntity.fill(contract: PensionContract) {
         participantPartyId = contract.participantPartyId
         productLine = contract.productLine.name
@@ -81,6 +95,7 @@ class PensionContractRepositoryImpl(
         contributionFrequency = contract.schedule.frequency.name
         beneficiaries = objectMapper.writeValueAsString(contract.beneficiaries.map { it.toRow() })
         startDate = contract.startDate
+        idempotencyKey = contract.idempotencyKey
         createdAt = contract.createdAt
         updatedAt = contract.updatedAt
     }
@@ -104,6 +119,7 @@ class PensionContractRepositoryImpl(
         strategyHistory = history.map { StrategyElection(it.strategyCode, it.effectiveFrom, it.electedAt) },
         beneficiaries = objectMapper.readValue<List<BeneficiaryRow>>(beneficiaries).map { it.toDomain() },
         startDate = startDate,
+        idempotencyKey = idempotencyKey,
         createdAt = createdAt,
         updatedAt = updatedAt,
     )

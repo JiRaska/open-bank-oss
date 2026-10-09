@@ -95,7 +95,10 @@ class PensionContractTest {
         assertThatThrownBy { draft(listOf(Beneficiary("A", sharePercent = BigDecimal("60")))) }
             .isInstanceOf(IllegalArgumentException::class.java)
         val ok = draft(
-            listOf(Beneficiary("A", sharePercent = BigDecimal("60")), Beneficiary("B", sharePercent = BigDecimal("40"))),
+            listOf(
+                Beneficiary("A", sharePercent = BigDecimal("60")),
+                Beneficiary("B", sharePercent = BigDecimal("40")),
+            ),
         )
         assertThat(ok.beneficiaries).hasSize(2)
     }

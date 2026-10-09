@@ -4,6 +4,7 @@
 
 package com.openbank.pension.application.usecase
 
+import com.openbank.pension.application.port.`in`.Caller
 import com.openbank.pension.application.port.`in`.CreateDraftCommand
 import com.openbank.pension.application.port.`in`.EarlyTerminationCommand
 import com.openbank.pension.application.port.`in`.EarlyTerminationResult
@@ -12,9 +13,9 @@ import com.openbank.pension.application.port.`in`.PensionContractUseCase
 import com.openbank.pension.application.port.out.ContractNotFoundException
 import com.openbank.pension.application.port.out.PensionContractRepository
 import com.openbank.pension.domain.model.ContractStatus
+import com.openbank.pension.domain.model.Limits
 import com.openbank.pension.domain.model.PensionContract
 import com.openbank.pension.domain.pack.IncentiveResult
-import com.openbank.pension.domain.pack.JurisdictionPack
 import com.openbank.pension.domain.pack.JurisdictionPackRegistry
 import com.openbank.pension.domain.pack.PackEvaluator
 import com.openbank.pension.domain.pack.SurrenderCalculator
@@ -33,7 +34,16 @@ class PensionContractService(
 ) : PensionContractUseCase {
 
     override suspend fun createDraft(command: CreateDraftCommand): PensionContract {
+        command.idempotencyKey?.let { key ->
+            contracts.findByIdempotencyKey(command.participantPartyId, key)?.let { return it }
+        }
+        require(command.beneficiaries.size <= Limits.MAX_BENEFICIARIES) {
+            "at most ${Limits.MAX_BENEFICIARIES} beneficiaries"
+        }
+        require(command.residencyEvidence.size <= Limits.MAX_ENTRIES) { "too many residency evidence entries" }
+        Limits.requireCode(command.jurisdiction, "jurisdiction")
         val today = LocalDate.now(clock)
+        require(command.birthDate.isBefore(today)) { "birthDate must be in the past" }
         val pack = packs.resolve(command.jurisdiction, command.productLine, today)
         require(command.providerType in pack.permittedProviderTypes) {
             "provider type ${command.providerType} may not provide ${pack.productLine} under " +
@@ -43,7 +53,12 @@ class PensionContractService(
             "contribution currency must be ${pack.currency} under this pack"
         }
         val eligibility = PackEvaluator.checkEligibility(
-            pack, command.birthDate, command.residencyCountry, command.residencyEvidence, command.hasGuardian, today,
+            pack,
+            command.birthDate,
+            command.residencyCountry,
+            command.residencyEvidence,
+            command.hasGuardian,
+            today,
         )
         require(eligibility.eligible) { "participant is not eligible: ${eligibility.reasons.joinToString("; ")}" }
         val draft = PensionContract.draft(
@@ -59,30 +74,46 @@ class PensionContractService(
             beneficiaries = command.beneficiaries,
             today = today,
             now = clock.instant(),
+            idempotencyKey = command.idempotencyKey,
         )
         return contracts.save(draft)
     }
 
-    override suspend fun submit(id: UUID) = mutate(id) { it.submit(clock.instant()) }
+    override suspend fun submit(caller: Caller, id: UUID) =
+        transition(caller, id, ContractStatus.PENDING_ACTIVATION) { it.submit(clock.instant()) }
 
-    override suspend fun activate(id: UUID) = mutate(id) { it.activate(LocalDate.now(clock), clock.instant()) }
+    override suspend fun activate(caller: Caller, id: UUID) =
+        transition(caller, id, ContractStatus.ACTIVE) { it.activate(LocalDate.now(clock), clock.instant()) }
 
-    override suspend fun electStrategy(id: UUID, strategyCode: String, effectiveFrom: LocalDate?) = mutate(id) {
-        val from = effectiveFrom ?: LocalDate.now(clock)
-        require(!from.isBefore(LocalDate.now(clock))) { "a strategy change cannot take effect in the past" }
-        it.electStrategy(strategyCode, from, clock.instant())
+    override suspend fun electStrategy(caller: Caller, id: UUID, strategyCode: String, effectiveFrom: LocalDate?) =
+        transition(caller, id, null) {
+            val from = effectiveFrom ?: LocalDate.now(clock)
+            require(!from.isBefore(LocalDate.now(clock))) { "a strategy change cannot take effect in the past" }
+            it.electStrategy(strategyCode, from, clock.instant())
+        }
+
+    override suspend fun suspendContributions(caller: Caller, id: UUID) =
+        transition(caller, id, ContractStatus.SUSPENDED) { it.suspendContributions(clock.instant()) }
+
+    override suspend fun resumeContributions(caller: Caller, id: UUID) =
+        transition(caller, id, ContractStatus.ACTIVE) { it.resumeContributions(clock.instant()) }
+
+    /**
+     * The ownership check. Someone else's contract is NOT FOUND — the same answer as an id that
+     * does not exist — so a customer cannot learn which ids are real.
+     */
+    override suspend fun get(caller: Caller, id: UUID): PensionContract {
+        val contract = contracts.findById(id) ?: throw ContractNotFoundException(id)
+        if (caller.customerPartyId != null && contract.participantPartyId != caller.customerPartyId) {
+            throw ContractNotFoundException(id)
+        }
+        return contract
     }
 
-    override suspend fun suspendContributions(id: UUID) = mutate(id) { it.suspendContributions(clock.instant()) }
-
-    override suspend fun resumeContributions(id: UUID) = mutate(id) { it.resumeContributions(clock.instant()) }
-
-    override suspend fun get(id: UUID): PensionContract = contracts.findById(id) ?: throw ContractNotFoundException(id)
-
     override suspend fun evaluateIncentives(command: IncentiveEvaluationCommand): List<IncentiveResult> {
-        val contract = get(command.contractId)
+        val contract = get(command.caller, command.contractId)
         return PackEvaluator.evaluateIncentives(
-            pinnedPack(contract),
+            packs.pinnedFor(contract),
             command.contribution,
             command.period,
             command.employerContributionAnnual,
@@ -91,18 +122,43 @@ class PensionContractService(
     }
 
     override suspend fun requestEarlyTermination(command: EarlyTerminationCommand): EarlyTerminationResult {
-        val contract = get(command.contractId)
-        check(contract.status == ContractStatus.ACTIVE || contract.status == ContractStatus.SUSPENDED) {
+        val contract = get(command.caller, command.contractId)
+        if (command.confirm) command.caller.requireParticipant()
+        // A replayed confirmation finds the contract already TERMINATING and answers the same
+        // preview without a second transition.
+        val replay = command.confirm && contract.status == ContractStatus.TERMINATING
+        check(replay || contract.status == ContractStatus.ACTIVE || contract.status == ContractStatus.SUSPENDED) {
             "early termination needs an ACTIVE or SUSPENDED contract, was ${contract.status}"
         }
-        val preview = SurrenderCalculator.preview(contract, pinnedPack(contract), command.inputs, LocalDate.now(clock))
-        val result = if (command.confirm) contracts.save(contract.requestTermination(clock.instant())) else contract
+        val preview = SurrenderCalculator.preview(
+            contract,
+            packs.pinnedFor(contract),
+            command.inputs,
+            LocalDate.now(clock),
+        )
+        val result = if (command.confirm &&
+            !replay
+        ) {
+            contracts.save(contract.requestTermination(clock.instant()))
+        } else {
+            contract
+        }
         return EarlyTerminationResult(result, preview)
     }
 
-    private fun pinnedPack(contract: PensionContract): JurisdictionPack =
-        packs.pinned(contract.jurisdiction, contract.productLine, contract.packVersion)
-
-    private suspend fun mutate(id: UUID, change: (PensionContract) -> PensionContract): PensionContract =
-        contracts.save(change(get(id)))
+    /**
+     * A lifecycle action is idempotent: a retry that finds the contract already in [target] returns
+     * it unchanged instead of failing the second attempt of an action that succeeded. A `null`
+     * target (strategy election) always applies the change.
+     */
+    private suspend fun transition(
+        caller: Caller,
+        id: UUID,
+        target: ContractStatus?,
+        change: (PensionContract) -> PensionContract,
+    ): PensionContract {
+        caller.requireParticipant()
+        val current = get(caller, id)
+        return if (target != null && current.status == target) current else contracts.save(change(current))
+    }
 }

@@ -41,6 +41,9 @@ packs are code-reviewed data baked into the image, not runtime input).
 | Threat | Vector | Mitigation in S1 |
 |---|---|---|
 | **Spoofing** | A caller impersonates the participant to open or terminate a contract | Writes reachable only through the edge principal, which authenticates the human and stamps `X-Customer-Party-Id`; an absent header is a 400 (nullable param + `requireNotNull`, #3104) |
+| **Spoofing / IDOR** | A customer reads or acts on another participant's contract by id | Every route resolves the caller: a caller without a staff role must carry `X-Customer-Party-Id` and is confined to that party's contracts; someone else's contract answers **404**, identical to an unknown id, so ids cannot be enumerated. Staff may read without the header; every change requires a participant caller. Covered by `PensionContractApiIT` (stranger → 404 on read and every action, owner → 200, operator → 200 read / 400 write), falsified by removing the check |
+| **Tampering** | Retried requests double-create or double-apply | `Idempotency-Key` is required on every POST; create deduplicates per participant (unique index), lifecycle actions are idempotent by state |
+| **Tampering** | Oversized or pathological amounts | Every caller-supplied amount bounded (≤ 1e9, ≤ 4 decimals); list/map inputs capped; codes restricted to `[A-Za-z0-9_-]{1,64}` |
 | **Tampering** | Request sets lifecycle state, pack version or a backdated strategy | Status is never a request field; transitions go through `ContractStatus.canMoveTo` and an illegal edge is 409; the pack version is resolved server-side by date and pinned; strategy changes cannot take effect in the past; DB `CHECK` constraints mirror the status vocabulary and the start-date invariant |
 | **Tampering** | Pack data edited to inflate incentives | Packs are repository data reviewed in PR, loaded through a strict mapper (unknown key = boot failure), validated per rule type; every pack carries a legal-review status |
 | **Repudiation** | Participant disputes a strategy change | Strategy elections are append-only rows with `elected_at`; nothing overwrites a previous election. Signed client intent (SCA) arrives with the onboarding workflow slice |
@@ -56,6 +59,8 @@ packs are code-reviewed data baked into the image, not runtime input).
   contract to `TERMINATING` only — no payout exists in S1.
 - **Pack activation is a deploy, not a four-eyes runtime act** in S1. ADR-0212 D4's maker-checker
   activation is a follow-up; until then the pull-request review is the second pair of eyes.
+- **Concurrent creates with one key.** Two simultaneous first attempts with the same key race to
+  the unique index; the loser fails at insert rather than returning the winner's contract.
 - **Pack values pending legal review.** The CZ/DPS and CZ/DIP packs are reference data.
 - **Money-moving slices must extend this model** before they merge: contribution collection
   (SDD/standing order), incentive claims to a state agency, payouts, transfers, and the
