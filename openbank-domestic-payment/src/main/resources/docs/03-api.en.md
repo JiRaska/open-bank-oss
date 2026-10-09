@@ -138,6 +138,7 @@ Errors use `openbank-libs` `ApiError` (`{ correlationId, status, code, message }
 |---|---|---|
 | 400 | (validation) | missing `Idempotency-Key`, malformed body / enum |
 | 400 | `AMOUNT_SCALE_EXCEEDED` / `CURRENCY_UNSUPPORTED` / `VALIDATION_ERROR` | `amount` + `currency` cannot be a kernel `Money` (more decimals than the currency allows, e.g. `100.005 CZK`; not an ISO 4217 code with a minor unit; absent or out of range), or the amount is zero or negative (#11604). Refused before the `Idempotency-Key` is looked up: nothing is persisted and a corrected retry under the same key succeeds |
+| 400 | `CURRENCY_NOT_ALLOWED` | A valid currency other than CZK is refused on the Czech domestic rail (#12059), including technical-account transfers. The check runs before the `Idempotency-Key` is bound; nothing is persisted and a corrected CZK retry with the same key succeeds. `violations[]` names `currency` without echoing its value. |
 | 401 | unauthorized | missing / invalid token |
 | 403 | forbidden | role missing for the endpoint (or OPA deny in enforce mode) |
 | 404 | `NOT_FOUND` | payment id does not exist (`DomesticPaymentNotFoundException`) |
