@@ -305,9 +305,6 @@ locals {
     # archived_count rises, failed_count stays 0, ContinuousArchiving reads True, and the bucket
     # is empty. Only `aws s3 ls` can tell the two apart.
     wealth       = { namespace = "wealth", sa = "wealth-db" }
-    # ADR-0334: the unit register of segregated pension funds. Declared from the first commit:
-    # a barmanObjectStore without its association archives to NOWHERE and reports success.
-    pension-fund = { namespace = "pension-fund", sa = "pension-fund-db" }
     tpp-registry = { namespace = "tpp-registry", sa = "tpp-registry-db" }
     # JiRaska/openbank-pricing#1: pricing moves under GitOps with a barmanObjectStore. Declared
     # BEFORE the manifest lands, so WAL archiving never runs without credentials.
