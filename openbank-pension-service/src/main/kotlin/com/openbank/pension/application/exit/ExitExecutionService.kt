@@ -56,11 +56,21 @@ class ExitExecutionService(private val ctx: ExitContext) {
             gw.incentives.settleClawback(notice.contractId, q.incentiveReturn, key("term", noticeId, "clawback"))
         }
         remit(notice.contractId, "DEDUCTION_RECAPTURE", q.deductionRecapture, key("term", noticeId, "tax-deduction"))
-        remit(notice.contractId, "EMPLOYER_EXEMPT_RECAPTURE", q.employerExemptRecapture, key("term", noticeId, "tax-employer"))
+        remit(
+            notice.contractId,
+            "EMPLOYER_EXEMPT_RECAPTURE",
+            q.employerExemptRecapture,
+            key("term", noticeId, "tax-employer"),
+        )
         val contract = contract(notice.contractId)
         val ref = pay(
-            key("term", noticeId, "payout"), contract, "EARLY_TERMINATION", contract.participantPartyId.toString(),
-            requireNotNull(notice.payoutIban), q.netPayout, q.currency,
+            key("term", noticeId, "payout"),
+            contract,
+            "EARLY_TERMINATION",
+            contract.participantPartyId.toString(),
+            requireNotNull(notice.payoutIban),
+            q.netPayout,
+            q.currency,
         )
         stores.notices.save(notice.markPaid(ref, now()))
     }
@@ -96,14 +106,22 @@ class ExitExecutionService(private val ctx: ExitContext) {
         if (payout.form == PayoutForm.ANNUITY) {
             if (payout.annuity == null) {
                 val policy = gw.insurer.purchase(
-                    payout.contractId, q.netAmount, contract.participantBirthDate, key("payout", payoutId, "annuity"),
+                    payout.contractId,
+                    q.netAmount,
+                    contract.participantBirthDate,
+                    key("payout", payoutId, "annuity"),
                 )
                 stores.payouts.save(payout.markAnnuityPurchased(policy, now()))
             }
         } else if (payout.paymentRef == null) {
             val ref = pay(
-                key("payout", payoutId, "pay"), contract, payout.form.name, contract.participantPartyId.toString(),
-                requireNotNull(payout.payoutIban), q.netAmount, q.currency,
+                key("payout", payoutId, "pay"),
+                contract,
+                payout.form.name,
+                contract.participantPartyId.toString(),
+                requireNotNull(payout.payoutIban),
+                q.netAmount,
+                q.currency,
             )
             stores.payouts.save(payout.markPaid(ref, now()))
         }
@@ -120,8 +138,13 @@ class ExitExecutionService(private val ctx: ExitContext) {
         remit(payout.contractId, "PAYOUT_WITHHOLDING", installment.tax, key("payout", payoutId, "i$seq-tax"))
         val contract = contract(payout.contractId)
         val ref = pay(
-            key("payout", payoutId, "i$seq-pay"), contract, "${payout.form.name}#$seq",
-            contract.participantPartyId.toString(), requireNotNull(payout.payoutIban), installment.net, payout.quote.currency,
+            key("payout", payoutId, "i$seq-pay"),
+            contract,
+            "${payout.form.name}#$seq",
+            contract.participantPartyId.toString(),
+            requireNotNull(payout.payoutIban),
+            installment.net,
+            payout.quote.currency,
         )
         stores.payouts.save(payout.markInstallmentPaid(seq, ref, now()))
         return true
@@ -145,7 +168,11 @@ class ExitExecutionService(private val ctx: ExitContext) {
         if (claim.incentiveReturn.signum() > 0) {
             gw.incentives.settleClawback(claim.contractId, claim.incentiveReturn, key("death", claimId, "clawback"))
         }
-        val proceeds = gw.fund.redeem(claim.contractId, requireNotNull(claim.valuation), key("death", claimId, "redeem"))
+        val proceeds = gw.fund.redeem(
+            claim.contractId,
+            requireNotNull(claim.valuation),
+            key("death", claimId, "redeem"),
+        )
         stores.claims.save(claim.markRedeemed(proceeds, now()))
     }
 
@@ -156,11 +183,21 @@ class ExitExecutionService(private val ctx: ExitContext) {
         val claim = requireNotNull(stores.claims.findById(claimId))
         val claimant = claim.claimant(claimantId)
         if (claim.status != DeathClaimStatus.IN_PAYMENT || claimant.paymentRef != null) return
-        remit(claim.contractId, "BENEFICIARY_WITHHOLDING", requireNotNull(claimant.tax), key("death", claimId, "$claimantId-tax"))
+        remit(
+            claim.contractId,
+            "BENEFICIARY_WITHHOLDING",
+            requireNotNull(claimant.tax),
+            key("death", claimId, "$claimantId-tax"),
+        )
         val contract = contract(claim.contractId)
         val ref = pay(
-            key("death", claimId, "$claimantId-pay"), contract, "DEATH_BENEFIT", claimant.name,
-            requireNotNull(claimant.iban), requireNotNull(claimant.net), currency(contract),
+            key("death", claimId, "$claimantId-pay"),
+            contract,
+            "DEATH_BENEFIT",
+            claimant.name,
+            requireNotNull(claimant.iban),
+            requireNotNull(claimant.net),
+            currency(contract),
         )
         stores.claims.save(claim.markClaimantPaid(claimantId, ref, now()))
     }
@@ -195,7 +232,9 @@ class ExitExecutionService(private val ctx: ExitContext) {
         )
         stored.paymentRef?.let { return it }
         check(stored.amount.compareTo(amount) == 0) { "instruction $key exists with a different amount" }
-        val ref = gw.payments.pay(PaymentOrder(key, contract.id, creditor, iban, amount, currency, "PENSION $purpose ${contract.id}"))
+        val ref = gw.payments.pay(
+            PaymentOrder(key, contract.id, creditor, iban, amount, currency, "PENSION $purpose ${contract.id}"),
+        )
         stores.instructions.markSent(key, ref)
         return ref
     }
@@ -205,7 +244,9 @@ class ExitExecutionService(private val ctx: ExitContext) {
     private suspend fun contract(id: UUID): PensionContract =
         requireNotNull(stores.contracts.findById(id)) { "contract $id vanished" }
 
-    private suspend fun payout(id: UUID): PayoutRequest = requireNotNull(stores.payouts.findById(id)) { "payout $id vanished" }
+    private suspend fun payout(id: UUID): PayoutRequest = requireNotNull(stores.payouts.findById(id)) {
+        "payout $id vanished"
+    }
 
     companion object {
         const val NO_PAYMENT = "NO-PAYMENT"

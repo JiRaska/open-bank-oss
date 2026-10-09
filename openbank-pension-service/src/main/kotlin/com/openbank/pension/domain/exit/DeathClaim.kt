@@ -93,21 +93,33 @@ data class DeathClaim(
     val allVerified: Boolean get() = claimants.all { it.verification == ClaimantVerification.VERIFIED }
     val allPaid: Boolean get() = claimants.all { it.paymentRef != null }
 
-    fun claimant(claimantId: UUID): Claimant =
-        claimants.firstOrNull { it.id == claimantId } ?: throw IllegalArgumentException("claimant $claimantId not found")
+    fun claimant(claimantId: UUID): Claimant = claimants.firstOrNull { it.id == claimantId }
+        ?: throw IllegalArgumentException("claimant $claimantId not found")
 
     fun replaceClaimants(designations: List<Claimant>, now: Instant): DeathClaim {
         check(status == DeathClaimStatus.NOTIFIED) { "claimants can change only while NOTIFIED, was $status" }
         return copy(claimants = designations, updatedAt = now)
     }
 
-    fun recordVerification(claimantId: UUID, verified: Boolean, iban: String, operator: String, now: Instant): DeathClaim {
+    fun recordVerification(
+        claimantId: UUID,
+        verified: Boolean,
+        iban: String,
+        operator: String,
+        now: Instant,
+    ): DeathClaim {
         check(status == DeathClaimStatus.NOTIFIED) { "claimants are verified while NOTIFIED, was $status" }
         claimant(claimantId)
         val outcome = if (verified) ClaimantVerification.VERIFIED else ClaimantVerification.REJECTED
         return copy(
             claimants = claimants.map {
-                if (it.id == claimantId) it.copy(verification = outcome, iban = iban.takeIf { verified }, verifiedBy = operator) else it
+                if (it.id ==
+                    claimantId
+                ) {
+                    it.copy(verification = outcome, iban = iban.takeIf { verified }, verifiedBy = operator)
+                } else {
+                    it
+                }
             },
             updatedAt = now,
         )
@@ -142,14 +154,27 @@ data class DeathClaim(
         )
     }
 
-    fun markRedeemed(proceeds: BigDecimal, now: Instant): DeathClaim =
-        if (status == DeathClaimStatus.IN_PAYMENT) this else moveTo(DeathClaimStatus.IN_PAYMENT, now).copy(redeemedAmount = ExitMoney.round(proceeds))
+    fun markRedeemed(proceeds: BigDecimal, now: Instant): DeathClaim = if (status ==
+        DeathClaimStatus.IN_PAYMENT
+    ) {
+        this
+    } else {
+        moveTo(DeathClaimStatus.IN_PAYMENT, now).copy(redeemedAmount = ExitMoney.round(proceeds))
+    }
 
     fun markClaimantPaid(claimantId: UUID, ref: String, now: Instant): DeathClaim {
         check(status == DeathClaimStatus.IN_PAYMENT) { "claimants are paid IN_PAYMENT, was $status" }
         claimant(claimantId)
         return copy(
-            claimants = claimants.map { if (it.id == claimantId && it.paymentRef == null) it.copy(paymentRef = ref) else it },
+            claimants = claimants.map {
+                if (it.id == claimantId &&
+                    it.paymentRef == null
+                ) {
+                    it.copy(paymentRef = ref)
+                } else {
+                    it
+                }
+            },
             updatedAt = now,
         )
     }

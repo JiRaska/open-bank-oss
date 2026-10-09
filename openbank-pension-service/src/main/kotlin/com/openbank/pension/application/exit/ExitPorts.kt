@@ -68,15 +68,15 @@ interface ScaVerificationPort {
 
 /** Insurer that converts a premium into a life annuity. */
 interface AnnuityInsurerPort {
-    suspend fun purchase(contractId: UUID, premium: BigDecimal, birthDate: LocalDate, idempotencyKey: String): AnnuityPolicy
+    suspend fun purchase(
+        contractId: UUID,
+        premium: BigDecimal,
+        birthDate: LocalDate,
+        idempotencyKey: String,
+    ): AnnuityPolicy
 }
 
-data class ClaimantKyc(
-    val name: String,
-    val birthDate: LocalDate,
-    val identityDocumentRef: String,
-    val iban: String,
-)
+data class ClaimantKyc(val name: String, val birthDate: LocalDate, val identityDocumentRef: String, val iban: String)
 
 /** KYC-light check of a beneficiary: identity document matches, and the account is theirs. */
 interface BeneficiaryVerificationPort {

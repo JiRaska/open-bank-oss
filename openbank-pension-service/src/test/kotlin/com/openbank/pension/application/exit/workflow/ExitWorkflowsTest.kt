@@ -42,8 +42,10 @@ class ExitWorkflowsTest {
     @AfterEach
     fun tearDown() = env.close()
 
-    private fun <T> stub(type: Class<T>, id: String): T =
-        env.workflowClient.newWorkflowStub(type, WorkflowOptions.newBuilder().setTaskQueue(queue).setWorkflowId(id).build())
+    private fun <T> stub(type: Class<T>, id: String): T = env.workflowClient.newWorkflowStub(
+        type,
+        WorkflowOptions.newBuilder().setTaskQueue(queue).setWorkflowId(id).build(),
+    )
 
     @Test
     fun `early termination pays nothing before the notice period ends, then redeems, settles and closes`() {
@@ -100,7 +102,8 @@ class ExitWorkflowsTest {
 
     @Test
     fun `a schedule interrupted by a death claim stops without completing`() {
-        every { activities.payoutPlan("p3") } returns listOf(PlannedInstallment(1, 0).encode(), PlannedInstallment(2, 0).encode())
+        every { activities.payoutPlan("p3") } returns
+            listOf(PlannedInstallment(1, 0).encode(), PlannedInstallment(2, 0).encode())
         every { activities.payoutInstallment("p3", 1) } returns false
         stub(RegularPayoutWorkflow::class.java, "p-p3").run("p3")
         verify(exactly = 0) { activities.payoutInstallment("p3", 2) }

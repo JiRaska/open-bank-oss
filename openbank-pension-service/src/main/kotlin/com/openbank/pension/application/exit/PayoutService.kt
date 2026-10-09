@@ -40,7 +40,11 @@ data class ConfirmPayoutCommand(
     val idempotencyKey: String,
 )
 
-data class EligibilityView(val eligibility: PayoutEligibility, val allowedForms: Set<PayoutForm>, val partialAllowed: Boolean)
+data class EligibilityView(
+    val eligibility: PayoutEligibility,
+    val allowedForms: Set<PayoutForm>,
+    val partialAllowed: Boolean,
+)
 
 /**
  * Regular termination & payout and partial withdrawals (ADR-0334 §4 step 7). Same binding-quote
@@ -69,7 +73,9 @@ class PayoutService(
             "a payout needs an ACTIVE or SUSPENDED contract, was ${contract.status}"
         }
         check(stores.claims.findByContract(contract.id) == null) { "a death claim is registered for this contract" }
-        require(command.form != PayoutForm.SURRENDER) { "a surrender is an early termination; use the termination quote" }
+        require(command.form != PayoutForm.SURRENDER) {
+            "a surrender is an early termination; use the termination quote"
+        }
         val pack = ctx.packs.pinnedFor(contract)
         val rules = pack.exitRules()
         val today = LocalDate.now(ctx.clock)
@@ -100,7 +106,9 @@ class PayoutService(
         val contract = contractsUseCase.get(command.caller, command.contractId)
         val request = load(command.contractId, command.payoutId)
         if (request.status != PayoutStatus.QUOTED) {
-            check(request.idempotencyKey == command.idempotencyKey) { "payout is ${request.status}; it cannot be confirmed again" }
+            check(request.idempotencyKey == command.idempotencyKey) {
+                "payout is ${request.status}; it cannot be confirmed again"
+            }
             if (!request.partial) ensureTerminating(contract)
             if (request.status != PayoutStatus.COMPLETED) launcher.startPayout(request.id)
             return request
@@ -114,7 +122,12 @@ class PayoutService(
             "a payout needs an ACTIVE or SUSPENDED contract, was ${contract.status}"
         }
         val iban = IbanRule.normalise(command.iban)
-        ctx.gateways.verifySignatureAndAccount(contract.participantPartyId, command.scaChallengeId, request.quoteHash, iban)
+        ctx.gateways.verifySignatureAndAccount(
+            contract.participantPartyId,
+            command.scaChallengeId,
+            request.quoteHash,
+            iban,
+        )
         val confirmed = stores.payouts.save(
             request.confirm(iban, command.scaChallengeId, command.idempotencyKey, LocalDate.now(ctx.clock), now),
         )
@@ -170,7 +183,9 @@ class PayoutService(
             else -> return months.also { require(it == null) { "months applies only to a scheduled payout" } }
         } ?: error("the pack states no schedule bounds for $form")
         val m = requireNotNull(months) { "months is required for $form" }
-        require(m in bounds.minMonths..bounds.maxMonths) { "months must be ${bounds.minMonths}..${bounds.maxMonths} for $form" }
+        require(m in bounds.minMonths..bounds.maxMonths) {
+            "months must be ${bounds.minMonths}..${bounds.maxMonths} for $form"
+        }
         return m
     }
 

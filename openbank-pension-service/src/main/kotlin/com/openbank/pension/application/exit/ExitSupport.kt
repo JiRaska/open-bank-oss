@@ -53,7 +53,12 @@ internal object IbanRule {
 }
 
 /** SCA over the quote hash, then the payout account: both a 403, neither says which part failed. */
-internal suspend fun ExitGateways.verifySignatureAndAccount(partyId: java.util.UUID, challenge: String, hash: String, iban: String) {
+internal suspend fun ExitGateways.verifySignatureAndAccount(
+    partyId: java.util.UUID,
+    challenge: String,
+    hash: String,
+    iban: String,
+) {
     if (!sca.verify(partyId, challenge, hash)) {
         throw ExitForbiddenException("strong customer authentication failed for this quote")
     }

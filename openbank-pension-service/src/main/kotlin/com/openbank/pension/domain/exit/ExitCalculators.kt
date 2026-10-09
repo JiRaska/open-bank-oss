@@ -40,7 +40,12 @@ data class IncentiveBalance(
     }
 }
 
-data class PayoutEligibility(val conditionsMet: Boolean, val ageYears: Int, val durationMonths: Long, val reasons: List<String>)
+data class PayoutEligibility(
+    val conditionsMet: Boolean,
+    val ageYears: Int,
+    val durationMonths: Long,
+    val reasons: List<String>,
+)
 
 /**
  * The binding amounts of an early termination. Every component is rounded once ([ExitMoney]); the
@@ -63,8 +68,13 @@ data class TerminationQuote(
 
     /** Canonical text the participant signs (SCA dynamic linking); stable field order. */
     fun canonical(): String = listOf(
-        redemptionValue, surrenderFee, incentiveReturn, deductionRecapture, employerExemptRecapture,
-        netPayout, shortfall,
+        redemptionValue,
+        surrenderFee,
+        incentiveReturn,
+        deductionRecapture,
+        employerExemptRecapture,
+        netPayout,
+        shortfall,
     ).joinToString("|") { it.toPlainString() } + "|$currency|v$packVersion"
 }
 
@@ -86,10 +96,9 @@ data class PayoutQuote(
         .joinToString("|") { it.toPlainString() } + "|$form|$currency|v$packVersion|${months ?: 0}"
 }
 
-fun JurisdictionPack.exitRules(): ExitRules =
-    exit ?: error(
-        "pack $jurisdiction/$productLine v$version defines no exit rules; termination and payout are unavailable",
-    )
+fun JurisdictionPack.exitRules(): ExitRules = exit ?: error(
+    "pack $jurisdiction/$productLine v$version defines no exit rules; termination and payout are unavailable",
+)
 
 object ExitCalculator {
 
@@ -155,7 +164,8 @@ object ExitCalculator {
         currentValue: BigDecimal,
         gross: BigDecimal,
         balance: IncentiveBalance,
-    ): PayoutQuote = taxed(PayoutForm.LUMP_SUM, pack.exitRules().death.beneficiaryTax, currentValue, gross, balance, pack, null)
+    ): PayoutQuote =
+        taxed(PayoutForm.LUMP_SUM, pack.exitRules().death.beneficiaryTax, currentValue, gross, balance, pack, null)
 
     private fun rulesTax(pack: JurisdictionPack, form: PayoutForm): FormTax {
         require(form in pack.payout.allowedForms) {

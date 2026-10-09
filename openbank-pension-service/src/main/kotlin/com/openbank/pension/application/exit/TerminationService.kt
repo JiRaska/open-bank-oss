@@ -90,9 +90,21 @@ class TerminationService(
             error("the termination quote expired; request a new one")
         }
         val iban = IbanRule.normalise(command.iban)
-        ctx.gateways.verifySignatureAndAccount(contract.participantPartyId, command.scaChallengeId, notice.quoteHash, iban)
+        ctx.gateways.verifySignatureAndAccount(
+            contract.participantPartyId,
+            command.scaChallengeId,
+            notice.quoteHash,
+            iban,
+        )
         val signed = stores.notices.save(
-            notice.sign(iban, command.scaChallengeId, command.idempotencyKey, noticeDays, now, LocalDate.now(ctx.clock)),
+            notice.sign(
+                iban,
+                command.scaChallengeId,
+                command.idempotencyKey,
+                noticeDays,
+                now,
+                LocalDate.now(ctx.clock),
+            ),
         )
         ensureTerminating(contract)
         launcher.startTermination(signed.id, noticeDays)

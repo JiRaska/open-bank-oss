@@ -50,7 +50,9 @@ class StubFundAdministrationAdapter(
         values[contractId] = value
     }
 
-    fun redemptionsFor(contractId: UUID): Map<String, BigDecimal> = redemptions.filterKeys { it.contains(contractId.toString()) }
+    fun redemptionsFor(contractId: UUID): Map<String, BigDecimal> = redemptions.filterKeys {
+        it.contains(contractId.toString())
+    }
 
     override suspend fun redemptionValue(contractId: UUID): BigDecimal = values[contractId] ?: defaultValue
 
@@ -110,7 +112,9 @@ class StubAnnuityInsurerAdapter : AnnuityInsurerPort {
         AnnuityPolicy(
             policyRef = "STUB-ANNUITY-${idempotencyKey.hashCode().toUInt()}",
             insurerRef = "stub-insurer",
-            monthlyAmount = ExitMoney.round(premium.divide(BigDecimal(ILLUSTRATIVE_MONTHS), java.math.MathContext.DECIMAL64)),
+            monthlyAmount = ExitMoney.round(
+                premium.divide(BigDecimal(ILLUSTRATIVE_MONTHS), java.math.MathContext.DECIMAL64),
+            ),
         )
 
     private companion object {

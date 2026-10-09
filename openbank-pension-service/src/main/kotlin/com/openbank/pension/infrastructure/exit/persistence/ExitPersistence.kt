@@ -154,14 +154,26 @@ internal suspend fun <E : ExitDocumentEntity> PanacheRepository<E>.upsert(
     }.awaitSuspending()
 }
 
-internal suspend inline fun <E : ExitDocumentEntity, reified T> PanacheRepository<E>.load(query: String, vararg params: Any): List<T> =
-    Panache.withSession { find(query, *params).list() }.awaitSuspending()
-        .map { ExitJson.mapper.readValue(it.body, T::class.java) }
+internal suspend inline fun <E : ExitDocumentEntity, reified T> PanacheRepository<E>.load(
+    query: String,
+    vararg params: Any,
+): List<T> = Panache.withSession { find(query, *params).list() }.awaitSuspending()
+    .map { ExitJson.mapper.readValue(it.body, T::class.java) }
 
 @ApplicationScoped
-class TerminationNoticeRepositoryImpl : TerminationNoticeRepository, PanacheRepository<TerminationNoticeEntity> {
+class TerminationNoticeRepositoryImpl :
+    TerminationNoticeRepository,
+    PanacheRepository<TerminationNoticeEntity> {
     override suspend fun save(notice: TerminationNotice): TerminationNotice {
-        upsert(notice.id, notice.contractId, notice.status.name, notice.idempotencyKey, notice, notice.updatedAt, ::TerminationNoticeEntity)
+        upsert(
+            notice.id,
+            notice.contractId,
+            notice.status.name,
+            notice.idempotencyKey,
+            notice,
+            notice.updatedAt,
+            ::TerminationNoticeEntity,
+        )
         return notice
     }
 
@@ -177,28 +189,51 @@ class TerminationNoticeRepositoryImpl : TerminationNoticeRepository, PanacheRepo
 }
 
 @ApplicationScoped
-class PayoutRequestRepositoryImpl : PayoutRequestRepository, PanacheRepository<PayoutRequestEntity> {
+class PayoutRequestRepositoryImpl :
+    PayoutRequestRepository,
+    PanacheRepository<PayoutRequestEntity> {
     override suspend fun save(request: PayoutRequest): PayoutRequest {
-        upsert(request.id, request.contractId, request.status.name, request.idempotencyKey, request, request.updatedAt, ::PayoutRequestEntity)
+        upsert(
+            request.id,
+            request.contractId,
+            request.status.name,
+            request.idempotencyKey,
+            request,
+            request.updatedAt,
+            ::PayoutRequestEntity,
+        )
         return request
     }
 
-    override suspend fun findById(id: UUID): PayoutRequest? = load<PayoutRequestEntity, PayoutRequest>("aggregateId", id).firstOrNull()
+    override suspend fun findById(id: UUID): PayoutRequest? =
+        load<PayoutRequestEntity, PayoutRequest>("aggregateId", id).firstOrNull()
 
-    override suspend fun findByContract(contractId: UUID): List<PayoutRequest> = load("contractId = ?1 order by id", contractId)
+    override suspend fun findByContract(contractId: UUID): List<PayoutRequest> =
+        load("contractId = ?1 order by id", contractId)
 
     override suspend fun findInPayment(): List<PayoutRequest> =
         load("status in ?1", listOf(PayoutStatus.CONFIRMED.name, PayoutStatus.IN_PAYMENT.name))
 }
 
 @ApplicationScoped
-class DeathClaimRepositoryImpl : DeathClaimRepository, PanacheRepository<DeathClaimEntity> {
+class DeathClaimRepositoryImpl :
+    DeathClaimRepository,
+    PanacheRepository<DeathClaimEntity> {
     override suspend fun save(claim: DeathClaim): DeathClaim {
-        upsert(claim.id, claim.contractId, claim.status.name, claim.idempotencyKey, claim, claim.updatedAt, ::DeathClaimEntity)
+        upsert(
+            claim.id,
+            claim.contractId,
+            claim.status.name,
+            claim.idempotencyKey,
+            claim,
+            claim.updatedAt,
+            ::DeathClaimEntity,
+        )
         return claim
     }
 
-    override suspend fun findById(id: UUID): DeathClaim? = load<DeathClaimEntity, DeathClaim>("aggregateId", id).firstOrNull()
+    override suspend fun findById(id: UUID): DeathClaim? =
+        load<DeathClaimEntity, DeathClaim>("aggregateId", id).firstOrNull()
 
     override suspend fun findByContract(contractId: UUID): DeathClaim? =
         load<DeathClaimEntity, DeathClaim>("contractId", contractId).firstOrNull()
@@ -206,7 +241,8 @@ class DeathClaimRepositoryImpl : DeathClaimRepository, PanacheRepository<DeathCl
 
 @ApplicationScoped
 class PaymentInstructionRepositoryImpl(private val clock: Clock) :
-    PaymentInstructionRepository, PanacheRepository<PaymentInstructionEntity> {
+    PaymentInstructionRepository,
+    PanacheRepository<PaymentInstructionEntity> {
 
     override suspend fun recordIfAbsent(instruction: PaymentInstruction): PaymentInstruction {
         val stored = Panache.withTransaction {
@@ -247,10 +283,18 @@ class PaymentInstructionRepositoryImpl(private val clock: Clock) :
         }.awaitSuspending()
     }
 
-    override suspend fun findByContract(contractId: UUID): List<PaymentInstruction> =
-        Panache.withSession { find("contractId = ?1 order by id", contractId).list() }.awaitSuspending().map { it.toDomain() }
+    override suspend fun findByContract(contractId: UUID): List<PaymentInstruction> = Panache.withSession {
+        find("contractId = ?1 order by id", contractId).list()
+    }.awaitSuspending().map { it.toDomain() }
 
     private fun PaymentInstructionEntity.toDomain() = PaymentInstruction(
-        idempotencyKey, contractId, purpose, amount, currency, creditorIban, InstructionStatus.valueOf(status), paymentRef,
+        idempotencyKey,
+        contractId,
+        purpose,
+        amount,
+        currency,
+        creditorIban,
+        InstructionStatus.valueOf(status),
+        paymentRef,
     )
 }

@@ -26,7 +26,11 @@ data class SignRequest(val scaChallengeId: String? = null, val payoutIban: Strin
 
 data class PayoutQuoteRequest(val form: PayoutForm? = null, val amount: BigDecimal? = null, val months: Int? = null)
 
-data class NotifyDeathRequest(val contractId: UUID? = null, val dateOfDeath: LocalDate? = null, val evidenceRef: String? = null)
+data class NotifyDeathRequest(
+    val contractId: UUID? = null,
+    val dateOfDeath: LocalDate? = null,
+    val evidenceRef: String? = null,
+)
 
 data class ClaimantRequest(
     val name: String? = null,
@@ -54,8 +58,12 @@ data class EligibilityResponse(
 ) {
     companion object {
         fun from(v: EligibilityView) = EligibilityResponse(
-            v.eligibility.conditionsMet, v.eligibility.ageYears, v.eligibility.durationMonths, v.eligibility.reasons,
-            v.allowedForms.sorted(), v.partialAllowed,
+            v.eligibility.conditionsMet,
+            v.eligibility.ageYears,
+            v.eligibility.durationMonths,
+            v.eligibility.reasons,
+            v.allowedForms.sorted(),
+            v.partialAllowed,
         )
     }
 }
@@ -136,7 +144,8 @@ data class PayoutResponse(
     companion object {
         fun from(p: PayoutRequest) = PayoutResponse(
             p.id, p.contractId, p.form, p.status.name, p.quote.currentValue, p.quote.grossAmount, p.quote.taxBase.name,
-            p.quote.taxableAmount, p.quote.taxWithheld, p.quote.netAmount, p.quote.currency, p.quote.months, p.quoteHash,
+            p.quote.taxableAmount, p.quote.taxWithheld, p.quote.netAmount, p.quote.currency, p.quote.months,
+            p.quoteHash,
             p.quoteExpiresAt, p.schedule?.installments.orEmpty().map(InstallmentResponse::from), p.annuity?.policyRef,
             p.annuity?.monthlyAmount, p.paymentRef,
         )
@@ -164,14 +173,22 @@ data class PayoutStatementResponse(
             val (netPaid, taxPaid, count) = when {
                 schedule != null -> {
                     val paid = schedule.installments.filter { it.paymentRef != null }
-                    Triple(paid.fold(BigDecimal.ZERO) { a, i -> a + i.net }, paid.fold(BigDecimal.ZERO) { a, i -> a + i.tax }, paid.size)
+                    Triple(
+                        paid.fold(BigDecimal.ZERO) { a, i -> a + i.net },
+                        paid.fold(BigDecimal.ZERO) { a, i ->
+                            a +
+                                i.tax
+                        },
+                        paid.size,
+                    )
                 }
                 p.paymentRef != null || p.annuity != null -> Triple(p.quote.netAmount, p.quote.taxWithheld, 1)
                 else -> Triple(BigDecimal.ZERO, BigDecimal.ZERO, 0)
             }
             val scale = p.quote.netAmount.scale()
             return PayoutStatementResponse(
-                p.id, p.form, p.status.name, p.quote.currency, p.quote.grossAmount, p.quote.taxWithheld, p.quote.netAmount,
+                p.id, p.form, p.status.name, p.quote.currency, p.quote.grossAmount, p.quote.taxWithheld,
+                p.quote.netAmount,
                 netPaid.setScale(scale), taxPaid.setScale(scale), (p.quote.netAmount - netPaid).setScale(scale), count,
                 schedule?.installments?.size ?: 1,
             )
@@ -191,8 +208,9 @@ data class ClaimantResponse(
     val paymentRef: String?,
 ) {
     companion object {
-        fun from(c: Claimant) =
-            ClaimantResponse(c.id, c.name, c.sharePercent, c.estate, c.verification.name, c.gross, c.tax, c.net, c.paymentRef)
+        fun from(c: Claimant) = ClaimantResponse(
+            c.id, c.name, c.sharePercent, c.estate, c.verification.name, c.gross, c.tax, c.net, c.paymentRef,
+        )
     }
 }
 
@@ -209,7 +227,8 @@ data class DeathClaimResponse(
 ) {
     companion object {
         fun from(c: DeathClaim) = DeathClaimResponse(
-            c.id, c.contractId, c.status.name, c.dateOfDeath, c.notifiedBy, c.approvedBy, c.valuation, c.incentiveReturn,
+            c.id, c.contractId, c.status.name, c.dateOfDeath, c.notifiedBy, c.approvedBy, c.valuation,
+            c.incentiveReturn,
             c.claimants.map(ClaimantResponse::from),
         )
     }

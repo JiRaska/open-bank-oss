@@ -35,14 +35,23 @@ class ExitDomainTest {
     private val balance = IncentiveBalance(
         stateIncentivesToReturn = BigDecimal("12345.67"),
         stateIncentivesReceived = BigDecimal("12345.67"),
-        deductedContributionsByYear = mapOf(2014 to BigDecimal("24000"), 2017 to BigDecimal("10000"), 2026 to BigDecimal("6000")),
+        deductedContributionsByYear = mapOf(
+            2014 to BigDecimal("24000"),
+            2017 to BigDecimal("10000"),
+            2026 to BigDecimal("6000"),
+        ),
         employerExemptByYear = mapOf(2026 to BigDecimal("1000.01")),
         ownContributionsNotDeducted = BigDecimal("50000"),
     )
 
     @Test
     fun `termination quote deducts fee, clawback and recapture inside the window, rounded per component`() {
-        val q = ExitCalculator.terminationQuote(withFees("0.01", "100", "1000"), BigDecimal("200000.005"), balance, 2026)
+        val q = ExitCalculator.terminationQuote(
+            withFees("0.01", "100", "1000"),
+            BigDecimal("200000.005"),
+            balance,
+            2026,
+        )
         assertThat(q.redemptionValue).isEqualByComparingTo("200000.00")
         assertThat(q.surrenderFee).isEqualByComparingTo("1000.00") // 2000 + 100 capped at 1000
         assertThat(q.incentiveReturn).isEqualByComparingTo("12345.67")
@@ -68,7 +77,13 @@ class ExitDomainTest {
 
     @Test
     fun `a partial withdrawal is taxed on its prorated share of the gains only`() {
-        val q = ExitCalculator.payoutQuote(dps, PayoutForm.EARLY_WITHDRAWAL, BigDecimal("200000"), BigDecimal("50000"), balance)
+        val q = ExitCalculator.payoutQuote(
+            dps,
+            PayoutForm.EARLY_WITHDRAWAL,
+            BigDecimal("200000"),
+            BigDecimal("50000"),
+            balance,
+        )
         // gains = 200000 - 50000 - 12345.67 = 137654.33; a quarter of it is taxable
         assertThat(q.taxableAmount).isEqualByComparingTo("34413.58")
         assertThat(q.taxWithheld).isEqualByComparingTo("5162.04")
@@ -78,15 +93,22 @@ class ExitDomainTest {
     @Test
     fun `a form the pack does not allow, or more than the value, is refused`() {
         val dip = JurisdictionPackLoader.loadAll().first { it.productLine == ProductLine.DIP }
-        assertThatThrownBy { ExitCalculator.payoutQuote(dip, PayoutForm.ANNUITY, BigDecimal.TEN, BigDecimal.TEN, balance) }
+        assertThatThrownBy {
+            ExitCalculator.payoutQuote(dip, PayoutForm.ANNUITY, BigDecimal.TEN, BigDecimal.TEN, balance)
+        }
             .isInstanceOf(IllegalArgumentException::class.java)
-        assertThatThrownBy { ExitCalculator.payoutQuote(dps, PayoutForm.LUMP_SUM, BigDecimal.TEN, BigDecimal("11"), balance) }
+        assertThatThrownBy {
+            ExitCalculator.payoutQuote(dps, PayoutForm.LUMP_SUM, BigDecimal.TEN, BigDecimal("11"), balance)
+        }
             .isInstanceOf(IllegalArgumentException::class.java)
     }
 
     @Test
     fun `split never creates or loses a cent`() {
-        val parts = ExitMoney.split(BigDecimal("100.00"), listOf(BigDecimal("33.333"), BigDecimal("33.333"), BigDecimal("33.334")))
+        val parts = ExitMoney.split(
+            BigDecimal("100.00"),
+            listOf(BigDecimal("33.333"), BigDecimal("33.333"), BigDecimal("33.334")),
+        )
         assertThat(parts.fold(BigDecimal.ZERO, BigDecimal::add)).isEqualByComparingTo("100.00")
         assertThat(ExitMoney.splitEvenly(BigDecimal("1000.00"), 7).fold(BigDecimal.ZERO, BigDecimal::add))
             .isEqualByComparingTo("1000.00")
@@ -94,7 +116,14 @@ class ExitDomainTest {
 
     @Test
     fun `a schedule is the quote cut into months and sums back to it exactly`() {
-        val q = ExitCalculator.payoutQuote(dps, PayoutForm.PHASED_WITHDRAWAL, BigDecimal("100000.01"), BigDecimal("100000.01"), balance, 13)
+        val q = ExitCalculator.payoutQuote(
+            dps,
+            PayoutForm.PHASED_WITHDRAWAL,
+            BigDecimal("100000.01"),
+            BigDecimal("100000.01"),
+            balance,
+            13,
+        )
         val request = PayoutRequest.quote(UUID.randomUUID(), UUID.randomUUID(), q, 7, now)
             .confirm("CZ6508000000192000145399", "sca", "k1", today, now)
         val plan = request.schedule!!
@@ -108,7 +137,13 @@ class ExitDomainTest {
 
     @Test
     fun `payout transitions are guarded and an unsettled payout cannot complete`() {
-        val q = ExitCalculator.payoutQuote(dps, PayoutForm.LUMP_SUM, BigDecimal("1000"), BigDecimal("1000"), IncentiveBalance.EMPTY)
+        val q = ExitCalculator.payoutQuote(
+            dps,
+            PayoutForm.LUMP_SUM,
+            BigDecimal("1000"),
+            BigDecimal("1000"),
+            IncentiveBalance.EMPTY,
+        )
         val quoted = PayoutRequest.quote(UUID.randomUUID(), UUID.randomUUID(), q, 7, now)
         assertThatThrownBy { quoted.complete(now) }.isInstanceOf(IllegalStateException::class.java)
         assertThatThrownBy { quoted.confirm("CZ6508000000192000145399", "s", "k", today, now.plusSeconds(8 * 86_400)) }
@@ -128,7 +163,9 @@ class ExitDomainTest {
             .isInstanceOf(IllegalStateException::class.java)
         val signed = notice.sign("X", "s", "k", 30, now, today)
         assertThat(signed.effectiveDate).isEqualTo(today.plusDays(30))
-        assertThatThrownBy { signed.sign("X", "s", "k", 30, now, today) }.isInstanceOf(IllegalStateException::class.java)
+        assertThatThrownBy {
+            signed.sign("X", "s", "k", 30, now, today)
+        }.isInstanceOf(IllegalStateException::class.java)
         assertThatThrownBy { signed.markPaid("r", now) }.isInstanceOf(IllegalStateException::class.java)
         assertThat(signed.markRedeemed(BigDecimal("4990"), now).navVariance).isEqualByComparingTo("-10.00")
     }
@@ -144,7 +181,9 @@ class ExitDomainTest {
 
     @Test
     fun `claimant shares must total exactly 100`() {
-        assertThatThrownBy { claim().replaceClaimants(listOf(Claimant(UUID.randomUUID(), "A", null, BigDecimal("99"), false)), now) }
+        assertThatThrownBy {
+            claim().replaceClaimants(listOf(Claimant(UUID.randomUUID(), "A", null, BigDecimal("99"), false)), now)
+        }
             .isInstanceOf(IllegalArgumentException::class.java)
     }
 
@@ -156,7 +195,9 @@ class ExitDomainTest {
         c.claimants.forEach { c = c.recordVerification(it.id, true, "CZ6508000000192000145399", "op-1", now) }
         assertThatThrownBy { c.approve("op-1", BigDecimal("1000"), BigDecimal.ZERO, { BigDecimal.ZERO }, now) }
             .hasMessageContaining("four-eyes")
-        val approved = c.approve("op-2", BigDecimal("1000.01"), BigDecimal("0.01"), { it.multiply(BigDecimal("0.1")) }, now)
+        val approved = c.approve("op-2", BigDecimal("1000.01"), BigDecimal("0.01"), {
+            it.multiply(BigDecimal("0.1"))
+        }, now)
         assertThat(approved.claimants.fold(BigDecimal.ZERO) { a, x -> a + x.gross!! }).isEqualByComparingTo("1000.00")
         approved.claimants.forEach { assertThat(it.net).isEqualByComparingTo(it.gross!! - it.tax!!) }
         assertThatThrownBy { approved.settle(now) }.isInstanceOf(IllegalStateException::class.java)

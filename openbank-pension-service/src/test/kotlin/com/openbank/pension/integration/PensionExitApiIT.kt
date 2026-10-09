@@ -5,7 +5,15 @@
 package com.openbank.pension.integration
 
 import com.openbank.pension.application.exit.DeathClaimService
+import com.openbank.pension.application.port.`in`.Caller
+import com.openbank.pension.application.port.`in`.CreateDraftCommand
+import com.openbank.pension.application.port.`in`.PensionContractUseCase
 import com.openbank.pension.domain.exit.IncentiveBalance
+import com.openbank.pension.domain.model.Beneficiary
+import com.openbank.pension.domain.model.ContributionFrequency
+import com.openbank.pension.domain.model.ContributionSchedule
+import com.openbank.pension.domain.model.ProductLine
+import com.openbank.pension.domain.pack.ProviderType
 import com.openbank.pension.infrastructure.exit.WorkflowClientTestProducer
 import com.openbank.pension.infrastructure.exit.stub.StubFundAdministrationAdapter
 import com.openbank.pension.infrastructure.exit.stub.StubIncentiveClawbackAdapter
@@ -29,6 +37,7 @@ import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.sql.DriverManager
 import java.time.Duration
+import java.time.LocalDate
 import java.util.UUID
 
 /**
@@ -56,6 +65,34 @@ class PensionExitApiIT {
     @Inject
     lateinit var deathClaims: DeathClaimService
 
+    @Inject
+    lateinit var contractUseCase: PensionContractUseCase
+
+    private fun <T> onVertx(block: suspend () -> T): T =
+        VertxContextSupport.subscribeAndAwait { CoroutineScope(Dispatchers.Unconfined).async { block() }.asUni() }
+
+    /** An active contract created through the use case — an operator is not the edge relay, so cannot create over HTTP. */
+    private fun activeContractDirect(): UUID = onVertx {
+        val caller = Caller.customer(party)
+        val draft = contractUseCase.createDraft(
+            CreateDraftCommand(
+                participantPartyId = party, productLine = ProductLine.DPS, jurisdiction = "CZ",
+                providerEntityId = UUID.randomUUID(), providerType = ProviderType.PENSION_COMPANY,
+                birthDate = LocalDate.parse("1985-05-05"), residencyCountry = "CZ", residencyEvidence = emptySet(),
+                hasGuardian = false,
+                schedule = ContributionSchedule(BigDecimal("1700"), "CZK", ContributionFrequency.MONTHLY),
+                initialStrategy = "BALANCED",
+                beneficiaries = listOf(
+                    Beneficiary("Jane Doe", null, BigDecimal("60")),
+                    Beneficiary("John Doe", null, BigDecimal("40")),
+                ),
+                idempotencyKey = UUID.randomUUID().toString(),
+            ),
+        )
+        contractUseCase.submit(caller, draft.id)
+        contractUseCase.activate(caller, draft.id).id
+    }
+
     private val contracts = "/api/v1/pension/contracts"
     private val iban = "CZ6508000000192000145399"
     private val party: UUID = UUID.randomUUID()
@@ -79,7 +116,11 @@ class PensionExitApiIT {
         return UUID.fromString(id)
     }
 
-    private fun contractStatus(id: UUID): String = req().get("$contracts/$id").then().statusCode(200).extract().path("status")
+    private fun staffStatus(id: UUID): String =
+        req(null, null).get("$contracts/$id").then().statusCode(200).extract().path("status")
+
+    private fun contractStatus(id: UUID): String =
+        req().get("$contracts/$id").then().statusCode(200).extract().path("status")
 
     private fun awaitStatus(path: String, expected: String, asParty: UUID? = party): ValidatableResponse {
         val deadline = System.nanoTime() + Duration.ofSeconds(AWAIT_SECONDS).toNanos()
@@ -100,7 +141,11 @@ class PensionExitApiIT {
         incentives.setBalance(
             id,
             IncentiveBalance(
-                BigDecimal("8160.00"), BigDecimal("8160.00"), mapOf(2026 to BigDecimal("20000")), emptyMap(), BigDecimal.ZERO,
+                BigDecimal("8160.00"),
+                BigDecimal("8160.00"),
+                mapOf(2026 to BigDecimal("20000")),
+                emptyMap(),
+                BigDecimal.ZERO,
             ),
         )
         val quote = req().post("$contracts/$id/exit/termination/quote").then().statusCode(201)
@@ -132,7 +177,11 @@ class PensionExitApiIT {
         assertThat(rows).hasSize(1)
         assertThat(rows.single().first).isEqualTo("EARLY_TERMINATION")
         assertThat(rows.single().second).isEqualByComparingTo(quotedNet)
-        assertThat(payments.orders.values.filter { it.contractId == id }.single().amount).isEqualByComparingTo(quotedNet)
+        assertThat(
+            payments.orders.values.filter {
+                it.contractId == id
+            }.single().amount,
+        ).isEqualByComparingTo(quotedNet)
         assertThat(contractStatus(id)).isEqualTo("CLOSED")
     }
 
@@ -145,7 +194,9 @@ class PensionExitApiIT {
         req(stranger).post("$contracts/$id/exit/termination/quote").then().statusCode(404)
         req(stranger).get("$contracts/$id/exit/payout-eligibility").then().statusCode(404)
         req(stranger).body("""{"form":"LUMP_SUM"}""").post("$contracts/$id/exit/payouts/quote").then().statusCode(404)
-        val noticeId: String = req().post("$contracts/$id/exit/termination/quote").then().statusCode(201).extract().path("noticeId")
+        val noticeId: String = req().post(
+            "$contracts/$id/exit/termination/quote",
+        ).then().statusCode(201).extract().path("noticeId")
         req(stranger).get("$contracts/$id/exit/termination/$noticeId").then().statusCode(404)
         req(stranger, "k").body("""{"scaChallengeId":"x","payoutIban":"$iban"}""")
             .post("$contracts/$id/exit/termination/$noticeId/sign").then().statusCode(404)
@@ -161,7 +212,9 @@ class PensionExitApiIT {
         fund.setValue(id, BigDecimal("1000"))
         req().get("$contracts/$id/exit/payout-eligibility").then().statusCode(200).body("conditionsMet", equalTo(false))
         req().body("""{"form":"LUMP_SUM"}""").post("$contracts/$id/exit/payouts/quote").then().statusCode(409)
-        req().body("""{"form":"EARLY_WITHDRAWAL","amount":500}""").post("$contracts/$id/exit/payouts/quote").then().statusCode(409)
+        req().body(
+            """{"form":"EARLY_WITHDRAWAL","amount":500}""",
+        ).post("$contracts/$id/exit/payouts/quote").then().statusCode(409)
     }
 
     @Test
@@ -174,35 +227,43 @@ class PensionExitApiIT {
     @Test
     @TestSecurity(user = "op-1", roles = ["ROLE_OPERATOR"])
     fun `a death claim freezes the contract, refuses self-approval and pays each verified claimant their share`() {
-        val id = activeContract().also { fund.setValue(it, BigDecimal("100000.01")) }
+        val id = activeContractDirect().also { fund.setValue(it, BigDecimal("100000.01")) }
         val notify = """{"contractId":"$id","dateOfDeath":"2026-09-01","evidenceRef":"death-cert-1"}"""
         val claimId: String = req(null, "d-1").body(notify).post("/api/v1/pension/death-claims").then().statusCode(201)
             .body("status", equalTo("NOTIFIED")).extract().path("claimId")
         req(null, "d-1").body(notify).post("/api/v1/pension/death-claims").then().statusCode(201)
             .body("claimId", equalTo(claimId))
-        assertThat(contractStatus(id)).isEqualTo("TERMINATING")
+        assertThat(staffStatus(id)).isEqualTo("TERMINATING")
 
         val claimants: List<Map<String, Any>> = req(null).get("/api/v1/pension/death-claims/$claimId").then()
             .statusCode(200).extract().path("claimants")
         val claimPath = "/api/v1/pension/death-claims/$claimId"
-        req(null).body("""{"claimants":[{"name":"Jane Doe","sharePercent":70}]}""").put("$claimPath/claimants").then().statusCode(400)
+        req(
+            null,
+        ).body(
+            """{"claimants":[{"name":"Jane Doe","sharePercent":70}]}""",
+        ).put("$claimPath/claimants").then().statusCode(400)
         req(null, "a-0").post("$claimPath/approve").then().statusCode(409) // claimants not verified
         claimants.forEach {
-            req(null).body("""{"name":"${it["name"]}","birthDate":"1990-01-01","identityDocumentRef":"ID-1","iban":"$iban"}""")
+            req(
+                null,
+            ).body("""{"name":"${it["name"]}","birthDate":"1990-01-01","identityDocumentRef":"ID-1","iban":"$iban"}""")
                 .post("$claimPath/claimants/${it["claimantId"]}/verification").then().statusCode(200)
         }
         req(null, "a-1").post("$claimPath/approve").then().statusCode(409) // four-eyes: op-1 registered it
 
-        val approved = VertxContextSupport.subscribeAndAwait {
-            CoroutineScope(Dispatchers.Unconfined).async { deathClaims.approve("op-2", UUID.fromString(claimId)) }.asUni()
-        }
-        assertThat(approved.claimants.map { it.gross }).containsExactlyInAnyOrder(BigDecimal("60000.01"), BigDecimal("40000.00"))
+        val approved = onVertx { deathClaims.approve("op-2", UUID.fromString(claimId)) }
+        assertThat(
+            approved.claimants.map {
+                it.gross
+            },
+        ).containsExactlyInAnyOrder(BigDecimal("60000.01"), BigDecimal("40000.00"))
         awaitStatus(claimPath, "SETTLED", null)
 
         val rows = instructions(id)
         assertThat(rows.map { it.first }).containsOnly("DEATH_BENEFIT")
         assertThat(rows.fold(BigDecimal.ZERO) { a, r -> a + r.second }).isEqualByComparingTo("100000.01")
-        assertThat(contractStatus(id)).isEqualTo("CLOSED")
+        assertThat(staffStatus(id)).isEqualTo("CLOSED")
     }
 
     private fun instructions(contractId: UUID): List<Pair<String, BigDecimal>> {
@@ -211,9 +272,17 @@ class PensionExitApiIT {
         return DriverManager.getConnection(url, "openbank", "openbank_secret").use { conn ->
             conn.prepareStatement(sql).use { st ->
                 st.setObject(1, contractId)
-                st.executeQuery().use { rs -> generateSequence { if (rs.next()) rs.getString(1) to rs.getBigDecimal(2) else null }.toList() }
+                st.executeQuery().use { rs ->
+                    generateSequence { if (rs.next()) rs.getString(1) to rs.getBigDecimal(2) else null }.toList()
+                }
             }
         }
+    }
+
+    @Test
+    @TestSecurity(user = "someone-else", roles = ["ROLE_API"])
+    fun `a party header from a principal that is not the edge relay is refused`() {
+        req().post("$contracts/${UUID.randomUUID()}/exit/termination/quote").then().statusCode(403)
     }
 
     private companion object {

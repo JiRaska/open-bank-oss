@@ -46,6 +46,5 @@ object ExitMoney {
     }
 
     /** [total] split into [count] equal parts; the residual cents go to the first parts. */
-    fun splitEvenly(total: BigDecimal, count: Int): List<BigDecimal> =
-        split(total, List(count) { BigDecimal.ONE })
+    fun splitEvenly(total: BigDecimal, count: Int): List<BigDecimal> = split(total, List(count) { BigDecimal.ONE })
 }

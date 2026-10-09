@@ -138,7 +138,13 @@ data class PayoutRequest(
 
     val quoteHash: String get() = sha256("$id|$contractId|${quote.canonical()}|$quoteExpiresAt")
 
-    fun confirm(iban: String, scaChallengeId: String, idempotencyKey: String, today: LocalDate, now: Instant): PayoutRequest {
+    fun confirm(
+        iban: String,
+        scaChallengeId: String,
+        idempotencyKey: String,
+        today: LocalDate,
+        now: Instant,
+    ): PayoutRequest {
         check(now.isBefore(quoteExpiresAt)) { "the payout quote expired at $quoteExpiresAt; request a new one" }
         val plan = if (scheduled) {
             PayoutSchedule.monthly(today.plusMonths(1).withDayOfMonth(1), requireNotNull(quote.months), quote)
@@ -155,8 +161,13 @@ data class PayoutRequest(
     }
 
     /** Idempotent: a retried redemption keeps the first proceeds. */
-    fun markRedeemed(proceeds: BigDecimal, now: Instant): PayoutRequest =
-        if (status == PayoutStatus.IN_PAYMENT) this else moveTo(PayoutStatus.IN_PAYMENT, now).copy(redeemedAmount = ExitMoney.round(proceeds))
+    fun markRedeemed(proceeds: BigDecimal, now: Instant): PayoutRequest = if (status ==
+        PayoutStatus.IN_PAYMENT
+    ) {
+        this
+    } else {
+        moveTo(PayoutStatus.IN_PAYMENT, now).copy(redeemedAmount = ExitMoney.round(proceeds))
+    }
 
     /** Scheduled forms redeem per installment; entering IN_PAYMENT is idempotent. */
     fun startInstallments(now: Instant): PayoutRequest {
@@ -170,7 +181,9 @@ data class PayoutRequest(
     }
 
     fun markAnnuityPurchased(policy: AnnuityPolicy, now: Instant): PayoutRequest {
-        check(status == PayoutStatus.IN_PAYMENT && form == PayoutForm.ANNUITY) { "no annuity purchase in $status/$form" }
+        check(status == PayoutStatus.IN_PAYMENT && form == PayoutForm.ANNUITY) {
+            "no annuity purchase in $status/$form"
+        }
         return copy(annuity = annuity ?: policy, updatedAt = now)
     }
 

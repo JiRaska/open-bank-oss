@@ -46,7 +46,8 @@ class ExitActivitiesImpl(private val execution: ExitExecutionService) : ExitActi
 
     override fun terminationRedeem(noticeId: String) = vtx { execution.terminationRedeem(UUID.fromString(noticeId)) }
     override fun terminationSettle(noticeId: String) = vtx { execution.terminationSettle(UUID.fromString(noticeId)) }
-    override fun terminationComplete(noticeId: String) = vtx { execution.terminationComplete(UUID.fromString(noticeId)) }
+    override fun terminationComplete(noticeId: String) =
+        vtx { execution.terminationComplete(UUID.fromString(noticeId)) }
 
     override fun payoutPlan(payoutId: String): List<String> = vtx {
         execution.payoutPlan(UUID.fromString(payoutId)).map { (seq, day) -> PlannedInstallment(seq, day).encode() }
@@ -59,7 +60,8 @@ class ExitActivitiesImpl(private val execution: ExitExecutionService) : ExitActi
     override fun payoutComplete(payoutId: String) = vtx { execution.payoutComplete(UUID.fromString(payoutId)) }
 
     override fun deathRedeem(claimId: String) = vtx { execution.deathRedeem(UUID.fromString(claimId)) }
-    override fun deathClaimants(claimId: String): List<String> = vtx { execution.deathClaimants(UUID.fromString(claimId)) }
+    override fun deathClaimants(claimId: String): List<String> =
+        vtx { execution.deathClaimants(UUID.fromString(claimId)) }
     override fun deathPayClaimant(claimId: String, claimantId: String) =
         vtx { execution.deathPayClaimant(UUID.fromString(claimId), UUID.fromString(claimantId)) }
 

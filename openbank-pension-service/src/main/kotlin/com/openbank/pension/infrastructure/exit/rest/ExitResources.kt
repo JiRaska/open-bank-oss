@@ -19,6 +19,7 @@ import com.openbank.pension.application.exit.SignTerminationCommand
 import com.openbank.pension.application.exit.TerminationService
 import com.openbank.pension.application.exit.requireKey
 import com.openbank.pension.application.port.`in`.Caller
+import com.openbank.pension.infrastructure.authz.ContractAccessGuard
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
@@ -40,11 +41,10 @@ import java.util.UUID
 /**
  * Participant-side exits (ADR-0334 S5): early termination, regular payout and partial withdrawal.
  *
- * Ownership is S1's rule, applied through the S1 use case: a caller without a staff role must send
- * the edge-stamped `X-Customer-Party-Id` and is confined to that party's contracts — another
- * party's contract answers 404, like an unknown id. Staff may READ without the header; every
- * money-moving command acts for the participant (the services refuse a staff caller) and needs an
- * `Idempotency-Key`.
+ * Ownership is S1's [ContractAccessGuard] (the header is trusted only from the edge relay) plus
+ * the S1 use case's visibility rule: another party's contract answers 404, like an unknown id.
+ * Staff may READ without the header; every money-moving command acts for a vouched participant and
+ * needs an `Idempotency-Key`.
  *
  * `@Path` directly above `class` (#3371); nullable params checked in the body (#3104).
  */
@@ -61,21 +61,20 @@ class PensionExitResource {
     @Inject
     lateinit var payouts: PayoutService
 
+    /** S1's single ownership rule: the party header is trusted only from the edge relay. */
     @Inject
-    lateinit var identity: SecurityIdentity
+    lateinit var access: ContractAccessGuard
 
-    private fun caller(party: String?): Caller {
-        if (party != null) return Caller.customer(parseUuid(party, PARTY_HEADER))
-        require(STAFF_ROLES.any(identity::hasRole)) { "header '$PARTY_HEADER' is required" }
-        return Caller.STAFF
-    }
+    private fun reader(party: String?): Caller = access.readerFor(party)
+
+    private fun participant(party: String?): Caller = access.actingParticipant(party)
 
     @GET
     @Path("/payout-eligibility")
     @Operation(summary = "Whether the pinned pack's payout conditions are met, and which forms are allowed")
     @Authorize(action = "pension.exit.read", resource = "#contractId")
     suspend fun eligibility(@PathParam("contractId") contractId: UUID, @HeaderParam(PARTY_HEADER) party: String?) =
-        EligibilityResponse.from(payouts.eligibility(caller(party), contractId))
+        EligibilityResponse.from(payouts.eligibility(reader(party), contractId))
 
     @POST
     @Path("/termination/quote")
@@ -85,11 +84,13 @@ class PensionExitResource {
         @PathParam("contractId") contractId: UUID,
         @HeaderParam(PARTY_HEADER) party: String?,
     ): Response = Response.status(Response.Status.CREATED)
-        .entity(TerminationResponse.from(terminations.quote(caller(party), contractId))).build()
+        .entity(TerminationResponse.from(terminations.quote(participant(party), contractId))).build()
 
     @POST
     @Path("/termination/{noticeId}/sign")
-    @Operation(summary = "Sign the quoted notice under SCA; the contract goes TERMINATING and pays after the notice period")
+    @Operation(
+        summary = "Sign the quoted notice under SCA; the contract goes TERMINATING and pays after the notice period",
+    )
     @Authorize(action = "pension.exit.terminate", resource = "#contractId")
     suspend fun signTermination(
         @PathParam("contractId") contractId: UUID,
@@ -103,7 +104,9 @@ class PensionExitResource {
         return TerminationResponse.from(
             terminations.sign(
                 SignTerminationCommand(
-                    caller(party), contractId, noticeId,
+                    participant(party),
+                    contractId,
+                    noticeId,
                     requireNotNull(body.scaChallengeId) { "scaChallengeId is required" },
                     requireNotNull(body.payoutIban) { "payoutIban is required" },
                     key,
@@ -120,7 +123,7 @@ class PensionExitResource {
         @PathParam("contractId") contractId: UUID,
         @PathParam("noticeId") noticeId: UUID,
         @HeaderParam(PARTY_HEADER) party: String?,
-    ) = TerminationResponse.from(terminations.get(caller(party), contractId, noticeId))
+    ) = TerminationResponse.from(terminations.get(reader(party), contractId, noticeId))
 
     @POST
     @Path("/payouts/quote")
@@ -134,7 +137,13 @@ class PensionExitResource {
         val body = requireNotNull(request) { "request body is required" }
         val quoted = payouts.quote(
             PayoutQuoteCommand(
-                caller(party), contractId, requireNotNull(body.form) { "form is required" }, body.amount, body.months,
+                participant(party),
+                contractId,
+                requireNotNull(body.form) {
+                    "form is required"
+                },
+                body.amount,
+                body.months,
             ),
         )
         return Response.status(Response.Status.CREATED).entity(PayoutResponse.from(quoted)).build()
@@ -156,7 +165,9 @@ class PensionExitResource {
         return PayoutResponse.from(
             payouts.confirm(
                 ConfirmPayoutCommand(
-                    caller(party), contractId, payoutId,
+                    participant(party),
+                    contractId,
+                    payoutId,
                     requireNotNull(body.scaChallengeId) { "scaChallengeId is required" },
                     requireNotNull(body.payoutIban) { "payoutIban is required" },
                     key,
@@ -173,7 +184,7 @@ class PensionExitResource {
         @PathParam("contractId") contractId: UUID,
         @PathParam("payoutId") payoutId: UUID,
         @HeaderParam(PARTY_HEADER) party: String?,
-    ) = PayoutResponse.from(payouts.get(caller(party), contractId, payoutId))
+    ) = PayoutResponse.from(payouts.get(reader(party), contractId, payoutId))
 
     @GET
     @Path("/payouts/{payoutId}/statement")
@@ -183,12 +194,11 @@ class PensionExitResource {
         @PathParam("contractId") contractId: UUID,
         @PathParam("payoutId") payoutId: UUID,
         @HeaderParam(PARTY_HEADER) party: String?,
-    ) = PayoutStatementResponse.from(payouts.get(caller(party), contractId, payoutId))
+    ) = PayoutStatementResponse.from(payouts.get(reader(party), contractId, payoutId))
 
     companion object {
-        const val PARTY_HEADER = "X-Customer-Party-Id"
+        const val PARTY_HEADER = ContractAccessGuard.PARTY_HEADER
         const val IDEMPOTENCY_HEADER = "Idempotency-Key"
-        val STAFF_ROLES = listOf(Roles.OPERATOR, Roles.ADMIN, Roles.COMPLIANCE)
     }
 }
 
@@ -210,7 +220,14 @@ class PensionDeathClaimResource {
     @Inject
     lateinit var identity: SecurityIdentity
 
-    private fun operator(): String = identity.principal.name
+    @Inject
+    lateinit var access: ContractAccessGuard
+
+    /** Staff only, through the same guard as every contract route: no party header, staff role required. */
+    private fun operator(): String {
+        check(access.readerFor(null) == Caller.STAFF) { "death claims are staff work" }
+        return identity.principal.name
+    }
 
     @POST
     @Operation(summary = "Register a death with evidence; freezes the contract")
@@ -244,7 +261,8 @@ class PensionDeathClaimResource {
     @Operation(summary = "Replace the claimants (shares must total 100 %) while the claim is NOTIFIED")
     @Authorize(action = "pension.death.verify", resource = "#claimId")
     suspend fun replaceClaimants(@PathParam("claimId") claimId: UUID, request: ClaimantsRequest?): DeathClaimResponse {
-        val list = requireNotNull(requireNotNull(request) { "request body is required" }.claimants) { "claimants is required" }
+        val list =
+            requireNotNull(requireNotNull(request) { "request body is required" }.claimants) { "claimants is required" }
         val designations = list.mapIndexed { i, c ->
             val item = requireNotNull(c) { "claimants[$i] must not be null" }
             ClaimantDesignation(
@@ -299,6 +317,3 @@ class ExitExceptionMappers {
     fun forbidden(e: ExitForbiddenException): Response =
         Response.status(Response.Status.FORBIDDEN).entity(mapOf("error" to e.message)).build()
 }
-
-private fun parseUuid(value: String, field: String): UUID =
-    runCatching { UUID.fromString(value) }.getOrElse { throw IllegalArgumentException("$field must be a UUID") }
