@@ -234,7 +234,7 @@ open class SepaPaymentActivitiesImpl(
                 "scheme reject (pacs.002): ${outcome.reasonCode ?: "unspecified"}",
                 clock = clock,
             ).copy(schemeOutcomeUnknown = false)
-            paymentRepository.update(
+            paymentRepository.recordSchemeDecision(
                 payment = rejected,
                 outboxMessage = SepaPaymentOutboxMessage(
                     aggregateId = rejected.id,
@@ -255,7 +255,7 @@ open class SepaPaymentActivitiesImpl(
     private suspend fun settleAfterAcceptance(payment: SepaPayment, paymentId: UUID): SepaPaymentStatus {
         val processing = payment.transitionTo(SepaPaymentStatus.PROCESSING, clock = clock)
             .copy(schemeOutcomeUnknown = false)
-        paymentRepository.update(
+        paymentRepository.recordSchemeDecision(
             payment = processing,
             outboxMessage = SepaPaymentOutboxMessage(
                 aggregateId = processing.id,

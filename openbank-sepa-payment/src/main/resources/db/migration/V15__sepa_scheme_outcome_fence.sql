@@ -6,4 +6,6 @@
 -- Those rows need scheme-side reconciliation before a payment can leave the hold.
 -- Rollback after rolling back the code: ALTER TABLE sepa_payments DROP COLUMN scheme_outcome_unknown;
 ALTER TABLE sepa_payments ADD COLUMN scheme_outcome_unknown BOOLEAN NOT NULL DEFAULT FALSE;
-UPDATE sepa_payments SET scheme_outcome_unknown = TRUE WHERE status = 'VALIDATED';
+UPDATE sepa_payments
+SET scheme_outcome_unknown = TRUE, aggregate_revision = aggregate_revision + 1
+WHERE status = 'VALIDATED';

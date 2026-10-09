@@ -5,6 +5,9 @@
 package com.openbank.sepa.integration
 
 import com.openbank.libs.idempotency.IdempotencyScope
+import com.openbank.sepa.application.port.out.SepaPaymentOutboxMessage
+import com.openbank.sepa.domain.model.SepaPaymentStatus
+import com.openbank.sepa.domain.model.SepaRejectReason
 import com.openbank.sepa.infrastructure.persistence.repository.SepaPaymentRepositoryImpl
 import io.quarkus.redis.datasource.ReactiveRedisDataSource
 import io.quarkus.test.common.QuarkusTestResource
@@ -23,6 +26,8 @@ import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestMethodOrder
 import java.util.UUID
+import java.time.Clock
+import java.time.Instant
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -202,6 +207,11 @@ class SepaPaymentReceiptIT {
         assertThat(onEventLoop { paymentRepository.claimSchemeSubmission(id) }).isNull()
         assertThat(onEventLoop { paymentRepository.findById(id) }?.schemeOutcomeUnknown).isTrue()
         assertThat(receipt(key = key).jsonPath().getString("state")).isEqualTo("UNKNOWN")
+        assertThat(
+            RestAssured.given().contentType("application/json")
+                .body("""{"targetStatus":"REJECTED","rejectReason":"TECHNICAL_ERROR"}""")
+                .patch("/api/v1/sepa-payments/$id/status").statusCode,
+        ).isEqualTo(409)
         evictCreatorRedisKey(key)
         assertThat(create(key).statusCode).isEqualTo(409)
         assertThat(countForKey("SELECT count(*) FROM sepa_payments WHERE idempotency_key = ?", key)).isEqualTo(1)
@@ -254,6 +264,65 @@ class SepaPaymentReceiptIT {
         }
         assertThat(onEventLoop { paymentRepository.claimSchemeSubmission(historicalId) }).isNull()
         assertThat(receipt(key = historicalKey).jsonPath().getString("state")).isEqualTo("UNKNOWN")
+    }
+
+    @Test
+    @Order(8)
+    @TestSecurity(user = "receipt-operator-a", roles = ["ROLE_PAYMENTS"])
+    fun `scheme claim races a stale status transition without losing the unknown fence`() {
+        val key = UUID.randomUUID().toString()
+        val created = create(key)
+        assertThat(created.statusCode).isEqualTo(201)
+        val id = UUID.fromString(created.jsonPath().getString("id"))
+        dataSource.connection.use { connection ->
+            connection.prepareStatement("UPDATE sepa_payments SET status = 'VALIDATED' WHERE payment_id = ?").use {
+                it.setObject(1, id)
+                assertThat(it.executeUpdate()).isEqualTo(1)
+            }
+        }
+        val stale = requireNotNull(onEventLoop { paymentRepository.findById(id) })
+        val rejected = stale.transitionTo(
+            SepaPaymentStatus.REJECTED,
+            SepaRejectReason.TECHNICAL_ERROR,
+            "test decision",
+            Clock.systemUTC(),
+        )
+        val event = SepaPaymentOutboxMessage(id, "sepa.payment.status-changed", "{}", createdAt = Instant.now())
+
+        val executor = Executors.newFixedThreadPool(2)
+        try {
+            val start = CountDownLatch(1)
+            val claim = executor.submit<Boolean> {
+                start.await()
+                onEventLoop { paymentRepository.claimSchemeSubmission(id) != null }
+            }
+            val transition = executor.submit<Boolean> {
+                start.await()
+                runCatching { onEventLoop { paymentRepository.update(rejected, event) } }.isSuccess
+            }
+            start.countDown()
+            val claimed = claim.get(20, TimeUnit.SECONDS)
+            val transitioned = transition.get(20, TimeUnit.SECONDS)
+            assertThat(listOf(claimed, transitioned)).containsExactlyInAnyOrder(true, false)
+            val current = requireNotNull(onEventLoop { paymentRepository.findById(id) })
+            if (claimed) {
+                assertThat(current.status).isEqualTo(SepaPaymentStatus.VALIDATED)
+                assertThat(current.schemeOutcomeUnknown).isTrue()
+                assertThat(current.revision).isEqualTo(stale.revision + 1)
+                val afterClaim = current.transitionTo(
+                    SepaPaymentStatus.REJECTED,
+                    SepaRejectReason.TECHNICAL_ERROR,
+                    "post-claim status attempt",
+                    Clock.systemUTC(),
+                )
+                assertThat(runCatching { onEventLoop { paymentRepository.update(afterClaim, event) } }.isFailure).isTrue()
+            } else {
+                assertThat(current.status).isEqualTo(SepaPaymentStatus.REJECTED)
+                assertThat(current.schemeOutcomeUnknown).isFalse()
+            }
+        } finally {
+            executor.shutdownNow()
+        }
     }
 
     private fun installRaceTrigger() = dataSource.connection.use { connection ->

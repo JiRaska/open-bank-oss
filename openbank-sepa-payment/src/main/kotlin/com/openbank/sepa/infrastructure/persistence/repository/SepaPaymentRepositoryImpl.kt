@@ -41,7 +41,8 @@ class SepaPaymentRepositoryImpl(private val outboxRepository: SepaPaymentOutboxR
 
     override suspend fun claimSchemeSubmission(paymentId: UUID): SepaPayment? = Panache.withTransaction {
         update(
-            "schemeOutcomeUnknown = true where paymentId = ?1 and status = ?2 and schemeOutcomeUnknown = false",
+            "schemeOutcomeUnknown = true, revision = revision + 1 " +
+                "where paymentId = ?1 and status = ?2 and schemeOutcomeUnknown = false",
             paymentId,
             SepaPaymentStatus.VALIDATED.name,
         ).flatMap { claimed ->
@@ -73,13 +74,18 @@ class SepaPaymentRepositoryImpl(private val outboxRepository: SepaPaymentOutboxR
     }.awaitSuspending().map { it.toDomain() }
 
     override suspend fun update(payment: SepaPayment, outboxMessage: SepaPaymentOutboxMessage): SepaPayment =
-        updateWithMessages(payment, listOf(outboxMessage))
+        updateWithMessages(payment, listOf(outboxMessage), schemeDecision = false)
+
+    override suspend fun recordSchemeDecision(
+        payment: SepaPayment,
+        outboxMessage: SepaPaymentOutboxMessage,
+    ): SepaPayment = updateWithMessages(payment, listOf(outboxMessage), schemeDecision = true)
 
     override suspend fun updateWithEvidence(
         payment: SepaPayment,
         outboxMessage: SepaPaymentOutboxMessage,
         evidenceMessage: SepaPaymentOutboxMessage,
-    ): SepaPayment = updateWithMessages(payment, listOf(outboxMessage, evidenceMessage))
+    ): SepaPayment = updateWithMessages(payment, listOf(outboxMessage, evidenceMessage), schemeDecision = false)
 
     /**
      * The single write path: the aggregate change and EVERY accompanying outbox message inside one
@@ -90,12 +96,25 @@ class SepaPaymentRepositoryImpl(private val outboxRepository: SepaPaymentOutboxR
     private suspend fun updateWithMessages(
         payment: SepaPayment,
         outboxMessages: List<SepaPaymentOutboxMessage>,
+        schemeDecision: Boolean,
     ): SepaPayment = Panache.withTransaction {
         find("paymentId", payment.id).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult()
             .invoke { entity ->
                 requireNotNull(entity) { "SEPA payment ${payment.id} disappeared during transition" }
                 require(payment.revision == entity.revision + 1) {
                     "stale SEPA payment revision ${payment.revision}; expected ${entity.revision + 1}"
+                }
+                if (schemeDecision) {
+                    require(entity.schemeOutcomeUnknown && !payment.schemeOutcomeUnknown) {
+                        "scheme decision must resolve a claimed unknown outcome"
+                    }
+                    require(payment.status in setOf(SepaPaymentStatus.PROCESSING, SepaPaymentStatus.REJECTED)) {
+                        "scheme decision has an invalid target status ${payment.status}"
+                    }
+                } else {
+                    require(!entity.schemeOutcomeUnknown && !payment.schemeOutcomeUnknown) {
+                        "scheme outcome remains unknown; payment state cannot change"
+                    }
                 }
                 entity.status = payment.status.name
                 entity.rejectReason = payment.rejectReason?.name

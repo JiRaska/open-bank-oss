@@ -104,8 +104,9 @@ class SepaPaymentActivitiesImplTest {
         coJustRun { amlCasePort.openCase(any()) }
         coEvery { settlementPort.settle(any()) } returns SettlementOutcome(settled = true, transactionId = null)
         coEvery { paymentRepository.update(any(), any()) } answers { firstArg() }
+        coEvery { paymentRepository.recordSchemeDecision(any(), any()) } answers { firstArg() }
         coEvery { paymentRepository.claimSchemeSubmission(paymentId) } answers {
-            payment.copy(status = SepaPaymentStatus.VALIDATED, schemeOutcomeUnknown = true)
+            payment.copy(status = SepaPaymentStatus.VALIDATED, revision = 1, schemeOutcomeUnknown = true)
         }
     }
 
@@ -245,7 +246,7 @@ class SepaPaymentActivitiesImplTest {
         val result = activities.submitToScheme(paymentId)
 
         assertThat(result).isEqualTo(SepaPaymentStatus.COMPLETED)
-        coVerify { paymentRepository.update(match { it.status == SepaPaymentStatus.PROCESSING }, any()) }
+        coVerify { paymentRepository.recordSchemeDecision(match { it.status == SepaPaymentStatus.PROCESSING }, any()) }
         coVerify { settlementPort.settle(match { it.status == SepaPaymentStatus.PROCESSING }) }
         coVerify { paymentRepository.update(match { it.status == SepaPaymentStatus.COMPLETED }, any()) }
     }
@@ -262,7 +263,7 @@ class SepaPaymentActivitiesImplTest {
         val result = activities.submitToScheme(paymentId)
 
         assertThat(result).isEqualTo(SepaPaymentStatus.PROCESSING)
-        coVerify { paymentRepository.update(match { it.status == SepaPaymentStatus.PROCESSING }, any()) }
+        coVerify { paymentRepository.recordSchemeDecision(match { it.status == SepaPaymentStatus.PROCESSING }, any()) }
         coVerify(exactly = 0) { paymentRepository.update(match { it.status == SepaPaymentStatus.COMPLETED }, any()) }
     }
 
@@ -277,7 +278,7 @@ class SepaPaymentActivitiesImplTest {
 
         assertThat(result).isEqualTo(SepaPaymentStatus.REJECTED)
         coVerify {
-            paymentRepository.update(
+            paymentRepository.recordSchemeDecision(
                 match { it.status == SepaPaymentStatus.REJECTED && it.rejectReason == SepaRejectReason.ACCOUNT_CLOSED },
                 any(),
             )
@@ -295,6 +296,7 @@ class SepaPaymentActivitiesImplTest {
 
         assertThat(result).isEqualTo(SepaPaymentStatus.VALIDATED)
         coVerify(exactly = 0) { paymentRepository.update(any(), any()) }
+        coVerify(exactly = 0) { paymentRepository.recordSchemeDecision(any(), any()) }
     }
 
     @Test
@@ -302,7 +304,7 @@ class SepaPaymentActivitiesImplTest {
         val validated = payment.copy(status = SepaPaymentStatus.VALIDATED)
         coEvery { paymentRepository.findById(paymentId) } returns validated
         coEvery { paymentRepository.claimSchemeSubmission(paymentId) } returnsMany
-            listOf(validated.copy(schemeOutcomeUnknown = true), null)
+            listOf(validated.copy(revision = 1, schemeOutcomeUnknown = true), null)
         coEvery { schemeGatewayPort.submit(any()) } throws
             SchemeGatewayUnavailableException(RuntimeException("response lost after send"))
 
@@ -390,6 +392,7 @@ class SepaPaymentActivitiesImplTest {
         coEvery { paymentRepository.findById(paymentId) } returns validated
         coEvery { schemeGatewayPort.submit(any()) } returns SchemeSubmissionOutcome(accepted = true, reasonCode = null)
         coEvery { paymentRepository.update(any(), capture(outboxes)) } answers { firstArg() }
+        coEvery { paymentRepository.recordSchemeDecision(any(), capture(outboxes)) } answers { firstArg() }
 
         val result = fixedClockActivities().submitToScheme(paymentId)
 
@@ -398,7 +401,7 @@ class SepaPaymentActivitiesImplTest {
         assertThat(outboxes.map { objectMapper.readTree(it.payload).get("status").asText() })
             .containsExactly("PROCESSING", "COMPLETED")
         assertThat(outboxes.map { objectMapper.readTree(it.payload).get("version").asLong() })
-            .containsExactly(1, 2)
+            .containsExactly(2, 3)
         outboxes.forEach {
             assertThat(Instant.parse(objectMapper.readTree(it.payload).get("occurredAt").asText()))
                 .isEqualTo(fixedInstant)
@@ -417,6 +420,7 @@ class SepaPaymentActivitiesImplTest {
     fun `every Temporal-path payload self-reports sepa-payment as its source service`() {
         val outboxes = mutableListOf<SepaPaymentOutboxMessage>()
         coEvery { paymentRepository.update(any(), capture(outboxes)) } answers { firstArg() }
+        coEvery { paymentRepository.recordSchemeDecision(any(), capture(outboxes)) } answers { firstArg() }
 
         val activities = fixedClockActivities()
 
@@ -438,7 +442,7 @@ class SepaPaymentActivitiesImplTest {
         assertThat(outboxes.map { objectMapper.readTree(it.payload).get("status").asText() })
             .containsExactly("VALIDATED", "REJECTED", "PROCESSING", "COMPLETED", "REJECTED")
         assertThat(outboxes.map { objectMapper.readTree(it.payload).get("version").asLong() })
-            .containsExactly(1, 1, 1, 2, 1)
+            .containsExactly(1, 1, 2, 3, 2)
         // Read the parsed JSON, not a substring: a `contains` would also pass on a key that is
         // present but nested, or on a value that merely starts with the expected text.
         assertThat(outboxes.map { objectMapper.readTree(it.payload).get("sourceService")?.asText() })

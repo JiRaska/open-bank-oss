@@ -276,6 +276,10 @@ class SepaPaymentService(
         val payment = paymentRepository.findById(command.paymentId)
             ?: throw SepaPaymentNotFoundException(command.paymentId)
 
+        if (payment.schemeOutcomeUnknown) {
+            throw InvalidSepaPaymentStateTransitionException("Scheme outcome requires reconciliation")
+        }
+
         if (!payment.canTransitionTo(command.targetStatus)) {
             throw InvalidSepaPaymentStateTransitionException(
                 "Invalid SEPA payment status transition: ${payment.status} -> ${command.targetStatus}",
@@ -317,6 +321,10 @@ class SepaPaymentService(
 
         val payment = paymentRepository.findByEndToEndId(endToEndId)
             ?: throw IllegalArgumentException("No payment found for endToEndId: $endToEndId")
+
+        if (payment.schemeOutcomeUnknown) {
+            throw InvalidSepaPaymentStateTransitionException("Scheme outcome requires reconciliation")
+        }
 
         // Idempotent: already returned
         if (payment.status == SepaPaymentStatus.RETURNED) return payment

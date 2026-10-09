@@ -49,6 +49,9 @@ interface SepaPaymentRepository {
     /** Update a payment and enqueue a domain-event outbox message, atomically. */
     suspend fun update(payment: SepaPayment, outboxMessage: SepaPaymentOutboxMessage): SepaPayment
 
+    /** Only a definitive pacs.002 verdict may clear the committed unknown-outcome fence. */
+    suspend fun recordSchemeDecision(payment: SepaPayment, outboxMessage: SepaPaymentOutboxMessage): SepaPayment
+
     /**
      * As [update], plus a second outbox message carrying the non-repudiation evidence for the same
      * act — both rows and the aggregate change commit in ONE transaction (issue #6056).
