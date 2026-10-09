@@ -90,6 +90,7 @@ enum class ScaOperation(val code: String) {
     /** Termination signing, payout confirmation, payout-account change (hash covers quote + IBAN). */
     EXIT("exit"),
     SCHEDULE_CHANGE("schedule-change"),
+    STRATEGY_CHANGE("strategy-change"),
     BENEFICIARY_CHANGE("beneficiary-change"),
     ANNUITY_SELECTION("annuity-selection"),
     ANNUITY_CANCELLATION("annuity-cancellation"),

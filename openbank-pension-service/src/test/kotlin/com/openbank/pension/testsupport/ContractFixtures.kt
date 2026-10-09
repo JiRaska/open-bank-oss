@@ -45,7 +45,7 @@ object ContractFixtures {
                 providerType = if (productLine == ProductLine.DIP) ProviderType.BANK else ProviderType.PENSION_COMPANY,
                 birthDate = birthDate, residencyCountry = "CZ", residencyEvidence = emptySet(), hasGuardian = false,
                 schedule = ContributionSchedule(BigDecimal("1700"), "CZK", ContributionFrequency.MONTHLY),
-                initialStrategy = "BALANCED",
+                initialStrategy = "CONSERVATIVE",
                 beneficiaries = beneficiaries,
                 idempotencyKey = UUID.randomUUID().toString(),
             ),

@@ -37,8 +37,21 @@ class PensionBeans {
         clock: Clock,
         notifier: ParticipantNotifier,
         onboarding: jakarta.enterprise.inject.Instance<com.openbank.pension.application.onboarding.OnboardingService>,
-    ): PensionContractUseCase = PensionContractService(repository, registry, clock, notifier) { contract, code ->
-        // Resolved per call: OnboardingService is the owner of the assessment in force (#12384).
-        onboarding.get().requireSuitableStrategyChange(contract, code)
-    }
+        sca: com.openbank.pension.application.exit.ScaVerificationPort,
+    ): PensionContractUseCase = PensionContractService(
+        repository,
+        registry,
+        clock,
+        notifier,
+        // Resolved per call: OnboardingService owns the assessment in force (#12384).
+        object : com.openbank.pension.application.port.out.StrategySuitabilityPort {
+            override suspend fun authorize(
+                request: com.openbank.pension.application.port.out.StrategySuitabilityRequest,
+            ) = onboarding.get().authorizeStrategy(request)
+
+            override suspend fun record(approval: com.openbank.pension.application.port.out.StrategyApproval) =
+                onboarding.get().recordStrategyApproval(approval)
+        },
+        sca,
+    )
 }

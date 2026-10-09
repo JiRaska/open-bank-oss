@@ -159,6 +159,14 @@ data class OnboardingApplication(
         return copy(assessmentId = assessmentId, recommendedStrategy = recommendation, updatedAt = now)
     }
 
+    /** Acknowledgements given for a strategy change of the activated contract (audit, appended). */
+    fun recordPostActivationAcknowledgements(acks: List<WarningAcknowledgement>, now: Instant): OnboardingApplication {
+        check(status == OnboardingStatus.ACTIVATED) {
+            "only an activated contract's application records change warnings"
+        }
+        return copy(warningAcknowledgements = warningAcknowledgements + acks, updatedAt = now)
+    }
+
     /** Save-and-resume: answers are kept as given; nothing is scored until submission. */
     fun saveDraft(answers: Map<String, String>, now: Instant): OnboardingApplication {
         check(status.preSignature) { "a $status application can no longer be edited" }

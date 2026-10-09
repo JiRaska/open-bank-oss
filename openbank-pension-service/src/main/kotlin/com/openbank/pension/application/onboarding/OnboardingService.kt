@@ -7,6 +7,10 @@ package com.openbank.pension.application.onboarding
 import com.openbank.pension.application.port.out.ActivationOutcome
 import com.openbank.pension.application.port.out.PensionContractRepository
 import com.openbank.pension.application.port.out.ReassessmentRequiredException
+import com.openbank.pension.application.port.out.StrategyApproval
+import com.openbank.pension.application.port.out.StrategyNotPermittedException
+import com.openbank.pension.application.port.out.StrategySuitabilityRequest
+import com.openbank.pension.application.port.out.StrategyWarningsRequiredException
 import com.openbank.pension.domain.model.ContractStatus
 import com.openbank.pension.domain.model.ContributionSchedule
 import com.openbank.pension.domain.model.PensionContract
@@ -245,21 +249,80 @@ class OnboardingService(
     }
 
     /**
-     * The re-assessment rule on a strategy change of an EXISTING contract ([ReassessmentPolicy]):
-     * an expired or superseded assessment, or a requested strategy above the profile's risk class,
-     * refuses the change (409) until the participant answers the questionnaire again on
-     * [ReassessmentRequiredException.applicationId]. A contract created without onboarding (the S1
-     * draft API) has no assessment on record and is not judged here — tracked as an open item.
+     * The suitability gate for ANY strategy a contract is to hold (StrategySuitabilityPort):
+     * - no onboarding application on record (an S1 draft): no assessment exists, so only the pack's
+     *   most conservative strategy is admissible; anything else is 403 — complete onboarding;
+     * - the assessment in force must be current (expired / superseded / missing -> 409 re-assess);
+     * - every warning WarningPolicy requires must be overridable under the regime (MiFID: a strategy
+     *   above the profile is refused outright, 403) and acknowledged on this request (409 otherwise);
+     *   the acknowledgement is bound to the hash of the exact wording shown.
      */
-    suspend fun requireSuitableStrategyChange(contract: PensionContract, strategyCode: String) {
-        val application = applications.findByContract(contract.id) ?: return
+    suspend fun authorizeStrategy(request: StrategySuitabilityRequest): StrategyApproval {
+        val onboarding = rules.rules(request.jurisdiction, request.productLine, request.packVersion)
+        val option = requireNotNull(onboarding.strategy(request.strategyCode)) {
+            "strategy ${request.strategyCode} is not offered under this pack"
+        }
+        val application = request.contractId?.let { applications.findByContract(it) }
+            ?: return conservativeOnly(onboarding, option.riskClass, request)
+        val assessment = assessmentInForce(application)
+        val required = WarningPolicy.required(request.strategyCode, assessment, recommend(application, assessment))
+        requireAllowedAndAcknowledged(onboarding, required, request)
+        return StrategyApproval(
+            application.id,
+            warningAcks(application, required, assessment.id, request.strategyCode, request.language),
+        )
+    }
+
+    /** No assessment on record (an S1 draft): only the pack's most conservative strategy. */
+    private fun conservativeOnly(
+        onboarding: OnboardingRules,
+        riskClass: Int,
+        request: StrategySuitabilityRequest,
+    ): StrategyApproval {
+        if (riskClass > onboarding.strategies.minOf { it.riskClass } || request.acknowledged.isNotEmpty()) {
+            throw StrategyNotPermittedException(
+                "without a suitability assessment only the most conservative strategy may be held; " +
+                    "complete the onboarding questionnaire first",
+            )
+        }
+        return StrategyApproval(null, emptyList())
+    }
+
+    /** The current assessment of [application], or 409 naming why it must be renewed. */
+    private suspend fun assessmentInForce(application: OnboardingApplication): SuitabilityAssessment {
         val assessment = application.assessmentId?.let { assessments.findById(it) }
             ?: throw ReassessmentRequiredException(application.id, RefreshReason.NO_ASSESSMENT)
-        val riskClass = rules.rules(contract.jurisdiction, contract.productLine, contract.packVersion)
-            .strategy(strategyCode)?.riskClass
-        ReassessmentPolicy.refreshReason(assessment, today(), riskClass)?.let {
-            throw ReassessmentRequiredException(application.id, it)
+        val stale = ReassessmentPolicy.refreshReason(assessment, today())
+        if (stale != null) throw ReassessmentRequiredException(application.id, stale)
+        return assessment
+    }
+
+    /** MiFID-forbidden warnings refuse (403); every other required warning must be acknowledged (409). */
+    private fun requireAllowedAndAcknowledged(
+        onboarding: OnboardingRules,
+        required: Set<WarningCode>,
+        request: StrategySuitabilityRequest,
+    ) {
+        val forbidden = required.firstOrNull { !WarningPolicy.overridable(it, onboarding) }
+        if (forbidden != null) {
+            throw StrategyNotPermittedException(
+                "strategy ${request.strategyCode} is not suitable under the " +
+                    "${onboarding.questionnaire.regime} regime ($forbidden)",
+            )
         }
+        require(required.containsAll(request.acknowledged)) {
+            "warnings ${(request.acknowledged - required).joinToString()} do not apply to ${request.strategyCode}"
+        }
+        val missing = required - request.acknowledged
+        if (missing.isNotEmpty()) throw StrategyWarningsRequiredException(missing)
+    }
+
+    /** Stores an authorized change's acknowledgements on the application (audit). */
+    suspend fun recordStrategyApproval(approval: StrategyApproval) {
+        val id = approval.applicationId ?: return
+        if (approval.acknowledgements.isEmpty()) return
+        val application = applications.findById(id) ?: return
+        applications.save(application.recordPostActivationAcknowledgements(approval.acknowledgements, now()))
     }
 
     /** The assessment in force for one of the caller's applications, or null before the first answer. */

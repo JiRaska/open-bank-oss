@@ -381,6 +381,8 @@ class AnnuityMarketplaceServiceTest {
                     registry,
                     clock,
                     com.openbank.pension.infrastructure.notification.RecordingParticipantNotifier(),
+                    com.openbank.pension.testsupport.RecordingSuitability(),
+                    com.openbank.pension.testsupport.RecordingSca(),
                 )
             val id = ContractFixtures.activeContract(
                 contracts,

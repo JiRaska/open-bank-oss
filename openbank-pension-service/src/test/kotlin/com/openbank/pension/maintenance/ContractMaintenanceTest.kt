@@ -284,7 +284,14 @@ class ContractMaintenanceTest {
     private val sca = Sca()
     private val deaths = Deaths()
     private val service = ContractMaintenanceService(
-        PensionContractService(repo, registry, clock, RecordingParticipantNotifier()),
+        PensionContractService(
+            repo,
+            registry,
+            clock,
+            RecordingParticipantNotifier(),
+            com.openbank.pension.testsupport.RecordingSuitability(),
+            com.openbank.pension.testsupport.RecordingSca(),
+        ),
         store,
         deaths,
         sca,
