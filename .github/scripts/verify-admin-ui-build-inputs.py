@@ -66,7 +66,15 @@ def materialized_context_matches(record: dict, root: Path) -> bool:
                 return False
             content_hash = (hashlib.sha256(os.fsencode(entry["symlink"])).hexdigest()
                             if "symlink" in entry else entry["sha256"])
-            if material != freeze.material_for(Path(rel), content_hash, source, producer):
+            expected_material = freeze.material_for(Path(rel), content_hash, source, producer)
+            if expected_material.get("source") in freeze.ARTIFACT_SOURCES:
+                receipt = next((item for item in record["contextManifest"]["externalFeeds"]
+                                if item["path"] == rel), None)
+                if receipt is None:
+                    return False
+                expected_material["artifactId"] = receipt["artifactId"]
+                expected_material["archiveSha256"] = receipt["archiveSha256"]
+            if material != expected_material:
                 return False
             if material["kind"] == "git" and rel not in tracked:
                 return False

@@ -10,6 +10,7 @@ import re
 import subprocess
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -24,9 +25,33 @@ def load(name: str, file: str):
 
 freeze_mod = load("freeze_context", "freeze-admin-ui-context.py")
 verify_mod = load("verify_build", "verify-admin-ui-build-inputs.py")
+receipt_mod = load("record_artifact", "record-admin-ui-artifact.py")
 
 
 class AdminUiImageInputsTest(unittest.TestCase):
+    def test_archive_receipt_is_bound_to_exact_staged_bytes(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            archive = root / "upstream.zip"
+            staged = root / "openbank-admin-ui/perf-artifacts/summary.json"
+            staged.parent.mkdir(parents=True)
+            with zipfile.ZipFile(archive, "w") as zipped:
+                zipped.writestr("summary.json", b'{"state":"passed"}\n')
+            staged.write_bytes(b'{"state":"passed"}\n')
+            ledger = root / "receipts.jsonl"
+            receipt_mod.record(archive, ledger, "performance-actions-artifact", "42", root, [staged])
+            item = json.loads(ledger.read_text())
+            self.assertEqual(item["path"], "openbank-admin-ui/perf-artifacts/summary.json")
+            self.assertEqual(item["artifactId"], "42")
+            self.assertEqual(item["archiveSha256"], hashlib.sha256(archive.read_bytes()).hexdigest())
+            staged.write_bytes(b'{"state":"failed"}\n')
+            with self.assertRaisesRegex(ValueError, "differs from Actions artifact"):
+                receipt_mod.record(archive, ledger, "performance-actions-artifact", "42", root, [staged])
+            self.assertEqual(len(ledger.read_text().splitlines()), 1)
+            with self.assertRaisesRegex(ValueError, "invalid staged artifact file"):
+                receipt_mod.record(archive, ledger, "performance-actions-artifact", "42", root,
+                                   [root / "openbank-admin-ui/perf-artifacts/absent.json"])
+
     def test_every_host_collector_output_is_allowlisted(self):
         root = Path(__file__).resolve().parents[2]
         producer = (root / "openbank-infra/scripts/build-push-admin-ui.sh").read_text()
@@ -77,10 +102,15 @@ class AdminUiImageInputsTest(unittest.TestCase):
             context = base / "context"
             manifest_path = base / "manifest.json"
             receipts = base / "receipts.jsonl"
-            receipts.write_text('\n'.join((
-                '{"source":"client-actions-artifact","artifactId":"123"}',
-                '{"source":"security-actions-artifact","artifactId":"456"}',
-                '{"source":"test-intelligence-actions-artifact","artifactId":"789"}',
+            def receipt(source_name, artifact_id, path):
+                return {"source": source_name, "artifactId": artifact_id,
+                        "archiveSha256": "a" * 64, "path": path,
+                        "sha256": hashlib.sha256((repo / path).read_bytes()).hexdigest()}
+            receipts.write_text('\n'.join(json.dumps(item) for item in (
+                receipt("client-actions-artifact", "123", "openbank-admin-ui/client-test-evidence/openbank-app-123.json"),
+                receipt("security-actions-artifact", "456", "openbank-notification-service/build/reports/bom.json"),
+                receipt("security-actions-artifact", "456", "sbom-staging/openbank-notification-service.json"),
+                receipt("test-intelligence-actions-artifact", "789", "openbank-admin-ui/test-run-history/test-intelligence-run-example.json"),
             )) + '\n')
             with patch.dict("os.environ", {"GITHUB_ACTIONS": "true", "GITHUB_RUN_ID": "12345",
                                         "GITHUB_RUN_ATTEMPT": "1", "GITHUB_WORKFLOW_REF":
@@ -102,6 +132,33 @@ class AdminUiImageInputsTest(unittest.TestCase):
                              sbom.read_bytes())
             self.assertEqual((context / "sbom-staging/openbank-notification-service.json").read_bytes(),
                              sbom.read_bytes())
+            # An expired cache entry has no currently verifiable upstream archive.
+            # It must not inherit the receipt of another history file.
+            stale = history / "expired-but-cached.json"
+            stale.write_text('{"state":"passed"}\n')
+            with patch.dict("os.environ", {"GITHUB_ACTIONS": "true", "GITHUB_RUN_ID": "12345",
+                                        "GITHUB_RUN_ATTEMPT": "1", "GITHUB_WORKFLOW_REF":
+                                        "JiRaska/open-bank-oss/.github/workflows/admin-ui-deploy.yml@refs/heads/main",
+                                        "ADMIN_UI_FEED_RECEIPTS": str(receipts)}):
+                with self.assertRaisesRegex(ValueError, "lacks a source artifact receipt"):
+                    freeze_mod.freeze(repo, base / "stale-context", base / "stale-manifest.json")
+            stale.unlink()
+            malicious = json.loads(original_manifest)
+            forged = next(item for item in malicious["files"] if item["path"] ==
+                          "openbank-admin-ui/test-run-history/test-intelligence-run-example.json")
+            forged["sha256"] = "0" * 64
+            forged["material"]["sha256"] = "0" * 64
+            self.assertFalse(freeze_mod.receipts_cover(malicious["files"], malicious["externalFeeds"]))
+            malicious = json.loads(original_manifest)
+            forged = next(item for item in malicious["files"] if item["path"] ==
+                          "openbank-admin-ui/test-run-history/test-intelligence-run-example.json")
+            forged["path"] = "openbank-admin-ui/test-run-history/attacker.json"
+            self.assertFalse(freeze_mod.receipts_cover(malicious["files"], malicious["externalFeeds"]))
+            malicious = json.loads(original_manifest)
+            forged = next(item for item in malicious["files"] if item["path"] ==
+                          "openbank-admin-ui/test-run-history/test-intelligence-run-example.json")
+            forged["material"]["artifactId"] = "123"
+            self.assertFalse(freeze_mod.receipts_cover(malicious["files"], malicious["externalFeeds"]))
             for name in ("governance.json", "cost-footprints.json", "cluster-topology.json"):
                 self.assertTrue(any(item["path"] == "openbank-admin-ui/" + name for item in inventory))
                 self.assertTrue((context / "openbank-admin-ui" / name).is_file())
@@ -172,7 +229,7 @@ class AdminUiImageInputsTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "unknown untracked"):
                 freeze_mod.freeze(repo, base / "context3", base / "manifest3.json")
             (repo / "untracked-source.ts").unlink()
-            receipts.write_text('{"source":"client-actions-artifact","artifactId":"123"}\n')
+            receipts.write_text(json.dumps(json.loads(original_manifest)["externalFeeds"][0]) + '\n')
             with patch.dict("os.environ", {"GITHUB_ACTIONS": "true", "GITHUB_RUN_ID": "12345",
                                         "GITHUB_RUN_ATTEMPT": "1", "GITHUB_WORKFLOW_REF":
                                         "JiRaska/open-bank-oss/.github/workflows/admin-ui-deploy.yml@refs/heads/main",

@@ -51,6 +51,19 @@ EXTERNAL_DIR_SOURCES = {
     "openbank-admin-ui/test-run-history": "test-intelligence-actions-artifact",
     "sbom-staging": "security-actions-artifact",
 }
+ARTIFACT_SOURCES = set(EXTERNAL_DIR_SOURCES.values()) | {"security-actions-artifact"}
+
+
+def valid_receipt(item: object) -> bool:
+    return (isinstance(item, dict) and set(item) == {"source", "artifactId", "archiveSha256", "path", "sha256"}
+            and item["source"] in ARTIFACT_SOURCES
+            and isinstance(item["artifactId"], str) and item["artifactId"].isdecimal()
+            and isinstance(item["path"], str) and item["path"]
+            and not Path(item["path"]).is_absolute() and ".." not in Path(item["path"]).parts
+            and isinstance(item["sha256"], str)
+            and re.fullmatch(r"[0-9a-f]{64}", item["sha256"]) is not None
+            and isinstance(item["archiveSha256"], str)
+            and re.fullmatch(r"[0-9a-f]{64}", item["archiveSha256"]) is not None)
 
 
 def feed_receipts() -> list[dict]:
@@ -64,37 +77,35 @@ def feed_receipts() -> list[dict]:
     receipts = []
     for line in path.read_text().splitlines():
         item = json.loads(line)
-        if (not isinstance(item, dict) or set(item) != {"source", "artifactId"}
-                or item["source"] not in set(EXTERNAL_DIR_SOURCES.values()) | {"security-actions-artifact", "test-intelligence-actions-artifact", "pact-and-pitest-evidence"}
-                or not isinstance(item["artifactId"], str)
-                or not item["artifactId"].isdecimal()):
+        if not valid_receipt(item):
             raise ValueError("external feed receipt is malformed")
         receipts.append(item)
-    return [{"source": source, "artifactId": artifact_id}
-            for source, artifact_id in sorted({(x["source"], x["artifactId"]) for x in receipts})]
+    return sorted(receipts, key=lambda x: (x["source"], x["artifactId"], x["path"]))
 
 
 def receipts_cover(entries: list[dict], receipts: list[dict]) -> bool:
     """Every artifact-backed frozen input must have a signed producer receipt."""
-    if not isinstance(receipts, list) or any(
-            not isinstance(item, dict) or set(item) != {"source", "artifactId"}
-            or item["source"] not in set(EXTERNAL_DIR_SOURCES.values()) | {"security-actions-artifact", "test-intelligence-actions-artifact", "pact-and-pitest-evidence"}
-            or not isinstance(item["artifactId"], str) or not item["artifactId"].isdecimal()
-            for item in receipts):
+    if not isinstance(receipts, list) or any(not valid_receipt(item) for item in receipts):
         return False
-    if receipts != sorted(receipts, key=lambda item: (item["source"], item["artifactId"])):
+    if receipts != sorted(receipts, key=lambda x: (x["source"], x["artifactId"], x["path"])):
         return False
-    receipt_pairs = {(item["source"], item["artifactId"]) for item in receipts}
-    if len(receipt_pairs) != len(receipts):
+    receipt_paths = {item["path"] for item in receipts}
+    if len(receipt_paths) != len(receipts):
         return False
-    receipt_sources = {source for source, _ in receipt_pairs}
+    if not receipt_paths.issubset({entry["path"] for entry in entries}):
+        return False
+    by_path = {item["path"]: item for item in receipts}
     for entry in entries:
         material = entry["material"]
         source = material.get("source")
-        if source in set(EXTERNAL_DIR_SOURCES.values()) | {"security-actions-artifact"}:
-            if source not in receipt_sources:
+        if source in ARTIFACT_SOURCES:
+            receipt = by_path.get(entry["path"])
+            if (receipt is None or receipt["source"] != source
+                    or receipt["sha256"] != entry.get("sha256")
+                    or receipt["artifactId"] != material.get("artifactId")
+                    or receipt["archiveSha256"] != material.get("archiveSha256")):
                 return False
-            if source == "client-actions-artifact" and (source, material.get("artifactId")) not in receipt_pairs:
+            if source == "client-actions-artifact" and Path(entry["path"]).name != f"openbank-app-{receipt['artifactId']}.json":
                 return False
     return True
 
@@ -106,6 +117,8 @@ def material_for(relative: Path, sha256: str, source_sha: str, producer: dict) -
         source = EXTERNAL_ROOT_SOURCES.get(root_json, "repo-derived-collector")
     elif SBOM_PATH.fullmatch(relative.as_posix()):
         source = "security-actions-artifact"
+    elif relative == Path("openbank-admin-ui/test-run-history/.staged-ids"):
+        source = "repo-derived-collector"
     else:
         source = next((kind for directory, kind in EXTERNAL_DIR_SOURCES.items()
                        if relative.is_relative_to(Path(directory)) and relative != Path(directory)), None)
@@ -115,13 +128,10 @@ def material_for(relative: Path, sha256: str, source_sha: str, producer: dict) -
         # Local builds remain possible, but their material provenance cannot pass
         # the signed CI deploy verifier.
         return {"kind": "unverified-local", "source": source, "sha256": sha256}
+    if source == "client-actions-artifact" and not re.fullmatch(r"openbank-app-[0-9]+\.json", relative.name):
+        raise ValueError("client evidence has no source artifact identifier")
     material = {"kind": "producer-captured", "source": source, "sha256": sha256,
                 "runId": producer["runId"], "runAttempt": producer["runAttempt"]}
-    if source == "client-actions-artifact":
-        match = re.fullmatch(r"openbank-app-([0-9]+)\.json", relative.name)
-        if not match:
-            raise ValueError("client evidence has no source artifact identifier")
-        material["artifactId"] = match[1]
     return material
 
 
@@ -261,6 +271,27 @@ def freeze(root: Path, output: Path, manifest: Path) -> dict:
                         "material": material_for(relative, digest, source_sha, producer)})
     require_clean_source_inputs(root)
     receipts = feed_receipts()
+    receipt_by_path = {item["path"]: item for item in receipts}
+    # The build script copies each verified service BOM into the flat collector
+    # directory. Bind that copy to the same upstream file, byte for byte.
+    for entry in entries:
+        rel = Path(entry["path"])
+        if rel.parent == Path("sbom-staging") and rel.suffix == ".json":
+            original = f"{rel.stem}/build/reports/bom.json"
+            source_receipt = receipt_by_path.get(original)
+            if (entry["path"] not in receipt_by_path and source_receipt is not None
+                    and source_receipt["sha256"] == entry.get("sha256")):
+                copied = dict(source_receipt, path=entry["path"])
+                receipts.append(copied)
+                receipt_by_path[entry["path"]] = copied
+    receipts.sort(key=lambda x: (x["source"], x["artifactId"], x["path"]))
+    if producer.get("kind") == "github-actions":
+        for entry in entries:
+            if entry["material"].get("source") in ARTIFACT_SOURCES:
+                receipt = receipt_by_path.get(entry["path"])
+                if receipt is not None:
+                    entry["material"]["artifactId"] = receipt["artifactId"]
+                    entry["material"]["archiveSha256"] = receipt["archiveSha256"]
     if producer.get("kind") == "github-actions" and not os.environ.get("ADMIN_UI_FEED_RECEIPTS"):
         raise ValueError("external feed receipt ledger is unavailable")
     if producer.get("kind") == "github-actions" and not receipts_cover(entries, receipts):
