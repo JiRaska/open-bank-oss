@@ -42,7 +42,10 @@ Všechny cesty jsou pod `/customer/v1`. Scopy jsou OAuth scopy deklarované v `o
 | `GET /transactions?accountId=&limit=&cursor=` | `accounts:read` | vlastnictví vynuceno; `cursor` URL-enkódovaný |
 | `GET /statements/{accountId}` | `accounts:read` | seznam období uzávěrek |
 | `GET /statements/{accountId}/{currency}/{legalSequence}?format=` | `accounts:read` | render camt.053 / MT940 / PDF; format & currency v allow-listu |
-| `GET /notifications?limit=` | `accounts:read` | feed omezený na party |
+| `GET /notifications?limit=&page=` | `accounts:read` | stránkovaný feed podle party, celkový a přesný nepřečtený počet |
+| `GET /notifications/unified?limit=&partyId=` | `accounts:read` | posledních 1–100 položek osoby a aktuálně zastupovaných firem; volitelný filtr oprávněného profilu |
+| `GET /notifications/{id}?partyId=` | `accounts:read` | detail; původní `partyId` z jednotného seznamu vybere oprávněný profil |
+| `PATCH /notifications/{id}/read?partyId=` | `accounts:read` | označí notifikaci oprávněného profilu jako přečtenou |
 | `GET /profile` | `accounts:read` | vlastní profil party volajícího |
 | `POST /domestic-payments` | `payments:initiate` | obohaceno; `Idempotency-Key` vyžadován |
 | `POST /sepa-payments` | `payments:initiate` | obohaceno; `Idempotency-Key` vyžadován |
@@ -63,6 +66,10 @@ Všechny cesty jsou pod `/customer/v1`. Scopy jsou OAuth scopy deklarované v `o
 | `PUT /holdings/{holdingId}/valuation` | `wealth:write` | přecenit; předchozí hodnota zůstává v historii |
 | `GET /holdings/{holdingId}/valuations` | `wealth:read` | historie ocenění, nejnovější první |
 | `DELETE /holdings/{holdingId}` | `wealth:write` | stáhnout; 409 `HOLDING_LOCKED`, dokud je zastavené |
+
+### Jednotný seznam notifikací
+
+Bez `partyId` se spojí notifikace přihlášené osoby a všech firem z aktuálního seznamu mandátů. Každá položka nese své původní `partyId`; při otevření nebo označení firemní položky jako přečtené jej předejte příslušnému endpointu. Výslovný filtr `partyId` musí patřit osobě nebo platnému mandátu. Odpověď obsahuje posledních 1–100 položek s `page: 0`; starší historii poskytuje dosavadní seznam vybraného profilu. `total` a `unreadCount` jsou součty odpovědí jednotlivých profilů pozorovaných během požadavku, nikoli atomický snímek při souběžných zápisech. Nedostupný seznam mandátů vrací 503, cizí filtr 403 a selhání či nesoulad profilu v některém feedu 502 bez částečných položek.
 
 ## Vybrané requesty
 
@@ -88,6 +95,8 @@ Content-Type: application/json
 ```
 
 Edge obohatí `debtorAccountNumber`/`debtorBankCode` (z českého IBANu účtu), `debtorName` (party-service), rozdělí kredit `number/bankcode`, namapuje `reference`→`messageForPayee`, nastaví `priority=STANDARD` a přepošle na `domestic-payment-service`. Peníze se nehýbou — iniciace jen vytvoří a proscreenuje; settlement je pod SCA.
+
+Domácí platební rail přijímá pouze CZK. Jiná měna vrátí `400 CURRENCY_NOT_ALLOWED` ještě před dohledáním účtu, rezervací delegovaného limitu nebo SCA; `Idempotency-Key` zůstane použitelný pro platný pokus. Volající bez práva odepsat peníze dostane stejnou odpověď `403` bez ohledu na existenci účtu či delegace, takže odpověď jejich existenci neprozrazuje.
 
 ### Začátek onboardingu (anonymně)
 
@@ -140,3 +149,9 @@ Edge vrací malé JSON chybové obálky tvaru `{"error":"…"}`, které sám gen
 - **Zákaznická verze API v URL** (`/customer/v1`). OpenAPI `info.version` (`1.6.0`) je osa API kontraktu (ADR-0048), nezávislá na release verzi `version.txt` (`0.9.0`).
 - Upstream volání míří na vlastní `/api/v1` každé služby.
 - **OpenAPI diff** v CI hlídá breaking změny bez bumpu kontraktu.
+
+## Veřejné texty stavů mobilní aplikace
+
+Anonymní `GET /customer/v1/app-copy` vrací pouze `{version, messages}` ze zveřejněného komunikačního stylu pro klienty. Neobsahuje osobní údaje ani interní instrukce persony. Zveřejněné odpovědi lze ukládat do cache na 60 sekund. Chybějící nebo vyřazená publikace vrací verzi nula a prázdnou mapu, což výslovně ruší klientské přepisy.
+
+Adresa komunikační služby se dodává při běhu přes `COMMUNICATION_SERVICE_URL`. Chybějící konfigurace nebo nedostupná služba vrací 503; neplatný dokument vrací 502. Klient v obou případech zachová ověřené uložené nebo vestavěné texty a tímto volitelným požadavkem neblokuje spuštění. Volání používá identitu služby bez hlavičky klientské party.

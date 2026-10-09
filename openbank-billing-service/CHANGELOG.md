@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.13.8](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.13.7...billing-service-v0.13.8) (2026-10-09)
+
+
+### Bug Fixes
+
+* **billing:** keep annual fee summary idempotent after outbox retention ([#12311](https://github.com/JiRaska/open-bank-oss/issues/12311)) ([46be784](https://github.com/JiRaska/open-bank-oss/commit/46be7845fdb49594d6f1b8bcfd8402e4f9bf031a))
+
+## [0.13.7](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.13.6...billing-service-v0.13.7) (2026-10-07)
+
+
+### Bug Fixes
+
+* **approval:** preserve verified maker actor kind ([#12159](https://github.com/JiRaska/open-bank-oss/issues/12159)) ([74cba34](https://github.com/JiRaska/open-bank-oss/commit/74cba348b75c0b318902c033bf81356ddba32393))
+
 ## [0.13.6](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.13.5...billing-service-v0.13.6) (2026-10-04)
 
 

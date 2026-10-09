@@ -203,6 +203,9 @@ class ScaOperatorApprovalDurabilityIT {
             )
         }
         assertThat(onContext { store.find(approval.id) }?.makerActorKind).isEqualTo(MakerActorKind.AI_AGENT)
+        val detail = given().get("/api/v1/sca/approvals/${approval.id}")
+            .then().statusCode(200).extract().body().asString()
+        assertThat(mapper.readTree(detail)["makerActorKind"].asText()).isEqualTo("AI_AGENT")
         decide(approval.id, 200)
         assertThat(onContext { store.markExecuted(approval.id) }?.makerActorKind).isEqualTo(MakerActorKind.AI_AGENT)
         assertThat(events(approval.id).map { it["makerActorKind"].asText() })

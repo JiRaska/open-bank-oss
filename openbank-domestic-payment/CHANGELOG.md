@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.21.9](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.21.8...domestic-payment-v0.21.9) (2026-10-09)
+
+
+### Bug Fixes
+
+* **domestic-payment:** refuse non-CZK submissions on the domestic rail ([#12305](https://github.com/JiRaska/open-bank-oss/issues/12305)) ([3efd3a2](https://github.com/JiRaska/open-bank-oss/commit/3efd3a2595d12c7b7c1f6df26bfc348675d138c6))
+
+## [0.21.8](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.21.7...domestic-payment-v0.21.8) (2026-10-07)
+
+
+### Bug Fixes
+
+* **approval:** preserve verified maker actor kind ([#12159](https://github.com/JiRaska/open-bank-oss/issues/12159)) ([74cba34](https://github.com/JiRaska/open-bank-oss/commit/74cba348b75c0b318902c033bf81356ddba32393))
+
 ## [0.21.7](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.21.6...domestic-payment-v0.21.7) (2026-10-04)
 
 

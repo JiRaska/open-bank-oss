@@ -15,6 +15,7 @@ import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
+import org.eclipse.microprofile.config.ConfigProvider
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.everyItem
@@ -30,6 +31,8 @@ abstract class StandaloneCatalogBootContract {
     lateinit var oidcTlsVerification: String
 
     protected fun assertNoBankCompatibilityData() {
+        assertThat(ConfigProvider.getConfig().getValue("quarkus.kafka.devservices.enabled", String::class.java))
+            .isEqualTo("false")
         assertThat(count("products")).isZero()
         assertThat(count("bank_v1_product_mapping")).isZero()
         assertThat(oidcTlsVerification).isEqualTo("required")
