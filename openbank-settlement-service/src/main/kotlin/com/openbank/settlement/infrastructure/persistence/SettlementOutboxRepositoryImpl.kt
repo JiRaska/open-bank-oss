@@ -7,6 +7,9 @@ import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxFailurePolicy
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.persistence.outbox.OutboxStatus
+import com.openbank.libs.persistence.outbox.OutboxTableShape
+import com.openbank.libs.persistence.outbox.PanacheOutboxRetention
+import com.openbank.libs.persistence.outbox.SentOutboxRetention
 import com.openbank.settlement.application.port.out.SettlementOutboxRepository
 import com.openbank.settlement.infrastructure.persistence.entity.SettlementOutboxEntity
 import io.quarkus.hibernate.reactive.panache.Panache
@@ -22,6 +25,7 @@ import java.util.UUID
 @ApplicationScoped
 class SettlementOutboxRepositoryImpl(private val clock: Clock) :
     SettlementOutboxRepository,
+    SentOutboxRetention by PanacheOutboxRetention(OutboxTableShape("settlement_outbox")),
     PanacheRepository<SettlementOutboxEntity> {
 
     override suspend fun oldestUnsentAt(): Instant? = Panache.withSession {
