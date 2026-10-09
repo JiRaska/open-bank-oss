@@ -49,9 +49,18 @@ def check(workflow: str, template: str, terraform: str) -> list[str]:
         findings.append("rendered Cluster namespace differs from workflow namespace")
 
     # The association uses the fleet map's namespace/SA and the shared backup role.
+    # Read the map consumed by db_backups_fleet, not a similarly shaped value in a
+    # comment, test fixture, or unrelated Terraform local.
+    fleet_map = re.search(
+        r'(?ms)^\s*db_backup_clusters\s*=\s*\{(?P<body>.*?)^\s*\}', terraform
+    )
+    fleet_body = fleet_map.group("body") if fleet_map else ""
     associations = set(re.findall(
-        r'\{\s*namespace\s*=\s*"([^"]+)"\s*,\s*sa\s*=\s*"([^"]+)"\s*\}', terraform
+        r'^\s*[\w-]+\s*=\s*\{\s*namespace\s*=\s*"([^"]+)"'
+        r'\s*,\s*sa\s*=\s*"([^"]+)"\s*\}', fleet_body, re.M
     ))
+    if not fleet_map:
+        findings.append("declared backup association map is missing")
     if not re.search(
         r'resource "aws_eks_pod_identity_association" "db_backups_fleet"\s*\{'
         r'[^}]*for_each\s*=\s*local\.db_backup_clusters'
@@ -75,8 +84,11 @@ def check(workflow: str, template: str, terraform: str) -> list[str]:
             findings.append(f"{sid} lacks the archive prefix or {action}")
         for tag, value in (("kubernetes-namespace", namespace),
                            ("kubernetes-service-account", sa)):
-            if not re.search(r'variable\s*=\s*"aws:PrincipalTag/' + tag +
-                             r'"\s*\n\s*values\s*=\s*\["' + re.escape(value) + r'"\]', body):
+            conditions = re.findall(r'\bcondition\s*\{([^{}]*)\}', body, re.S)
+            if not any(re.search(r'test\s*=\s*"StringEquals"', condition) and
+                       re.search(r'variable\s*=\s*"aws:PrincipalTag/' + tag + r'"', condition) and
+                       re.search(r'values\s*=\s*\["' + re.escape(value) + r'"\]', condition)
+                       for condition in conditions):
                 findings.append(f"{sid} is not scoped to {tag}={value}")
     return findings
 
@@ -97,16 +109,22 @@ spec:
  service_account = each.value.sa
  role_arn = aws_iam_role.db_backups.arn
 }
-x = { namespace = "dr-verify", sa = "restore-db" }
+locals {
+  db_backup_clusters = {
+    restore = { namespace = "dr-verify", sa = "restore-db" }
+  }
+}
   statement {
     sid = "LedgerDrillReadsLedgerArchive"
     actions = ["s3:GetObject"]
     resources = ["${bucket}/ledger-db/*"]
     condition {
+      test = "StringEquals"
       variable = "aws:PrincipalTag/kubernetes-namespace"
       values = ["dr-verify"]
     }
     condition {
+      test = "StringEquals"
       variable = "aws:PrincipalTag/kubernetes-service-account"
       values = ["restore-db"]
     }
@@ -116,10 +134,12 @@ x = { namespace = "dr-verify", sa = "restore-db" }
     actions = ["s3:ListBucket"]
     values = ["ledger-db/*"]
     condition {
+      test = "StringEquals"
       variable = "aws:PrincipalTag/kubernetes-namespace"
       values = ["dr-verify"]
     }
     condition {
+      test = "StringEquals"
       variable = "aws:PrincipalTag/kubernetes-service-account"
       values = ["restore-db"]
     }
@@ -128,8 +148,19 @@ x = { namespace = "dr-verify", sa = "restore-db" }
     assert not check(workflow, template, tf)
     assert any("association" in f for f in check(workflow, template,
                                                    tf.replace('sa = "restore-db"', 'sa = "wrong-db"')))
+    assert any("association" in f for f in check(
+        workflow, template, tf.replace('restore = { namespace = "dr-verify", sa = "restore-db" }',
+                                       'restore = { namespace = "ledger", sa = "restore-db" }') +
+        '\n# restore = { namespace = "dr-verify", sa = "restore-db" }'))
     assert any("kubernetes-namespace" in f for f in check(
         workflow, template, tf.replace('values = ["dr-verify"]', 'values = ["ledger"]')))
+    assert any("kubernetes-service-account" in f for f in check(
+        workflow, template, tf.replace('test = "StringEquals"', 'test = "StringLike"')))
+    assert any("association" in f for f in check(
+        workflow.replace('NS="dr-verify"', 'NS="dr-verify-${RUN_ID}"'), template, tf))
+    assert any("backup role" in f for f in check(
+        workflow, template, tf.replace('role_arn = aws_iam_role.db_backups.arn',
+                                       'role_arn = aws_iam_role.other.arn')))
     assert any("archive prefix" in f for f in check(
         workflow, template, tf.replace('ledger-db/*', 'other-db/*')))
     assert any("not traceable" in f for f in check(
