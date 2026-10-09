@@ -590,9 +590,23 @@ jobs:
           JOB_FILE: ${{ runner.temp }}/service-ci-jobs.ndjson
         run: |
           set -euo pipefail
-          gh api --paginate \
-            "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}/jobs?per_page=100" \
-            --jq '.jobs[] | {name,conclusion}' > "$JOB_FILE"
+          # A transient Jobs API 502 made run 37789735793 red after all 79 builds
+          # passed. Fetch into a temporary file on EACH attempt: pagination may have
+          # emitted partial output before failing, and a retry must never duplicate it.
+          for attempt in 1 2 3; do
+            if gh api --paginate \
+              "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}/jobs?per_page=100" \
+              --jq '.jobs[] | {name,conclusion}' > "${JOB_FILE}.pending" 2> "${JOB_FILE}.error"; then
+              mv "${JOB_FILE}.pending" "$JOB_FILE"
+              rm -f "${JOB_FILE}.error"
+              break
+            fi
+            if [ "$attempt" -eq 3 ] || ! grep -qiE 'HTTP 5[0-9][0-9]' "${JOB_FILE}.error"; then
+              cat "${JOB_FILE}.error" >&2
+              exit 1
+            fi
+            sleep $(( attempt * 5 ))
+          done
           python3 - <<'PY'
           import json
           import os
