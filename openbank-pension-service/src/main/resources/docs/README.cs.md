@@ -39,3 +39,20 @@ Recovery sweep výplat při startu registruje workflow `pension-payout-schedule-
 `openbank_workflow_success_recorded` rozlišuje registrované workflow bez dokončeného běhu od úspěchu. `openbank_workflow_last_success_age_seconds` se inicializuje při registraci, takže samotná nízká hodnota po startu nedokazuje provedení sweepu. Stávající gauge opožděných splátek měří práci; heartbeat měří provedení.
 
 Interval `off` nebo `disabled` vypíná plánování a nepublikuje heartbeat workflow.
+
+## Postupné nasazení interního TLS
+
+GitOps přidává TLS 1.3 na portu 8443 vedle stávajícího HTTP listeneru. Cert-manager
+vystavuje serverový certifikát interní CA; PEM certifikát a klíč se načítají
+z připojeného adresáře a obnovují každou hodinu.
+
+Nejprve nasaďte Certificate a serverový listener. Před přepnutím klienta ověřte
+Certificate Ready, DNS SAN služby, důvěryhodný TLS handshake a síťové politiky pro
+port 8443. HTTP zachovejte během souběhu verzí; jeho odstranění vyžaduje samostatnou
+inventuru klientů a nasazení. Při chybě nového listeneru ponechte původní klientskou
+URL a vraťte přidanou serverovou konfiguraci. Tato fáze ověřuje identitu serveru,
+neposkytuje vzájemné TLS.
+
+`ServerTlsIT` ověřuje načtení PEM, vyjednání TLS 1.3, odmítnutí nedůvěryhodného
+certifikátu a zachování HTTP s dočasnými testovacími klíči. Deklarace ani tento
+test nedokazují připravenost certifikátu v clusteru.

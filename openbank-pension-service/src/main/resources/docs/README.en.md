@@ -39,3 +39,20 @@ The payout recovery sweep registers workflow `pension-payout-schedule-sweep` at 
 `openbank_workflow_success_recorded` distinguishes a registered workflow that has not completed from a successful run. `openbank_workflow_last_success_age_seconds` is seeded at registration, so its startup value alone is not proof that a sweep ran. The existing overdue-installment gauge measures workload; the heartbeat measures execution.
 
 An `off` or `disabled` interval disables the schedule and publishes no workflow heartbeat.
+
+### Additive internal TLS rollout
+
+The GitOps deployment exposes TLS 1.3 on port 8443 alongside the existing HTTP
+listener. A cert-manager Certificate supplies the server identity from the internal
+CA; the directory-mounted PEM certificate and key reload every hour.
+
+Deploy the Certificate and server listener first. Before switching a caller to
+HTTPS, verify Certificate readiness, the service DNS SAN, a trusted TLS handshake,
+and caller network-policy access to 8443. Keep HTTP during mixed-version operation;
+removing it requires a separate caller inventory and rollout. If the new listener
+fails, retain the existing caller URL and revert the additive server configuration.
+This stage provides server authentication; it does not establish mutual TLS.
+
+`ServerTlsIT` proves PEM loading, TLS 1.3 negotiation, rejection of an untrusted
+certificate, and continued HTTP service with ephemeral test keys. Deployment
+declarations and this test do not prove that a cluster Certificate is ready.
