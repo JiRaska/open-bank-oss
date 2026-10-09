@@ -19,7 +19,7 @@ class PostgresTestResource : QuarkusTestResourceLifecycleManager {
         if (!DockerClientFactory.instance().isDockerAvailable) {
             throw TestAbortedException("Docker not available — skipping Testcontainers IT")
         }
-        val pg = PostgreSQLContainer(DockerImageName.parse(POSTGRES_IMAGE))
+        val pg = PostgreSQLContainer(DockerImageName.parse(POSTGRES_IMAGE).asCompatibleSubstituteFor("postgres"))
             .withDatabaseName("openbank_pension_fund_it")
             .withUsername("openbank")
             .withPassword("openbank_secret")
@@ -45,6 +45,8 @@ class PostgresTestResource : QuarkusTestResourceLifecycleManager {
     }
 
     private companion object {
-        const val POSTGRES_IMAGE = "postgres:18.6-alpine"
+        // Same official multi-platform image, pinned independently of the mirror's mutable tag.
+        const val POSTGRES_IMAGE =
+            "mirror.gcr.io/library/postgres:18.6-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873"
     }
 }
