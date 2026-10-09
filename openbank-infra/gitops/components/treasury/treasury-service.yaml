@@ -34,7 +34,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-treasury-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "097e088575e52715"
+        openbank.tech/policy-checksum: "7a5324ac9164f6ae"
       labels:
         app.kubernetes.io/name: treasury-service
         app.kubernetes.io/part-of: treasury
