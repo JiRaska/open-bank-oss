@@ -6,13 +6,13 @@ package com.openbank.pension.infrastructure.rest
 
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
-import com.openbank.pension.application.port.`in`.Caller
 import com.openbank.pension.application.port.`in`.CreateDraftCommand
 import com.openbank.pension.application.port.`in`.EarlyTerminationCommand
 import com.openbank.pension.application.port.`in`.IncentiveEvaluationCommand
 import com.openbank.pension.application.port.`in`.PensionContractUseCase
 import com.openbank.pension.domain.model.ContributionSchedule
 import com.openbank.pension.domain.pack.SurrenderInputs
+import com.openbank.pension.infrastructure.authz.ContractAccessGuard
 import com.openbank.pension.infrastructure.rest.dto.ContractResponse
 import com.openbank.pension.infrastructure.rest.dto.CreateContractRequest
 import com.openbank.pension.infrastructure.rest.dto.EarlyTerminationRequest
@@ -20,7 +20,6 @@ import com.openbank.pension.infrastructure.rest.dto.EarlyTerminationResponse
 import com.openbank.pension.infrastructure.rest.dto.ElectStrategyRequest
 import com.openbank.pension.infrastructure.rest.dto.IncentiveEvaluationRequest
 import com.openbank.pension.infrastructure.rest.dto.IncentiveResultResponse
-import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
@@ -61,15 +60,8 @@ class PensionContractResource {
     @Inject
     lateinit var contracts: PensionContractUseCase
 
-    // Request-scoped and carried across the coroutine dispatch, unlike a JAX-RS SecurityContext.
     @Inject
-    lateinit var identity: SecurityIdentity
-
-    private fun caller(customerPartyId: String?): Caller {
-        if (customerPartyId != null) return Caller.customer(UUID.fromString(customerPartyId))
-        require(STAFF_ROLES.any(identity::hasRole)) { "header '$PARTY_HEADER' is required" }
-        return Caller.STAFF
-    }
+    lateinit var access: ContractAccessGuard
 
     @POST
     @Operation(summary = "Create a DRAFT contract under the jurisdiction pack in force today")
@@ -79,12 +71,12 @@ class PensionContractResource {
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         request: CreateContractRequest?,
     ): Response {
-        val party = requireNotNull(participantPartyId) { "header '$PARTY_HEADER' is required" }
+        val participant = requireNotNull(access.actingParticipant(participantPartyId).customerPartyId)
         val body = requireNotNull(request) { "request body is required" }
         val schedule = requireNotNull(body.schedule) { "schedule is required" }
         val contract = contracts.createDraft(
             CreateDraftCommand(
-                participantPartyId = UUID.fromString(party),
+                participantPartyId = participant,
                 productLine = requireNotNull(body.productLine) { "productLine is required" },
                 jurisdiction = requireNotNull(body.jurisdiction) { "jurisdiction is required" },
                 providerEntityId = requireNotNull(body.providerEntityId) { "providerEntityId is required" },
@@ -116,7 +108,7 @@ class PensionContractResource {
     @Operation(summary = "Read one contract with its strategy history")
     @Authorize(action = "pension.contract.read", resource = "#id")
     suspend fun get(@PathParam("id") id: UUID, @HeaderParam("X-Customer-Party-Id") party: String?): ContractResponse =
-        ContractResponse.from(contracts.get(caller(party), id))
+        ContractResponse.from(contracts.get(access.readerFor(party), id))
 
     @POST
     @Path("/{id}/submit")
@@ -128,7 +120,7 @@ class PensionContractResource {
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
     ): ContractResponse = ContractResponse.from(
         contracts.submit(
-            caller(party).also {
+            access.actingParticipant(party).also {
                 idempotencyKey(idempotencyKey)
             },
             id,
@@ -145,7 +137,7 @@ class PensionContractResource {
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
     ): ContractResponse = ContractResponse.from(
         contracts.activate(
-            caller(party).also {
+            access.actingParticipant(party).also {
                 idempotencyKey(idempotencyKey)
             },
             id,
@@ -163,7 +155,9 @@ class PensionContractResource {
     ): ContractResponse {
         val body = requireNotNull(request) { "request body is required" }
         val code = requireNotNull(body.strategyCode) { "strategyCode is required" }
-        return ContractResponse.from(contracts.electStrategy(caller(party), id, code, body.effectiveFrom))
+        return ContractResponse.from(
+            contracts.electStrategy(access.actingParticipant(party), id, code, body.effectiveFrom),
+        )
     }
 
     @POST
@@ -174,8 +168,14 @@ class PensionContractResource {
         @PathParam("id") id: UUID,
         @HeaderParam("X-Customer-Party-Id") party: String?,
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
-    ): ContractResponse =
-        ContractResponse.from(contracts.suspendContributions(caller(party).also { idempotencyKey(idempotencyKey) }, id))
+    ): ContractResponse = ContractResponse.from(
+        contracts.suspendContributions(
+            access.actingParticipant(party).also {
+                idempotencyKey(idempotencyKey)
+            },
+            id,
+        ),
+    )
 
     @POST
     @Path("/{id}/resume")
@@ -185,8 +185,14 @@ class PensionContractResource {
         @PathParam("id") id: UUID,
         @HeaderParam("X-Customer-Party-Id") party: String?,
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
-    ): ContractResponse =
-        ContractResponse.from(contracts.resumeContributions(caller(party).also { idempotencyKey(idempotencyKey) }, id))
+    ): ContractResponse = ContractResponse.from(
+        contracts.resumeContributions(
+            access.actingParticipant(party).also {
+                idempotencyKey(idempotencyKey)
+            },
+            id,
+        ),
+    )
 
     @POST
     @Path("/{id}/incentive-evaluation")
@@ -202,7 +208,7 @@ class PensionContractResource {
         val body = requireNotNull(request) { "request body is required" }
         return contracts.evaluateIncentives(
             IncentiveEvaluationCommand(
-                caller = caller(party),
+                caller = access.readerFor(party),
                 contractId = id,
                 contribution = requireNotNull(body.contribution) { "contribution is required" },
                 period = requireNotNull(body.period) { "period is required" },
@@ -233,7 +239,7 @@ class PensionContractResource {
         }
         val result = contracts.requestEarlyTermination(
             EarlyTerminationCommand(
-                caller = caller(party),
+                caller = access.actingParticipant(party),
                 contractId = id,
                 inputs = SurrenderInputs(
                     currentValue = requireNotNull(body.currentValue) { "currentValue is required" },
@@ -243,11 +249,6 @@ class PensionContractResource {
             ),
         )
         return EarlyTerminationResponse.from(result.contract, result.preview)
-    }
-
-    private companion object {
-        const val PARTY_HEADER = "X-Customer-Party-Id"
-        val STAFF_ROLES = listOf(Roles.OPERATOR, Roles.ADMIN, Roles.COMPLIANCE)
     }
 }
 

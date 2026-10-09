@@ -3,4 +3,7 @@
     <file name="src/main/kotlin/com/openbank/pension/application/port/in/PensionUseCases.kt">
         <error line="5" column="9" source="standard:package-name" />
     </file>
+    <file name="src/main/kotlin/com/openbank/pension/application/port/in/ContractVisibility.kt">
+        <error line="5" column="9" source="standard:package-name" />
+    </file>
 </baseline>

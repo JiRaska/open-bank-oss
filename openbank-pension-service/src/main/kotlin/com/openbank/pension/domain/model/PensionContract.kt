@@ -4,6 +4,7 @@
 
 package com.openbank.pension.domain.model
 
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.pension.domain.pack.ProviderType
 import java.math.BigDecimal
 import java.time.Instant
@@ -222,7 +223,7 @@ data class PensionContract(
             now: Instant,
             idempotencyKey: String? = null,
         ): PensionContract = PensionContract(
-            id = UUID.randomUUID(),
+            id = Ids.newId(),
             participantPartyId = participantPartyId,
             productLine = productLine,
             jurisdiction = jurisdiction,
