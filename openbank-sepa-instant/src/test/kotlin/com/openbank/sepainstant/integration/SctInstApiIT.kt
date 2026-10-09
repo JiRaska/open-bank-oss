@@ -13,6 +13,7 @@ import io.restassured.filter.log.ResponseLoggingFilter
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
+import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.notNullValue
@@ -21,6 +22,7 @@ import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestMethodOrder
 import java.util.UUID
+import javax.sql.DataSource
 
 @QuarkusTest
 @QuarkusTestResource(
@@ -29,6 +31,9 @@ import java.util.UUID
 )
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 class SctInstApiIT {
+
+    @Inject
+    lateinit var dataSource: DataSource
 
     companion object {
         private val debtorAccountId: UUID = UUID.randomUUID()
@@ -210,6 +215,70 @@ class SctInstApiIT {
             post("/api/v1/sepa-instant")
         } Then {
             statusCode(409)
+        }
+    }
+
+    @Test
+    @Order(9)
+    @TestSecurity(user = "operator-01", roles = ["ROLE_OPERATOR"])
+    fun `Redis replay reads the current durable status`() {
+        val key = requireNotNull(receiptKey)
+        val payload = requireNotNull(submittedPayload)
+        updateReceipt(status = "SETTLED", ready = true)
+
+        Given {
+            contentType("application/json")
+            header("Idempotency-Key", key)
+            body(payload)
+        } When {
+            post("/api/v1/sepa-instant")
+        } Then {
+            statusCode(201)
+            body("status", equalTo("SETTLED"))
+        }
+    }
+
+    @Test
+    @Order(10)
+    @TestSecurity(user = "operator-01", roles = ["ROLE_OPERATOR"])
+    fun `an unresolved durable claim is unknown and cannot replay a stale success`() {
+        val key = requireNotNull(receiptKey)
+        val payload = requireNotNull(submittedPayload)
+        updateReceipt(status = "PENDING", ready = false)
+        try {
+            Given {
+                contentType("application/json")
+                body("""{"idempotencyKey":"$key","debtorAccountId":"$debtorAccountId"}""")
+            } When {
+                post("/api/v1/sepa-instant/receipts/lookup")
+            } Then {
+                statusCode(200)
+                body("state", equalTo("UNKNOWN"))
+            }
+            Given {
+                contentType("application/json")
+                header("Idempotency-Key", key)
+                body(payload)
+            } When {
+                post("/api/v1/sepa-instant")
+            } Then {
+                statusCode(409)
+            }
+        } finally {
+            updateReceipt(status = "SETTLED", ready = true)
+        }
+    }
+
+    private fun updateReceipt(status: String, ready: Boolean) {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "UPDATE sct_inst_payments SET status = ?, receipt_ready = ? WHERE payment_id = ?",
+            ).use { statement ->
+                statement.setString(1, status)
+                statement.setBoolean(2, ready)
+                statement.setObject(3, UUID.fromString(requireNotNull(createdPaymentId)))
+                assertThat(statement.executeUpdate()).isEqualTo(1)
+            }
         }
     }
 }

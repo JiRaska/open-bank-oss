@@ -5,6 +5,7 @@
 package com.openbank.sepainstant.application.usecase
 
 import com.openbank.libs.domain.money.Money
+import com.openbank.libs.idempotency.IdempotencyRequestInProgressException
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.sepainstant.application.port.`in`.SubmitSctInstCommand
 import com.openbank.sepainstant.application.port.out.AmlCasePort
@@ -46,6 +47,9 @@ import java.time.Instant
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 
 class SctInstPaymentServiceTest {
 
@@ -103,6 +107,7 @@ class SctInstPaymentServiceTest {
         val existing = payment(status = SctInstStatus.PROCESSING).copy(
             requestHash = "hash-123",
             initiatingPrincipal = "issuer\u001foperator-01",
+            receiptReady = true,
         )
         val command = command().copy(requestHash = "hash-123", initiatingPrincipal = "issuer\u001foperator-01")
 
@@ -117,6 +122,82 @@ class SctInstPaymentServiceTest {
         verify(exactly = 0) { screeningPort.screen(any(), any(), any()) }
         // SHADOW: idempotent replay skips fraud scoring (payment was already scored on first submit).
         verify(exactly = 0) { fraudScoringPort.score(any()) }
+    }
+
+    @Test
+    fun `a durable claim is not a completed receipt and cannot restart screening`() {
+        val existing = payment(status = SctInstStatus.PENDING).copy(
+            requestHash = "hash-123",
+            initiatingPrincipal = "issuer\u001foperator-01",
+            receiptReady = false,
+        )
+        val command = command().copy(requestHash = "hash-123", initiatingPrincipal = "issuer\u001foperator-01")
+        every { repo.findByIdempotencyKey(command.idempotencyKey) } returns Uni.createFrom().item(existing)
+
+        assertThat(
+            service.findReceipt(
+                command.idempotencyKey,
+                command.debtorAccountId,
+                requireNotNull(command.initiatingPrincipal),
+                null,
+                null,
+            ).await().indefinitely(),
+        ).isNull()
+        assertThatThrownBy { service.submit(command).await().indefinitely() }
+            .isInstanceOf(IdempotencyRequestInProgressException::class.java)
+        verify(exactly = 0) { repo.save(any()) }
+        verify(exactly = 0) { screeningPort.screen(any(), any(), any()) }
+    }
+
+    @Test
+    fun `lookup stays unknown while screening is delayed and concurrent retry cannot execute twice`() {
+        val command = command(idempotencyKey = "delayed-screening").copy(
+            requestHash = "request-sha",
+            initiatingPrincipal = "issuer\u001foperator-01",
+        )
+        val durable = AtomicReference<SctInstPayment?>()
+        val debtorVerdict = CompletableFuture<ScreeningResult>()
+        every { repo.findByIdempotencyKey(command.idempotencyKey) } answers {
+            Uni.createFrom().item(durable.get())
+        }
+        every { repo.save(any()) } answers {
+            firstArg<SctInstPayment>().also(durable::set).let { Uni.createFrom().item(it) }
+        }
+        every { screeningPort.screen(any(), ScreeningRole.DEBTOR, any()) } returns
+            Uni.createFrom().completionStage(debtorVerdict)
+        every { screeningPort.screen(any(), ScreeningRole.CREDITOR, any()) } returns
+            Uni.createFrom().item(
+                ScreeningResult("Bob Creditor", ScreeningRole.CREDITOR, ScreeningMatchStatus.CLEAR, 0.0, null),
+            )
+
+        val first = service.submit(command).subscribe().asCompletionStage()
+        assertThat(durable.get()?.receiptReady).isFalse()
+        assertThat(
+            service.findReceipt(
+                command.idempotencyKey,
+                command.debtorAccountId,
+                requireNotNull(command.initiatingPrincipal),
+                null,
+                null,
+            ).await().indefinitely(),
+        ).isNull()
+        assertThatThrownBy { service.submit(command).await().indefinitely() }
+            .isInstanceOf(IdempotencyRequestInProgressException::class.java)
+        verify(exactly = 1) { screeningPort.screen(any(), ScreeningRole.DEBTOR, any()) }
+
+        debtorVerdict.complete(
+            ScreeningResult("Alice Debtor", ScreeningRole.DEBTOR, ScreeningMatchStatus.CLEAR, 0.0, null),
+        )
+        assertThat(first.toCompletableFuture().get(5, TimeUnit.SECONDS).receiptReady).isTrue()
+        assertThat(
+            service.findReceipt(
+                command.idempotencyKey,
+                command.debtorAccountId,
+                requireNotNull(command.initiatingPrincipal),
+                null,
+                null,
+            ).await().indefinitely(),
+        ).isNotNull()
     }
 
     @Test
@@ -424,5 +505,6 @@ class SctInstPaymentServiceTest {
         submittedAt = OffsetDateTime.parse("2026-01-01T10:15:00Z"),
         createdAt = OffsetDateTime.parse("2026-01-01T10:14:00Z"),
         updatedAt = OffsetDateTime.parse("2026-01-01T10:15:30Z"),
+        receiptReady = true,
     )
 }

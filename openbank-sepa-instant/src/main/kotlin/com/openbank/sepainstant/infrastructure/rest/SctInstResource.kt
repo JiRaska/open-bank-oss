@@ -151,9 +151,20 @@ class SctInstResource @Inject constructor(
                 IdempotencyStore.DEFAULT_IN_FLIGHT_TTL_SECONDS,
             )
         ) {
-            is ReserveResult.Replay -> return Response.status(reservation.record.statusCode)
-                .entity(reservation.record.responseBody).type(MediaType.APPLICATION_JSON)
-                .header("X-Idempotency-Replayed", "true").build()
+            is ReserveResult.Replay -> {
+                // Redis only proves this key and payload were seen. Its cached body can be stale
+                // after screening, settlement or recall; SQL is the current receipt authority.
+                val current = submitUseCase.findReceipt(
+                    key,
+                    body.debtorAccountId,
+                    actorScope,
+                    partyId,
+                    actorId,
+                ).awaitSuspending() ?: throw IdempotencyRequestInProgressException()
+                return Response.status(Response.Status.CREATED).entity(toResponse(current))
+                    .type(MediaType.APPLICATION_JSON)
+                    .header("X-Idempotency-Replayed", "true").build()
+            }
             ReserveResult.Mismatch -> throw IdempotencyKeyReusedException()
             ReserveResult.InFlight -> throw IdempotencyRequestInProgressException()
             ReserveResult.Reserved -> Unit

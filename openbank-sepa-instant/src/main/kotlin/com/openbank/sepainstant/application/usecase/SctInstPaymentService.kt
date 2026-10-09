@@ -5,6 +5,7 @@
 package com.openbank.sepainstant.application.usecase
 
 import com.openbank.libs.idempotency.IdempotencyKeyReusedException
+import com.openbank.libs.idempotency.IdempotencyRequestInProgressException
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.sepainstant.application.port.`in`.GetSctInstPaymentUseCase
 import com.openbank.sepainstant.application.port.`in`.RecallSctInstPaymentUseCase
@@ -109,6 +110,8 @@ class SctInstPaymentService(
                 if (existing != null) {
                     if (!sameRequest(existing, command)) {
                         Uni.createFrom().failure(IdempotencyKeyReusedException())
+                    } else if (!existing.receiptReady) {
+                        Uni.createFrom().failure(IdempotencyRequestInProgressException())
                     } else {
                         Uni.createFrom().item(existing)
                     }
@@ -121,7 +124,11 @@ class SctInstPaymentService(
                             } else {
                                 repo.findByIdempotencyKey(command.idempotencyKey).flatMap { winner ->
                                     if (winner != null && sameRequest(winner, command)) {
-                                        Uni.createFrom().item(winner)
+                                        if (winner.receiptReady) {
+                                            Uni.createFrom().item(winner)
+                                        } else {
+                                            Uni.createFrom().failure(IdempotencyRequestInProgressException())
+                                        }
                                     } else {
                                         Uni.createFrom().failure(IdempotencyKeyReusedException())
                                     }
@@ -147,7 +154,8 @@ class SctInstPaymentService(
         actorId: UUID?,
     ): Uni<SctInstPayment?> = repo.findByIdempotencyKey(key).map { payment ->
         payment?.takeIf {
-            it.requestHash != null &&
+            it.receiptReady &&
+                it.requestHash != null &&
                 it.initiatingPrincipal != null &&
                 it.initiatingPrincipal == principal &&
                 it.initiatingPartyId == partyId &&
@@ -242,7 +250,8 @@ class SctInstPaymentService(
         )
         metrics.paymentSubmitted("sepa_instant", base.currency)
         // Claim the durable unique key before any external screening, scheme or settlement call.
-        // A crash after this commit leaves a visible PENDING receipt, never a second execution.
+        // A crash after this commit leaves an unresolved claim, not a completed receipt.
+        // The unique key prevents a second execution until reconciliation determines the outcome.
         return repo.save(base).flatMap { persisted ->
             screeningPort.screen(
                 persisted.debtorName,
@@ -339,6 +348,7 @@ class SctInstPaymentService(
         val code = reasonCode ?: "RJCT"
         val rejected = base.copy(
             status = SctInstStatus.REJECTED,
+            receiptReady = true,
             rejectReason = code,
             rejectDetail = "scheme reject (pacs.002): $code",
         )
@@ -366,6 +376,7 @@ class SctInstPaymentService(
     private fun proceed(base: SctInstPayment): Uni<SctInstPayment> {
         val processing = base.copy(
             status = SctInstStatus.PROCESSING,
+            receiptReady = true,
             executionTimeoutAt = OffsetDateTime.now(clock).plusSeconds(timeoutSeconds),
         )
         return repo.save(processing).flatMap { saved ->
@@ -386,7 +397,7 @@ class SctInstPaymentService(
     /** ADR-0108: funds booked — transition from PROCESSING to SETTLED and emit Settled. */
     private fun complete(processing: SctInstPayment): Uni<SctInstPayment> {
         val now = OffsetDateTime.now(clock)
-        val settled = processing.copy(status = SctInstStatus.SETTLED, settledAt = now)
+        val settled = processing.copy(status = SctInstStatus.SETTLED, settledAt = now, receiptReady = true)
         return repo.save(settled).flatMap { saved ->
             publisher.publish(SctInstPaymentSettled(paymentId = saved.paymentId, settledAt = now, occurredAt = now))
                 .invoke { _ ->
@@ -405,6 +416,7 @@ class SctInstPaymentService(
     private fun reject(base: SctInstPayment, detail: String, matched: String?): Uni<SctInstPayment> {
         val rejected = base.copy(
             status = SctInstStatus.REJECTED,
+            receiptReady = true,
             rejectReason = ALERT_SANCTIONS_HIT,
             rejectDetail = detail,
         )
@@ -440,7 +452,7 @@ class SctInstPaymentService(
         detail: String?,
         matched: String?,
     ): Uni<SctInstPayment> {
-        val held = base.copy(status = SctInstStatus.PENDING)
+        val held = base.copy(status = SctInstStatus.PENDING, receiptReady = true)
         return repo.save(held).flatMap { saved ->
             openCaseQuietly(saved, risk, alert, detail, matched).replaceWith(saved)
         }

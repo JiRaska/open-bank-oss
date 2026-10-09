@@ -34,6 +34,9 @@ class SctInstPaymentEntity {
     @Column(name = "initiating_actor_party_id")
     var initiatingActorPartyId: UUID? = null
 
+    @Column(name = "receipt_ready", nullable = false)
+    var receiptReady: Boolean = false
+
     @Column(nullable = false)
     var status: String = "PENDING"
 
