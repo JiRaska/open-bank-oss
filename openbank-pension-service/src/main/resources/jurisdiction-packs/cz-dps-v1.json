@@ -27,6 +27,7 @@
       "minContribution": 500,
       "amountCap": 340,
       "claimChannel": "STATE_AGENCY_BATCH",
+      "claimFormat": "agency-monthly-batch-v0",
       "clawback": { "mode": "RETURN_ALL" }
     },
     {

@@ -124,12 +124,12 @@ object PackEvaluator {
         val amount = if (perPeriod < min) {
             BigDecimal.ZERO
         } else {
-            perPeriod.multiply(rule.rate!!).min(rule.amountCap!!)
+            IncentiveBand.matched(rule, perPeriod).min(rule.amountCap!!)
         }
         return IncentiveResult(
             rule.id, rule.type, rule.period, money(amount), null, rule.claimChannel,
             if (perPeriod < min) "contribution below the minimum $min per ${rule.period}" else
-                "${rule.rate} of the contribution, capped at ${rule.amountCap} per ${rule.period}",
+                "${rule.bands?.let { "banded" } ?: rule.rate} of the contribution, capped at ${rule.amountCap} per ${rule.period}",
         )
     }
 

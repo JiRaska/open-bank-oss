@@ -134,12 +134,16 @@ data class IncentiveRule(
     val indicativeTaxRate: BigDecimal? = null,
     val claimChannel: ClaimChannel = ClaimChannel.NONE,
     val clawback: ClawbackRule? = null,
+    /** Progressive matching bands (ADR-0334 S3); when present they replace the single [rate]. */
+    val bands: List<IncentiveBand>? = null,
+    /** Wire format of the claim channel adapter that files this incentive (ADR-0334 S3). */
+    val claimFormat: String? = null,
 ) {
     init {
         require(id.isNotBlank()) { "incentive id must not be blank" }
         when (type) {
             IncentiveType.MATCHING -> {
-                requireField(rate, "rate")
+                if (bands == null) requireField(rate, "rate") else IncentiveBand.validate(id, bands)
                 requireField(amountCap, "amountCap")
             }
             IncentiveType.FLAT -> requireField(flatAmount, "flatAmount")
