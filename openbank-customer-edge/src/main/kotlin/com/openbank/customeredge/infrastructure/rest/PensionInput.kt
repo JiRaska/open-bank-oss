@@ -24,7 +24,8 @@ internal object PensionInput {
     private val PROVIDER_TYPES =
         setOf("PENSION_COMPANY", "BANK", "INVESTMENT_FIRM", "MANAGEMENT_COMPANY", "INSURANCE_COMPANY")
     private val FREQUENCIES = setOf("MONTHLY", "QUARTERLY", "ANNUALLY")
-    private val PAYOUT_FORMS = setOf("LUMP_SUM", "ANNUITY", "PHASED_WITHDRAWAL")
+    private val PAYOUT_FORMS = setOf("LUMP_SUM", "ANNUITY", "PHASED_WITHDRAWAL", "FIXED_PERIOD_PENSION")
+    private const val MAX_PAYOUT_MONTHS = 600
     private val CODE = Regex("^[A-Z0-9_]{1,64}$")
     private val JURISDICTION = Regex("^[A-Z]{2}$")
     private val CURRENCY = Regex("^[A-Z]{3}$")
@@ -110,12 +111,35 @@ internal object PensionInput {
         )
     }
 
-    fun payout(node: JsonNode?): Result<Map<String, Any?>> = runCatching {
+    /** A payout quote. Early withdrawal and surrender go through the early-termination routes instead. */
+    fun payoutQuote(node: JsonNode?): Result<Map<String, Any?>> = runCatching {
+        requireNotNull(node) { "body must be a JSON object" }
+        val months = node.path("months").takeIf { !it.isMissingNode && !it.isNull }?.let {
+            requireNotNull(
+                it.takeIf { m ->
+                    m.isIntegralNumber
+                }?.intValue()?.takeIf { m -> m in 1..MAX_PAYOUT_MONTHS },
+            ) {
+                "months must be between 1 and $MAX_PAYOUT_MONTHS"
+            }
+        }
+        mapOf(
+            "form" to oneOf(node, "form", PAYOUT_FORMS),
+            "amount" to node.decimalString("amount")?.let { amount(it, "amount") },
+            "months" to months,
+        )
+    }
+
+    /** Confirmation of a quoted payout: the SCA challenge the app completed and the payout IBAN. */
+    fun payoutConfirmation(node: JsonNode?): Result<Map<String, Any?>> = runCatching {
         requireNotNull(node) { "body must be a JSON object" }
         val iban = requireNotNull(node.text("payoutIban")?.replace(" ", "")?.uppercase()?.takeIf(IBAN::matches)) {
             "payoutIban must be an IBAN"
         }
-        mapOf("form" to oneOf(node, "form", PAYOUT_FORMS), "payoutIban" to iban)
+        val challenge = requireNotNull(node.text("scaChallengeId")?.takeIf { it.length in 1..MAX_NAME }) {
+            "scaChallengeId is required"
+        }
+        mapOf("scaChallengeId" to challenge, "payoutIban" to iban)
     }
 
     fun taxYear(raw: String?): Int? {

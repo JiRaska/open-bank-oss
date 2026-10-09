@@ -207,7 +207,7 @@ class CustomerPensionResource(private val upstream: UpstreamClient, private val 
         }
     }
 
-    /** Contributions, incentives and deductible amount for a tax year. Backend pending (S3). */
+    /** Contributions, incentives and deductible amount for a tax year (S3 funding route; backend pending). */
     @GET
     @Path("/contracts/{id}/tax-summary")
     @Authorize(action = "customer.pension.contract.read", resource = "")
@@ -215,7 +215,7 @@ class CustomerPensionResource(private val upstream: UpstreamClient, private val 
     fun taxSummary(@PathParam("id") id: String?, @QueryParam("year") year: String?): Response {
         val taxYear = PensionInput.taxYear(year) ?: return invalid("year must be a past or current calendar year")
         return owned(id) { _, party, contractId ->
-            val response = upstream.get("${api()}/contracts/$contractId/tax-summary?year=$taxYear", party.toString())
+            val response = upstream.get("${api()}/funding/contracts/$contractId/tax-years/$taxYear", party.toString())
             if (response.status == OK) passThrough(response) else failure(response)
         }
     }
@@ -254,16 +254,45 @@ class CustomerPensionResource(private val upstream: UpstreamClient, private val 
     fun earlyTerminationNotice(@PathParam("id") id: String?, @HeaderParam(IDEMPOTENCY) key: String?): Response =
         earlyTermination(id, confirm = true, key = key)
 
-    /** Regular payout request (lump sum, annuity, phased withdrawal). Backend pending (S5). */
+    /** Binding payout quote for a form (S5 exit route; backend pending). */
     @POST
     @Path("/contracts/{id}/payouts")
     @Authorize(action = "customer.pension.payout.request", resource = "")
     @Blocking
     fun payout(@PathParam("id") id: String?, body: String?, @HeaderParam(IDEMPOTENCY) key: String?): Response {
-        val input = PensionInput.payout(EdgeJson.parseObject(body)).getOrElse { return invalid(it) }
+        val input = PensionInput.payoutQuote(EdgeJson.parseObject(body)).getOrElse { return invalid(it) }
         return owned(id) { _, party, contractId ->
-            val response = upstream.post("${api()}/contracts/$contractId/payouts", party.toString(), json(input), key)
+            val response = upstream.post(
+                "${api()}/contracts/$contractId/exit/payouts/quote",
+                party.toString(),
+                json(input),
+                key,
+            )
             if (response.status == CREATED || response.status == OK) passThrough(response) else failure(response)
+        }
+    }
+
+    /** Confirm a quoted payout with the completed SCA challenge (S5 exit route; backend pending). */
+    @POST
+    @Path("/contracts/{id}/payouts/{payoutId}/confirm")
+    @Authorize(action = "customer.pension.payout.request", resource = "")
+    @Blocking
+    fun confirmPayout(
+        @PathParam("id") id: String?,
+        @PathParam("payoutId") payoutId: String?,
+        body: String?,
+        @HeaderParam(IDEMPOTENCY) key: String?,
+    ): Response {
+        val input = PensionInput.payoutConfirmation(EdgeJson.parseObject(body)).getOrElse { return invalid(it) }
+        val payout = payoutId?.let { runCatching { UUID.fromString(it) }.getOrNull() } ?: return notFound()
+        return owned(id) { _, party, contractId ->
+            val response = upstream.post(
+                "${api()}/contracts/$contractId/exit/payouts/$payout/confirm",
+                party.toString(),
+                json(input),
+                key,
+            )
+            if (response.status == OK) passThrough(response) else failure(response)
         }
     }
 

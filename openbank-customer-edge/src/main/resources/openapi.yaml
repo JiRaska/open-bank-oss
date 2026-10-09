@@ -461,7 +461,7 @@ paths:
       tags: [Pension]
       operationId: getPensionTaxSummary
       summary: Contributions, incentives and deductible amount for a tax year (backend pending)
-      description: Proxies pension-service GET .../tax-summary, not shipped by S1 (#12350, slice S3).
+      description: Proxies pension-service GET /api/v1/pension/funding/contracts/{id}/tax-years/{year} (#12350, slice S3, not yet merged).
       x-backend-pending: true
       security:
         - customerOidc: [pension:read]
@@ -562,8 +562,10 @@ paths:
     post:
       tags: [Pension]
       operationId: requestPensionPayout
-      summary: Request the regular payout (backend pending)
-      description: Proxies pension-service POST .../payouts, not shipped by S1 (#12350, slice S5).
+      summary: Binding payout quote for a payout form (backend pending)
+      description: >-
+        Proxies pension-service POST /api/v1/pension/contracts/{id}/exit/payouts/quote (#12350,
+        slice S5, not yet merged). The quote is confirmed by the separate /confirm route under SCA.
       x-backend-pending: true
       security:
         - customerOidc: [pension:write]
@@ -576,19 +578,56 @@ paths:
           application/json:
             schema:
               type: object
-              required: [form, payoutIban]
+              required: [form]
               properties:
-                form: {type: string, enum: [LUMP_SUM, ANNUITY, PHASED_WITHDRAWAL]}
-                payoutIban: {type: string}
+                form: {type: string, enum: [LUMP_SUM, ANNUITY, PHASED_WITHDRAWAL, FIXED_PERIOD_PENSION]}
+                amount: {type: string, description: Decimal string; a partial amount where the pack allows it}
+                months: {type: integer, minimum: 1, maximum: 600, description: Duration for a fixed-period or phased payout}
       responses:
         '201':
-          description: Payout requested
+          description: Payout quoted
           content:
             application/json:
               schema: {type: object, additionalProperties: true}
         '400': {description: 'Invalid input, or PENSION_RULE_REFUSED (payout conditions not met)'}
         '401': {description: Missing or invalid bearer token}
         '404': {description: No such contract for the caller, or backend route not deployed yet}
+        '409': {description: 'INVALID_CONTRACT_STATE'}
+        '502': {description: Pension service unavailable}
+  /pension/contracts/{contractId}/payouts/{payoutId}/confirm:
+    post:
+      tags: [Pension]
+      operationId: confirmPensionPayout
+      summary: Confirm a quoted payout under SCA (backend pending)
+      description: >-
+        Proxies pension-service POST /api/v1/pension/contracts/{id}/exit/payouts/{payoutId}/confirm
+        (#12350, slice S5, not yet merged). The SCA challenge is completed by the app first.
+      x-backend-pending: true
+      security:
+        - customerOidc: [pension:write]
+      parameters:
+        - $ref: '#/components/parameters/PensionContractId'
+        - {name: payoutId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: Idempotency-Key, in: header, required: false, schema: {type: string}, description: Synthesized by the edge when absent}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [scaChallengeId, payoutIban]
+              properties:
+                scaChallengeId: {type: string}
+                payoutIban: {type: string}
+      responses:
+        '200':
+          description: Payout confirmed
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        '400': {description: 'Invalid input, or PENSION_RULE_REFUSED'}
+        '401': {description: Missing or invalid bearer token}
+        '404': {description: No such contract or payout for the caller, or backend route not deployed yet}
         '409': {description: 'INVALID_CONTRACT_STATE'}
         '502': {description: Pension service unavailable}
   /holdings:

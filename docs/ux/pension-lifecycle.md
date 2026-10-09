@@ -87,9 +87,11 @@ action for that state rather than letting the customer hit it.
 
 ### 7. Regular payout
 
-`POST /pension/contracts/{id}/payouts` *(pending, S5)* with the payout form (`LUMP_SUM`,
-`ANNUITY`, `PHASED_WITHDRAWAL`) and a payout IBAN, after SCA. A 400 `PENSION_RULE_REFUSED` means
-the pack's payout conditions (age, duration) are not met yet.
+Two steps, both *(pending, S5)*: `POST /pension/contracts/{id}/payouts` returns a binding quote for
+the chosen form (`LUMP_SUM`, `ANNUITY`, `PHASED_WITHDRAWAL`, `FIXED_PERIOD_PENSION`, optional
+`amount` and `months`); after the customer completes SCA,
+`POST /pension/contracts/{id}/payouts/{payoutId}/confirm` with the `scaChallengeId` and the payout
+IBAN. A 400 `PENSION_RULE_REFUSED` means the pack's payout conditions (age, duration) are not met.
 
 ### 8. Death
 
@@ -101,5 +103,6 @@ No customer flow: a death claim is reported to and handled by the back office (a
 - Suitability/ESG questionnaire and key-information document delivery have no edge route yet.
 - Contract list, simulation, contribution change, beneficiaries, tax summary, transfer-in and
   payout depend on backend slices S2/S3/S5 of #12350.
-- SCA binding of the submit, notice and payout intents is not yet enforced by the edge for these
-  routes; until it is, the app must still run the SCA step before calling them.
+- SCA binding of the submit and early-termination notice intents is not enforced by the edge
+  (backend slice S5 replaces the notice with a quote/sign flow that carries an SCA challenge);
+  the app must still run the SCA step before calling them.

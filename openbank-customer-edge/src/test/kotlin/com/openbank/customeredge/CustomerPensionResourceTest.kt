@@ -215,4 +215,26 @@ class CustomerPensionResourceTest {
         assertThat(resource(upstream).taxSummary(contractId.toString(), "2999").status).isEqualTo(400)
         verify(exactly = 0) { upstream.get(any(), any()) }
     }
+
+    @Test
+    fun `a payout quote goes to the S5 exit route and a malformed payout id is 404 without a call`() {
+        val upstream = mockk<UpstreamClient>()
+        val url = slot<String>()
+        every { upstream.get("$pension/api/v1/pension/contracts/$contractId", caller.toString()) } returns
+            ok(contract(caller))
+        every { upstream.post(capture(url), caller.toString(), any(), any()) } returns ok("""{"payoutId":"p"}""", 201)
+
+        val quoted = resource(upstream).payout(contractId.toString(), """{"form":"LUMP_SUM"}""", null)
+        val confirmed = resource(upstream).confirmPayout(
+            contractId.toString(),
+            "not-a-uuid",
+            """{"scaChallengeId":"c1","payoutIban":"CZ6508000000192000145399"}""",
+            null,
+        )
+
+        assertThat(quoted.status).isEqualTo(201)
+        assertThat(url.captured).isEqualTo("$pension/api/v1/pension/contracts/$contractId/exit/payouts/quote")
+        assertThat(confirmed.status).isEqualTo(404)
+        verify(exactly = 1) { upstream.post(any(), any(), any(), any()) }
+    }
 }
