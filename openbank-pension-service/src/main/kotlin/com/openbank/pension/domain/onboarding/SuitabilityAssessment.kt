@@ -7,6 +7,7 @@ package com.openbank.pension.domain.onboarding
 import com.openbank.pension.domain.model.ProductLine
 import com.openbank.pension.domain.questionnaire.QuestionnaireProfile
 import com.openbank.pension.domain.questionnaire.QuestionnaireRecord
+import com.openbank.pension.domain.questionnaire.StrategyInstrumentMapping
 import java.time.Instant
 import java.time.LocalDate
 import java.time.Period
@@ -72,6 +73,8 @@ data class SuitabilityAssessment(
     val validUntil: LocalDate,
     /** Set when the assessment came from the data-driven question set (issue #12384). */
     val questionnaire: QuestionnaireRecord? = null,
+    /** Published offering revisions effective when answers were assessed; null for historical records. */
+    val strategyInstrumentMappings: List<StrategyInstrumentMapping>? = null,
 ) {
     val esgPreference: EsgPreference get() = answers.esgPreference ?: EsgPreference.NONE
 
