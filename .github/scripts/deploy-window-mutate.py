@@ -53,11 +53,14 @@ def required_policy(ruleset: dict) -> tuple[list[str], int]:
     if not names or any(not n for n in names) or len(names) != len(set(names)):
         raise ValueError("required main status contexts are missing or ambiguous")
     reviews = rules.get("pull_request")
-    if not isinstance(reviews, dict):
-        raise ValueError("main-protection has no required pull request review rule")
-    count = reviews.get("required_approving_review_count")
-    if not isinstance(count, int) or isinstance(count, bool) or count < 1:
-        raise ValueError("main-protection does not require positive approving reviews")
+    if reviews is None:
+        count = 0
+    elif isinstance(reviews, dict):
+        count = reviews.get("required_approving_review_count")
+        if not isinstance(count, int) or isinstance(count, bool) or count < 0:
+            raise ValueError("main-protection has an invalid approving review count")
+    else:
+        raise ValueError("main-protection has an invalid pull request review rule")
     return names, count
 
 
@@ -78,7 +81,7 @@ def action(pr: dict, head: str, base: str, required: list[str], reviews: int) ->
         return "ARM"
     if state != "CLEAN":
         raise ValueError(f"deploy PR merge state {state!r} needs a safe retry")
-    if reviews < 1 or pr.get("reviewDecision") != "APPROVED":
+    if reviews > 0 and pr.get("reviewDecision") != "APPROVED":
         raise ValueError(f"{reviews} approval(s) required; reviewDecision is "
                          f"{pr.get('reviewDecision')!r}")
     checks = pr.get("statusCheckRollup") or []
@@ -174,14 +177,21 @@ def self_test() -> None:
         pass
     else:
         raise AssertionError("non-strict main accepted")
-    for rules in (policy["rules"][:1], [policy["rules"][0],
-                  {"type": "pull_request", "parameters": {"required_approving_review_count": 0}}]):
+    no_review_policy = {**policy, "rules": policy["rules"][:1]}
+    assert required_policy(no_review_policy) == (["all-green"], 0)
+    assert action({**pr, "reviewDecision": ""}, sha, base, checks, 0) == "MERGE"
+    assert required_policy({**policy, "rules": [policy["rules"][0],
+                           {"type": "pull_request", "parameters": {"required_approving_review_count": 0}}]}) == (["all-green"], 0)
+    for rules in ([policy["rules"][0],
+                   {"type": "pull_request", "parameters": {"required_approving_review_count": -1}}],
+                  [policy["rules"][0],
+                   {"type": "pull_request", "parameters": {"required_approving_review_count": True}}]):
         try:
             required_policy({**policy, "rules": rules})
         except ValueError:
             pass
         else:
-            raise AssertionError("main without positive required reviews accepted")
+            raise AssertionError("main with invalid required reviews accepted")
     original_gh = globals()["gh"]
     try:
         globals()["gh"] = lambda *_: {"commit": {"verification": {"verified": False}}}
