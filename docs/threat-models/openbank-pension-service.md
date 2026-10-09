@@ -51,6 +51,27 @@ packs are code-reviewed data baked into the image, not runtime input).
 | **Denial of service** | Request floods or oversized bodies | Fleet rate limit (100 concurrent), 1 MB body limit, read/idle timeouts from `application.yaml` |
 | **Elevation of privilege** | A backend service-account holding `ROLE_OPERATOR` writes a contract | `operator-pension-read` excludes `service-account-*` and is read-only; the edge grant is keyed on one principal id |
 
+## 4a. Exits — termination, payout, death (slice S5)
+
+New trust boundaries: the fund unit register (redeem), the payment rail (payout), the tax authority
+(withholding remittance), the incentive ledger (clawback), an annuity insurer, sca-service and
+account-service. All are behind ports; in S5 they are `@DefaultBean` stubs.
+
+| STRIDE | Threat | Mitigation |
+|---|---|---|
+| **Spoofing** | A caller names another participant's party to cash out their contract | `ContractAccessGuard`: the party header is trusted only from the edge relay; another party's contract is 404 |
+| **Tampering** | Amounts changed between the preview and the payout | The quote is stored and signed: SCA dynamic linking over `quoteHash`; execution pays only stored quote amounts (IT asserts preview == executed) |
+| **Repudiation** | Participant denies requesting the termination | SCA challenge id, signing time and quote hash are stored on the notice |
+| **Information disclosure** | Enumerating notices / payouts / claims | Every exit aggregate is looked up under its contract after the ownership check; mismatch is 404 |
+| **Denial of service** | A retried activity or replayed request pays twice | Deterministic idempotency keys per step, `pension_payment_instructions.idempotency_key` UNIQUE, workflow id = aggregate id, `Idempotency-Key` on every money-moving command |
+| **Elevation of privilege** | One operator registers a death and pays the claimants alone | Death routes: staff roles + `operator-pension-death-claim` (no service-account, no edge); approval is four-eyes in `DeathClaim.approve` |
+
+Residual: the SCA, own-account and beneficiary-KYC stubs FAIL CLOSED outside %dev/%test, so a
+deployment refuses every exit until sca-service / account-service adapters are wired. A binding
+quote moves NAV risk to the provider for the notice period (`navVariance` is recorded, never
+charged to the participant). A death during a phased withdrawal stops the remaining installments;
+handing the unpaid remainder to the claim is a follow-up.
+
 ## 5. Residual risks / assumptions
 
 - **Surrender preview inputs are caller-supplied.** Until pension-fund-service owns the unit
@@ -69,3 +90,4 @@ packs are code-reviewed data baked into the image, not runtime input).
 ## 6. Change log
 
 - 2026-10-09 — initial model with the S1 bootstrap (ADR-0334, #12350).
+- 2026-10-09 — S5 exits: termination, payout, death claims (§4a).
