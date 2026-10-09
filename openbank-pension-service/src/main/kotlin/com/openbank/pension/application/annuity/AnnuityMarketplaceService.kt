@@ -166,9 +166,10 @@ class AnnuityMarketplaceService(
         val payout = annuityPayout(contractId, payoutId)
         check(payout.status == PayoutStatus.QUOTED) { "the payout is ${payout.status}; the selection is closed" }
         val purchase = load(contractId, payoutId)
+        // A replay of the same signed selection is answered as-is (the challenge is single-use).
+        val sameSelection = purchase.selectedPartnerId == partnerId && purchase.selectedOfferId == offerId
         if (purchase.status == AnnuityPurchaseStatus.SELECTED &&
-            purchase.selectedPartnerId == partnerId &&
-            purchase.selectedOfferId == offerId &&
+            sameSelection &&
             purchase.scaChallengeId == scaChallengeId
         ) {
             return purchase
@@ -238,7 +239,7 @@ class AnnuityMarketplaceService(
 
     override suspend fun requireBindingSelection(payoutId: UUID, premium: BigDecimal) {
         val purchase = stores.purchases.findById(payoutId)
-            ?: throw IllegalStateException("request annuity offers and select one before confirming")
+            ?: error("request annuity offers and select one before confirming")
         val offer = purchase.requireBindingSelection(premium, clock.instant())
         checkNotNull(livePinned(offer)) {
             "the selected partner is no longer active under the terms it quoted; request new offers"

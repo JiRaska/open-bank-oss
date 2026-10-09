@@ -171,21 +171,21 @@ class ReferenceAnnuityProtocolContractTest {
         val paths = spec["paths"] as Map<String, Map<String, Any?>>
         return paths.entries.firstNotNullOfOrNull { (template, ops) ->
             val regex = Regex("^" + template.replace(Regex("\\{[^/]+}"), "[^/]+") + "$")
-            (ops[method] as Map<String, Any?>?)?.takeIf { regex.matches(path) }?.let { template to it }
+            (ops[method] as? Map<String, Any?>)?.takeIf { regex.matches(path) }?.let { template to it }
         }
     }
 
     @Suppress("UNCHECKED_CAST")
     private fun requiredHeaders(op: Map<String, Any?>): List<String> =
-        (op["parameters"] as List<Map<String, Any?>>?).orEmpty().map { resolve(it) }
+        (op["parameters"] as? List<Map<String, Any?>>).orEmpty().map { resolve(it) }
             .filter { it["in"] == "header" && it["required"] == true }.map { it["name"] as String }
 
     @Suppress("UNCHECKED_CAST")
     private fun requestSchema(op: Map<String, Any?>): Map<String, Any?>? = (
         (
-            ((op["requestBody"] as Map<String, Any?>?)?.get("content") as Map<String, Any?>?)
-                ?.get("application/json") as Map<String, Any?>?
-            )?.get("schema") as Map<String, Any?>?
+            ((op["requestBody"] as? Map<String, Any?>)?.get("content") as? Map<String, Any?>)
+                ?.get("application/json") as? Map<String, Any?>
+            )?.get("schema") as? Map<String, Any?>
         )?.let(::resolve)
 
     @Suppress("UNCHECKED_CAST")
@@ -196,22 +196,22 @@ class ReferenceAnnuityProtocolContractTest {
 
     @Suppress("UNCHECKED_CAST")
     private fun schemaRef(ref: String): Map<String, Any?> =
-        ref.removePrefix("#/").split("/").fold(spec as Any?) { node, key ->
+        ref.removePrefix("#/").split("/").fold<String, Any?>(spec) { node, key ->
             (node as Map<String, Any?>)[key]
         } as Map<String, Any?>
 
     private fun resolve(node: Map<String, Any?>): Map<String, Any?> =
-        (node["\$ref"] as String?)?.let { resolve(schemaRef(it)) } ?: node
+        (node["\$ref"] as? String)?.let { resolve(schemaRef(it)) } ?: node
 
     @Suppress("UNCHECKED_CAST", "CyclomaticComplexMethod")
     private fun validate(value: Any?, rawSchema: Map<String, Any?>, at: String) {
         val schema = resolve(rawSchema)
-        (schema["enum"] as List<Any?>?)?.let { if (value !in it) violations += "$at: '$value' not in $it" }
+        (schema["enum"] as? List<Any?>)?.let { if (value !in it) violations += "$at: '$value' not in $it" }
         when (schema["type"]) {
             "object" -> {
                 val obj = value as? Map<String, Any?> ?: return run { violations += "$at: not an object" }
-                val props = (schema["properties"] as Map<String, Map<String, Any?>>?).orEmpty()
-                (schema["required"] as List<String>?).orEmpty().filter { it !in obj }
+                val props = (schema["properties"] as? Map<String, Map<String, Any?>>).orEmpty()
+                (schema["required"] as? List<String>).orEmpty().filter { it !in obj }
                     .forEach { violations += "$at: missing required '$it'" }
                 if (schema["additionalProperties"] == false) {
                     obj.keys.filter { it !in props }.forEach { violations += "$at: unknown property '$it'" }

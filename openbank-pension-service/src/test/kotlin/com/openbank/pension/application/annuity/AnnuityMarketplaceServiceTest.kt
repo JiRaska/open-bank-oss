@@ -298,6 +298,7 @@ class AnnuityMarketplaceServiceTest {
 
     // ---------------------------------------------------------------------------------------------
 
+    @Suppress("LongParameterList") // a test world: one handle per fake
     private inner class World(
         val service: AnnuityMarketplaceService,
         val contract: PensionContract,
