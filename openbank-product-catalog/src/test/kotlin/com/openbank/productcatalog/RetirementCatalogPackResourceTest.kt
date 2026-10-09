@@ -60,7 +60,10 @@ class RetirementCatalogPackResourceTest {
     @Test
     fun `every illustrative CZ DPS and DIP offering validates against the pack`() {
         val offerings = fixtureOfferings()
-        assertThat(offerings.map { it["attributes"]["productLine"].asText() to it["attributes"]["fundStrategy"].asText() })
+        val pairs = offerings.map { offering ->
+            offering["attributes"]["productLine"].asText() to offering["attributes"]["fundStrategy"].asText()
+        }
+        assertThat(pairs)
             .containsExactlyInAnyOrderElementsOf(
                 listOf("DPS", "DIP").flatMap { line -> STRATEGIES.map { line to it } },
             )
