@@ -11,6 +11,9 @@ is_inert_service_path() {
     .github/scripts/check-authz-enforce-money-path.py|.github/scripts/check-flyway-version-commit-order.py|.github/scripts/check-public-workload-ha.py|.github/scripts/deploy-window-inputs.sh|.github/scripts/supersede-deploy-prs.sh|.github/scripts/publish-admin-ui-pacts.py|.github/scripts/test-publish-admin-ui-pacts.py|.github/scripts/verify-dependabot-auto-merge.py|.github/scripts/test-verify-dependabot-auto-merge.py|.github/gates/gates.yaml|.github/gates/workflow-write-permissions-baseline.txt|.github/canary-rollout-realisable-baseline.txt|.github/public-workload-ha-baseline.txt)
       # Separate governance and Pact controls own these files; they do not build services.
       return 0 ;;
+    .github/scripts/test-service-ci-job-roster.py)
+      # The changes job exercises this test; its source is not a Gradle/Pact input.
+      return 0 ;;
     .github/workflows/*)
       # Only the service CI recipes can affect a service build.
       case "$1" in
@@ -76,6 +79,8 @@ pact_build_modules_self_test() {
   done
   ! is_inert_service_path ".github/scripts/unknown-deploy-window-helper.sh" \
     || { echo "selector self-test: unknown deploy helper must retain safe fallback" >&2; return 1; }
+  is_inert_service_path ".github/scripts/test-service-ci-job-roster.py" \
+    || { echo "selector self-test: job-roster self-test must not full-fleet" >&2; return 1; }
   [ "$(pact_build_modules pacts/openbank-admin-ui-openbank-context-service.json)" = "openbank-context-service" ] \
     || { echo "selector self-test: Admin UI Pact must select its provider only" >&2; return 1; }
   [ "$(pact_build_modules pacts/openbank-ledger-service-openbank-balance-service.json)" = $'openbank-ledger-service\nopenbank-balance-service' ] \

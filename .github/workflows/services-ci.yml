@@ -128,6 +128,7 @@ jobs:
           # shellcheck source=.github/scripts/service-ci-pact-modules.sh
           source .github/scripts/service-ci-pact-modules.sh
           pact_build_modules_self_test
+          python3 .github/scripts/test-service-ci-job-roster.py
           python3 .github/scripts/coverage-floor-only-diff.py --self-test
 
           if [ "${{ github.event_name }}" = "schedule" ] \
