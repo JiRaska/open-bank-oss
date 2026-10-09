@@ -25,6 +25,7 @@ import kotlinx.coroutines.async
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.eclipse.microprofile.config.ConfigProvider
+import org.eclipse.microprofile.reactive.messaging.Message
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.hasEntry
 import org.junit.jupiter.api.Test
@@ -34,6 +35,8 @@ import java.time.Instant
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.TimeUnit
 import jakarta.enterprise.inject.Any as AnyQualifier
 
 @QuarkusTest
@@ -43,6 +46,8 @@ import jakarta.enterprise.inject.Any as AnyQualifier
 )
 @QuarkusTestResource(ContextMessagingTestResource::class)
 class ContextApiIT {
+    private val railDeliveries = mutableListOf<CompletableFuture<Void>>()
+
     @Inject
     @AnyQualifier
     lateinit var connector: InMemoryConnector
@@ -105,7 +110,7 @@ class ContextApiIT {
         val transactions = connector.source<String>("transaction-events-in")
         val ledger = connector.source<String>("ledger-events-in")
         val clearing = connector.source<String>("clearing-events-in")
-        val sepaReturns = connector.source<String>("sepa-payment-events-in")
+        val sepaReturns = connector.source<Message<String>>("sepa-payment-events-in")
         val reversalId = UUID.randomUUID()
         listOf(source, payments, transactions, ledger, clearing, sepaReturns)
             .forEach { it.runOnVertxContext(true) }
@@ -615,12 +620,26 @@ class ContextApiIT {
 
     private fun sendRailEvidence(
         clearing: InMemorySource<String>,
-        sepaReturns: InMemorySource<String>,
+        sepaReturns: InMemorySource<Message<String>>,
         paymentId: UUID,
         reversalId: UUID,
     ): UUID = UUID.randomUUID().also { itemId ->
         clearing.send(clearingItemSettledEvent(itemId, UUID.randomUUID(), paymentId))
-        sepaReturns.send(sepaReturnedEvent(paymentId, reversalId))
+        val delivered = CompletableFuture<Void>()
+        railDeliveries.add(delivered)
+        sepaReturns.send(
+            Message.of(
+                sepaReturnedEvent(paymentId, reversalId),
+                {
+                    delivered.complete(null)
+                    CompletableFuture.completedFuture<Void>(null)
+                },
+                { failure ->
+                    delivered.completeExceptionally(failure)
+                    CompletableFuture.completedFuture<Void>(null)
+                },
+            ),
+        )
     }
 
     private fun seedUnrelatedComplaint(paymentId: UUID): String =
@@ -644,6 +663,8 @@ class ContextApiIT {
         awaitCount("context_projection_events", "aggregate_ref", "booking-transaction:$bookingTransactionId", 1)
         awaitCount("context_projection_events", "aggregate_ref", "ledger-booking:$journalId", 1)
         awaitCount("context_projection_events", "aggregate_ref", "clearing-item:$clearingItemId", 1)
+        // Preserve concurrent sends, but surface a consumer nack before checking its persisted row.
+        railDeliveries.forEach { it.get(5, TimeUnit.SECONDS) }
         awaitCount("context_projection_events", "aggregate_ref", "return-evidence:sepa:$paymentId:4", 1)
         assertThat(count("context_nodes", "node_key = ?", "reversal-transaction:$reversalId")).isEqualTo(1)
         assertThat(count("context_nodes", "node_key LIKE ?", "%$complaintId%")).isZero()
