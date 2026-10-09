@@ -43,7 +43,7 @@ exec "$@"
 """)
             timeout.chmod(0o755)
             if scanner_failure:
-                scanner = root / "rg"
+                scanner = root / "grep"
                 scanner.write_text("#!/bin/bash\nexit 2\n")
                 scanner.chmod(0o755)
             env = dict(os.environ, MODE=mode, COMMANDS=str(commands))

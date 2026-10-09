@@ -13,7 +13,7 @@ if [[ ${#roots[@]} -eq 0 ]]; then
   echo "PostgreSQL pre-warm: no test source sets in $module"
   exit 0
 fi
-if rg -q --glob '*.kt' --glob '*.java' \
+if grep -rqE --include='*.kt' --include='*.java' \
     'postgres:18\.6-alpine|com\.openbank\.libs\.testing\.containers\.Postgres' "${roots[@]}"; then
   :
 else
