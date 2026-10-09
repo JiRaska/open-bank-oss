@@ -129,6 +129,8 @@ jobs:
           source .github/scripts/service-ci-pact-modules.sh
           pact_build_modules_self_test
           python3 .github/scripts/test-service-ci-job-roster.py
+          # Validate the shared image-preparation logic once before matrix fan-out.
+          python3 .github/scripts/tests/test_prewarm_ci_postgres.py
           python3 .github/scripts/coverage-floor-only-diff.py --self-test
 
           if [ "${{ github.event_name }}" = "schedule" ] \

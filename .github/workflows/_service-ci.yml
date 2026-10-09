@@ -155,7 +155,6 @@ jobs:
         env:
           CI_TEST_MODULE: ${{ inputs.service }}
         run: |
-          python3 .github/scripts/tests/test_prewarm_ci_postgres.py
           bash .github/scripts/prewarm-ci-postgres.sh "$CI_TEST_MODULE"
 
       # Most modules pin kotlin { jvmToolchain(25) }; a few use 21. Installing both
