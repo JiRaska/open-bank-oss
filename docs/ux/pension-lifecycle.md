@@ -21,6 +21,14 @@
   backend slice ships. The app treats a 404 on those routes as "not available yet" and hides the
   feature, never as an error.
 - Every POST sends an `Idempotency-Key` per user intent (one tap), reused on retry.
+- **Every state change needs SCA** (submit, pause/resume, strategy, contribution, beneficiaries,
+  transfer-in, early-termination notice, payout confirm). Send the call once without
+  `X-SCA-Challenge-Id`: the edge answers 403 `SCA_REQUIRED` with `scaLinking` (purpose `APPROVAL`,
+  `approvalRequestId`, `payloadSha256`) computed from the exact request. Raise the sca-service
+  challenge with that linking, let the customer approve it on the device, then repeat the
+  identical request with the challenge id in `X-SCA-Challenge-Id`. A changed body no longer
+  matches (403 `SCA_REJECTED`) and a challenge is spent once. Payout confirm is the exception: its
+  challenge is bound by pension-service to the quoted payout.
 
 ## Flows
 
@@ -103,6 +111,4 @@ No customer flow: a death claim is reported to and handled by the back office (a
 - Suitability/ESG questionnaire and key-information document delivery have no edge route yet.
 - Contract list, simulation, contribution change, beneficiaries, tax summary, transfer-in and
   payout depend on backend slices S2/S3/S5 of #12350.
-- SCA binding of the submit and early-termination notice intents is not enforced by the edge
-  (backend slice S5 replaces the notice with a quote/sign flow that carries an SCA challenge);
-  the app must still run the SCA step before calling them.
+- Payout-account change has no route in any slice.

@@ -45,6 +45,8 @@ import java.util.UUID
  *     derives it from the unit register itself, so a customer cannot price their own surrender.
  *  4. **Upstream error bodies are never forwarded** ([EdgeJson.upstreamFailure]); a 400 from a pack
  *     rule maps to a fixed code, a 409 to `INVALID_CONTRACT_STATE`.
+ *  5. **Every state-changing operation needs SCA** bound to its exact payload (see [scaGate]);
+ *     reads, the simulation, a draft and the previews do not.
  *
  * Routes marked "backend pending" in openapi.yaml proxy pension-service paths that the backend
  * slices S2/S3/S5 (#12350) have not shipped yet; until they do they answer 404 through rule 4.
@@ -66,6 +68,9 @@ class CustomerPensionResource(private val upstream: UpstreamClient, private val 
         defaultValue = "http://product-catalog.accounts.svc:8104",
     )
     lateinit var catalogUrl: String
+
+    @ConfigProperty(name = "openbank.edge.sca-service-url")
+    lateinit var scaServiceUrl: String
 
     /** Published DPS/DIP offerings from the product catalog's retirement pack. */
     @GET
@@ -149,33 +154,43 @@ class CustomerPensionResource(private val upstream: UpstreamClient, private val 
     @Path("/contracts/{id}/submit")
     @Authorize(action = "customer.pension.contract.submit", resource = "")
     @Blocking
-    fun submit(@PathParam("id") id: String?, @HeaderParam(IDEMPOTENCY) key: String?): Response =
-        transition(id, "submit", key)
+    fun submit(
+        @PathParam("id") id: String?,
+        @HeaderParam(IDEMPOTENCY) key: String?,
+        @HeaderParam(ScaConsume.HEADER) sca: String?,
+    ): Response = transition(id, "submit", key, sca)
 
     /** Pause contributions (ACTIVE -> SUSPENDED). */
     @POST
     @Path("/contracts/{id}/pause")
     @Authorize(action = "customer.pension.contract.manage", resource = "")
     @Blocking
-    fun pause(@PathParam("id") id: String?, @HeaderParam(IDEMPOTENCY) key: String?): Response =
-        transition(id, "suspend", key)
+    fun pause(
+        @PathParam("id") id: String?,
+        @HeaderParam(IDEMPOTENCY) key: String?,
+        @HeaderParam(ScaConsume.HEADER) sca: String?,
+    ): Response = transition(id, "suspend", key, sca)
 
     /** Resume contributions (SUSPENDED -> ACTIVE). */
     @POST
     @Path("/contracts/{id}/resume")
     @Authorize(action = "customer.pension.contract.manage", resource = "")
     @Blocking
-    fun resume(@PathParam("id") id: String?, @HeaderParam(IDEMPOTENCY) key: String?): Response =
-        transition(id, "resume", key)
+    fun resume(
+        @PathParam("id") id: String?,
+        @HeaderParam(IDEMPOTENCY) key: String?,
+        @HeaderParam(ScaConsume.HEADER) sca: String?,
+    ): Response = transition(id, "resume", key, sca)
 
     /** Change strategy; units switch at the next NAV. */
     @PUT
     @Path("/contracts/{id}/strategy")
     @Authorize(action = "customer.pension.contract.manage", resource = "")
     @Blocking
-    fun strategy(@PathParam("id") id: String?, body: String?): Response {
+    fun strategy(@PathParam("id") id: String?, body: String?, @HeaderParam(ScaConsume.HEADER) sca: String?): Response {
         val input = PensionInput.strategy(EdgeJson.parseObject(body)).getOrElse { return invalid(it) }
         return owned(id) { _, party, contractId ->
+            scaGate(sca, party, "strategy", contractId, input)?.let { return@owned it }
             val response = upstream.put("${api()}/contracts/$contractId/strategy", party.toString(), json(input))
             if (response.status == OK) contractOf(response, OK) else failure(response)
         }
@@ -186,9 +201,14 @@ class CustomerPensionResource(private val upstream: UpstreamClient, private val 
     @Path("/contracts/{id}/contribution")
     @Authorize(action = "customer.pension.contract.manage", resource = "")
     @Blocking
-    fun contribution(@PathParam("id") id: String?, body: String?): Response {
+    fun contribution(
+        @PathParam("id") id: String?,
+        body: String?,
+        @HeaderParam(ScaConsume.HEADER) sca: String?,
+    ): Response {
         val input = runCatching { PensionInput.schedule(EdgeJson.parseObject(body)) }.getOrElse { return invalid(it) }
         return owned(id) { _, party, contractId ->
+            scaGate(sca, party, "contribution", contractId, input)?.let { return@owned it }
             val response = upstream.put("${api()}/contracts/$contractId/schedule", party.toString(), json(input))
             if (response.status == OK) contractOf(response, OK) else failure(response)
         }
@@ -199,9 +219,14 @@ class CustomerPensionResource(private val upstream: UpstreamClient, private val 
     @Path("/contracts/{id}/beneficiaries")
     @Authorize(action = "customer.pension.contract.manage", resource = "")
     @Blocking
-    fun beneficiaries(@PathParam("id") id: String?, body: String?): Response {
+    fun beneficiaries(
+        @PathParam("id") id: String?,
+        body: String?,
+        @HeaderParam(ScaConsume.HEADER) sca: String?,
+    ): Response {
         val input = PensionInput.beneficiaries(EdgeJson.parseObject(body)).getOrElse { return invalid(it) }
         return owned(id) { _, party, contractId ->
+            scaGate(sca, party, "beneficiaries", contractId, input)?.let { return@owned it }
             val response = upstream.put("${api()}/contracts/$contractId/beneficiaries", party.toString(), json(input))
             if (response.status == OK) contractOf(response, OK) else failure(response)
         }
@@ -225,9 +250,15 @@ class CustomerPensionResource(private val upstream: UpstreamClient, private val 
     @Path("/contracts/{id}/transfers-in")
     @Authorize(action = "customer.pension.transfer.request", resource = "")
     @Blocking
-    fun transferIn(@PathParam("id") id: String?, body: String?, @HeaderParam(IDEMPOTENCY) key: String?): Response {
+    fun transferIn(
+        @PathParam("id") id: String?,
+        body: String?,
+        @HeaderParam(IDEMPOTENCY) key: String?,
+        @HeaderParam(ScaConsume.HEADER) sca: String?,
+    ): Response {
         val input = PensionInput.transferIn(EdgeJson.parseObject(body)).getOrElse { return invalid(it) }
         return owned(id) { _, party, contractId ->
+            scaGate(sca, party, "transfer-in", contractId, input)?.let { return@owned it }
             val response = upstream.post(
                 "${api()}/contracts/$contractId/transfers-in",
                 party.toString(),
@@ -244,15 +275,18 @@ class CustomerPensionResource(private val upstream: UpstreamClient, private val 
     @Authorize(action = "customer.pension.contract.read", resource = "")
     @Blocking
     fun earlyTerminationPreview(@PathParam("id") id: String?, @HeaderParam(IDEMPOTENCY) key: String?): Response =
-        earlyTermination(id, confirm = false, key = key)
+        earlyTermination(id, confirm = false, key = key, sca = null)
 
     /** Early-termination notice: the contract moves to TERMINATING. */
     @POST
     @Path("/contracts/{id}/early-termination/notice")
     @Authorize(action = "customer.pension.contract.terminate", resource = "")
     @Blocking
-    fun earlyTerminationNotice(@PathParam("id") id: String?, @HeaderParam(IDEMPOTENCY) key: String?): Response =
-        earlyTermination(id, confirm = true, key = key)
+    fun earlyTerminationNotice(
+        @PathParam("id") id: String?,
+        @HeaderParam(IDEMPOTENCY) key: String?,
+        @HeaderParam(ScaConsume.HEADER) sca: String?,
+    ): Response = earlyTermination(id, confirm = true, key = key, sca = sca)
 
     /** Binding payout quote for a form (S5 exit route; backend pending). */
     @POST
@@ -282,26 +316,33 @@ class CustomerPensionResource(private val upstream: UpstreamClient, private val 
         @PathParam("payoutId") payoutId: String?,
         body: String?,
         @HeaderParam(IDEMPOTENCY) key: String?,
+        @HeaderParam(ScaConsume.HEADER) sca: String?,
     ): Response {
         val input = PensionInput.payoutConfirmation(EdgeJson.parseObject(body)).getOrElse { return invalid(it) }
         val payout = payoutId?.let { runCatching { UUID.fromString(it) }.getOrNull() } ?: return notFound()
+        // pension-service consumes this challenge itself, bound to the payout it quoted (S5); the
+        // edge consuming it first would spend the single use. The edge's part is to refuse a
+        // confirmation that carries no challenge at all, before anything goes upstream.
+        val challenge = ScaConsume.challengeId(sca) ?: return ScaConsume.required()
         return owned(id) { _, party, contractId ->
             val response = upstream.post(
                 "${api()}/contracts/$contractId/exit/payouts/$payout/confirm",
                 party.toString(),
-                json(input),
+                json(input + ("scaChallengeId" to challenge.toString())),
                 key,
             )
             if (response.status == OK) passThrough(response) else failure(response)
         }
     }
 
-    private fun transition(id: String?, action: String, key: String?): Response = owned(id) { _, party, contractId ->
-        val response = upstream.post("${api()}/contracts/$contractId/$action", party.toString(), "{}", key)
-        if (response.status == OK) contractOf(response, OK) else failure(response)
-    }
+    private fun transition(id: String?, action: String, key: String?, sca: String?): Response =
+        owned(id) { _, party, contractId ->
+            scaGate(sca, party, action, contractId, emptyMap<String, Any>())?.let { return@owned it }
+            val response = upstream.post("${api()}/contracts/$contractId/$action", party.toString(), "{}", key)
+            if (response.status == OK) contractOf(response, OK) else failure(response)
+        }
 
-    private fun earlyTermination(id: String?, confirm: Boolean, key: String?): Response =
+    private fun earlyTermination(id: String?, confirm: Boolean, key: String?, sca: String?): Response =
         owned(id) { _, party, contractId ->
             val valuation = valuation(contractId) ?: return@owned EdgeJson.error(
                 SERVICE_UNAVAILABLE,
@@ -313,6 +354,12 @@ class CustomerPensionResource(private val upstream: UpstreamClient, private val 
                 "part of the contract has no published unit price yet",
                 mapOf("code" to "VALUATION_INCOMPLETE"),
             )
+            // The notice is signed for exactly the value it is given on: a revaluation in between
+            // changes the payload hash and the challenge no longer matches.
+            if (confirm) {
+                scaGate(sca, party, "early-termination-notice", contractId, mapOf("currentValue" to value))
+                    ?.let { return@owned it }
+            }
             // incentivesReceived stays empty until S3's incentive register answers it; the preview
             // then says so in `incentiveHistoryIncluded` rather than presenting a clawback of zero.
             val body = mapOf(
@@ -326,6 +373,22 @@ class CustomerPensionResource(private val upstream: UpstreamClient, private val 
             val node = EdgeJson.parse(response)?.takeIf { it.isObject } ?: return@owned badUpstream(SERVICE)
             EdgeJson.ok(PensionProjection.earlyTermination(node) + ("incentiveHistoryIncluded" to false))
         }
+
+    /**
+     * The SCA gate for a state-changing pension operation (rule 5). The operation is bound as an
+     * APPROVAL challenge: `approvalRequestId` names the operation and contract, `payloadSha256` is
+     * the hash of the exact body that will go upstream. sca-service compares both strictly, so a
+     * challenge signed for another operation, another contract or another payload — or one that
+     * signed nothing — cannot be spent here, and a spent one cannot be spent again. Without a
+     * challenge the answer is 403 SCA_REQUIRED carrying the linking the app must have signed.
+     */
+    private fun scaGate(sca: String?, party: UUID, operation: String, contractId: UUID, payload: Any): Response? {
+        val linking = PensionScaLinking.of(operation, contractId, payload)
+        val challenge = ScaConsume.challengeId(sca)
+            ?: return ScaConsume.required(mapOf("scaLinking" to linking + ("purpose" to "APPROVAL")))
+        val consumed = ScaConsume.consume(upstream, scaServiceUrl, challenge, party.toString(), party, linking)
+        return if (consumed.status == OK) null else ScaConsume.rejected()
+    }
 
     /** Sum of holding values; null when any holding has no published NAV (a partial sum would understate). */
     private fun currentValue(valuation: JsonNode): BigDecimal? {

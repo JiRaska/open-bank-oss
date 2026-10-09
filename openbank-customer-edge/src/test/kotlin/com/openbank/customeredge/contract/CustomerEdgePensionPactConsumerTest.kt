@@ -57,6 +57,14 @@ class CustomerEdgePensionPactConsumerTest {
                 exchange.sendResponseHeaders(200, bytes.size.toLong())
                 exchange.responseBody.use { it.write(bytes) }
             }
+            // sca-service is a separate provider; here it approves every consume so the pension
+            // interactions are what the pact records.
+            createContext("/api/v1/sca/challenges/") { exchange ->
+                val bytes = """{"status":"COMPLETED"}""".toByteArray()
+                exchange.responseHeaders.add("Content-Type", "application/json")
+                exchange.sendResponseHeaders(200, bytes.size.toLong())
+                exchange.responseBody.use { it.write(bytes) }
+            }
             start()
         }
     }
@@ -171,13 +179,15 @@ class CustomerEdgePensionPactConsumerTest {
     @Test
     @PactTestFor(pactMethod = "electStrategy")
     fun `electing a strategy matches the provider`(mockServer: MockServer) {
-        assertThat(resource(mockServer).strategy(CONTRACT_ID, """{"strategyCode":"DYNAMIC"}""").status).isEqualTo(200)
+        assertThat(
+            resource(mockServer).strategy(CONTRACT_ID, """{"strategyCode":"DYNAMIC"}""", CHALLENGE_ID).status,
+        ).isEqualTo(200)
     }
 
     @Test
     @PactTestFor(pactMethod = "suspend")
     fun `pausing contributions matches the provider`(mockServer: MockServer) {
-        assertThat(resource(mockServer).pause(CONTRACT_ID, "pact-key").status).isEqualTo(200)
+        assertThat(resource(mockServer).pause(CONTRACT_ID, "pact-key", CHALLENGE_ID).status).isEqualTo(200)
     }
 
     @Test
@@ -208,6 +218,7 @@ class CustomerEdgePensionPactConsumerTest {
             pensionServiceUrl = mockServer.getUrl()
             fundServiceUrl = "http://127.0.0.1:9"
             catalogUrl = "http://127.0.0.1:9"
+            scaServiceUrl = "http://127.0.0.1:${tokenStub.address.port}"
         }
     }
 
@@ -226,6 +237,7 @@ class CustomerEdgePensionPactConsumerTest {
         const val CONTRACT_ID = "44444444-4444-4444-8444-444444444444"
         const val PROVIDER_ID = "55555555-5555-4555-8555-555555555555"
         const val UNKNOWN_ID = "99999999-9999-4999-8999-999999999999"
+        const val CHALLENGE_ID = "77777777-7777-4777-8777-777777777777"
         const val ACTIVE_STATE = "the customer party holds an active pension contract"
         const val NO_CONTRACT_STATE = "the customer party holds no pension contract"
         const val NEGATIVE_AUTH_STATE = "no valid M2M identity is presented"

@@ -338,9 +338,11 @@ paths:
         - customerOidc: [pension:write]
       parameters:
         - $ref: '#/components/parameters/PensionContractId'
+        - {name: X-SCA-Challenge-Id, in: header, required: true, schema: {type: string, format: uuid}, description: 'An approved SCA challenge bound to this operation (see SCA_REQUIRED.scaLinking); single use'}
         - {name: Idempotency-Key, in: header, required: false, schema: {type: string}, description: Synthesized by the edge when absent}
       responses:
         '200': {$ref: '#/components/responses/PensionContract'}
+        '403': {description: 'SCA_REQUIRED (no challenge; the body carries scaLinking — purpose APPROVAL, approvalRequestId, payloadSha256 — to raise one for) or SCA_REJECTED (challenge not approved, spent, or signed for another operation or payload)'}
         '401': {description: Missing or invalid bearer token}
         '404': {description: No such contract for the caller}
         '409': {description: 'INVALID_CONTRACT_STATE'}
@@ -354,9 +356,11 @@ paths:
         - customerOidc: [pension:write]
       parameters:
         - $ref: '#/components/parameters/PensionContractId'
+        - {name: X-SCA-Challenge-Id, in: header, required: true, schema: {type: string, format: uuid}, description: 'An approved SCA challenge bound to this operation (see SCA_REQUIRED.scaLinking); single use'}
         - {name: Idempotency-Key, in: header, required: false, schema: {type: string}, description: Synthesized by the edge when absent}
       responses:
         '200': {$ref: '#/components/responses/PensionContract'}
+        '403': {description: 'SCA_REQUIRED (no challenge; the body carries scaLinking — purpose APPROVAL, approvalRequestId, payloadSha256 — to raise one for) or SCA_REJECTED (challenge not approved, spent, or signed for another operation or payload)'}
         '401': {description: Missing or invalid bearer token}
         '404': {description: No such contract for the caller}
         '409': {description: 'INVALID_CONTRACT_STATE'}
@@ -370,9 +374,11 @@ paths:
         - customerOidc: [pension:write]
       parameters:
         - $ref: '#/components/parameters/PensionContractId'
+        - {name: X-SCA-Challenge-Id, in: header, required: true, schema: {type: string, format: uuid}, description: 'An approved SCA challenge bound to this operation (see SCA_REQUIRED.scaLinking); single use'}
         - {name: Idempotency-Key, in: header, required: false, schema: {type: string}, description: Synthesized by the edge when absent}
       responses:
         '200': {$ref: '#/components/responses/PensionContract'}
+        '403': {description: 'SCA_REQUIRED (no challenge; the body carries scaLinking — purpose APPROVAL, approvalRequestId, payloadSha256 — to raise one for) or SCA_REJECTED (challenge not approved, spent, or signed for another operation or payload)'}
         '401': {description: Missing or invalid bearer token}
         '404': {description: No such contract for the caller}
         '409': {description: 'INVALID_CONTRACT_STATE'}
@@ -386,6 +392,7 @@ paths:
         - customerOidc: [pension:write]
       parameters:
         - $ref: '#/components/parameters/PensionContractId'
+        - {name: X-SCA-Challenge-Id, in: header, required: true, schema: {type: string, format: uuid}, description: 'An approved SCA challenge bound to this operation (see SCA_REQUIRED.scaLinking); single use'}
       requestBody:
         required: true
         content:
@@ -399,6 +406,7 @@ paths:
       responses:
         '200': {$ref: '#/components/responses/PensionContract'}
         '400': {description: 'Invalid input, or PENSION_RULE_REFUSED'}
+        '403': {description: 'SCA_REQUIRED (no challenge; the body carries scaLinking — purpose APPROVAL, approvalRequestId, payloadSha256 — to raise one for) or SCA_REJECTED (challenge not approved, spent, or signed for another operation or payload)'}
         '401': {description: Missing or invalid bearer token}
         '404': {description: No such contract for the caller}
         '409': {description: 'INVALID_CONTRACT_STATE'}
@@ -414,6 +422,7 @@ paths:
         - customerOidc: [pension:write]
       parameters:
         - $ref: '#/components/parameters/PensionContractId'
+        - {name: X-SCA-Challenge-Id, in: header, required: true, schema: {type: string, format: uuid}, description: 'An approved SCA challenge bound to this operation (see SCA_REQUIRED.scaLinking); single use'}
       requestBody:
         required: true
         content:
@@ -422,6 +431,7 @@ paths:
       responses:
         '200': {$ref: '#/components/responses/PensionContract'}
         '400': {description: 'Invalid input, or PENSION_RULE_REFUSED'}
+        '403': {description: 'SCA_REQUIRED (no challenge; the body carries scaLinking — purpose APPROVAL, approvalRequestId, payloadSha256 — to raise one for) or SCA_REJECTED (challenge not approved, spent, or signed for another operation or payload)'}
         '401': {description: Missing or invalid bearer token}
         '404': {description: No such contract for the caller, or backend route not deployed yet}
         '409': {description: 'INVALID_CONTRACT_STATE'}
@@ -437,6 +447,7 @@ paths:
         - customerOidc: [pension:write]
       parameters:
         - $ref: '#/components/parameters/PensionContractId'
+        - {name: X-SCA-Challenge-Id, in: header, required: true, schema: {type: string, format: uuid}, description: 'An approved SCA challenge bound to this operation (see SCA_REQUIRED.scaLinking); single use'}
       requestBody:
         required: true
         content:
@@ -453,6 +464,7 @@ paths:
       responses:
         '200': {$ref: '#/components/responses/PensionContract'}
         '400': {description: Invalid input}
+        '403': {description: 'SCA_REQUIRED (no challenge; the body carries scaLinking — purpose APPROVAL, approvalRequestId, payloadSha256 — to raise one for) or SCA_REJECTED (challenge not approved, spent, or signed for another operation or payload)'}
         '401': {description: Missing or invalid bearer token}
         '404': {description: No such contract for the caller, or backend route not deployed yet}
         '502': {description: Pension service unavailable}
@@ -489,6 +501,7 @@ paths:
         - customerOidc: [pension:write]
       parameters:
         - $ref: '#/components/parameters/PensionContractId'
+        - {name: X-SCA-Challenge-Id, in: header, required: true, schema: {type: string, format: uuid}, description: 'An approved SCA challenge bound to this operation (see SCA_REQUIRED.scaLinking); single use'}
         - {name: Idempotency-Key, in: header, required: false, schema: {type: string}, description: Synthesized by the edge when absent}
       requestBody:
         required: true
@@ -508,6 +521,7 @@ paths:
             application/json:
               schema: {type: object, additionalProperties: true}
         '400': {description: 'Invalid input, or PENSION_RULE_REFUSED'}
+        '403': {description: 'SCA_REQUIRED (no challenge; the body carries scaLinking — purpose APPROVAL, approvalRequestId, payloadSha256 — to raise one for) or SCA_REJECTED (challenge not approved, spent, or signed for another operation or payload)'}
         '401': {description: Missing or invalid bearer token}
         '404': {description: No such contract for the caller, or backend route not deployed yet}
         '409': {description: 'INVALID_CONTRACT_STATE'}
@@ -546,6 +560,7 @@ paths:
         - customerOidc: [pension:write]
       parameters:
         - $ref: '#/components/parameters/PensionContractId'
+        - {name: X-SCA-Challenge-Id, in: header, required: true, schema: {type: string, format: uuid}, description: 'An approved SCA challenge bound to this operation (see SCA_REQUIRED.scaLinking); single use'}
         - {name: Idempotency-Key, in: header, required: false, schema: {type: string}, description: Synthesized by the edge when absent}
       responses:
         '200':
@@ -553,6 +568,7 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/PensionEarlyTermination'}
+        '403': {description: 'SCA_REQUIRED (no challenge; the body carries scaLinking — purpose APPROVAL, approvalRequestId, payloadSha256 — to raise one for) or SCA_REJECTED (challenge not approved, spent, or signed for another operation or payload)'}
         '401': {description: Missing or invalid bearer token}
         '404': {description: No such contract for the caller}
         '409': {description: 'VALUATION_INCOMPLETE or INVALID_CONTRACT_STATE'}
@@ -601,12 +617,15 @@ paths:
       summary: Confirm a quoted payout under SCA (backend pending)
       description: >-
         Proxies pension-service POST /api/v1/pension/contracts/{id}/exit/payouts/{payoutId}/confirm
-        (#12350, slice S5, not yet merged). The SCA challenge is completed by the app first.
+        (#12350, slice S5, not yet merged). The challenge in X-SCA-Challenge-Id is forwarded and
+        consumed by pension-service against the payout it quoted; the edge refuses a confirmation
+        without one.
       x-backend-pending: true
       security:
         - customerOidc: [pension:write]
       parameters:
         - $ref: '#/components/parameters/PensionContractId'
+        - {name: X-SCA-Challenge-Id, in: header, required: true, schema: {type: string, format: uuid}, description: 'An approved SCA challenge bound to this operation (see SCA_REQUIRED.scaLinking); single use'}
         - {name: payoutId, in: path, required: true, schema: {type: string, format: uuid}}
         - {name: Idempotency-Key, in: header, required: false, schema: {type: string}, description: Synthesized by the edge when absent}
       requestBody:
@@ -615,9 +634,8 @@ paths:
           application/json:
             schema:
               type: object
-              required: [scaChallengeId, payoutIban]
+              required: [payoutIban]
               properties:
-                scaChallengeId: {type: string}
                 payoutIban: {type: string}
       responses:
         '200':
@@ -626,6 +644,7 @@ paths:
             application/json:
               schema: {type: object, additionalProperties: true}
         '400': {description: 'Invalid input, or PENSION_RULE_REFUSED'}
+        '403': {description: 'SCA_REQUIRED (no challenge; the body carries scaLinking — purpose APPROVAL, approvalRequestId, payloadSha256 — to raise one for) or SCA_REJECTED (challenge not approved, spent, or signed for another operation or payload)'}
         '401': {description: Missing or invalid bearer token}
         '404': {description: No such contract or payout for the caller, or backend route not deployed yet}
         '409': {description: 'INVALID_CONTRACT_STATE'}

@@ -130,16 +130,13 @@ internal object PensionInput {
         )
     }
 
-    /** Confirmation of a quoted payout: the SCA challenge the app completed and the payout IBAN. */
+    /** Confirmation of a quoted payout: the payout IBAN. The SCA challenge travels in `X-SCA-Challenge-Id`. */
     fun payoutConfirmation(node: JsonNode?): Result<Map<String, Any?>> = runCatching {
         requireNotNull(node) { "body must be a JSON object" }
         val iban = requireNotNull(node.text("payoutIban")?.replace(" ", "")?.uppercase()?.takeIf(IBAN::matches)) {
             "payoutIban must be an IBAN"
         }
-        val challenge = requireNotNull(node.text("scaChallengeId")?.takeIf { it.length in 1..MAX_NAME }) {
-            "scaChallengeId is required"
-        }
-        mapOf("scaChallengeId" to challenge, "payoutIban" to iban)
+        mapOf("payoutIban" to iban)
     }
 
     fun taxYear(raw: String?): Int? {
@@ -309,4 +306,24 @@ internal object PensionProjection {
         "effectiveFrom" to s.text("effectiveFrom"),
         "electedAt" to s.text("electedAt"),
     )
+}
+
+/**
+ * Dynamic linking of a pension operation for sca-service's APPROVAL challenge: the operation and
+ * contract as `approvalRequestId`, and SHA-256 over a canonical (key-sorted) JSON of the operation,
+ * contract and exact payload as `payloadSha256`. Deterministic, so the edge computes the same value
+ * when it hands the linking to the app and when it consumes the challenge.
+ */
+internal object PensionScaLinking {
+    private val canonical = EdgeJson.mapper.copy()
+        .configure(com.fasterxml.jackson.databind.SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true)
+
+    fun of(operation: String, contractId: UUID, payload: Any): Map<String, String> {
+        val document = mapOf("operation" to operation, "contractId" to contractId.toString(), "payload" to payload)
+        val digest = java.security.MessageDigest.getInstance("SHA-256").digest(canonical.writeValueAsBytes(document))
+        return mapOf(
+            "approvalRequestId" to "pension.$operation:$contractId",
+            "payloadSha256" to digest.joinToString("") { "%02x".format(it) },
+        )
+    }
 }
