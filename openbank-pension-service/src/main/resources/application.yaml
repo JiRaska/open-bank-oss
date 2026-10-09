@@ -58,7 +58,8 @@ quarkus:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
 
   # pension-service's OWN machine identity (ADR-0334 S8): Keycloak client `openbank-pension`,
-  # ROLE_API only. Used ONLY by the pension-fund-service rest-client (FundAdministrationPort);
+  # ROLE_API only. Used by the pension-fund-service rest-client (FundAdministrationPort) and the
+  # sca/party/account identity checks (#12377);
   # pension-fund-service admits holdings and orders for service-account-openbank-pension alone.
   # Never the shared openbank-services client.
   oidc-client:
@@ -74,6 +75,20 @@ quarkus:
       url: ${PENSION_FUND_SERVICE_URL:http://localhost:8162}
       connect-timeout: 2000
       read-timeout: 5000
+    # Identity and SCA checks (#12377), same own client (openbank-pension). Read timeouts are short:
+    # a slow check fails closed (503), never passes.
+    sca-service:
+      url: ${SCA_SERVICE_URL:http://localhost:8110}
+      connect-timeout: 2000
+      read-timeout: 3000
+    party-service:
+      url: ${PARTY_SERVICE_URL:http://localhost:8111}
+      connect-timeout: 2000
+      read-timeout: 3000
+    account-service:
+      url: ${ACCOUNT_SERVICE_URL:http://localhost:8100}
+      connect-timeout: 2000
+      read-timeout: 3000
 
   shutdown:
     timeout: 30S

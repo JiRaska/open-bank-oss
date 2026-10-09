@@ -111,6 +111,13 @@ spec:
                   optional: false
             - name: PENSION_FUND_SERVICE_URL
               value: http://pension-fund-service.pension-fund.svc:8162
+            # Identity and SCA checks (#12377), authenticated as openbank-pension.
+            - name: SCA_SERVICE_URL
+              value: http://sca-service.sca.svc:8110
+            - name: PARTY_SERVICE_URL
+              value: http://party-service.party.svc:8111
+            - name: ACCOUNT_SERVICE_URL
+              value: http://account-service.accounts.svc:8100
             # OPA sidecar enforced from the first rollout: pension_rest_ext.rego grants the
             # participant actions to the edge principal only, and no service-account reaches a
             # write by any rule.

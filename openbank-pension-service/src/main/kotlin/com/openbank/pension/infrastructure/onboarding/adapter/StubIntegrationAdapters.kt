@@ -20,6 +20,7 @@ import com.openbank.pension.application.onboarding.TransferCounterpartyPort
 import com.openbank.pension.application.port.out.FundAdministrationPort
 import com.openbank.pension.domain.transfer.IncentiveHistoryEntry
 import com.openbank.pension.domain.transfer.TransferRequest
+import io.quarkus.arc.profile.IfBuildProfile
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
@@ -56,6 +57,8 @@ class StubIntegrationSwitch(
     }
 }
 
+// Prod builds use the real adapter in infrastructure/identity (#12377).
+@IfBuildProfile(anyOf = ["dev", "test"])
 @ApplicationScoped
 class StubPartyKycAdapter(private val stub: StubIntegrationSwitch) : PartyKycPort {
     /** Verified, full capacity, no verified attributes — the applicant's declaration stands. */
@@ -91,6 +94,8 @@ class StubKeyInformationDocumentAdapter(private val stub: StubIntegrationSwitch)
  * a challenge is SINGLE-USE (any second spend is REJECTED, whatever it is bound to), and a blank
  * or `rejected-` challenge is refused so tests can drive the refusal path.
  */
+// Prod builds use the real adapter in infrastructure/identity (#12377).
+@IfBuildProfile(anyOf = ["dev", "test"])
 @ApplicationScoped
 class StubSignatureVerificationAdapter(private val stub: StubIntegrationSwitch) : SignatureVerificationPort {
     private val spent = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
