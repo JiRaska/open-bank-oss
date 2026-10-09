@@ -25,6 +25,7 @@ import PensionContractDetailPage from '@/app/pension/contracts/[id]/page'
 import PensionFundsPage from '@/app/pension/funds/page'
 import PensionStrategiesPage from '@/app/pension/strategies/page'
 import PensionPayoutsPage from '@/app/pension/payouts/page'
+import PensionQueuesPage from '@/app/pension/queues/page'
 import { allocationProblem, canApplyChange, canDecideChange, canDecideNav, contractTimeline } from '@/components/pension/model'
 import { hasPermission } from '@/lib/auth/roles'
 
@@ -228,5 +229,24 @@ describe('backend-pending queues', () => {
     expect(calls.map(c => c.url).some(u => u.includes('/api/v1/pension/payouts'))).toBe(true)
     expect(calls.map(c => c.url).some(u => u.includes('/api/v1/pension/death-claims'))).toBe(true)
     expect(document.body.textContent).not.toMatch(/HTTP 404|alert-error/)
+  })
+})
+
+describe('operator queues', () => {
+  it('reads the S2 operator routes and renders nested application rows', async () => {
+    router = url => {
+      if (url.includes('/operator/onboarding/applications')) {
+        return json([{ partyId: 'p-1', application: { applicationId: 'app-1', kind: 'NEW', status: 'SIGNED', productLine: 'DPS', chosenStrategy: 'BALANCED', signedAt: '2026-10-01T10:00:00Z' } }])
+      }
+      if (url.includes('/operator/transfers')) {
+        return json([{ transferId: 'tr-1', contractId: CONTRACT_ID, direction: 'IN', counterpartyProviderName: 'Other PS', status: 'REQUESTED', deadline: '2026-11-01', netAmount: null, currency: 'CZK' }])
+      }
+      return json({}, 404)
+    }
+    await renderPage(<PensionQueuesPage />)
+    expect(calls.some(c => c.url.includes('/api/svc/pension-service/api/v1/pension/operator/onboarding/applications'))).toBe(true)
+    expect(screen.getByText('app-1')).toBeTruthy()
+    expect(screen.getByText('BALANCED')).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'tr-1' }).getAttribute('href')).toBe(`/pension/contracts/${CONTRACT_ID}`)
   })
 })

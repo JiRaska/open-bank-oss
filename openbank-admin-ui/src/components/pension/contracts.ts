@@ -140,15 +140,26 @@ export type UnitTransaction = z.infer<typeof unitTransactionSchema>
 export const unitTransactionListSchema = z.array(unitTransactionSchema)
 
 /**
- * The operator queues of backend slices S2/S3/S5 (#12350) — transfers, unmatched contributions,
- * incentive claim batches, payouts and death claims — have no published contract yet. A queue row
- * is therefore read as an open record with an id (or a contractId) and a status, and rendered column by column from
- * whatever the slice ships; nothing beyond those two fields is assumed.
+ * The operator queues of backend slices S2/S3/S5 (#12350) — onboarding applications, transfers,
+ * unmatched contributions, incentive claim batches, payouts and death claims — come from routes
+ * still in review, each with its own row shape. A queue row is therefore read as an open record and
+ * rendered column by column (dotted paths reach nested fields, e.g. `application.status`); nothing
+ * beyond "it is an object" is assumed, so a shape change degrades a cell, never the whole queue.
  */
-export const queueRowSchema = z.object({
-  id: z.string().min(1).optional(),
-  contractId: z.string().min(1).optional(),
-  status: z.string().optional(),
-}).catchall(z.unknown()).refine(r => r.id !== undefined || r.contractId !== undefined, 'a queue row needs an id')
+export const queueRowSchema = z.record(z.string(), z.unknown())
 export type QueueRow = z.infer<typeof queueRowSchema>
 export const queueSchema = z.array(queueRowSchema)
+
+/** A dotted-path read into an open queue row. */
+export function fieldOf(row: QueueRow, path: string): unknown {
+  return path.split('.').reduce<unknown>((v, k) => (v && typeof v === 'object' ? (v as Record<string, unknown>)[k] : undefined), row)
+}
+
+/** The row's own id, whichever name the slice gave it. */
+export function rowIdOf(row: QueueRow): string | null {
+  for (const path of ['id', 'transferId', 'applicationId', 'application.applicationId', 'claimId', 'payoutId', 'contractId']) {
+    const v = fieldOf(row, path)
+    if (typeof v === 'string' && v.length > 0) return v
+  }
+  return null
+}

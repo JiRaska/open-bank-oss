@@ -4,7 +4,8 @@
 
 // Unmatched contributions (ADR-0334 lifecycle step 4): incoming payments the contribution matcher
 // could not attach to a contract (unknown variable symbol, closed contract, amount outside the
-// pack's limits). Backend slice S3 (#12350); the panel degrades through DataUnavailable until then.
+// pack's limits). pension-service GET /funding/operations/unmatched (backend slice S3, #12350); the
+// panel degrades through DataUnavailable until it is deployed.
 
 'use client'
 
@@ -12,7 +13,7 @@ import { FileSearch } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { PageHeader } from '@/components/ui'
 import { PENSION, pensionUrl } from '@/components/pension/api'
-import { PAGE_SIZE, PensionQueue } from '@/components/pension/PensionQueue'
+import { PensionQueue } from '@/components/pension/PensionQueue'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 
 export default function PensionUnmatchedContributionsPage() {
@@ -34,15 +35,14 @@ function Unmatched() {
       />
       <PensionQueue
         title={t('K vyřešení', 'To resolve')}
-        url={pensionUrl('/contributions/unmatched', { limit: String(PAGE_SIZE * 4) })}
+        url={pensionUrl('/funding/operations/unmatched')}
         service={PENSION}
         feature={t('nespárované příspěvky', 'unmatched contributions')}
         columns={[
-          { key: 'source', cs: 'Zdroj', en: 'Source' },
           { key: 'amount', cs: 'Částka', en: 'Amount' },
           { key: 'currency', cs: 'Měna', en: 'Currency' },
+          { key: 'valueDate', cs: 'Valuta', en: 'Value date' },
           { key: 'reference', cs: 'Reference', en: 'Reference' },
-          { key: 'receivedAt', cs: 'Přijato', en: 'Received' },
           { key: 'reason', cs: 'Důvod', en: 'Reason' },
         ]}
       />

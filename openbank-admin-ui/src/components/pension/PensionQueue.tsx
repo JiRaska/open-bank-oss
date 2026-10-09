@@ -14,7 +14,7 @@ import Link from 'next/link'
 import { RefreshCw } from 'lucide-react'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { getJson } from './api'
-import { queueSchema, type QueueRow } from './contracts'
+import { fieldOf, queueSchema, rowIdOf, type QueueRow } from './contracts'
 import { statusLabel } from './model'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 
@@ -23,6 +23,8 @@ export const PAGE_SIZE = 25
 export type QueueColumn = { key: string; cs: string; en: string }
 
 type Props = {
+  /** Dotted path of the row's status field; default `status`. */
+  statusPath?: string
   title: string
   url: string
   service: string
@@ -38,7 +40,7 @@ function cell(value: unknown): string {
   return String(value)
 }
 
-export function PensionQueue({ title, url, service, feature, columns, hrefOf }: Props) {
+export function PensionQueue({ title, url, service, feature, columns, hrefOf, statusPath = 'status' }: Props) {
   const { t, language } = useLanguage()
   const [rows, setRows] = useState<QueueRow[] | null>(null)
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
@@ -76,14 +78,16 @@ export function PensionQueue({ title, url, service, feature, columns, hrefOf }: 
               </tr>
             </thead>
             <tbody>
-              {rows.slice(0, shown).map(row => {
-                const key = row.id ?? row.contractId ?? ''
-                const href = hrefOf?.(row) ?? (row.contractId ? `/pension/contracts/${encodeURIComponent(row.contractId)}` : null)
+              {rows.slice(0, shown).map((row, i) => {
+                const id = rowIdOf(row)
+                const contractId = fieldOf(row, 'contractId')
+                const href = hrefOf?.(row) ?? (typeof contractId === 'string' ? `/pension/contracts/${encodeURIComponent(contractId)}` : null)
+                const status = fieldOf(row, statusPath)
                 return (
-                  <tr key={key}>
-                    <td>{href ? <Link href={href}>{key}</Link> : key}</td>
-                    <td>{row.status ? statusLabel(row.status, t) : '—'}</td>
-                    {columns.map(c => <td key={c.key}>{cell(row[c.key])}</td>)}
+                  <tr key={id ?? `row-${i}`}>
+                    <td>{id === null ? '—' : href ? <Link href={href}>{id}</Link> : id}</td>
+                    <td>{typeof status === 'string' ? statusLabel(status, t) : '—'}</td>
+                    {columns.map(c => <td key={c.key}>{cell(fieldOf(row, c.key))}</td>)}
                   </tr>
                 )
               })}

@@ -2,9 +2,10 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
-// Onboarding and transfer queues (ADR-0334 lifecycle steps 2-3): contracts signed and waiting for
-// activation, and transfer requests to or from another provider. Transfers are backend slice S2
-// (#12350); until that route ships the panel degrades through DataUnavailable.
+// Onboarding and transfer queues (ADR-0334 lifecycle steps 2-3): onboarding applications and
+// transfer requests to or from another provider, from pension-service's operator routes (backend
+// slice S2, #12350 — GET /operator/onboarding/applications and /operator/transfers). Until that
+// slice is deployed the panels degrade through DataUnavailable.
 
 'use client'
 
@@ -34,25 +35,29 @@ function Queues() {
         icon={<Inbox size={20} aria-hidden="true" />}
       />
       <PensionQueue
-        title={t('Čeká na aktivaci', 'Waiting for activation')}
-        url={pensionUrl('/contracts', { status: 'PENDING_ACTIVATION', limit })}
+        title={t('Žádosti o sjednání', 'Onboarding applications')}
+        url={pensionUrl('/operator/onboarding/applications', { limit })}
         service={PENSION}
-        feature={t('smlouvy čekající na aktivaci', 'contracts waiting for activation')}
+        feature={t('žádosti o sjednání', 'onboarding applications')}
+        statusPath="application.status"
         columns={[
-          { key: 'productLine', cs: 'Produkt', en: 'Product' },
-          { key: 'createdAt', cs: 'Založeno', en: 'Created' },
+          { key: 'application.kind', cs: 'Druh', en: 'Kind' },
+          { key: 'application.productLine', cs: 'Produkt', en: 'Product' },
+          { key: 'application.chosenStrategy', cs: 'Strategie', en: 'Strategy' },
+          { key: 'application.signedAt', cs: 'Podepsáno', en: 'Signed' },
         ]}
       />
       <PensionQueue
         title={t('Převody', 'Transfers')}
-        url={pensionUrl('/transfers', { status: 'OPEN', limit })}
+        url={pensionUrl('/operator/transfers', { limit })}
         service={PENSION}
         feature={t('převody penzijních smluv', 'pension transfers')}
         columns={[
           { key: 'direction', cs: 'Směr', en: 'Direction' },
-          { key: 'counterpartyProvider', cs: 'Druhý poskytovatel', en: 'Other provider' },
-          { key: 'requestedAt', cs: 'Požádáno', en: 'Requested' },
+          { key: 'counterpartyProviderName', cs: 'Druhý poskytovatel', en: 'Other provider' },
           { key: 'deadline', cs: 'Lhůta', en: 'Deadline' },
+          { key: 'netAmount', cs: 'Čistá částka', en: 'Net amount' },
+          { key: 'currency', cs: 'Měna', en: 'Currency' },
         ]}
       />
     </div>

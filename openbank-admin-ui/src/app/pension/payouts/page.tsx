@@ -3,8 +3,9 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 // Payouts and death claims (ADR-0334 lifecycle steps 6-8): payout requests from regular and early
-// termination, and death claims paid to beneficiaries or the estate. Backend slice S5 (#12350);
-// both panels degrade through DataUnavailable until it ships.
+// termination, and death claims paid to beneficiaries or the estate. Backend slice S5 (#12350)
+// serves payouts and death claims by id only; the two list routes read here are not in it yet, so
+// both panels degrade through DataUnavailable until a list route ships.
 
 'use client'
 
