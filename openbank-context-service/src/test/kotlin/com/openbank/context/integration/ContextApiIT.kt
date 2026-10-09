@@ -46,7 +46,7 @@ import jakarta.enterprise.inject.Any as AnyQualifier
 )
 @QuarkusTestResource(ContextMessagingTestResource::class)
 class ContextApiIT {
-    private val railDeliveries = mutableListOf<CompletableFuture<Void>>()
+    private val railDeliveries = ProjectionDeliveries()
 
     @Inject
     @AnyQualifier
@@ -566,14 +566,8 @@ class ContextApiIT {
             }
         }
 
-    private fun awaitCount(table: String, column: String, value: Any, expected: Int) {
-        val deadline = System.nanoTime() + java.time.Duration.ofSeconds(5).toNanos()
-        while (System.nanoTime() < deadline) {
-            if (count(table, "$column = ?", value) == expected) return
-            Thread.sleep(25)
-        }
-        assertThat(count(table, "$column = ?", value)).isEqualTo(expected)
-    }
+    private fun awaitCount(table: String, column: String, value: Any, expected: Int) =
+        awaitProjectionCount(table, column, value, expected, ::count)
 
     private fun complaintEvent(
         complaintId: UUID,
@@ -625,21 +619,7 @@ class ContextApiIT {
         reversalId: UUID,
     ): UUID = UUID.randomUUID().also { itemId ->
         clearing.send(clearingItemSettledEvent(itemId, UUID.randomUUID(), paymentId))
-        val delivered = CompletableFuture<Void>()
-        railDeliveries.add(delivered)
-        sepaReturns.send(
-            Message.of(
-                sepaReturnedEvent(paymentId, reversalId),
-                {
-                    delivered.complete(null)
-                    CompletableFuture.completedFuture<Void>(null)
-                },
-                { failure ->
-                    delivered.completeExceptionally(failure)
-                    CompletableFuture.completedFuture<Void>(null)
-                },
-            ),
-        )
+        railDeliveries.send(sepaReturns, sepaReturnedEvent(paymentId, reversalId))
     }
 
     private fun seedUnrelatedComplaint(paymentId: UUID): String =
@@ -664,7 +644,7 @@ class ContextApiIT {
         awaitCount("context_projection_events", "aggregate_ref", "ledger-booking:$journalId", 1)
         awaitCount("context_projection_events", "aggregate_ref", "clearing-item:$clearingItemId", 1)
         // Preserve concurrent sends, but surface a consumer nack before checking its persisted row.
-        railDeliveries.forEach { it.get(5, TimeUnit.SECONDS) }
+        railDeliveries.await()
         awaitCount("context_projection_events", "aggregate_ref", "return-evidence:sepa:$paymentId:4", 1)
         assertThat(count("context_nodes", "node_key = ?", "reversal-transaction:$reversalId")).isEqualTo(1)
         assertThat(count("context_nodes", "node_key LIKE ?", "%$complaintId%")).isZero()
@@ -726,6 +706,45 @@ class ContextApiIT {
         // Lifecycle fixtures add seconds per revision; keep every event before the default asOf query.
         val NOW: Instant = Instant.now().minusSeconds(60)
     }
+}
+
+private fun awaitProjectionCount(
+    table: String,
+    column: String,
+    value: Any,
+    expected: Int,
+    count: (String, String, Any) -> Int,
+) {
+    val deadline = System.nanoTime() + java.time.Duration.ofSeconds(5).toNanos()
+    while (System.nanoTime() < deadline) {
+        if (count(table, "$column = ?", value) == expected) return
+        Thread.sleep(25)
+    }
+    assertThat(count(table, "$column = ?", value)).isEqualTo(expected)
+}
+
+private class ProjectionDeliveries {
+    private val pending = mutableListOf<CompletableFuture<Void>>()
+
+    fun send(source: InMemorySource<Message<String>>, payload: String) {
+        val delivered = CompletableFuture<Void>()
+        pending.add(delivered)
+        source.send(
+            Message.of(
+                payload,
+                {
+                    delivered.complete(null)
+                    CompletableFuture.completedFuture<Void>(null)
+                },
+                { failure ->
+                    delivered.completeExceptionally(failure)
+                    CompletableFuture.completedFuture<Void>(null)
+                },
+            ),
+        )
+    }
+
+    fun await() = pending.forEach { it.get(5, TimeUnit.SECONDS) }
 }
 
 class ContextMessagingTestResource : QuarkusTestResourceLifecycleManager {
