@@ -48,6 +48,8 @@ data class HeldPayment(
     val extras: Map<String, String?> = emptyMap(),
     /** Verified original initiator, frozen for receipt provenance on delayed rail release. */
     val initiatorActorId: UUID? = null,
+    /** Original caller key for header-only rails, frozen before the approval delay. */
+    val originalIdempotencyKey: String? = null,
     /** Verified representation mandate at the original hold, never supplied by the client. */
     val initiatorMandateId: UUID? = null,
 )
@@ -205,6 +207,7 @@ class BusinessPaymentApprovals(
             if (p.rail in actorBoundRails) {
                 put("initiatorActorId", (p.initiatorActorId ?: customer.authenticatedActor).toString())
             }
+            p.originalIdempotencyKey?.let { put("originalIdempotencyKey", it) }
             p.initiatorMandateId?.let {
                 put("initiatorMandateId", it.toString())
                 put("initiatorHumanId", customer.human.toString())
@@ -282,7 +285,11 @@ class BusinessPaymentApprovals(
             } else {
                 mapOf("X-Customer-Actor-Id" to actor.toString())
             }
-            val key = if (rail in originalKeyRails) {
+            val key = if (rail == PaymentRail.SEPA) {
+                // Older held approvals never froze the caller key; keep their existing release path.
+                payload.path("originalIdempotencyKey").takeIf { it.isTextual }
+                    ?.asText()?.takeIf { it.isNotBlank() } ?: approvalId.toString()
+            } else if (rail in originalKeyRails) {
                 val originalKey = railRequest.path("idempotencyKey").takeIf { it.isTextual }
                     ?.asText()?.takeIf { it.isNotBlank() }
                 if (originalKey == null) {

@@ -46,7 +46,8 @@ private const val CONSUME = "/api/v1/sca/challenges/$SCA/consume"
  *    is never called; one that needs 1 goes to the rail exactly as before;
  *  - the signer is always the token's human; a signer's SCA is consumed with the approval id and
  *    payload hash; the initiator cannot co-sign; the last signature releases through a single-use
- *    claim with `Idempotency-Key = approvalId`; a lost claim never reaches the rail;
+ *    claim with the frozen caller Idempotency-Key (approvalId for legacy holds); a lost claim never
+ *    reaches the rail;
  *  - no mandate, no call: X-Acting-For is resolved fail-closed before delegation-service is asked.
  */
 @QuarkusTest
@@ -148,6 +149,7 @@ class BusinessPaymentApprovalIT {
         assertThat(created.path("initiatorSignature").path("scaChallengeId").asText()).isEqualTo(SCA)
         assertThat(created.path("payload").path("rail").asText()).isEqualTo("SEPA")
         assertThat(created.path("payload").path("initiatorActorId").asText()).isEqualTo(INITIATOR)
+        assertThat(created.path("payload").path("originalIdempotencyKey").asText()).isEqualTo("idem-1")
         assertThat(created.path("payload").path("railRequest").path("debtorName").asText()).isEqualTo("Firma s.r.o.")
     }
 
@@ -192,7 +194,7 @@ class BusinessPaymentApprovalIT {
         BusinessApprovalStubs.stub(
             "POST",
             "$DETAIL/release-claim",
-            body = """{"claimToken":"t1","payload":{"rail":"SEPA",""" +
+            body = """{"claimToken":"t1","payload":{"rail":"SEPA","originalIdempotencyKey":"idem-1",""" +
                 """"railRequest":{"type":"SCT","creditorIban":"$CREDITOR"}}}""",
         )
         BusinessApprovalStubs.stub("POST", SEPA_RAIL, status = 201, body = """{"id":"pay-9","status":"RECEIVED"}""")
@@ -212,7 +214,7 @@ class BusinessPaymentApprovalIT {
         assertThat(signature.path("partyId").asText()).isEqualTo(COSIGNER)
         assertThat(signature.path("scaChallengeId").asText()).isEqualTo(SCA)
         val rail = BusinessApprovalStubs.requests("POST", SEPA_RAIL).single()
-        assertThat(rail.header("Idempotency-Key")).isEqualTo(APPROVAL)
+        assertThat(rail.header("Idempotency-Key")).isEqualTo("idem-1")
         assertThat(rail.header("X-Customer-Actor-Id")).isEqualTo(INITIATOR)
         assertThat(readJson(rail.body).path("creditorIban").asText()).isEqualTo(CREDITOR)
         val result = readJson(BusinessApprovalStubs.requests("POST", "$DETAIL/release-result").single().body)
@@ -240,6 +242,34 @@ class BusinessPaymentApprovalIT {
             body("release.status", equalTo("RELEASE_FAILED"))
         }
         assertThat(BusinessApprovalStubs.requests("POST", SEPA_RAIL)).isEmpty()
+    }
+
+    @Test
+    @TestSecurity(user = "customer:$COSIGNER", roles = ["ROLE_CUSTOMER"])
+    @OidcSecurity(claims = [Claim(key = "party_id", value = COSIGNER)])
+    fun `legacy SEPA approval without frozen idempotency key releases using approval ID`() {
+        stubLastSignature()
+        BusinessApprovalStubs.stub(
+            "POST",
+            "$DETAIL/release-claim",
+            body = """{"claimToken":"t1","payload":{"rail":"SEPA","railRequest":{"type":"SCT"}}}""",
+        )
+        BusinessApprovalStubs.stub(
+            "POST",
+            SEPA_RAIL,
+            status = 201,
+            body = """{"id":"pay-legacy","status":"RECEIVED"}""",
+        )
+        BusinessApprovalStubs.stub("POST", "$DETAIL/release-result", body = "{}")
+
+        sign() Then {
+            statusCode(200)
+            body("release.status", equalTo("RELEASED"))
+            body("release.paymentId", equalTo("pay-legacy"))
+        }
+        val rail = BusinessApprovalStubs.requests("POST", SEPA_RAIL).single()
+        assertThat(rail.header("Idempotency-Key")).isEqualTo(APPROVAL)
+        assertThat(rail.header("X-Customer-Actor-Id")).isEqualTo(INITIATOR)
     }
 
     @Test

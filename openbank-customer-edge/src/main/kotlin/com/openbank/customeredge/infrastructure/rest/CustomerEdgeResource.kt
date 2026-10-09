@@ -3095,6 +3095,7 @@ class CustomerEdgeResource(
                     debtor.toString(),
                     enriched,
                     initiatorActorId = authenticatedActorId(),
+                    originalIdempotencyKey = idempotencyKey?.takeIf { it.isNotBlank() },
                 ),
                 scaChallengeId,
                 "payments.sepa",
