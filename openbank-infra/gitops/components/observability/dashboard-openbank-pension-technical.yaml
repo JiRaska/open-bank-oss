@@ -1,0 +1,1215 @@
+# Pension technical dashboard (#12424).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-openbank-pension-technical
+  namespace: observability
+  labels:
+    grafana_dashboard: "1"
+data:
+  openbank-pension-technical.json: |
+    {
+      "id": null,
+      "uid": "openbank-pension-technical",
+      "title": "OpenBank — Pension technical",
+      "description": "openbank-pension-service RED, runtime, Kafka, Temporal, SCA, idempotency, liveness (#12424).",
+      "tags": [
+        "openbank",
+        "pension",
+        "technical"
+      ],
+      "schemaVersion": 39,
+      "version": 1,
+      "refresh": "1m",
+      "time": {
+        "from": "now-6h",
+        "to": "now"
+      },
+      "timepicker": {},
+      "editable": false,
+      "graphTooltip": 1,
+      "templating": {
+        "list": [
+          {
+            "name": "datasource",
+            "type": "datasource",
+            "pluginId": "prometheus",
+            "label": "Datasource",
+            "hide": 0,
+            "refresh": 1,
+            "options": [],
+            "current": {}
+          }
+        ]
+      },
+      "annotations": {
+        "list": []
+      },
+      "links": [
+        {
+          "title": "Runbook",
+          "type": "link",
+          "url": "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/pension-alerts.md",
+          "targetBlank": true
+        }
+      ],
+      "panels": [
+        {
+          "title": "RED (HTTP)",
+          "type": "row",
+          "collapsed": false,
+          "panels": [],
+          "id": 1,
+          "gridPos": {
+            "x": 0,
+            "y": 0,
+            "w": 24,
+            "h": 1
+          }
+        },
+        {
+          "title": "Requests by route",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 15,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (method, uri) (rate(http_server_requests_seconds_count{namespace=\"pension\",uri!~\"/q/.*\"}[5m]))",
+              "legendFormat": "{{method}} {{uri}}"
+            }
+          ],
+          "id": 2,
+          "gridPos": {
+            "x": 0,
+            "y": 1,
+            "w": 12,
+            "h": 8
+          }
+        },
+        {
+          "title": "5xx ratio by route",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 15,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (uri) (rate(http_server_requests_seconds_count{namespace=\"pension\",status=~\"5..\"}[5m])) / clamp_min(sum by (uri) (rate(http_server_requests_seconds_count{namespace=\"pension\"}[5m])), 1e-9)",
+              "legendFormat": "{{uri}}"
+            }
+          ],
+          "id": 3,
+          "gridPos": {
+            "x": 12,
+            "y": 1,
+            "w": 12,
+            "h": 8
+          }
+        },
+        {
+          "title": "p95 latency by route",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 15,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "histogram_quantile(0.95, sum by (le, uri) (rate(http_server_requests_seconds_bucket{namespace=\"pension\",uri!~\"/q/.*\"}[5m])))",
+              "legendFormat": "{{uri}}"
+            }
+          ],
+          "id": 4,
+          "gridPos": {
+            "x": 0,
+            "y": 9,
+            "w": 12,
+            "h": 8
+          }
+        },
+        {
+          "title": "4xx by status",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 15,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (status) (rate(http_server_requests_seconds_count{namespace=\"pension\",status=~\"4..\"}[5m]))",
+              "legendFormat": "{{status}}"
+            }
+          ],
+          "id": 5,
+          "gridPos": {
+            "x": 12,
+            "y": 9,
+            "w": 12,
+            "h": 8
+          }
+        },
+        {
+          "title": "SLO (Pyrra, money path)",
+          "type": "row",
+          "collapsed": false,
+          "panels": [],
+          "id": 6,
+          "gridPos": {
+            "x": 0,
+            "y": 17,
+            "w": 24,
+            "h": 1
+          }
+        },
+        {
+          "title": "Availability (non-error server spans)",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 15,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "1 - (sum(rate(traces_spanmetrics_calls_total{service=\"openbank-pension-service\",span_kind=\"SPAN_KIND_SERVER\",status_code=\"STATUS_CODE_ERROR\",span_name!~\"GET /|GET /api/v1/info\"}[1h])) / clamp_min(sum(rate(traces_spanmetrics_calls_total{service=\"openbank-pension-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[1h])), 1e-9))",
+              "legendFormat": "availability 1h"
+            }
+          ],
+          "description": "Same SLI as openbank-pension-availability; burn-rate alerts are Pyrra's.",
+          "id": 7,
+          "gridPos": {
+            "x": 0,
+            "y": 18,
+            "w": 12,
+            "h": 8
+          }
+        },
+        {
+          "title": "Server span p95",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 15,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(traces_spanmetrics_latency_bucket{service=\"openbank-pension-service\",span_kind=\"SPAN_KIND_SERVER\"}[5m])))",
+              "legendFormat": "p95"
+            }
+          ],
+          "id": 8,
+          "gridPos": {
+            "x": 12,
+            "y": 18,
+            "w": 12,
+            "h": 8
+          }
+        },
+        {
+          "title": "Runtime and database",
+          "type": "row",
+          "collapsed": false,
+          "panels": [],
+          "id": 9,
+          "gridPos": {
+            "x": 0,
+            "y": 26,
+            "w": 24,
+            "h": 1
+          }
+        },
+        {
+          "title": "JVM heap",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 15,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (pod) (jvm_memory_used_bytes{namespace=\"pension\",area=\"heap\"})",
+              "legendFormat": "{{pod}}"
+            }
+          ],
+          "id": 10,
+          "gridPos": {
+            "x": 0,
+            "y": 27,
+            "w": 8,
+            "h": 8
+          }
+        },
+        {
+          "title": "GC pause",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 15,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (pod) (rate(jvm_gc_pause_seconds_sum{namespace=\"pension\"}[5m]))",
+              "legendFormat": "{{pod}}"
+            }
+          ],
+          "id": 11,
+          "gridPos": {
+            "x": 8,
+            "y": 27,
+            "w": 8,
+            "h": 8
+          }
+        },
+        {
+          "title": "DB pool (Agroal)",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 15,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (pod) (agroal_active_count{namespace=\"pension\"})",
+              "legendFormat": "active {{pod}}"
+            },
+            {
+              "refId": "B",
+              "expr": "sum by (pod) (agroal_awaiting_count{namespace=\"pension\"})",
+              "legendFormat": "awaiting {{pod}}"
+            }
+          ],
+          "id": 12,
+          "gridPos": {
+            "x": 16,
+            "y": 27,
+            "w": 8,
+            "h": 8
+          }
+        },
+        {
+          "title": "Messaging and workflows",
+          "type": "row",
+          "collapsed": false,
+          "panels": [],
+          "id": 13,
+          "gridPos": {
+            "x": 0,
+            "y": 35,
+            "w": 24,
+            "h": 1
+          }
+        },
+        {
+          "title": "Consumer lag",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 15,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (consumergroup, topic) (kafka_consumergroup_lag{topic=\"openbank.domestic.payment.events\",consumergroup=~\".*pension.*\"})",
+              "legendFormat": "{{consumergroup}}"
+            }
+          ],
+          "id": 14,
+          "gridPos": {
+            "x": 0,
+            "y": 36,
+            "w": 8,
+            "h": 8
+          }
+        },
+        {
+          "title": "DLQ records (1h)",
+          "type": "stat",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 1
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "value",
+            "graphMode": "area",
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(increase(kafka_topic_partition_current_offset{topic=\"openbank.dlq.pension.domestic-payment-events-in\"}[1h]))"
+            }
+          ],
+          "id": 15,
+          "gridPos": {
+            "x": 8,
+            "y": 36,
+            "w": 4,
+            "h": 8
+          }
+        },
+        {
+          "title": "Notices by outcome",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 15,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (outcome) (rate(openbank_pension_notification_requests_total[15m]))",
+              "legendFormat": "{{outcome}}"
+            }
+          ],
+          "description": "skipped = the switch is off (default until #12392); there is no 'delivered'.",
+          "id": 16,
+          "gridPos": {
+            "x": 12,
+            "y": 36,
+            "w": 6,
+            "h": 8
+          }
+        },
+        {
+          "title": "Payout settlements",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 15,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (outcome) (rate(openbank_pension_payout_payments_settlement_total[15m]))",
+              "legendFormat": "{{outcome}}"
+            }
+          ],
+          "id": 17,
+          "gridPos": {
+            "x": 18,
+            "y": 36,
+            "w": 6,
+            "h": 8
+          }
+        },
+        {
+          "title": "Temporal workflow failures by type",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 15,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (workflow_type, task_queue) (rate(temporal_workflow_failed_total{namespace=\"pension\"}[15m]))",
+              "legendFormat": "{{workflow_type}}"
+            }
+          ],
+          "id": 18,
+          "gridPos": {
+            "x": 0,
+            "y": 44,
+            "w": 8,
+            "h": 8
+          }
+        },
+        {
+          "title": "Temporal workflow end-to-end p95",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 15,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "histogram_quantile(0.95, sum by (le, workflow_type) (rate(temporal_workflow_endtoend_latency_seconds_bucket{namespace=\"pension\"}[15m])))",
+              "legendFormat": "{{workflow_type}}"
+            }
+          ],
+          "id": 19,
+          "gridPos": {
+            "x": 8,
+            "y": 44,
+            "w": 8,
+            "h": 8
+          }
+        },
+        {
+          "title": "Temporal activity failures",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 15,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (activity_type) (rate(temporal_activity_execution_failed_total{namespace=\"pension\"}[15m]))",
+              "legendFormat": "{{activity_type}}"
+            }
+          ],
+          "id": 20,
+          "gridPos": {
+            "x": 16,
+            "y": 44,
+            "w": 8,
+            "h": 8
+          }
+        },
+        {
+          "title": "Integrity signals",
+          "type": "row",
+          "collapsed": false,
+          "panels": [],
+          "id": 21,
+          "gridPos": {
+            "x": 0,
+            "y": 52,
+            "w": 24,
+            "h": 1
+          }
+        },
+        {
+          "title": "SCA consume outcomes",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 15,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (outcome) (rate(openbank_pension_sca_consume_total[15m]))",
+              "legendFormat": "{{outcome}}"
+            }
+          ],
+          "id": 22,
+          "gridPos": {
+            "x": 0,
+            "y": 53,
+            "w": 8,
+            "h": 8
+          }
+        },
+        {
+          "title": "Idempotency replays",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 15,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (method) (rate(openbank_pension_idempotency_replays_total[15m]))",
+              "legendFormat": "{{method}}"
+            }
+          ],
+          "id": 23,
+          "gridPos": {
+            "x": 8,
+            "y": 53,
+            "w": 8,
+            "h": 8
+          }
+        },
+        {
+          "title": "Optimistic-lock conflicts",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 15,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (aggregate, outcome) (rate(openbank_pension_optimistic_lock_conflicts_total[15m]))",
+              "legendFormat": "{{aggregate}} {{outcome}}"
+            }
+          ],
+          "id": 24,
+          "gridPos": {
+            "x": 16,
+            "y": 53,
+            "w": 8,
+            "h": 8
+          }
+        },
+        {
+          "title": "Aggregate transitions",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 15,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (aggregate, to) (rate(openbank_pension_transitions_total[15m]))",
+              "legendFormat": "{{aggregate}} -> {{to}}"
+            }
+          ],
+          "id": 25,
+          "gridPos": {
+            "x": 0,
+            "y": 61,
+            "w": 24,
+            "h": 8
+          }
+        },
+        {
+          "title": "Scheduler liveness",
+          "type": "row",
+          "collapsed": false,
+          "panels": [],
+          "id": 26,
+          "gridPos": {
+            "x": 0,
+            "y": 69,
+            "w": 24,
+            "h": 1
+          }
+        },
+        {
+          "title": "Workflow heartbeat age vs expected interval",
+          "type": "table",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": []
+          },
+          "options": {
+            "showHeader": true
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "max by (workflow) (openbank_workflow_last_success_age_seconds{workflow=~\"pension-.*\"}) / max by (workflow) (openbank_workflow_expected_interval_seconds{workflow=~\"pension-.*\"})",
+              "format": "table",
+              "instant": true
+            }
+          ],
+          "transformations": [
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true
+                }
+              }
+            }
+          ],
+          "description": "Ratio > 2 is WorkflowLivenessStale. Seeded at registration, so a fresh pod reads its own age, never decades.",
+          "id": 27,
+          "gridPos": {
+            "x": 0,
+            "y": 70,
+            "w": 12,
+            "h": 8
+          }
+        },
+        {
+          "title": "Overdue payout installments",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 15,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "max(openbank_pension_payout_installments_overdue)",
+              "legendFormat": "overdue"
+            }
+          ],
+          "id": 28,
+          "gridPos": {
+            "x": 12,
+            "y": 70,
+            "w": 12,
+            "h": 8
+          }
+        },
+        {
+          "title": "Logs",
+          "type": "row",
+          "collapsed": false,
+          "panels": [],
+          "id": 29,
+          "gridPos": {
+            "x": 0,
+            "y": 78,
+            "w": 24,
+            "h": 1
+          }
+        },
+        {
+          "title": "Pension errors",
+          "type": "logs",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "options": {
+            "showTime": true,
+            "wrapLogMessage": true,
+            "sortOrder": "Descending"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "{namespace=\"pension\"} |~ \"(?i)error|exception\""
+            }
+          ],
+          "id": 30,
+          "gridPos": {
+            "x": 0,
+            "y": 79,
+            "w": 24,
+            "h": 8
+          }
+        }
+      ]
+    }
