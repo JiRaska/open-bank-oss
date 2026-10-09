@@ -8,26 +8,18 @@ import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import com.openbank.pension.application.annuity.AnnuityMarketplaceService
 import com.openbank.pension.application.annuity.AnnuityNotFoundException
-import com.openbank.pension.application.annuity.AnnuityProviderRegistryService
-import com.openbank.pension.application.exit.ExitWorkflowLauncher
-import com.openbank.pension.application.port.`in`.Caller
-import com.openbank.pension.domain.annuity.AnnuityProviderStatus
-import com.openbank.pension.domain.annuity.AnnuityPurchaseStatus
 import com.openbank.pension.domain.annuity.FourEyesViolationException
 import com.openbank.pension.infrastructure.authz.ContractAccessGuard
 import com.openbank.pension.infrastructure.rest.requireIdempotencyKey
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
-import jakarta.ws.rs.DefaultValue
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
-import jakarta.ws.rs.PUT
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
-import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.openapi.annotations.Operation
@@ -36,7 +28,6 @@ import org.jboss.resteasy.reactive.server.ServerExceptionMapper
 import java.util.UUID
 
 private const val PARTY_HEADER = ContractAccessGuard.PARTY_HEADER
-private const val IDEMPOTENCY_HEADER = "Idempotency-Key"
 
 /**
  * Participant side of the annuity marketplace (#12383): request offers from every eligible partner,
@@ -63,7 +54,7 @@ class PensionAnnuityResource {
     @Operation(summary = "Ask every eligible partner insurer for offers, in parallel; partial results are returned")
     @Authorize(action = "pension.annuity.quote", resource = "#contractId")
     suspend fun requestOffers(
-        @HeaderParam(IDEMPOTENCY_HEADER) idempotencyKey: String?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         @PathParam("contractId") contractId: UUID,
         @PathParam("payoutId") payoutId: UUID,
         @HeaderParam(PARTY_HEADER) party: String?,
@@ -90,7 +81,7 @@ class PensionAnnuityResource {
     @Operation(summary = "Select one offer under SCA (the challenge signs partner, offer id and amounts)")
     @Authorize(action = "pension.annuity.select", resource = "#contractId")
     suspend fun select(
-        @HeaderParam(IDEMPOTENCY_HEADER) idempotencyKey: String?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         @PathParam("contractId") contractId: UUID,
         @PathParam("payoutId") payoutId: UUID,
         @HeaderParam(PARTY_HEADER) party: String?,
@@ -115,7 +106,7 @@ class PensionAnnuityResource {
     @Operation(summary = "Cancel the issued policy within the partner's cooling-off period (SCA)")
     @Authorize(action = "pension.annuity.cancel", resource = "#contractId")
     suspend fun cancel(
-        @HeaderParam(IDEMPOTENCY_HEADER) idempotencyKey: String?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         @PathParam("contractId") contractId: UUID,
         @PathParam("payoutId") payoutId: UUID,
         @HeaderParam(PARTY_HEADER) party: String?,
@@ -131,166 +122,6 @@ class PensionAnnuityResource {
                 requireNotNull(body.scaChallengeId) { "scaChallengeId is required" },
             ),
         )
-    }
-}
-
-/**
- * Operator registry of partner insurers (#12383): CRUD under FOUR-EYES activation — the approver
- * must differ from whoever edited the terms or requested activation (enforced in the aggregate).
- * Real human staff only (OPA: `operator-pension-annuity-*`; [ContractAccessGuard.staffActor]).
- */
-@Tag(name = "Pension operations", description = "Annuity partner registry")
-@Path("/api/v1/pension/operator/annuity-providers")
-@Produces(MediaType.APPLICATION_JSON)
-@Consumes(MediaType.APPLICATION_JSON)
-@RolesAllowed(Roles.OPERATOR, Roles.ADMIN, Roles.COMPLIANCE)
-class PensionAnnuityProviderResource {
-
-    @Inject
-    lateinit var registry: AnnuityProviderRegistryService
-
-    @Inject
-    lateinit var access: ContractAccessGuard
-
-    @GET
-    @Operation(summary = "Partner insurers, optionally by status")
-    @Authorize(action = "pension.operator.annuity-read")
-    suspend fun list(@QueryParam("status") status: AnnuityProviderStatus?): List<AnnuityProviderResponse> {
-        check(access.readerFor(null) == Caller.STAFF) { "the partner registry is staff work" }
-        return registry.list(status).map(AnnuityProviderResponse::from)
-    }
-
-    @GET
-    @Path("/{partnerId}")
-    @Operation(summary = "One partner insurer")
-    @Authorize(action = "pension.operator.annuity-read")
-    suspend fun get(@PathParam("partnerId") partnerId: String): AnnuityProviderResponse {
-        check(access.readerFor(null) == Caller.STAFF) { "the partner registry is staff work" }
-        return AnnuityProviderResponse.from(registry.get(partnerId))
-    }
-
-    @POST
-    @Operation(summary = "Register a partner insurer as DRAFT (maker)")
-    @Authorize(action = "pension.operator.annuity-write")
-    suspend fun create(
-        @HeaderParam(IDEMPOTENCY_HEADER) idempotencyKey: String?,
-        @HeaderParam(PARTY_HEADER) party: String?,
-        request: CreateAnnuityProviderRequest?,
-    ): Response {
-        requireIdempotencyKey(idempotencyKey)
-        val body = requireNotNull(request) { "request body is required" }
-        val created = registry.create(
-            requireNotNull(body.partnerId) { "partnerId is required" },
-            requireNotNull(body.terms) { "terms is required" }.toTerms(),
-            access.staffActor(party),
-        )
-        return Response.status(Response.Status.CREATED).entity(AnnuityProviderResponse.from(created)).build()
-    }
-
-    @PUT
-    @Path("/{partnerId}")
-    @Operation(summary = "Propose new terms; the approved version stays live until a different person approves")
-    @Authorize(action = "pension.operator.annuity-write")
-    suspend fun amend(
-        @PathParam("partnerId") partnerId: String,
-        @HeaderParam(PARTY_HEADER) party: String?,
-        request: AnnuityProviderTermsRequest?,
-    ) = AnnuityProviderResponse.from(
-        registry.amend(
-            partnerId,
-            requireNotNull(request) {
-                "request body is required"
-            }.toTerms(),
-            access.staffActor(party),
-        ),
-    )
-
-    @POST
-    @Path("/{partnerId}/activation-request")
-    @Operation(summary = "Request activation (maker)")
-    @Authorize(action = "pension.operator.annuity-write")
-    suspend fun requestActivation(
-        @HeaderParam(IDEMPOTENCY_HEADER) idempotencyKey: String?,
-        @PathParam("partnerId") partnerId: String,
-        @HeaderParam(PARTY_HEADER) party: String?,
-    ): AnnuityProviderResponse {
-        requireIdempotencyKey(idempotencyKey)
-        return AnnuityProviderResponse.from(registry.requestActivation(partnerId, access.staffActor(party)))
-    }
-
-    @POST
-    @Path("/{partnerId}/activation-approval")
-    @Operation(summary = "Approve activation (checker: never the editor or the requester)")
-    @Authorize(action = "pension.operator.annuity-approve")
-    suspend fun approveActivation(
-        @HeaderParam(IDEMPOTENCY_HEADER) idempotencyKey: String?,
-        @PathParam("partnerId") partnerId: String,
-        @HeaderParam(PARTY_HEADER) party: String?,
-    ): AnnuityProviderResponse {
-        requireIdempotencyKey(idempotencyKey)
-        return AnnuityProviderResponse.from(registry.approveActivation(partnerId, access.staffActor(party)))
-    }
-
-    @POST
-    @Path("/{partnerId}/disable")
-    @Operation(summary = "Stop asking this partner for quotes (purchases already in flight continue)")
-    @Authorize(action = "pension.operator.annuity-write")
-    suspend fun disable(
-        @HeaderParam(IDEMPOTENCY_HEADER) idempotencyKey: String?,
-        @PathParam("partnerId") partnerId: String,
-        @HeaderParam(PARTY_HEADER) party: String?,
-    ): AnnuityProviderResponse {
-        requireIdempotencyKey(idempotencyKey)
-        access.staffActor(party)
-        return AnnuityProviderResponse.from(registry.disable(partnerId))
-    }
-}
-
-/** Operator view and status sync of annuity purchases (#12383). */
-@Tag(name = "Pension operations", description = "Annuity purchases")
-@Path("/api/v1/pension/operator/annuity-purchases")
-@Produces(MediaType.APPLICATION_JSON)
-@RolesAllowed(Roles.OPERATOR, Roles.ADMIN, Roles.COMPLIANCE)
-class PensionAnnuityPurchaseResource {
-
-    @Inject
-    lateinit var marketplace: AnnuityMarketplaceService
-
-    @Inject
-    lateinit var access: ContractAccessGuard
-
-    @Inject
-    lateinit var launcher: ExitWorkflowLauncher
-
-    @GET
-    @Operation(summary = "Annuity purchases newest first, optionally by status")
-    @Authorize(action = "pension.operator.annuity-read")
-    suspend fun list(
-        @QueryParam("status") status: AnnuityPurchaseStatus?,
-        @QueryParam("limit") @DefaultValue("50") limit: Int,
-    ): List<AnnuityPurchaseResponse> {
-        check(access.readerFor(null) == Caller.STAFF) { "the purchase queue is staff work" }
-        return marketplace.list(status, limit).map(AnnuityPurchaseResponse::from)
-    }
-
-    @POST
-    @Path("/{purchaseId}/sync")
-    @Operation(summary = "Ask the partner where an in-flight purchase or a cancellation refund stands, and apply it")
-    @Authorize(action = "pension.operator.annuity-purchase")
-    suspend fun sync(
-        @HeaderParam(IDEMPOTENCY_HEADER) idempotencyKey: String?,
-        @PathParam("purchaseId") purchaseId: UUID,
-        @HeaderParam(PARTY_HEADER) party: String?,
-    ): AnnuityPurchaseResponse {
-        requireIdempotencyKey(idempotencyKey)
-        access.staffActor(party)
-        val synced = marketplace.sync(purchaseId)
-        // The payout workflow may have exhausted its retries while the partner was deciding; a
-        // re-start is idempotent (workflow id = payout id) and settles the payout from the new state.
-        if (synced.status == AnnuityPurchaseStatus.ACTIVE || synced.status == AnnuityPurchaseStatus.FAILED) {
-            launcher.startPayout(synced.id)
-        }
-        return AnnuityPurchaseResponse.from(synced)
     }
 }
 
