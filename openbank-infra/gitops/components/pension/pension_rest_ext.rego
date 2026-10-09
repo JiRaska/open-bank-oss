@@ -183,3 +183,52 @@ allowed_reasons contains "operator-pension-funding-ingest" if {
 	role in input.principal.roles
 	input.action == "pension.funding.ingest"
 }
+
+# ---------------------------------------------------------------------------------------------
+# #12383 — partner-agnostic annuity integration (PensionAnnuityResource,
+# PensionAnnuityProviderResource, PensionAnnuityPurchaseResource).
+#   pension.annuity.read              — GET  /contracts/{id}/exit/payouts/{pid}/annuity
+#   pension.annuity.quote             — POST .../annuity/offers
+#   pension.annuity.select            — POST .../annuity/selection     (SCA)
+#   pension.annuity.cancel            — POST .../annuity/cancellation  (SCA, cooling-off)
+#   pension.operator.annuity-read     — GET  /operator/annuity-providers[/{p}], /operator/annuity-purchases
+#   pension.operator.annuity-write    — POST/PUT /operator/annuity-providers, activation-request, disable
+#   pension.operator.annuity-approve  — POST /operator/annuity-providers/{p}/activation-approval (four-eyes
+#                                       in the AnnuityProvider aggregate)
+#   pension.operator.annuity-purchase — POST /operator/annuity-purchases/{id}/sync
+# ---------------------------------------------------------------------------------------------
+
+# The participant's own intent, relayed by the customer edge. Enumerated, as above.
+allowed_reasons contains "edge-service-pension-annuity" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-edge"
+	input.action in {
+		"pension.annuity.read",
+		"pension.annuity.quote",
+		"pension.annuity.select",
+		"pension.annuity.cancel",
+	}
+}
+
+# Real staff read the marketplace; compliance included (comparison-fairness review).
+allowed_reasons contains "operator-pension-annuity-read" if {
+	input.principal.type == "HUMAN"
+	not startswith(input.principal.id, "service-account-")
+	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE"}
+	role in input.principal.roles
+	input.action in {"pension.annuity.read", "pension.operator.annuity-read"}
+}
+
+# The partner registry and purchase sync are real-staff work: never a service account holding
+# ROLE_OPERATOR (#3765/#3734), never the edge.
+allowed_reasons contains "operator-pension-annuity-manage" if {
+	input.principal.type == "HUMAN"
+	not startswith(input.principal.id, "service-account-")
+	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+	role in input.principal.roles
+	input.action in {
+		"pension.operator.annuity-write",
+		"pension.operator.annuity-approve",
+		"pension.operator.annuity-purchase",
+	}
+}

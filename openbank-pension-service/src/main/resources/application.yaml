@@ -137,6 +137,13 @@ openbank:
         # profile turns them on.
         checks-accept: false
         default-value: "0"
+    # Annuity partner integration (#12383). Partners are REGISTRY data (operator, four-eyes); this is
+    # only how long a quote round waits, and whether a partner endpoint may be plain http (never in
+    # prod). A reference-protocol partner's credential is openbank.pension.annuity.partners.<id>.token
+    # (a secret, injected per environment); without one that partner is never called.
+    annuity:
+      quote-timeout: PT5S
+      allow-insecure-endpoints: false
   rate-limit:
     enabled: true
     max-concurrent-requests: 100
@@ -170,6 +177,8 @@ authz:
         stub:
           checks-accept: true
           default-value: "250000.00"
+      annuity:
+        allow-insecure-endpoints: true
   quarkus:
     log:
       level: DEBUG
@@ -194,6 +203,8 @@ authz:
       exit:
         stub:
           checks-accept: true
+      annuity:
+        allow-insecure-endpoints: true
   quarkus:
     scheduler:
       enabled: false

@@ -77,15 +77,32 @@ interface ScaVerificationPort {
     suspend fun verify(partyId: UUID, challengeId: String, documentSha256: String): Boolean
 }
 
-/** Insurer that converts a premium into a life annuity. */
-interface AnnuityInsurerPort {
-    suspend fun purchase(
-        contractId: UUID,
-        premium: BigDecimal,
-        birthDate: LocalDate,
-        idempotencyKey: String,
-    ): AnnuityPolicy
+/** How an ANNUITY payout's money ended up (#12383). */
+sealed interface AnnuityPlacement {
+    /** The partner issued the policy for the premium that was sent. */
+    data class Issued(val policy: AnnuityPolicy) : AnnuityPlacement
+
+    /** No policy; the pack sends the money to the participant's signed account instead. */
+    data class ReturnedToClient(val paymentRef: String) : AnnuityPlacement
+
+    /** No policy; the pack returns the money to the contract (re-invested), which reopens. */
+    data object ReturnedToContract : AnnuityPlacement
 }
+
+/**
+ * The annuity marketplace as the exit slice sees it (#12383, replaces the single-insurer stub):
+ * a confirmation needs a binding SCA selection, and execution places the premium with the
+ * selected partner. [place] is idempotent and resumable; it throws [AnnuityStepPendingException]
+ * while the partner has not answered yet, so the workflow activity retries it.
+ */
+interface AnnuityPlacementPort {
+    suspend fun requireBindingSelection(payoutId: UUID, premium: BigDecimal)
+
+    suspend fun place(payout: PayoutRequest, contract: com.openbank.pension.domain.model.PensionContract): AnnuityPlacement
+}
+
+/** The partner has not decided yet (policy or refund pending). NOT an IllegalStateException: it is retried. */
+class AnnuityStepPendingException(message: String) : RuntimeException(message)
 
 data class ClaimantKyc(val name: String, val birthDate: LocalDate, val identityDocumentRef: String, val iban: String)
 

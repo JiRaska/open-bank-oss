@@ -96,6 +96,30 @@ real adapter replaces the stub (fails closed until then). The notification port 
 refuses outside dev/test. Orders are forward-priced: a redemption returns the amount ordered, the
 proceeds settle at the next NAV.
 
+## 4c. Annuity partners (#12383)
+
+The ANNUITY payout form buys a policy from a partner insurer chosen by the participant among
+offers from every eligible partner. New trust boundary: external insurers, reached through the
+`AnnuityProviderAdapter` SPI — the `reference-rest` adapter speaks the published reference
+protocol to an operator-registered HTTPS endpoint with a per-partner credential from
+configuration; `SimulatorAnnuityAdapter` exists only in dev/test builds.
+
+| STRIDE | Threat | Mitigation |
+|---|---|---|
+| **Elevation of privilege** | One operator registers or re-points a partner (new premium IBAN, new endpoint) and activates it alone | Four-eyes in the `AnnuityProvider` aggregate: the approver must differ from the terms editor and the activation requester (403 otherwise); any amendment returns the partner to DRAFT; only real human staff reach the registry routes (OPA `operator-pension-annuity-manage`, `ContractAccessGuard.staffActor`) |
+| **Tampering** | The participant approves one offer and another insurer, offer or amount is bought | The selection SCA challenge signs `selectionHash` (payout, contract, partner, offer id, premium, monthly amount, type); the payout confirmation requires that binding selection, unexpired and for the same net premium (`requireBindingSelection`) |
+| **Tampering** | A partner answers with an offer for another premium, currency or type | Normalisation is enforced in `AnnuityMarketplaceService.offerFits`, not trusted from the adapter; such offers are dropped and listed as partner failures |
+| **Repudiation / tampering** | A policy is recorded for a premium that never left, or money is lost when a partner refuses | Application first; the premium leaves once (`PaymentInstructionRepository`, key `pension-annuity-<payout>-premium`); a definitive payment rejection cancels the application; `markActive` is refused unless the premium was sent; a refusal after payment waits for the partner's `refundRef`, then the pack decides (contract re-subscription or the signed client account) |
+| **Spoofing / SSRF** | An operator-supplied endpoint targets an internal address or leaks credentials | HTTPS only outside dev/test, no user-info/query/fragment, redirects not followed; the credential is configuration keyed by partner id, never stored in the registry; no credential → no call |
+| **Denial of service** | A slow partner blocks the quote round | Partners are asked in parallel, each bounded by `openbank.pension.annuity.quote-timeout`; partial results are returned |
+| **Information disclosure** | A partner receives more personal data than needed to quote | The quote carries premium, date(s) of birth, jurisdiction and dates; the application a pseudonymous holder reference (party id) — identity data is exchanged under the partner agreement |
+
+Residual: the partner licence and legal-entity reference are recorded, not verified against the
+supervisor's register or party-service (operator check at activation). A partner's
+pre-contractual documents are not yet attached to offers (docs/compliance/pension-annuity-distribution.md,
+legal review pending). Withholding tax already remitted on a premium returned to the contract is
+not reversed automatically.
+
 ## 5. Residual risks / assumptions
 
 - **(Resolved in S8)** S1's caller-valued surrender preview is retired; termination is S5's quote
@@ -114,3 +138,4 @@ proceeds settle at the next NAV.
 - 2026-10-09 — initial model with the S1 bootstrap (ADR-0334, #12350).
 - 2026-10-09 — S5 exits: termination, payout, death claims (§4a).
 - 2026-10-09 — S8 integration: fund REST client identity, onboarding-only activation, account-bound SCA, held account change, optimistic locking, POST replay (§4b).
+- 2026-10-09 — annuity partner integration: registry with four-eyes activation, adapter SPI, SCA-bound selection, premium/compensation flow (§4c, #12383).
