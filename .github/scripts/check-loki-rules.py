@@ -56,7 +56,7 @@ except ImportError:
 
 REPO = Path(__file__).resolve().parents[2]
 COMPONENTS = REPO / "openbank-infra" / "gitops" / "components"
-LOKI_IMAGE = "grafana/loki:3.7.8"
+LOKI_IMAGE = "grafana/loki:3.7.8@sha256:1107dd5274e0ada47e42472b7a7e71f3b2a2fe878878108f3e2f9e51528f0193"
 PORT = 13199
 CONTAINER = "openbank-loki-rule-check"
 
@@ -129,8 +129,35 @@ def _get(url: str, timeout: float = 5.0) -> str | None:
         return None
 
 
+def select_loki_image() -> tuple[str | None, str]:
+    """Use the identical pinned artifact from cache, mirror, or upstream; never skip a failure."""
+    images = (f"mirror.gcr.io/{LOKI_IMAGE}", LOKI_IMAGE)
+    for image in images:
+        try:
+            cached = subprocess.run(
+                ["docker", "image", "inspect", image], capture_output=True, timeout=10)
+            if cached.returncode == 0:
+                return image, ""
+        except subprocess.TimeoutExpired:
+            pass
+    errors = []
+    for image in images:
+        try:
+            pulled = subprocess.run(
+                ["docker", "pull", image], capture_output=True, text=True, timeout=90)
+            if pulled.returncode == 0:
+                return image, ""
+            errors.append(f"{image}: {pulled.stderr.strip()[:300]}")
+        except subprocess.TimeoutExpired:
+            errors.append(f"{image}: pull timed out after 90s")
+    return None, "could not fetch the pinned Loki image: " + "; ".join(errors)
+
+
 def load_into_ruler(bodies: dict[str, str], quiet: bool = False) -> tuple[bool, str]:
     """-> (accepted, detail). accepted is False when the ruler lists fewer groups than we gave it."""
+    image, detail = select_loki_image()
+    if image is None:
+        return False, detail
     tmp = Path(tempfile.mkdtemp())
     rules_dir = tmp / "rules" / "fake"
     rules_dir.mkdir(parents=True)
@@ -145,7 +172,7 @@ def load_into_ruler(bodies: dict[str, str], quiet: bool = False) -> tuple[bool, 
     run = subprocess.run(
         ["docker", "run", "-d", "--name", CONTAINER, "-p", f"{PORT}:3100",
          "-v", f"{tmp / 'config.yaml'}:/etc/loki/local-config.yaml",
-         "-v", f"{tmp / 'rules'}:/rules", LOKI_IMAGE,
+         "-v", f"{tmp / 'rules'}:/rules", image,
          "-config.file=/etc/loki/local-config.yaml"],
         capture_output=True, text=True)
     if run.returncode != 0:
