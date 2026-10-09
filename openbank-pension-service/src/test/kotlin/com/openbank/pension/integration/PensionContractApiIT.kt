@@ -63,7 +63,7 @@ class PensionContractApiIT {
         .`when`().post(base)
         .then().statusCode(201)
         .body("status", equalTo("DRAFT"))
-        .body("packVersion", equalTo(1))
+        .body("packVersion", equalTo(2))
         .extract().path("contractId")
 
     private fun post(path: String, body: String = "{}", asParty: UUID? = party) =

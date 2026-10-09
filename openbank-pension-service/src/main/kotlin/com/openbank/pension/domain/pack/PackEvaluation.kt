@@ -132,7 +132,7 @@ object PackEvaluator {
         val amount = if (perPeriod < min) {
             BigDecimal.ZERO
         } else {
-            IncentiveBand.matched(rule, perPeriod).min(rule.amountCap!!)
+            rule.roundDown(IncentiveBand.matched(rule, perPeriod).min(rule.amountCap!!))
         }
         return IncentiveResult(
             rule.id,
