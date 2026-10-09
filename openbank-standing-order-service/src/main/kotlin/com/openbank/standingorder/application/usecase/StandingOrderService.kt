@@ -6,8 +6,10 @@ package com.openbank.standingorder.application.usecase
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.libs.idempotency.IdempotencyKeyReusedException
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.standingorder.application.port.`in`.CreateStandingOrderCommand
+import com.openbank.standingorder.application.port.`in`.StandingOrderReceipt
 import com.openbank.standingorder.application.port.`in`.StandingOrderUseCase
 import com.openbank.standingorder.application.port.out.StandingOrderRepository
 import com.openbank.standingorder.domain.error.SepaCreditSchemeRules
@@ -28,11 +30,16 @@ class StandingOrderService(
 ) : StandingOrderUseCase {
 
     override suspend fun create(cmd: CreateStandingOrderCommand): StandingOrder {
-        // #11938: a SEPA_CREDIT order executes as an SCT, which is euro-only. Refused here — before
-        // the idempotency lookup and before any row — so it covers both a new order and an edit
-        // (replacesStandingOrderId), and never reaches a due date only to fail at sepa-payment.
+        repo.findByIdempotencyKey(cmd.idempotencyKey)?.let {
+            val replay = replayOrRefuse(it, cmd)
+            // Preserve #11938's fail-closed check for a legacy non-EUR SEPA order. A changed
+            // payload reaches the durable fingerprint first and is consistently a 409.
+            SepaCreditSchemeRules.requireRailCurrency(cmd.paymentType, cmd.currency)
+            return replay
+        }
+        // #11938: a new SEPA_CREDIT order executes as an SCT, which is euro-only. An invalid
+        // create or edit is refused before any write or cancellation.
         SepaCreditSchemeRules.requireRailCurrency(cmd.paymentType, cmd.currency)
-        repo.findByIdempotencyKey(cmd.idempotencyKey)?.let { return it }
         val now = Instant.now(clock)
         val order = StandingOrder(
             id = Ids.newId(), idempotencyKey = cmd.idempotencyKey,
@@ -46,15 +53,71 @@ class StandingOrderService(
             nextExecutionDate = cmd.startDate,
             lastExecutionDate = null, executionCount = 0, failureCount = 0,
             status = StandingOrderStatus.ACTIVE, createdAt = now, updatedAt = now,
+            requestHash = cmd.requestHash,
+            initiatingPrincipal = cmd.initiatingPrincipal,
+            initiatingPartyId = cmd.initiatingPartyId,
+            initiatingActorId = cmd.initiatingActorId,
         )
-        val replaced = cmd.replacesStandingOrderId ?: return repo.save(order)
-        // An edit: create the replacement and cancel the original atomically, so a customer is
-        // never debited by both (#10281). A replay of the same idempotency key returned above.
-        check(repo.replace(order, replaced, now)) {
-            "Standing order $replaced is not an ACTIVE or PAUSED order of this party; nothing was changed"
+        try {
+            val replaced = cmd.replacesStandingOrderId ?: return repo.save(order)
+            // An edit: create the replacement and cancel the original atomically, so a customer
+            // is never debited by both (#10281). The database unique key arbitrates racing creates.
+            if (!repo.replace(order, replaced, now)) {
+                // A same-key replacement racing the winner reaches this branch after the
+                // original has become CANCELLED. Its persisted successor still owns the key.
+                repo.findByIdempotencyKey(cmd.idempotencyKey)?.let { return replayOrRefuse(it, cmd) }
+                error("Standing order $replaced is not an ACTIVE or PAUSED order of this party; nothing was changed")
+            }
+            return order
+        } catch (failure: RuntimeException) {
+            // A concurrent create can pass the first read in both requests. Recover only the
+            // standing_orders idempotency-key conflict; unrelated DB failures must propagate.
+            if (!isIdempotencyConflict(failure)) throw failure
+            val winner = repo.findByIdempotencyKey(cmd.idempotencyKey) ?: throw failure
+            return replayOrRefuse(winner, cmd)
         }
-        return order
     }
+
+    override suspend fun findReceipt(
+        key: String,
+        debitAccountId: UUID,
+        initiatingPrincipal: String,
+        initiatingPartyId: UUID,
+        initiatingActorId: UUID,
+    ): StandingOrderReceipt {
+        val order = repo.findByIdempotencyKey(key) ?: return StandingOrderReceipt("UNKNOWN")
+        // A key is correlation, never authorization. Legacy and rolling-deploy rows without the
+        // complete durable binding are indistinguishable from other actors' requests here.
+        if (
+            order.requestHash == null ||
+            order.initiatingPrincipal != initiatingPrincipal ||
+            order.initiatingPartyId != initiatingPartyId ||
+            order.initiatingActorId != initiatingActorId ||
+            order.debitAccountId != debitAccountId ||
+            order.partyId != initiatingPartyId
+        ) {
+            return StandingOrderReceipt("UNKNOWN")
+        }
+        return StandingOrderReceipt("FOUND", order.id, order.status.name)
+    }
+
+    private fun replayOrRefuse(existing: StandingOrder, cmd: CreateStandingOrderCommand): StandingOrder {
+        if (
+            existing.requestHash != cmd.requestHash ||
+            existing.initiatingPrincipal != cmd.initiatingPrincipal ||
+            existing.initiatingPartyId != cmd.initiatingPartyId ||
+            existing.initiatingActorId != cmd.initiatingActorId ||
+            existing.partyId != cmd.partyId ||
+            existing.debitAccountId != cmd.debitAccountId
+        ) {
+            throw IdempotencyKeyReusedException()
+        }
+        return existing
+    }
+
+    private fun isIdempotencyConflict(failure: Throwable): Boolean =
+        generateSequence(failure) { it.cause.takeIf { cause -> cause !== it } }
+            .any { it.message?.contains("standing_orders_idempotency_key_key", ignoreCase = true) == true }
 
     override suspend fun pause(id: UUID, operatorId: String) =
         repo.save((repo.findById(id) ?: error("Standing order not found: $id")).pause(Instant.now(clock)))

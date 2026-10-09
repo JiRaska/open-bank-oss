@@ -26,10 +26,24 @@ data class CreateStandingOrderCommand(
     val endDate: LocalDate?,
     /** Atomic replace (#10281): cancel this order in the same transaction that creates the new one. */
     val replacesStandingOrderId: UUID? = null,
+    /** Canonical hash of the complete create command and authenticated caller. */
+    val requestHash: String,
+    val initiatingPrincipal: String,
+    val initiatingPartyId: UUID? = null,
+    val initiatingActorId: UUID? = null,
 )
+
+data class StandingOrderReceipt(val state: String, val orderId: UUID? = null, val status: String? = null)
 
 interface StandingOrderUseCase {
     suspend fun create(cmd: CreateStandingOrderCommand): StandingOrder
+    suspend fun findReceipt(
+        key: String,
+        debitAccountId: UUID,
+        initiatingPrincipal: String,
+        initiatingPartyId: UUID,
+        initiatingActorId: UUID,
+    ): StandingOrderReceipt
     suspend fun pause(id: UUID, operatorId: String): StandingOrder
     suspend fun resume(id: UUID, operatorId: String): StandingOrder
     suspend fun cancel(id: UUID, operatorId: String): StandingOrder

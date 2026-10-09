@@ -42,6 +42,8 @@ data class CreateStandingOrderRequest(
     }
 }
 
+data class StandingOrderReceiptLookupRequest(val idempotencyKey: String, val debitAccountId: UUID)
+
 data class StandingOrderResponse(
     val id: UUID,
     val partyId: UUID,

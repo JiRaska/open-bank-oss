@@ -50,6 +50,22 @@ openbank-sdd-service.
 - **Assets:** standing-order instructions (debtor/creditor IBAN, BIC, amount, currency, schedule,
   remittance info), execution history, idempotency keys.
 
+### Receipt reconciliation (#12317)
+
+The customer-edge forwards the effective party and authenticated human actor as provenance only
+on its own M2M call. The standing-order service accepts those headers only from the verified edge
+JWT (`preferred_username` and `azp`) and binds them, the issuer-qualified token subject, the debit
+account and a canonical hash of the entire create request to the inserted row. A replay with a
+changed request or actor returns 409, including a database-key race. `POST /receipts/lookup`
+carries the key in a JSON body, requires the same verified edge and returns `FOUND` only when
+every stored binding matches; other and pre-migration rows return `UNKNOWN` without an identifier.
+During a rolling deployment, an older verified edge may still send the party header without the
+actor header; that create is accepted with a NULL actor binding and remains `UNKNOWN` on lookup.
+The edge must verify current debit-account ownership before forwarding. This lookup proves an
+accepted standing-order instruction, not that any scheduled payment settled. The nullable V8
+columns permit rolling deployment; rollback keeps them in place so new bindings survive a return
+to the previous binary. A pre-V8 row cannot safely be backfilled from the key or party alone.
+
 ## 3. Authn/Authz
 
 - All REST endpoints: `@RolesAllowed` (ROLE_CUSTOMER for own orders, ROLE_OPERATOR/ROLE_ADMIN for

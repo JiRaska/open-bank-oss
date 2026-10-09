@@ -13,6 +13,7 @@ fun StandingOrderEntity.toDomain() = StandingOrder(
     amountMinorUnits, currency, frequency, paymentType, remittanceInfo,
     startDate, endDate, nextExecutionDate, lastExecutionDate, executionCount, failureCount,
     status, createdAt, updatedAt,
+    requestHash, initiatingPrincipal, initiatingPartyId, initiatingActorId,
 )
 
 fun StandingOrder.toEntity() = StandingOrderEntity().also {
@@ -20,6 +21,10 @@ fun StandingOrder.toEntity() = StandingOrderEntity().also {
     it.idempotencyKey = idempotencyKey
     it.partyId = partyId
     it.debitAccountId = debitAccountId
+    it.requestHash = requestHash
+    it.initiatingPrincipal = initiatingPrincipal
+    it.initiatingPartyId = initiatingPartyId
+    it.initiatingActorId = initiatingActorId
     it.debtorIban = debtorIban
     it.debtorName = debtorName
     it.creditorIban = creditorIban

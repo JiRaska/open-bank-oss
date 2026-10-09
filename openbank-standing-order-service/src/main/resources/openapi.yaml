@@ -3,9 +3,8 @@
 openapi: 3.1.0
 info:
   title: Standing Order Service API
-  # 1.7 -> 1.8 (#11938): additive — create documents 400 CURRENCY_NOT_ALLOWED (a SEPA_CREDIT
-  # order executes as an SCT, which is euro-only).
-  version: 1.8.0
+  # 1.8 -> 1.9 (#12317): additive authenticated standing-order receipt lookup.
+  version: 1.9.0
   description: Recurring payment orders — create, pause, resume, cancel.
   license:
     name: Apache-2.0
@@ -40,7 +39,8 @@ paths:
       description: >-
         With `replacesStandingOrderId` (an edit, #10281) the new order is created and the replaced
         one cancelled in ONE transaction: both run never, neither-runs never. A replay of the same
-        `idempotencyKey` returns the order already created and changes nothing.
+        `idempotencyKey` and identical authenticated request returns the order already created;
+        reusing the key for a different payload, actor or debit account is a 409.
       responses:
         '201':
           description: Standing order created
@@ -58,6 +58,35 @@ paths:
           description: >-
             `replacesStandingOrderId` is not an ACTIVE or PAUSED order of the same party; nothing
             was created or cancelled.
+        '409':
+          description: Idempotency key was already used for a different request or legacy unbound row.
+
+  /api/v1/standing-orders/receipts/lookup:
+    post:
+      tags: [Standing Orders]
+      summary: Reconcile a standing-order create by its original idempotency key
+      operationId: lookupStandingOrderReceipt
+      description: >-
+        Read-only customer-edge request. The key is carried in the body, never the URL. The
+        authenticated edge identity and its customer party/actor provenance must match the
+        durable create record, including the original debit account. Missing, in-flight,
+        unbound legacy and mismatched records all return UNKNOWN; no receipt is inferred from
+        an absent order. The edge must verify debit-account ownership before forwarding.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StandingOrderReceiptLookupRequest'
+      responses:
+        '200':
+          description: Bound durable receipt, or UNKNOWN
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandingOrderReceipt'
+        '403':
+          description: Customer provenance did not come from the authenticated edge.
 
   /api/v1/standing-orders/{id}:
     get:
@@ -178,8 +207,8 @@ components:
       properties:
         idempotencyKey:
           description: >-
-            Caller-chosen dedup key. A retry with the same key returns the originally created
-            order instead of double-creating (findByIdempotencyKey short-circuits the create).
+            Caller-chosen dedup key. A retry with the same authenticated request returns the
+            originally created order. Reuse for different content or actor returns 409.
           type: string
           minLength: 1
         partyId:
@@ -236,6 +265,34 @@ components:
           format: uuid
           nullable: true
           description: Edit — cancel this order atomically with creating the new one (#10281).
+
+    StandingOrderReceiptLookupRequest:
+      type: object
+      required: [idempotencyKey, debitAccountId]
+      properties:
+        idempotencyKey:
+          type: string
+          minLength: 1
+          maxLength: 255
+        debitAccountId:
+          type: string
+          format: uuid
+
+    StandingOrderReceipt:
+      type: object
+      required: [state]
+      properties:
+        state:
+          type: string
+          enum: [FOUND, UNKNOWN]
+        orderId:
+          type: string
+          format: uuid
+          nullable: true
+        status:
+          type: string
+          enum: [ACTIVE, PAUSED, CANCELLED, COMPLETED, FAILED]
+          nullable: true
 
     ApiError:
       type: object

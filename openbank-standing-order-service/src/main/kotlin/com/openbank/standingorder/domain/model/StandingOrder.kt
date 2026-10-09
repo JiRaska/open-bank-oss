@@ -4,6 +4,7 @@
 
 package com.openbank.standingorder.domain.model
 
+import com.fasterxml.jackson.annotation.JsonIgnore
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
@@ -44,6 +45,12 @@ data class StandingOrder(
     val status: StandingOrderStatus,
     val createdAt: Instant,
     val updatedAt: Instant,
+    // Nullable only for rows created before V8 or by a previous binary during a rolling deploy.
+    // Such rows cannot be exposed through the customer receipt lookup.
+    @get:JsonIgnore val requestHash: String? = null,
+    @get:JsonIgnore val initiatingPrincipal: String? = null,
+    @get:JsonIgnore val initiatingPartyId: UUID? = null,
+    @get:JsonIgnore val initiatingActorId: UUID? = null,
 ) {
     fun pause(now: Instant) = also {
         require(status == StandingOrderStatus.ACTIVE) { "Only ACTIVE orders can be paused" }

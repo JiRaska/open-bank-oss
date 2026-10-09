@@ -49,6 +49,7 @@ dependencies {
     // endpoints over real HTTP — the only way to exercise a reactive Panache write, since a bare
     // @QuarkusTest thread carries no Vert.x context. The existing ITs only hit unsecured routes.
     testImplementation(libs.quarkus.test.security)
+    testImplementation("io.quarkus:quarkus-test-security-jwt")
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)

@@ -6,6 +6,7 @@ package com.openbank.standingorder.application.usecase
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
+import com.openbank.libs.idempotency.IdempotencyKeyReusedException
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.standingorder.application.port.`in`.CreateStandingOrderCommand
 import com.openbank.standingorder.application.port.out.StandingOrderRepository
@@ -41,6 +42,52 @@ class StandingOrderServiceTest {
 
         assertThat(result).isEqualTo(existing)
         coVerify(exactly = 0) { repo.save(any()) }
+    }
+
+    @Test
+    fun `create rejects a reused key for a changed request hash or actor`(): Unit = runBlocking {
+        val existing = standingOrder()
+        coEvery { repo.findByIdempotencyKey("idem-1") } returns existing
+
+        org.assertj.core.api.Assertions.assertThatThrownBy {
+            runBlocking { service.create(createCommand().copy(requestHash = "b".repeat(64))) }
+        }.isInstanceOf(IdempotencyKeyReusedException::class.java)
+        org.assertj.core.api.Assertions.assertThatThrownBy {
+            runBlocking { service.create(createCommand().copy(initiatingActorId = UUID.randomUUID())) }
+        }.isInstanceOf(IdempotencyKeyReusedException::class.java)
+        org.assertj.core.api.Assertions.assertThatThrownBy {
+            runBlocking { service.create(createCommand().copy(currency = "CZK", requestHash = "b".repeat(64))) }
+        }.isInstanceOf(IdempotencyKeyReusedException::class.java)
+        coVerify(exactly = 0) { repo.save(any()) }
+    }
+
+    @Test
+    fun `receipt requires every persisted binding and returns UNKNOWN for legacy rows`(): Unit = runBlocking {
+        val existing = standingOrder()
+        coEvery { repo.findByIdempotencyKey("idem-1") } returns existing
+        val receipt = service.findReceipt("idem-1", existing.debitAccountId, "test-principal", existing.partyId, ACTOR)
+        assertThat(receipt.state).isEqualTo("FOUND")
+        assertThat(receipt.orderId).isEqualTo(existing.id)
+        assertThat(receipt.status).isEqualTo("ACTIVE")
+        assertThat(service.findReceipt("idem-1", UUID.randomUUID(), "test-principal", existing.partyId, ACTOR).state)
+            .isEqualTo("UNKNOWN")
+        assertThat(service.findReceipt("idem-1", existing.debitAccountId, "other", existing.partyId, ACTOR).state)
+            .isEqualTo("UNKNOWN")
+        assertThat(
+            service.findReceipt(
+                "idem-1",
+                existing.debitAccountId,
+                "test-principal",
+                existing.partyId,
+                UUID.randomUUID(),
+            ).state,
+        )
+            .isEqualTo("UNKNOWN")
+        coEvery { repo.findByIdempotencyKey("legacy") } returns existing.copy(requestHash = null)
+        assertThat(
+            service.findReceipt("legacy", existing.debitAccountId, "test-principal", existing.partyId, ACTOR).state,
+        )
+            .isEqualTo("UNKNOWN")
     }
 
     @Test
@@ -193,6 +240,10 @@ class StandingOrderServiceTest {
         remittanceInfo = "Rent",
         startDate = LocalDate.of(2026, 2, 1),
         endDate = LocalDate.of(2026, 12, 31),
+        requestHash = "a".repeat(64),
+        initiatingPrincipal = "test-principal",
+        initiatingPartyId = UUID.fromString("00000000-0000-0000-0000-000000000201"),
+        initiatingActorId = ACTOR,
     )
 
     private fun standingOrder(
@@ -202,9 +253,9 @@ class StandingOrderServiceTest {
         failureCount: Int = 0,
     ) = StandingOrder(
         id = id,
-        idempotencyKey = "idem-existing",
-        partyId = UUID.fromString("00000000-0000-0000-0000-000000000302"),
-        debitAccountId = UUID.fromString("00000000-0000-0000-0000-000000000303"),
+        idempotencyKey = "idem-1",
+        partyId = UUID.fromString("00000000-0000-0000-0000-000000000201"),
+        debitAccountId = UUID.fromString("00000000-0000-0000-0000-000000000202"),
         debtorIban = "DE89370400440532013001",
         debtorName = "Debtor",
         creditorIban = "DE89370400440532013000",
@@ -224,9 +275,14 @@ class StandingOrderServiceTest {
         status = status,
         createdAt = FIXED_NOW,
         updatedAt = FIXED_NOW,
+        requestHash = "a".repeat(64),
+        initiatingPrincipal = "test-principal",
+        initiatingPartyId = UUID.fromString("00000000-0000-0000-0000-000000000201"),
+        initiatingActorId = ACTOR,
     )
 
     companion object {
         val FIXED_NOW: Instant = Instant.parse("2026-01-15T10:15:30Z")
+        val ACTOR: UUID = UUID.fromString("00000000-0000-0000-0000-000000000209")
     }
 }
