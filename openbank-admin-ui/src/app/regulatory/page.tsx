@@ -532,6 +532,12 @@ export default function RegulatoryPage() {
         </a>}
       />
 
+      <p style={{ marginBottom: 20 }}>
+        <Link href="/regulatory/statutory-returns" className="btn btn-secondary">
+          {t('Statutární výkazy a termíny', 'Statutory returns and deadlines')}
+        </Link>
+      </p>
+
       {/* Summary */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '12px', marginBottom: '20px' }}>
         {[
