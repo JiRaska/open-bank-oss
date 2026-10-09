@@ -91,7 +91,8 @@ function parseInboxItem(value: unknown): ApprovalInboxItem | null {
     !nonEmpty(item.id) || !nonEmpty(item.domain) || !DOMAIN_SET.has(item.domain) ||
     !nonEmpty(item.action) || !nullableString(item.resourceId) || !nullableString(item.maker) ||
     !nullableString(item.proposedAt) || (item.proposedAt !== null && !instant(item.proposedAt)) ||
-    (item.makerActorKind !== undefined && !MAKER_ACTOR_KINDS.has(String(item.makerActorKind)))
+    (item.makerActorKind !== undefined &&
+      (typeof item.makerActorKind !== 'string' || !MAKER_ACTOR_KINDS.has(item.makerActorKind)))
   ) return null
   return { ...item, makerActorKind: item.makerActorKind ?? 'UNKNOWN' } as ApprovalInboxItem
 }

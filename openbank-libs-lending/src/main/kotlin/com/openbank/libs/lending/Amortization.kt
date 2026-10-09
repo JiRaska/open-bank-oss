@@ -160,7 +160,6 @@ object Amortization {
             // before isWellFormed sees the completed schedule. Reamortize at the first line.
             if (principalDue.amount.signum() < 0 || principalDue > opening) return null
             val closing = opening - principalDue
-            if (closing.amount.signum() < 0) return null
             val payment = principalDue + interest
             installments += Installment(n, dueDate, opening, principalDue, interest, payment, closing)
             opening = closing
