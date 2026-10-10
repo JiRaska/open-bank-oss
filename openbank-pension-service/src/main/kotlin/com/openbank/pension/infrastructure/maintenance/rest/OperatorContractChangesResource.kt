@@ -39,14 +39,14 @@ class OperatorContractChangesResource {
     @GET
     @Path("/contribution-schedule")
     @Operation(summary = "Staff: original, in-force and pending schedule with the change history")
-    @Authorize(action = "pension.operator.read", resource = "#contractId")
+    @Authorize(action = "pension.operator.inspect", resource = "#contractId")
     suspend fun schedule(@PathParam("contractId") contractId: UUID): ScheduleViewResponse =
         ScheduleViewResponse.from(maintenance.schedule(access.readerFor(null), contractId))
 
     @GET
     @Path("/beneficiaries")
     @Operation(summary = "Staff: current beneficiary designation with the designation history")
-    @Authorize(action = "pension.operator.read", resource = "#contractId")
+    @Authorize(action = "pension.operator.inspect", resource = "#contractId")
     suspend fun beneficiaries(@PathParam("contractId") contractId: UUID): BeneficiaryViewResponse {
         val (contract, history) = maintenance.beneficiaries(access.readerFor(null), contractId)
         return BeneficiaryViewResponse.from(contract, history)

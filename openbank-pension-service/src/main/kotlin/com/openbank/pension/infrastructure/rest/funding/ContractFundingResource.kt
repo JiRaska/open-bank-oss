@@ -74,7 +74,7 @@ class ContractFundingResource {
     @GET
     @Path("/payment-reference")
     @Operation(summary = "The reference a payer quotes so a payment matches this contract")
-    @Authorize(action = "pension.funding.read", resource = "#contractId")
+    @Authorize(action = "pension.funding.inspect", resource = "#contractId")
     suspend fun reference(
         @PathParam("contractId") contractId: UUID,
         @HeaderParam(ContractAccessGuard.PARTY_HEADER) party: String?,
@@ -86,7 +86,7 @@ class ContractFundingResource {
     @GET
     @Path("/contributions")
     @Operation(summary = "Every contribution credited to the contract, oldest first")
-    @Authorize(action = "pension.funding.read", resource = "#contractId")
+    @Authorize(action = "pension.funding.inspect", resource = "#contractId")
     suspend fun list(
         @PathParam("contractId") contractId: UUID,
         @HeaderParam(ContractAccessGuard.PARTY_HEADER) party: String?,
@@ -171,7 +171,7 @@ class ContractFundingResource {
     @GET
     @Path("/incentives")
     @Operation(summary = "Incentive claims and the per-incentive ledger balance")
-    @Authorize(action = "pension.funding.read", resource = "#contractId")
+    @Authorize(action = "pension.funding.inspect", resource = "#contractId")
     suspend fun incentiveStatus(
         @PathParam("contractId") contractId: UUID,
         @HeaderParam(ContractAccessGuard.PARTY_HEADER) party: String?,
@@ -187,7 +187,7 @@ class ContractFundingResource {
     @GET
     @Path("/tax-years/{year}")
     @Operation(summary = "Contributions by source, incentives and deductible amount for one tax year")
-    @Authorize(action = "pension.funding.read", resource = "#contractId")
+    @Authorize(action = "pension.funding.inspect", resource = "#contractId")
     suspend fun taxYear(
         @PathParam("contractId") contractId: UUID,
         @PathParam("year") year: Int,

@@ -42,7 +42,7 @@ class AnnualStatementResource {
 
     @GET
     @Operation(summary = "Read the issued annual statement for a year (404 until issued)")
-    @Authorize(action = "pension.contract.read", resource = "#contractId")
+    @Authorize(action = "pension.contract.inspect", resource = "#contractId")
     suspend fun get(
         @PathParam("contractId") contractId: UUID,
         @PathParam("year") year: Int,

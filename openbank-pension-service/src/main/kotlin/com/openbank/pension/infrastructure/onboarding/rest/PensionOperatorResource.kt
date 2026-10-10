@@ -55,7 +55,7 @@ class PensionOperatorResource {
     @GET
     @Path("/onboarding/applications")
     @Operation(summary = "Onboarding applications, newest first, optionally by status")
-    @Authorize(action = "pension.operator.read")
+    @Authorize(action = "pension.operator.inspect")
     suspend fun applications(
         @QueryParam("status") status: OnboardingStatus?,
         @QueryParam("limit") @DefaultValue("50") limit: Int,
@@ -65,7 +65,7 @@ class PensionOperatorResource {
     @GET
     @Path("/onboarding/applications/{id}")
     @Operation(summary = "One onboarding application")
-    @Authorize(action = "pension.operator.read", resource = "#id")
+    @Authorize(action = "pension.operator.inspect", resource = "#id")
     suspend fun application(@PathParam("id") id: UUID): OperatorApplicationResponse =
         OperatorApplicationResponse.from(onboarding.get(id, null))
 
@@ -84,7 +84,7 @@ class PensionOperatorResource {
     @GET
     @Path("/transfers")
     @Operation(summary = "Transfers in both directions, newest first, optionally by status")
-    @Authorize(action = "pension.operator.read")
+    @Authorize(action = "pension.operator.inspect")
     suspend fun transferList(
         @QueryParam("status") status: TransferStatus?,
         @QueryParam("limit") @DefaultValue("50") limit: Int,
@@ -93,7 +93,7 @@ class PensionOperatorResource {
     @GET
     @Path("/transfers/{id}")
     @Operation(summary = "One transfer")
-    @Authorize(action = "pension.operator.read", resource = "#id")
+    @Authorize(action = "pension.operator.inspect", resource = "#id")
     suspend fun transfer(@PathParam("id") id: UUID): TransferResponse = TransferResponse.from(transfers.get(id, null))
 
     @POST

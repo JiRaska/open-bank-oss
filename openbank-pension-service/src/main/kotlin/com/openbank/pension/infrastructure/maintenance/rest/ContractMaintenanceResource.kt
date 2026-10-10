@@ -58,7 +58,7 @@ class ContractMaintenanceResource {
     @GET
     @Path("/contribution-schedule")
     @Operation(summary = "Original, in-force and pending contribution schedule with the full change history")
-    @Authorize(action = "pension.contract.read", resource = "#contractId")
+    @Authorize(action = "pension.contract.inspect", resource = "#contractId")
     suspend fun schedule(
         @PathParam("contractId") contractId: UUID,
         @HeaderParam(PARTY_HEADER) party: String?,
@@ -108,7 +108,7 @@ class ContractMaintenanceResource {
     @GET
     @Path("/beneficiaries")
     @Operation(summary = "Current beneficiary designation with the full designation history")
-    @Authorize(action = "pension.contract.read", resource = "#contractId")
+    @Authorize(action = "pension.contract.inspect", resource = "#contractId")
     suspend fun beneficiaries(
         @PathParam("contractId") contractId: UUID,
         @HeaderParam(PARTY_HEADER) party: String?,

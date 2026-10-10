@@ -30,11 +30,21 @@ packs are code-reviewed data baked into the image, not runtime input).
 - Every route is `@RolesAllowed(API, OPERATOR, ADMIN)` behind Keycloak OIDC; there is no
   anonymous surface.
 - `pension_rest_ext.rego` grants the participant actions (`create`, `submit`, `activate`,
-  `strategy`, `suspend`, `resume`, `terminate`, `read`) to `service-account-openbank-edge` only,
+  `strategy`, `suspend`, `resume`, `terminate`, `inspect`) to `service-account-openbank-edge` only,
   keyed on `principal.id`, and grants real staff (`HUMAN`, not `service-account-*`) **read only**.
   No action is placed in `rules.yaml: authz.role_action_matrix`, because a matrix line is a grant
   to every service-account holding the role and cannot be vetoed (#3765/#3734).
 - `AUTHZ_ENFORCE=true` from the first rollout. Policy tests carry a must-deny for every allow.
+- **No pension action ends in `.read` or `.list`.** Base `rest.rego` grants every such action to
+  any HUMAN-classified principal holding `ROLE_OPERATOR`/`ROLE_ADMIN` (`operator-read-any`) or
+  `ROLE_COMPLIANCE` (`compliance-read-any`), and the shared M2M account
+  `service-account-openbank-services` is classified HUMAN and holds those roles in at least one
+  realm. A per-service rule cannot veto a base allow, so the reads are named `*.inspect`
+  (`pension.contract.inspect`, `.exit.inspect`, `.funding.inspect`, `.death.inspect`,
+  `.onboarding.inspect`, `.transfer.inspect`, `.operator.inspect`) and reach only the edge and real
+  staff through the narrow rules. Measured with `opa eval` on the bundle: before the rename the
+  shared account was allowed all seven reads, after it none. `pension_rest_ext_test.rego` carries
+  a must-deny per action for that account with each of the three roles.
 
 ## 4. STRIDE
 
@@ -174,6 +184,7 @@ not reversed automatically.
 
 ## 6. Change log
 
+- 2026-10-10 — §3: pension reads renamed `*.read` → `*.inspect` so the shared M2M account no longer reaches them through base `operator-read-any`/`compliance-read-any` (#12371).
 - 2026-10-10 — §4a: pension → pension-fund trust boundary (fund-administration port, #12355).
 - 2026-10-09 — initial model with the S1 bootstrap (ADR-0334, #12350).
 - 2026-10-09 — S5 exits: termination, payout, death claims (§4b).

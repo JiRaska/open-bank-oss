@@ -69,7 +69,7 @@ class PensionAnnuityResource {
 
     @GET
     @Operation(summary = "The offers, the selection and the purchase progress of one annuity payout")
-    @Authorize(action = "pension.annuity.read", resource = "#contractId")
+    @Authorize(action = "pension.annuity.inspect", resource = "#contractId")
     suspend fun get(
         @PathParam("contractId") contractId: UUID,
         @PathParam("payoutId") payoutId: UUID,
