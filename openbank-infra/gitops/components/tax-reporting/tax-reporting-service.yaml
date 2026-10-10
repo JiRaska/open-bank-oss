@@ -121,8 +121,7 @@ spec:
             - name: PENSION_COMPANY_LEDGER_URL
               value: http://ledger-service.ledger-pension-co.svc:8101
             # openbank.statutory-returns.company-books.opened (CompanyBooks, #12496): the first day
-            # of the pension company's books. OWNER DECISION — PLACEHOLDER: 2027-01-01, the first
-            # day of the year the ledger-pension-co instance is assumed to go live. Every
+            # of the pension company's books: 2027-01-01, confirmed by owner 2026-10-10. Every
             # company-books return sums frozen periods from this date, so it must equal the real
             # opening date of the company's books on this instance; unset = returns refused (503).
             - name: OPENBANK_STATUTORY_RETURNS_COMPANY_BOOKS_OPENED
