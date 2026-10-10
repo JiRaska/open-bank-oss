@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 """Verify real push/PR service selection, including external JVM test inputs."""
-import json,os,re,subprocess,tempfile,yaml
+import json,os,subprocess,tempfile,yaml
 from pathlib import Path
 root=Path(__file__).resolve().parents[2]
 w=yaml.safe_load((root/'.github/workflows/services-ci.yml').read_text())
