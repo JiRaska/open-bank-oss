@@ -12,8 +12,7 @@
 ## Regulatory Basis
 
 Applicability depends on the legal entity, service and deployment. This historical Docker
-runbook is not an approved legal mapping or evidence of production compliance. For the pension
-buyer, record the applicable obligations and accountable owner in
+runbook is not an approved legal mapping or evidence of production compliance. For pension deployments, track configurable jurisdiction-specific requirements in
 [#12475](https://github.com/JiRaska/open-bank-oss/issues/12475).
 
 Where applicable, [DORA](https://eur-lex.europa.eu/eli/reg/2022/2554/oj) covers continuity and
@@ -211,7 +210,7 @@ Read it with [ADR-0186](../adr/0186-single-region-deployment-and-disaster-recove
 which records the sandbox's single-region posture and aspirational recovery objectives. Reconcile
 the chosen service tier, business-impact assessment and tested deployment before agreeing an SLA;
 do not combine targets from different environments into a promise. Pension-specific measured
-restore, data reconciliation and buyer acceptance remain
+restore and data reconciliation verification remain
 [#12479](https://github.com/JiRaska/open-bank-oss/issues/12479). A historical Docker exercise does
 not establish recovery of the current pension database, workflows or external payments.
 

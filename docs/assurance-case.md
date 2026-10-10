@@ -104,28 +104,25 @@ Known, openly tracked gaps (honesty is part of the assurance argument):
 - **Reproducible builds** are not yet bit-for-bit verified (jar timestamps); candidate
   follow-up tracked in the SSDLC audit backlog.
 
-## Pension buyer assurance
+## Pension-platform transition verification
 
-The pension acceptance index is [#12350](https://github.com/JiRaska/open-bank-oss/issues/12350),
-with release and supplier acceptance in [#12479](https://github.com/JiRaska/open-bank-oss/issues/12479).
-Reuse this assurance case and the service threat models, but attach each customer-facing claim to
-an exact source/image/configuration, environment, test or independent review, limitations, owner
-and review date. Distinguish planned, implemented, locally tested, reviewed, deployed and accepted.
-An earlier green run does not establish a later revision's readiness.
+The reusable transition capability index is [#12350](https://github.com/JiRaska/open-bank-oss/issues/12350).
+It covers product compatibility, independent financial reconciliation, migration, portable export,
+provider isolation, recovery and reporting. Verification records must identify the exact revision,
+configuration, environment, result and limitations. Earlier results do not establish a later
+revision's readiness.
 
-The [synthetic demo](../openbank-pension-service/demo/README.md) proves the scenarios it runs in
-disposable test contexts. It does not establish a connected production money path, real-token
-cross-provider isolation, statutory submission acceptance or the buyer's migration acceptance.
-The [pension TLS runbook](../openbank-pension-service/src/main/resources/docs/README.en.md)
-describes an additive server-authentication stage; that stage does not establish mutual TLS.
+The [synthetic demo](../openbank-pension-service/demo/README.md) verifies its documented scenarios
+in disposable test contexts. It does not establish a connected production money path, real-token
+cross-provider isolation, regulatory submission or migration readiness. The
+[pension TLS runbook](../openbank-pension-service/src/main/resources/docs/README.en.md) describes
+an additive server-authentication stage; that stage does not establish mutual TLS.
 
-Buyer acceptance additionally requires independent financial reconciliation, agreed legacy/product
-scope, migration and exit rehearsal, tested recovery and capacity, support and incident response,
-and applicable supplier/data-processing terms. Track these in #12475, #12477, #12478, #12472 and
-#12479 rather than treating a general platform control or certification badge as evidence of the
-whole pension service. Synthetic development remains independent of production legal-entity and
-ownership approvals. Restricted audit findings and contractual evidence do not belong in this
-public repository.
+Migration from any pension administration system requires explicit product compatibility,
+reconciled data, repeatable cutover and recovery procedures, and independently usable exports.
+Track these general capabilities in #12475, #12477, #12478, #12472 and #12479. Synthetic development
+remains independent of production legal-entity configuration and approvals. Customer-specific
+assessments, contracts and restricted audit evidence do not belong in this public repository.
 
 ## Maintenance
 
