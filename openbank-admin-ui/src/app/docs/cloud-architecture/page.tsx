@@ -3,11 +3,13 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 'use client'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Cloud, Info, CheckCircle2, CircleDashed, Circle, X, RefreshCw, Wifi, WifiOff, Minus } from 'lucide-react'
 import type { InfraStatusResult } from '@/lib/infra/probes'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
-import { eksVersion, nodeGroupSummary } from '@/lib/platform-versions'
+import { eksVersion } from '@/lib/platform-versions'
+import { LIVE_UNAVAILABLE_NOTE, nodesText, versionText, type PlatformView } from '@/lib/platform-view'
+import { usePlatformView } from '@/lib/use-platform-view'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 
 // Bilingual string tuple: [Czech, English] — spread into t(cs, en) at render.
@@ -68,18 +70,22 @@ const EDGE: Node[] = [
 ]
 
 // --- AWS substrate (only AWS-managed layer per ADR-0027) --------------------
-const SUBSTRATE: Node[] = [
+// EKS / node-group rows depend on LIVE data (Prometheus) + declared (terraform), so they are built per render.
+const substrateNodes = (view: PlatformView | null): Node[] => {
+  const k8s = view ? versionText(view.items.kubernetes) : `${eksVersion()} (${LIVE_UNAVAILABLE_NOTE})`
+  return [
   node('s3-state', ['S3 — tofu state', 'S3 — tofu state'], 'live', ['Vzdálený verzovaný bucket se stavem OpenTofu + bootstrap. Aplikováno.', 'Remote versioned OpenTofu state bucket + bootstrap. Applied.']),
   node('runner', ['EC2 / Mac mini CI runner', 'EC2 / Mac mini CI runner'], 'live', ['Self-hosted pool GitHub Actions runnerů (ADR-0040: Mac mini aktivní, EC2 studená záloha). Běží.', 'Self-hosted GitHub Actions runner pool (ADR-0040: Mac mini active, EC2 cold standby). Running.']),
   node('vpc', ['VPC — 3 AZ', 'VPC — 3 AZ'], 'live', ['modules/network: privátní adresní prostor, IGW, veřejné+privátní subnety napříč 3 AZ, jediný NAT (FinOps), S3 gateway + interface VPC endpointy. Aplikováno.', 'modules/network: private address space, IGW, public+private subnets across 3 AZ, single NAT (FinOps), S3 gateway + interface VPC endpoints. Applied.']),
-  node('eks', [`EKS control plane (${eksVersion()})`, `EKS control plane (${eksVersion()})`], 'live', [`aws_eks_cluster v${eksVersion()}, ACTIVE. OIDC/IRSA, EKS Pod Identity, authentication_mode=API (žádný aws-auth configmap), logy control-plane do CloudWatch. Addony: vpc-cni, kube-proxy, coredns, pod-identity.`, `aws_eks_cluster v${eksVersion()}, ACTIVE. OIDC/IRSA, EKS Pod Identity, authentication_mode=API (no aws-auth configmap), control-plane logs to CloudWatch. Addons: vpc-cni, kube-proxy, coredns, pod-identity.`]),
-  node('nodegroup', ['Bootstrap node group (Graviton)', 'Bootstrap node group (Graviton)'], 'live', [`AL2023 spravovaná node group (${nodeGroupSummary()}). Nese systémové pody, Karpenter controller a ArgoCD; zbytek provisionuje Karpenter.`, `AL2023 managed node group (${nodeGroupSummary()}). Carries system pods, Karpenter controller and ArgoCD; Karpenter provisions the rest.`]),
+  node('eks', [`EKS control plane (${k8s})`, `EKS control plane (${k8s})`], 'live', [`aws_eks_cluster v${k8s}, ACTIVE. OIDC/IRSA, EKS Pod Identity, authentication_mode=API (žádný aws-auth configmap), logy control-plane do CloudWatch. Addony: vpc-cni, kube-proxy, coredns, pod-identity.`, `aws_eks_cluster v${k8s}, ACTIVE. OIDC/IRSA, EKS Pod Identity, authentication_mode=API (no aws-auth configmap), control-plane logs to CloudWatch. Addons: vpc-cni, kube-proxy, coredns, pod-identity.`]),
+  node('nodegroup', ['Bootstrap node group (Graviton)', 'Bootstrap node group (Graviton)'], 'live', [`AL2023 spravovaná node group (${nodesText(view)}). Nese systémové pody, Karpenter controller a ArgoCD; zbytek provisionuje Karpenter.`, `AL2023 managed node group (${nodesText(view)}). Carries system pods, Karpenter controller and ArgoCD; Karpenter provisions the rest.`]),
   node('kms', ['KMS CMK', 'KMS CMK'], 'live', ['Zákaznicky spravovaný klíč pro envelope šifrování EKS secrets (aws_kms_key.secrets). Aplikováno.', 'Customer-managed key for EKS secrets envelope encryption (aws_kms_key.secrets). Applied.']),
   node('iam', ['IAM (cluster/node, OIDC, Karpenter)', 'IAM (cluster/node, OIDC, Karpenter)'], 'live', ['Role clusteru + uzlů, IRSA OIDC provider, IAM pro Karpenter controller/node přes EKS Pod Identity, SQS interruption queue. Aplikováno.', 'Cluster + node roles, IRSA OIDC provider, Karpenter controller/node IAM via EKS Pod Identity, SQS interruption queue. Applied.']),
   node('ecr', ['ECR', 'ECR'], 'live', ['Privátní container registry pro všechny image openbank-*-service. Aktivně používáno — image pushovány přes build-push-service.sh. Zatím nespravováno přes IaC (ruční vytváření ECR repo); zapojení do IaC je follow-up.', 'Private container registry for all openbank-*-service images. Actively used — images are pushed via build-push-service.sh. Not yet managed via IaC (manual ECR repository creation); IaC wiring is a follow-up.']),
   node('cloudtrail', ['CloudTrail + Config', 'CloudTrail + Config'], 'planned', ['Neměnný audit na úrovni účtu + config drift (podmínka go-live DORA čl. 12). Zatím není v IaC.', 'Immutable account-level audit + config drift (DORA Art. 12 go-live condition). Not yet in IaC.']),
   node('worm', ['S3 Object Lock (WORM archiv)', 'S3 Object Lock (WORM archive)'], 'planned', ['Write-once compliance archiv. ADR-0027 — zatím není v IaC.', 'Write-once compliance archive. ADR-0027 — not yet in IaC.']),
-]
+  ]
+}
 
 // --- EKS platform bootstrap (sandbox-platform root, day-2) ------------------
 const BOOTSTRAP: Node[] = [
@@ -184,6 +190,9 @@ function ArchitectureArrow({ label }: { label?: string }) {
 export default function CloudArchitecturePage() {
   const { t, language } = useLanguage()
   const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
+  const view = usePlatformView()
+  const substrate = useMemo(() => substrateNodes(view), [view])
+  const k8sText = view ? versionText(view.items.kubernetes) : `${eksVersion()} (${LIVE_UNAVAILABLE_NOTE})`
   const [selected, setSelected] = useState<Node | null>(null)
   const [liveStatus, setLiveStatus] = useState<Record<string, InfraStatusResult> | null>(null)
   const [checkedAt, setCheckedAt] = useState<string | null>(null)
@@ -270,12 +279,12 @@ export default function CloudArchitecturePage() {
           <ArchitectureArrow label={t('TLS (ACM)', 'TLS (ACM)')} />
 
           <ArchitectureZone title={t('AWS substrate', 'AWS substrate')} subtitle={t('sandbox účet · regionální nasazení · jediná AWS-managed vrstva', 'sandbox account · regional deployment · the only AWS-managed layer')} accent="var(--warning-text)">
-            <div style={wrap}>{SUBSTRATE.map(n => <CloudNodeBox key={n.id} n={n} selectedId={selected?.id ?? null} liveStatus={liveStatus} t={t} onSelect={selectNode} />)}</div>
+            <div style={wrap}>{substrate.map(n => <CloudNodeBox key={n.id} n={n} selectedId={selected?.id ?? null} liveStatus={liveStatus} t={t} onSelect={selectNode} />)}</div>
           </ArchitectureZone>
 
           <ArchitectureArrow />
 
-          <ArchitectureZone title={t('EKS cluster — openbank-sandbox', 'EKS cluster — openbank-sandbox')} subtitle={t(`k8s ${eksVersion()} · Karpenter Graviton/Spot autoscaling`, `k8s ${eksVersion()} · Karpenter Graviton/Spot autoscaling`)} accent="var(--accent-text)">
+          <ArchitectureZone title={t('EKS cluster — openbank-sandbox', 'EKS cluster — openbank-sandbox')} subtitle={t(`k8s ${k8sText} · Karpenter Graviton/Spot autoscaling`, `k8s ${k8sText} · Karpenter Graviton/Spot autoscaling`)} accent="var(--accent-text)">
             <div style={{ marginBottom: '12px' }}>
               <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '6px' }}>
                 {t('Platform bootstrap (sandbox-platform → seeduje GitOps)', 'Platform bootstrap (sandbox-platform → seeds GitOps)')}

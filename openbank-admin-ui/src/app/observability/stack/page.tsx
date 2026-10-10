@@ -11,6 +11,8 @@ import {
 } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { lokiAppVersion } from '@/lib/platform-versions'
+import { LIVE_UNAVAILABLE_NOTE, formatVersion, versionText } from '@/lib/platform-view'
+import { usePlatformView } from '@/lib/use-platform-view'
 import { PageHeader } from '@/components/ui/PageHeader'
 
 // Static explainer — the LGTM(P) + GlitchTip correlation layer (ADR-0087), extended with
@@ -28,6 +30,10 @@ const DANGER = 'var(--danger)'
 
 export default function ObservabilityStackPage() {
   const { t } = useLanguage()
+  const view = usePlatformView()
+  // LIVE value first, declared alongside, DRIFT flagged; declared-only (labelled) while live is unavailable.
+  const lokiText = view ? versionText(view.items.loki) : `${lokiAppVersion()} (${LIVE_UNAVAILABLE_NOTE})`
+  const lokiShort = view ? formatVersion(view.items.loki).primary : lokiAppVersion()
 
   const pillars: Pillar[] = [
     {
@@ -37,7 +43,7 @@ export default function ObservabilityStackPage() {
              'Metrics — rate/error/latency, business counters, exemplars into traces.'),
     },
     {
-      icon: <ScrollText size={18} />, name: 'Loki', store: t(`Loki ${lokiAppVersion()} · S3`, `Loki ${lokiAppVersion()} · S3`),
+      icon: <ScrollText size={18} />, name: 'Loki', store: t(`Loki ${lokiText} · S3`, `Loki ${lokiText} · S3`),
       color: WARNING,
       tag: t('Logy — strukturované JSON s trace_id; trvanlivé v S3, retence 7 dní (DORA).',
              'Logs — structured JSON with trace_id; durable in S3, 7-day retention (DORA).'),
@@ -183,7 +189,7 @@ export default function ObservabilityStackPage() {
 
           {/* Stores */}
           <SvgBox x={70} y={270} w={195} h={58} title="Prometheus" sub={t('metriky + exempláry', 'metrics + exemplars')} accent={DANGER} small />
-          <SvgBox x={285} y={270} w={195} h={58} title={`Loki ${lokiAppVersion()}`} sub={t('logy + trace_id · S3', 'logs + trace_id · S3')} accent={WARNING} small />
+          <SvgBox x={285} y={270} w={195} h={58} title={`Loki ${lokiShort}`} sub={t('logy + trace_id · S3', 'logs + trace_id · S3')} accent={WARNING} small />
           <SvgBox x={500} y={270} w={195} h={58} title="Tempo" sub={t('traces + span-metrics · S3', 'traces + span-metrics · S3')} accent={ACCENT} small />
           <SvgBox x={715} y={270} w={195} h={58} title="Pyroscope" sub={t('profily', 'profiles')} accent={SUCCESS} small />
 

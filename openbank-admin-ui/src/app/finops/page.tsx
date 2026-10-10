@@ -58,7 +58,7 @@ interface LifecycleData {
   minRunwayDays: number
   versions: EksVersion[]
   components: PlatformComponent[]
-  dataSource: 'file' | 'embedded'
+  dataSource: 'live' | 'snapshot'
   lastRefreshed: string
   adrRef: string
 }
@@ -697,7 +697,7 @@ function FinOpsContent() {
                 </span>
               </div>
               <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
-                {t('Zdroj', 'Source')}: {lifecycle.dataSource === 'file' ? lifecycle.lastRefreshed : t('Zabudovaná data', 'Embedded data')}
+                {t('Zdroj', 'Source')}: {lifecycle.dataSource === 'live' ? t('Živě (endoflife.date)', 'Live (endoflife.date)') : `${t('Snapshot', 'Snapshot')} ${lifecycle.lastRefreshed}`}
               </span>
             </div>
 

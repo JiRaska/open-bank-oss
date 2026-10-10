@@ -3,7 +3,8 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 import { NextResponse } from 'next/server'
-import { componentVersion, platformVersions } from '@/lib/platform-versions'
+import { getEksLifecycle, getPlatformView } from '@/lib/live-platform-versions'
+import { versionText } from '@/lib/platform-view'
 
 export const dynamic = 'force-dynamic'
 
@@ -24,15 +25,18 @@ function runwayStatus(days: number): 'ok' | 'warn' | 'critical' {
 }
 
 export async function GET() {
-  // Everything EKS-related comes from platform-versions.json (generated from variables.tf and
-  // eks-version-lifecycle.json). No embedded table and no default version: a missing snapshot is
-  // reported as unavailable, never as a guessed cluster version.
-  if (!platformVersions) {
-    return NextResponse.json({ error: 'platform_versions_snapshot_missing' }, { status: 503, headers: { 'Cache-Control': 'no-store' } })
+  // EKS support dates: endoflife.date at runtime (24h cache), falling back to the build-time
+  // snapshot. The running version is LIVE (Prometheus) with the declared value alongside; if neither
+  // is known the route reports unavailable instead of guessing a cluster version.
+  const [view, eol] = await Promise.all([getPlatformView(), getEksLifecycle()])
+  const k8s = view.items.kubernetes
+  const liveMinor = k8s.live?.[0]?.version.split('.').slice(0, 2).join('.') ?? null
+  const currentVersion = liveMinor ?? k8s.declared
+  if (!eol || !currentVersion) {
+    return NextResponse.json({ error: 'platform_versions_unavailable' }, { status: 503, headers: { 'Cache-Control': 'no-store' } })
   }
-  const lifecycle = platformVersions.eksLifecycle
-  const dataSource = 'file' as const
-  const currentVersion = platformVersions.kubernetesVersion
+  const lifecycle = eol.lifecycle
+  const dataSource = eol.source === 'snapshot' ? 'snapshot' as const : 'live' as const
   const now = new Date()
 
   const versions = Object.entries(lifecycle.versions)
@@ -75,18 +79,18 @@ export async function GET() {
   // honestly. A formal support-lifecycle countdown only exists where upstream
   // publishes one (EKS, PostgreSQL major). Self-hosted operators roll versions
   // continuously, so `standardEnd`/`daysRemaining` are null (rendered "rolling")
-  // rather than a fabricated date. Versions overridable via env for other envs.
+  // rather than a fabricated date. Versions are LIVE from Prometheus with the declared value alongside (see lib/live-platform-versions.ts).
   const components = [
     {
       name: 'Amazon EKS', kind: 'kubernetes',
-      version: currentVersion, tier: currentTier,
+      version: versionText(k8s), tier: currentTier,
       managedBy: 'AWS-managed control plane',
       standardEnd: current?.standardSupportEnds ?? null,
       daysRemaining: current?.daysToStandardEnd ?? null,
     },
     {
       name: 'PostgreSQL', kind: 'database',
-      version: componentVersion('postgres'),
+      version: versionText(view.items.postgres),
       tier: 'supported',
       managedBy: 'CloudNativePG (in-cluster operator)',
       // No pinned source for a community EOL date: shown as rolling, never a typed date.
@@ -95,15 +99,15 @@ export async function GET() {
     },
     {
       name: 'Apache Kafka', kind: 'messaging',
-      version: componentVersion('kafka'),
+      version: versionText(view.items.kafka),
       tier: 'rolling',
-      managedBy: `Strimzi ${componentVersion('strimziOperator')} (in-cluster operator)`,
+      managedBy: `Strimzi ${versionText(view.items.strimziOperator)} (in-cluster operator)`,
       standardEnd: null,
       daysRemaining: null,
     },
     {
       name: 'Apicurio Registry', kind: 'messaging',
-      version: componentVersion('apicurio'),
+      version: versionText(view.items.apicurio),
       tier: 'rolling',
       managedBy: 'Schema registry (in-cluster)',
       standardEnd: null,
@@ -111,7 +115,7 @@ export async function GET() {
     },
     {
       name: 'Valkey (Redis-compatible)', kind: 'cache',
-      version: componentVersion('valkey'),
+      version: versionText(view.items.valkey),
       tier: 'rolling',
       managedBy: 'Self-hosted (in-cluster)',
       standardEnd: null,
@@ -135,6 +139,7 @@ export async function GET() {
     versions,
     components,
     dataSource,
+    platform: view,
     lastRefreshed: lifecycle._meta.last_refreshed,
     adrRef: 'ADR-0054',
   }, { headers: { 'Cache-Control': 'no-store' } })
