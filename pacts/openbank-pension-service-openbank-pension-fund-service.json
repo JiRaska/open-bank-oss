@@ -1,0 +1,754 @@
+{
+  "consumer": {
+    "name": "openbank-pension-service"
+  },
+  "interactions": [
+    {
+      "description": "GET the unit holdings of a pension contract whose fund has no published NAV yet",
+      "providerStates": [
+        {
+          "name": "a pension contract holds units in a fund with no published NAV"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/contracts/7a1e0000-0000-4000-8000-0000000000c2/holdings"
+      },
+      "response": {
+        "body": {
+          "contractId": "7a1e0000-0000-4000-8000-0000000000c2",
+          "holdings": [
+            {
+              "currency": "CZK",
+              "fundId": "7a1e0000-0000-4000-8000-0000000000f2",
+              "navDate": null,
+              "navPerUnit": null,
+              "units": 40.000000,
+              "value": null
+            }
+          ]
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.contractId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.holdings": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 1
+                }
+              ]
+            },
+            "$.holdings[*].fundId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.holdings[*].units": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json.*"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET the fund strategies a pension contract may elect",
+      "providerStates": [
+        {
+          "name": "a pension contract holds units priced at a published NAV"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/strategies"
+      },
+      "response": {
+        "body": [
+          {
+            "allocations": [
+              {
+                "fundId": "7a1e0000-0000-4000-8000-0000000000f1",
+                "weight": 1
+              }
+            ],
+            "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+            "name": "BALANCED",
+            "status": "ACTIVE"
+          }
+        ],
+        "generators": {
+          "body": {
+            "$[*].id": {
+              "type": "Uuid"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 1
+                }
+              ]
+            },
+            "$[*].allocations": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 1
+                }
+              ]
+            },
+            "$[*].allocations[*].fundId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$[*].allocations[*].weight": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$[*].id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$[*].name": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].status": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "ACTIVE|CLOSED"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json.*"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET the priced unit transactions of a pension contract",
+      "providerStates": [
+        {
+          "name": "a pension contract holds units priced at a published NAV"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/contracts/7a1e0000-0000-4000-8000-0000000000c1/transactions"
+      },
+      "response": {
+        "body": [
+          {
+            "amount": 125.00,
+            "contractId": "7a1e0000-0000-4000-8000-0000000000c1",
+            "fundId": "7a1e0000-0000-4000-8000-0000000000f1",
+            "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+            "navId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+            "navPerUnit": 1.250000,
+            "pricedAt": "2026-10-01T16:00:00Z",
+            "type": "SUBSCRIBE",
+            "units": 100.000000
+          }
+        ],
+        "generators": {
+          "body": {
+            "$[*].id": {
+              "type": "Uuid"
+            },
+            "$[*].navId": {
+              "type": "Uuid"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 1
+                }
+              ]
+            },
+            "$[*].amount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$[*].contractId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$[*].fundId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$[*].id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$[*].navId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$[*].navPerUnit": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$[*].pricedAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "SUBSCRIBE|REDEEM|SWITCH_OUT|SWITCH_IN|FEE"
+                }
+              ]
+            },
+            "$[*].units": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json.*"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET the unit holdings of a pension contract priced at a published NAV",
+      "providerStates": [
+        {
+          "name": "a pension contract holds units priced at a published NAV"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/contracts/7a1e0000-0000-4000-8000-0000000000c1/holdings"
+      },
+      "response": {
+        "body": {
+          "contractId": "7a1e0000-0000-4000-8000-0000000000c1",
+          "holdings": [
+            {
+              "currency": "CZK",
+              "fundId": "7a1e0000-0000-4000-8000-0000000000f1",
+              "navDate": "2000-01-31",
+              "navPerUnit": 1.250000,
+              "units": 100.000000,
+              "value": 125.00
+            }
+          ],
+          "pendingOrders": [
+            {
+              "fundId": "7a1e0000-0000-4000-8000-0000000000f1",
+              "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+              "placedAt": "2026-10-01T08:00:00Z",
+              "status": "PENDING",
+              "type": "SUBSCRIBE"
+            }
+          ]
+        },
+        "generators": {
+          "body": {
+            "$.holdings[*].navDate": {
+              "format": "yyyy-MM-dd",
+              "type": "Date"
+            },
+            "$.pendingOrders[*].id": {
+              "type": "Uuid"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.contractId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.holdings": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 1
+                }
+              ]
+            },
+            "$.holdings[*].fundId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.holdings[*].navDate": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "format": "yyyy-MM-dd",
+                  "match": "date"
+                }
+              ]
+            },
+            "$.holdings[*].navPerUnit": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.holdings[*].units": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.holdings[*].value": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.pendingOrders": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 1
+                }
+              ]
+            },
+            "$.pendingOrders[*].fundId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.pendingOrders[*].id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.pendingOrders[*].placedAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.pendingOrders[*].type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "SUBSCRIBE|REDEEM|SWITCH_OUT|SWITCH_IN"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json.*"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "POST a REDEEM unit order in units for a pension contract with an Idempotency-Key",
+      "providerStates": [
+        {
+          "name": "a pension contract holds units priced at a published NAV"
+        }
+      ],
+      "request": {
+        "body": {
+          "fundId": "7a1e0000-0000-4000-8000-0000000000f1",
+          "type": "REDEEM",
+          "units": 10.000000
+        },
+        "headers": {
+          "Content-Type": "application/json",
+          "Idempotency-Key": "15e84f512a52f6b8bbfde811ac547ec5e9b02e1e29e93d78acc6e4ac45cff69a"
+        },
+        "matchingRules": {
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json.*"
+                }
+              ]
+            },
+            "Idempotency-Key": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{64}"
+                }
+              ]
+            }
+          }
+        },
+        "method": "POST",
+        "path": "/api/v1/contracts/7a1e0000-0000-4000-8000-0000000000c1/orders"
+      },
+      "response": {
+        "body": {
+          "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+          "status": "PENDING"
+        },
+        "generators": {
+          "body": {
+            "$.id": {
+              "type": "Uuid"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json.*"
+                }
+              ]
+            }
+          }
+        },
+        "status": 202
+      }
+    },
+    {
+      "description": "POST a SUBSCRIBE unit order for a pension contract with an Idempotency-Key",
+      "providerStates": [
+        {
+          "name": "a pension contract holds units priced at a published NAV"
+        }
+      ],
+      "request": {
+        "body": {
+          "amount": 1000.00,
+          "fundId": "7a1e0000-0000-4000-8000-0000000000f1",
+          "type": "SUBSCRIBE"
+        },
+        "headers": {
+          "Content-Type": "application/json",
+          "Idempotency-Key": "519ab6d76094de854573571a0f9d5bbe5fb8841fece3789df5835c558948fa9d"
+        },
+        "matchingRules": {
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json.*"
+                }
+              ]
+            },
+            "Idempotency-Key": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{64}"
+                }
+              ]
+            }
+          }
+        },
+        "method": "POST",
+        "path": "/api/v1/contracts/7a1e0000-0000-4000-8000-0000000000c3/orders"
+      },
+      "response": {
+        "body": {
+          "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+          "status": "PENDING"
+        },
+        "generators": {
+          "body": {
+            "$.id": {
+              "type": "Uuid"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json.*"
+                }
+              ]
+            }
+          }
+        },
+        "status": 202
+      }
+    },
+    {
+      "description": "GET pension contract holdings with no M2M identity",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/contracts/7a1e0000-0000-4000-8000-0000000000c1/holdings"
+      },
+      "response": {
+        "status": 401
+      }
+    },
+    {
+      "description": "POST a pension unit order with no M2M identity",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "body": {
+          "amount": 1000.00,
+          "fundId": "7a1e0000-0000-4000-8000-0000000000f1",
+          "type": "SUBSCRIBE"
+        },
+        "headers": {
+          "Content-Type": "application/json",
+          "Idempotency-Key": "519ab6d76094de854573571a0f9d5bbe5fb8841fece3789df5835c558948fa9d"
+        },
+        "matchingRules": {
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json.*"
+                }
+              ]
+            },
+            "Idempotency-Key": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{64}"
+                }
+              ]
+            }
+          }
+        },
+        "method": "POST",
+        "path": "/api/v1/contracts/7a1e0000-0000-4000-8000-0000000000c3/orders"
+      },
+      "response": {
+        "status": 401
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-pension-fund-service"
+  }
+}

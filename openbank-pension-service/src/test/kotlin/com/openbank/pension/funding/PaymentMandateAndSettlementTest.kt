@@ -50,6 +50,11 @@ class PaymentMandateAndSettlementTest {
         override suspend fun markCancelled(id: UUID, at: Instant) {
             rows[id] = rows.getValue(id).copy(status = PaymentMandateStatus.CANCELLED, updatedAt = at)
         }
+
+        override suspend fun list(contractId: UUID?, status: PaymentMandateStatus?, limit: Int) = rows.values
+            .filter { (contractId == null || it.contractId == contractId) && (status == null || it.status == status) }
+            .sortedByDescending { it.createdAt }
+            .take(limit)
     }
 
     private class Port : PaymentMandatePort {

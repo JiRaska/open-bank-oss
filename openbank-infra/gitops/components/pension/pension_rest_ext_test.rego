@@ -406,3 +406,54 @@ test_compliance_may_not_write_annuity_partners if {
 		"action": "pension.operator.annuity-write",
 	}
 }
+
+# --- participant valuation + operator mandates list (#12350) ------------------------------------
+
+test_edge_may_read_a_contract_valuation if {
+	rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": pension_edge, "roles": ["ROLE_API"]},
+		"action": "pension.contract.read",
+	}
+}
+
+test_shared_api_service_account_may_not_read_a_contract_valuation if {
+	not rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_API"]},
+		"action": "pension.contract.read",
+	}
+}
+
+test_operator_may_list_mandates if {
+	rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
+		"action": "pension.operator.mandate-read",
+	}
+}
+
+test_compliance_may_list_mandates if {
+	rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "carol", "roles": ["ROLE_COMPLIANCE"]},
+		"action": "pension.operator.mandate-read",
+	}
+}
+
+test_edge_may_not_list_mandates if {
+	not rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": pension_edge, "roles": ["ROLE_API", "ROLE_OPERATOR"]},
+		"action": "pension.operator.mandate-read",
+	}
+}
+
+test_service_account_with_operator_role_may_not_list_mandates if {
+	not rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]},
+		"action": "pension.operator.mandate-read",
+	}
+}
+
+test_customer_role_may_not_list_mandates if {
+	not rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "bob", "roles": ["ROLE_CUSTOMER"]},
+		"action": "pension.operator.mandate-read",
+	}
+}

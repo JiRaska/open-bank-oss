@@ -33,6 +33,9 @@ interface PaymentMandateRepository {
     suspend fun findById(id: UUID): PaymentMandate?
 
     suspend fun markCancelled(id: UUID, at: Instant)
+
+    /** Staff view (operator mandates list): newest first, optionally for one contract and/or status. */
+    suspend fun list(contractId: UUID?, status: PaymentMandateStatus?, limit: Int): List<PaymentMandate>
 }
 
 /**
@@ -94,6 +97,9 @@ class ForeignDebtorAccountException :
 
 class PaymentMandateNotFoundException(id: UUID) : NoSuchElementException("payment mandate $id not found")
 
+/** Upper bound of one operator mandates-list page. */
+const val MAX_MANDATE_LIST = 200
+
 /**
  * Sets up and cancels the participant's regular payment (ADR-0334 §4 Contribute, #12378).
  *
@@ -112,6 +118,12 @@ class PaymentMandateService(
     private val sca: ScaVerificationPort,
     private val clock: Clock,
 ) {
+    /** The operator mandates list; staff-only at the resource and in OPA. [limit] is 1..[MAX_MANDATE_LIST]. */
+    suspend fun list(contractId: UUID?, status: PaymentMandateStatus?, limit: Int): List<PaymentMandate> {
+        require(limit in 1..MAX_MANDATE_LIST) { "query parameter 'limit' must be between 1 and $MAX_MANDATE_LIST" }
+        return mandates.list(contractId, status, limit)
+    }
+
     /**
      * Binds the participant's account to a recurring debit, so it is SCA-gated like every sibling
      * (mandate cancel, payout confirm, payout-account change): the single-use challenge must sign

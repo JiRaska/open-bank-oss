@@ -63,6 +63,16 @@ class PgPaymentMandates(private val client: Pool) : PaymentMandateRepository {
         ).execute(Tuple.of(id, at.atOffset(ZoneOffset.UTC))).awaitSuspending()
     }
 
+    override suspend fun list(contractId: UUID?, status: PaymentMandateStatus?, limit: Int): List<PaymentMandate> =
+        client.preparedQuery(
+            """
+            SELECT * FROM pension_payment_mandates
+            WHERE ($1::uuid IS NULL OR contract_id = $1) AND ($2::varchar IS NULL OR status = $2)
+            ORDER BY created_at DESC, id
+            LIMIT $3
+            """.trimIndent(),
+        ).execute(Tuple.of(contractId, status?.name, limit)).awaitSuspending().map { it.toMandate() }
+
     private suspend fun one(sql: String, args: Tuple): PaymentMandate? =
         client.preparedQuery(sql).execute(args).awaitSuspending().firstOrNull()?.toMandate()
 

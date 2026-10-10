@@ -246,3 +246,19 @@ allowed_reasons contains "operator-pension-annuity-manage" if {
 		"pension.operator.annuity-purchase",
 	}
 }
+
+# ---------------------------------------------------------------------------------------------
+# Participant valuation + operator mandates list (#12350, ADR-0334 final integration).
+#   pension.contract.read          — GET /contracts/{id}/valuation, /contracts/{id}/transactions
+#                                    (edge for the participant, staff as readers; rules above)
+#   pension.operator.mandate-read  — GET /operator/mandates (admin-ui mandates list)
+# Real human staff only: never a service-account holding ROLE_OPERATOR (#3765/#3734), never the
+# edge. The resource additionally refuses a request carrying a participant header.
+# ---------------------------------------------------------------------------------------------
+allowed_reasons contains "operator-pension-mandate-read" if {
+	input.principal.type == "HUMAN"
+	not startswith(input.principal.id, "service-account-")
+	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE"}
+	role in input.principal.roles
+	input.action == "pension.operator.mandate-read"
+}
