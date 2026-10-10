@@ -6,3 +6,9 @@
 # already removed from the file by 62616af1ef; this entry only clears the historical commit that
 # the per-PR BASE..HEAD scan still walks. It disappears from main on squash-merge.
 ecae95d1bbbc0ec02206c8450f0e4e86b48ed541:openbank-libs-domain/src/main/kotlin/com/openbank/libs/security/EgressPolicy.kt:rod-cislo:162
+
+# FALSE POSITIVE (#12419): iban-real matched CZ0708000000000000000099, a made-up "unknown IBAN"
+# in the sdd->account consumer pact (all-zero account digits; not a real account). The literal was
+# replaced with the safelisted CZ6508000000192000145981 in the next commit; this entry only
+# covers the intermediate commit still present in the PR's history (squash-merged, never on main).
+ed2bf55aedcbc9f9e99859b0d68f6c77351b9d03:pacts/openbank-sdd-service-openbank-account-service.json:iban-real:45
