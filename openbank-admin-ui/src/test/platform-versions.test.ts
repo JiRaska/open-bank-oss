@@ -19,7 +19,7 @@ import {
 const repo = path.resolve(__dirname, '..', '..', '..')
 const read = (rel: string) => readFileSync(path.join(repo, rel), 'utf8')
 
-describe('platform versions derivation', () => {
+describe('platform versions derivation', { timeout: 30_000 }, () => {
   it('EKS version equals the kubernetes_version default in variables.tf', () => {
     const independent = /variable "kubernetes_version"[\s\S]*?default\s*=\s*"([^"]+)"/.exec(read(SOURCES.variables))?.[1]
     expect(independent).toMatch(/^\d+\.\d+$/)

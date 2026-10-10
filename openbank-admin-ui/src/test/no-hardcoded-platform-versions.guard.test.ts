@@ -28,6 +28,8 @@ function walk(dir: string, out: string[] = []): string[] {
   return out
 }
 
+// Frozen live counts: "18 pods", "DaemonSet (18 podů)", "2 uzly Ready", "3 pody Running".
+const FROZEN_COUNT = /\b\d+\s+(?:pods?|podů|pody|uzl\w*|nodes?)\b(?:\s+(?:Ready|Running))?/i
 // `process.env.X_VERSION ?? '1.2'` : an env override with a typed default is a hardcoded version.
 const ENV_DEFAULT = /process\.env\.\w*VERSION\w*\s*(?:\?\?|\|\|)\s*['"`]\d/
 
@@ -38,7 +40,7 @@ function offenders(): string[] {
       if (/^\s*(\/\/|\*|\/\*)/.test(line)) return
       // 'AsyncAPI 3.0' is a spec version, not a platform version.
       const scan = line.replace(/AsyncAPI \d+\.\d+/gi, 'AsyncAPI')
-      if (HARDCODED.test(scan) || ENV_DEFAULT.test(scan)) hits.push(`${path.relative(SRC, file)}:${i + 1}: ${line.trim().slice(0, 140)}`)
+      if (HARDCODED.test(scan) || ENV_DEFAULT.test(scan) || FROZEN_COUNT.test(scan)) hits.push(`${path.relative(SRC, file)}:${i + 1}: ${line.trim().slice(0, 140)}`)
     })
   }
   return hits
@@ -54,6 +56,9 @@ describe('no hardcoded platform versions in UI source', () => {
     expect(ENV_DEFAULT.test("version: process.env.KAFKA_VERSION ?? '4.2.0',")).toBe(true)
     expect(ENV_DEFAULT.test("version: process.env.REDIS_VERSION ?? '7.4.9'")).toBe(true)
     expect(ENV_DEFAULT.test('const v = process.env.NODE_ENV ?? "x"')).toBe(false)
+    expect(FROZEN_COUNT.test('DaemonSet (18 podů) sbírá logy')).toBe(true)
+    expect(FROZEN_COUNT.test('3 pods Running in ns cert-manager')).toBe(true)
+    expect(FROZEN_COUNT.test('Živě: ${n} podů Running')).toBe(false)
     expect(HARDCODED.test('const label = `EKS ${pv.kubernetesVersion}`')).toBe(false)
   })
 

@@ -206,7 +206,8 @@ RUN set -e; \
     mkdir -p /pv-src/openbank-infra/aws/envs/sandbox-substrate /pv-src/openbank-infra/aws/finops; \
     cp /repo/openbank-infra/aws/envs/sandbox-substrate/variables.tf /repo/openbank-infra/aws/envs/sandbox-substrate/main.tf /pv-src/openbank-infra/aws/envs/sandbox-substrate/; \
     cp /repo/openbank-infra/aws/finops/eks-version-lifecycle.json /pv-src/openbank-infra/aws/finops/; \
-    cd /repo && find openbank-infra/gitops -name '*.yaml' | while read -r f; do mkdir -p "/pv-src/$(dirname "$f")"; cp "$f" "/pv-src/$f"; done; \
+    cd /repo && find openbank-infra/aws -name '*.tf' -not -path '*/.terraform/*' | while read -r f; do mkdir -p "/pv-src/$(dirname "$f")"; cp "$f" "/pv-src/$f"; done; \
+    find openbank-infra/gitops -name '*.yaml' | while read -r f; do mkdir -p "/pv-src/$(dirname "$f")"; cp "$f" "/pv-src/$f"; done; \
     test -s /pv-src/openbank-infra/gitops/components/kafka/kafka.yaml
 
 FROM --platform=$BUILDPLATFORM node:26-alpine@sha256:725aeba2364a9b16beae49e180d83bd597dbd0b15c47f1f28875c290bfd255b9 AS deps

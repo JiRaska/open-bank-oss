@@ -25,6 +25,12 @@ export interface NodeSummary {
   byType: { instanceType: string; capacityType: string | null; count: number }[]
 }
 
+export interface Inventory {
+  gitops: { apps: string[]; components: string[]; clickhouse: boolean; istio: boolean; cilium: boolean }
+  /** Environments whose IaC instantiates the resource type; empty = not defined/used anywhere. */
+  iac: Record<'route53' | 'cloudfront' | 'acm' | 'alb' | 'cloudtrail' | 'awsConfig' | 'objectLock', string[]>
+}
+
 export interface PlatformView {
   fetchedAt: string
   liveAvailable: boolean
@@ -32,6 +38,11 @@ export interface PlatformView {
   liveError: string | null
   items: Record<string, VersionItem>
   nodes: NodeSummary | null
+  /** Live Running pods per namespace / ready DaemonSet pods per `ns/name`; null when Prometheus is down. */
+  podsRunningByNamespace: Record<string, number> | null
+  daemonSetsReady: Record<string, number> | null
+  /** Build-time facts derived from gitops/apps and IaC (see scripts/lib/platform-versions.mjs). */
+  inventory: Inventory | null
   declaredNodeGroup: { instanceType: string; desiredSize: number; minSize: number; maxSize: number } | null
   eksLifecycleSource: 'live (endoflife.date)' | 'snapshot'
 }

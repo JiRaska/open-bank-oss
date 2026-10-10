@@ -8,6 +8,8 @@
 // the snapshot is missing it shows UNKNOWN rather than a guess (guarded by
 // src/test/no-hardcoded-platform-versions.guard.test.ts).
 
+import type { Inventory } from '@/lib/platform-view'
+
 export interface EksVersionEntry {
   eks_release: string
   end_of_standard_support: string
@@ -32,6 +34,7 @@ export interface PlatformVersions {
   nodeGroup: { instanceType: string; desiredSize: number; minSize: number; maxSize: number }
   loki: { chartVersion: string; appVersion: string }
   eksLifecycle: EksLifecycle
+  inventory: Inventory
   components: Record<'postgres' | 'valkey' | 'apicurio' | 'kafka' | 'strimziOperator', PinnedComponent | null>
   sources: Record<string, string>
 }

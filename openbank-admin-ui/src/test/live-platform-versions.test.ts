@@ -68,7 +68,10 @@ describe('parsers', () => {
 
 describe('live snapshot from mocked Prometheus', () => {
   const full = mockProm({
-    kubelet: [row({ git_version: 'v1.99.0-eks-aaa' }, 2)],
+    apiserver: [row({ git_version: 'v1.99.0-eks-aaa' }, 2)],
+    kubelet: [row({ git_version: 'v1.98.7-eks-bbb' }, 3)],
+    podsRunning: [row({ namespace: 'cert-manager' }, 3)],
+    daemonSetsReady: [row({ namespace: 'observability', daemonset: 'alloy' }, 7)],
     nodeTypes: [row({ label_node_kubernetes_io_instance_type: 'x9.big', label_karpenter_sh_capacity_type: 'spot' }, 2)],
     nodesReady: [row({}, 2)],
     nodesTotal: [row({}, 3)],
@@ -79,6 +82,9 @@ describe('live snapshot from mocked Prometheus', () => {
     const s = await fetchLiveSnapshot(full)
     expect(s.available).toBe(true)
     expect(s.kubernetes).toEqual([{ version: '1.99.0', count: 2 }])
+    expect(s.kubelets).toEqual([{ version: '1.98.7', count: 3 }])
+    expect(s.podsRunningByNamespace).toEqual({ 'cert-manager': 3 })
+    expect(s.daemonSetsReady).toEqual({ 'observability/alloy': 7 })
     expect(s.components.kafka).toEqual([{ version: '9.8.7', count: 3 }])
     expect(s.nodes).toEqual({ ready: 2, total: 3, byType: [{ instanceType: 'x9.big', capacityType: 'spot', count: 2 }] })
     expect(nodesText({ nodes: s.nodes, declaredNodeGroup: null } as never)).toContain('2/3 Ready')
@@ -100,7 +106,7 @@ describe('live snapshot from mocked Prometheus', () => {
     const s = await pending
     vi.useRealTimers()
     expect(s.available).toBe(false)
-    expect(s.error).toContain('aborted')
+    expect(s.error).toBe('prometheus_unavailable')
   })
 
   it('caches for 60s', async () => {
@@ -138,8 +144,33 @@ describe('drift detection and formatting', () => {
     expect(unavailable.items.kubernetes.status).toBe('live-unavailable')
     expect(unavailable.nodes).toBeNull()
 
-    const drifted = buildView(await fetchLiveSnapshot(mockProm({ kubelet: [row({ git_version: 'v1.1.0-eks-z' }, 1)], images: [row({ image: 'x' }, 1)] })), 'snapshot')
+    const drifted = buildView(await fetchLiveSnapshot(mockProm({ apiserver: [row({ git_version: 'v1.1.0-eks-z' }, 1)], images: [row({ image: 'x' }, 1)] })), 'snapshot')
     expect(drifted.items.kubernetes.status).toBe('drift')
+  })
+
+  it('control plane comes from the apiserver job only; kubelets are separate and skew is drift', async () => {
+    const skew = buildView(await fetchLiveSnapshot(mockProm({
+      apiserver: [row({ git_version: 'v1.99.0-eks-a' }, 2)],
+      kubelet: [row({ git_version: 'v1.98.7-eks-b' }, 3)],
+      images: [row({ image: 'x' }, 1)],
+    })), 'snapshot')
+    expect(skew.items.kubernetes.live).toEqual([{ version: '1.99.0', count: 2 }])
+    expect(skew.items.kubelet.live).toEqual([{ version: '1.98.7', count: 3 }])
+    expect(skew.items.kubelet.status).toBe('drift')
+
+    const aligned = buildView(await fetchLiveSnapshot(mockProm({
+      apiserver: [row({ git_version: 'v1.99.0-eks-a' }, 2)],
+      kubelet: [row({ git_version: 'v1.99.2-eks-b' }, 3)],
+      images: [row({ image: 'x' }, 1)],
+    })), 'snapshot')
+    expect(aligned.items.kubelet.status).toBe('match')
+  })
+
+  it('never exposes raw Prometheus error text', async () => {
+    const failing = vi.fn(async () => { throw new Error('connect ECONNREFUSED 10.1.2.3:9090') }) as unknown as typeof fetch
+    const v = buildView(await fetchLiveSnapshot(failing), 'snapshot')
+    expect(JSON.stringify(v)).not.toContain('10.1.2.3')
+    expect(v.liveError).toBe('prometheus_unavailable')
   })
 })
 

@@ -74,6 +74,13 @@ export function parseLifecycle(json, kubernetesVersion) {
   return lifecycle
 }
 
+// One read per file per process: four derivations walk the same ~400 manifests.
+const textCache = new Map()
+const readCached = file => {
+  if (!textCache.has(file)) textCache.set(file, readFileSync(file, 'utf8'))
+  return textCache.get(file)
+}
+
 function walkYaml(dir, out = []) {
   for (const name of readdirSync(dir)) {
     const p = path.join(dir, name)
@@ -90,7 +97,7 @@ export function collectImagePins(repoRoot, re) {
   for (const file of walkYaml(path.join(repoRoot, SOURCES.gitops))) {
     const rel = path.relative(repoRoot, file)
     const seen = new Set()
-    for (const m of readFileSync(file, 'utf8').matchAll(re)) seen.add(m[1])
+    for (const m of readCached(file).matchAll(re)) seen.add(m[1])
     for (const v of seen) (pins[v] ??= []).push(rel)
   }
   const versions = Object.keys(pins)
@@ -122,6 +129,57 @@ export function parseStrimziChart(yamlText) {
   return v
 }
 
+// Terraform resource types per inventory key. An IaC item is "present" only when an ENV
+// instantiates it (directly, or through a module that defines it) - a module nobody calls is not.
+const IAC_TYPES = {
+  route53: ['aws_route53_zone'],
+  cloudfront: ['aws_cloudfront_distribution'],
+  acm: ['aws_acm_certificate'],
+  alb: ['aws_lb', 'aws_alb'],
+  cloudtrail: ['aws_cloudtrail'],
+  awsConfig: ['aws_config_configuration_recorder'],
+  objectLock: ['aws_s3_bucket_object_lock_configuration'],
+}
+
+function tfText(dir) {
+  return readdirSync(dir).filter(f => f.endsWith('.tf')).map(f => readFileSync(path.join(dir, f), 'utf8')).join('\n')
+}
+
+export function deriveIac(repoRoot) {
+  const aws = path.join(repoRoot, 'openbank-infra', 'aws')
+  const modules = Object.fromEntries(
+    readdirSync(path.join(aws, 'modules')).map(m => [m, strip(tfText(path.join(aws, 'modules', m)))]),
+  )
+  const out = Object.fromEntries(Object.keys(IAC_TYPES).map(k => [k, []]))
+  for (const env of readdirSync(path.join(aws, 'envs'))) {
+    const dir = path.join(aws, 'envs', env)
+    if (!statSync(dir).isDirectory()) continue
+    let text = strip(tfText(dir))
+    for (const m of text.matchAll(/source\s*=\s*"[./]*\/modules\/([\w-]+)"/g)) text += '\n' + (modules[m[1]] ?? '')
+    for (const [key, types] of Object.entries(IAC_TYPES)) {
+      if (types.some(t => new RegExp(`resource\\s+"${t}"`).test(text))) out[key].push(env)
+    }
+  }
+  return out
+}
+
+export function deriveGitopsInventory(repoRoot) {
+  const gitops = path.join(repoRoot, SOURCES.gitops)
+  const names = dir => readdirSync(path.join(gitops, dir))
+  const apps = names('apps').filter(f => /\.ya?ml$/.test(f)).map(f => f.replace(/\.ya?ml$/, '')).sort()
+  const components = names('components').filter(f => statSync(path.join(gitops, 'components', f)).isDirectory()).sort()
+  if (apps.length === 0 || components.length === 0) throw new Error(`${SOURCES.gitops}: no apps/components found`)
+  const files = walkYaml(gitops).map(readCached)
+  const has = re => files.some(t => re.test(t))
+  return {
+    apps,
+    components,
+    clickhouse: has(/image:\s*\S*clickhouse\/clickhouse-server/),
+    istio: has(/(?:image:\s*\S*istio\/|chart:\s*istiod)/),
+    cilium: has(/(?:image:\s*\S*cilium\/cilium|chart:\s*cilium\s*$)/m),
+  }
+}
+
 export function derivePlatformVersions(repoRoot) {
   const read = rel => readFileSync(path.join(repoRoot, rel), 'utf8')
   const kubernetesVersion = parseKubernetesVersion(read(SOURCES.variables))
@@ -143,6 +201,7 @@ export function derivePlatformVersions(repoRoot) {
     nodeGroup,
     loki,
     eksLifecycle: lifecycle,
+    inventory: { gitops: deriveGitopsInventory(repoRoot), iac: deriveIac(repoRoot) },
     components,
     sources: {
       kubernetesVersion: SOURCES.variables,

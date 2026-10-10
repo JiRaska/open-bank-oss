@@ -97,35 +97,54 @@ export async function promQuery(query: string, fetchImpl: FetchLike = fetch): Pr
 
 // Metric names are kube-prometheus-stack defaults (kube-state-metrics, kubelet).
 export const QUERIES = {
-  kubelet: 'count by (git_version) (kubernetes_build_info)',
+  // Control plane (apiserver) and node kubelets are different subjects: a mixed query would
+  // blur an EKS minor upgrade that has not rolled onto the nodes yet.
+  apiserver: 'count by (git_version) (kubernetes_build_info{job="apiserver"})',
+  kubelet: 'count by (git_version) (kubernetes_build_info{job="kubelet"})',
   nodeTypes: 'count by (label_node_kubernetes_io_instance_type, label_karpenter_sh_capacity_type) (kube_node_labels)',
   nodesReady: 'count(kube_node_status_condition{condition="Ready",status="true"} == 1)',
   nodesTotal: 'count(kube_node_info)',
   images: 'count by (image) (kube_pod_container_info)',
+  podsRunning: 'sum by (namespace) (kube_pod_status_phase{phase="Running"})',
+  daemonSetsReady: 'sum by (namespace, daemonset) (kube_daemonset_status_number_ready)',
 } as const
 
 export interface LiveSnapshot {
   available: boolean
   fetchedAt: string
   error: string | null
+  /** Control plane (apiserver job). */
   kubernetes: LiveVersion[] | null
+  /** Node kubelets (kubelet job). */
+  kubelets: LiveVersion[] | null
+  podsRunningByNamespace: Record<string, number> | null
+  daemonSetsReady: Record<string, number> | null
   nodes: NodeSummary | null
   components: Record<string, LiveVersion[]>
 }
 
 export async function fetchLiveSnapshot(fetchImpl: FetchLike = fetch, now: () => Date = () => new Date()): Promise<LiveSnapshot> {
   const settled = await Promise.allSettled(Object.values(QUERIES).map(q => promQuery(q, fetchImpl)))
-  const [kubelet, nodeTypes, ready, total, images] = settled
+  const [apiserver, kubelet, nodeTypes, ready, total, images, pods, daemonSets] = settled
   const errors = settled.flatMap(s => (s.status === 'rejected' ? [String(s.reason)] : []))
   const rows = (s: PromiseSettledResult<PromRow[]>): PromRow[] | null => (s.status === 'fulfilled' ? s.value : null)
 
-  const kubeRows = rows(kubelet)
-  const kubeVersions = new Map<string, number>()
-  for (const r of kubeRows ?? []) {
-    const p = parseKubeGitVersion(r.metric.git_version ?? '')
-    if (p) kubeVersions.set(p.full, (kubeVersions.get(p.full) ?? 0) + r.value)
+  const versionsOf = (r: PromiseSettledResult<PromRow[]>): LiveVersion[] | null => {
+    const m = new Map<string, number>()
+    for (const row of rows(r) ?? []) {
+      const p = parseKubeGitVersion(row.metric.git_version ?? '')
+      if (p) m.set(p.full, (m.get(p.full) ?? 0) + row.value)
+    }
+    return m.size > 0 ? [...m].map(([version, count]) => ({ version, count })) : null
   }
-  const kubernetes = kubeVersions.size > 0 ? [...kubeVersions].map(([version, count]) => ({ version, count })) : null
+  const kubernetes = versionsOf(apiserver)
+  const kubelets = versionsOf(kubelet)
+  const toMap = (r: PromiseSettledResult<PromRow[]>, key: (m: Record<string, string>) => string): Record<string, number> | null => {
+    const rs = rows(r)
+    return rs && rs.length > 0 ? Object.fromEntries(rs.map(x => [key(x.metric), x.value])) : null
+  }
+  const podsRunningByNamespace = toMap(pods, m => m.namespace)
+  const daemonSetsReady = toMap(daemonSets, m => `${m.namespace}/${m.daemonset}`)
 
   const imageRows = rows(images)
   const components = aggregateImages((imageRows ?? []).filter(r => r.metric.image).map(r => ({ image: r.metric.image, count: r.value })))
@@ -148,12 +167,16 @@ export async function fetchLiveSnapshot(fetchImpl: FetchLike = fetch, now: () =>
 
   // "Available" means Prometheus actually returned running workloads or a version; an empty
   // answer is a missing scrape target, which must read as unavailable, not as "nothing runs".
-  const available = (imageRows?.length ?? 0) > 0 || kubernetes !== null
+  if (errors.length > 0) console.error('[live-platform-versions] prometheus query failures:', errors.join('; '))
+  const available = (imageRows?.length ?? 0) > 0 || kubernetes !== null || kubelets !== null
   return {
     available,
     fetchedAt: now().toISOString(),
-    error: available ? null : (errors[0] ?? 'prometheus returned no kube-state-metrics series'),
+    error: available ? null : 'prometheus_unavailable',
     kubernetes,
+    kubelets,
+    podsRunningByNamespace,
+    daemonSetsReady,
     nodes,
     components,
   }
@@ -232,8 +255,23 @@ export function buildView(live: LiveSnapshot, eksSource: PlatformView['eksLifecy
     declaredFor[key] = { v: c?.version ?? null, src: c?.source ?? null }
   }
   const items: Record<string, VersionItem> = {}
-  const keys = ['kubernetes', ...Object.keys(IMAGE_PATTERNS)]
+  const keys = ['kubernetes', 'kubelet', ...Object.keys(IMAGE_PATTERNS)]
   for (const key of keys) {
+    if (key === 'kubelet') {
+      // Kubelets are compared with the LIVE control plane when known (a skewed upgrade is drift),
+      // else with the declared minor.
+      const cp = live.available ? live.kubernetes : null
+      const ref = cp ? minor(cp[0].version) : (declaredFor.kubernetes.v ?? null)
+      const kv = live.available ? live.kubelets : null
+      items.kubelet = {
+        key,
+        declared: ref,
+        declaredSource: cp ? 'control plane (live apiserver)' : declaredFor.kubernetes.src,
+        live: kv,
+        status: compareVersions(ref, kv, minor),
+      }
+      continue
+    }
     const liveVersions = live.available ? (key === 'kubernetes' ? live.kubernetes : (live.components[key] ?? null)) : null
     const d = declaredFor[key] ?? { v: null, src: null }
     items[key] = {
@@ -251,6 +289,9 @@ export function buildView(live: LiveSnapshot, eksSource: PlatformView['eksLifecy
     liveError: live.error,
     items,
     nodes: live.available ? live.nodes : null,
+    podsRunningByNamespace: live.available ? live.podsRunningByNamespace : null,
+    daemonSetsReady: live.available ? live.daemonSetsReady : null,
+    inventory: pv?.inventory ?? null,
     declaredNodeGroup: pv?.nodeGroup ?? null,
     eksLifecycleSource: eksSource,
   }
