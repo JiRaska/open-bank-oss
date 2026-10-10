@@ -44,12 +44,13 @@ async function resolveInCluster(svcKey: string): Promise<ResolvedService | null>
   if (!discoveryCache || now - discoveryCache.at > DISCOVERY_TTL_MS) {
     const discovered = await discoverServices()
     if (discovered) {
-      const map: Record<string, { namespace: string; port: number; scaledToZero: boolean }> = {}
+      // No prototype: `constructor` / `__proto__` / `toString` must be missing keys, not functions.
+      const map: Record<string, { namespace: string; port: number; scaledToZero: boolean }> = Object.create(null)
       for (const d of discovered) map[d.name] = { namespace: d.namespace, port: d.port, scaledToZero: d.scaledToZero }
       discoveryCache = { at: now, map }
     }
   }
-  const hit = discoveryCache?.map[svcKey]
+  const hit = discoveryCache && Object.hasOwn(discoveryCache.map, svcKey) ? discoveryCache.map[svcKey] : undefined
   return hit ? { url: `http://${svcKey}.${hit.namespace}.svc:${hit.port}`, scaledToZero: hit.scaledToZero } : null
 }
 
@@ -57,14 +58,18 @@ async function serviceBaseUrl(svcKey: string): Promise<ResolvedService | null> {
   if (svcKey === 'product-catalog' && process.env.CATALOG_STANDALONE_SIDECAR === 'true') {
     return { url: 'http://127.0.0.1:8104', scaledToZero: false }
   }
+  // The catalog allowlist gates BOTH paths: an in-cluster workload that discovery can see but the
+  // catalog does not list as a business service (agent, sink, unknown deployment) is not reachable
+  // through the operator BFF, and a key is data, never a property lookup on a plain object.
+  const allowlist = getProxyAllowlist()
+  if (!Object.hasOwn(allowlist, svcKey)) return null
   if (inCluster()) {
     // Only proxy to services the cluster actually exposes; an undeployed service
     // resolves to null → 404 rather than a misleading hang.
     return resolveInCluster(svcKey)
   }
   // Off-cluster (local dev / docker-compose): legacy localhost/container map.
-  const allowlist = getProxyAllowlist()
-  const svc = Object.hasOwn(allowlist, svcKey) ? allowlist[svcKey] : undefined
+  const svc = allowlist[svcKey]
   if (!svc) return null
   const host =
     process.env.SERVICES_HOST === 'container'

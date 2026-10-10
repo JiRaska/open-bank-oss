@@ -91,19 +91,24 @@ function moduleDirs(): string[] {
     .filter(e => statSync(path.join(REPO, e)).isDirectory())
 }
 
+/** Runnable service modules, recomputed from the build scripts (not from catalog.json). */
+function runnableModulesOnDisk(): string[] {
+  return moduleDirs().filter(dir => {
+    const gradle = path.join(REPO, dir, 'build.gradle.kts')
+    if (!existsSync(gradle)) return false
+    const src = readFileSync(gradle, 'utf-8')
+    const viaConvention = /^\s*(?:plugins\s*\{\s*)?id\(["']openbank\.quarkus-service["']\)/m.test(src)
+      && (src.includes('project(":openbank-libs-runtime")') || src.includes('project(":openbank-libs")'))
+    return viaConvention || /^\s*alias\(libs\.plugins\.quarkus\)/m.test(src)
+  })
+}
+
 describe('no hand-kept service list (the fleet is derived from the catalog)', () => {
   it('the derived registry has one entry per runnable service module on disk', () => {
     const catalog = JSON.parse(readFileSync(path.join(ADMIN_UI, 'catalog.json'), 'utf-8')) as { services: CatalogFleetModule[] }
     const registry = buildRegistry(catalog.services)
 
-    const runnableOnDisk = moduleDirs().filter(dir => {
-      const gradle = path.join(REPO, dir, 'build.gradle.kts')
-      if (!existsSync(gradle)) return false
-      const src = readFileSync(gradle, 'utf-8')
-      const viaConvention = /^\s*(?:plugins\s*\{\s*)?id\(["']openbank\.quarkus-service["']\)/m.test(src)
-        && (src.includes('project(":openbank-libs-runtime")') || src.includes('project(":openbank-libs")'))
-      return viaConvention || /^\s*alias\(libs\.plugins\.quarkus\)/m.test(src)
-    })
+    const runnableOnDisk = runnableModulesOnDisk()
     expect(runnableOnDisk.length).toBeGreaterThan(40)
     expect(registry.length).toBe(runnableOnDisk.length)
 
@@ -112,6 +117,20 @@ describe('no hand-kept service list (the fleet is derived from the catalog)', ()
     const namedServices = moduleDirs().filter(d => d.endsWith('-service') && existsSync(path.join(REPO, d, 'version.txt')))
     const missing = namedServices.filter(d => !registry.some(s => s.container === d))
     expect(missing, `released *-service modules absent from the derived registry: ${missing.join(', ')}`).toEqual([])
+  })
+
+  it('mutation: a registry built from the catalog minus one module FAILS the disk comparison', () => {
+    // The comparison above must be able to fail. Drop one runnable module from the catalog and
+    // assert the very same predicate now reports a difference - a count check that cannot detect a
+    // missing module is decoration.
+    const catalog = JSON.parse(readFileSync(path.join(ADMIN_UI, 'catalog.json'), 'utf-8')) as { services: CatalogFleetModule[] }
+    const onDisk = runnableModulesOnDisk().sort()
+    const full = buildRegistry(catalog.services).map(s => s.container).sort()
+    expect(full).toEqual(onDisk)
+    const victim = catalog.services.find(m => m.runnable === true && m.name === 'openbank-ledger-service')!
+    const mutated = buildRegistry(catalog.services.filter(m => m !== victim)).map(s => s.container).sort()
+    expect(mutated).not.toEqual(onDisk)
+    expect(onDisk.filter(d => !mutated.includes(d))).toEqual(['openbank-ledger-service'])
   })
 
   it('no source file under src/ carries a hand-typed fleet list', () => {

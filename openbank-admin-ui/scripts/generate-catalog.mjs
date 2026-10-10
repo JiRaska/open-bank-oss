@@ -160,6 +160,20 @@ const catalog = {
   services,
 }
 
+// Duplicate listener ports among runnable modules are real in application.yaml; warn (never fail)
+// so they are visible instead of silently hidden by a hand-typed, accidentally-unique list.
+{
+  const byPort = new Map()
+  for (const s of services.filter(m => m.runnable && m.port != null)) {
+    byPort.set(s.port, [...(byPort.get(s.port) ?? []), s.name])
+  }
+  const dups = [...byPort.entries()].filter(([, names]) => names.length > 1)
+  if (dups.length > 0) {
+    console.warn(`[generate-catalog] WARNING: ${dups.length} duplicate listener port(s) among runnable modules:`)
+    for (const [port, names] of dups) console.warn(`  - ${port}: ${names.join(', ')}`)
+  }
+}
+
 writeFileSync(OUT, JSON.stringify(catalog, null, 2) + '\n')
 console.log(`[generate-catalog] ${totals.modules} modules (${totals.services} services, ${totals.withOpenapi} with OpenAPI, ${totals.moneyPath} money-path, ${totals.withGaps} with gaps) → ${OUT}`)
 if (totals.withGaps > 0) {

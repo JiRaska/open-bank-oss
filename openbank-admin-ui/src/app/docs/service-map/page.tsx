@@ -475,7 +475,7 @@ export default function ServiceMapPage() {
     const out: Record<string, HealthStatus> = {}
     if (healthEntries.length === 0) return out
     for (const svc of SERVICES) {
-      const entry = healthEntries.find(h => h.container === svc.container || h.container === svc.k8s || h.name === svc.k8s)
+      const entry = healthEntries.find(h => h.container === svc.container || h.container === svc.k8s || h.name === svc.k8s || h.name === svc.container.replace(/^openbank-/, ''))
       out[svc.id] = entry?.status ?? 'UNKNOWN'
     }
     return out

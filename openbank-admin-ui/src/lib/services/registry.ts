@@ -65,7 +65,7 @@ export function k8sNameOf(svc: ServiceEntry): string {
  * with a label derived from its name and group `platform`. The guard test asserts every key is a
  * real catalog module.
  */
-export const SERVICE_OVERRIDES: Record<string, { label?: string; group?: ServiceEntry['group']; id?: string; k8sName?: string }> = {
+export const SERVICE_OVERRIDES: Record<string, { label?: string; group?: ServiceEntry['group']; id?: string; k8sName?: string; exposeViaBff?: boolean }> = {
   'openbank-account-service'            : { label: 'Accounts', group: 'core' },
   'openbank-ledger-service'             : { label: 'Ledger', group: 'core' },
   'openbank-transaction-service'        : { label: 'Transactions', group: 'core' },
@@ -109,6 +109,12 @@ export const SERVICE_OVERRIDES: Record<string, { label?: string; group?: Service
   'openbank-anacredit-service'          : { label: 'AnaCredit', group: 'compliance' },
   'openbank-case-coordinator-agent'     : { label: 'Case Coordinator', group: 'platform', id: 'case-coordinator' },
   'openbank-communication-service'      : { label: 'Communication', group: 'platform' },
+  // Not business services (agents / auditors / sentinels whose names carry no -agent suffix): never BFF-exposed.
+  'openbank-authz-policy-auditor':       { exposeViaBff: false },
+  'openbank-control-liveness-sentinel':  { exposeViaBff: false },
+  'openbank-flaky-test-hunter':          { exposeViaBff: false },
+  'openbank-governance-auditor':         { exposeViaBff: false },
+  'openbank-release-steward':            { exposeViaBff: false },
 }
 
 /** The subset of a `catalog.json` module this registry needs. */
@@ -131,7 +137,7 @@ function titleCase(short: string): string {
  * Pure (no I/O) so server routes, the browser and the guard test all share one definition.
  */
 export function buildRegistry(modules: readonly CatalogFleetModule[]): ServiceEntry[] {
-  return modules
+  const entries = modules
     .filter(m => m.runnable === true && typeof m.port === 'number')
     .map((m): ServiceEntry => {
       const o = SERVICE_OVERRIDES[m.name] ?? {}
@@ -146,6 +152,16 @@ export function buildRegistry(modules: readonly CatalogFleetModule[]): ServiceEn
       }
     })
     .sort((a, b) => a.container.localeCompare(b.container))
+  assertUnique(entries.map(e => e.id), 'registry id')
+  return entries
+}
+
+function assertUnique(values: readonly string[], what: string): void {
+  const seen = new Set<string>()
+  for (const v of values) {
+    if (seen.has(v)) throw new Error(`duplicate ${what} '${v}' in the derived service registry - fix SERVICE_OVERRIDES or the module name`)
+    seen.add(v)
+  }
 }
 
 export function findInRegistry(registry: readonly ServiceEntry[], id: string): ServiceEntry | undefined {
@@ -153,13 +169,35 @@ export function findInRegistry(registry: readonly ServiceEntry[], id: string): S
 }
 
 /**
- * The BFF allowlist: `/api/svc/<key>` → upstream target. Derived from the same registry, so the
- * key set is exactly the catalog's runnable modules — never free-form, and never a caller-supplied
- * host (the host is `container`/`SERVICES_HOST`, the port comes from the module's own config).
- * The key is the Kubernetes workload name, which in-cluster is looked up verbatim in discovery.
+ * Modules that are NOT business services and must not be reachable through the operator BFF unless
+ * explicitly overridden (`exposeViaBff: true`): AI/ops agents, data sinks, simulators, libraries.
+ * Names, not metadata, because the catalog carries no exposure class; the guard test pins the
+ * resulting set.
+ */
+const NON_BFF_PATTERN = /(-agent|-sink|-simulator)$|^openbank-libs/
+
+/** The registry entries `/api/svc` may reach. */
+export function isBffExposed(s: ServiceEntry): boolean {
+  const o = SERVICE_OVERRIDES[s.container]
+  if (o?.exposeViaBff !== undefined) return o.exposeViaBff
+  return !NON_BFF_PATTERN.test(s.container)
+}
+
+/**
+ * The BFF allowlist: `/api/svc/<key>` -> upstream target. Derived from the same registry, so the
+ * key set is exactly the catalog's runnable BUSINESS modules - never free-form, and never a
+ * caller-supplied host (the host is `container`/`SERVICES_HOST`, the port comes from the module's
+ * own config). The key is the Kubernetes workload name, which in-cluster is looked up verbatim in
+ * discovery. The returned map has no prototype: `constructor`/`__proto__` are plain missing keys.
+ * A duplicate key throws instead of silently overwriting (which would re-route one service to
+ * another's upstream).
  */
 export function buildProxyAllowlist(registry: readonly ServiceEntry[]): Record<string, { container: string; port: number }> {
-  return Object.fromEntries(registry.map(s => [k8sNameOf(s), { container: s.container, port: s.port }]))
+  const exposed = registry.filter(isBffExposed)
+  assertUnique(exposed.map(s => k8sNameOf(s)), 'BFF allowlist key')
+  const out: Record<string, { container: string; port: number }> = Object.create(null)
+  for (const s of exposed) out[k8sNameOf(s)] = { container: s.container, port: s.port }
+  return out
 }
 
 /**

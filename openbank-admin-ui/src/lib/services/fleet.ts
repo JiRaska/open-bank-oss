@@ -23,10 +23,19 @@ function catalogFile(): string {
 }
 
 let cache: { file: string; registry: ServiceEntry[] } | null = null
+const reported = new Set<string>()
+
+/** Log a missing/unparseable catalog once per file, not once per request. */
+function reportOnce(file: string, why: string): void {
+  if (reported.has(file)) return
+  reported.add(file)
+  console.error(`[fleet] service catalog unavailable (${why}): ${file}. The derived fleet is EMPTY - health, config and the /api/svc BFF will report no services until catalog.json is baked into the image.`)
+}
 
 /**
  * The fleet, derived from catalog.json. An absent or unreadable snapshot yields an EMPTY fleet
- * (callers degrade through the graceful-state rule) — never a fabricated one.
+ * (callers degrade through the graceful-state rule) - never a fabricated one. The failure is cached
+ * for the process (a baked artifact does not appear later) and logged once.
  */
 export function getRegistry(): ServiceEntry[] {
   const file = catalogFile()
@@ -35,8 +44,9 @@ export function getRegistry(): ServiceEntry[] {
   try {
     const parsed = JSON.parse(readFileSync(file, 'utf-8')) as { services?: CatalogFleetModule[] }
     if (Array.isArray(parsed.services)) registry = buildRegistry(parsed.services)
-  } catch {
-    return [] // not cached: a snapshot that appears later is picked up
+    else reportOnce(file, 'no services array')
+  } catch (err) {
+    reportOnce(file, err instanceof Error ? err.message : String(err))
   }
   cache = { file, registry }
   return registry

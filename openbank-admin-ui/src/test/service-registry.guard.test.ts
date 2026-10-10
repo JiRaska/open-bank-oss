@@ -31,6 +31,7 @@ import path from 'path'
 import {
   SERVICE_OVERRIDES,
   buildProxyAllowlist,
+  isBffExposed,
   buildRegistry,
   k8sNameOf,
   type CatalogFleetModule,
@@ -287,7 +288,7 @@ describe('service registry drift guard', () => {
     // /api/svc/<key> is a security boundary: the key selects an upstream host. It must be a closed
     // set built from catalog modules - no key outside it resolves, and the host is the module's
     // own container name, never a caller-supplied value.
-    expect(Object.keys(ALLOWLIST).sort()).toEqual(REGISTRY.map(s => k8sNameOf(s)).sort())
+    expect(Object.keys(ALLOWLIST).sort()).toEqual(REGISTRY.filter(isBffExposed).map(s => k8sNameOf(s)).sort())
     for (const [key, target] of Object.entries(ALLOWLIST)) {
       expect(key, 'allowlist keys are plain DNS-label workload names').toMatch(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/)
       expect(target.container).toMatch(/^openbank-[a-z0-9-]+$/)
@@ -296,6 +297,32 @@ describe('service registry drift guard', () => {
     for (const hostile of ['../etc', 'localhost', 'evil.example.com', 'openbank-account-service/../x', '__proto__', 'constructor', '']) {
       expect(Object.hasOwn(ALLOWLIST, hostile), `${hostile} must not be allowlisted`).toBe(false)
     }
+  })
+
+  it('the BFF never exposes agents, sinks, simulators or libs (unless explicitly overridden)', () => {
+    const exposed = new Set(Object.values(ALLOWLIST).map(t => t.container))
+    const leaked = REGISTRY
+      .filter(s => /(-agent|-sink|-simulator)$|^openbank-libs/.test(s.container))
+      .filter(s => exposed.has(s.container) && SERVICE_OVERRIDES[s.container]?.exposeViaBff !== true)
+    expect(leaked.map(s => s.container)).toEqual([])
+    for (const name of ['openbank-devops-agent', 'openbank-finops-agent', 'openbank-analytics-sink', 'openbank-clearing-simulator',
+      'openbank-release-steward', 'openbank-governance-auditor']) {
+      expect(exposed.has(name), `${name} must not be BFF-exposed`).toBe(false)
+    }
+    // Every module the old hand-kept BFF map served remains reachable.
+    for (const key of ['account-service', 'ledger-service', 'product-catalog', 'security-scanner-service', 'sepa-instant', 'kyb-service', 'risk-engine']) {
+      expect(Object.hasOwn(ALLOWLIST, key), key).toBe(true)
+    }
+    expect(REGISTRY.filter(isBffExposed).length).toBe(Object.keys(ALLOWLIST).length)
+  })
+
+  it('duplicate registry ids / BFF keys throw at build instead of silently overwriting', () => {
+    const mod = (name: string, port: number): CatalogFleetModule =>
+      ({ name, short: name.replace(/^openbank-/, ''), kind: 'service', runnable: true, port })
+    // Same short name cannot occur on disk, so force the collision through two modules mapping to one id.
+    expect(() => buildRegistry([mod('openbank-dup-service', 1), mod('openbank-dup-service', 2)])).toThrow(/duplicate registry id/)
+    const entry = { id: 'a', label: 'A', group: 'core' as const, container: 'openbank-a-service', port: 1 }
+    expect(() => buildProxyAllowlist([entry, { ...entry, id: 'b', container: 'openbank-b-service', k8sName: 'a-service' }])).toThrow(/duplicate BFF allowlist key/)
   })
 
   it('every svcUrl() key exists in the BFF allowlist (no caller pointing at an unknown service)', () => {
@@ -453,7 +480,7 @@ describe('service registry drift guard', () => {
     // Overrides carry label/group/id/k8sName. If they start carrying ports or other facts, the
     // list has become a second source of truth again - derive the fact in generate-catalog.mjs.
     for (const [name, o] of Object.entries(SERVICE_OVERRIDES)) {
-      expect(Object.keys(o).filter(k => !['label', 'group', 'id', 'k8sName'].includes(k)), name).toEqual([])
+      expect(Object.keys(o).filter(k => !['label', 'group', 'id', 'k8sName', 'exposeViaBff'].includes(k)), name).toEqual([])
     }
   })
 })
