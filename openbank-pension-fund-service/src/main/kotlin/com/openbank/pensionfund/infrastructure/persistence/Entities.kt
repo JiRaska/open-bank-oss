@@ -192,6 +192,70 @@ class FundNavEntity : PanacheEntityBase {
 
     @Column(name = "published_at")
     var publishedAt: Instant? = null
+
+    @Column(name = "positions_recorded", nullable = false)
+    var positionsRecorded: Boolean = false
+}
+
+@Entity
+@Table(name = "fund_nav_positions")
+class FundNavPositionEntity : PanacheEntityBase {
+    @Id
+    @Column(name = "id", nullable = false)
+    lateinit var id: UUID
+
+    @Column(name = "nav_id", nullable = false)
+    lateinit var navId: UUID
+
+    @Column(name = "instrument_id", nullable = false)
+    lateinit var instrumentId: String
+
+    @Column(name = "quantity", nullable = false)
+    lateinit var quantity: BigDecimal
+
+    @Column(name = "price", nullable = false)
+    lateinit var price: BigDecimal
+
+    @Column(name = "instrument_class", nullable = false)
+    lateinit var instrumentClass: String
+}
+
+@Entity
+@Table(name = "position_classification_corrections")
+class PositionClassificationCorrectionEntity : PanacheEntityBase {
+    @Id
+    @Column(name = "id", nullable = false)
+    lateinit var id: UUID
+
+    @Column(name = "position_id", nullable = false)
+    lateinit var positionId: UUID
+
+    @Column(name = "nav_id", nullable = false)
+    lateinit var navId: UUID
+
+    @Column(name = "from_class", nullable = false)
+    lateinit var fromClass: String
+
+    @Column(name = "to_class", nullable = false)
+    lateinit var toClass: String
+
+    @Column(name = "reason", nullable = false)
+    lateinit var reason: String
+
+    @Column(name = "proposed_by", nullable = false)
+    lateinit var proposedBy: String
+
+    @Column(name = "proposed_at", nullable = false)
+    lateinit var proposedAt: Instant
+
+    @Column(name = "status", nullable = false)
+    lateinit var status: String
+
+    @Column(name = "decided_by")
+    var decidedBy: String? = null
+
+    @Column(name = "decided_at")
+    var decidedAt: Instant? = null
 }
 
 @Entity
@@ -300,4 +364,18 @@ class UnitTransactionEntity : PanacheEntityBase {
 
     @Column(name = "corrected_from_nav_id")
     var correctedFromNavId: UUID? = null
+}
+
+@Entity
+@Table(name = "classification_request_receipts")
+class ClassificationReceiptEntity : PanacheEntityBase {
+    @Id
+    @Column(name = "receipt_key", nullable = false)
+    lateinit var key: String
+
+    @Column(name = "fingerprint", nullable = false)
+    lateinit var fingerprint: String
+
+    @Column(name = "response_snapshot", nullable = false, columnDefinition = "text")
+    lateinit var responseSnapshot: String
 }

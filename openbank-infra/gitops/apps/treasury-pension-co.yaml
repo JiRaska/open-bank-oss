@@ -1,0 +1,37 @@
+# Pension company treasury (ADR-0337 amendment): a SECOND deployment of treasury-service holding
+# the pension company's (penzijní společnost) own portfolio from the custodian's semt.002 —
+# separate namespace, separate CNPG cluster (treasury-pension-co-db), its own OPA bundle, every
+# bank-only scheduler and outbound edge switched off (gate treasury-instance-switches-off). Read
+# by tax-reporting-service (PSP 34-12 PS) over mTLS and staff tooling only. No public Ingress.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: treasury-pension-co
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank-oss.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/treasury-pension-co
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: treasury-pension-co
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+    syncOptions:
+      - CreateNamespace=false
+      # The OPA bundle ConfigMap approaches the ceiling client-side apply can carry (256 KB
+      # last-applied annotation). Server-side apply does not write that annotation at all.
+      # Gate: opa-bundle-apply-size (.github/scripts/check-opa-bundle-apply-size.py).
+      - ServerSideApply=true

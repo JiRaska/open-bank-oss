@@ -445,6 +445,12 @@ spec:
         - record: openbank:cnpg_cluster_expected
           expr: vector(1)
           labels:
+            namespace: tax-reporting
+            cluster: tax-reporting-db
+            origin: manifest
+        - record: openbank:cnpg_cluster_expected
+          expr: vector(1)
+          labels:
             namespace: temporal
             cluster: temporal-db
             origin: manifest
@@ -453,6 +459,12 @@ spec:
           labels:
             namespace: tpp-registry
             cluster: tpp-registry-db
+            origin: manifest
+        - record: openbank:cnpg_cluster_expected
+          expr: vector(1)
+          labels:
+            namespace: treasury-pension-co
+            cluster: treasury-pension-co-db
             origin: manifest
         - record: openbank:cnpg_cluster_expected
           expr: vector(1)
@@ -812,6 +824,11 @@ spec:
         - record: openbank:cnpg_cluster_instances_declared
           expr: vector(2)
           labels:
+            namespace: tax-reporting
+            cluster: tax-reporting-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
             namespace: temporal
             cluster: temporal-db
         - record: openbank:cnpg_cluster_instances_declared
@@ -819,6 +836,11 @@ spec:
           labels:
             namespace: tpp-registry
             cluster: tpp-registry-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: treasury-pension-co
+            cluster: treasury-pension-co-db
         - record: openbank:cnpg_cluster_instances_declared
           expr: vector(2)
           labels:

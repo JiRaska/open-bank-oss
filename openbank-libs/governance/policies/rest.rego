@@ -94,6 +94,10 @@ allowed_reasons contains "compliance-read-any" if {
 	input.principal.type == "HUMAN"
 	"ROLE_COMPLIANCE" in input.principal.roles
 	endswith(input.action, ".read")
+	# The same exclusion as operator-read-any: an excluded read is served ONLY by its service's
+	# identity-scoped rules. Without it a client holding ROLE_COMPLIANCE reached it here (ADR-0337
+	# amendment, treasury.portfolio.read). Compliance staff who need one are granted it there.
+	not operator_read_any_excluded(input.action)
 }
 
 # AI agents go through this same query when the agent's tool wraps a REST call

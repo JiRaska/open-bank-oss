@@ -48,6 +48,9 @@ CONFIG = REPO / "release-please-config.json"
 # Packages whose config entry is NOT the mechanical shape. Each needs a reason; an entry for a
 # module that no longer exists is a failure, so the map cannot quietly outlive its subject.
 #
+# `openbank-tax-reporting-service` left this map in #5760, when it was first deployed: it had never
+# produced a tag, so giving it a component changed no existing release identity.
+#
 # `openbank-campaign-service` and `openbank-tax-reporting-service` are NOT a considered exception —
 # they are a defect this script surfaced. They carry `{"release-type": "simple"}` with no
 # `component` and no `exclude-paths`, which means (a) their tag has no component prefix, so both
@@ -62,7 +65,6 @@ OVERRIDES: dict[str, dict] = {
         "exclude-paths": ["openbank-admin-ui/src/test", "openbank-admin-ui/e2e"],
     },
     "openbank-campaign-service": {"release-type": "simple"},
-    "openbank-tax-reporting-service": {"release-type": "simple"},
 }
 
 

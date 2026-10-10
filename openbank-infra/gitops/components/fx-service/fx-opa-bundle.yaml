@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: fx-service
     app.kubernetes.io/part-of: fx
   annotations:
-    openbank.tech/policy-checksum: "982fb59d7f70d13b"
+    openbank.tech/policy-checksum: "d00171130f1dc26b"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -108,6 +108,10 @@ data:
     	input.principal.type == "HUMAN"
     	"ROLE_COMPLIANCE" in input.principal.roles
     	endswith(input.action, ".read")
+    	# The same exclusion as operator-read-any: an excluded read is served ONLY by its service's
+    	# identity-scoped rules. Without it a client holding ROLE_COMPLIANCE reached it here (ADR-0337
+    	# amendment, treasury.portfolio.read). Compliance staff who need one are granted it there.
+    	not operator_read_any_excluded(input.action)
     }
 
     # AI agents go through this same query when the agent's tool wraps a REST call
@@ -1672,6 +1676,16 @@ data:
       operator_read_any_excluded_actions:
         - pension-fund.holding.read   # participants' unit holdings and orders (ADR-0334 S4, #12350):
                                       # staff + service-account-openbank-pension only
+        - tax.filing.read             # §38d withholding returns and the per-remittance audit trail behind
+                                      # them (#5760): real staff only via tax_reporting_rest_ext.rego; no
+                                      # service-account reads them through operator-read-any
+        - pension-fund.reporting.read # period-end fund aggregates for the ČNB returns (#12425, ADR-0336 D4):
+                                      # staff + service-account-openbank-tax-reporting only. Aggregates,
+                                      # but they are a supervisory filing's figures before it is filed.
+        - treasury.portfolio.read     # the pension company's own holdings, custodian semt.002 (ADR-0337
+                                      # amendment, PSP 34-12 PS): treasury staff +
+                                      # service-account-openbank-tax-reporting only. Also excluded
+                                      # from compliance-read-any (rest.rego honours this list there).
       role_action_matrix:
         ROLE_OPERATOR:
           grant:

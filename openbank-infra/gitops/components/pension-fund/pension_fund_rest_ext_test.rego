@@ -140,3 +140,61 @@ test_without_the_exclusion_the_base_rule_reopens_holdings if {
 	}
 		with data.rules as {}
 }
+
+# ---- #12425: period-end fund aggregates for the ČNB returns ----
+
+reporting_excluded := {"authz": {"operator_read_any_excluded_actions": ["pension-fund.holding.read", "pension-fund.reporting.read"]}}
+
+tax_reporting := {"type": "HUMAN", "id": "service-account-openbank-tax-reporting", "roles": ["ROLE_API"]}
+
+# must-ALLOW: tax-reporting's own client, and staff oversight.
+test_tax_reporting_and_staff_read_fund_aggregates if {
+	rest.allow with input as {"principal": tax_reporting, "action": "pension-fund.reporting.read"}
+		with data.rules as reporting_excluded
+	rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "carol", "roles": ["ROLE_COMPLIANCE"]},
+		"action": "pension-fund.reporting.read",
+	}
+		with data.rules as reporting_excluded
+}
+
+# must-DENY: the shared account, pension-service's own client, an AI agent and a customer.
+test_others_cannot_read_fund_aggregates if {
+	not rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR", "ROLE_API"]},
+		"action": "pension-fund.reporting.read",
+	}
+		with data.rules as reporting_excluded
+	not rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "service-account-openbank-pension", "roles": ["ROLE_API"]},
+		"action": "pension-fund.reporting.read",
+	}
+		with data.rules as reporting_excluded
+	not rest.allow with input as {
+		"principal": {"type": "AI_AGENT", "id": "agent:x", "roles": ["ROLE_OPERATOR"]},
+		"action": "pension-fund.reporting.read",
+	}
+		with data.rules as reporting_excluded
+	not rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "cust-1", "roles": ["ROLE_CUSTOMER"]},
+		"action": "pension-fund.reporting.read",
+	}
+		with data.rules as reporting_excluded
+}
+
+# must-DENY: tax-reporting reaches nothing else here — not holdings, not orders, not NAV writes.
+test_tax_reporting_reaches_only_aggregates if {
+	every a in {"pension-fund.holding.read", "pension-fund.order.place", "pension-fund.nav.approve", "pension-fund.nav.read"} {
+		not rest.allow with input as {"principal": tax_reporting, "action": a}
+			with data.rules as reporting_excluded
+	}
+}
+
+# A token without ROLE_API (e.g. a mis-mapped client) is not admitted on the id alone.
+test_tax_reporting_id_without_role_api_is_denied if {
+	not rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "service-account-openbank-tax-reporting", "roles": []},
+		"action": "pension-fund.reporting.read",
+	}
+		with data.rules as reporting_excluded
+}

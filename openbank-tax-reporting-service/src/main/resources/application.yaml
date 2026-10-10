@@ -6,26 +6,92 @@ quarkus:
     port: 8152
   datasource:
     db-kind: postgresql
-    username: ${DB_USERNAME:openbank}
-    password: ${DB_PASSWORD:openbank}
+    username: openbank
+    password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
     reactive:
-      url: ${DB_REACTIVE_URL:vertx-reactive:postgresql://localhost:5432/openbank_tax_reporting}
+      url: vertx-reactive:postgresql://localhost:5432/openbank_tax_reporting
+    # A LITERAL jdbc url, not only an env expression: Flyway migrates the DEFAULT (Agroal/JDBC)
+    # datasource, and a service that boots only because the environment supplied one cannot start
+    # from this repo alone (check-flyway-default-datasource.py, #3080). The deployed values come
+    # from QUARKUS_DATASOURCE_* env in the gitops manifest, which outranks this file.
     jdbc:
-      url: ${DB_JDBC_URL:jdbc:postgresql://localhost:5432/openbank_tax_reporting}
+      url: jdbc:postgresql://localhost:5432/openbank_tax_reporting
   hibernate-orm:
     database:
       generation: none
   flyway:
+    # Committing migrations does not run them — this key defaults to FALSE (#3350).
     migrate-at-start: true
     baseline-on-migrate: true
+    connect-retries: 10
+    connect-retries-interval: 2S
+  # Bearer validation only (JWKS): this service calls nobody, so it holds NO client secret and
+  # needs no Keycloak client of its own. A credential belongs here the day it makes an outbound
+  # call, and then as a dedicated client (rules.yaml: oidc_secret_convention).
   oidc:
+    auth-server-url: http://localhost:8080/realms/openbank
+    client-id: openbank-tax-reporting-service
+  # Health and metrics on the fleet-common management port, scraped by the fleet PodMonitor
+  # (port name `management`) and probed by the kubelet.
+  management:
+    enabled: true
+    port: 8085
+    host: 0.0.0.0
+    root-path: /q
+  smallrye-health:
+    root-path: /q/health
+  otel:
+    exporter:
+      otlp:
+        endpoint: http://localhost:4317
+    resource:
+      attributes:
+        service.name: openbank-tax-reporting-service
+  shutdown:
+    timeout: 30S
+  dev-ui:
+    enabled: false
+
+# Read by the Kafka connector as the default broker config; the deployed value (Strimzi mTLS
+# bootstrap) comes from KAFKA_BOOTSTRAP_SERVERS in the gitops manifest.
+kafka:
+  bootstrap:
+    servers: localhost:9092
+
+  # #12425: tax-reporting-service's OWN machine identity — Keycloak client `openbank-tax-reporting`,
+  # ROLE_API only — for the pension reporting read models. pension-service and pension-fund-service
+  # admit their aggregate routes for service-account-openbank-tax-reporting and staff alone; never
+  # the shared openbank-services client.
+  oidc-client:
     auth-server-url: ${OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
-    client-id: ${OIDC_CLIENT_ID:openbank-tax-reporting-service}
-    tls:
-      verification: ${OIDC_TLS_VERIFICATION:required}
-  kafka:
-    bootstrap:
-      servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    client-id: openbank-tax-reporting
+    credentials:
+      secret: ${OIDC_TAX_REPORTING_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    grant:
+      type: client
+
+  rest-client:
+    pension-service:
+      url: ${PENSION_SERVICE_URL:http://localhost:8171}
+      connect-timeout: 2000
+      read-timeout: 10000
+    pension-fund-service:
+      url: ${PENSION_FUND_SERVICE_URL:http://localhost:8162}
+      connect-timeout: 2000
+      read-timeout: 10000
+    # ADR-0337: the PENSION COMPANY's own ledger-service instance — never the bank's ledger. The
+    # configKey is the provider module's; the URL names the company's deployment.
+    ledger-service:
+      url: ${PENSION_COMPANY_LEDGER_URL:http://localhost:8099}
+      connect-timeout: 2000
+      read-timeout: 10000
+    # ADR-0337: the PENSION COMPANY's own treasury-service instance (PSP 34-12 PS, its own
+    # portfolio). No default on purpose: unset = PSP 34-12 PS is refused (503, "not configured")
+    # rather than read from whichever treasury happens to answer on a default port.
+    treasury-service:
+      url: ${PENSION_COMPANY_TREASURY_URL:}
+      connect-timeout: 2000
+      read-timeout: 10000
 
 mp:
   messaging:
@@ -38,15 +104,47 @@ mp:
       # auto.offset.reset stays `latest`, so a fresh deploy does not replay historical remittances
       # into filing periods that were already assembled. Backfilling an earlier period is an
       # explicit operator action, not something a deploy does by accident.
+      #
+      # A failed write is RETHROWN (WithholdingRemittedConsumer), so the record goes to this
+      # channel's dead-letter topic rather than halting the group. The topic is NESTED, not the
+      # dotted one-liner: SmallRye quotes a dotted leaf key and the connector never reads it
+      # (#5752). The KafkaTopic CR and the KafkaUser Write ACL for it live in
+      # openbank-infra/gitops/components/tax-reporting/ — all three or the DLQ send itself wedges.
       withholding-remitted-in:
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.tax-reporting.withholding-remitted-in
+          # Keep the original producer bytes, not a JSON-quoted String. The real broker IT
+          # caught SmallRye's otherwise selected JSON serializer double-encoding this value.
+          key:
+            serializer: org.apache.kafka.common.serialization.StringSerializer
+          value:
+            serializer: org.apache.kafka.common.serialization.StringSerializer
         connector: smallrye-kafka
         topic: openbank.interest.accrual.event
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
         key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
 
+opa:
+  url: "${OPA_URL:http://localhost:8181}"
+  path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
+
+# @Authorize on TaxFilingResource asks the co-located OPA sidecar (tax_reporting_rest_ext.rego).
+authz:
+  enforce: "${AUTHZ_ENFORCE:true}"
+
 openbank:
   api:
     version: "1"
+  # ADR-0336: catalogue-defined statutory returns. Until the reporting start and fund roster are
+  # configured, deadline checks fail closed and workflow liveness cannot report success.
+  statutory-returns:
+    catalogues: statutory-returns/cz/pension-cnb.v1.json
+    company-id: company
+    deadline-check-every: 1h
+    # ADR-0337: the first day of the pension company's books. Unset = every company-books return
+    # is refused (503), because a balance summed from an unknown start cannot be shown complete.
+    # company-books.opened: 2025-01-01
   build:
     time: "${BUILD_TIME:unknown}"
   git:
@@ -59,9 +157,15 @@ openbank:
         url: vertx-reactive:postgresql://localhost:5432/openbank_tax_reporting_it
       jdbc:
         url: jdbc:postgresql://localhost:5432/openbank_tax_reporting_it
+    management:
+      enabled: false
     oidc:
+      enabled: false
+    oidc-client:
       enabled: false
     devservices:
       enabled: false
     scheduler:
       enabled: false
+  authz:
+    enforce: "false"

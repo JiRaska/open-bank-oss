@@ -194,10 +194,16 @@ spec:
               kubernetes.io/metadata.name: statements
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: tax-reporting
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: tpp-registry
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: treasury
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: treasury-pension-co
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: vault

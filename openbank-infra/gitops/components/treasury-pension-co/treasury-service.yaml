@@ -1,0 +1,300 @@
+# treasury-service, SECOND deployment: the pension company's (penzijní společnost) own portfolio
+# (ADR-0337 amendment — one deployment per legal entity). Same image as
+# components/treasury/treasury-service.yaml; differs only in configuration:
+#   - its own CNPG cluster treasury-pension-co-db;
+#   - the portfolio entity + custodian safekeeping account set (only this instance keeps one);
+#   - every bank-only scheduler, the outbox → Kafka edge, the simulated market and its risk-engine
+#     quotes, nostro reconciliation and interest accrual switched OFF (see env);
+#   - no Kafka credentials or bootstrap, no LEDGER_SERVICE_URL (nothing posts to ANY ledger —
+#     neither the bank's nor ledger-pension-co), no RISK_ENGINE_URL, no M2M client secret;
+#   - its own OPA bundle (treasury-pension-co-opa-bundle) that serves the portfolio actions and
+#     nothing else, to treasury staff and to tax-reporting's own service-account only;
+#   - an mTLS listener (8443) for tax-reporting — ASVS V9.1 forbids a new plaintext edge.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: treasury-service
+  namespace: treasury-pension-co
+  annotations:
+    # tax-reporting declares its target port (8443, mTLS), so its ingress is pinned to that port;
+    # admin-ui (staff statement upload) keeps the HTTP port as for every service.
+    openbank.io/port-scoped-ingress: "true"
+  labels:
+    app.kubernetes.io/name: treasury-service
+    app.kubernetes.io/part-of: treasury-pension-co
+spec:
+  replicas: 1
+  # Terminate-first, as the bank instance (see components/treasury/treasury-service.yaml): a
+  # one-replica Deployment cannot otherwise roll on a cluster with no spare room.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: treasury-service
+  template:
+    metadata:
+      annotations:
+        # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
+        # Kept in sync by gen-treasury-pension-co-opa-bundle.sh (do not hand-edit).
+        openbank.tech/policy-checksum: "5a7051c2905deb2f"
+      labels:
+        app.kubernetes.io/name: treasury-service
+        app.kubernetes.io/part-of: treasury-pension-co
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: treasury-service
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-treasury-service:sandbox-4c86c6f7
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8160
+            - name: https
+              containerPort: 8443
+            - name: management
+              containerPort: 8090
+          env:
+            # Private-CA TLS listener for tax-reporting's portfolio read. Client-auth REQUIRED is
+            # baked into the image (%prod quarkus.http.ssl.client-auth, a BUILD-TIME property);
+            # the env below only supplies the files and the port.
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
+              value: /mnt/internal-tls/tls.crt
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
+              value: /mnt/internal-tls/tls.key
+            - name: QUARKUS_HTTP_SSL_PORT
+              value: "8443"
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_TRUST_STORE_FILES
+              value: /mnt/internal-tls/ca.crt
+            - name: QUARKUS_HTTP_SSL_CLIENT_AUTH
+              value: required
+            - name: QUARKUS_HTTP_SSL_PROTOCOLS
+              value: TLSv1.3
+            - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://tempo.observability.svc:4317"
+            - name: OTEL_TRACES_SAMPLER_ARG
+              value: "0.1"
+            # The pension company's OWN database — never treasury-db.
+            - name: QUARKUS_DATASOURCE_JDBC_URL
+              value: jdbc:postgresql://treasury-pension-co-db-rw.treasury-pension-co.svc:5432/openbank_treasury
+            - name: QUARKUS_DATASOURCE_REACTIVE_URL
+              value: vertx-reactive:postgresql://treasury-pension-co-db-rw.treasury-pension-co.svc:5432/openbank_treasury
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: treasury-pension-co-db-app
+                  key: password
+            # ── The one thing this instance is for: the custodian's semt.002 (PSP 34-12 PS) ────
+            # The legal entity whose portfolio this deployment keeps; every statement and snapshot
+            # is stored under it. Without it every upload is refused and every read answers 409.
+            - name: OPENBANK_TREASURY_PORTFOLIO_ENTITY
+              value: pension-co
+            # SYNTHETIC sandbox custodian safekeeping account (the semt.002 test fixtures' own).
+            # A statement for any other account is refused at upload. Replace with the real
+            # custodian account(s), comma-separated, before the first real statement.
+            - name: OPENBANK_TREASURY_PORTFOLIO_SAFEKEEPING_ACCOUNTS
+              value: PSCO-OWN-0001
+            # ── Bank-only schedulers and outbound edges: ALL OFF on this instance ──────────────
+            # Asserted by .github/scripts/check-treasury-instance-switches.py, which derives the
+            # switch list from openbank-treasury-service's @Scheduled / *enabled* properties /
+            # channels / rest-clients, so a new scheduler without a switch fails it.
+            #
+            # Outbox → Kafka: the bank's openbank.treasury.deal.events consumers must never see a
+            # pension-company event.
+            - name: OPENBANK_OUTBOX_DISPATCH_ENABLED
+              value: "false"
+            # …and its 5 s poll tick itself, so the dispatcher never even claims outbox rows.
+            - name: OPENBANK_OUTBOX_POLL_INTERVAL
+              value: "off"
+            # Defence in depth: a pension-only topic name (no KafkaTopic, no KafkaUser, no Kafka
+            # credentials or bootstrap env exist for this namespace).
+            - name: MP_MESSAGING_OUTGOING_TREASURY_EVENTS_OUT_TOPIC
+              value: openbank.treasury-pension-co.deal.events.disabled
+            # ADR-0315 D9 SYNTHETIC counterparties (settle/mature the bank's sandbox deals) and their
+            # risk-engine curve quotes: bank dealing simulation, nothing to do with a custodian.
+            - name: OPENBANK_TREASURY_SIMULATED_MARKET_ENABLED
+              value: "false"
+            - name: OPENBANK_TREASURY_SIMULATED_MARKET_INTERVAL
+              value: "off"
+            - name: OPENBANK_TREASURY_SIMULATED_QUOTES_ENABLED
+              value: "false"
+            # ADR-0315 D7 nostro break sweep: re-reconciles camt.053 against the BANK ledger.
+            - name: OPENBANK_TREASURY_NOSTRO_BREAKS_ENABLED
+              value: "false"
+            - name: OPENBANK_TREASURY_NOSTRO_BREAKS_INTERVAL
+              value: "off"
+            # ADR-0315 D5 interest accrual: posts accrual journals for SETTLED deals to the ledger.
+            - name: OPENBANK_TREASURY_ACCRUAL_ENABLED
+              value: "false"
+            - name: OPENBANK_TREASURY_ACCRUAL_INTERVAL
+              value: "off"
+            # #10896 FX rate check against fx-service (the bank's fixing).
+            - name: OPENBANK_TREASURY_FX_SPOT_RATE_CHECK_ENABLED
+              value: "false"
+            # Keycloak runs in `iam`. Same realm and shared client as the bank instance.
+            - name: QUARKUS_OIDC_AUTH_SERVER_URL
+              value: http://keycloak.iam.svc:8080/realms/openbank
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: treasury-service-oidc
+                  key: OIDC_CLIENT_SECRET
+            # OPA sidecar enforcing treasury-pension-co-opa-bundle from the first rollout.
+            - name: AUTHZ_ENFORCE
+              value: "true"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 384Mi
+            limits:
+              cpu: "1"
+              memory: 768Mi
+          # Startup on the management port, readiness as a TCP accept on http — NOT
+          # /q/health/ready: with no Kafka bootstrap the idle producer's readiness check never
+          # turns UP, a serve-before-traffic deadlock (same reasoning as ledger-pension-co).
+          # Flyway-at-start already proves the datasource before the port opens.
+          startupProbe:
+            tcpSocket:
+              port: management
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: management
+            periodSeconds: 15
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: internal-tls
+              mountPath: /mnt/internal-tls
+              readOnly: true
+            # The image's %prod ledger-authority / risk-authority TLS buckets load
+            # /mnt/ledger-tls at boot; neither rest-client is wired here (see the certificate).
+            - name: internal-tls
+              mountPath: /mnt/ledger-tls
+              readOnly: true
+        # OPA policy decision point (ADR-0034), bundle from treasury-pension-co-opa-bundle.
+        - name: opa
+          image: docker.io/openpolicyagent/opa:1.21.1
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - --server
+            - --addr=0.0.0.0:8181
+            - --log-level=info
+            # REQUIRED: without bundle mode rules-data.yaml and agents-data.yaml collide.
+            - --bundle
+            - /bundle
+          ports:
+            - name: opa
+              containerPort: 8181
+          readinessProbe:
+            httpGet:
+              path: /health?bundles=true
+              port: 8181
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 100
+            runAsGroup: 101
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: opa-bundle
+              mountPath: /bundle/rest.rego
+              subPath: rest.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/treasury_rest_ext.rego
+              subPath: treasury_rest_ext.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/treasury_pension_co_rest_ext.rego
+              subPath: treasury_pension_co_rest_ext.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents.rego
+              subPath: agents.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents/data.yaml
+              subPath: agents-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/rules/data.yaml
+              subPath: rules-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/.manifest
+              subPath: manifest.json
+              readOnly: true
+            - name: opa-tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: internal-tls
+          secret:
+            secretName: treasury-service-internal-tls
+            optional: false
+        - name: opa-tmp
+          emptyDir: {}
+        - name: opa-bundle
+          configMap:
+            name: treasury-pension-co-opa-bundle
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: treasury-service
+  namespace: treasury-pension-co
+  labels:
+    app.kubernetes.io/name: treasury-service
+    app.kubernetes.io/part-of: treasury-pension-co
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: treasury-service
+  ports:
+    - name: http
+      port: 8160
+      targetPort: http
+    - name: https
+      port: 8443
+      targetPort: https
+    - name: management
+      port: 8090
+      targetPort: management

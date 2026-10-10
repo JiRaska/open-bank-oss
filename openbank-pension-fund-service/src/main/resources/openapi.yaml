@@ -2,7 +2,10 @@ openapi: 3.1.0
 info:
   title: OpenBank Pension Fund Service API
   # 1.0.0: first contract (ADR-0334 slice S4, issue #12350).
-  version: 1.0.0
+  # 1.1.0: period-end reporting read model for the ČNB returns (#12425) — additive. Includes the
+  #        separately accumulated P&L lines, the instrument class of positions and its four-eyes
+  #        correction route (still unreleased against 1.0.0, so one minor).
+  version: 1.1.0
   description: |
     Provider side of the pension platform (ADR-0334 §1): segregated funds, fund strategies with
     lifecycle glide paths, the unit register and NAV.
@@ -20,6 +23,7 @@ tags:
   - name: NAV
   - name: Strategies
   - name: Unit register
+  - name: Reporting
 security:
   - bearerAuth: []
 
@@ -105,6 +109,27 @@ paths:
         '200':
           description: NAVs
           content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Nav' } } } }
+  /api/v1/reporting/funds/{fundId}/period-figures:
+    parameters: [ { $ref: '#/components/parameters/FundId' } ]
+    get:
+      tags: [Reporting]
+      operationId: getFundPeriodFigures
+      summary: Period-end fund aggregates for regulatory returns (#12425)
+      description: |
+        Balance sheet at the closing NAV, year-to-date P&L, unit roll-forward, portfolio at the
+        closing NAV, flows and participant COUNTS for one period. Aggregate only — no contract id
+        or participant attribute is returned. Derived from PUBLISHED NAVs and the transactions
+        priced at them, bucketed by valuation date, so a closed period answers the same way every
+        time; `fingerprint` changes only when the inputs do (e.g. a NAV correction).
+        Served to staff and to tax-reporting-service's own client only.
+      parameters:
+        - { name: periodStart, in: query, required: true, schema: { type: string, format: date } }
+        - { name: periodEnd, in: query, required: true, schema: { type: string, format: date } }
+      responses:
+        '200': { description: The period figures, content: { application/json: { schema: { $ref: '#/components/schemas/FundPeriodFigures' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: No published NAV backs the period — not reportable (never zeroes), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /api/v1/navs/{navId}:
     parameters: [ { $ref: '#/components/parameters/NavId' } ]
     get:
@@ -133,6 +158,55 @@ paths:
       summary: Reject a calculated NAV (checker)
       responses:
         '200': { description: Rejected, content: { application/json: { schema: { $ref: '#/components/schemas/Nav' } } } }
+        '403': { $ref: '#/components/responses/FourEyes' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/navs/{navId}/positions:
+    parameters: [ { $ref: '#/components/parameters/NavId' } ]
+    get:
+      tags: [NAV]
+      operationId: listNavPositions
+      summary: The positions a NAV was struck on, each with its effective instrument class
+      responses:
+        '200': { description: The positions, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/NavPosition' } } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/position-classification-corrections:
+    post:
+      tags: [NAV]
+      operationId: proposeClassificationCorrection
+      parameters: [ { $ref: '#/components/parameters/ClassificationIdempotencyKey' } ]
+      summary: Propose a position's instrument class (maker)
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ClassificationCorrectionRequest' } } }
+      responses:
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '200': { description: Proposed, content: { application/json: { schema: { $ref: '#/components/schemas/ClassificationCorrection' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/position-classification-corrections/{correctionId}/approve:
+    parameters: [ { $ref: '#/components/parameters/CorrectionId' } ]
+    post:
+      tags: [NAV]
+      operationId: approveClassificationCorrection
+      parameters: [ { $ref: '#/components/parameters/ClassificationIdempotencyKey' } ]
+      summary: Approve a proposed instrument class (checker, never the proposer)
+      responses:
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '200': { description: Approved, content: { application/json: { schema: { $ref: '#/components/schemas/ClassificationCorrection' } } } }
+        '403': { $ref: '#/components/responses/FourEyes' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/position-classification-corrections/{correctionId}/reject:
+    parameters: [ { $ref: '#/components/parameters/CorrectionId' } ]
+    post:
+      tags: [NAV]
+      operationId: rejectClassificationCorrection
+      parameters: [ { $ref: '#/components/parameters/ClassificationIdempotencyKey' } ]
+      summary: Reject a proposed instrument class (checker, never the proposer)
+      responses:
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '200': { description: Rejected, content: { application/json: { schema: { $ref: '#/components/schemas/ClassificationCorrection' } } } }
         '403': { $ref: '#/components/responses/FourEyes' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
@@ -306,10 +380,17 @@ components:
       bearerFormat: JWT
 
   parameters:
+    ClassificationIdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Scoped to caller and operation. Replays the original response; changed content with the same key is 409.
+      schema: { type: string, minLength: 1, maxLength: 128 }
     FundId: { name: fundId, in: path, required: true, schema: { type: string, format: uuid } }
     NavId: { name: navId, in: path, required: true, schema: { type: string, format: uuid } }
     StrategyId: { name: strategyId, in: path, required: true, schema: { type: string, format: uuid } }
     ChangeId: { name: changeId, in: path, required: true, schema: { type: string, format: uuid } }
+    CorrectionId: { name: correctionId, in: path, required: true, schema: { type: string, format: uuid } }
     ContractId: { name: contractId, in: path, required: true, schema: { type: string, format: uuid } }
 
   responses:
@@ -419,6 +500,10 @@ components:
         instrumentId: { type: string }
         quantity: { type: number }
         price: { type: number, description: Optional; when absent the market-price port prices it }
+        instrumentClass:
+          type: string
+          enum: [DEPOSIT, DEBT_SECURITY, LOAN, EQUITY, FUND_SHARE, DERIVATIVE, OTHER, UNCLASSIFIED]
+          description: ECB/2018/2 asset category. Optional; omitted records the position UNCLASSIFIED (unknown), correctable four-eyes.
     NavCalculationRequest:
       type: object
       required: [valuationDate]
@@ -516,3 +601,117 @@ components:
         contractId: { type: string, format: uuid }
         holdings: { type: array, items: { $ref: '#/components/schemas/HoldingValuation' } }
         pendingOrders: { type: array, items: { $ref: '#/components/schemas/UnitOrder' } }
+    FundPeriodFigures:
+      type: object
+      required: [fundId, currency, periodStart, periodEnd, closingNavId, closingValuationDate, balanceSheet, profitAndLossYtd, units, portfolio, flows, entitlements, participants, basisNavIds, fingerprint]
+      properties:
+        fundId: { type: string, format: uuid }
+        currency: { type: string }
+        periodStart: { type: string, format: date }
+        periodEnd: { type: string, format: date }
+        closingNavId: { type: string, format: uuid }
+        closingValuationDate: { type: string, format: date }
+        balanceSheet:
+          type: object
+          required: [totalAssets, totalLiabilities, totalEquity]
+          properties:
+            totalAssets: { type: number }
+            totalLiabilities: { type: number, description: Accrued management fee plus other liabilities }
+            totalEquity: { type: number, description: Net assets attributable to participants }
+        profitAndLossYtd:
+          type: object
+          description: |
+            Year-to-date lines, each accumulated NAV interval by NAV interval — never one derived
+            from another. Gains and losses are separate non-negative lines, so a loss year is not a
+            negative income. The three investment lines are null (with linesUnavailableReason) when
+            a NAV in the year predates position recording.
+          required: [managementFees, profitLoss]
+          properties:
+            revaluationGains: { type: [number, 'null'], description: Price rises on units held across each interval }
+            revaluationLosses: { type: [number, 'null'], description: Price falls on units held across each interval, as a positive number }
+            otherInvestmentResult: { type: [number, 'null'], description: Signed. Interest, result on disposals and cash — not separable without a cash ledger }
+            managementFees: { type: number, description: Management fee accrued by the NAVs of the year }
+            profitLoss: { type: number, description: Signed. Closing net assets less opening net assets and capital flows }
+            linesUnavailableReason: { type: [string, 'null'] }
+        units:
+          type: object
+          required: [opening, issued, cancelled, closing, unitValue, unitValuePeriodMax]
+          properties:
+            opening: { type: number }
+            issued: { type: number }
+            cancelled: { type: number }
+            closing: { type: number }
+            unitValue: { type: number }
+            unitValuePeriodMax: { type: number }
+        portfolio:
+          type: object
+          description: Null figures mean the closing NAV predates position recording — unknown, not empty.
+          properties:
+            carryingValue: { type: [number, 'null'] }
+            holdingsCount: { type: [integer, 'null'] }
+            cash: { type: [number, 'null'] }
+            carryingValueByClass:
+              type: [object, 'null']
+              description: Carrying value per effective instrument class
+              additionalProperties: { type: number }
+            unclassifiedCount: { type: [integer, 'null'] }
+            loansOutstanding: { type: [number, 'null'], description: Null while any closing position is UNCLASSIFIED (it may be a loan) }
+        flows:
+          type: object
+          required: [subscriptions, redemptions, switchesIn, switchesOut, unitFees, managementFeesAccrued]
+          properties:
+            subscriptions: { type: number }
+            redemptions: { type: number }
+            switchesIn: { type: number }
+            switchesOut: { type: number }
+            unitFees: { type: number }
+            managementFeesAccrued: { type: number }
+        entitlements:
+          type: object
+          required: [opening, increase, decrease, closing]
+          properties:
+            opening: { type: number }
+            increase: { type: number }
+            decrease: { type: number }
+            closing: { type: number }
+        participants:
+          type: object
+          required: [holders, subscribing]
+          properties:
+            holders: { type: integer }
+            subscribing: { type: integer }
+        basisNavIds: { type: array, items: { type: string, format: uuid } }
+        fingerprint: { type: string }
+    NavPosition:
+      type: object
+      required: [positionId, navId, instrumentId, quantity, price, marketValue, instrumentClass]
+      properties:
+        positionId: { type: string, format: uuid }
+        navId: { type: string, format: uuid }
+        instrumentId: { type: string }
+        quantity: { type: number }
+        price: { type: number }
+        marketValue: { type: number }
+        instrumentClass: { type: string, enum: [DEPOSIT, DEBT_SECURITY, LOAN, EQUITY, FUND_SHARE, DERIVATIVE, OTHER, UNCLASSIFIED] }
+    ClassificationCorrectionRequest:
+      type: object
+      required: [positionId, toClass, reason]
+      properties:
+        positionId: { type: string, format: uuid }
+        toClass: { type: string, enum: [DEPOSIT, DEBT_SECURITY, LOAN, EQUITY, FUND_SHARE, DERIVATIVE, OTHER] }
+        reason: { type: string }
+    ClassificationCorrection:
+      type: object
+      required: [id, positionId, navId, fromClass, toClass, reason, status, proposedBy, proposedAt]
+      properties:
+        id: { type: string, format: uuid }
+        positionId: { type: string, format: uuid }
+        navId: { type: string, format: uuid }
+        fromClass: { type: string, enum: [DEPOSIT, DEBT_SECURITY, LOAN, EQUITY, FUND_SHARE, DERIVATIVE, OTHER, UNCLASSIFIED] }
+        toClass: { type: string, enum: [DEPOSIT, DEBT_SECURITY, LOAN, EQUITY, FUND_SHARE, DERIVATIVE, OTHER, UNCLASSIFIED] }
+        reason: { type: string }
+        status: { type: string, enum: [PROPOSED, APPROVED, REJECTED] }
+        proposedBy: { type: string }
+        proposedAt: { type: string, format: date-time }
+        decidedBy: { type: [string, 'null'] }
+        decidedAt: { type: [string, 'null'], format: date-time }

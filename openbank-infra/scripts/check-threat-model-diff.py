@@ -135,7 +135,22 @@ def gitops_tokens(service: str) -> set[str]:
     return toks
 
 
+# ADR-0337: a second deployment of a service for another legal entity lives in
+# `<component>-<entity>` (ledger-pension-co, treasury-pension-co). The entity suffix names the
+# OWNER of the books, not a service: without stripping it, `pension` (openbank-pension-service's
+# token) matched both directories and demanded a pension-service threat-model update for a
+# treasury or ledger change. The instance still matches its own service through the prefix.
+ENTITY_INSTANCE_SUFFIXES = ("-pension-co",)
+
+
+def strip_entity_suffix(text: str) -> str:
+    for suffix in ENTITY_INSTANCE_SUFFIXES:
+        text = text.replace(suffix, "")
+    return text
+
+
 def token_in(tokens: set[str], text: str) -> bool:
+    text = strip_entity_suffix(text)
     return any(
         re.search(rf"(^|[^a-z0-9]){re.escape(t)}s?($|[^a-z0-9])", text) for t in tokens
     )
@@ -520,6 +535,16 @@ def self_test() -> int:
         if got != expected:
             ok = False
         print(f"  [{mark}] {name}: flagged={got} expected={expected}")
+    for name, service, comp, expected in (
+        ("treasury-pension-co is treasury's", "openbank-treasury-service", "treasury-pension-co", True),
+        ("treasury-pension-co is not pension-service's", "openbank-pension-service", "treasury-pension-co", False),
+        ("pension component is pension-service's", "openbank-pension-service", "pension", True),
+    ):
+        got = token_in(gitops_tokens(service), comp)
+        mark = "ok" if got == expected else "FAIL"
+        if got != expected:
+            ok = False
+        print(f"  [{mark}] {name}: matched={got} expected={expected}")
     for name, before, after, expected in DOC_SELF_TEST_CASES:
         got = doc_scoped_flags(before, after)
         mark = "ok" if got == expected else "FAIL"

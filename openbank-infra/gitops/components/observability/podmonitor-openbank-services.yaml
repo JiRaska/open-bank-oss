@@ -101,8 +101,10 @@ spec:
       - sdd
       - security-scanner
       - statements
+      - tax-reporting
       - tpp-registry
       - treasury
+      - treasury-pension-co
       - wealth
       - pension-fund
   podMetricsEndpoints:
