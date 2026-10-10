@@ -59,6 +59,20 @@ class ContractAccessGuard {
     fun requireVisible(caller: Caller, contract: PensionContract): PensionContract =
         ContractVisibility.requireVisible(caller, contract)
 
+    /**
+     * The acting STAFF member's principal name (#12383), for maker/checker records such as the
+     * annuity-partner registry's four-eyes activation. Never a party header, never a service account.
+     */
+    fun staffActor(partyHeader: String?): String {
+        require(partyHeader == null) { "staff work is not done on behalf of a participant" }
+        require(STAFF_ROLES.any(identity::hasRole)) { "this is staff work" }
+        val name = identity.principal?.name
+        if (name.isNullOrBlank() || name.startsWith("service-account-")) {
+            throw ForbiddenException("staff work needs a named human principal")
+        }
+        return name
+    }
+
     private fun vouchedParty(header: String): UUID {
         val principal = identity.principal?.name
         if (principal == null || principal !in trustedRelays) {

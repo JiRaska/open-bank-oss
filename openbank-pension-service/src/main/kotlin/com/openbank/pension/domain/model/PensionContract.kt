@@ -73,7 +73,8 @@ enum class ContractStatus {
             PENDING_ACTIVATION to setOf(ACTIVE, CLOSED),
             ACTIVE to setOf(SUSPENDED, TERMINATING),
             SUSPENDED to setOf(ACTIVE, TERMINATING),
-            TERMINATING to setOf(PAID_OUT, TRANSFERRED_OUT, CLOSED),
+            // ACTIVE: an annuity purchase whose premium came back to the contract (#12383).
+            TERMINATING to setOf(PAID_OUT, TRANSFERRED_OUT, CLOSED, ACTIVE),
             PAID_OUT to emptySet(),
             TRANSFERRED_OUT to emptySet(),
             CLOSED to emptySet(),
@@ -194,6 +195,15 @@ data class PensionContract(
     fun markTransferredOut(now: Instant): PensionContract = moveTo(ContractStatus.TRANSFERRED_OUT, now)
 
     fun markPaidOut(now: Instant): PensionContract = moveTo(ContractStatus.PAID_OUT, now)
+
+    /**
+     * TERMINATING -> ACTIVE: the annuity payout failed and the pack returns the premium to the
+     * contract (#12383), so the participant holds units again and may choose another payout.
+     */
+    fun reopenAfterReversedPayout(now: Instant): PensionContract {
+        check(status == ContractStatus.TERMINATING) { "only a TERMINATING contract can reopen, was $status" }
+        return moveTo(ContractStatus.ACTIVE, now)
+    }
 
     /** Strategy can change in any non-terminal state; the previous elections stay as history. */
     fun electStrategy(strategyCode: String, effectiveFrom: LocalDate, now: Instant): PensionContract {

@@ -5,9 +5,11 @@
 package com.openbank.pension.application.onboarding
 
 import com.openbank.pension.application.port.out.FundAdministrationPort
+import com.openbank.pension.application.port.out.ParticipantNotifier
 import com.openbank.pension.application.port.out.PensionContractRepository
 import com.openbank.pension.application.port.out.Redemption
 import com.openbank.pension.application.port.out.TransferInBookingPort
+import com.openbank.pension.application.usecase.ParticipantNotices
 import com.openbank.pension.domain.model.ContractStatus
 import com.openbank.pension.domain.onboarding.OnboardingStatus
 import com.openbank.pension.domain.pack.JurisdictionPackRegistry
@@ -49,7 +51,22 @@ class TransferService(
     private val transferInBooking: TransferInBookingPort,
     private val tx: TransactionRunner,
     private val clock: Clock,
+    private val notifier: ParticipantNotifier,
 ) {
+
+    /**
+     * Every transfer write goes through here. When a write MOVES the transfer into a status the
+     * participant hears about (#12379), the notice follows the stored write — informational, its
+     * outcome never undoes the step. A rewrite in the same status (a retried activity) is silent.
+     */
+    private suspend fun persist(transfer: TransferRequest): TransferRequest {
+        val before = transfers.findById(transfer.id)?.status
+        val saved = transfers.save(transfer)
+        if (saved.status != before && saved.status in ParticipantNotices.NOTIFIED_TRANSFER_STATUSES) {
+            ParticipantNotices.send(notifier, ParticipantNotices.transferStatus(saved))
+        }
+        return saved
+    }
 
     private fun today(): LocalDate = LocalDate.now(clock)
     private fun now() = clock.instant()
@@ -104,7 +121,7 @@ class TransferService(
             deadline = TransferTerms.deadline(pack.transfer, today()),
             now = now(),
         )
-        val saved = transfers.save(request)
+        val saved = persist(request)
         if (saved.status == TransferStatus.REQUESTED) orchestrator.startTransferOut(saved.id)
         return saved
     }
@@ -119,7 +136,7 @@ class TransferService(
             "transfer $id is ${transfer.status}, not awaiting consent"
         }
         verifyConsent(partyId, challengeId, outRef(transfer.contractId, transfer.counterparty) + ":$id")
-        val saved = transfers.save(transfer.consented(challengeId, now()))
+        val saved = persist(transfer.consented(challengeId, now()))
         orchestrator.startTransferOut(saved.id)
         return saved
     }
@@ -171,7 +188,7 @@ class TransferService(
             failIn(id, TransferStatus.FAILED, receipt.reason ?: "the ceding provider refused the request")
             return DispatchResult.ENDED
         }
-        transfers.save(
+        persist(
             transfer.sent(
                 checkNotNull(receipt.reference) {
                     "a dispatched request carries a reference"
@@ -184,7 +201,7 @@ class TransferService(
 
     suspend fun recordAccepted(id: UUID) {
         val transfer = get(id, null)
-        if (transfer.status == TransferStatus.SENT) transfers.save(transfer.accepted(now()))
+        if (transfer.status == TransferStatus.SENT) persist(transfer.accepted(now()))
     }
 
     /**
@@ -201,7 +218,7 @@ class TransferService(
         val received = if (transfer.status == TransferStatus.FUNDS_RECEIVED) {
             transfer
         } else {
-            transfers.save(transfer.fundsReceived(arrival, pack.transfer.carriesIncentiveHistory, now()))
+            persist(transfer.fundsReceived(arrival, pack.transfer.carriesIncentiveHistory, now()))
         }
         funds.subscribe(contract.id, arrival.amount, arrival.currency, "transfer-in:$id")
         // Booked in S3's contribution ledger as TRANSFER_IN (tax year reports it apart; no second order).
@@ -215,7 +232,7 @@ class TransferService(
             if (application != null && application.status == OnboardingStatus.SIGNED) {
                 applications.save(application.activate(today(), now()))
             }
-            transfers.save(received.completed(emptyList(), now()))
+            persist(received.completed(emptyList(), now()))
         }
     }
 
@@ -242,7 +259,7 @@ class TransferService(
                     applications.save(application.transferFailed(reason, now()))
                 }
             }
-            transfers.save(transfer.failed(outcome, reason, compensation, now()))
+            persist(transfer.failed(outcome, reason, compensation, now()))
         }
     }
 
@@ -255,7 +272,7 @@ class TransferService(
         val contract = contracts.findById(transfer.contractId)
             ?: throw OnboardingNotFoundException("contract", transfer.contractId)
         if (contract.status != ContractStatus.ACTIVE && contract.status != ContractStatus.SUSPENDED) {
-            transfers.save(
+            persist(
                 transfer.failed(TransferStatus.REJECTED, "contract is ${contract.status}", Compensation.NONE, now()),
             )
             return false
@@ -266,7 +283,7 @@ class TransferService(
             "valuation currency ${valuation.currency} != ${transfer.currency}"
         }
         val fee = TransferTerms.fee(pack.transfer, contract.startDate, valuation.amount, today())
-        transfers.save(transfer.valuated(valuation.amount, fee, now()))
+        persist(transfer.valuated(valuation.amount, fee, now()))
         return true
     }
 
@@ -281,7 +298,7 @@ class TransferService(
             transfer.currency,
             "transfer-out:$id",
         ).reference
-        transfers.save(transfer.copy(redemptionRef = ref, updatedAt = now()))
+        persist(transfer.copy(redemptionRef = ref, updatedAt = now()))
         return ref
     }
 
@@ -296,7 +313,7 @@ class TransferService(
             transfer
         } else {
             val payment = counterparties.payTransferOut(transfer, history)
-            transfers.save(transfer.settled(checkNotNull(transfer.redemptionRef) { "redeem before settling" }, now()))
+            persist(transfer.settled(checkNotNull(transfer.redemptionRef) { "redeem before settling" }, now()))
                 .also { check(payment.isNotBlank()) { "the counterparty payment carries a reference" } }
         }
         tx.inTransaction {
@@ -307,7 +324,7 @@ class TransferService(
             } else if (contract.status == ContractStatus.TERMINATING) {
                 contracts.save(contract.markTransferredOut(now()))
             }
-            transfers.save(settled.completed(history, now()))
+            persist(settled.completed(history, now()))
         }
     }
 
@@ -326,6 +343,6 @@ class TransferService(
         }
         val compensation = if (ref != null) Compensation.REDEMPTION_REVERSED else Compensation.NONE
         val failed = if (transfer.status == TransferStatus.REQUESTED) TransferStatus.REJECTED else TransferStatus.FAILED
-        transfers.save(transfer.failed(failed, reason, compensation, now()))
+        persist(transfer.failed(failed, reason, compensation, now()))
     }
 }

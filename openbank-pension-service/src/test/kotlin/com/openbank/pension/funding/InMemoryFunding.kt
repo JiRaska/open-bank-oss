@@ -33,8 +33,10 @@ import com.openbank.pension.domain.incentive.ClaimStatus
 import com.openbank.pension.domain.incentive.IncentiveClaim
 import com.openbank.pension.domain.incentive.IncentiveLedgerEntry
 import com.openbank.pension.domain.incentive.TaxYearSummary
-import com.openbank.pension.infrastructure.adapter.AgencyMonthlyBatchClaimAdapter
+import com.openbank.pension.infrastructure.notification.RecordingParticipantNotifier
 import com.openbank.pension.infrastructure.pack.JurisdictionPackLoader
+import com.openbank.pension.infrastructure.statecontribution.CzMfStateContributionClaimAdapter
+import com.openbank.pension.infrastructure.statecontribution.RecordingStateAgencyGateway
 import java.math.BigDecimal
 import java.time.Clock
 import java.time.Instant
@@ -42,9 +44,19 @@ import java.time.LocalDate
 import java.time.ZoneOffset
 import java.util.UUID
 
-/** In-memory ports with the same idempotency semantics as the SQL store (unique keys honoured). */
-class InMemoryFunding(now: Instant = Instant.parse("2026-02-10T10:00:00Z")) {
-    val clock: Clock = Clock.fixed(now, ZoneOffset.UTC)
+/**
+ * In-memory ports with the same idempotency semantics as the SQL store (unique keys honoured).
+ * The default date is in April: Q1 2026 has closed, so the CZ channel may file January's claims
+ * (ZDPS §16(2)). [now] can be moved to walk through filing and return deadlines.
+ */
+class InMemoryFunding(var now: Instant = Instant.parse("2026-04-10T10:00:00Z")) {
+    val clock: Clock = object : Clock() {
+        override fun getZone(): java.time.ZoneId = ZoneOffset.UTC
+
+        override fun withZone(zone: java.time.ZoneId?): Clock = this
+
+        override fun instant(): Instant = now
+    }
     val contracts = linkedMapOf<UUID, ContractFundingView>()
     val refs = linkedMapOf<UUID, String>()
     val contributionRows = mutableListOf<Contribution>()
@@ -63,9 +75,23 @@ class InMemoryFunding(now: Instant = Instant.parse("2026-02-10T10:00:00Z")) {
         status: String = "ACTIVE",
         productLine: String = "DPS",
         createdAt: Instant = Instant.parse("2025-01-01T00:00:00Z"),
-    ): ContractFundingView =
-        ContractFundingView(UUID.randomUUID(), participant, "CZ", productLine, 1, status, "CZK", createdAt)
-            .also { contracts[it.contractId] = it }
+    ): ContractFundingView = ContractFundingView(
+        UUID.randomUUID(),
+        participant,
+        "CZ",
+        productLine,
+        if (productLine ==
+            "DPS"
+        ) {
+            2
+        } else {
+            1
+        },
+        status,
+        "CZK",
+        createdAt,
+    )
+        .also { contracts[it.contractId] = it }
 
     val directory = object : ContractFundingDirectory {
         override suspend fun find(contractId: UUID) = contracts[contractId]
@@ -227,6 +253,9 @@ class InMemoryFunding(now: Instant = Instant.parse("2026-02-10T10:00:00Z")) {
 
     val mandates = object : PaymentMandatePort {
         override suspend fun setUp(request: MandateRequest) = "mandate-${request.reference}"
+
+        override suspend fun cancel(kind: com.openbank.pension.domain.contribution.MandateKind, externalId: String) =
+            Unit
     }
 
     val documents = object : TaxCertificateDocumentPort {
@@ -239,8 +268,15 @@ class InMemoryFunding(now: Instant = Instant.parse("2026-02-10T10:00:00Z")) {
             directory, references, contributions, unmatched, fund, employers, mandates, enrolments, activation, clock,
         )
 
+    val notifier = RecordingParticipantNotifier()
+
+    /** What the CZ channel handed to the (recording) state agency gateway. */
+    val agency = RecordingStateAgencyGateway()
+
+    val claimChannel = CzMfStateContributionClaimAdapter(agency, directory, java.util.Optional.of("12345678"))
+
     val incentiveService = IncentiveService(
         directory, references, contributions, claims, batches, ledger, summaries, JurisdictionPackLoader.loadRegistry(),
-        listOf(AgencyMonthlyBatchClaimAdapter()), documents, contributionService, clock,
+        listOf(claimChannel), documents, contributionService, clock, notifier,
     )
 }

@@ -18,6 +18,8 @@
 #   pension.simulation.run      — POST /simulations (illustrative projection)                    (S8)
 #   pension.operator.exit-read  — GET  /operator/payouts (staff payout queue)                     (S8)
 #   pension.death.read          — GET  /death-claims, /death-claims/{id}                          (S5/S8)
+#   pension.contract.schedule   — POST /contracts/{id}/contribution-schedule/{preview,changes}    (#12376)
+#   pension.contract.beneficiaries — POST /contracts/{id}/beneficiaries/{preview,changes}         (#12376)
 #
 # Retired at integration (S8): pension.contract.activate (activation is the onboarding workflow's
 # alone) and pension.contract.terminate (S1's preview; S5's pension.exit.terminate replaces it).
@@ -182,4 +184,65 @@ allowed_reasons contains "operator-pension-funding-ingest" if {
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS"}
 	role in input.principal.roles
 	input.action == "pension.funding.ingest"
+}
+
+# ---------------------------------------------------------------------------------------------
+# #12376 — contribution-schedule and beneficiary changes (ContractMaintenanceResource).
+# Participant intent only, through the edge; SCA and ownership are enforced in the service.
+# Reads reuse pension.contract.read (edge) and pension.operator.read (staff,
+# OperatorContractChangesResource). No staff principal may write either.
+# ---------------------------------------------------------------------------------------------
+allowed_reasons contains "edge-service-pension-contract-changes" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-edge"
+	input.action in {"pension.contract.schedule", "pension.contract.beneficiaries"}
+}
+
+# ---------------------------------------------------------------------------------------------
+# #12383 — partner-agnostic annuity integration (PensionAnnuityResource,
+# PensionAnnuityProviderResource, PensionAnnuityPurchaseResource).
+#   pension.annuity.read              — GET  /contracts/{id}/exit/payouts/{pid}/annuity
+#   pension.annuity.quote             — POST .../annuity/offers
+#   pension.annuity.select            — POST .../annuity/selection     (SCA)
+#   pension.annuity.cancel            — POST .../annuity/cancellation  (SCA, cooling-off)
+#   pension.operator.annuity-read     — GET  /operator/annuity-providers[/{p}], /operator/annuity-purchases
+#   pension.operator.annuity-write    — POST/PUT /operator/annuity-providers, activation-request, disable
+#   pension.operator.annuity-approve  — POST /operator/annuity-providers/{p}/activation-approval (four-eyes
+#                                       in the AnnuityProvider aggregate)
+#   pension.operator.annuity-purchase — POST /operator/annuity-purchases/{id}/sync
+# ---------------------------------------------------------------------------------------------
+
+# The participant's own intent, relayed by the customer edge. Enumerated, as above.
+allowed_reasons contains "edge-service-pension-annuity" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-edge"
+	input.action in {
+		"pension.annuity.read",
+		"pension.annuity.quote",
+		"pension.annuity.select",
+		"pension.annuity.cancel",
+	}
+}
+
+# Real staff read the marketplace; compliance included (comparison-fairness review).
+allowed_reasons contains "operator-pension-annuity-read" if {
+	input.principal.type == "HUMAN"
+	not startswith(input.principal.id, "service-account-")
+	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE"}
+	role in input.principal.roles
+	input.action in {"pension.annuity.read", "pension.operator.annuity-read"}
+}
+
+# The partner registry and purchase sync are real-staff work: never a service account holding
+# ROLE_OPERATOR (#3765/#3734), never the edge.
+allowed_reasons contains "operator-pension-annuity-manage" if {
+	input.principal.type == "HUMAN"
+	not startswith(input.principal.id, "service-account-")
+	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+	role in input.principal.roles
+	input.action in {
+		"pension.operator.annuity-write",
+		"pension.operator.annuity-approve",
+		"pension.operator.annuity-purchase",
+	}
 }

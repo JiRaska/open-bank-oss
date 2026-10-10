@@ -67,12 +67,21 @@ class DeathClaimService(
                 now,
             ),
         )
+        // #12376: a designation committed between our read and the claim insert (the insert waits
+        // on the contract row lock) must not be lost. Once the claim exists no further designation
+        // can commit, so the designation re-read NOW is final; take the claimants from it.
+        val fresh = contractsUseCase.get(Caller.STAFF, contract.id)
+        val claimed = if (fresh.beneficiaries == contract.beneficiaries) {
+            claim
+        } else {
+            stores.claims.save(claim.replaceClaimants(DeathClaim.claimantsFrom(fresh.beneficiaries, rules.death), now))
+        }
         // Freeze: a pending early-termination notice is superseded; the claim settles the contract.
         stores.notices.findOpenByContract(contract.id)
             .filter { it.status == TerminationStatus.SIGNED }
             .forEach { stores.notices.save(it.supersede(now)) }
-        if (contract.status != ContractStatus.TERMINATING) stores.contracts.save(contract.requestTermination(now))
-        return claim
+        if (fresh.status != ContractStatus.TERMINATING) stores.contracts.save(fresh.requestTermination(now))
+        return claimed
     }
 
     suspend fun replaceClaimants(claimId: UUID, designations: List<ClaimantDesignation>): DeathClaim {
@@ -89,7 +98,7 @@ class DeathClaimService(
         val claimant = claim.claimant(claimantId)
         require(kyc.name.equals(claimant.name, ignoreCase = true)) { "the identity document names a different person" }
         val iban = IbanRule.normalise(kyc.iban)
-        val verified = ctx.gateways.beneficiaryKyc.verify(kyc.copy(iban = iban))
+        val verified = ctx.gateways.beneficiaryKyc.verify(kyc.copy(iban = iban, partyId = claimant.partyId))
         return stores.claims.save(claim.recordVerification(claimantId, verified, iban, operator, ctx.clock.instant()))
     }
 

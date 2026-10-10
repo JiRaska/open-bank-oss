@@ -4,6 +4,7 @@
 
 package com.openbank.pension.application.exit
 
+import com.openbank.pension.application.usecase.ParticipantNotices
 import com.openbank.pension.domain.exit.DeathClaimStatus
 import com.openbank.pension.domain.exit.InstallmentStatus
 import com.openbank.pension.domain.exit.PayoutRequest
@@ -96,7 +97,12 @@ class ExitExecutionService(private val ctx: ExitContext) {
 
     suspend fun payoutSingle(payoutId: UUID) {
         var payout = payout(payoutId)
-        if (payout.scheduled || payout.status == PayoutStatus.COMPLETED) return
+        if (payout.scheduled ||
+            payout.status == PayoutStatus.COMPLETED ||
+            payout.status == PayoutStatus.REVERSED
+        ) {
+            return
+        }
         val q = payout.quote
         if (payout.status == PayoutStatus.CONFIRMED) {
             val proceeds = redeem(payout.contractId, q.grossAmount, key("payout", payoutId, "redeem"))
@@ -105,14 +111,8 @@ class ExitExecutionService(private val ctx: ExitContext) {
         remit(payout.contractId, "PAYOUT_WITHHOLDING", q.taxWithheld, key("payout", payoutId, "tax"))
         val contract = contract(payout.contractId)
         if (payout.form == PayoutForm.ANNUITY) {
-            if (payout.annuity == null) {
-                val policy = gw.insurer.purchase(
-                    payout.contractId,
-                    q.netAmount,
-                    contract.participantBirthDate,
-                    key("payout", payoutId, "annuity"),
-                )
-                stores.payouts.save(payout.markAnnuityPurchased(policy, now()))
+            if (payout.annuity == null && payout.paymentRef == null && payout.status == PayoutStatus.IN_PAYMENT) {
+                placeAnnuity(payout, contract)
             }
         } else if (payout.paymentRef == null) {
             val ref = pay(
@@ -125,6 +125,20 @@ class ExitExecutionService(private val ctx: ExitContext) {
                 q.currency,
             )
             stores.payouts.save(payout.markPaid(ref, now()))
+        }
+    }
+
+    /** The premium goes to the selected partner (#12383); a failure is compensated per pack. */
+    private suspend fun placeAnnuity(payout: PayoutRequest, contract: PensionContract) {
+        when (val outcome = gw.annuities.place(payout, contract)) {
+            is AnnuityPlacement.Issued -> stores.payouts.save(payout.markAnnuityPurchased(outcome.policy, now()))
+            is AnnuityPlacement.ReturnedToClient -> stores.payouts.save(payout.markPaid(outcome.paymentRef, now()))
+            AnnuityPlacement.ReturnedToContract -> {
+                stores.payouts.save(payout.reverseAnnuity(now()))
+                if (contract.status == ContractStatus.TERMINATING) {
+                    stores.contracts.save(contract.reopenAfterReversedPayout(now()))
+                }
+            }
         }
     }
 
@@ -154,7 +168,7 @@ class ExitExecutionService(private val ctx: ExitContext) {
 
     suspend fun payoutComplete(payoutId: UUID) {
         val payout = payout(payoutId)
-        if (payout.status == PayoutStatus.COMPLETED) return
+        if (payout.status == PayoutStatus.COMPLETED || payout.status == PayoutStatus.REVERSED) return
         stores.payouts.save(payout.complete(now()))
         if (!payout.partial) {
             val contract = contract(payout.contractId)
@@ -238,6 +252,21 @@ class ExitExecutionService(private val ctx: ExitContext) {
             PaymentOrder(key, contract.id, creditor, iban, amount, currency, "PENSION $purpose ${contract.id}"),
         )
         stores.instructions.markSent(key, ref)
+        // #12379: only a payment to the participant is announced to them — never a death benefit
+        // to a claimant. After markSent, so a replayed activity (paymentRef already set) is silent.
+        if (creditor == contract.participantPartyId.toString()) {
+            ParticipantNotices.send(
+                gw.notifier,
+                ParticipantNotices.payoutExecuted(
+                    contract.participantPartyId,
+                    contract.id,
+                    purpose,
+                    amount,
+                    currency,
+                    iban,
+                ),
+            )
+        }
         return ref
     }
 

@@ -241,7 +241,8 @@ class ExitExceptionMappers {
     /** A write lost an optimistic-lock race (S8): the caller re-reads and retries; nothing was changed. */
     @ServerExceptionMapper
     fun concurrent(e: com.openbank.pension.application.exit.ExitConcurrentUpdateException): Response =
-        Response.status(Response.Status.CONFLICT).entity(mapOf("error" to e.message)).build()
+        Response.status(Response.Status.CONFLICT).header(RETRY_AFTER, RETRY_AFTER_SECONDS)
+            .entity(mapOf("error" to e.message, "retryable" to true)).build()
 
     @Suppress("UnusedParameter") // the exception TYPE selects the mapper; its message is not echoed
     @ServerExceptionMapper
@@ -254,7 +255,14 @@ class ExitExceptionMappers {
     /** Two writers raced at flush (@Version): the loser changed nothing and may re-read and retry. */
     private fun concurrentWrite(): Response = Response.status(
         Response.Status.CONFLICT,
-    ).entity(mapOf("error" to "the record changed concurrently; retry")).build()
+    ).header(RETRY_AFTER, RETRY_AFTER_SECONDS)
+        .entity(mapOf("error" to "the record changed concurrently; retry", "retryable" to true)).build()
+
+    private companion object {
+        /** A lost optimistic-lock race is transient: the client re-reads and retries after this. */
+        const val RETRY_AFTER = "Retry-After"
+        const val RETRY_AFTER_SECONDS = "1"
+    }
 
     @ServerExceptionMapper
     fun forbidden(e: ExitForbiddenException): Response =

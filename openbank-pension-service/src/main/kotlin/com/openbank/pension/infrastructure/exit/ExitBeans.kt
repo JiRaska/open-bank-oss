@@ -4,7 +4,7 @@
 
 package com.openbank.pension.infrastructure.exit
 
-import com.openbank.pension.application.exit.AnnuityInsurerPort
+import com.openbank.pension.application.exit.AnnuityPlacementPort
 import com.openbank.pension.application.exit.BeneficiaryVerificationPort
 import com.openbank.pension.application.exit.DeathClaimRepository
 import com.openbank.pension.application.exit.DeathClaimService
@@ -26,6 +26,7 @@ import com.openbank.pension.application.exit.TerminationNoticeRepository
 import com.openbank.pension.application.exit.TerminationService
 import com.openbank.pension.application.port.`in`.PensionContractUseCase
 import com.openbank.pension.application.port.out.FundAdministrationPort
+import com.openbank.pension.application.port.out.ParticipantNotifier
 import com.openbank.pension.application.port.out.PensionContractRepository
 import com.openbank.pension.domain.pack.JurisdictionPackRegistry
 import jakarta.enterprise.context.ApplicationScoped
@@ -55,12 +56,13 @@ class ExitBeans {
         incentives: IncentiveClawbackPort,
         tax: TaxWithholdingPort,
         payments: PayoutPaymentPort,
-        insurer: AnnuityInsurerPort,
+        annuities: AnnuityPlacementPort,
         accounts: OwnAccountVerificationPort,
         sca: ScaVerificationPort,
         beneficiaryKyc: BeneficiaryVerificationPort,
         notifications: ParticipantNotificationPort,
-    ) = ExitGateways(fund, incentives, tax, payments, insurer, accounts, sca, beneficiaryKyc, notifications)
+        notifier: ParticipantNotifier,
+    ) = ExitGateways(fund, incentives, tax, payments, annuities, accounts, sca, beneficiaryKyc, notifications, notifier)
 
     @Produces
     @Singleton

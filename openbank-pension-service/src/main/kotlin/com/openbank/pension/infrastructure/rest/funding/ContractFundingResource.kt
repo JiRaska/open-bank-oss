@@ -12,6 +12,7 @@ import com.openbank.pension.application.port.out.MandateRequest
 import com.openbank.pension.application.port.out.PensionContractRepository
 import com.openbank.pension.application.usecase.ContributionService
 import com.openbank.pension.application.usecase.IncentiveService
+import com.openbank.pension.application.usecase.PaymentMandateService
 import com.openbank.pension.domain.model.PensionContract
 import com.openbank.pension.infrastructure.authz.ContractAccessGuard
 import com.openbank.pension.infrastructure.rest.requireIdempotencyKey
@@ -61,6 +62,9 @@ class ContractFundingResource {
     @Inject
     lateinit var contractRepository: PensionContractRepository
 
+    @Inject
+    lateinit var mandateService: PaymentMandateService
+
     /** S1's single ownership rule, applied to the contract as S1 stores it — never re-implemented here. */
     private suspend fun visible(caller: Caller, contractId: UUID): PensionContract = guard.requireVisible(
         caller,
@@ -104,7 +108,7 @@ class ContractFundingResource {
         requireIdempotencyKey(idempotencyKey)
         val contract = visible(guard.actingParticipant(party), contractId)
         val body = requireNotNull(request) { "request body is required" }
-        val id = contributions.setUpMandate(
+        val mandate = mandateService.setUp(
             MandateRequest(
                 contractId = contractId,
                 participantPartyId = contract.participantPartyId,
@@ -114,9 +118,37 @@ class ContractFundingResource {
                 currency = requireNotNull(body.currency) { "currency is required" },
                 reference = "",
                 firstCollection = requireNotNull(body.firstCollection) { "firstCollection is required" },
+                // #12378: the order repeats at the contract's own contribution frequency.
+                frequency = contract.schedule.frequency,
+                debtorName = body.debtorName?.takeIf { it.isNotBlank() },
             ),
+            body.scaChallengeId,
         )
-        return Response.status(Response.Status.CREATED).entity(MandateResponse(id)).build()
+        return Response.status(Response.Status.CREATED)
+            .entity(MandateResponse(mandate.externalId, mandate.id, mandate.status.name))
+            .build()
+    }
+
+    /**
+     * Cancels a regular payment this contract set up (#12378). SCA-bound: the challenge must sign
+     * [PaymentMandateCancellation.documentHash] of exactly this contract and mandate, so a
+     * challenge issued for another mandate cannot cancel this one.
+     */
+    @POST
+    @Path("/mandates/{mandateId}/cancel")
+    @Operation(summary = "Cancel a standing order or SEPA direct-debit mandate of this contract (SCA-bound)")
+    @Authorize(action = "pension.funding.mandate", resource = "#contractId")
+    suspend fun cancelMandate(
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        @PathParam("contractId") contractId: UUID,
+        @PathParam("mandateId") mandateId: UUID,
+        @HeaderParam(ContractAccessGuard.PARTY_HEADER) party: String?,
+        request: MandateCancelRequest?,
+    ): MandateResponse {
+        requireIdempotencyKey(idempotencyKey)
+        val contract = visible(guard.actingParticipant(party), contractId)
+        val mandate = mandateService.cancel(contractId, contract.participantPartyId, mandateId, request?.scaChallengeId)
+        return MandateResponse(mandate.externalId, mandate.id, mandate.status.name)
     }
 
     @PUT
@@ -127,9 +159,12 @@ class ContractFundingResource {
         @PathParam("contractId") contractId: UUID,
         @PathParam("employerPartyId") employerPartyId: UUID,
         @HeaderParam(ContractAccessGuard.PARTY_HEADER) party: String?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        request: MandateCancelRequest?,
     ): Response {
-        visible(guard.actingParticipant(party), contractId)
-        contributions.enrolEmployer(contractId, employerPartyId)
+        requireIdempotencyKey(idempotencyKey)
+        val contract = visible(guard.actingParticipant(party), contractId)
+        mandateService.enrolEmployer(contractId, contract.participantPartyId, employerPartyId, request?.scaChallengeId)
         return Response.noContent().build()
     }
 

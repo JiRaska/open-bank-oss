@@ -8,6 +8,7 @@ import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.pension.domain.model.ContributionSchedule
 import com.openbank.pension.domain.model.ProductLine
 import com.openbank.pension.domain.pack.ProviderType
+import com.openbank.pension.domain.questionnaire.WarningAcknowledgement
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
@@ -117,6 +118,10 @@ data class OnboardingApplication(
     val coolingOffEndsOn: LocalDate? = null,
     val expiresOn: LocalDate,
     val closedReason: String? = null,
+    /** Partially saved questionnaire answers (question id -> option code), for save-and-resume. */
+    val questionnaireDraft: Map<String, String> = emptyMap(),
+    /** Warnings acknowledged for the current assessment; re-answering clears them (issue #12384). */
+    val warningAcknowledgements: List<WarningAcknowledgement> = emptyList(),
     val version: Long = 0,
     val createdAt: Instant,
     val updatedAt: Instant,
@@ -140,7 +145,48 @@ data class OnboardingApplication(
             unsuitableChoiceAcknowledged = false,
             kid = null,
             kidAcceptedAt = null,
+            warningAcknowledgements = emptyList(),
         )
+    }
+
+    /**
+     * Re-assessment of an EXISTING contract (ADR-0334, #12384): the participant answered again
+     * after the application was activated. The lifecycle does not move; only the assessment in
+     * force (and its recommendation) is replaced. The superseded assessment stays on record.
+     */
+    fun recordReassessment(assessmentId: UUID, recommendation: String, now: Instant): OnboardingApplication {
+        check(status == OnboardingStatus.ACTIVATED) { "only an activated contract's application is re-assessed" }
+        return copy(assessmentId = assessmentId, recommendedStrategy = recommendation, updatedAt = now)
+    }
+
+    /** Acknowledgements given for a strategy change of the activated contract (audit, appended). */
+    fun recordPostActivationAcknowledgements(acks: List<WarningAcknowledgement>, now: Instant): OnboardingApplication {
+        check(status == OnboardingStatus.ACTIVATED) {
+            "only an activated contract's application records change warnings"
+        }
+        return copy(warningAcknowledgements = warningAcknowledgements + acks, updatedAt = now)
+    }
+
+    /** Save-and-resume: answers are kept as given; nothing is scored until submission. */
+    fun saveDraft(answers: Map<String, String>, now: Instant): OnboardingApplication {
+        check(status.preSignature) { "a $status application can no longer be edited" }
+        return copy(questionnaireDraft = answers, updatedAt = now)
+    }
+
+    /**
+     * Records acknowledgements. Choosing a strategy after a KID was issued voids the KID (the
+     * status machine does that on [issueKid]); acknowledging alone changes no status.
+     */
+    fun acknowledge(acks: List<WarningAcknowledgement>, now: Instant): OnboardingApplication {
+        check(status.preSignature) { "a $status application can no longer be edited" }
+        val current = checkNotNull(assessmentId) { "the questionnaire must be answered before acknowledging warnings" }
+        require(acks.all { it.assessmentId == current }) { "an acknowledgement must name the current assessment" }
+        val kept = warningAcknowledgements.filterNot { old ->
+            acks.any {
+                it.code == old.code && it.strategyCode == old.strategyCode && it.assessmentId == old.assessmentId
+            }
+        }
+        return copy(warningAcknowledgements = kept + acks, updatedAt = now)
     }
 
     /** Choosing a strategy issues a fresh key-information document for exactly that strategy. */

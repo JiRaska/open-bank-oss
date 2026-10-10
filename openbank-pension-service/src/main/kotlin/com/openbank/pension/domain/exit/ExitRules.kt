@@ -23,6 +23,8 @@ data class ExitRules(
     val phasedWithdrawal: InstallmentRules? = null,
     val fixedPeriodPension: InstallmentRules? = null,
     val death: DeathRules,
+    /** Annuity purchase from a partner insurer (#12383); absent = the premium returns to the contract. */
+    val annuity: com.openbank.pension.domain.annuity.AnnuityPackRules? = null,
 )
 
 /** Early termination on client notice. */

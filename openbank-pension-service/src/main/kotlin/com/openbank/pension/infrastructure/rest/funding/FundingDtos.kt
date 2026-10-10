@@ -53,7 +53,13 @@ data class MandateSetupRequest(
     val amount: BigDecimal? = null,
     val currency: String? = null,
     val firstCollection: LocalDate? = null,
+    /** Account holder's name; required for a SEPA direct-debit mandate (#12378). */
+    val debtorName: String? = null,
+    /** Single-use challenge signed over `pension-mandate-setup:<documentHash>` (ADR-0335). */
+    val scaChallengeId: String? = null,
 )
+
+data class MandateCancelRequest(val scaChallengeId: String? = null)
 
 data class ExternalCapUsageRequest(val usage: Map<String, BigDecimal?>? = null)
 
@@ -61,7 +67,13 @@ data class ExternalCapUsageRequest(val usage: Map<String, BigDecimal?>? = null)
 
 data class PaymentReferenceResponse(val contractId: UUID, val reference: String)
 
-data class MandateResponse(val mandateId: String)
+data class MandateResponse(
+    /** The downstream standing-order / sdd mandate id. */
+    val mandateId: String,
+    /** pension-service's own id of the mandate — the one the cancel route takes (#12378). */
+    val id: java.util.UUID? = null,
+    val status: String? = null,
+)
 
 data class ContributionResponse(
     val id: UUID,

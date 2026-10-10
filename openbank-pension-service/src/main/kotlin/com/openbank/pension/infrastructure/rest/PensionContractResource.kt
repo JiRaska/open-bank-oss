@@ -142,12 +142,27 @@ class PensionContractResource {
     suspend fun electStrategy(
         @PathParam("id") id: UUID,
         @HeaderParam("X-Customer-Party-Id") party: String?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         request: ElectStrategyRequest?,
     ): ContractResponse {
+        requireIdempotencyKey(idempotencyKey)
         val body = requireNotNull(request) { "request body is required" }
         val code = requireNotNull(body.strategyCode) { "strategyCode is required" }
+        val acknowledged = body.acknowledgedWarnings.orEmpty().mapIndexed { i, w ->
+            requireNotNull(w) { "acknowledgedWarnings[$i] must not be null" }
+        }.toSet()
         return ContractResponse.from(
-            contracts.electStrategy(access.actingParticipant(party), id, code, body.effectiveFrom),
+            contracts.electStrategy(
+                com.openbank.pension.application.port.`in`.ElectStrategyCommand(
+                    access.actingParticipant(party),
+                    id,
+                    code,
+                    body.effectiveFrom,
+                    body.scaChallengeId,
+                    acknowledged,
+                    body.language,
+                ),
+            ),
         )
     }
 

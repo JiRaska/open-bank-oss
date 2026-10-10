@@ -5,6 +5,7 @@
 package com.openbank.pension.application.exit
 
 import com.openbank.pension.application.port.out.FundAdministrationPort
+import com.openbank.pension.application.port.out.ParticipantNotifier
 import com.openbank.pension.application.port.out.PensionContractRepository
 import com.openbank.pension.domain.pack.JurisdictionPackRegistry
 import java.time.Clock
@@ -30,11 +31,13 @@ data class ExitGateways(
     val incentives: IncentiveClawbackPort,
     val tax: TaxWithholdingPort,
     val payments: PayoutPaymentPort,
-    val insurer: AnnuityInsurerPort,
+    val annuities: AnnuityPlacementPort,
     val accounts: OwnAccountVerificationPort,
     val sca: ScaVerificationPort,
     val beneficiaryKyc: BeneficiaryVerificationPort,
     val notifications: ParticipantNotificationPort,
+    /** Informational participant notices (#12379), e.g. a payout handed to the rail. */
+    val notifier: ParticipantNotifier,
 )
 
 data class ExitContext(
@@ -61,7 +64,7 @@ internal suspend fun ExitGateways.verifySignatureAndAccount(
     hash: String,
     iban: String,
 ) {
-    if (!sca.verify(partyId, challenge, hash)) {
+    if (!sca.verify(partyId, challenge, hash, ScaOperation.EXIT)) {
         throw ExitForbiddenException("strong customer authentication failed for this quote")
     }
     if (!accounts.isOwnVerifiedAccount(partyId, iban)) {

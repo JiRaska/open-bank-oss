@@ -12,6 +12,8 @@ import com.openbank.pension.it.PostgresTestResource
 import com.openbank.pension.testsupport.ContractFixtures
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.junit.QuarkusTestProfile
+import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.vertx.VertxContextSupport
 import io.restassured.RestAssured.given
@@ -36,7 +38,23 @@ import java.util.UUID
  */
 @QuarkusTest
 @QuarkusTestResource(PostgresTestResource::class)
+@TestProfile(PensionIntegrationRoutesIT.OwnTemporal::class)
 class PensionIntegrationRoutesIT {
+
+    /**
+     * Its OWN Quarkus app, so its OWN time-skipping Temporal environment (#12383). Every
+     * default-profile class shares one environment, and `PensionExitApiIT` advances its workflow
+     * time by 31 days; a payout confirmed here afterwards had its first instalment already "due",
+     * so the instalment activity raced this class's account-change assertions and the result
+     * depended on test ORDER (409 in some full-module runs, green alone). The production race
+     * itself is covered deterministically by `PayoutAccountChangeRaceTest`.
+     */
+    class OwnTemporal : QuarkusTestProfile {
+        override fun getConfigOverrides(): Map<String, String> = mapOf(
+            "openbank.pension.onboarding.task-queue" to "it-routes-pension-onboarding",
+            "openbank.pension.exit.task-queue" to "it-routes-pension-exit",
+        )
+    }
 
     @Inject
     lateinit var contractUseCase: PensionContractUseCase
@@ -172,7 +190,7 @@ class PensionIntegrationRoutesIT {
             // The signed account is untouched; the new one is pending for later installments only.
             .body("payoutAccountLast4", equalTo(IBAN.takeLast(4)))
             .body("pendingAccountLast4", equalTo(OTHER_IBAN.takeLast(4)))
-            .body("pendingAccountFrom", equalTo(LocalDate.now().plusDays(3).toString()))
+            .body("pendingAccountFrom", equalTo(LocalDate.now(java.time.ZoneOffset.UTC).plusDays(3).toString()))
         assertThat(notifications.sent).anySatisfy { assertThat(it).startsWith("$payout|${OTHER_IBAN.takeLast(4)}") }
 
         // A second change while one is pending is refused (no rapid chain of redirects).

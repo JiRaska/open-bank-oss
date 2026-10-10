@@ -8,6 +8,7 @@ import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import com.openbank.pension.application.onboarding.ChooseStrategyCommand
 import com.openbank.pension.application.onboarding.OnboardingService
+import com.openbank.pension.application.onboarding.QuestionnaireService
 import com.openbank.pension.application.onboarding.StartOnboardingCommand
 import com.openbank.pension.domain.model.ContributionSchedule
 import com.openbank.pension.domain.onboarding.CedingContract
@@ -22,9 +23,11 @@ import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
+import jakarta.ws.rs.PUT
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
+import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.openapi.annotations.Operation
@@ -51,6 +54,7 @@ import java.util.UUID
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @RolesAllowed(Roles.API)
+@Suppress("TooManyFunctions") // one route per onboarding step
 class OnboardingResource {
 
     @Inject
@@ -61,6 +65,9 @@ class OnboardingResource {
 
     @Inject
     lateinit var onboarding: OnboardingService
+
+    @Inject
+    lateinit var questionnaire: QuestionnaireService
 
     @POST
     @Operation(
@@ -132,18 +139,108 @@ class OnboardingResource {
     ): QuestionnaireResponse {
         requireIdempotencyKey(idempotencyKey)
         val body = requireNotNull(request) { "request body is required" }
+        val partyId = partyOf(party)
+        body.answers?.let { raw ->
+            val confirmed = body.confirmInconsistencies.orEmpty().mapIndexed { i, c ->
+                requireNotNull(c) { "confirmInconsistencies[$i] must not be null" }
+            }.toSet()
+            val (application, recommendation) = questionnaire.submit(id, partyId, raw.requireAnswers(), confirmed)
+            val profile = ProfileResponse.from(questionnaire.profile(id, partyId), body.language)
+            return QuestionnaireResponse(
+                ApplicationResponse.from(application),
+                RecommendationResponse.from(recommendation),
+                profile,
+            )
+        }
         val answers = QuestionnaireAnswers(
             knowledgeLevel = body.knowledgeLevel,
             experienceLevel = body.experienceLevel,
-            riskAppetite = requireNotNull(body.riskAppetite) { "riskAppetite is required" },
+            riskAppetite = requireNotNull(body.riskAppetite) { "riskAppetite (or answers) is required" },
             lossTolerance = requireNotNull(body.lossTolerance) { "lossTolerance is required" },
             financialSituationStable = requireNotNull(body.financialSituationStable) {
                 "financialSituationStable is required"
             },
             esgPreference = body.esgPreference,
         )
-        val (application, recommendation) = onboarding.submitQuestionnaire(id, partyOf(party), answers)
+        val (application, recommendation) = onboarding.submitQuestionnaire(id, partyId, answers)
         return QuestionnaireResponse(ApplicationResponse.from(application), RecommendationResponse.from(recommendation))
+    }
+
+    // --- data-driven questionnaire (issue #12384) ------------------------------------------------
+
+    @GET
+    @Path("/{id}/questionnaire")
+    @Operation(
+        summary = "The question set for this application, with prefill, saved draft, progress and consistency hints",
+    )
+    @Authorize(action = "pension.onboarding.read", resource = "#id")
+    suspend fun questionnaireView(
+        @HeaderParam(PARTY_HEADER) party: String?,
+        @PathParam("id") id: UUID,
+        @QueryParam("lang") lang: String?,
+    ): QuestionnaireViewResponse = QuestionnaireViewResponse.from(questionnaire.view(id, partyOf(party)), lang)
+
+    @PUT
+    @Path("/{id}/questionnaire/draft")
+    @Operation(summary = "Save partial answers (save-and-resume); nothing is scored until submission")
+    @Authorize(action = "pension.onboarding.questionnaire", resource = "#id")
+    suspend fun questionnaireDraft(
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        @HeaderParam(PARTY_HEADER) party: String?,
+        @PathParam("id") id: UUID,
+        @QueryParam("lang") lang: String?,
+        request: QuestionnaireDraftRequest?,
+    ): QuestionnaireViewResponse {
+        requireIdempotencyKey(idempotencyKey)
+        val answers = requireNotNull(request?.answers) { "answers is required" }.requireAnswers()
+        return QuestionnaireViewResponse.from(questionnaire.saveDraft(id, partyOf(party), answers), lang)
+    }
+
+    @GET
+    @Path("/{id}/profile")
+    @Operation(summary = "The risk profile (class 1-7), the answers that set it, and the recommended strategy")
+    @Authorize(action = "pension.onboarding.read", resource = "#id")
+    suspend fun profile(
+        @HeaderParam(PARTY_HEADER) party: String?,
+        @PathParam("id") id: UUID,
+        @QueryParam("lang") lang: String?,
+    ): ProfileResponse = ProfileResponse.from(questionnaire.profile(id, partyOf(party)), lang)
+
+    @GET
+    @Path("/{id}/warnings")
+    @Operation(summary = "The warnings choosing a strategy would require, worded for display")
+    @Authorize(action = "pension.onboarding.read", resource = "#id")
+    suspend fun warnings(
+        @HeaderParam(PARTY_HEADER) party: String?,
+        @PathParam("id") id: UUID,
+        @QueryParam("strategyCode") strategyCode: String?,
+        @QueryParam("lang") lang: String?,
+    ): List<WarningResponse> {
+        val code =
+            requireNotNull(strategyCode?.takeIf { it.isNotBlank() }) { "query parameter 'strategyCode' is required" }
+        val (set, codes) = questionnaire.requiredWarnings(id, partyOf(party), code)
+        return codes.map { WarningResponse(it, set.warning(it).text.text(lang)) }
+    }
+
+    @POST
+    @Path("/{id}/warnings/acknowledge")
+    @Operation(summary = "Acknowledge the warnings a strategy choice requires; the wording shown is recorded")
+    @Authorize(action = "pension.onboarding.strategy", resource = "#id")
+    suspend fun acknowledgeWarnings(
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        @HeaderParam(PARTY_HEADER) party: String?,
+        @PathParam("id") id: UUID,
+        request: AcknowledgeWarningsRequest?,
+    ): ApplicationResponse {
+        requireIdempotencyKey(idempotencyKey)
+        val body = requireNotNull(request) { "request body is required" }
+        val strategy = requireNotNull(body.strategyCode?.takeIf { it.isNotBlank() }) { "strategyCode is required" }
+        val codes = requireNotNull(body.warnings) { "warnings is required" }.mapIndexed { i, c ->
+            requireNotNull(c) { "warnings[$i] must not be null" }
+        }.toSet()
+        return ApplicationResponse.from(
+            onboarding.acknowledgeWarnings(id, partyOf(party), strategy, codes, body.language),
+        )
     }
 
     @GET

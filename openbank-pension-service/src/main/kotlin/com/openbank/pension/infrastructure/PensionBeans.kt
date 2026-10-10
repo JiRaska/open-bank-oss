@@ -5,6 +5,7 @@
 package com.openbank.pension.infrastructure
 
 import com.openbank.pension.application.port.`in`.PensionContractUseCase
+import com.openbank.pension.application.port.out.ParticipantNotifier
 import com.openbank.pension.application.port.out.PensionContractRepository
 import com.openbank.pension.application.usecase.PensionContractService
 import com.openbank.pension.domain.pack.JurisdictionPackRegistry
@@ -34,5 +35,23 @@ class PensionBeans {
         repository: PensionContractRepository,
         registry: JurisdictionPackRegistry,
         clock: Clock,
-    ): PensionContractUseCase = PensionContractService(repository, registry, clock)
+        notifier: ParticipantNotifier,
+        onboarding: jakarta.enterprise.inject.Instance<com.openbank.pension.application.onboarding.OnboardingService>,
+        sca: com.openbank.pension.application.exit.ScaVerificationPort,
+    ): PensionContractUseCase = PensionContractService(
+        repository,
+        registry,
+        clock,
+        notifier,
+        // Resolved per call: OnboardingService owns the assessment in force (#12384).
+        object : com.openbank.pension.application.port.out.StrategySuitabilityPort {
+            override suspend fun authorize(
+                request: com.openbank.pension.application.port.out.StrategySuitabilityRequest,
+            ) = onboarding.get().authorizeStrategy(request)
+
+            override suspend fun record(approval: com.openbank.pension.application.port.out.StrategyApproval) =
+                onboarding.get().recordStrategyApproval(approval)
+        },
+        sca,
+    )
 }

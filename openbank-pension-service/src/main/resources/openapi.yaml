@@ -7,7 +7,12 @@ info:
   #        account change, operator payout and death-claim lists, Idempotency-Key on every POST.
   #        Bumped ONCE for all slices (ADR-0048). S1's unreleased /activate and /early-termination
   #        were retired in the same change; no released client ever called them.
-  version: 1.1.0
+  # 1.2.0: final integration of follow-ups F1-F7 (schedule and beneficiary changes, payment adapters,
+  #        identity and SCA adapters, documents and notices, CZ state contribution and returns,
+  #        annuity partners, questionnaire). Bumped ONCE (ADR-0048). The SCA-bound requirements it
+  #        adds to strategy change, mandate set-up and employer enrolment break no released client:
+  #        this API has never been on main.
+  version: 1.2.0
   description: |
     Participant-side pension contracts (ADR-0334). A contract is created under the jurisdiction
     pack in force on its creation date and PINS that pack version for life; incentive evaluation
@@ -24,6 +29,8 @@ tags:
   - name: Pension exit
   - name: Pension death claims
   - name: Pension simulation
+  - name: Pension contract changes
+  - name: Pension annuity
 security:
   - bearerAuth: []
 
@@ -139,9 +146,16 @@ paths:
       tags: [Pension]
       operationId: electStrategy
       summary: Elect or change the investment strategy; earlier elections stay as history
+      description: >-
+        One guarded path for every strategy change: ownership, idempotent replay of an applied change,
+        the suitability gate (409 REASSESSMENT_REQUIRED with reason and applicationId; 409
+        WARNINGS_REQUIRED with the warnings to show and acknowledge; 403 STRATEGY_NOT_PERMITTED under
+        MiFID or without an assessment), then a single-use SCA challenge over
+        `pension-strategy-change:<sha256(pension-strategy-change|contractId|strategyCode|effectiveFrom|SORTED,ACKS)>`.
       parameters:
         - $ref: '#/components/parameters/ContractId'
         - $ref: '#/components/parameters/CustomerPartyIdOptional'
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string } }
       requestBody:
         required: true
         content:
@@ -152,6 +166,7 @@ paths:
         '200': { $ref: '#/components/responses/Contract' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: 'SCA_REJECTED or STRATEGY_NOT_PERMITTED' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
   /api/v1/pension/contracts/{id}/incentive-evaluation:
@@ -245,6 +260,143 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/QuestionnaireResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Caller's role or principal may not use this route }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422':
+          description: The answers contradict each other; review or confirm the listed inconsistencies
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InconsistentAnswers' }
+    get:
+      tags: [Pension onboarding]
+      operationId: getPensionQuestionnaire
+      summary: The question set with prefill (years to retirement), saved draft, progress and consistency hints
+      parameters:
+        - $ref: '#/components/parameters/ApplicationId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+        - name: lang
+          in: query
+          required: false
+          description: Text language (cs default, en)
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QuestionnaireView' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Caller's role or principal may not use this route }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/onboarding/applications/{id}/questionnaire/draft:
+    put:
+      tags: [Pension onboarding]
+      operationId: savePensionQuestionnaireDraft
+      summary: Save partial answers (save-and-resume); nothing is scored until submission
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ApplicationId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+        - name: lang
+          in: query
+          required: false
+          description: Text language (cs default, en)
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/QuestionnaireDraftRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QuestionnaireView' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Caller's role or principal may not use this route }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/onboarding/applications/{id}/profile:
+    get:
+      tags: [Pension onboarding]
+      operationId: getPensionRiskProfile
+      summary: Risk profile (class 1-7), the answers that set it, and the recommended strategy; 409 when stale
+      parameters:
+        - $ref: '#/components/parameters/ApplicationId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+        - name: lang
+          in: query
+          required: false
+          description: Text language (cs default, en)
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RiskProfileView' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Caller's role or principal may not use this route }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/onboarding/applications/{id}/warnings:
+    get:
+      tags: [Pension onboarding]
+      operationId: getPensionStrategyWarnings
+      summary: The warnings choosing a strategy would require, worded for display
+      parameters:
+        - $ref: '#/components/parameters/ApplicationId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+        - name: strategyCode
+          in: query
+          required: true
+          schema: { type: string }
+        - name: lang
+          in: query
+          required: false
+          description: Text language (cs default, en)
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/QuestionnaireWarning' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Caller's role or principal may not use this route }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/onboarding/applications/{id}/warnings/acknowledge:
+    post:
+      tags: [Pension onboarding]
+      operationId: acknowledgePensionStrategyWarnings
+      summary: Acknowledge the warnings a strategy choice requires; the hash of the wording shown is recorded
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ApplicationId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AcknowledgeWarningsRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OnboardingApplication' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { description: Caller's role or principal may not use this route }
@@ -707,7 +859,43 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '403':
+          description: debtorIban is not a verified account of the participant (#12378).
         '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/funding/contracts/{contractId}/mandates/{mandateId}/cancel:
+    post:
+      tags: [Pension funding]
+      operationId: cancelMandate
+      summary: Cancel a standing order or SEPA direct-debit mandate of this contract (SCA-bound)
+      description: >-
+        The mandate must have been set up for this contract; any other id is a 404. The SCA
+        challenge signs SHA-256 of `pension-mandate-cancel|{contractId}|{mandateId}` (#12378).
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/FundingContractId'
+        - name: mandateId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/CustomerPartyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MandateCancelRequest'
+      responses:
+        '200':
+          description: Cancelled (or already cancelled)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Mandate'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Strong customer authentication failed.
+        '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/pension/funding/contracts/{contractId}/employers/{employerPartyId}:
     put:
       tags: [Pension funding]
@@ -717,9 +905,20 @@ paths:
         - $ref: '#/components/parameters/FundingContractId'
         - $ref: '#/components/parameters/EmployerPartyId'
         - $ref: '#/components/parameters/CustomerPartyId'
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MandateCancelRequest'
+      description: >-
+        SCA-bound: scaChallengeId must sign `pension-employer-enrolment:<sha256(pension-employer-enrolment|contractId|employerPartyId)>`.
+        An already enrolled employer is a no-op.
       responses:
         '204':
           description: Done
+        '403': { description: SCA_REJECTED }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -995,6 +1194,164 @@ paths:
           description: Staff only
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/funding/operations/state-contribution/contracts/{contractId}/ineligibility:
+    post:
+      tags: [Pension funding operations]
+      operationId: recordStateContributionIneligibility
+      summary: Record that the participant was not entitled from a month on; registers the returns owed (ZDPS §18(2))
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/FundingContractId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IneligibilityRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StateContributionReturn'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Staff only
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/funding/operations/state-contribution/returns:
+    get:
+      tags: [Pension funding operations]
+      operationId: listStateContributionReturns
+      summary: State contribution returns, optionally by status
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema: { type: string, enum: [DUE, REPORTED, CONFIRMED, SETTLED] }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StateContributionReturn'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Staff only
+  /api/v1/pension/funding/operations/state-contribution/returns/{id}/settle:
+    post:
+      tags: [Pension funding operations]
+      operationId: settleStateContributionReturn
+      summary: Record that a confirmed return was paid back to the agency
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ResourceId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StateContributionReturn'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Staff only
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/funding/operations/state-contribution/return-reports:
+    get:
+      tags: [Pension funding operations]
+      operationId: listReturnReports
+      summary: Filed return reports, newest first, with their filed payload
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ReturnReport'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Staff only
+    post:
+      tags: [Pension funding operations]
+      operationId: fileReturnReport
+      summary: File the monthly return report with every DUE return (ZDPS §18(4))
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReturnReportRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReturnReportRun'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Staff only
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/funding/operations/state-contribution/return-reports/{id}/result:
+    post:
+      tags: [Pension funding operations]
+      operationId: applyReturnReportResult
+      summary: Apply the agency's result to a return report
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ResourceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReceiptFileRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReturnReport'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Staff only
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/funding/operations/state-contribution/deadlines:
+    get:
+      tags: [Pension funding operations]
+      operationId: stateContributionDeadlines
+      summary: Missed state contribution deadlines (filing, payment, returns)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StateContributionDeadlines'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Staff only
   /api/v1/pension/funding/operations/contracts/{contractId}/clawback-preview:
     get:
       tags: [Pension funding operations]
@@ -1039,6 +1396,52 @@ paths:
           description: Staff only
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/funding/operations/contracts/{contractId}/annual-statements/{year}:
+    post:
+      tags: [Pension funding operations]
+      operationId: issueAnnualStatement
+      summary: Issue a closed year's annual statement through document-service (once per year)
+      description: >-
+        Renders the statement through document-service and stores its document id and SHA-256.
+        Insert-once per (contract, year): a repeated call returns the statement already issued.
+        503 when document-service cannot render it (fail closed — no statement is invented).
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/FundingContractId'
+        - $ref: '#/components/parameters/TaxYear'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnnualStatement'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Staff only
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503':
+          description: document-service unavailable or the template is not published
+  /api/v1/pension/contracts/{contractId}/annual-statements/{year}:
+    get:
+      tags: [Pension]
+      operationId: getAnnualStatement
+      summary: Read the issued annual statement for a year (404 until issued)
+      parameters:
+        - $ref: '#/components/parameters/FundingContractId'
+        - $ref: '#/components/parameters/TaxYear'
+        - $ref: '#/components/parameters/CustomerPartyIdOptional'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnnualStatement'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/pension/contracts/{contractId}/exit/payout-eligibility:
     get:
       tags: [Pension exits]
@@ -1289,7 +1692,7 @@ paths:
         - name: status
           in: query
           required: false
-          schema: { type: string, enum: [QUOTED, CONFIRMED, IN_PAYMENT, COMPLETED, EXPIRED] }
+          schema: { type: string, enum: [QUOTED, CONFIRMED, IN_PAYMENT, COMPLETED, EXPIRED, REVERSED] }
         - name: contractId
           in: query
           required: false
@@ -1448,7 +1851,500 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/contracts/{contractId}/contribution-schedule:
+    get:
+      tags: [Pension contract changes]
+      operationId: getContributionSchedule
+      summary: Original, in-force and pending contribution schedule with the change history
+      parameters:
+        - name: contractId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/CustomerPartyIdOptional'
+      responses:
+        '200':
+          description: Original, in-force and pending contribution schedule with the change history
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ContributionScheduleView' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/pension/contracts/{contractId}/contribution-schedule/preview:
+    post:
+      tags: [Pension contract changes]
+      operationId: previewContributionScheduleChange
+      summary: Validate a contribution-schedule change and return what to sign
+      description: |
+        Validates amount, frequency, collection day and start date against the pinned pack's
+        contributionLimits (monthly equivalent within min/max; fails closed when the pack declares none)
+        and its incentive rules (a change that lowers the annual state incentive needs
+        `acknowledgeIncentiveReduction: true`). Returns the effective date - the first collection day at
+        least the pack's notice period ahead, never the cycle in progress - and `documentSha256`, the
+        document the participant signs under SCA. Changes nothing.
+      parameters:
+        - name: contractId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/CustomerPartyId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ScheduleChangeRequest' }
+      responses:
+        '200':
+          description: Validate a contribution-schedule change and return what to sign
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ScheduleChangePreview' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/contracts/{contractId}/contribution-schedule/changes:
+    post:
+      tags: [Pension contract changes]
+      operationId: changeContributionSchedule
+      summary: Agree a contribution-schedule change under SCA
+      description: |
+        Re-validates on the current state and requires `scaChallengeId` signed over the preview's
+        `documentSha256` (a stale preview fails SCA). Effective from the next collection cycle; a
+        not-yet-effective earlier change becomes SUPERSEDED; history is append-only. Idempotent per
+        `Idempotency-Key`. A concurrent second change loses with 409.
+      parameters:
+        - name: contractId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/CustomerPartyId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ScheduleChangeRequest' }
+      responses:
+        '201':
+          description: Agree a contribution-schedule change under SCA
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ContributionScheduleVersion' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/contracts/{contractId}/beneficiaries:
+    get:
+      tags: [Pension contract changes]
+      operationId: getBeneficiaries
+      summary: Current beneficiary designation with the designation history
+      parameters:
+        - name: contractId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/CustomerPartyIdOptional'
+      responses:
+        '200':
+          description: Current beneficiary designation with the designation history
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BeneficiaryView' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/pension/contracts/{contractId}/beneficiaries/preview:
+    post:
+      tags: [Pension contract changes]
+      operationId: previewBeneficiaryChange
+      summary: Validate a complete ordered beneficiary designation and return what to sign
+      description: |
+        The body is the WHOLE new list in order (add, remove and reorder are all a new list; an empty
+        list removes every designation). Shares must be positive, carry at most two decimals and total
+        exactly 100; nobody twice; never the participant. Identity is minimal (GDPR): name and an
+        optional known partyId only. Refused (409) once a death claim exists. Changes nothing.
+      parameters:
+        - name: contractId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/CustomerPartyId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BeneficiaryChangeRequest' }
+      responses:
+        '200':
+          description: Validate a complete ordered beneficiary designation and return what to sign
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BeneficiaryChangePreview' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/contracts/{contractId}/beneficiaries/changes:
+    post:
+      tags: [Pension contract changes]
+      operationId: changeBeneficiaries
+      summary: Replace the beneficiary designation under SCA
+      description: |
+        Requires `scaChallengeId` signed over the preview's `documentSha256`. Written together with
+        the contract's designation in one transaction that re-checks no death claim was registered
+        meanwhile (409). History is append-only. Idempotent per `Idempotency-Key`.
+      parameters:
+        - name: contractId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/CustomerPartyId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BeneficiaryChangeRequest' }
+      responses:
+        '201':
+          description: Replace the beneficiary designation under SCA
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BeneficiaryDesignationVersion' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/operator/contracts/{contractId}/contribution-schedule:
+    get:
+      tags: [Pension operations]
+      operationId: operatorGetContributionSchedule
+      summary: Staff - contribution schedule with change history (read only)
+      parameters:
+        - name: contractId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Staff - contribution schedule with change history (read only)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ContributionScheduleView' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/pension/operator/contracts/{contractId}/beneficiaries:
+    get:
+      tags: [Pension operations]
+      operationId: operatorGetBeneficiaries
+      summary: Staff - beneficiary designation with history (read only)
+      parameters:
+        - name: contractId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Staff - beneficiary designation with history (read only)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BeneficiaryView' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
 
+  # ---- #12383: partner-agnostic annuity integration --------------------------------------------
+  /api/v1/pension/contracts/{contractId}/exit/payouts/{payoutId}/annuity:
+    get:
+      tags: [Pension annuity]
+      operationId: getAnnuityPurchase
+      summary: The offers, the selection and the purchase progress of one annuity payout
+      parameters:
+        - $ref: '#/components/parameters/ExitContractId'
+        - $ref: '#/components/parameters/PayoutId'
+        - $ref: '#/components/parameters/CustomerPartyIdOptional'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AnnuityPurchase' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/pension/contracts/{contractId}/exit/payouts/{payoutId}/annuity/offers:
+    post:
+      tags: [Pension annuity]
+      operationId: requestAnnuityOffers
+      summary: Ask every eligible partner insurer for offers, in parallel
+      description: |
+        For a QUOTED payout in the ANNUITY form; the premium is the quote's net amount. Every
+        ACTIVE partner whose jurisdiction, currency, premium band, dates and annuity types fit is
+        asked the same question, bounded by a timeout; partial results are returned and every
+        partner that failed, timed out or answered off-request is listed in `partnerFailures`.
+        Offers are listed in the disclosed `presentationOrder`; none is recommended. A new
+        request replaces earlier offers and clears a selection.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ExitContractId'
+        - $ref: '#/components/parameters/PayoutId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AnnuityOffersRequest' }
+      responses:
+        '200':
+          description: The collected offers
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AnnuityPurchase' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/contracts/{contractId}/exit/payouts/{payoutId}/annuity/selection:
+    post:
+      tags: [Pension annuity]
+      operationId: selectAnnuityOffer
+      summary: Select one offer under SCA
+      description: |
+        `scaChallengeId` must be signed over the offer's `selectionHash`, which binds this payout,
+        the partner, the offer id, the premium and the monthly amount. The payout confirmation
+        then requires this selection, still valid and for the same premium.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ExitContractId'
+        - $ref: '#/components/parameters/PayoutId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AnnuitySelectionRequest' }
+      responses:
+        '200':
+          description: The selection
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AnnuityPurchase' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/contracts/{contractId}/exit/payouts/{payoutId}/annuity/cancellation:
+    post:
+      tags: [Pension annuity]
+      operationId: cancelAnnuityPolicy
+      summary: Cancel the issued policy within the partner's cooling-off period (SCA)
+      description: |
+        `scaChallengeId` must be signed over `cancellationHash`. The premium the partner returns is
+        paid to the participant's signed payout account (the contract is already paid out).
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ExitContractId'
+        - $ref: '#/components/parameters/PayoutId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AnnuityCancellationRequest' }
+      responses:
+        '200':
+          description: The cancelled purchase
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AnnuityPurchase' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/operator/annuity-providers:
+    get:
+      tags: [Pension operations]
+      operationId: listAnnuityProviders
+      summary: Partner insurers, optionally by status (staff)
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema: { $ref: '#/components/schemas/AnnuityProviderStatus' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/AnnuityProvider' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Pension operations]
+      operationId: createAnnuityProvider
+      summary: Register a partner insurer as DRAFT (maker)
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateAnnuityProviderRequest' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AnnuityProvider' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/operator/annuity-providers/{partnerId}:
+    get:
+      tags: [Pension operations]
+      operationId: getAnnuityProvider
+      summary: One partner insurer (staff)
+      parameters:
+        - $ref: '#/components/parameters/AnnuityPartnerId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AnnuityProvider' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Pension operations]
+      operationId: amendAnnuityProvider
+      summary: Propose new terms; the approved version stays live until a different person approves them
+      parameters:
+        - $ref: '#/components/parameters/AnnuityPartnerId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AnnuityProviderTerms' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AnnuityProvider' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/operator/annuity-providers/{partnerId}/activation-request:
+    post:
+      tags: [Pension operations]
+      operationId: requestAnnuityProviderActivation
+      summary: Request activation (maker); the adapter kind must exist in this build
+      parameters:
+        - $ref: '#/components/parameters/AnnuityPartnerId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: PENDING_ACTIVATION
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AnnuityProvider' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/operator/annuity-providers/{partnerId}/activation-approval:
+    post:
+      tags: [Pension operations]
+      operationId: approveAnnuityProviderActivation
+      summary: Approve activation (checker); 403 when the approver edited the terms or requested activation
+      parameters:
+        - $ref: '#/components/parameters/AnnuityPartnerId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: ACTIVE
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AnnuityProvider' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/operator/annuity-providers/{partnerId}/disable:
+    post:
+      tags: [Pension operations]
+      operationId: disableAnnuityProvider
+      summary: Stop asking this partner for quotes (purchases in flight continue)
+      parameters:
+        - $ref: '#/components/parameters/AnnuityPartnerId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: DISABLED
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AnnuityProvider' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/pension/operator/annuity-purchases:
+    get:
+      tags: [Pension operations]
+      operationId: listAnnuityPurchases
+      summary: Annuity purchases newest first, optionally by status (staff)
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema: { $ref: '#/components/schemas/AnnuityPurchaseStatus' }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/AnnuityPurchase' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/pension/operator/annuity-purchases/{purchaseId}/sync:
+    post:
+      tags: [Pension operations]
+      operationId: syncAnnuityPurchase
+      summary: Ask the partner where an in-flight purchase or a cancellation refund stands, and apply it
+      parameters:
+        - name: purchaseId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The purchase after the sync
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AnnuityPurchase' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
 components:
   securitySchemes:
     bearerAuth:
@@ -1590,6 +2486,12 @@ components:
         type: string
         format: uuid
 
+    AnnuityPartnerId:
+      name: partnerId
+      in: path
+      required: true
+      schema: { type: string, pattern: '^[a-z0-9][a-z0-9-]{1,39}$' }
+
   responses:
     Forbidden:
       description: SCA, own-account or role check failed
@@ -1665,6 +2567,11 @@ components:
       properties:
         strategyCode: { type: string, minLength: 1 }
         effectiveFrom: { type: string, format: date, description: Defaults to today; never in the past }
+        scaChallengeId: { type: string, description: 'Single-use challenge over pension-strategy-change:<hash>' }
+        acknowledgedWarnings:
+          type: array
+          items: { type: string, enum: [STRATEGY_ABOVE_PROFILE, PRODUCT_NOT_APPROPRIATE, SUSTAINABILITY_PREFERENCE_NOT_MET] }
+        language: { type: string, description: 'Language the warnings were shown in (cs / en)' }
     IncentiveEvaluationRequest:
       type: object
       required: [contribution, period]
@@ -1759,8 +2666,18 @@ components:
             contractNumber: { type: string }
     QuestionnaireRequest:
       type: object
-      required: [riskAppetite, lossTolerance, financialSituationStable]
+      description: >-
+        Either `answers` (the data-driven question set, issue #12384) or the legacy 0..3 scales
+        (riskAppetite, lossTolerance, financialSituationStable required) for clients not yet migrated.
       properties:
+        answers:
+          type: object
+          description: Question id -> option code, from GET .../questionnaire
+          additionalProperties: { type: string }
+        confirmInconsistencies:
+          type: array
+          items: { type: string }
+        language: { type: string }
         knowledgeLevel: { type: integer, minimum: 0, maximum: 3 }
         experienceLevel: { type: integer, minimum: 0, maximum: 3 }
         riskAppetite: { type: integer, minimum: 0, maximum: 3 }
@@ -1829,6 +2746,151 @@ components:
       properties:
         application: { $ref: '#/components/schemas/OnboardingApplication' }
         recommendation: { $ref: '#/components/schemas/StrategyRecommendation' }
+        profile: { $ref: '#/components/schemas/RiskProfileView' }
+    QuestionnaireDraftRequest:
+      type: object
+      required: [answers]
+      properties:
+        answers:
+          type: object
+          additionalProperties: { type: string }
+    AcknowledgeWarningsRequest:
+      type: object
+      required: [strategyCode, warnings]
+      properties:
+        strategyCode: { type: string }
+        warnings:
+          type: array
+          items: { $ref: '#/components/schemas/WarningCode' }
+        language: { type: string }
+    WarningCode:
+      type: string
+      enum: [STRATEGY_ABOVE_PROFILE, PRODUCT_NOT_APPROPRIATE, SUSTAINABILITY_PREFERENCE_NOT_MET]
+    QuestionnaireWarning:
+      type: object
+      properties:
+        code: { $ref: '#/components/schemas/WarningCode' }
+        text: { type: string }
+    InconsistentAnswers:
+      type: object
+      properties:
+        error: { type: string }
+        inconsistencies:
+          type: array
+          items:
+            type: object
+            properties:
+              code: { type: string }
+              questions: { type: array, items: { type: string } }
+    QuestionDimension:
+      type: string
+      enum: [OBJECTIVE, RISK_WILLINGNESS, LOSS_CAPACITY, FINANCIAL_SITUATION, SAVINGS, KNOWLEDGE, EXPERIENCE, SUSTAINABILITY]
+    QuestionnaireView:
+      type: object
+      properties:
+        questionSetId: { type: string }
+        questionSetVersion: { type: integer }
+        legalReviewStatus: { type: string, enum: [REQUIRES_LEGAL_REVIEW, REVIEWED] }
+        steps:
+          type: array
+          items:
+            type: object
+            properties:
+              code: { type: string }
+              title: { type: string }
+              optional: { type: boolean }
+              questions:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: string }
+                    dimension: { $ref: '#/components/schemas/QuestionDimension' }
+                    instrumentClass: { type: string, nullable: true }
+                    text: { type: string }
+                    help: { type: string, nullable: true }
+                    required: { type: boolean }
+                    options:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          code: { type: string }
+                          text: { type: string }
+                          illustrationCzk: { type: number, nullable: true }
+        answers:
+          type: object
+          additionalProperties: { type: string }
+        progress:
+          type: object
+          properties:
+            answered: { type: integer }
+            required: { type: integer }
+            missingRequired: { type: array, items: { type: string } }
+            nextStep: { type: string, nullable: true }
+            complete: { type: boolean }
+        prefill:
+          type: object
+          properties:
+            birthDate: { type: string, format: date }
+            yearsToRetirement: { type: integer }
+            retirementAge: { type: integer }
+            previousAnswersAvailable: { type: boolean }
+        inconsistencies:
+          type: array
+          items:
+            type: object
+            properties:
+              code: { type: string }
+              questions: { type: array, items: { type: string } }
+              message: { type: string }
+    RiskProfileView:
+      type: object
+      properties:
+        assessmentId: { type: string, format: uuid }
+        questionSetId: { type: string, nullable: true }
+        questionSetVersion: { type: integer, nullable: true }
+        riskClass: { type: integer, minimum: 1, maximum: 7 }
+        riskLabel: { type: string, enum: [CONSERVATIVE, BALANCED, DYNAMIC] }
+        why:
+          type: array
+          items:
+            type: object
+            properties:
+              dimension: { $ref: '#/components/schemas/QuestionDimension' }
+              questionId: { type: string }
+              question: { type: string }
+              answer: { type: string }
+              maxRiskClass: { type: integer }
+        financialSituationStable: { type: boolean }
+        appropriate: { type: boolean, nullable: true }
+        competence:
+          type: array
+          items:
+            type: object
+            properties:
+              instrumentClass: { type: string }
+              knowledge: { type: integer }
+              experience: { type: integer }
+        sustainability:
+          type: object
+          nullable: true
+          properties:
+            optionCode: { type: string, nullable: true }
+            categories:
+              type: array
+              items: { type: string, enum: [TAXONOMY_ALIGNED, SFDR_SUSTAINABLE, PAI_CONSIDERED] }
+            minSharePercent: { type: integer, nullable: true }
+        savingsCzk: { type: number, nullable: true }
+        lossSharePercent: { type: integer, nullable: true }
+        lossCapacityCzk: { type: number, nullable: true }
+        confirmedInconsistencies: { type: array, items: { type: string } }
+        recommendation: { $ref: '#/components/schemas/StrategyRecommendation' }
+        recommendedStrategyWarnings:
+          type: array
+          items: { $ref: '#/components/schemas/QuestionnaireWarning' }
+        assessedAt: { type: string, format: date-time }
+        validUntil: { type: string, format: date }
     OperatorApplication:
       type: object
       properties:
@@ -1896,16 +2958,38 @@ components:
     Mandate:
       type: object
       properties:
-        mandateId: { type: string }
+        mandateId: { type: string, description: The standing-order / sdd mandate id downstream. }
+        id: { type: string, format: uuid, description: "pension-service's own mandate id (the cancel route takes it, #12378)." }
+        status: { type: string, enum: [ACTIVE, CANCELLED] }
+    MandateCancelRequest:
+      type: object
+      required: [scaChallengeId]
+      properties:
+        scaChallengeId:
+          type: string
+          description: SCA challenge signing this contract's cancellation of this mandate (single use).
     MandateSetupRequest:
       type: object
-      required: [kind, debtorIban, amount, currency, firstCollection]
+      required: [kind, debtorIban, amount, currency, firstCollection, scaChallengeId]
       properties:
+        scaChallengeId:
+          type: string
+          description: >-
+            Single-use sca-service APPROVAL challenge raised with approvalRequestId
+            `pension-mandate-setup:<sha256>` over `pension-mandate-setup|contractId|kind|IBAN|amount|CURRENCY|firstCollection`
+            (IBAN without spaces, upper case; amount without trailing zeros). Missing or not verified = 403,
+            before any account lookup.
         kind: { type: string, enum: [STANDING_ORDER, DIRECT_DEBIT] }
         debtorIban: { type: string }
         amount: { type: number, exclusiveMinimum: 0, maximum: 999999999.99, multipleOf: 0.01 }
         currency: { type: string, pattern: '^[A-Z]{3}$' }
         firstCollection: { type: string, format: date }
+        debtorName:
+          type: string
+          description: >-
+            Account holder's name; required for DIRECT_DEBIT. The debit account itself is resolved
+            server-side from debtorIban and must be a verified account of the participant (#12378);
+            no account id is accepted from the caller.
     Contribution:
       type: object
       properties:
@@ -1990,6 +3074,53 @@ components:
       required: [payload]
       properties:
         payload: { type: string }
+    IneligibilityRequest:
+      type: object
+      required: [ineligibleFrom]
+      properties:
+        ineligibleFrom: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$', description: First month without entitlement (YYYY-MM) }
+    ReturnReportRequest:
+      type: object
+      required: [month]
+      properties:
+        month: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' }
+    StateContributionReturn:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        contractId: { type: string, format: uuid }
+        claimId: { type: [string, 'null'], format: uuid }
+        cause: { type: string, enum: [CONTRACT_TERMINATED, INELIGIBILITY_DISCOVERED] }
+        amount: { type: number }
+        currency: { type: string }
+        discoveredOn: { type: string, format: date }
+        dueBy: { type: string, format: date, description: Statutory deadline (ZDPS §18(2)/(3)) }
+        status: { type: string, enum: [DUE, REPORTED, CONFIRMED, SETTLED] }
+        reportId: { type: [string, 'null'], format: uuid }
+    ReturnReport:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        month: { type: string }
+        returnIds: { type: array, items: { type: string, format: uuid } }
+        payload: { type: string, description: Filed document in the placeholder cz-mf-state-contribution-v1 format }
+        channelReference: { type: [string, 'null'], description: 'MANUAL:sha256:… means nothing was transmitted' }
+        resultApplied: { type: boolean }
+        createdAt: { type: string, format: date-time }
+    ReturnReportRun:
+      type: object
+      properties:
+        filed: { type: boolean }
+        report:
+          oneOf:
+            - $ref: '#/components/schemas/ReturnReport'
+            - type: 'null'
+    StateContributionDeadlines:
+      type: object
+      properties:
+        claimsPastFilingDeadline: { type: integer }
+        claimsPastExpectedPayment: { type: integer }
+        returnsOverdue: { type: integer }
     IncentiveClaim:
       type: object
       properties:
@@ -2048,6 +3179,20 @@ components:
         usage:
           type: object
           additionalProperties: { type: number, minimum: 0 }
+    AnnualStatement:
+      type: object
+      required: [contractId, year, documentId, sha256, issuedAt]
+      properties:
+        contractId: { type: string, format: uuid }
+        year: { type: integer }
+        documentId:
+          type: string
+          description: document-service's id of the rendered statement
+        sha256:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          description: document-service's SHA-256 of the stored statement
+        issuedAt: { type: string, format: date-time }
     TaxYearSummary:
       type: object
       properties:
@@ -2153,7 +3298,7 @@ components:
         payoutId: { type: string, format: uuid }
         contractId: { type: string, format: uuid }
         form: { $ref: '#/components/schemas/PayoutForm' }
-        status: { type: string, enum: [QUOTED, CONFIRMED, IN_PAYMENT, COMPLETED, EXPIRED] }
+        status: { type: string, enum: [QUOTED, CONFIRMED, IN_PAYMENT, COMPLETED, EXPIRED, REVERSED] }
         currentValue: { $ref: '#/components/schemas/Money' }
         grossAmount: { $ref: '#/components/schemas/Money' }
         taxBase: { type: string, enum: [NONE, GAINS, GROSS] }
@@ -2272,3 +3417,204 @@ components:
         projections:
           type: array
           items: { $ref: '#/components/schemas/StrategyProjection' }
+    ScheduleChangeRequest:
+      type: object
+      required: [amount, frequency, dayOfMonth]
+      properties:
+        amount: { type: number, minimum: 0, description: Participant contribution per collection }
+        frequency: { $ref: '#/components/schemas/ContributionFrequency' }
+        dayOfMonth: { type: integer, minimum: 1, maximum: 28 }
+        startDate: { type: string, format: date, description: Earliest start; the next cycle on or after it applies }
+        acknowledgeIncentiveReduction: { type: boolean, default: false }
+        scaChallengeId: { type: string, maxLength: 128, description: Required on /changes only }
+    ScheduleChangePreview:
+      type: object
+      properties:
+        amount: { type: number }
+        employerAmount: { type: number }
+        currency: { type: string }
+        frequency: { $ref: '#/components/schemas/ContributionFrequency' }
+        dayOfMonth: { type: integer }
+        effectiveFrom: { type: string, format: date }
+        annualIncentiveBefore: { type: number }
+        annualIncentiveAfter: { type: number }
+        incentiveWarnings: { type: array, items: { type: string } }
+        documentSha256: { type: string, description: The document to sign under SCA }
+    ContributionScheduleVersion:
+      type: object
+      properties:
+        seq: { type: integer }
+        amount: { type: number }
+        employerAmount: { type: number }
+        currency: { type: string }
+        frequency: { $ref: '#/components/schemas/ContributionFrequency' }
+        dayOfMonth: { type: integer }
+        effectiveFrom: { type: string, format: date }
+        status: { type: string, enum: [SCHEDULED, SUPERSEDED] }
+        changedAt: { type: string, format: date-time }
+    ContributionScheduleView:
+      type: object
+      properties:
+        original:
+          type: object
+          description: The schedule agreed at signing; applies until the first change takes effect
+          properties:
+            amount: { type: number }
+            employerAmount: { type: number }
+            currency: { type: string }
+            frequency: { $ref: '#/components/schemas/ContributionFrequency' }
+        inForce:
+          oneOf:
+            - { $ref: '#/components/schemas/ContributionScheduleVersion' }
+            - { type: 'null' }
+        pending:
+          oneOf:
+            - { $ref: '#/components/schemas/ContributionScheduleVersion' }
+            - { type: 'null' }
+        history: { type: array, items: { $ref: '#/components/schemas/ContributionScheduleVersion' } }
+    BeneficiaryChangeRequest:
+      type: object
+      required: [beneficiaries]
+      properties:
+        beneficiaries: { type: array, maxItems: 10, items: { $ref: '#/components/schemas/Beneficiary' } }
+        scaChallengeId: { type: string, maxLength: 128, description: Required on /changes only }
+    BeneficiaryChangePreview:
+      type: object
+      properties:
+        beneficiaries: { type: array, items: { $ref: '#/components/schemas/Beneficiary' } }
+        documentSha256: { type: string, description: The document to sign under SCA }
+    BeneficiaryDesignationVersion:
+      type: object
+      properties:
+        seq: { type: integer }
+        beneficiaries: { type: array, items: { $ref: '#/components/schemas/Beneficiary' } }
+        changedAt: { type: string, format: date-time }
+    BeneficiaryView:
+      type: object
+      properties:
+        current: { type: array, items: { $ref: '#/components/schemas/Beneficiary' } }
+        history: { type: array, items: { $ref: '#/components/schemas/BeneficiaryDesignationVersion' } }
+    # ---- #12383 annuity marketplace ----
+    AnnuityType:
+      type: string
+      enum: [LIFELONG, FIXED_TERM, GUARANTEE_PERIOD, JOINT_LIFE, INDEXED]
+    AnnuityProviderStatus:
+      type: string
+      enum: [DRAFT, PENDING_ACTIVATION, ACTIVE, DISABLED]
+    AnnuityPurchaseStatus:
+      type: string
+      enum: [OFFERED, SELECTED, APPLIED, PREMIUM_SENT, ACTIVE, CANCELLED, FAILED]
+    AnnuityOffersRequest:
+      type: object
+      properties:
+        annuityTypes: { type: array, items: { $ref: '#/components/schemas/AnnuityType' } }
+        guaranteeMonths: { type: [integer, 'null'], minimum: 0 }
+        termMonths: { type: [integer, 'null'], minimum: 1 }
+        jointLifeBirthDate: { type: [string, 'null'], format: date }
+        survivorShare: { type: [number, 'null'], minimum: 0, maximum: 1 }
+    AnnuitySelectionRequest:
+      type: object
+      required: [partnerId, offerId, scaChallengeId]
+      properties:
+        partnerId: { type: string }
+        offerId: { type: string }
+        scaChallengeId: { type: string }
+    AnnuityCancellationRequest:
+      type: object
+      required: [scaChallengeId]
+      properties:
+        scaChallengeId: { type: string }
+    AnnuityOffer:
+      type: object
+      properties:
+        partnerId: { type: string }
+        partnerName: { type: string }
+        offerId: { type: string }
+        annuityType: { $ref: '#/components/schemas/AnnuityType' }
+        premium: { $ref: '#/components/schemas/Money' }
+        currency: { type: string }
+        monthlyAmount: { $ref: '#/components/schemas/Money' }
+        guaranteeMonths: { type: integer }
+        termMonths: { type: [integer, 'null'] }
+        indexationRate: { type: number }
+        survivorShare: { type: [number, 'null'] }
+        oneOffFee: { $ref: '#/components/schemas/Money' }
+        annualFeeRate: { type: number }
+        guaranteedTotal: { $ref: '#/components/schemas/Money' }
+        validUntil: { type: string, format: date-time }
+        illustrative: { type: boolean, description: True when the figures are not a binding insurer price }
+        providerVersion: { type: integer, description: The approved partner version this offer was quoted under (signed) }
+        selectionHash: { type: string, description: What an SCA challenge selecting this offer must be signed over }
+    AnnuityPartnerFailure:
+      type: object
+      properties:
+        partnerId: { type: string }
+        reason: { type: string }
+    AnnuityPurchase:
+      type: object
+      properties:
+        payoutId: { type: string, format: uuid }
+        contractId: { type: string, format: uuid }
+        status: { $ref: '#/components/schemas/AnnuityPurchaseStatus' }
+        premium: { $ref: '#/components/schemas/Money' }
+        currency: { type: string }
+        quotedAt: { type: string, format: date-time }
+        presentationOrder: { type: string, description: The disclosed partner-neutral order of offers }
+        offers: { type: array, items: { $ref: '#/components/schemas/AnnuityOffer' } }
+        partnerFailures: { type: array, items: { $ref: '#/components/schemas/AnnuityPartnerFailure' } }
+        selectedPartnerId: { type: [string, 'null'] }
+        selectedOfferId: { type: [string, 'null'] }
+        applicationRef: { type: [string, 'null'] }
+        premiumPaymentRef: { type: [string, 'null'] }
+        policyRef: { type: [string, 'null'] }
+        policyMonthlyAmount: { type: [number, 'null'] }
+        coolingOffEndsOn: { type: [string, 'null'], format: date }
+        cancellationHash: { type: [string, 'null'] }
+        failureReason: { type: [string, 'null'] }
+        compensation: { type: string, enum: [NONE, RETURNED_TO_CONTRACT, RETURNED_TO_CLIENT] }
+        disclaimer: { type: string }
+    AnnuityProviderTerms:
+      type: object
+      required: [legalName, legalEntityPartyId, licenceRef, licenceAuthority, jurisdictions, supportedTypes,
+                 currency, minPremium, maxPremium, coolingOffDays, premiumIban, adapter, effectiveFrom]
+      properties:
+        legalName: { type: string }
+        legalEntityPartyId: { type: string, format: uuid, description: The insurer's legal entity in party-service }
+        licenceRef: { type: string }
+        licenceAuthority: { type: string }
+        jurisdictions: { type: array, items: { type: string, pattern: '^[A-Z]{2}$' } }
+        supportedTypes: { type: array, items: { $ref: '#/components/schemas/AnnuityType' } }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        minPremium: { type: number }
+        maxPremium: { type: number }
+        coolingOffDays: { type: integer, minimum: 0, maximum: 60 }
+        premiumIban: { type: string }
+        adapter: { type: string, description: 'Adapter kind, e.g. reference-rest (simulator exists only in dev/test builds)' }
+        endpointUrl: { type: [string, 'null'], description: HTTPS base URL of a reference-protocol partner }
+        adapterSettings: { type: object, additionalProperties: { type: string }, description: Non-secret adapter parameters }
+        effectiveFrom: { type: string, format: date }
+        effectiveTo: { type: [string, 'null'], format: date }
+    CreateAnnuityProviderRequest:
+      type: object
+      required: [partnerId, terms]
+      properties:
+        partnerId: { type: string, pattern: '^[a-z0-9][a-z0-9-]{1,39}$' }
+        terms: { $ref: '#/components/schemas/AnnuityProviderTerms' }
+    AnnuityProvider:
+      type: object
+      description: |
+        Versioned under four-eyes: `liveTerms` is the approved version quoting and purchase use;
+        `proposedTerms` is a pending edit, invisible to the marketplace until a different person
+        approves it. Offers pin the live version (`providerVersion`) and the selection SCA signs it.
+      properties:
+        partnerId: { type: string }
+        status: { $ref: '#/components/schemas/AnnuityProviderStatus' }
+        liveVersion: { type: [integer, 'null'] }
+        liveTerms: { oneOf: [{ $ref: '#/components/schemas/AnnuityProviderTerms' }, { type: 'null' }] }
+        approvedBy: { type: [string, 'null'] }
+        approvedAt: { type: [string, 'null'], format: date-time }
+        proposedVersion: { type: [integer, 'null'] }
+        proposedTerms: { oneOf: [{ $ref: '#/components/schemas/AnnuityProviderTerms' }, { type: 'null' }] }
+        proposedBy: { type: [string, 'null'] }
+        activationRequestedBy: { type: [string, 'null'] }
+        updatedAt: { type: string, format: date-time }

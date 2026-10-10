@@ -25,9 +25,11 @@ import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestMethodOrder
 import java.math.BigDecimal
+import java.time.Clock
 import java.time.Duration
 import java.time.LocalDate
 import java.time.YearMonth
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 /**
@@ -79,6 +81,10 @@ class PensionFullLifecycleJourneyE2E {
     @Inject
     lateinit var temporal: PensionTemporalTestEnvironment
 
+    /** The service's clock (WorkflowTimeClock): it moves with [temporal]. */
+    @Inject
+    lateinit var appClock: Clock
+
     @Inject
     lateinit var fundValues: InMemoryFundAdministrationAdapter
 
@@ -112,6 +118,13 @@ class PensionFullLifecycleJourneyE2E {
         const val PARTY = "X-Customer-Party-Id"
         const val IDEMPOTENCY = "Idempotency-Key"
         const val IBAN = "CZ6508000000192000145399"
+        const val OTHER_IBAN = "CZ5508000000001234567899"
+        const val SECOND_IBAN = "CZ1208000000009876543210"
+        const val PARTNERS = "/api/v1/pension/operator/annuity-providers"
+        val SIM_PARTNERS = listOf(
+            Triple("sim-alpha", "1.12", "CZ5508000000001234567899"),
+            Triple("sim-beta", "1.10", "CZ1208000000009876543210"),
+        )
         val ORIGINAL_START: LocalDate = LocalDate.of(2010, 1, 1)
 
         /** The CZ onboarding packs' cooling-off period (jurisdiction-packs/onboarding/cz-*-v1.json). */
@@ -134,11 +147,14 @@ class PensionFullLifecycleJourneyE2E {
             customerPost(
                 customer,
                 "$APPS/$dpsApplication/questionnaire",
-                """{"riskAppetite":2,"lossTolerance":2,"financialSituationStable":true}""",
+                """{"answers":{"dps.objective":"GROWTH","dps.risk_reaction":"HOLD","dps.knowledge":"CORRECT",
+                    "dps.experience":"OCCASIONALLY","dps.savings":"50K_250K","dps.loss_capacity":"UP_TO_25"}}""",
             ),
         )
         val recommended = q.getString("recommendation.recommendedStrategy")
-        assertThat(recommended).describedAs("a 2/2 risk profile 20+ years out").isNotBlank()
+        assertThat(recommended).describedAs("a class-5 profile 20+ years out").isNotBlank()
+        assertThat(q.getInt("profile.riskClass")).isEqualTo(5)
+        assertThat(q.getList<String>("profile.recommendedStrategyWarnings")).isEmpty()
 
         val kid = ok(customerPost(customer, "$APPS/$dpsApplication/strategy", "{}"))
         assertThat(kid.getString("chosenStrategy")).isEqualTo(recommended)
@@ -215,6 +231,13 @@ class PensionFullLifecycleJourneyE2E {
         assertThat(credited.getString("outcome")).describedAs(credited.prettify()).isEqualTo("CREDITED")
         assertThat(credited.getString("contribution.source")).isEqualTo("PARTICIPANT")
 
+        // The CZ application is filed in the month after the quarter (ZDPS §16(2)): move the
+        // service's clock into the filing month of lastMonth's quarter if it is not there yet.
+        val appToday = LocalDate.now(appClock)
+        val filingOpens = lastMonth.withMonth(((lastMonth.monthValue - 1) / 3) * 3 + 3).plusMonths(1).atDay(1)
+        if (appToday.isBefore(filingOpens)) {
+            temporal.advance(Duration.ofDays(ChronoUnit.DAYS.between(appToday, filingOpens) + 1))
+        }
         val run = ok(operatorPost("$OPS/claim-runs", """{"period":"$lastMonth"}"""))
         assertThat(run.getInt("claimsCreated")).isGreaterThanOrEqualTo(1)
         val batch = run.getList<Map<String, Any>>("batches")
@@ -222,6 +245,10 @@ class PensionFullLifecycleJourneyE2E {
                 StateAgencySimulator.parse(it["payload"].toString()).any { c -> c.contractReference == dpsReference }
             }
         claimBatch = batch["id"].toString()
+        // CZ files per calendar QUARTER (ZDPS § 16(2)), never per month: the batch is the quarter's.
+        val quarterStart = lastMonth.withMonth(((lastMonth.monthValue - 1) / 3) * 3 + 1)
+        assertThat(batch["claimFormat"]).isEqualTo("cz-mf-state-contribution-v1")
+        assertThat(batch["period"].toString()).describedAs("filed for the quarter").isEqualTo(quarterStart.toString())
         val filed = StateAgencySimulator.parse(batch["payload"].toString()).filter {
             it.contractReference ==
                 dpsReference
@@ -264,7 +291,7 @@ class PensionFullLifecycleJourneyE2E {
     // ---- (f) DIP happy path -------------------------------------------------------------------
 
     @Test
-    @Order(5)
+    @Order(7)
     @TestSecurity(user = "edge", roles = ["ROLE_API"])
     fun `f1 - a DIP is onboarded under MiFID suitability with an ESG preference`() {
         val started = ok(customerPost(dipCustomer, "/api/v1/pension/onboarding/applications", dipStart()), 201)
@@ -273,8 +300,11 @@ class PensionFullLifecycleJourneyE2E {
             customerPost(
                 dipCustomer,
                 "$APPS/$dipApplication/questionnaire",
-                """{"knowledgeLevel":3,"experienceLevel":3,"riskAppetite":3,"lossTolerance":3,
-                    "financialSituationStable":true,"esgPreference":"CONSIDER"}""",
+                """{"answers":{"dip.objective":"MAX_GROWTH","dip.financial_situation":"EASILY",
+                    "dip.savings":"OVER_1M","dip.loss_capacity":"OVER_25","dip.risk_reaction":"BUY_MORE",
+                    "dip.knowledge_bonds":"CORRECT","dip.experience_bonds":"REGULARLY",
+                    "dip.knowledge_equity":"CORRECT","dip.experience_equity":"REGULARLY",
+                    "dip.sustainability":"AVOID_HARM"}}""",
             ),
         )
         val kid = ok(customerPost(dipCustomer, "$APPS/$dipApplication/strategy", "{}"))
@@ -300,7 +330,7 @@ class PensionFullLifecycleJourneyE2E {
     }
 
     @Test
-    @Order(6)
+    @Order(8)
     @TestSecurity(user = "ops-maker", roles = ["ROLE_OPERATOR"])
     fun `f2 - the DIP activates on its first contribution and earns no state incentive`() {
         val ref = ok(operatorGet("$FUNDING/$dipContract/payment-reference")).getString("reference")
@@ -322,10 +352,41 @@ class PensionFullLifecycleJourneyE2E {
     // ---- (b) transfer-in, strategy change; also feeds (e) -----------------------------------------
 
     @Test
-    @Order(7)
+    @Order(9)
     @TestSecurity(user = "edge", roles = ["ROLE_API"])
-    fun `b1 - transfer-in applications are signed for three contracts from another provider`() {
-        for (key in listOf("lump", "phased", "death")) {
+    fun `f2b - under MiFID a DIP strategy above the profile is refused even when acknowledged`() {
+        // The DIP participant's situation changed: re-assessed to a cautious profile.
+        ok(
+            customerPost(
+                dipCustomer,
+                "$APPS/$dipApplication/questionnaire",
+                """{"answers":{"dip.objective":"STEADY","dip.financial_situation":"MANAGE",
+                    "dip.savings":"50K_250K","dip.loss_capacity":"UP_TO_10","dip.risk_reaction":"SWITCH_SAFER",
+                    "dip.knowledge_bonds":"CORRECT","dip.experience_bonds":"REGULARLY",
+                    "dip.knowledge_equity":"CORRECT","dip.experience_equity":"REGULARLY",
+                    "dip.sustainability":"AVOID_HARM"}}""",
+            ),
+        )
+        // MiFID (DIP): a strategy above the suitable class is refused outright, acknowledgement or
+        // not, and nothing is signed or stored.
+        val refused = given().contentType(JSON).header(PARTY, dipCustomer.toString())
+            .header(IDEMPOTENCY, UUID.randomUUID().toString())
+            .body(
+                """{"strategyCode":"EQUITY_GLOBAL","acknowledgedWarnings":["STRATEGY_ABOVE_PROFILE"],""" +
+                    """"scaChallengeId":"sca-${UUID.randomUUID()}"}""",
+            )
+            .`when`().put("/api/v1/pension/contracts/$dipContract/strategy")
+        assertThat(refused.statusCode).describedAs(refused.body.asString()).isEqualTo(403)
+        assertThat(
+            refused.jsonPath().getString("code"),
+        ).describedAs(refused.body.asString()).isEqualTo("STRATEGY_NOT_PERMITTED")
+    }
+
+    @Test
+    @Order(10)
+    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    fun `b1 - transfer-in applications are signed for four contracts from another provider`() {
+        for (key in listOf("lump", "phased", "death", "annuity")) {
             val started = ok(
                 customerPost(retiree, "/api/v1/pension/onboarding/applications", transferStart(key)),
                 201,
@@ -356,7 +417,7 @@ class PensionFullLifecycleJourneyE2E {
     }
 
     @Test
-    @Order(8)
+    @Order(11)
     @TestSecurity(user = "ops-maker", roles = ["ROLE_OPERATOR"])
     fun `b2 - the ceding provider accepts and the funds arrive with incentive history and original start date`() {
         for ((key, transfer) in transferIds) {
@@ -391,7 +452,7 @@ class PensionFullLifecycleJourneyE2E {
     }
 
     @Test
-    @Order(9)
+    @Order(12)
     @TestSecurity(user = "edge", roles = ["ROLE_API"])
     fun `b3 - the transferred contract is active from its original start date and its strategy can change`() {
         val id = transferContracts.getValue("lump")
@@ -401,9 +462,9 @@ class PensionFullLifecycleJourneyE2E {
             contract.getString("startDate"),
         ).describedAs("the original start date moves with the transfer").isEqualTo(ORIGINAL_START.toString())
 
-        val changed = given().contentType(
-            JSON,
-        ).header(PARTY, retiree.toString()).body("""{"strategyCode":"CONSERVATIVE"}""")
+        val changed = given().contentType(JSON).header(PARTY, retiree.toString())
+            .header(IDEMPOTENCY, UUID.randomUUID().toString())
+            .body("""{"strategyCode":"CONSERVATIVE","scaChallengeId":"sca-${UUID.randomUUID()}"}""")
             .`when`().put("/api/v1/pension/contracts/$id/strategy")
         assertThat(changed.statusCode).describedAs(changed.body.asString()).isEqualTo(200)
         assertThat(changed.jsonPath().getString("currentStrategy.strategyCode")).isEqualTo("CONSERVATIVE")
@@ -417,7 +478,7 @@ class PensionFullLifecycleJourneyE2E {
     // ---- (d) early termination -----------------------------------------------------------------
 
     @Test
-    @Order(10)
+    @Order(13)
     @TestSecurity(user = "edge", roles = ["ROLE_API"])
     fun `d1 - early termination pays exactly the quote, returning the received state incentive`() {
         fundValues.setValue(UUID.fromString(dpsContract), BigDecimal("50000.00"))
@@ -457,7 +518,7 @@ class PensionFullLifecycleJourneyE2E {
     }
 
     @Test
-    @Order(11)
+    @Order(14)
     @TestSecurity(user = "ops-maker", roles = ["ROLE_OPERATOR"])
     fun `d2 - the returned incentive is booked back to the agency in the incentive ledger`() {
         val incentives = ok(operatorGet("$FUNDING/$dpsContract/incentives"))
@@ -469,12 +530,33 @@ class PensionFullLifecycleJourneyE2E {
         )
             .describedAs("S3 ledger after S5 termination: %s", incentives.prettify())
             .isEqualByComparingTo("340")
+
+        // ZDPS §18(3): the exit registered a return owed to MF; it is reported, confirmed by the
+        // agency (simulator) and settled.
+        val owed = ok(operatorGet("$OPS/state-contribution/returns?status=DUE"))
+        val returnId = owed.getString("find { it.contractId == '$dpsContract' }.id")
+        assertThat(owed.getString("find { it.contractId == '$dpsContract' }.cause")).isEqualTo("CONTRACT_TERMINATED")
+        val filed = ok(
+            operatorPost("$OPS/state-contribution/return-reports", """{"month":"${YearMonth.now(appClock)}"}"""),
+        )
+        assertThat(filed.getBoolean("filed")).isTrue()
+        val payload = filed.getString("report.payload")
+        assertThat(BigDecimal(StateAgencySimulator.parseReturns(payload).single { it.returnId == returnId }.amount))
+            .isEqualByComparingTo("340")
+        ok(
+            operatorPost(
+                "$OPS/state-contribution/return-reports/${filed.getString("report.id")}/result",
+                """{"payload":${quote(StateAgencySimulator.returnResult(payload))}}""",
+            ),
+        )
+        assertThat(ok(operatorPost("$OPS/state-contribution/returns/$returnId/settle", null)).getString("status"))
+            .isEqualTo("SETTLED")
     }
 
     // ---- (e) regular payout and death --------------------------------------------------------------
 
     @Test
-    @Order(12)
+    @Order(15)
     @TestSecurity(user = "edge", roles = ["ROLE_API"])
     fun `e1 - a lump sum is paid exactly as quoted once the payout conditions are met`() {
         val id = transferContracts.getValue("lump")
@@ -513,7 +595,7 @@ class PensionFullLifecycleJourneyE2E {
     }
 
     @Test
-    @Order(13)
+    @Order(16)
     @TestSecurity(user = "edge", roles = ["ROLE_API"])
     fun `e2 - a phased withdrawal pays every instalment on its due date`() {
         val id = transferContracts.getValue("phased")
@@ -535,6 +617,28 @@ class PensionFullLifecycleJourneyE2E {
                 """{"scaChallengeId":"sca-${UUID.randomUUID()}","payoutIban":"$IBAN"}""",
             ),
         )
+        // Account-change race: two signed redirects of the same payout at once. Exactly one wins and is
+        // held (+3 days, security notice); the loser is refused, never silently applied on top.
+        val accountPath = "/api/v1/pension/contracts/$id/exit/payouts/$payout/account"
+        val pool = java.util.concurrent.Executors.newFixedThreadPool(2)
+        val start = java.util.concurrent.CountDownLatch(1)
+        val racers = listOf(OTHER_IBAN, SECOND_IBAN).map { iban ->
+            pool.submit<Int> {
+                start.await()
+                given().contentType(JSON).header(PARTY, retiree.toString())
+                    .body("""{"scaChallengeId":"sca-${UUID.randomUUID()}","payoutIban":"$iban"}""")
+                    .`when`().put(accountPath).statusCode
+            }
+        }
+        start.countDown()
+        val codes = racers.map { it.get() }.sorted()
+        pool.shutdown()
+        assertThat(codes).describedAs("exactly one account change wins the race").containsExactly(200, 409)
+        val held = ok(customerGet(retiree, "/api/v1/pension/contracts/$id/exit/payouts/$payout"))
+        assertThat(held.getString("payoutAccountLast4")).describedAs("the signed account is untouched")
+            .isEqualTo(IBAN.takeLast(4))
+        assertThat(held.getString("pendingAccountLast4")).isIn(OTHER_IBAN.takeLast(4), SECOND_IBAN.takeLast(4))
+
         temporal.advance(Duration.ofDays(400))
         eventually("phased payout completed") {
             ok(customerGet(retiree, "/api/v1/pension/contracts/$id/exit/payouts/$payout")).getString("status") ==
@@ -549,7 +653,7 @@ class PensionFullLifecycleJourneyE2E {
     }
 
     @Test
-    @Order(14)
+    @Order(17)
     @TestSecurity(user = "ops-maker", roles = ["ROLE_OPERATOR"])
     fun `e3 - a death is registered and both beneficiaries are verified`() {
         val id = transferContracts.getValue("death")
@@ -583,7 +687,7 @@ class PensionFullLifecycleJourneyE2E {
     }
 
     @Test
-    @Order(15)
+    @Order(18)
     @TestSecurity(user = "ops-checker", roles = ["ROLE_OPERATOR"])
     fun `e4 - a second operator approves and each beneficiary is paid their share`() {
         val approved = ok(operatorPost("/api/v1/pension/death-claims/$deathClaim/approve", null))
@@ -608,7 +712,7 @@ class PensionFullLifecycleJourneyE2E {
     // ---- (f) authorisation negatives -------------------------------------------------------------
 
     @Test
-    @Order(16)
+    @Order(19)
     @TestSecurity(user = "edge", roles = ["ROLE_API"])
     fun `f3 - another customer gets 404 on the onboarding, transfer, funding and exit routes of someone else`() {
         val contract = transferContracts.getValue("phased")
@@ -645,6 +749,217 @@ class PensionFullLifecycleJourneyE2E {
         assertThat(
             customerPost(stranger, "$OPS/payments", payment("x", 1, "x", LocalDate.now())).statusCode,
         ).isEqualTo(403)
+    }
+
+    // ---- (g) regular payout in the annuity form across two partner insurers (#12383) ----------
+
+    @Test
+    @Order(20)
+    @TestSecurity(user = "ops-maker", roles = ["ROLE_OPERATOR"])
+    fun `g1 - two simulator partners are registered and their activation requested, which the maker cannot approve`() {
+        for ((partner, yieldFactor, iban) in SIM_PARTNERS) {
+            ok(
+                operatorPost(
+                    "$PARTNERS",
+                    """{"partnerId":"$partner","terms":${simulatorTerms(partner, yieldFactor, iban)}}""",
+                ),
+                201,
+            )
+            ok(operatorPost("$PARTNERS/$partner/activation-request", null))
+            // Four-eyes: the maker who drafted and requested cannot activate.
+            assertThat(operatorPost("$PARTNERS/$partner/activation-approval", null).statusCode).isEqualTo(403)
+            assertThat(ok(operatorGet("$PARTNERS/$partner")).getString("status")).isEqualTo("PENDING_ACTIVATION")
+        }
+    }
+
+    @Test
+    @Order(21)
+    @TestSecurity(user = "ops-checker", roles = ["ROLE_OPERATOR"])
+    fun `g2 - a second operator activates both partners`() {
+        for ((partner, _, _) in SIM_PARTNERS) {
+            val approved = ok(operatorPost("$PARTNERS/$partner/activation-approval", null))
+            assertThat(approved.getString("status")).isEqualTo("ACTIVE")
+            assertThat(approved.getString("approvedBy")).isEqualTo("ops-checker")
+        }
+    }
+
+    @Test
+    @Order(22)
+    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    fun `g3 - an annuity payout compares both partners, binds the signed offer and buys exactly that policy`() {
+        val id = transferContracts.getValue("annuity")
+        fundValues.setValue(UUID.fromString(id), BigDecimal("900000.00"))
+        val quote =
+            ok(customerPost(retiree, "/api/v1/pension/contracts/$id/exit/payouts/quote", """{"form":"ANNUITY"}"""), 201)
+        val payout = quote.getString("payoutId")
+        val net = quote.getObject("netAmount", BigDecimal::class.java)
+        val annuity = "/api/v1/pension/contracts/$id/exit/payouts/$payout/annuity"
+
+        // No selection yet: the confirmation is refused, nothing moves.
+        assertThat(
+            customerPost(
+                retiree,
+                "/api/v1/pension/contracts/$id/exit/payouts/$payout/confirm",
+                """{"scaChallengeId":"sca-${UUID.randomUUID()}","payoutIban":"$IBAN"}""",
+            ).statusCode,
+        ).isEqualTo(409)
+
+        val offers =
+            ok(customerPost(retiree, "$annuity/offers", """{"annuityTypes":["LIFELONG","GUARANTEE_PERIOD"]}"""))
+        assertThat(
+            offers.getList<String>("offers.partnerId").toSet(),
+        ).containsExactlyInAnyOrder("sim-alpha", "sim-beta")
+        assertThat(offers.getList<String>("partnerFailures")).isEmpty()
+        assertThat(offers.getList<Boolean>("offers.illustrative")).containsOnly(true)
+        assertThat(offers.getList<BigDecimal>("offers.premium")).allSatisfy { assertThat(it).isEqualByComparingTo(net) }
+        assertThat(offers.getString("presentationOrder")).isNotBlank()
+
+        // The participant picks the beta LIFELONG offer even if it is not the top one: no steering.
+        val chosen = offers.getList<Map<String, Any>>("offers")
+            .first { it["partnerId"] == "sim-beta" && it["annuityType"] == "LIFELONG" }
+        val selected = ok(
+            customerPost(
+                retiree,
+                "$annuity/selection",
+                """{"partnerId":"sim-beta","offerId":"${chosen["offerId"]}","scaChallengeId":"sca-${UUID.randomUUID()}"}""",
+            ),
+        )
+        assertThat(selected.getString("status")).isEqualTo("SELECTED")
+
+        ok(
+            customerPost(
+                retiree,
+                "/api/v1/pension/contracts/$id/exit/payouts/$payout/confirm",
+                """{"scaChallengeId":"sca-${UUID.randomUUID()}","payoutIban":"$IBAN"}""",
+            ),
+        )
+        eventually("annuity payout completed") {
+            ok(customerGet(retiree, "/api/v1/pension/contracts/$id/exit/payouts/$payout")).getString("status") ==
+                "COMPLETED"
+        }
+        val purchase = ok(customerGet(retiree, annuity))
+        assertThat(purchase.getString("status")).isEqualTo("ACTIVE")
+        assertThat(purchase.getString("selectedPartnerId")).isEqualTo("sim-beta")
+        assertThat(purchase.getString("policyRef")).isNotBlank()
+        assertThat(purchase.getString("coolingOffEndsOn")).isNotBlank()
+        val paid = ok(customerGet(retiree, "/api/v1/pension/contracts/$id/exit/payouts/$payout"))
+        assertThat(paid.getString("annuityPolicyRef")).isEqualTo(purchase.getString("policyRef"))
+
+        // Exactly ONE premium left, to the SELECTED partner, for exactly the quoted net amount.
+        val sent = paymentRail.orders.values.filter { it.contractId == UUID.fromString(id) }
+        assertThat(sent).hasSize(1)
+        assertThat(sent.single().creditorIban).isEqualTo(SIM_PARTNERS.first { it.first == "sim-beta" }.third)
+        assertThat(sent.single().amount).isEqualByComparingTo(net)
+        assertThat(ok(customerGet(retiree, "/api/v1/pension/contracts/$id")).getString("status")).isEqualTo("PAID_OUT")
+        // Another customer cannot see it.
+        assertThat(customerGet(stranger, annuity).statusCode).isEqualTo(404)
+    }
+
+    private fun simulatorTerms(partner: String, yieldFactor: String, iban: String) = """
+        {"legalName":"Illustrative ${partner.uppercase()} Life (simulator)","legalEntityPartyId":"${UUID.randomUUID()}",
+         "licenceRef":"SIM-$partner","licenceAuthority":"SIMULATED","jurisdictions":["CZ"],
+         "supportedTypes":["LIFELONG","GUARANTEE_PERIOD","FIXED_TERM"],"currency":"CZK",
+         "minPremium":10000,"maxPremium":50000000,"coolingOffDays":30,"premiumIban":"$iban",
+         "adapter":"simulator","adapterSettings":{"yieldFactor":"$yieldFactor"},"effectiveFrom":"2020-01-01"}
+    """.trimIndent()
+
+    // ---- (h) life changes on the active DPS -----------------------------------------------------
+
+    @Test
+    @Order(5)
+    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    fun `h1 - the participant changes the contribution schedule and the beneficiaries under SCA`() {
+        val contracts = "/api/v1/pension/contracts/$dpsContract"
+        val schedule = """{"amount":2000,"frequency":"MONTHLY","dayOfMonth":20}"""
+        val preview = ok(customerPost(customer, "$contracts/contribution-schedule/preview", schedule))
+        assertThat(preview.getString("documentSha256")).hasSize(64)
+        ok(
+            customerPost(
+                customer,
+                "$contracts/contribution-schedule/changes",
+                """{"amount":2000,"frequency":"MONTHLY","dayOfMonth":20,"scaChallengeId":"sca-${UUID.randomUUID()}"}""",
+            ),
+            201,
+        )
+        assertThat(ok(customerGet(customer, "$contracts/contribution-schedule")).getList<Any>("history")).hasSize(1)
+
+        ok(
+            customerPost(
+                customer,
+                "$contracts/beneficiaries/changes",
+                """{"beneficiaries":[{"name":"Jana Novakova","sharePercent":60},{"name":"Petr Novak","sharePercent":40}],
+                    "scaChallengeId":"sca-${UUID.randomUUID()}"}""",
+            ),
+            201,
+        )
+        val beneficiaries = ok(customerGet(customer, "$contracts/beneficiaries"))
+        assertThat(beneficiaries.getList<String>("current.name")).containsExactly("Jana Novakova", "Petr Novak")
+    }
+
+    @Test
+    @Order(6)
+    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    fun `h2 - a strategy above a renewed, more cautious profile needs the acknowledged warning and SCA`() {
+        // The participant's circumstances changed: they answer again, now a class-3 profile.
+        val cautious = ok(
+            customerPost(
+                customer,
+                "$APPS/$dpsApplication/questionnaire",
+                """{"answers":{"dps.objective":"STEADY","dps.risk_reaction":"SWITCH_SAFER","dps.knowledge":"CORRECT",
+                    "dps.experience":"OCCASIONALLY","dps.savings":"50K_250K","dps.loss_capacity":"UP_TO_10"}}""",
+            ),
+        )
+        assertThat(cautious.getInt("profile.riskClass")).isEqualTo(3)
+        assertThat(cautious.getString("application.status")).describedAs("re-assessment does not reopen onboarding")
+            .isEqualTo("ACTIVATED")
+
+        val strategy = "/api/v1/pension/contracts/$dpsContract/strategy"
+        fun put(body: String) = given().contentType(JSON).header(PARTY, customer.toString())
+            .header(IDEMPOTENCY, UUID.randomUUID().toString()).body(body).`when`().put(strategy)
+
+        // Above the renewed profile: DPS lets the participant choose it, but only after the
+        // warning was shown and acknowledged (ZDPS § 136(3)), and only under a fresh SCA.
+        val warned = put("""{"strategyCode":"DYNAMIC","scaChallengeId":"sca-${UUID.randomUUID()}"}""")
+        assertThat(warned.statusCode).describedAs(warned.body.asString()).isEqualTo(409)
+        assertThat(warned.jsonPath().getString("code")).isEqualTo("WARNINGS_REQUIRED")
+        assertThat(warned.jsonPath().getList<String>("warnings")).containsExactly("STRATEGY_ABOVE_PROFILE")
+        val unsigned = put("""{"strategyCode":"DYNAMIC","acknowledgedWarnings":["STRATEGY_ABOVE_PROFILE"]}""")
+        assertThat(unsigned.statusCode).describedAs(unsigned.body.asString()).isEqualTo(403)
+        val body = """{"strategyCode":"DYNAMIC","acknowledgedWarnings":["STRATEGY_ABOVE_PROFILE"],""" +
+            """"language":"cs","scaChallengeId":"sca-${UUID.randomUUID()}"}"""
+        val changed = put(body)
+        assertThat(changed.statusCode).describedAs(changed.body.asString()).isEqualTo(200)
+        assertThat(changed.jsonPath().getString("currentStrategy.strategyCode")).isEqualTo("DYNAMIC")
+        // The same change again is idempotent: no second election.
+        val replay = put(body)
+        assertThat(replay.statusCode).isEqualTo(200)
+        assertThat(replay.jsonPath().getList<String>("strategyHistory")).hasSameSizeAs(
+            changed.jsonPath().getList<String>("strategyHistory"),
+        )
+
+        // Re-assessed back to class 5.
+        ok(
+            customerPost(
+                customer,
+                "$APPS/$dpsApplication/questionnaire",
+                """{"answers":{"dps.objective":"GROWTH","dps.risk_reaction":"HOLD","dps.knowledge":"CORRECT",
+                    "dps.experience":"OCCASIONALLY","dps.savings":"50K_250K","dps.loss_capacity":"UP_TO_25"}}""",
+            ),
+        )
+    }
+
+    @Test
+    @Order(23)
+    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    fun `i1 - once the assessment has expired, a strategy change requires re-assessment first`() {
+        // The journey's clock has moved more than the pack's 365-day validity since h2.
+        val refused = given().contentType(JSON).header(PARTY, customer.toString())
+            .header(IDEMPOTENCY, UUID.randomUUID().toString())
+            .body("""{"strategyCode":"BALANCED","scaChallengeId":"sca-${UUID.randomUUID()}"}""")
+            .`when`().put("/api/v1/pension/contracts/$dpsContract/strategy")
+        assertThat(refused.statusCode).describedAs(refused.body.asString()).isEqualTo(409)
+        assertThat(refused.jsonPath().getString("code")).isEqualTo("REASSESSMENT_REQUIRED")
+        assertThat(refused.jsonPath().getString("reason")).isEqualTo("EXPIRED")
     }
 
     // ---------------------------------------------------------------------------------------------

@@ -58,5 +58,13 @@
     },
     "phasedWithdrawal": { "minMonths": 12, "maxMonths": 360 },
     "death": { "estateWhenNoBeneficiary": true, "clawbackOnDeath": false, "beneficiaryTax": { "base": "NONE" } }
+  },
+  "contributionLimits": {
+    "minMonthly": 1,
+    "allowedFrequencies": ["MONTHLY", "QUARTERLY", "ANNUALLY"],
+    "minDayOfMonth": 1,
+    "maxDayOfMonth": 28,
+    "changeNoticeDays": 3,
+    "maxStartAheadDays": 366
   }
 }

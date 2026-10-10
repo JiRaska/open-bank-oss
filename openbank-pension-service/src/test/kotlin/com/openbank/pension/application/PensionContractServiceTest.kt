@@ -6,6 +6,7 @@ package com.openbank.pension.application
 
 import com.openbank.pension.application.port.`in`.Caller
 import com.openbank.pension.application.port.`in`.CreateDraftCommand
+import com.openbank.pension.application.port.out.ParticipantNotificationKind
 import com.openbank.pension.application.port.out.PensionContractRepository
 import com.openbank.pension.application.usecase.PensionContractService
 import com.openbank.pension.domain.model.ContractStatus
@@ -14,6 +15,7 @@ import com.openbank.pension.domain.model.ContributionSchedule
 import com.openbank.pension.domain.model.PensionContract
 import com.openbank.pension.domain.model.ProductLine
 import com.openbank.pension.domain.pack.ProviderType
+import com.openbank.pension.infrastructure.notification.RecordingParticipantNotifier
 import com.openbank.pension.infrastructure.pack.JurisdictionPackLoader
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
@@ -44,7 +46,20 @@ class PensionContractServiceTest {
 
     private val repo = InMemoryRepo()
     private val clock = Clock.fixed(Instant.parse("2026-10-09T10:00:00Z"), ZoneOffset.UTC)
-    private val service = PensionContractService(repo, JurisdictionPackLoader.loadRegistry(), clock)
+    private val notifier = RecordingParticipantNotifier()
+    private val suitability = com.openbank.pension.testsupport.RecordingSuitability()
+    private val sca = com.openbank.pension.testsupport.RecordingSca()
+    private val service =
+        PensionContractService(repo, JurisdictionPackLoader.loadRegistry(), clock, notifier, suitability, sca)
+
+    private fun change(id: UUID, code: String, from: String?, challenge: String? = "sca-${UUID.randomUUID()}") =
+        com.openbank.pension.application.port.`in`.ElectStrategyCommand(
+            me,
+            id,
+            code,
+            from?.let(LocalDate::parse),
+            challenge,
+        )
 
     private val party = UUID.randomUUID()
     private val me = Caller.customer(party)
@@ -75,7 +90,7 @@ class PensionContractServiceTest {
     fun `a draft pins the pack version in force`(): Unit = runBlocking {
         val draft = service.createDraft(command())
         assertThat(draft.status).isEqualTo(ContractStatus.DRAFT)
-        assertThat(draft.packVersion).isEqualTo(1)
+        assertThat(draft.packVersion).isEqualTo(2)
         assertThat(repo.rows).containsKey(draft.id)
     }
 
@@ -100,8 +115,22 @@ class PensionContractServiceTest {
     @Test
     fun `a strategy change cannot take effect in the past`(): Unit = runBlocking {
         val id = service.createDraft(command()).id
-        assertThatThrownBy { runBlocking { service.electStrategy(me, id, "DYNAMIC", LocalDate.parse("2020-01-01")) } }
+        assertThatThrownBy { runBlocking { service.electStrategy(change(id, "DYNAMIC", "2020-01-01")) } }
             .isInstanceOf(IllegalArgumentException::class.java)
+        // A refused change tells the participant nothing.
+        assertThat(notifier.sent).isEmpty()
+    }
+
+    @Test
+    fun `an accepted strategy change notifies the participant of its effective date (#12379)`(): Unit = runBlocking {
+        val id = service.createDraft(command()).id
+        service.electStrategy(change(id, "DYNAMIC", "2026-11-01"))
+        val notice = notifier.sent.single()
+        assertThat(notice.kind).isEqualTo(ParticipantNotificationKind.STRATEGY_CHANGE_EFFECTIVE)
+        assertThat(notice.partyId).isEqualTo(party)
+        assertThat(
+            notice.variables,
+        ).containsEntry("effectiveFrom", "2026-11-01").containsEntry("strategyCode", "DYNAMIC")
     }
 
     @Test
@@ -137,5 +166,57 @@ class PensionContractServiceTest {
         assertThatThrownBy {
             ContributionSchedule(BigDecimal("1000000000.01"), "CZK", ContributionFrequency.MONTHLY)
         }.isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test
+    fun `every strategy change goes through the suitability gate BEFORE any challenge is spent`(): Unit = runBlocking {
+        val id = service.createDraft(command()).id
+        suitability.refusal = { com.openbank.pension.application.port.out.StrategyNotPermittedException("no") }
+        assertThatThrownBy { runBlocking { service.electStrategy(change(id, "DYNAMIC", "2026-11-01")) } }
+            .isInstanceOf(com.openbank.pension.application.port.out.StrategyNotPermittedException::class.java)
+        assertThat(sca.spent).isEmpty()
+        assertThat(repo.findById(id)!!.strategyHistory).hasSize(1)
+        assertThat(notifier.sent).isEmpty()
+    }
+
+    @Test
+    fun `a strategy change needs a single-use challenge over its exact document`(): Unit = runBlocking {
+        val id = service.createDraft(command()).id
+        listOf(null, " ", "forged").forEach { challenge ->
+            assertThatThrownBy { runBlocking { service.electStrategy(change(id, "DYNAMIC", "2026-11-01", challenge)) } }
+                .isInstanceOf(com.openbank.pension.application.usecase.StrategyChangeScaFailedException::class.java)
+        }
+        assertThat(repo.findById(id)!!.strategyHistory).hasSize(1)
+        service.electStrategy(change(id, "DYNAMIC", "2026-11-01", "sca-1"))
+        val (_, hash, op) = sca.spent.single()
+        assertThat(op).isEqualTo(com.openbank.pension.application.exit.ScaOperation.STRATEGY_CHANGE)
+        assertThat(hash).isEqualTo(
+            com.openbank.pension.application.port.`in`.StrategyChangeDocument.hash(
+                id,
+                "DYNAMIC",
+                LocalDate.parse("2026-11-01"),
+                emptySet(),
+            ),
+        )
+        assertThat(suitability.recorded).hasSize(1)
+    }
+
+    @Test
+    fun `repeating an applied change is idempotent - nothing is signed, stored or announced twice`(): Unit =
+        runBlocking {
+            val id = service.createDraft(command()).id
+            service.electStrategy(change(id, "DYNAMIC", "2026-11-01", "sca-1"))
+            val again = service.electStrategy(change(id, "DYNAMIC", "2026-11-01", "sca-2"))
+            assertThat(again.strategyHistory).hasSize(2)
+            assertThat(sca.spent).hasSize(1)
+            assertThat(notifier.sent).hasSize(1)
+        }
+
+    @Test
+    fun `a draft's initial strategy goes through the same gate`(): Unit = runBlocking {
+        suitability.refusal = { com.openbank.pension.application.port.out.StrategyNotPermittedException("no") }
+        assertThatThrownBy { runBlocking { service.createDraft(command()) } }
+            .isInstanceOf(com.openbank.pension.application.port.out.StrategyNotPermittedException::class.java)
+        assertThat(suitability.asked.single().contractId).isNull()
     }
 }

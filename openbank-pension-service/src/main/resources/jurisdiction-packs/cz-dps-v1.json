@@ -3,6 +3,7 @@
   "productLine": "DPS",
   "version": 1,
   "effectiveFrom": "2024-07-01",
+  "effectiveTo": "2025-12-31",
   "currency": "CZK",
   "legalReview": {
     "status": "REQUIRES_LEGAL_REVIEW",
@@ -80,6 +81,19 @@
     },
     "phasedWithdrawal": { "minMonths": 12, "maxMonths": 360 },
     "fixedPeriodPension": { "minMonths": 120, "maxMonths": 360 },
-    "death": { "estateWhenNoBeneficiary": true, "clawbackOnDeath": false, "beneficiaryTax": { "base": "NONE" } }
+    "death": { "estateWhenNoBeneficiary": true, "clawbackOnDeath": false, "beneficiaryTax": { "base": "NONE" } },
+    "annuity": {
+      "permittedTypes": ["LIFELONG", "FIXED_TERM", "GUARANTEE_PERIOD", "JOINT_LIFE", "INDEXED"],
+      "refusedPremiumDestination": "CONTRACT",
+      "quoteValidityMinHours": 24
+    }
+  },
+  "contributionLimits": {
+    "minMonthly": 100,
+    "allowedFrequencies": ["MONTHLY", "QUARTERLY", "ANNUALLY"],
+    "minDayOfMonth": 1,
+    "maxDayOfMonth": 28,
+    "changeNoticeDays": 3,
+    "maxStartAheadDays": 366
   }
 }

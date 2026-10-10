@@ -64,6 +64,14 @@ data class QuestionnaireRequest(
     val lossTolerance: Int? = null,
     val financialSituationStable: Boolean? = null,
     val esgPreference: EsgPreference? = null,
+    /**
+     * The data-driven questionnaire (issue #12384): question id -> option code. When present the
+     * legacy scale fields above are ignored; they remain for clients not yet migrated.
+     */
+    val answers: Map<String, String?>? = null,
+    /** Inconsistency codes the participant reviewed and confirms (see GET .../questionnaire). */
+    val confirmInconsistencies: List<String?>? = null,
+    val language: String? = null,
 )
 
 data class ChooseStrategyRequest(
@@ -147,7 +155,12 @@ data class RecommendationResponse(
     }
 }
 
-data class QuestionnaireResponse(val application: ApplicationResponse, val recommendation: RecommendationResponse)
+data class QuestionnaireResponse(
+    val application: ApplicationResponse,
+    val recommendation: RecommendationResponse,
+    /** Present for a data-driven submission: the profile with its plain "why". */
+    val profile: ProfileResponse? = null,
+)
 
 data class TransferOutRequest(
     val contractId: UUID? = null,

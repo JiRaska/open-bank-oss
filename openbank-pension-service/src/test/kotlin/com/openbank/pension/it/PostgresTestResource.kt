@@ -44,7 +44,7 @@ class PostgresTestResource : QuarkusTestResourceLifecycleManager {
         }
     }
 
-    private companion object {
+    internal companion object {
         const val POSTGRES_IMAGE = "postgres:18.6-alpine"
     }
 }

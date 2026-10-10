@@ -21,7 +21,6 @@ import org.eclipse.microprofile.config.ConfigProvider
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.everyItem
 import org.hamcrest.Matchers.hasItem
-import org.hamcrest.Matchers.hasSize
 import org.hamcrest.Matchers.not
 import org.junit.jupiter.api.Test
 import java.sql.DriverManager
@@ -50,7 +49,7 @@ class PensionContractApiIT {
           "birthDate": "1985-05-05",
           "residencyCountry": "CZ",
           "schedule": { "amount": 1700, "currency": "CZK", "frequency": "MONTHLY" },
-          "strategyCode": "BALANCED",
+          "strategyCode": "CONSERVATIVE",
           "beneficiaries": [ { "name": "Jane Doe", "sharePercent": 100 } ]
         }
     """.trimIndent()
@@ -63,7 +62,7 @@ class PensionContractApiIT {
         .`when`().post(base)
         .then().statusCode(201)
         .body("status", equalTo("DRAFT"))
-        .body("packVersion", equalTo(1))
+        .body("packVersion", equalTo(2))
         .extract().path("contractId")
 
     private fun post(path: String, body: String = "{}", asParty: UUID? = party) =
@@ -114,15 +113,28 @@ class PensionContractApiIT {
 
     @Test
     @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    fun `the retired S1 create route cannot open a contract in a riskier strategy than the most conservative`() {
+        given().contentType("application/json").header("X-Customer-Party-Id", party.toString())
+            .header("Idempotency-Key", UUID.randomUUID().toString())
+            .body(createBody().replace("\"CONSERVATIVE\"", "\"DYNAMIC\""))
+            .`when`().post(base)
+            .then().statusCode(403).body("code", equalTo("STRATEGY_NOT_PERMITTED"))
+    }
+
+    @Test
+    @TestSecurity(user = "edge", roles = ["ROLE_API"])
     fun `the full participant lifecycle runs over real HTTP`() {
         val id = create()
         post("$base/$id/submit").statusCode(200).body("status", equalTo("PENDING_ACTIVATION"))
         activateDirectly(id)
 
+        // S1 contract: no suitability assessment exists, so a riskier strategy is refused at the
+        // use case (the same gate as onboarding), even with a valid challenge and key.
         given().contentType("application/json").header("X-Customer-Party-Id", party.toString())
-            .body("""{"strategyCode":"DYNAMIC"}""")
+            .header("Idempotency-Key", UUID.randomUUID().toString())
+            .body("""{"strategyCode":"DYNAMIC","scaChallengeId":"sca-${UUID.randomUUID()}"}""")
             .`when`().put("$base/$id/strategy")
-            .then().statusCode(200).body("strategyHistory", hasSize<Any>(2))
+            .then().statusCode(403).body("code", equalTo("STRATEGY_NOT_PERMITTED"))
 
         post("$base/$id/suspend").statusCode(200).body("status", equalTo("SUSPENDED"))
         post("$base/$id/resume").statusCode(200).body("status", equalTo("ACTIVE"))
@@ -133,10 +145,10 @@ class PensionContractApiIT {
 
         read(id, party).statusCode(200)
             .body("status", equalTo("ACTIVE"))
-            .body("currentStrategy.strategyCode", equalTo("DYNAMIC"))
+            .body("currentStrategy.strategyCode", equalTo("CONSERVATIVE"))
             .body("beneficiaries[0].name", equalTo("Jane Doe"))
 
-        assertThat(electionRows(UUID.fromString(id))).containsExactly("BALANCED", "DYNAMIC")
+        assertThat(electionRows(UUID.fromString(id))).containsExactly("CONSERVATIVE")
     }
 
     @Test
@@ -170,6 +182,7 @@ class PensionContractApiIT {
         post("$base/$id/submit", asParty = stranger).statusCode(404)
         post("$base/$id/incentive-evaluation", """{"contribution":1000,"period":"MONTH"}""", stranger).statusCode(404)
         given().contentType("application/json").header("X-Customer-Party-Id", stranger.toString())
+            .header("Idempotency-Key", UUID.randomUUID().toString())
             .body("""{"strategyCode":"DYNAMIC"}""").`when`().put("$base/$id/strategy").then().statusCode(404)
         read(id, party).statusCode(200).body("status", equalTo("DRAFT"))
     }

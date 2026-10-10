@@ -31,6 +31,9 @@ dependencies {
     implementation(libs.quarkus.smallrye.fault.tolerance)
     // ADR-0334 S3: monthly incentive claim run + subscription sweep.
     implementation(libs.quarkus.scheduler)
+    // #12378: domestic-payment status events -> payout settlement (DLQ-wired consumer).
+    // #12379: participant notices onto notification-service's request topic.
+    implementation(libs.quarkus.smallrye.kafka)
 
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.reactive)
@@ -46,6 +49,7 @@ dependencies {
     testImplementation("io.temporal:temporal-testing:1.25.1")
     testImplementation("io.grpc:grpc-inprocess:1.68.1")
     testImplementation(libs.quarkus.junit5)
+    testImplementation(libs.smallrye.reactive.messaging.inmemory)
     testImplementation(libs.quarkus.test.security)
     // ADR-0334 S8: git-pact provider replay of customer-edge's consumer pact (@PactFolder).
     testImplementation(libs.pact.provider)
@@ -56,6 +60,11 @@ dependencies {
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(project(":openbank-libs-testing"))
+    // Consumer pacts for the sca/party/account identity checks (#12377), written to pacts/.
+    // #12379: consumer pact for the document-service render call (ADR-0063 P2).
+    testImplementation(libs.pact.consumer)
+    // RepinCzDpsV1MigrationTest drives Flyway directly (target V11, then V12) against a real Postgres.
+    testRuntimeOnly("org.flywaydb:flyway-database-postgresql")
 }
 
 kover {

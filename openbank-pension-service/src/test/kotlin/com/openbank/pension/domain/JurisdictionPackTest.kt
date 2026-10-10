@@ -37,8 +37,8 @@ class JurisdictionPackTest {
             .associateBy { it.incentiveId }
 
     @Test
-    fun `both reference packs load and are marked as requiring legal review`() {
-        assertThat(registry.all()).hasSize(2)
+    fun `all reference packs load and are marked as requiring legal review`() {
+        assertThat(registry.all()).hasSize(3)
         assertThat(registry.all().map { it.legalReview.status }).containsOnly(LegalReviewStatus.REQUIRES_LEGAL_REVIEW)
     }
 
@@ -101,5 +101,33 @@ class JurisdictionPackTest {
         assertThatThrownBy { IncentiveRule(id = "m", type = IncentiveType.MATCHING, rate = BigDecimal.ONE) }
             .isInstanceOf(IllegalArgumentException::class.java)
             .hasMessageContaining("amountCap")
+    }
+
+    @Test
+    fun `exactly one CZ DPS version is in force on any date - v1 ends the day before v2 starts`() {
+        val v1 = registry.pinned("CZ", ProductLine.DPS, 1)
+        val v2 = registry.pinned("CZ", ProductLine.DPS, 2)
+        assertThat(v1.effectiveTo).isEqualTo(v2.effectiveFrom.minusDays(1))
+        assertThat(registry.resolve("CZ", ProductLine.DPS, v1.effectiveTo!!).version).isEqualTo(1)
+        assertThat(registry.resolve("CZ", ProductLine.DPS, v2.effectiveFrom).version).isEqualTo(2)
+        // effectiveTo is inclusive: v1 is still in force on its last day and not the day after.
+        assertThat(v1.isEffectiveOn(v1.effectiveTo!!)).isTrue()
+        assertThat(v1.isEffectiveOn(v2.effectiveFrom)).isFalse()
+    }
+
+    @Test
+    fun `a registry with two versions effective at once is refused`() {
+        val v1 = registry.pinned("CZ", ProductLine.DPS, 1)
+        val v2 = registry.pinned("CZ", ProductLine.DPS, 2)
+        assertThatThrownBy {
+            com.openbank.pension.domain.pack.JurisdictionPackRegistry(
+                listOf(v1.copy(effectiveTo = null), v2),
+            )
+        }.isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("must end the day before")
+        assertThatThrownBy {
+            com.openbank.pension.domain.pack.JurisdictionPackRegistry(
+                listOf(v1.copy(effectiveTo = v2.effectiveFrom), v2),
+            )
+        }.isInstanceOf(IllegalArgumentException::class.java)
     }
 }

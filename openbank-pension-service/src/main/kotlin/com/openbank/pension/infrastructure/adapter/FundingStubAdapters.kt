@@ -8,7 +8,9 @@ import com.openbank.pension.application.port.out.EmployerDirectoryPort
 import com.openbank.pension.application.port.out.MandateRequest
 import com.openbank.pension.application.port.out.PaymentMandatePort
 import com.openbank.pension.application.port.out.TaxCertificateDocumentPort
+import com.openbank.pension.domain.contribution.MandateKind
 import com.openbank.pension.domain.incentive.TaxYearSummary
+import io.quarkus.arc.profile.IfBuildProfile
 import jakarta.enterprise.context.ApplicationScoped
 import org.jboss.logging.Logger
 import java.nio.charset.StandardCharsets
@@ -27,6 +29,11 @@ import java.util.UUID
 private fun stubId(prefix: String, key: String): String =
     "$prefix-" + UUID.nameUUIDFromBytes(key.toByteArray(StandardCharsets.UTF_8))
 
+/**
+ * dev/test only (#12378): the real adapter is `PaymentMandateRestAdapter`
+ * (standing-order-service / sdd-service), the only bean in a prod build.
+ */
+@IfBuildProfile(anyOf = ["dev", "test"])
 @ApplicationScoped
 class StubPaymentMandateAdapter : PaymentMandatePort {
     private val log = Logger.getLogger(StubPaymentMandateAdapter::class.java)
@@ -34,6 +41,10 @@ class StubPaymentMandateAdapter : PaymentMandatePort {
     override suspend fun setUp(request: MandateRequest): String {
         log.warnf("STUB payment mandate: %s for contract %s not sent downstream", request.kind, request.contractId)
         return stubId("stub-mandate", "${request.contractId}:${request.kind}:${request.firstCollection}")
+    }
+
+    override suspend fun cancel(kind: MandateKind, externalId: String) {
+        log.warnf("STUB payment mandate: cancel of %s %s not sent downstream", kind, externalId)
     }
 }
 
@@ -51,6 +62,8 @@ class StubEmployerDirectoryAdapter : EmployerDirectoryPort {
     }
 }
 
+/** Only in `dev`/`test` builds; the real adapter is `DocumentServiceTaxCertificateAdapter` (#12379). */
+@IfBuildProfile(anyOf = ["dev", "test"])
 @ApplicationScoped
 class StubTaxCertificateDocumentAdapter : TaxCertificateDocumentPort {
     private val log = Logger.getLogger(StubTaxCertificateDocumentAdapter::class.java)

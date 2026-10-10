@@ -68,7 +68,7 @@ class PensionLifecycleJourneyE2E {
         assertThat(draft.getString("status")).isEqualTo("DRAFT")
         assertThat(draft.getString("productLine")).isEqualTo("DPS")
         assertThat(draft.getString("jurisdiction")).isEqualTo("CZ")
-        assertThat(draft.getInt("packVersion")).isEqualTo(1)
+        assertThat(draft.getInt("packVersion")).isEqualTo(2)
         assertThat(draft.getString("startDate")).isNull()
 
         assertThat(post(party, "$BASE/$id/submit").jsonPath().getString("status")).isEqualTo("PENDING_ACTIVATION")
@@ -114,14 +114,17 @@ class PensionLifecycleJourneyE2E {
         val party = UUID.randomUUID()
         val id = activeContract(party, dps(monthly = 1000))
 
-        val changed = given().contentType(JSON).header(PARTY, party.toString())
-            .body("""{"strategyCode":"DYNAMIC"}""")
+        // An S1 contract has no suitability assessment: a riskier strategy is refused even when
+        // signed, and nothing is appended.
+        val refused = given().contentType(JSON).header(PARTY, party.toString())
+            .header("Idempotency-Key", UUID.randomUUID().toString())
+            .body("""{"strategyCode":"DYNAMIC","scaChallengeId":"sca-${UUID.randomUUID()}"}""")
             .`when`().put("$BASE/$id/strategy")
-        assertThat(changed.statusCode).describedAs(changed.body.asString()).isEqualTo(200)
+        assertThat(refused.statusCode).describedAs(refused.body.asString()).isEqualTo(403)
 
         val stored = read(party, id).jsonPath()
-        assertThat(stored.getString("currentStrategy.strategyCode")).isEqualTo("DYNAMIC")
-        assertThat(stored.getList<String>("strategyHistory.strategyCode")).containsExactly("BALANCED", "DYNAMIC")
+        assertThat(stored.getString("currentStrategy.strategyCode")).isEqualTo("CONSERVATIVE")
+        assertThat(stored.getList<String>("strategyHistory.strategyCode")).containsExactly("CONSERVATIVE")
         assertThat(stored.getString("status")).isEqualTo("ACTIVE")
     }
 
@@ -219,14 +222,15 @@ class PensionLifecycleJourneyE2E {
             .isEqualTo(404)
         assertThat(post(stranger, "$BASE/$id/exit/termination/quote").statusCode).isEqualTo(404)
         assertThat(
-            given().contentType(JSON).header(PARTY, stranger.toString()).body("""{"strategyCode":"DYNAMIC"}""")
+            given().contentType(JSON).header(PARTY, stranger.toString())
+                .header("Idempotency-Key", UUID.randomUUID().toString()).body("""{"strategyCode":"DYNAMIC"}""")
                 .`when`().put("$BASE/$id/strategy").statusCode,
         ).isEqualTo(404)
 
         // The stranger's attempts changed nothing for the owner.
         val after = read(owner, id).jsonPath()
         assertThat(after.getString("status")).isEqualTo("ACTIVE")
-        assertThat(after.getString("currentStrategy.strategyCode")).isEqualTo("BALANCED")
+        assertThat(after.getString("currentStrategy.strategyCode")).isEqualTo("CONSERVATIVE")
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -239,14 +243,14 @@ class PensionLifecycleJourneyE2E {
         {"productLine":"DPS","jurisdiction":"CZ","providerEntityId":"${UUID.randomUUID()}",
          "providerType":"$providerType","birthDate":"1985-05-05","residencyCountry":"CZ",
          "schedule":{"amount":$monthly,"currency":"CZK","frequency":"MONTHLY"},
-         "strategyCode":"BALANCED","beneficiaries":$beneficiaries}
+         "strategyCode":"CONSERVATIVE","beneficiaries":$beneficiaries}
     """.trimIndent()
 
     private fun dip(providerType: String) = """
         {"productLine":"DIP","jurisdiction":"CZ","providerEntityId":"${UUID.randomUUID()}",
          "providerType":"$providerType","birthDate":"1979-03-14",
          "schedule":{"amount":4000,"currency":"CZK","frequency":"MONTHLY"},
-         "strategyCode":"DYNAMIC","beneficiaries":[]}
+         "strategyCode":"CONSERVATIVE","beneficiaries":[]}
     """.trimIndent()
 
     private fun create(party: UUID, body: String): Response = given().contentType(JSON)

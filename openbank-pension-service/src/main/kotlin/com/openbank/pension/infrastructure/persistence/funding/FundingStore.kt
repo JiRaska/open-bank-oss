@@ -321,8 +321,8 @@ class PgClaimBatches(client: Pool) :
         }
 
     override suspend fun update(batch: ClaimBatch) {
-        client.preparedQuery("UPDATE pension_claim_batches SET status = $2 WHERE id = $1")
-            .execute(Tuple.of(batch.id, batch.status.name)).awaitSuspending()
+        client.preparedQuery("UPDATE pension_claim_batches SET status = $2, channel_reference = $3 WHERE id = $1")
+            .execute(Tuple.of(batch.id, batch.status.name, batch.channelReference)).awaitSuspending()
     }
 }
 
