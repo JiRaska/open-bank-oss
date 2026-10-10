@@ -4,6 +4,7 @@
 
 package com.openbank.libs.testing.mtls
 
+import com.openbank.libs.domain.identifiers.Ids
 import com.sun.net.httpserver.HttpServer
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import java.net.InetAddress
@@ -18,7 +19,6 @@ import java.security.interfaces.RSAPublicKey
 import java.security.spec.PKCS8EncodedKeySpec
 import java.time.Instant
 import java.util.Base64
-import java.util.UUID
 import javax.net.ssl.KeyManagerFactory
 import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManagerFactory
@@ -38,7 +38,7 @@ import javax.net.ssl.TrustManagerFactory
 class ListenerMaterial : QuarkusTestResourceLifecycleManager {
     override fun start(): Map<String, String> {
         val dir = Files.createTempDirectory("listener-parity-")
-        val password = UUID.randomUUID().toString()
+        val password = Ids.randomId().toString()
         generate(dir.resolve("server.p12"), "server", "CN=localhost", password)
         generate(dir.resolve("client.p12"), "client", "CN=fleet-workload-test", password)
         pem(dir, "server", password, "tls")
