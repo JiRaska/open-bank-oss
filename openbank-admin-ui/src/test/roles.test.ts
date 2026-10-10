@@ -3,18 +3,27 @@ import { describe, it, expect } from 'vitest'
 import { hasPermission, hasRole, hasAnyRole, ROLES, PERMISSIONS } from '@/lib/auth/roles'
 
 describe('hasPermission', () => {
-  // The one deliberate gap: treasury deal WRITES. TreasuryResource's method-level @RolesAllowed
-  // admits only the desk roles (ADR-0315), so a UI grant to ADMIN would render buttons that 403.
+  // Treasury write endpoints admit only their desk roles (ADR-0315). Pension revision approval
+  // likewise requires the separate legal counsel and product owner roles, never ADMIN alone.
   // treasury-rbac.guard.test.ts ties these to the Kotlin annotations.
   // #10896: NostroResource's upload endpoint is method-level APPROVER only, same shape as the
   // treasury deal writes above — ADMIN sits in the class-level @RolesAllowed but not this method's.
-  const ADMIN_EXCLUDED_BY_SERVICE = new Set(['treasury:deal:create', 'treasury:deal:approve', 'treasury:deal:cancel', 'treasury:deal:override-limit', 'treasury:nostro:upload'])
+  const ADMIN_EXCLUDED_BY_SERVICE = new Set(['treasury:deal:create', 'treasury:deal:approve', 'treasury:deal:cancel', 'treasury:deal:override-limit', 'treasury:nostro:upload', 'catalog:pension:legal-approve', 'catalog:pension:product-approve'])
 
-  it('returns true for admin on any permission, except the service-excluded treasury writes', () => {
+  it('returns true for admin except specialist-only treasury and pension approvals', () => {
     const admin = [ROLES.ADMIN]
     for (const perm of Object.keys(PERMISSIONS) as (keyof typeof PERMISSIONS)[]) {
       expect(hasPermission(admin, perm), perm).toBe(!ADMIN_EXCLUDED_BY_SERVICE.has(perm))
     }
+  })
+
+  it('keeps pension legal and product approval with separate roles, without an admin shortcut', () => {
+    expect(hasPermission([ROLES.ADMIN], 'catalog:pension:legal-approve')).toBe(false)
+    expect(hasPermission([ROLES.ADMIN], 'catalog:pension:product-approve')).toBe(false)
+    expect(hasPermission([ROLES.PENSION_LEGAL_APPROVER], 'catalog:pension:legal-approve')).toBe(true)
+    expect(hasPermission([ROLES.PENSION_LEGAL_APPROVER], 'catalog:pension:product-approve')).toBe(false)
+    expect(hasPermission([ROLES.PENSION_PRODUCT_OWNER], 'catalog:pension:legal-approve')).toBe(false)
+    expect(hasPermission([ROLES.PENSION_PRODUCT_OWNER], 'catalog:pension:product-approve')).toBe(true)
   })
 
   it('returns true when role is in allowed list', () => {
