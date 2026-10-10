@@ -27,7 +27,7 @@ class BoundedBodyHandlersTest {
 
     @BeforeEach
     fun start() {
-        server = HttpServer.create(InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0)
+        server = HttpServer.create(InetSocketAddress(InetAddress.getByName("127.0.0.1"), 0), 0)
         server.createContext("/small") { ex ->
             val b = "héllo".toByteArray(Charsets.UTF_8)
             ex.responseHeaders.add("Content-Type", "text/plain; charset=utf-8")
