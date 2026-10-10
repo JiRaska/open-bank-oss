@@ -965,3 +965,22 @@ than ten connections and compete with other account clients for that shared limi
 on nginx until the listener policy and 401/429 behavior have been checked on the Gateway
 address. Rollback is the coordinated DNS switch back to nginx; its Ingress and network
 allowance remain until Phase 5.
+
+
+## Pension integration boundary (ADR-0334/0335, #12435)
+
+**Account ownership verification.** This integration adds the `pension` namespace to `account-service-ingress-allow-list`.
+That grants namespace-wide network reachability to the selected provider pods; it does not
+restrict traffic to one workload and does not grant an application action. The pension REST
+client uses its own `openbank-pension` client-credentials identity for `POST /api/v1/accounts/ownership-verifications`.
+
+**Threat and required controls.** The response is an ownership decision for the requested party and account, not permission to move funds. A caller must not obtain unrestricted account enumeration through this edge.
+Compromise of any admitted namespace workload is therefore a network threat, while compromise
+of the pension client credential reaches whichever actions its provider authorization permits.
+Keep token validation, identity-scoped authorization and the provider's domain checks enabled.
+
+**Rollout dependency and proof limits.** The integration depends on #12419 for scoped downstream
+authorization; the allow-list change alone does not prove that grant is deployed or correct.
+Review the corresponding provider grant and negative caller/ownership tests before enabling
+this integration. Consumer contracts pin request/response shape; they do not prove a live token
+or account entitlement. No live deployment verification is claimed by this documentation update.
