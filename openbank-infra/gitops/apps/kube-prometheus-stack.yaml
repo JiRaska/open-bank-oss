@@ -705,6 +705,10 @@ spec:
           # Dropping this flag makes CronJobMaxSuccessAgeUndeclared fire for every CronJob.
           metricAnnotationsAllowList:
             - cronjobs=[openbank.tech/max-success-age-seconds]
+          # admin-ui reads the RUNNING node shape live (src/lib/live-platform-versions.ts):
+          # kube_node_labels only carries labels named here, and by default carries none.
+          metricLabelsAllowlist:
+            - nodes=[node.kubernetes.io/instance-type,karpenter.sh/capacity-type]
           resources:
             requests:
               cpu: 20m
