@@ -71,7 +71,8 @@ CONFIG = ROOT / "release-please-config.json"
 KNOWN_UNCOVERED: dict[str, str] = {
     "openbank-campaign-service": "#7597 — release-please-config.json has no `component`; adding one "
     "changes the release tag name, a repo-owner decision, not a drive-by fix",
-    "openbank-tax-reporting-service": "#7597 — same as openbank-campaign-service",
+    # openbank-tax-reporting-service is OFF this list as of #5760: it gained `component:
+    # tax-reporting-service` when it was first deployed (it had never produced a tag).
 }
 
 errors: list[str] = []
