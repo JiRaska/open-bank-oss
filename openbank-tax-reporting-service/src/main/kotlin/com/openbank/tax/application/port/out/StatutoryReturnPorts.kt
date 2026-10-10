@@ -23,9 +23,10 @@ class ReturnDataUnavailableException(message: String) : RuntimeException(message
  * Extraction seam for a return's datapoints (ADR-0336 D4).
  *
  * For the pension catalogue the owners are pension-service (contributions, payouts, participants)
- * and pension-fund-service (fund balance sheet, units, holdings). Neither exposes those aggregates
- * yet, so the bound adapter throws [ReturnDataUnavailableException] for every request: a return is
- * either assembled from real figures or not assembled at all.
+ * and pension-fund-service (fund balance sheet, units, holdings); `PensionReturnDataAdapter` reads
+ * their reporting read models (#12425). A return whose figures no service owns, or whose source
+ * cannot answer, throws [ReturnDataUnavailableException]: a return is either assembled from real
+ * figures or not assembled at all.
  */
 interface ReturnDataPort {
     /** True when a real source is bound; the API reports this rather than implying one exists. */

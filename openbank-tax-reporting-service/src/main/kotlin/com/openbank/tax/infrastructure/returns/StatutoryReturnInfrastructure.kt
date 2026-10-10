@@ -9,8 +9,6 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessRecorder
 import com.openbank.tax.application.port.out.ReturnCatalogueSource
-import com.openbank.tax.application.port.out.ReturnDataPort
-import com.openbank.tax.application.port.out.ReturnDataUnavailableException
 import com.openbank.tax.application.port.out.ReturnWireRendererPort
 import com.openbank.tax.application.port.out.StatutoryReturnMetricsPort
 import com.openbank.tax.application.usecase.ReportingEntities
@@ -94,25 +92,6 @@ object CatalogueParser {
     private fun JsonNode.required(field: String): JsonNode = get(field) ?: error("Catalogue field '$field' missing")
 
     private fun JsonNode.text(field: String): String = required(field).asText()
-}
-
-/**
- * Bound until pension-service / pension-fund-service publish the reporting read models (ADR-0336
- * D4). Refuses rather than returning zeroes: a return of zeroes passes every arithmetic rule and
- * tells the regulator the funds are empty.
- */
-@ApplicationScoped
-class UnavailableReturnDataAdapter : ReturnDataPort {
-    override val available: Boolean = false
-
-    override suspend fun fetch(
-        catalogue: ReturnCatalogue,
-        definition: ReturnDefinition,
-        entityId: String,
-        period: ReportingPeriod,
-    ): Map<String, BigDecimal> = throw ReturnDataUnavailableException(
-        "No data source is bound for ${catalogue.id}/${definition.code} — the source read models are not built yet (ADR-0336)",
-    )
 }
 
 @ApplicationScoped
