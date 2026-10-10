@@ -4786,6 +4786,12 @@ gates:
     name: "bank-only ledger schedulers/edges off on non-bank instances (ADR-0337, enforced)"
     group: gitops
     mode: enforced
+    budget_seconds: 15   # ~3.4s measured locally incl. self-test
+    rationale: >-
+      A second ledger-service deployment runs the bank's image, so its schedulers, outbox
+      dispatcher and Kafka channel act on the company's books by default; the switch list is
+      derived from source so a new bank-only job cannot reach the instance unswitched.
+    review_after: '2027-04-10'
     min_subjects: 5   # 11 measured 2026-10-10 (7 @Scheduled, 2 *enabled* props, 1 channel, 1 REST client)
     selftest: python3 .github/scripts/check-ledger-instance-switches.py --self-test
     selftest_expect: pass

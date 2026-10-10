@@ -294,14 +294,13 @@ spec:
           - name: canary-hash
             valueFrom:
               podTemplateHashValue: Canary
+      # One replica cannot express a 10%/30% weight (canary-rollout-realisable), so the new pod
+      # takes all traffic at once and the money-path analysis runs against it for a 10 min hold
+      # before the old ReplicaSet is scaled down.
       steps:
-        - setWeight: 10
-        - pause:
-            duration: 5m
-        - setWeight: 30
-        - pause:
-            duration: 5m
         - setWeight: 100
+        - pause:
+            duration: 10m
 ---
 # Stable service — original DNS name preserved; Rollouts controller adds
 # rollouts-pod-template-hash selector to pin to stable replica set.

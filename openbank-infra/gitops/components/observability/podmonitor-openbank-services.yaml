@@ -82,6 +82,7 @@ spec:
       - incentive
       - kyc
       - ledger
+      - ledger-pension-co
       - lending
       - loyalty
       - kyb
