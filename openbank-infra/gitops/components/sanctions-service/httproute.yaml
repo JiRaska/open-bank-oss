@@ -12,9 +12,11 @@
 # a listener carries one certificate per hostname, where nginx picked one of four per-Ingress
 # Secrets. The host is NOT key-pinned by the mobile app (ADR-0086 pins customer and kc only).
 #
-# HELD OUT OF DNS. The route carries `external-dns.kubernetes.io/controller:
-# gateway-api-cutover-pending`, which external-dns skips, so api.open-bank.tech keeps resolving
-# to ingress-nginx. Three steps, each its own change: (1) the four routes, their policies and
+# IN DNS since the cutover: external-dns publishes api.open-bank.tech from the four routes,
+# pointing at the Gateway's NLB. The four nginx Ingresses now carry
+# `external-dns.kubernetes.io/controller: gateway-api-cutover-pending` and keep serving on
+# ingress-nginx as the rollback (swap all four annotations back together). The three steps,
+# each its own change: (1) the four routes, their policies and
 # the api-edge-tls Certificate; (2) the https-api listener and its ClientTrafficPolicy;
 # (3) the DNS cutover, which moves ALL FOUR routes in one change — external-dns would otherwise
 # publish one host from two load balancers.
@@ -43,9 +45,6 @@ kind: HTTPRoute
 metadata:
   name: sanctions-api
   namespace: sanctions
-  annotations:
-    # Held out of DNS until the cutover change (step 3 above).
-    external-dns.kubernetes.io/controller: gateway-api-cutover-pending
 spec:
   parentRefs:
     - name: edge
