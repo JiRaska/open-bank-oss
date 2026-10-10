@@ -38,6 +38,18 @@ class GlobalMetadataInventoryTest(unittest.TestCase):
                 self.check({'configurations': ['runtimeClasspath'],
                             'receipts': {'runtimeClasspath': [row]}})
 
+    def test_same_name_in_project_and_buildscript_is_distinct(self):
+        project = {'component': 'g:app:1', 'artifact': 'app.jar', 'sha256': 'a' * 64}
+        plugin = {'component': 'g:plugin:1', 'artifact': 'plugin.jar', 'sha256': 'b' * 64}
+        model = {'configurations': ['project:classpath', 'buildscript:classpath'],
+                 'receipts': {'project:classpath': [project], 'buildscript:classpath': [plugin]}}
+        count, artifacts = self.check(model)
+        self.assertEqual(count, 2)
+        self.assertEqual(len(artifacts), 2)
+        del model['receipts']['buildscript:classpath']
+        with self.assertRaisesRegex(ValueError, 'inventory'):
+            self.check(model)
+
     def test_missing_model_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory, self.assertRaises(ValueError):
             MODULE.check_inventory(Path(directory), ['openbank-a'])

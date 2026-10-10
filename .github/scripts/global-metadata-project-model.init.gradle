@@ -19,24 +19,28 @@ gradle.projectsEvaluated {
         doLast {
             def closure = [account.path] as Set
             def receipts = [:]
-            account.configurations.findAll { it.canBeResolved }.collect { it.name }.sort().each { name ->
-                def cfg = account.configurations.getByName(name)
+            [project:account.configurations, buildscript:account.buildscript.configurations].each { scope, configurations ->
+            configurations.findAll { it.canBeResolved }.sort { it.name }.each { cfg ->
+                // Module closure applies only to project dependencies. Plugin composite
+                // dependencies are resolved and verified by the separate build-logic phase.
                 cfg.incoming.resolutionResult.allComponents.each { component ->
                     def id = component.id
                     if (id instanceof ProjectComponentIdentifier) {
-                        if (id.build.buildPath != ':') throw new GradleException('Opaque composite dependency ' + id)
-                        closure.add(id.projectPath)
+                        def buildPath = id.build.buildPath
+                        if (buildPath != ':' && !(scope == 'buildscript' && buildPath == ':build-logic' && id.projectPath == ':')) throw new GradleException('Opaque composite dependency ' + id + ' in ' + buildPath)
+                        if (scope == 'project') closure.add(id.projectPath)
                     }
                 }
                 def view = cfg.incoming.artifactView { componentFilter { it instanceof ModuleComponentIdentifier } }
-                receipts[name] = view.artifacts.artifacts.collect { a ->
+                receipts[scope + ':' + cfg.name] = view.artifacts.artifacts.collect { a ->
                     def digest = MessageDigest.getInstance('SHA-256').digest(a.file.bytes).encodeHex().toString()
                     [component:a.id.componentIdentifier.displayName, artifact:a.file.name, sha256:digest]
                 }.sort { a,b -> (a.component + ':' + a.artifact) <=> (b.component + ':' + b.artifact) }
             }
+            }
             def dir = new File(System.getenv('OB_METADATA_MODEL_DIR')); dir.mkdirs()
             def output = new File(dir, account.name + '.json')
-            output.text = JsonOutput.prettyPrint(JsonOutput.toJson([closure:closure.sort(), configurations:account.configurations.findAll { it.canBeResolved }.collect { it.name }.sort(), receipts:receipts]))
+            output.text = JsonOutput.prettyPrint(JsonOutput.toJson([closure:closure.sort(), configurations:[project:account.configurations, buildscript:account.buildscript.configurations].collectMany { scope, configurations -> configurations.findAll { it.canBeResolved }.collect { scope + ':' + it.name } }.sort(), receipts:receipts]))
             println 'SCOPED_MODEL_PROJECTS=' + closure.sort().join(',')
             println 'SCOPED_MODEL_ARTIFACTS=' + receipts.collectEntries { k,v -> [k,v.size()] }
         }
