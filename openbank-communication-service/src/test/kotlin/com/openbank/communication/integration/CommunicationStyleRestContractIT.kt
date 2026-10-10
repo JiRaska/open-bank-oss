@@ -245,6 +245,68 @@ class CommunicationStyleRestContractIT {
         }
     }
 
+    @Test
+    @TestSecurity(user = "checker@openbank.test", roles = ["ROLE_COMMS_EDITOR", "ROLE_COMMS_APPROVER"])
+    fun `retirement cannot reset the publication generation and revive a stale draft`() {
+        val persona = "aba-${UUID.randomUUID()}"
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "insert into persona (id, key, display_name, channel, language, description) values (?, ?, ?, 'ADMIN', 'cs', '')",
+            ).use { statement ->
+                statement.setObject(1, UUID.randomUUID())
+                statement.setString(2, persona)
+                statement.setString(3, persona)
+                statement.executeUpdate()
+            }
+        }
+        fun draft(base: Int): String = Given {
+            contentType("application/json")
+            body("""{"tone":"warm","formality":"formal","formOfAddress":"vykani","basePublishedVersion":$base}""")
+        } When {
+            post("/api/v2/personas/$persona/style-versions")
+        } Then {
+            statusCode(201)
+        } Extract { path("id") }
+        fun submitAsOtherMaker(id: String) {
+            dataSource.connection.use { connection ->
+                connection.prepareStatement(
+                    "update style_version set maker = 'editor@openbank.test' where id = ?",
+                ).use {
+                    it.setObject(1, UUID.fromString(id))
+                    it.executeUpdate()
+                }
+            }
+            Given { this }.When { post("/api/v2/personas/style-versions/$id/submit") } Then { statusCode(200) }
+        }
+        val first = draft(0)
+        val stale = draft(0)
+        submitAsOtherMaker(first)
+        submitAsOtherMaker(stale)
+        Given { this }.When { post("/api/v2/personas/style-versions/$first/publish") } Then { statusCode(200) }
+        val firstVersion = draftVersions(first, stale).getValue(first)
+        Given { this }.When { post("/api/v2/personas/style-versions/$first/retire") } Then { statusCode(200) }
+        Given { this }.When { get("/api/v2/personas/$persona/editor-state") } Then {
+            statusCode(200)
+            body("basePublishedVersion", equalTo(firstVersion))
+            body("published", equalTo(null))
+        }
+        Given { this }.When { post("/api/v2/personas/style-versions/$stale/publish") } Then {
+            statusCode(409)
+            body("error", containsString("published style changed"))
+        }
+        val fresh = draft(firstVersion)
+        submitAsOtherMaker(fresh)
+        Given { this }.When { post("/api/v2/personas/style-versions/$fresh/publish") } Then {
+            statusCode(200)
+            body("status", equalTo("PUBLISHED"))
+        }
+        Given { this }.When { get("/api/v2/personas/$persona/editor-state") } Then {
+            statusCode(200)
+            body("basePublishedVersion", equalTo(draftVersions(fresh, stale).getValue(fresh)))
+            body("published.styleVersion", equalTo(draftVersions(fresh, stale).getValue(fresh)))
+        }
+    }
+
     private fun concurrentDrafts(): Pair<String, String> = Executors.newFixedThreadPool(2).use { executor ->
         val start = CountDownLatch(1)
         val firstDraft = executor.submit(

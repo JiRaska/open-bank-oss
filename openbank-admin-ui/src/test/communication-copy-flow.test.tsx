@@ -15,11 +15,11 @@ afterEach(() => vi.unstubAllGlobals())
 it('loads approved copy and saves edited copy with existing vocabulary in the reviewable draft', async () => {
   let saved: Record<string, unknown> | undefined
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-    if (url.endsWith('/published')) return Response.json({
+    if (url.endsWith('/editor-state')) return Response.json({ basePublishedVersion: 7, published: {
       tone: 'warm', formality: 'informal', formOfAddress: 'tykání', styleVersion: 7,
       preferredTerms: { account: 'účet' }, forbiddenTerms: ['password'],
       uiMessages: { 'cs.status.loading': 'Původní text.', 'en.status.loading': 'Original text.' },
-    })
+    } })
     if (url.endsWith('/style-versions') && init?.method === 'POST') {
       saved = JSON.parse(String(init.body))
       return Response.json({ id: 'draft-1', version: 2, status: 'DRAFT' }, { status: 201 })
@@ -44,7 +44,7 @@ it.each([
   ['maker cannot publish their own style version', 'Publikace byla odmítnuta.'],
 ])('shows the right publish conflict for %s', async (reason, expected) => {
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-    if (url.endsWith('/published')) return Response.json({ error: 'not found' }, { status: 404 })
+    if (url.endsWith('/editor-state')) return Response.json({ basePublishedVersion: 0, published: null })
     if (url.endsWith('/style-versions') && init?.method === 'POST') {
       return Response.json({ id: 'draft-1', version: 1, status: 'IN_REVIEW' }, { status: 201 })
     }
@@ -62,4 +62,24 @@ it.each([
   await waitFor(() => expect(publish).toBeEnabled())
   fireEvent.click(publish)
   expect(await screen.findByText(new RegExp(expected))).toBeInTheDocument()
+})
+
+it('keeps the last publication generation after explicit retirement', async () => {
+  let saved: Record<string, unknown> | undefined
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('/editor-state')) return Response.json({ basePublishedVersion: 7, published: null })
+    if (url.endsWith('/style-versions') && init?.method === 'POST') {
+      saved = JSON.parse(String(init.body))
+      return Response.json({ id: 'draft-2', version: 8, status: 'DRAFT' }, { status: 201 })
+    }
+    return Response.json([])
+  }))
+  render(<Page />)
+  fireEvent.change(screen.getByLabelText('Tón'), { target: { value: 'warm' } })
+  fireEvent.change(screen.getByLabelText('Formálnost'), { target: { value: 'formal' } })
+  fireEvent.change(screen.getByLabelText('Oslovení'), { target: { value: 'vykání' } })
+  const save = await screen.findByRole('button', { name: 'Uložit koncept' })
+  await waitFor(() => expect(save).toBeEnabled())
+  fireEvent.click(save)
+  await waitFor(() => expect(saved?.basePublishedVersion).toBe(7))
 })

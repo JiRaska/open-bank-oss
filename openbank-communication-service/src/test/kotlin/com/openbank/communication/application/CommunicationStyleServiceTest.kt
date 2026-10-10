@@ -8,6 +8,7 @@ package com.openbank.communication.application
 import com.openbank.communication.application.port.out.CommunicationAuditRepository
 import com.openbank.communication.application.port.out.CommunicationEventPublisher
 import com.openbank.communication.application.port.out.PersonaRepository
+import com.openbank.communication.application.port.out.StyleEditorState
 import com.openbank.communication.application.port.out.StylePublication
 import com.openbank.communication.application.port.out.StyleVersionRepository
 import com.openbank.communication.domain.Persona
@@ -72,7 +73,11 @@ private class InMemoryStyleVersionRepository : StyleVersionRepository {
             ) {
                 throw StyleVersionConflictException("draft has no known published base")
             }
-            if (existing.basePublishedVersion != (current?.version ?: 0)) {
+            val generation = rows.values.filter {
+                it.personaId == existing.personaId &&
+                    it.status in setOf(StyleVersionStatus.PUBLISHED, StyleVersionStatus.RETIRED)
+            }.maxOfOrNull { it.version } ?: 0
+            if (existing.basePublishedVersion != generation) {
                 throw StyleVersionConflictException("published style changed since this draft was created")
             }
             val retired = current?.copy(status = StyleVersionStatus.RETIRED, retiredAt = at)
@@ -94,6 +99,14 @@ private class InMemoryStyleVersionRepository : StyleVersionRepository {
     }
     override suspend fun findPublished(personaId: UUID) =
         rows.values.firstOrNull { it.personaId == personaId && it.status == StyleVersionStatus.PUBLISHED }
+
+    override suspend fun readEditorState(personaId: UUID): StyleEditorState = synchronized(rows) {
+        val current = rows.values.firstOrNull { it.personaId == personaId && it.status == StyleVersionStatus.PUBLISHED }
+        val generation = rows.values.filter {
+            it.personaId == personaId && it.status in setOf(StyleVersionStatus.PUBLISHED, StyleVersionStatus.RETIRED)
+        }.maxOfOrNull { it.version } ?: 0
+        StyleEditorState(generation, current)
+    }
 }
 
 private class RecordingAuditRepository : CommunicationAuditRepository {

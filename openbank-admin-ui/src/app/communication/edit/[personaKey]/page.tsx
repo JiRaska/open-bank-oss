@@ -79,14 +79,16 @@ export default function CommunicationStyleEditorPage() {
     setBasePublishedVersion(null)
     setTone(''); setFormality(''); setFormOfAddress(''); setSignature(''); setMaxLength('')
     setUiMessages({}); setPreferredTerms({}); setForbiddenTerms([])
-    fetch(`${PROXY_BASE}/${encodeURIComponent(personaKey)}/published`, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(8_000)]) })
+    fetch(`${STYLE_WRITE_BASE}/${encodeURIComponent(personaKey)}/editor-state`, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(8_000)]) })
       .then(async res => {
-        if (res.status === 404) { if (!controller.signal.aborted) { setBasePublishedVersion(0); setPublishedLoaded(true) }; return }
-        if (!res.ok) throw new Error('Published style unavailable')
-        const published = await res.json()
+        if (!res.ok) throw new Error('Editor state unavailable')
+        const state = await res.json()
         if (controller.signal.aborted) return
-        if (!Number.isInteger(published.styleVersion) || published.styleVersion < 1) throw new Error('Invalid published style version')
-        setBasePublishedVersion(published.styleVersion)
+        if (!Number.isInteger(state.basePublishedVersion) || state.basePublishedVersion < 0) throw new Error('Invalid published style generation')
+        const published = state.published
+        if (published && (!Number.isInteger(published.styleVersion) || published.styleVersion !== state.basePublishedVersion)) throw new Error('Inconsistent editor state')
+        setBasePublishedVersion(state.basePublishedVersion)
+        if (!published) { setPublishedLoaded(true); return }
         setTone(published.tone ?? '')
         setFormality(published.formality ?? '')
         setFormOfAddress(published.formOfAddress ?? '')

@@ -8,6 +8,7 @@ package com.openbank.communication.infrastructure.persistence
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.communication.application.port.out.CommunicationAuditRepository
 import com.openbank.communication.application.port.out.PersonaRepository
+import com.openbank.communication.application.port.out.StyleEditorState
 import com.openbank.communication.application.port.out.StylePublication
 import com.openbank.communication.application.port.out.StyleVersionRepository
 import com.openbank.communication.domain.Persona
@@ -161,6 +162,28 @@ class PanacheStyleVersionRepository :
     override suspend fun find(id: UUID) =
         Panache.withSession { find("id", id).firstResult<StyleVersionEntity>() }.awaitSuspending()?.toDomain()
 
+    override suspend fun readEditorState(personaId: UUID): StyleEditorState = Panache.withTransaction {
+        Panache.getSession().flatMap { session ->
+            session.find(PersonaEntity::class.java, personaId, LockModeType.PESSIMISTIC_WRITE).flatMap { persona ->
+                if (persona == null) throw StyleVersionConflictException("persona no longer exists")
+                find(
+                    "personaId = ?1 and (status = ?2 or status = ?3) order by version desc",
+                    personaId,
+                    StyleVersionStatus.PUBLISHED.name,
+                    StyleVersionStatus.RETIRED.name,
+                ).firstResult<StyleVersionEntity>().flatMap { latest ->
+                    find(
+                        "personaId = ?1 and status = ?2",
+                        personaId,
+                        StyleVersionStatus.PUBLISHED.name,
+                    ).firstResult<StyleVersionEntity>().map { current ->
+                        StyleEditorState(latest?.version ?: 0, current?.toDomain())
+                    }
+                }
+            }
+        }
+    }.awaitSuspending()
+
     override suspend fun submit(id: UUID, at: Instant) = Panache.withTransaction {
         find("id = ?1 and status = ?2", id, StyleVersionStatus.DRAFT.name).firstResult<StyleVersionEntity>().map { e ->
             requireNotNull(e)
@@ -195,25 +218,32 @@ class PanacheStyleVersionRepository :
                                     "personaId = ?1 and status = ?2",
                                     personaId,
                                     StyleVersionStatus.PUBLISHED.name,
-                                ).firstResult<StyleVersionEntity>().map { current ->
-                                    val base = draft.basePublishedVersion
-                                        ?: throw StyleVersionConflictException("draft has no known published base")
-                                    if (base != (current?.version ?: 0)) {
-                                        throw StyleVersionConflictException(
-                                            "published style changed since this draft was created",
-                                        )
+                                ).firstResult<StyleVersionEntity>().flatMap { current ->
+                                    find(
+                                        "personaId = ?1 and (status = ?2 or status = ?3) order by version desc",
+                                        personaId,
+                                        StyleVersionStatus.PUBLISHED.name,
+                                        StyleVersionStatus.RETIRED.name,
+                                    ).firstResult<StyleVersionEntity>().map { latest ->
+                                        val base = draft.basePublishedVersion
+                                            ?: throw StyleVersionConflictException("draft has no known published base")
+                                        if (base != (latest?.version ?: 0)) {
+                                            throw StyleVersionConflictException(
+                                                "published style changed since this draft was created",
+                                            )
+                                        }
+                                        val retired = current?.apply {
+                                            status = StyleVersionStatus.RETIRED.name
+                                            decidedBy = decidedBy ?: checker
+                                            decidedAt = decidedAt ?: at
+                                            retiredAt = at
+                                        }?.toDomain()
+                                        draft.status = StyleVersionStatus.PUBLISHED.name
+                                        draft.decidedBy = checker
+                                        draft.decidedAt = at
+                                        draft.publishedAt = at
+                                        StylePublication(draft.toDomain(), retired)
                                     }
-                                    val retired = current?.apply {
-                                        status = StyleVersionStatus.RETIRED.name
-                                        decidedBy = decidedBy ?: checker
-                                        decidedAt = decidedAt ?: at
-                                        retiredAt = at
-                                    }?.toDomain()
-                                    draft.status = StyleVersionStatus.PUBLISHED.name
-                                    draft.decidedBy = checker
-                                    draft.decidedAt = at
-                                    draft.publishedAt = at
-                                    StylePublication(draft.toDomain(), retired)
                                 }
                             }
                         }

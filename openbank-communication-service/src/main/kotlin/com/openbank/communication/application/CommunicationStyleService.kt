@@ -39,6 +39,8 @@ data class DraftStyleVersionCommand(
     val basePublishedVersion: Int,
 )
 
+data class EditorStyleSnapshot(val basePublishedVersion: Int, val published: PublishedStyle?)
+
 @ApplicationScoped
 class CommunicationStyleService(
     private val personas: PersonaRepository,
@@ -183,6 +185,14 @@ class CommunicationStyleService(
         val published = styleVersions.findPublished(persona.id)
             ?: throw StyleVersionNotFoundException("persona '$personaKey' has no published style version")
         return published.toPublishedStyle(personaKey)
+    }
+
+    /** One locked read pairs the visible copy with its durable publication generation. */
+    suspend fun editorState(personaKey: String): EditorStyleSnapshot {
+        val persona = personas.findByKey(personaKey)
+            ?: throw PersonaNotFoundException("persona '$personaKey' not found")
+        val state = styleVersions.readEditorState(persona.id)
+        return EditorStyleSnapshot(state.basePublishedVersion, state.published?.toPublishedStyle(personaKey))
     }
 
     private fun StyleVersion.toPublishedStyle(personaKey: String) = PublishedStyle(

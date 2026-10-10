@@ -18,6 +18,7 @@ interface PersonaRepository {
 }
 
 data class StylePublication(val published: StyleVersion, val retired: StyleVersion?)
+data class StyleEditorState(val basePublishedVersion: Int, val published: StyleVersion?)
 
 interface StyleVersionRepository {
     /** Allocate the next per-persona version and create it while holding the persona row lock. */
@@ -27,6 +28,9 @@ interface StyleVersionRepository {
     suspend fun publishIfCurrent(id: UUID, checker: String, at: Instant): StylePublication
     suspend fun retire(id: UUID, checker: String, at: Instant): StyleVersion?
     suspend fun findPublished(personaId: UUID): StyleVersion?
+
+    /** Current copy and last publication generation, read under the persona lock. */
+    suspend fun readEditorState(personaId: UUID): StyleEditorState
 }
 
 interface CommunicationAuditRepository {

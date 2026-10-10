@@ -5,6 +5,26 @@ info:
   # v1 published-style reads remain available for existing consumers.
   version: 2.0.0
 paths:
+  /api/v2/personas/{personaKey}/editor-state:
+    get:
+      summary: Atomically read the current style and durable publication generation for an editor
+      description: >-
+        The generation is the greatest ever published version, including a retired version;
+        zero means this persona has never published a style. Editors submit this value as
+        basePublishedVersion. The published field is null after explicit retirement.
+      parameters: [{name: personaKey, in: path, required: true, schema: {type: string}}]
+      responses:
+        "200":
+          description: Editor snapshot
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [basePublishedVersion, published]
+                properties:
+                  basePublishedVersion: {type: integer, minimum: 0}
+                  published: {type: object, nullable: true}
+        "404": {description: Unknown persona}
   /api/v2/personas/{personaKey}/style-versions:
     post:
       summary: Draft a new style version for a persona (D3 lint runs before persistence)
