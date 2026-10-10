@@ -53,7 +53,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: transaction-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-transaction-service:sandbox-631a1f05
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-transaction-service:sandbox-4c86c6f7
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -464,7 +464,7 @@ spec:
         - name: sepa-payment
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-payment:sandbox-631a1f05
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-payment:sandbox-4c86c6f7
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -851,7 +851,7 @@ spec:
         - name: domestic-payment
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-domestic-payment:sandbox-3efd3a25
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-domestic-payment:sandbox-06b3e255
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -1220,7 +1220,7 @@ spec:
         - name: sepa-instant
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-instant:sandbox-631a1f05
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-instant:sandbox-f85d4c59
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -1309,8 +1309,9 @@ spec:
               value: http://clearing-simulator.payments.svc:8139
             - name: QUARKUS_REDIS_HOSTS
               value: redis://redis.payments.svc:6379
-            - name: SEPA_INSTANT_SCHEME_SUBMISSION_ENABLED
-              value: "true"
+            # Keep settlement opt-in disabled until the outbox and reconciliation rollout is approved.
+            - name: SCT_INST_SCHEME_SUBMISSION_ENABLED
+              value: "false"
             - name: TRANSACTION_SERVICE_URL
               value: http://transaction-service.payments.svc:8102
             # OPA sidecar is deployed (ADR-0034 Phase 5, issue #266). AUTHZ_ENFORCE=true
@@ -1558,7 +1559,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: clearing-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-service:sandbox-a5b43740
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-service:sandbox-4c86c6f7
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -1882,7 +1883,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: standing-order-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-standing-order-service:sandbox-ed58c115
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-standing-order-service:sandbox-4c86c6f7
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -2174,7 +2175,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: card-issuance-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-issuance-service:sandbox-2f607bb9
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-issuance-service:sandbox-4c86c6f7
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -2473,7 +2474,7 @@ spec:
           # is UNVERIFIABLE forever rather than merely stale. No image carries this tag yet; the
           # first auto-deploy run rewrites the line, and until then the Deployment does not admit,
           # which is the honest state for a service whose image has never been built.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-processing-service:sandbox-a5b43740
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-processing-service:sandbox-4c86c6f7
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -2731,7 +2732,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: settlement-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-settlement-service:sandbox-631a1f05
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-settlement-service:sandbox-4c86c6f7
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -3078,7 +3079,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: clearing-simulator
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-simulator:sandbox-92997073
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-simulator:sandbox-e94ac8ee
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -3197,7 +3198,7 @@ spec:
         - name: swift-service
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-swift-service:sandbox-631a1f05
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-swift-service:sandbox-4c86c6f7
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -3520,7 +3521,7 @@ spec:
       containers:
         - name: vop-service
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-vop-service:sandbox-ed58c115
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-vop-service:sandbox-4c86c6f7
 
           imagePullPolicy: IfNotPresent
           ports:
