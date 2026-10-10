@@ -186,3 +186,64 @@ test_nobody_else_may_upload_nostro_statement if {
 		not allowed(p, "treasury.nostro.upload")
 	}
 }
+
+# --- portfolio (ADR-0337 amendment): the one treasury read a machine reaches ---
+
+portfolio_excluded := {"authz": {"operator_read_any_excluded_actions": ["treasury.portfolio.read"]}}
+
+tax_reporting := {"type": "HUMAN", "id": "service-account-openbank-tax-reporting", "roles": ["ROLE_API"]}
+
+portfolio_allowed(p, a) if rest.allow.allow with input as {"principal": p, "action": a} with data.rules as portfolio_excluded
+
+test_tax_reporting_may_read_portfolio if {
+	portfolio_allowed(tax_reporting, "treasury.portfolio.read")
+}
+
+test_tax_reporting_reads_nothing_else if {
+	not portfolio_allowed(tax_reporting, "treasury.portfolio.upload")
+	every a in reads {
+		not portfolio_allowed(tax_reporting, a)
+	}
+}
+
+# Without ROLE_API (the role the realm grants that client) the identity alone is not enough.
+test_tax_reporting_identity_without_api_role_denied if {
+	not portfolio_allowed({"type": "HUMAN", "id": "service-account-openbank-tax-reporting", "roles": []}, "treasury.portfolio.read")
+}
+
+test_treasury_staff_may_read_portfolio if {
+	every p in [dealer, approver, admin, senior] {
+		portfolio_allowed(p, "treasury.portfolio.read")
+	}
+}
+
+test_shared_m2m_other_service_account_and_agent_may_not_read_portfolio if {
+	not portfolio_allowed({"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR", "ROLE_API", "ROLE_COMPLIANCE"]}, "treasury.portfolio.read")
+	not portfolio_allowed({"type": "HUMAN", "id": "service-account-openbank-pension", "roles": ["ROLE_API", "ROLE_OPERATOR"]}, "treasury.portfolio.read")
+	not portfolio_allowed(shared_sa, "treasury.portfolio.read")
+	not portfolio_allowed({"type": "AI_AGENT", "id": "agent:treasury-drafter", "roles": ["ROLE_API", "ROLE_TREASURY_DEALER"]}, "treasury.portfolio.read")
+	not portfolio_allowed(nobody, "treasury.portfolio.read")
+}
+
+# compliance-read-any honours the exclusion too: a client holding ROLE_COMPLIANCE is still a machine.
+test_compliance_role_does_not_reach_portfolio if {
+	not portfolio_allowed({"type": "HUMAN", "id": "service-account-openbank-aml", "roles": ["ROLE_COMPLIANCE"]}, "treasury.portfolio.read")
+	not portfolio_allowed({"type": "HUMAN", "id": "carol", "roles": ["ROLE_COMPLIANCE"]}, "treasury.portfolio.read")
+}
+
+# The exclusion is what does the work: without it the base rules re-admit the shared account.
+test_without_the_exclusion_the_base_rules_reopen_portfolio if {
+	rest.allow.allow with input as {
+		"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]},
+		"action": "treasury.portfolio.read",
+	}
+		with data.rules as {}
+}
+
+test_only_approver_may_upload_portfolio if {
+	allowed(approver, "treasury.portfolio.upload")
+	not allowed(dealer, "treasury.portfolio.upload")
+	not allowed(admin, "treasury.portfolio.upload")
+	not allowed(shared_sa, "treasury.portfolio.upload")
+	not allowed(agent, "treasury.portfolio.upload")
+}

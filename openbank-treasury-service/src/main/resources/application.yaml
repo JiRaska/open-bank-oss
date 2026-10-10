@@ -203,6 +203,22 @@ openbank:
       # least this amount in its own currency (0 = any amount).
       break-alert-age-days: ${OPENBANK_TREASURY_NOSTRO_BREAK_ALERT_AGE_DAYS:3}
       break-alert-min-amount: ${OPENBANK_TREASURY_NOSTRO_BREAK_ALERT_MIN_AMOUNT:0}
+    portfolio:
+      # ADR-0337 amendment: the custodian's semt.002 statement of holdings (PSP 34-12 PS). Only the
+      # treasury-pension-co deployment keeps a portfolio: it sets the entity and its safekeeping
+      # account(s) in its own configuration. Without an entity every upload is refused and every
+      # period-end read answers 409 — the bank's own treasury keeps no portfolio here. Set
+      # OPENBANK_TREASURY_PORTFOLIO_ENTITY and OPENBANK_TREASURY_PORTFOLIO_SAFEKEEPING_ACCOUNTS
+      # on that deployment (both deliberately absent here: no default entity exists).
+      # Instrument class per CFI PREFIX (ISO 10962; longest prefix wins). A CFI no prefix covers
+      # refuses the WHOLE statement at upload — a holding is never classified by guess.
+      cfi-classes:
+        DB: DEBT_SECURITY
+        DY: MONEY_MARKET_INSTRUMENT
+        ES: EQUITY
+        EP: EQUITY
+        CI: FUND_UNIT
+        CE: FUND_UNIT
     nostro-breaks:
       # Hourly sweep: re-reconcile statements of the last 31 days (a late ledger booking resolves
       # its break), then age every open break and alert once on those over the threshold.
@@ -242,6 +258,33 @@ authz:
 
 "%prod":
   quarkus:
+    http:
+      # East-west mTLS on the 8443 listener (ADR-0337: tax-reporting reads the pension company's
+      # portfolio from the treasury-pension-co instance). `quarkus.http.ssl.client-auth` is a
+      # BUILD-TIME property: the container env cannot set it, so it lives in the file the image is
+      # built from. Under `%prod` only: with `quarkus.http.ssl.*` set and no certificate Quarkus
+      # refuses to start, which would break every dev run and @QuarkusTest. In the cluster BOTH
+      # deployments supply the certificate files (treasury-pension-co: treasury-service-internal-tls;
+      # the bank's treasury: treasury-internal-tls, server usage added for exactly this) — the gitops
+      # change (#12508) must be live before an image built from this file deploys.
+      ssl:
+        client-auth: required
+      # Keep the plain-HTTP port (8160): with client-auth REQUIRED Quarkus otherwise drops the HTTP
+      # listener, and the readiness probe and admin-ui's staff path use it. Runtime property, #10441.
+      insecure-requests: enabled
+      # Listener parity (ADR-0337): with client-auth on, Quarkus ALSO registers its mTLS
+      # authentication mechanism, which turns a trusted client certificate into a SecurityIdentity
+      # of its own — on 8443 only. The API must be authenticated identically on both listeners, by
+      # the OIDC bearer OPA decides on, so /api/* accepts the bearer mechanism ONLY; the certificate
+      # stays transport authentication. Measured: without this, a trusted certificate with no bearer
+      # reached the handler as an authenticated principal (403 from authz, not 401).
+      # ListenerAuthParityIT holds both listeners to 401 without a bearer.
+      auth:
+        permission:
+          bearer-only:
+            paths: /api/*
+            policy: permit
+            auth-mechanism: bearer
     # ledger-service's 8443 listener is private-CA mTLS with client auth REQUIRED; the
     # treasury-internal-tls certificate is mounted at /mnt/ledger-tls in the cluster only.
     tls:

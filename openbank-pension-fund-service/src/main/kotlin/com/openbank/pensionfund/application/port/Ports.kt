@@ -6,7 +6,9 @@ package com.openbank.pensionfund.application.port
 
 import com.openbank.pensionfund.domain.model.Fund
 import com.openbank.pensionfund.domain.model.FundStrategy
+import com.openbank.pensionfund.domain.model.NavPosition
 import com.openbank.pensionfund.domain.model.NavRecord
+import com.openbank.pensionfund.domain.model.PositionClassificationCorrection
 import com.openbank.pensionfund.domain.model.StrategyChange
 import com.openbank.pensionfund.domain.model.UnitHolding
 import com.openbank.pensionfund.domain.model.UnitOrder
@@ -17,12 +19,19 @@ import java.util.UUID
 
 class NotFoundException(message: String) : RuntimeException(message)
 
+data class ClassificationReceipt(
+    val key: String,
+    val fingerprint: String,
+    val result: PositionClassificationCorrection,
+)
+
 /**
  * Everything one use case changes, committed in ONE transaction. A NAV publication settles orders,
  * moves holdings, writes transactions and may spawn switch-in legs — a partial commit would leave
  * the register disagreeing with itself, so the store takes the whole change set or nothing.
  */
 data class StoreChanges(
+    val classificationReceipt: ClassificationReceipt? = null,
     val funds: List<Fund> = emptyList(),
     val strategies: List<FundStrategy> = emptyList(),
     val strategyChanges: List<StrategyChange> = emptyList(),
@@ -30,12 +39,18 @@ data class StoreChanges(
     val orders: List<UnitOrder> = emptyList(),
     val transactions: List<UnitTransaction> = emptyList(),
     val holdings: List<UnitHolding> = emptyList(),
+    /** Written once, with the NAV that was struck on them (#12425); never rewritten on publication. */
+    val navPositions: List<NavPosition> = emptyList(),
+    /** Four-eyes reclassifications of recorded positions; the positions themselves are never rewritten. */
+    val classificationCorrections: List<PositionClassificationCorrection> = emptyList(),
 )
 
 // One read per query the use cases need; splitting it per aggregate would split the ONE commit too.
 @Suppress("TooManyFunctions")
 interface PensionFundStore {
     suspend fun commit(changes: StoreChanges)
+
+    suspend fun classificationReceipt(key: String): ClassificationReceipt?
 
     suspend fun fund(id: UUID): Fund?
     suspend fun funds(): List<Fund>
@@ -62,6 +77,27 @@ interface PensionFundStore {
 
     suspend fun transactionsPricedAt(navId: UUID): List<UnitTransaction>
     suspend fun transactions(contractId: UUID): List<UnitTransaction>
+
+    // ---- reporting reads (#12425): aggregate inputs, by fund and valuation date ----
+
+    /** PUBLISHED NAVs of [fundId] valued on or before [upTo], oldest first. */
+    suspend fun publishedNavsUpTo(fundId: UUID, upTo: LocalDate): List<NavRecord>
+
+    /** Every unit transaction priced at one of [navIds]. */
+    suspend fun transactionsPricedAtAny(navIds: Collection<UUID>): List<UnitTransaction>
+
+    /** The positions [navId] was struck on, with their RECORDED class. */
+    suspend fun navPositions(navId: UUID): List<NavPosition>
+
+    /** The positions each of [navIds] was struck on, with their RECORDED class. */
+    suspend fun navPositionsOf(navIds: Collection<UUID>): List<NavPosition>
+
+    suspend fun navPosition(id: UUID): NavPosition?
+
+    suspend fun classificationCorrection(id: UUID): PositionClassificationCorrection?
+
+    /** Every correction, in any status, of one of [positionIds]. */
+    suspend fun classificationCorrections(positionIds: Collection<UUID>): List<PositionClassificationCorrection>
 }
 
 /**
