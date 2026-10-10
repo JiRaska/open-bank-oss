@@ -44,3 +44,4 @@
 # --check-placeholders direction fails on.
 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-pension-service:sandbox-000000000
 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-pension-fund-service:sandbox-000000000
+265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-tax-reporting-service:sandbox-000000000
