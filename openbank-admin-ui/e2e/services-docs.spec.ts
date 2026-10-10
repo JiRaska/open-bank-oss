@@ -139,6 +139,7 @@ test.describe('/services — Service Documentation page', () => {
   test('shows a newly cataloged service with its running build provenance', async ({ page }) => {
     await page.route('**/api/catalog/services', route =>
       route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+        available: true,
         services: [{ name: 'openbank-example-service', short: 'example-service', kind: 'service', runnable: true, apiTitle: 'Example Service' }],
       }) })
     )
