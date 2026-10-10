@@ -537,6 +537,7 @@ rules:
       # Incentive lifecycle producer. The corresponding ExternalSecret is staged without a
       # Deployment, so this narrowly permits ESO to project only this Strimzi-issued client key.
       - incentive-service
+      - pension-service
       # ADR-0284: business onboarding case lifecycle producer + party-events consumer, ns kyb
       # (first ESO client there). Without this the keystore ExternalSecret sits at
       # SecretSyncedError, ArgoCD never advances past sync-wave -1, and no pod is ever created —

@@ -63,3 +63,11 @@ concurrent decisions on the same ceremony conflict loudly (422) instead of lost-
 Dedicated database `openbank_documents`, `generation: none`, Flyway V1..V3. Only the outbox entity
 extends `PanacheOutboxEntity` (Hibernate sequence `document_outbox_seq`, created in V3 — guarded by
 `HibernateSequenceGuardTest`); all other entities use application-assigned UUID/String ids.
+
+## Seeded pension templates
+
+`DocumentTemplateSeed` also seeds the eight `pension-*` templates (DPS key information, DIP KID, tax
+certificate, annual statement; cs and en) as `PUBLISHED` `1.0.0`, because `render` resolves published
+rows only. Their wording is a draft: each body keeps the `LEGAL-REVIEW-REQUIRED` marker and renders a
+DRAFT banner while the caller sends `legalReviewRequired=true`. Reviewed wording ships as a new seed
+version.
