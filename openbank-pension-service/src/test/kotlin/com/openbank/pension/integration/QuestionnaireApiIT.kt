@@ -7,6 +7,8 @@ package com.openbank.pension.integration
 import com.openbank.pension.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.junit.QuarkusTestProfile
+import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
 import io.restassured.response.ValidatableResponse
@@ -30,7 +32,14 @@ import java.util.UUID
 @QuarkusTest
 @QuarkusTestResource(PostgresTestResource::class)
 @QuarkusTestResource(StrategyCatalogWireMockResource::class, restrictToAnnotatedClass = true)
+@TestProfile(QuestionnaireApiIT.CatalogOidcEnabled::class)
 class QuestionnaireApiIT {
+
+    class CatalogOidcEnabled : QuarkusTestProfile {
+        // The service's %test profile disables OIDC at build time. Enable it before augmentation;
+        // a test-resource runtime override alone cannot activate a build-time-disabled client.
+        override fun getConfigOverrides(): Map<String, String> = mapOf("quarkus.oidc-client.enabled" to "true")
+    }
 
     private val apps = "/api/v1/pension/onboarding/applications"
     private val party: UUID = UUID.randomUUID()
