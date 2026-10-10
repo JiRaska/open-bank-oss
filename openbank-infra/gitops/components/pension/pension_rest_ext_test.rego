@@ -457,3 +457,66 @@ test_customer_role_may_not_list_mandates if {
 		"action": "pension.operator.mandate-read",
 	}
 }
+
+# ---------------------------------------------------------------------------------------------
+# Participant-data reads vs the generic read rules (operator-read-any / compliance-read-any).
+# Mirrors rules.yaml: authz.operator_read_any_excluded_actions — the opa-eval matrix against the
+# materialised bundle is what proves the real list; these prove the rules do the work.
+# ---------------------------------------------------------------------------------------------
+pension_participant_reads := [
+	"pension.contract.read",
+	"pension.exit.read",
+	"pension.death.read",
+	"pension.funding.read",
+	"pension.onboarding.read",
+	"pension.transfer.read",
+	"pension.operator.read",
+	"pension.annuity.read",
+]
+
+pension_excluded := {"authz": {"operator_read_any_excluded_actions": pension_participant_reads}}
+
+pension_principal(id, roles) := {"type": "HUMAN", "id": id, "roles": roles}
+
+# must-DENY: the shared M2M client (ROLE_OPERATOR in the gitops realm, + ROLE_COMPLIANCE in CI),
+# an unrelated service, and an AI agent — for every participant read.
+test_machines_cannot_read_pension_participant_data if {
+	every action in pension_participant_reads {
+		not rest.allow with input as {"principal": pension_principal("service-account-openbank-services", ["ROLE_OPERATOR", "ROLE_COMPLIANCE", "ROLE_API"]), "action": action}
+			with data.rules as pension_excluded
+		not rest.allow with input as {"principal": pension_principal("service-account-openbank-treasury", ["ROLE_OPERATOR", "ROLE_ADMIN"]), "action": action}
+			with data.rules as pension_excluded
+		not rest.allow with input as {"principal": {"type": "AI_AGENT", "id": "agent-x", "roles": ["ROLE_OPERATOR"]}, "action": action}
+			with data.rules as pension_excluded
+	}
+}
+
+# must-ALLOW: human operator, admin and compliance read every participant read.
+test_human_staff_read_pension_participant_data if {
+	every action in pension_participant_reads {
+		every role in ["ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE"] {
+			rest.allow with input as {"principal": pension_principal("alice", [role]), "action": action}
+				with data.rules as pension_excluded
+		}
+	}
+}
+
+# must-ALLOW the edge relay for the participant's own reads; must-DENY it the staff-only ones.
+test_edge_relays_customer_scoped_reads_only if {
+	every action in ["pension.contract.read", "pension.exit.read", "pension.funding.read", "pension.onboarding.read", "pension.transfer.read", "pension.annuity.read"] {
+		rest.allow with input as {"principal": pension_principal("service-account-openbank-edge", ["ROLE_API", "ROLE_OPERATOR"]), "action": action}
+			with data.rules as pension_excluded
+	}
+	every action in ["pension.death.read", "pension.operator.read", "pension.operator.mandate-read"] {
+		not rest.allow with input as {"principal": pension_principal("service-account-openbank-edge", ["ROLE_API", "ROLE_OPERATOR"]), "action": action}
+			with data.rules as pension_excluded
+	}
+}
+
+# The exclusion is what does the work: without it the base rules re-admit the shared client.
+test_without_the_exclusion_the_shared_client_reads_pension_data if {
+	rest.allow with input as {"principal": pension_principal("service-account-openbank-services", ["ROLE_OPERATOR"]), "action": "pension.onboarding.read"}
+		with data.rules as {}
+	rest.allow with input as {"principal": pension_principal("service-account-openbank-services", ["ROLE_COMPLIANCE"]), "action": "pension.contract.read"}
+		with data.rules as {}
+}
