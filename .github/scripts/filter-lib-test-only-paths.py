@@ -32,7 +32,7 @@ LIB_TEST = re.compile(r"^(openbank-libs[^/]*)/src/(test|testFixtures)/")
 CONSUMER = re.compile(r'testFixtures\(\s*project\(\s*"(:[^"]+)"')
 # Mirrors the code-global regex in services-ci.yml; used by --self-test only.
 CODE_GLOBAL = re.compile(
-    r"^(openbank-libs/|openbank-libs-domain/|openbank-libs-runtime/|openbank-libs-testing/"
+    r"^(openbank-libs[^/]*/"
     r"|gradle/|settings\.gradle\.kts"
     r"|build\.gradle\.kts|gradle\.properties|build-logic/)"
 )
@@ -69,14 +69,18 @@ def decide(paths: list[str], modules: list[str], consumed: set[str]) -> list[str
 
 def self_test() -> int:
     mods = ["openbank-libs", "openbank-libs-runtime", "openbank-libs-testing",
-            "openbank-card-processing-service", "openbank-ledger-service"]
+            "openbank-card-processing-service", "openbank-ledger-service", "openbank-libs-future"]
     with tempfile.TemporaryDirectory() as d:
         root = Path(d)
         (root / "openbank-ledger-service").mkdir()
         (root / "openbank-ledger-service/build.gradle.kts").write_text(
-            'dependencies { testImplementation(testFixtures(project(":openbank-libs-testing"))) }\n')
+            'dependencies { testImplementation(testFixtures(project(":openbank-libs-testing"))); testImplementation(testFixtures(project(":openbank-libs-future"))) }\n')
         consumed = consumed_fixtures(root)
     cases = [
+        (["openbank-libs-future/src/main/x/Foo.kt"], mods),
+        (["openbank-libs-future/build.gradle.kts"], mods),
+        (["openbank-libs-future/src/testFixtures/x/Kit.kt"], mods),
+        (["openbank-libs-future/src/test/x/FooTest.kt"], ["openbank-libs-future"]),
         (["openbank-libs-runtime/src/test/x/FooTest.kt"], ["openbank-libs-runtime"]),
         (["openbank-libs-runtime/src/main/x/Foo.kt"], mods),
         (["build.gradle.kts"], mods),
@@ -94,7 +98,7 @@ def self_test() -> int:
         ok = got == sorted(want)
         bad += not ok
         print(f"{'ok  ' if ok else 'FAIL'} {paths} -> {got}")
-    if consumed != {"openbank-libs-testing"}:
+    if consumed != {"openbank-libs-testing", "openbank-libs-future"}:
         print(f"FAIL consumer detection: {consumed}")
         bad += 1
     print("self-test:", "FAIL" if bad else "pass")
