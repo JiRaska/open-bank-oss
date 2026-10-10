@@ -54,6 +54,13 @@ quarkus:
       url: ${PENSION_COMPANY_LEDGER_URL:http://localhost:8099}
       connect-timeout: 2000
       read-timeout: 10000
+    # ADR-0337: the PENSION COMPANY's own treasury-service instance (PSP 34-12 PS, its own
+    # portfolio). No default on purpose: unset = PSP 34-12 PS is refused (503, "not configured")
+    # rather than read from whichever treasury happens to answer on a default port.
+    treasury-service:
+      url: ${PENSION_COMPANY_TREASURY_URL:}
+      connect-timeout: 2000
+      read-timeout: 10000
 
 mp:
   messaging:
