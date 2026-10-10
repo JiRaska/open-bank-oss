@@ -49,14 +49,14 @@ class ProviderConfigTest {
     }
 
     private fun resolve(profile: String, environment: Map<String, String> = emptyMap()): UUID = SmallRyeConfigBuilder()
-            .addDefaultInterceptors()
-            .withSources(
-                YamlConfigSource(requireNotNull(javaClass.classLoader.getResource("application.yaml")), YAML_ORDINAL),
-                EnvConfigSource(environment, ENV_ORDINAL),
-            )
-            .withProfile(profile)
-            .build()
-            .getValue("openbank.pension.provider-entity-id", UUID::class.java)
+        .addDefaultInterceptors()
+        .withSources(
+            YamlConfigSource(requireNotNull(javaClass.classLoader.getResource("application.yaml")), YAML_ORDINAL),
+            EnvConfigSource(environment, ENV_ORDINAL),
+        )
+        .withProfile(profile)
+        .build()
+        .getValue("openbank.pension.provider-entity-id", UUID::class.java)
 
     private companion object {
         const val PROVIDER_ENV = "OPENBANK_PENSION_PROVIDER_ENTITY_ID"
