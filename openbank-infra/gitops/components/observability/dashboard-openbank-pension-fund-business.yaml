@@ -1,0 +1,1173 @@
+# Pension-fund administration dashboard (#12424). Generated layout, hand-reviewed; money panels are
+# counters of what the service ESTABLISHED (settled at a published NAV), and AUM is the net assets of
+# the last PUBLISHED NAV, never a live mark.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-openbank-pension-fund-business
+  namespace: observability
+  labels:
+    grafana_dashboard: "1"
+data:
+  openbank-pension-fund-business.json: |
+    {
+      "id": null,
+      "uid": "openbank-pension-fund-business",
+      "title": "OpenBank — Pension fund administration",
+      "description": "ADR-0334 pension funds: NAV pipeline and cutoff, AUM and flows per fund, orders, four-eyes approvals (#12424).",
+      "tags": [
+        "openbank",
+        "pension",
+        "pension-fund",
+        "business"
+      ],
+      "schemaVersion": 39,
+      "version": 1,
+      "refresh": "1m",
+      "time": {
+        "from": "now-7d",
+        "to": "now"
+      },
+      "timepicker": {},
+      "editable": false,
+      "graphTooltip": 1,
+      "templating": {
+        "list": [
+          {
+            "name": "datasource",
+            "type": "datasource",
+            "pluginId": "prometheus",
+            "label": "Datasource",
+            "hide": 0,
+            "refresh": 1,
+            "options": [],
+            "current": {}
+          }
+        ]
+      },
+      "annotations": {
+        "list": []
+      },
+      "links": [
+        {
+          "title": "Runbook",
+          "type": "link",
+          "url": "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/pension-alerts.md#pension-fund",
+          "targetBlank": true
+        }
+      ],
+      "panels": [
+        {
+          "title": "NAV pipeline",
+          "type": "row",
+          "collapsed": false,
+          "panels": [],
+          "id": 1,
+          "gridPos": {
+            "x": 0,
+            "y": 0,
+            "w": 24,
+            "h": 1
+          }
+        },
+        {
+          "title": "Funds past NAV cutoff (age > 24h)",
+          "type": "stat",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 1
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "value",
+            "graphMode": "area",
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "count(max by (fund) (openbank_pension_fund_nav_last_published_age_seconds) > 86400) or vector(0)"
+            }
+          ],
+          "description": "Funds whose latest published valuation day ended more than 24h ago. Expected over a weekend; the alert PensionFundNavNotPublishedByCutoff applies the business-day cutoff.",
+          "id": 2,
+          "gridPos": {
+            "x": 0,
+            "y": 1,
+            "w": 4,
+            "h": 4
+          }
+        },
+        {
+          "title": "NAVs awaiting checker",
+          "type": "stat",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 1
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "value",
+            "graphMode": "area",
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "max(openbank_pension_fund_queue_size{queue=\"navs_awaiting_approval\"})"
+            }
+          ],
+          "id": 3,
+          "gridPos": {
+            "x": 4,
+            "y": 1,
+            "w": 4,
+            "h": 4
+          }
+        },
+        {
+          "title": "Oldest NAV awaiting checker",
+          "type": "stat",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "value",
+            "graphMode": "area",
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "max(openbank_pension_fund_queue_oldest_age_seconds{queue=\"navs_awaiting_approval\"})"
+            }
+          ],
+          "id": 4,
+          "gridPos": {
+            "x": 8,
+            "y": 1,
+            "w": 4,
+            "h": 4
+          }
+        },
+        {
+          "title": "Corrections published (7d)",
+          "type": "stat",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 1
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "value",
+            "graphMode": "area",
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(increase(openbank_pension_fund_nav_events_total{event=\"published\",correction=\"true\"}[7d])) or vector(0)"
+            }
+          ],
+          "id": 5,
+          "gridPos": {
+            "x": 12,
+            "y": 1,
+            "w": 4,
+            "h": 4
+          }
+        },
+        {
+          "title": "NAVs rejected by checker (7d)",
+          "type": "stat",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "value",
+            "graphMode": "area",
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(increase(openbank_pension_fund_nav_events_total{event=\"rejected\"}[7d])) or vector(0)"
+            }
+          ],
+          "id": 6,
+          "gridPos": {
+            "x": 16,
+            "y": 1,
+            "w": 4,
+            "h": 4
+          }
+        },
+        {
+          "title": "Price lookups failed (24h)",
+          "type": "stat",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 1
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "value",
+            "graphMode": "area",
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(increase(openbank_pension_fund_market_price_lookups_total{outcome=\"failed\"}[24h])) or vector(0)"
+            }
+          ],
+          "id": 7,
+          "gridPos": {
+            "x": 20,
+            "y": 1,
+            "w": 4,
+            "h": 4
+          }
+        },
+        {
+          "title": "Last published NAV per fund (hours since valuation day ended)",
+          "type": "table",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": []
+          },
+          "options": {
+            "showHeader": true
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "max by (fund) (openbank_pension_fund_nav_last_published_age_seconds) / 3600",
+              "format": "table",
+              "instant": true
+            }
+          ],
+          "transformations": [
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true
+                }
+              }
+            }
+          ],
+          "description": "Absent for a fund that has never published a NAV. < 24h on a weekday means yesterday's NAV is out.",
+          "id": 8,
+          "gridPos": {
+            "x": 0,
+            "y": 5,
+            "w": 12,
+            "h": 8
+          }
+        },
+        {
+          "title": "Original NAV publication lag p95 vs 12h cutoff",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 15,
+                "stacking": {
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "line"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 43200
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "histogram_quantile(0.95, sum by (le, fund) (rate(openbank_pension_fund_nav_publication_lag_seconds_bucket[1d])))",
+              "legendFormat": "{{fund}}"
+            }
+          ],
+          "description": "From the end of the valuation day (00:00 UTC next day) to publication. Corrections are excluded.",
+          "id": 9,
+          "gridPos": {
+            "x": 12,
+            "y": 5,
+            "w": 12,
+            "h": 8
+          }
+        },
+        {
+          "title": "NAV events per day",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 15,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (fund, event, correction) (increase(openbank_pension_fund_nav_events_total[1d]))",
+              "legendFormat": "{{fund}} {{event}} correction={{correction}}"
+            }
+          ],
+          "id": 10,
+          "gridPos": {
+            "x": 0,
+            "y": 13,
+            "w": 24,
+            "h": 8
+          }
+        },
+        {
+          "title": "Assets under management and flows",
+          "type": "row",
+          "collapsed": false,
+          "panels": [],
+          "id": 11,
+          "gridPos": {
+            "x": 0,
+            "y": 21,
+            "w": 24,
+            "h": 1
+          }
+        },
+        {
+          "title": "Net assets at last published NAV",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 15,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (fund, currency) (openbank_pension_fund_net_assets)",
+              "legendFormat": "{{fund}} {{currency}}"
+            }
+          ],
+          "description": "AUM as last ESTABLISHED by a published NAV, not a live valuation.",
+          "id": 12,
+          "gridPos": {
+            "x": 0,
+            "y": 22,
+            "w": 12,
+            "h": 8
+          }
+        },
+        {
+          "title": "NAV per unit",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 15,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "max by (fund, currency) (openbank_pension_fund_nav_per_unit)",
+              "legendFormat": "{{fund}}"
+            }
+          ],
+          "id": 13,
+          "gridPos": {
+            "x": 12,
+            "y": 22,
+            "w": 12,
+            "h": 8
+          }
+        },
+        {
+          "title": "Units outstanding (register)",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 15,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (fund) (openbank_pension_fund_units_outstanding)",
+              "legendFormat": "{{fund}}"
+            }
+          ],
+          "id": 14,
+          "gridPos": {
+            "x": 0,
+            "y": 30,
+            "w": 12,
+            "h": 8
+          }
+        },
+        {
+          "title": "Money settled per day by order type",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 15,
+                "stacking": {
+                  "mode": "normal"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (fund, type, currency) (increase(openbank_pension_fund_settled_amount_total[1d]))",
+              "legendFormat": "{{fund}} {{type}} {{currency}}"
+            }
+          ],
+          "description": "Amounts of orders priced at a published NAV. SUBSCRIBE / SWITCH_IN are inflows, REDEEM / SWITCH_OUT outflows.",
+          "id": 15,
+          "gridPos": {
+            "x": 12,
+            "y": 30,
+            "w": 12,
+            "h": 8
+          }
+        },
+        {
+          "title": "Orders",
+          "type": "row",
+          "collapsed": false,
+          "panels": [],
+          "id": 16,
+          "gridPos": {
+            "x": 0,
+            "y": 38,
+            "w": 24,
+            "h": 1
+          }
+        },
+        {
+          "title": "Orders placed and settled",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 15,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (type, status) (increase(openbank_pension_fund_orders_total[1h]))",
+              "legendFormat": "{{type}} {{status}}"
+            }
+          ],
+          "id": 17,
+          "gridPos": {
+            "x": 0,
+            "y": 39,
+            "w": 12,
+            "h": 8
+          }
+        },
+        {
+          "title": "Pending orders by fund and type",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 15,
+                "stacking": {
+                  "mode": "normal"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (fund, type) (openbank_pension_fund_orders_pending)",
+              "legendFormat": "{{fund}} {{type}}"
+            }
+          ],
+          "id": 18,
+          "gridPos": {
+            "x": 12,
+            "y": 39,
+            "w": 12,
+            "h": 8
+          }
+        },
+        {
+          "title": "Oldest pending order per fund vs T+4",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 15,
+                "stacking": {
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "line"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 345600
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "max by (fund) (openbank_pension_fund_orders_pending_oldest_age_seconds)",
+              "legendFormat": "{{fund}}"
+            }
+          ],
+          "id": 19,
+          "gridPos": {
+            "x": 0,
+            "y": 47,
+            "w": 12,
+            "h": 8
+          }
+        },
+        {
+          "title": "Order placement retries answered from the original",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 15,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (type) (increase(openbank_pension_fund_order_replays_total[1h]))",
+              "legendFormat": "{{type}}"
+            }
+          ],
+          "id": 20,
+          "gridPos": {
+            "x": 12,
+            "y": 47,
+            "w": 12,
+            "h": 8
+          }
+        },
+        {
+          "title": "Approvals (four-eyes)",
+          "type": "row",
+          "collapsed": false,
+          "panels": [],
+          "id": 21,
+          "gridPos": {
+            "x": 0,
+            "y": 55,
+            "w": 24,
+            "h": 1
+          }
+        },
+        {
+          "title": "Approval queues",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 15,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "max by (queue) (openbank_pension_fund_queue_size{queue=~\"navs_awaiting_approval|strategy_changes_awaiting_approval\"})",
+              "legendFormat": "{{queue}}"
+            }
+          ],
+          "id": 22,
+          "gridPos": {
+            "x": 0,
+            "y": 56,
+            "w": 12,
+            "h": 8
+          }
+        },
+        {
+          "title": "Oldest item awaiting approval",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 15,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "max by (queue) (openbank_pension_fund_queue_oldest_age_seconds{queue=~\"navs_awaiting_approval|strategy_changes_awaiting_approval\"})",
+              "legendFormat": "{{queue}}"
+            }
+          ],
+          "id": 23,
+          "gridPos": {
+            "x": 12,
+            "y": 56,
+            "w": 12,
+            "h": 8
+          }
+        },
+        {
+          "title": "Strategy changes by event",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 15,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (event) (increase(openbank_pension_fund_strategy_changes_total[1d]))",
+              "legendFormat": "{{event}}"
+            }
+          ],
+          "id": 24,
+          "gridPos": {
+            "x": 0,
+            "y": 64,
+            "w": 12,
+            "h": 8
+          }
+        },
+        {
+          "title": "Aggregates by status",
+          "type": "table",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": []
+          },
+          "options": {
+            "showHeader": true
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (aggregate, status) (openbank_pension_fund_aggregates)",
+              "format": "table",
+              "instant": true
+            }
+          ],
+          "transformations": [
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true
+                }
+              }
+            }
+          ],
+          "id": 25,
+          "gridPos": {
+            "x": 12,
+            "y": 64,
+            "w": 12,
+            "h": 8
+          }
+        },
+        {
+          "title": "Depositary reconciliation",
+          "type": "row",
+          "collapsed": false,
+          "panels": [],
+          "id": 26,
+          "gridPos": {
+            "x": 0,
+            "y": 72,
+            "w": 24,
+            "h": 1
+          }
+        },
+        {
+          "title": "Not modelled",
+          "type": "text",
+          "options": {
+            "mode": "markdown",
+            "content": "pension-fund-service stores each fund's depositary and custody-account reference, but performs **no reconciliation** against the depositary's statement, so there are no breaks to count. A reconciliation job would add `openbank_pension_fund_reconciliation_breaks{fund}` here; until then, reconcile units outstanding (above) and the last published net assets against the depositary statement out of band."
+          },
+          "id": 27,
+          "gridPos": {
+            "x": 0,
+            "y": 73,
+            "w": 24,
+            "h": 4
+          }
+        }
+      ]
+    }
