@@ -16,10 +16,14 @@ import org.junit.jupiter.api.MethodOrderer
 import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestMethodOrder
+import java.sql.Connection
 import java.sql.DriverManager
 import java.time.LocalDate
 import java.time.ZoneOffset
 import java.util.UUID
+import java.util.concurrent.Callable
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /**
  * Real HTTP against a real Postgres. It proves what no unit test can: that the routes are
@@ -206,22 +210,43 @@ class PensionFundApiIT {
 
         // Missing fields are a 400, never a 500.
         post("/api/v1/position-classification-corrections", """{"positionId":"$loanPosition"}""").then().statusCode(400)
-        correction = post(
-            "/api/v1/position-classification-corrections",
+        correction = given().header("Idempotency-Key", "proposal").contentType("application/json").body(
+
             """{"positionId":"$loanPosition","toClass":"LOAN","reason":"depositary statement"}""",
+        ).`when`().post(
+            "/api/v1/position-classification-corrections",
         ).then().statusCode(200).body("status", equalTo("PROPOSED")).body("fromClass", equalTo("UNCLASSIFIED"))
             .extract().path("id")
+        given().header("Idempotency-Key", "proposal").contentType("application/json")
+            .body("""{"positionId":"$loanPosition","toClass":"LOAN","reason":"depositary statement"}""")
+            .`when`().post("/api/v1/position-classification-corrections").then().statusCode(200)
+            .body("id", equalTo(correction)).body("status", equalTo("PROPOSED"))
+        given().header("Idempotency-Key", "proposal").contentType("application/json")
+            .body("""{"positionId":"$loanPosition","toClass":"OTHER","reason":"changed instruction"}""")
+            .`when`().post("/api/v1/position-classification-corrections").then().statusCode(409)
+        given().header("Idempotency-Key", " ").contentType("application/json")
+            .body("""{"positionId":"$loanPosition","toClass":"LOAN","reason":"depositary statement"}""")
+            .`when`().post("/api/v1/position-classification-corrections").then().statusCode(400)
         // The proposer is not the checker.
-        post("/api/v1/position-classification-corrections/$correction/approve").then().statusCode(403)
+        given().header(
+            "Idempotency-Key",
+            "approval",
+        ).`when`().post("/api/v1/position-classification-corrections/$correction/approve").then().statusCode(403)
     }
 
     @Test
     @Order(7)
     @TestSecurity(user = "checker", roles = ["ROLE_OPERATOR"])
     fun `the checker approves the class, the position row itself is never rewritten`() {
-        post("/api/v1/position-classification-corrections/$correction/approve").then().statusCode(200)
-            .body("status", equalTo("APPROVED")).body("decidedBy", equalTo("checker"))
-        post("/api/v1/position-classification-corrections/$correction/approve").then().statusCode(409)
+        given().header(
+            "Idempotency-Key",
+            "approval",
+        ).`when`().post("/api/v1/position-classification-corrections/$correction/approve").then().statusCode(200)
+            .body("status", equalTo("APPROVED")).body("decidedBy", equalTo("checker")).extract().asString()
+        given().header(
+            "Idempotency-Key",
+            "approval",
+        ).`when`().post("/api/v1/position-classification-corrections/$correction/approve").then().statusCode(200)
         given().`when`().get("/api/v1/navs/$loanNav/positions").then().statusCode(200)
             .body("find { it.instrumentId == 'LOAN-1' }.instrumentClass", equalTo("LOAN"))
 
@@ -250,5 +275,154 @@ class PensionFundApiIT {
                 }
             }
         }
+    }
+
+    @Test
+    @Order(8)
+    @TestSecurity(user = "maker", roles = ["ROLE_OPERATOR"])
+    fun `proposal replay remains proposed after the checker has approved the correction`() {
+        given().header("Idempotency-Key", "proposal").contentType("application/json")
+            .body("""{"positionId":"$loanPosition","toClass":"LOAN","reason":"depositary statement"}""")
+            .`when`().post("/api/v1/position-classification-corrections").then().statusCode(200)
+            .body("id", equalTo(correction)).body("status", equalTo("PROPOSED"))
+        // Another caller's successful decision never grants the maker a replay of that decision.
+        given().header("Idempotency-Key", "approval").`when`()
+            .post("/api/v1/position-classification-corrections/$correction/approve").then().statusCode(409)
+    }
+
+    private fun jdbc(): Connection {
+        val config = ConfigProvider.getConfig()
+        return DriverManager.getConnection(
+            config.getValue("quarkus.datasource.jdbc.url", String::class.java),
+            config.getValue("quarkus.datasource.username", String::class.java),
+            config.getValue("quarkus.datasource.password", String::class.java),
+        )
+    }
+
+    private fun seedCorrection(): UUID {
+        val id = UUID.randomUUID()
+        jdbc().use { connection ->
+            connection.prepareStatement(
+                "INSERT INTO position_classification_corrections " +
+                    "(id, position_id, nav_id, from_class, to_class, reason, proposed_by, proposed_at, status) " +
+                    "VALUES (?, ?, ?, 'LOAN', 'OTHER', 'race proof', 'maker', now(), 'PROPOSED')",
+            ).use { statement ->
+                statement.setObject(1, id)
+                statement.setObject(2, UUID.fromString(loanPosition))
+                statement.setObject(3, UUID.fromString(loanNav))
+                statement.executeUpdate()
+            }
+        }
+        return id
+    }
+
+    private fun receiptCount(id: UUID): Int = jdbc().use { connection ->
+        connection.prepareStatement(
+            "SELECT count(*) FROM classification_request_receipts WHERE response_snapshot::jsonb ->> 'id' = ?",
+        ).use { statement ->
+            statement.setString(1, id.toString())
+            statement.executeQuery().use { result ->
+                result.next()
+                result.getInt(1)
+            }
+        }
+    }
+
+    private fun lockCorrection(lock: Connection, id: UUID) {
+        lock.prepareStatement("SELECT id FROM position_classification_corrections WHERE id = ? FOR UPDATE")
+            .use { statement ->
+                statement.setObject(1, id)
+                statement.executeQuery().use { result -> assertThat(result.next()).isTrue() }
+            }
+    }
+
+    private fun waitingDecisions(): Int = jdbc().use { observer ->
+        observer.createStatement().use { statement ->
+            statement.executeQuery(
+                "SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' " +
+                    "AND query LIKE '%update position_classification_corrections%'",
+            ).use { result ->
+                result.next()
+                result.getInt(1)
+            }
+        }
+    }
+
+    private fun decisionRequest(id: UUID, operation: String): Callable<Int> = Callable {
+        given().header("Idempotency-Key", "race-$operation").`when`()
+            .post("/api/v1/position-classification-corrections/$id/$operation").statusCode
+    }
+
+    private fun awaitCompetingDecisions() {
+        // Both requests must have read PROPOSED and reached the update before the lock releases.
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15)
+        var waiting = 0
+        while (waiting < 2 && System.nanoTime() < deadline) {
+            waiting = waitingDecisions()
+            if (waiting < 2) Thread.sleep(50)
+        }
+        assertThat(waiting).describedAs("both competing decisions reached the locked row").isEqualTo(2)
+    }
+
+    @Test
+    @Order(9)
+    @TestSecurity(user = "checker", roles = ["ROLE_OPERATOR"])
+    fun `concurrent approval and rejection commit exactly one decision and one receipt`() {
+        val id = seedCorrection()
+        val pool = Executors.newFixedThreadPool(2)
+        try {
+            jdbc().use { lock ->
+                lock.autoCommit = false
+                lockCorrection(lock, id)
+                val requests = listOf("approve", "reject").map { operation ->
+                    pool.submit(decisionRequest(id, operation))
+                }
+                awaitCompetingDecisions()
+                lock.commit()
+                assertThat(requests.map { it.get(30, TimeUnit.SECONDS) }.sorted()).containsExactly(200, 409)
+            }
+            assertThat(receiptCount(id)).isEqualTo(1)
+        } finally {
+            pool.shutdownNow()
+        }
+    }
+
+    @Test
+    @Order(10)
+    @TestSecurity(user = "checker", roles = ["ROLE_OPERATOR"])
+    fun `failed database decision rolls back its receipt and the same key can retry`() {
+        val id = seedCorrection()
+        jdbc().use { connection ->
+            connection.createStatement().use { statement ->
+                statement.execute(
+                    "CREATE FUNCTION fail_classification_test() RETURNS trigger LANGUAGE plpgsql AS " +
+                        "'BEGIN IF NEW.id = ''$id''::uuid THEN RAISE EXCEPTION ''injected write failure''; " +
+                        "END IF; RETURN NEW; END'",
+                )
+                statement.execute(
+                    "CREATE TRIGGER fail_classification_test BEFORE UPDATE ON position_classification_corrections " +
+                        "FOR EACH ROW EXECUTE FUNCTION fail_classification_test()",
+                )
+            }
+        }
+        try {
+            given().header("Idempotency-Key", "rollback-proof").`when`()
+                .post("/api/v1/position-classification-corrections/$id/reject").then().statusCode(500)
+            assertThat(receiptCount(id)).isZero()
+        } finally {
+            jdbc().use { connection ->
+                connection.createStatement().use { statement ->
+                    statement.execute("DROP TRIGGER fail_classification_test ON position_classification_corrections")
+                    statement.execute("DROP FUNCTION fail_classification_test()")
+                }
+            }
+        }
+        val original = given().header("Idempotency-Key", "rollback-proof").`when`()
+            .post("/api/v1/position-classification-corrections/$id/reject").then().statusCode(200)
+            .body("status", equalTo("REJECTED")).extract().asString()
+        val replay = given().header("Idempotency-Key", "rollback-proof").`when`()
+            .post("/api/v1/position-classification-corrections/$id/reject").then().statusCode(200).extract().asString()
+        assertThat(replay).isEqualTo(original)
+        assertThat(receiptCount(id)).isEqualTo(1)
     }
 }
