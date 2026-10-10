@@ -60,8 +60,16 @@ interface PensionReportingClient {
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class BalanceSheetDto(val totalAssets: BigDecimal, val totalLiabilities: BigDecimal, val totalEquity: BigDecimal)
 
+/** Separately accumulated YTD lines; the investment lines are null, with a reason, when unknown. */
 @JsonIgnoreProperties(ignoreUnknown = true)
-data class ProfitAndLossDto(val income: BigDecimal, val expenses: BigDecimal, val profitLoss: BigDecimal)
+data class ProfitAndLossDto(
+    val revaluationGains: BigDecimal? = null,
+    val revaluationLosses: BigDecimal? = null,
+    val otherInvestmentResult: BigDecimal? = null,
+    val managementFees: BigDecimal,
+    val profitLoss: BigDecimal,
+    val linesUnavailableReason: String? = null,
+)
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class UnitsDto(
@@ -78,6 +86,9 @@ data class PortfolioDto(
     val carryingValue: BigDecimal? = null,
     val holdingsCount: Int? = null,
     val cash: BigDecimal? = null,
+    /** Null while any closing position is UNCLASSIFIED ([unclassifiedCount] > 0) or positions are unknown. */
+    val loansOutstanding: BigDecimal? = null,
+    val unclassifiedCount: Int? = null,
 )
 
 @JsonIgnoreProperties(ignoreUnknown = true)

@@ -34,7 +34,7 @@ import java.util.concurrent.CopyOnWriteArrayList
  *   month (March 2009) with the year-to-date figures that IT pins.
  *
  * Every assembly is a 200 only if the catalogue's arithmetic holds on real provider output
- * (assets = liabilities + equity, unit roll-forward, profit = income - expenses, entitlement
+ * (assets = liabilities + equity, unit roll-forward, profit = gains - losses + other - fees, entitlement
  * roll-forward, contribution total). A tampered response breaking one of them is a 422, which is
  * what makes the 200s evidence rather than decoration.
  */
@@ -68,7 +68,14 @@ class PensionReturnsGoldenIT {
         assertThat(bs.v("total_assets")).isEqualByComparingTo(bs.v("total_liabilities") + bs.v("total_equity"))
 
         val pl = assembled("PSP20-12-FUND", FUND, "2025-10")
-        assertThat(pl.v("profit_loss_ytd")).isEqualByComparingTo(pl.v("income_ytd") - pl.v("expenses_ytd"))
+        assertThat(pl.v("revaluation_gains_ytd")).isEqualByComparingTo("100.00")
+        assertThat(pl.v("revaluation_losses_ytd")).isEqualByComparingTo("0.00")
+        assertThat(pl.v("management_fees_ytd")).isEqualByComparingTo("13.77")
+        assertThat(pl.v("profit_loss_ytd")).isEqualByComparingTo("1292.44")
+        assertThat(pl.v("profit_loss_ytd")).isEqualByComparingTo(
+            pl.v("revaluation_gains_ytd") - pl.v("revaluation_losses_ytd") + pl.v("other_investment_result_ytd") -
+                pl.v("management_fees_ytd"),
+        )
 
         val units = assembled("PSP30-12", FUND, "2025-10")
         assertThat(units.v("units_opening")).isEqualByComparingTo("15000")
@@ -107,6 +114,28 @@ class PensionReturnsGoldenIT {
 
     @Test
     @TestSecurity(user = "filer", roles = ["ROLE_OPERATOR"])
+    fun `a loss month assembles PSP 20-12 as a losses line, and PEF 13-04 reads the classified loans`() {
+        // Recorded off pension-fund-service's FundLossAndClassificationTest: the bond fell 1 000.
+        val pl = assembled("PSP20-12-FUND", FUND, "2025-03")
+        assertThat(pl.v("profit_loss_ytd")).isEqualByComparingTo("-973.47")
+        assertThat(pl.v("revaluation_gains_ytd")).isEqualByComparingTo("0.00")
+        assertThat(pl.v("revaluation_losses_ytd")).isEqualByComparingTo("1000.00")
+        assertThat(pl.v("other_investment_result_ytd")).isEqualByComparingTo("50.00")
+        assertThat(pl.v("management_fees_ytd")).isEqualByComparingTo("23.47")
+
+        val loans = assembled("PEF13-04", FUND, "2025-Q1")
+        assertThat(loans.v("loans_outstanding")).isEqualByComparingTo("500.00")
+    }
+
+    @Test
+    @TestSecurity(user = "filer", roles = ["ROLE_OPERATOR"])
+    fun `PEF 13-04 is unavailable while a closing position is unclassified, never zero`() {
+        assemble("PEF13-04", FUND2, "2025-Q1").then().statusCode(503)
+            .body(containsString("UNCLASSIFIED"))
+    }
+
+    @Test
+    @TestSecurity(user = "filer", roles = ["ROLE_OPERATOR"])
     fun `PSP 31-04 assembles from the recorded participant month and its contributions add up`() {
         val flows = assembled("PSP31-04", "company", "2009-Q1")
         assertThat(flows.v("contributions_participant_ytd")).isEqualByComparingTo("2300.00")
@@ -127,12 +156,14 @@ class PensionReturnsGoldenIT {
         // A provider 409 (no NAV for the period) is unavailable, never zero.
         assemble("PSP10-12-FUND", FUND, "2025-12").then().statusCode(503)
             .body(containsString("409"))
+        // The recorded October positions predate classification: loans are unknown, not zero.
         assemble("PEF13-04", FUND, "2025-Q4").then().statusCode(503)
             .body(containsString("loans"))
     }
 
     companion object {
         const val FUND = PensionProvidersStub.FUND
+        const val FUND2 = PensionProvidersStub.FUND2
     }
 }
 
@@ -162,7 +193,7 @@ class PensionProvidersStub : QuarkusTestResourceLifecycleManager {
         return mapOf(
             "quarkus.rest-client.pension-fund-service.url" to url,
             "quarkus.rest-client.pension-service.url" to url,
-            "openbank.statutory-returns.fund-ids" to FUND,
+            "openbank.statutory-returns.fund-ids" to "$FUND,$FUND2",
         )
     }
 
@@ -182,6 +213,7 @@ class PensionProvidersStub : QuarkusTestResourceLifecycleManager {
     companion object {
         /** The fund id the provider golden test assigned; recorded with the fixtures. */
         const val FUND = "0f0f2425-0000-4000-8000-000000002025"
+        const val FUND2 = "0f0f2425-0000-4000-8000-000000002026"
         val requests = CopyOnWriteArrayList<String>()
         private const val FUNDS = "/api/v1/reporting/funds/$FUND/period-figures"
         private val ROUTES = mapOf(
@@ -189,6 +221,10 @@ class PensionProvidersStub : QuarkusTestResourceLifecycleManager {
             "$FUNDS?periodStart=2025-11-01&periodEnd=2025-11-30" to "fund-month-2025-10.json",
             "$FUNDS?periodStart=2025-10-01&periodEnd=2025-12-31" to "fund-quarter-2025-q4.json",
             "$FUNDS?periodStart=2025-01-01&periodEnd=2025-12-31" to "fund-year-2025.json",
+            "$FUNDS?periodStart=2025-03-01&periodEnd=2025-03-31" to "fund-loss-month-2025-03.json",
+            "$FUNDS?periodStart=2025-01-01&periodEnd=2025-03-31" to "fund-loss-quarter-2025-q1.json",
+            "/api/v1/reporting/funds/$FUND2/period-figures?periodStart=2025-01-01&periodEnd=2025-03-31" to
+                "fund-unclassified-quarter-2025-q1.json",
             "/api/v1/pension/reporting/participant-aggregates?periodStart=2009-01-01&periodEnd=2009-03-31" to
                 "participants-2009-q1.json",
         )

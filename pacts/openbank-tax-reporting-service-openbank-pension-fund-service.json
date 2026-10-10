@@ -48,12 +48,16 @@
           "portfolio": {
             "carryingValue": 1000,
             "cash": 0,
-            "holdingsCount": 1
+            "holdingsCount": 1,
+            "loansOutstanding": 0,
+            "unclassifiedCount": 0
           },
           "profitAndLossYtd": {
-            "expenses": 0,
-            "income": 0,
-            "profitLoss": 0
+            "managementFees": 0,
+            "otherInvestmentResult": 1000,
+            "profitLoss": 1000,
+            "revaluationGains": 0,
+            "revaluationLosses": 0
           },
           "units": {
             "cancelled": 0,
@@ -189,7 +193,7 @@
                 }
               ]
             },
-            "$.profitAndLossYtd.expenses": {
+            "$.portfolio.loansOutstanding": {
               "combine": "AND",
               "matchers": [
                 {
@@ -197,7 +201,23 @@
                 }
               ]
             },
-            "$.profitAndLossYtd.income": {
+            "$.portfolio.unclassifiedCount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$.profitAndLossYtd.managementFees": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.profitAndLossYtd.otherInvestmentResult": {
               "combine": "AND",
               "matchers": [
                 {
@@ -206,6 +226,22 @@
               ]
             },
             "$.profitAndLossYtd.profitLoss": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.profitAndLossYtd.revaluationGains": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.profitAndLossYtd.revaluationLosses": {
               "combine": "AND",
               "matchers": [
                 {

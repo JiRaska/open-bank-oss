@@ -8,6 +8,7 @@ import com.openbank.pensionfund.application.port.PensionFundStore
 import com.openbank.pensionfund.application.port.StoreChanges
 import com.openbank.pensionfund.domain.model.Fund
 import com.openbank.pensionfund.domain.model.FundStatus
+import com.openbank.pensionfund.domain.model.InstrumentClass
 import com.openbank.pensionfund.domain.model.NavFigures
 import com.openbank.pensionfund.domain.model.NavPosition
 import com.openbank.pensionfund.domain.model.NavRecord
@@ -71,7 +72,16 @@ object PensionFundPactStates {
                 funds = listOf(fund),
                 navs = listOf(nav),
                 transactions = listOf(subscription),
-                navPositions = listOf(NavPosition(navId, "CZ-BOND-1", BigDecimal("10"), BigDecimal("100"))),
+                navPositions = listOf(
+                    NavPosition(
+                        UUID.fromString("f0a7c1e2-0000-4000-8000-0000000b0930"),
+                        navId,
+                        "CZ-BOND-1",
+                        BigDecimal("10"),
+                        BigDecimal("100"),
+                        InstrumentClass.DEBT_SECURITY,
+                    ),
+                ),
             ),
         )
     }

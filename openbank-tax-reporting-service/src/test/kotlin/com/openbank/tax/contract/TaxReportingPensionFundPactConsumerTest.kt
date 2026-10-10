@@ -73,9 +73,11 @@ class TaxReportingPensionFundPactConsumerTest {
                     b.numberType("totalEquity", 1000)
                 }
                 o.`object`("profitAndLossYtd") { p ->
-                    p.numberType("income", 0)
-                    p.numberType("expenses", 0)
-                    p.numberType("profitLoss", 0)
+                    p.numberType("revaluationGains", 0)
+                    p.numberType("revaluationLosses", 0)
+                    p.numberType("otherInvestmentResult", 1000)
+                    p.numberType("managementFees", 0)
+                    p.numberType("profitLoss", 1000)
                 }
                 o.`object`("units") { u ->
                     u.numberType("opening", 0)
@@ -89,6 +91,8 @@ class TaxReportingPensionFundPactConsumerTest {
                     p.numberType("carryingValue", 1000)
                     p.integerType("holdingsCount", 1)
                     p.numberType("cash", 0)
+                    p.numberType("loansOutstanding", 0)
+                    p.integerType("unclassifiedCount", 0)
                 }
                 o.`object`("entitlements") { e ->
                     e.numberType("opening", 0)
@@ -126,7 +130,7 @@ class TaxReportingPensionFundPactConsumerTest {
         val figures = mapper.readValue<FundPeriodFiguresDto>(body)
         val adapter = PensionReturnDataAdapter(FixedSources(figures))
         val catalogue = CatalogueParser.parse(mapper, "statutory-returns/cz/pension-cnb.v1.json")
-        listOf("PSP10-12-FUND", "PSP20-12-FUND", "PSP30-12", "PSP34-12-FUND").forEach { code ->
+        listOf("PSP10-12-FUND", "PSP20-12-FUND", "PSP30-12", "PSP34-12-FUND", "PEF13-04").forEach { code ->
             val definition = catalogue.definition(code)!!
             val values = runBlocking {
                 adapter.fetch(
