@@ -5,13 +5,12 @@ info:
   # 1.1.0: integration of slices S2 (onboarding, transfers), S3 (contributions, incentives) and S5
   #        (termination, payout, death) plus the S8 routes: contract list, simulation, payout
   #        account change, operator payout and death-claim lists, Idempotency-Key on every POST.
-  #        Bumped ONCE for all slices (ADR-0048). S1's unreleased /activate and /early-termination
-  #        were retired in the same change; no released client ever called them.
+  #        The removed /activate and /early-termination routes were published in
+  #        pension-service-v0.2.0 (API 1.0.0); their removal requires the 2.0.0 migration below.
   # 1.2.0: final integration of follow-ups F1-F7 (schedule and beneficiary changes, payment adapters,
   #        identity and SCA adapters, documents and notices, CZ state contribution and returns,
-  #        annuity partners, questionnaire). Bumped ONCE (ADR-0048). The SCA-bound requirements it
-  #        adds to strategy change, mandate set-up and employer enrolment break no released client:
-  #        this API has never been on main.
+  #        annuity partners, questionnaire). These additions and SCA-bound requirements
+  #        were incorporated into the 2.0.0 contract migration below.
   # 1.3.0: additive (#12350) — participant valuation and unit transactions per contract, composed
   #        from pension-fund-service, and the staff operator mandates list. MINOR per ADR-0048.
   # 2.0.0: MAJOR (ADR-0048 D5/D2) — URL major moves to /api/v2. Measured against main, where
