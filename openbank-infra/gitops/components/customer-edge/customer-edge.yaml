@@ -188,8 +188,6 @@ spec:
               value: http://audit-service.audit.svc:8113
             - name: PENSION_SERVICE_URL
               value: http://pension-service.pension.svc:8171
-            - name: PENSION_FUND_SERVICE_URL
-              value: http://pension-fund-service.pension-fund.svc:8162
             - name: ACCOUNT_SERVICE_URL
               value: http://account-service.accounts.svc:8100
             # ADR-0104 P2 currency pockets: the edge queries product-catalog (accounts ns,

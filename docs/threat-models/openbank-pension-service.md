@@ -72,6 +72,15 @@ quote moves NAV risk to the provider for the notice period (`navVariance` is rec
 charged to the participant). A death during a phased withdrawal stops the remaining installments;
 handing the unpaid remainder to the claim is a follow-up.
 
+The unit register these exits redeem from (pension-fund-service) is reachable over the network
+only from the `pension` namespace: its generated ingress NetworkPolicy admits `pension` (and the
+staff BFF in `admin-ui`) on the API ports, and customer-edge no longer declares a route to it, so
+the participant-facing edge cannot reach holdings or place orders even with a valid token. What
+remains is pension-service's own client: a compromised pension-service pod can read every
+contract's holdings and place redemptions within OPA's grant to
+`service-account-openbank-pension`. Participant valuation in the app therefore waits for a
+pension-service participant read; until then the edge serves the contract without holdings.
+
 ## 4b. Integration (slice S8)
 
 S8 joins S1/S2/S3/S5 into one service and adds the routes customer-edge needs. New trust boundary:
@@ -139,3 +148,4 @@ not reversed automatically.
 - 2026-10-09 — S5 exits: termination, payout, death claims (§4a).
 - 2026-10-09 — S8 integration: fund REST client identity, onboarding-only activation, account-bound SCA, held account change, optimistic locking, POST replay (§4b).
 - 2026-10-09 — annuity partner integration: registry with four-eyes activation, adapter SPI, SCA-bound selection, premium/compensation flow (§4c, #12383).
+- 2026-10-10 — network reach of the unit register: only `pension` (plus the staff BFF) is admitted; customer-edge's direct route removed (§4a residual, #12359).
