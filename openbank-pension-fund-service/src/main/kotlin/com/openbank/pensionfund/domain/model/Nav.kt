@@ -92,6 +92,12 @@ data class NavRecord(
     val correctsNavId: UUID? = null,
     val approvedBy: String? = null,
     val publishedAt: Instant? = null,
+    /**
+     * True when the positions this NAV was struck on are stored with it (#12425). NAVs calculated
+     * before that are false: their portfolio is UNKNOWN, which a report must say rather than read
+     * an empty position list as an empty portfolio.
+     */
+    val positionsRecorded: Boolean = false,
 ) {
     val navPerUnit: BigDecimal get() = figures.navPerUnit
 

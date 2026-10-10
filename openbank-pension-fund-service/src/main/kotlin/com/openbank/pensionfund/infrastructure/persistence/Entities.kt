@@ -192,6 +192,29 @@ class FundNavEntity : PanacheEntityBase {
 
     @Column(name = "published_at")
     var publishedAt: Instant? = null
+
+    @Column(name = "positions_recorded", nullable = false)
+    var positionsRecorded: Boolean = false
+}
+
+@Entity
+@Table(name = "fund_nav_positions")
+class FundNavPositionEntity : PanacheEntityBase {
+    @Id
+    @Column(name = "id", nullable = false)
+    lateinit var id: UUID
+
+    @Column(name = "nav_id", nullable = false)
+    lateinit var navId: UUID
+
+    @Column(name = "instrument_id", nullable = false)
+    lateinit var instrumentId: String
+
+    @Column(name = "quantity", nullable = false)
+    lateinit var quantity: BigDecimal
+
+    @Column(name = "price", nullable = false)
+    lateinit var price: BigDecimal
 }
 
 @Entity

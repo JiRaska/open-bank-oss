@@ -142,4 +142,47 @@ class PensionFundApiIT {
             }
         }
     }
+
+    @Test
+    @Order(4)
+    @TestSecurity(user = "service-account-openbank-tax-reporting", roles = ["ROLE_API"])
+    fun `the reporting read model serves period aggregates that reconcile, over real HTTP and SQL`() {
+        val today = LocalDate.now(ZoneOffset.UTC)
+        val start = today.withDayOfMonth(1)
+        val path = "/api/v1/reporting/funds/$fundA/period-figures"
+        val body = given().queryParam("periodStart", "$start").queryParam("periodEnd", "$today")
+            .`when`().get(path).then().log().ifValidationFails().statusCode(200)
+            .body("units.opening", equalTo(0.0f))
+            .body("units.issued", equalTo(1000.0f))
+            .body("units.closing", equalTo(1000.0f))
+            .body("flows.subscriptions", equalTo(1000.0f))
+            .body("participants.holders", equalTo(1))
+            .body("portfolio.holdingsCount", equalTo(0))
+            .extract().asString()
+        // Aggregate only: the contract the IT subscribed for appears nowhere in the payload.
+        assertThat(body).doesNotContain(contract.toString())
+        // The same question twice is the same answer.
+        val again = given().queryParam("periodStart", "$start").queryParam("periodEnd", "$today")
+            .`when`().get(path).then().statusCode(200).extract().path<String>("fingerprint")
+        assertThat(body).contains(again)
+
+        // Absent parameter: 400, never a 500 (#3104). Malformed date: 400.
+        given().queryParam("periodEnd", "$today").`when`().get(path).then().statusCode(400)
+        given().queryParam("periodStart", "nope").queryParam("periodEnd", "$today")
+            .`when`().get(path).then().statusCode(400)
+        // A period before any NAV: not reportable (409), never a report of zeroes.
+        given().queryParam("periodStart", "2001-01-01").queryParam("periodEnd", "2001-01-31")
+            .`when`().get(path).then().statusCode(409)
+        given().queryParam("periodStart", "$start").queryParam("periodEnd", "$today")
+            .`when`().get("/api/v1/reporting/funds/${UUID.randomUUID()}/period-figures").then().statusCode(404)
+    }
+
+    @Test
+    @Order(5)
+    @TestSecurity(user = "cust-1", roles = ["ROLE_CUSTOMER"])
+    fun `a customer cannot reach the reporting read model`() {
+        val today = LocalDate.now(ZoneOffset.UTC)
+        given().queryParam("periodStart", "${today.withDayOfMonth(1)}").queryParam("periodEnd", "$today")
+            .`when`().get("/api/v1/reporting/funds/$fundA/period-figures").then().statusCode(403)
+    }
 }

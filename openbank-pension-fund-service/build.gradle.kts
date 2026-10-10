@@ -42,6 +42,8 @@ dependencies {
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(project(":openbank-libs-testing"))
+    // #12425: @PactFolder replay of tax-reporting-service's consumer pact (reporting read model).
+    testImplementation(libs.pact.provider)
 }
 
 // twins, and the synthetic-taint profile), and the default 512m heap ran out on the fourth boot
