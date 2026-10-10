@@ -91,6 +91,8 @@ data class ParticipantPeriodAggregates(
 /** The period spans currencies; summing them would be wrong and splitting them is not asked for. */
 class MixedCurrencyException(message: String) : IllegalStateException(message)
 
+class UnknownSettlementTimeException(message: String) : IllegalStateException(message)
+
 object ParticipantBanding {
     fun countsFrom(
         groups: List<InForceGroup>,

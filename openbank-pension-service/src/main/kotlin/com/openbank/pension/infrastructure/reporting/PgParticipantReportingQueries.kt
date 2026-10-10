@@ -29,7 +29,8 @@ import java.time.ZoneOffset
  *
  * Interval convention: [from, to] closed on dates. A TIMESTAMPTZ is compared against
  * `[from 00:00Z, to+1 00:00Z)` so the last day is whole and the answer never depends on the
- * session time zone.
+ * session time zone. Payouts use domestic-payment's persisted SETTLED transition time; legacy
+ * SETTLED rows without a persisted event time make the report fail until independently reconciled.
  */
 // One query per reported figure, and column indexes into each aggregate row.
 @Suppress("TooManyFunctions", "MagicNumber")
@@ -38,12 +39,20 @@ class PgParticipantReportingQueries(client: Pool) :
     PgFundingSupport(client),
     ParticipantReportingQueries {
 
+    override suspend fun hasUnknownSettlementTime(to: LocalDate): Boolean = count(
+        """
+        SELECT COUNT(*) FROM pension_payment_instructions
+         WHERE status = 'SETTLED' AND settled_at IS NULL AND created_at < $1
+        """.trimIndent(),
+        Tuple.of(endExclusive(to)),
+    ) > 0
+
     override suspend fun currencies(from: LocalDate, to: LocalDate): Set<String> = rows(
         """
         SELECT DISTINCT currency FROM pension_contributions WHERE value_date BETWEEN $1 AND $2
         UNION
         SELECT DISTINCT currency FROM pension_payment_instructions
-         WHERE created_at >= $3 AND created_at < $4 AND status <> 'REJECTED'
+         WHERE settled_at >= $3 AND settled_at < $4 AND status = 'SETTLED'
         """.trimIndent(),
         Tuple.of(from, to, start(from), endExclusive(to)),
     ).map { it.getString(0).trim() }.toSet()
@@ -130,7 +139,7 @@ class PgParticipantReportingQueries(client: Pool) :
         val byForm = rows(
             """
             SELECT purpose, COALESCE(SUM(amount), 0), COUNT(*) FROM pension_payment_instructions
-             WHERE purpose IN ($PAYOUT_PURPOSES) AND status <> 'REJECTED' AND created_at >= $1 AND created_at < $2
+             WHERE purpose IN ($PAYOUT_PURPOSES) AND status = 'SETTLED' AND settled_at >= $1 AND settled_at < $2
              GROUP BY purpose
             """.trimIndent(),
             window,
@@ -138,14 +147,14 @@ class PgParticipantReportingQueries(client: Pool) :
         val withheld = rows(
             """
             SELECT COALESCE(SUM(amount), 0) FROM pension_payment_instructions
-             WHERE purpose LIKE '%WITHHOLDING' AND status <> 'REJECTED' AND created_at >= $1 AND created_at < $2
+             WHERE purpose LIKE '%WITHHOLDING' AND status = 'SETTLED' AND settled_at >= $1 AND settled_at < $2
             """.trimIndent(),
             window,
         ).single().money(0)
         val cases = count(
             """
             SELECT COUNT(DISTINCT contract_id) FROM pension_payment_instructions
-             WHERE purpose IN ($PAYOUT_PURPOSES) AND status <> 'REJECTED' AND created_at >= $1 AND created_at < $2
+             WHERE purpose IN ($PAYOUT_PURPOSES) AND status = 'SETTLED' AND settled_at >= $1 AND settled_at < $2
             """.trimIndent(),
             window,
         )

@@ -8,6 +8,7 @@ import com.openbank.pension.application.port.out.ParticipantReportingQueries
 import com.openbank.pension.domain.reporting.MixedCurrencyException
 import com.openbank.pension.domain.reporting.ParticipantBanding
 import com.openbank.pension.domain.reporting.ParticipantPeriodAggregates
+import com.openbank.pension.domain.reporting.UnknownSettlementTimeException
 import java.time.LocalDate
 
 /**
@@ -21,6 +22,11 @@ class ParticipantReportingService(private val queries: ParticipantReportingQueri
         require(!periodEnd.isBefore(periodStart)) { "periodEnd must not be before periodStart" }
         val yearStart = LocalDate.of(periodEnd.year, 1, 1)
         val ytdFrom = if (periodStart.isBefore(yearStart)) periodStart else yearStart
+        if (queries.hasUnknownSettlementTime(periodEnd)) {
+            throw UnknownSettlementTimeException(
+                "a settled payout lacks its domestic transition time; refusing incomplete aggregates",
+            )
+        }
         val currencies = queries.currencies(ytdFrom, periodEnd)
         if (currencies.any { it != baseCurrency }) {
             throw MixedCurrencyException(

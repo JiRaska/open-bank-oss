@@ -1,0 +1,14 @@
+-- #12425: reporting uses domestic-payment's persisted SETTLED transition time (event settledAt),
+-- not instruction creation, status-event creation or pension Kafka consumption time. Domestic
+-- sets that value after transaction-service booking; it is not an external rail timestamp.
+-- Nullable for rows settled before this migration: that source time was never persisted here.
+-- Do not backfill it from updated_at (the consumer's processing time) or created_at (order time).
+-- Reporting excludes those rows until an independently sourced reconciliation supplies the time.
+-- During a rolling deployment, old pods may still write SETTLED without settled_at. Do not add
+-- a NOT NULL/CHECK constraint yet; the read model fails closed for those legacy rows.
+-- Rollout order: publish the additive domestic event field first, then upgrade pension consumers.
+-- Older SETTLED events without settledAt are retained by the pension consumer's configured DLQ;
+-- reconcile their source times before using the statutory aggregate response.
+-- Rollback: ALTER TABLE pension_payment_instructions DROP COLUMN settled_at;
+-- Rollback loses recorded settlement instants; take a backup first if a rollback is needed.
+ALTER TABLE pension_payment_instructions ADD COLUMN settled_at TIMESTAMPTZ;

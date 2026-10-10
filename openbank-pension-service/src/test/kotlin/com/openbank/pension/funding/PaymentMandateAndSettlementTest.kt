@@ -218,6 +218,7 @@ class PaymentMandateAndSettlementTest {
             status,
             "pay-1",
         )
+        var settledAt: Instant? = null
 
         override suspend fun findByPaymentRef(paymentRef: String) = row.takeIf { it.paymentRef == paymentRef }
 
@@ -225,9 +226,16 @@ class PaymentMandateAndSettlementTest {
             paymentRef: String,
             from: Set<InstructionStatus>,
             to: InstructionStatus,
+            occurredAt: Instant,
+            settledAt: Instant?,
         ): Boolean {
             if (row.paymentRef != paymentRef || row.status !in from) return false
+            val staleReturn = this.settledAt?.isAfter(occurredAt) == true
+            if (row.status == InstructionStatus.SETTLED && to == InstructionStatus.REJECTED && staleReturn) {
+                return false
+            }
             row = row.copy(status = to)
+            this.settledAt = settledAt.takeIf { to == InstructionStatus.SETTLED }
             return true
         }
     }
@@ -237,18 +245,30 @@ class PaymentMandateAndSettlementTest {
         val repo = Instructions(InstructionStatus.SENT)
         val counted = mutableListOf<SettlementOutcome>()
         val svc = PayoutSettlementService(repo) { counted += it }
+        val railTime = Instant.parse("2009-03-31T23:30:00Z")
 
-        assertThat(runBlocking { svc.record("pay-1", RailSettlement.SETTLED) }).isEqualTo(SettlementOutcome.SETTLED)
-        assertThat(runBlocking { svc.record("pay-1", RailSettlement.SETTLED) }).isEqualTo(SettlementOutcome.UNCHANGED)
-        assertThat(runBlocking { svc.record("pay-1", RailSettlement.REJECTED) }).isEqualTo(SettlementOutcome.REJECTED)
+        assertThat(runBlocking { svc.record("pay-1", RailSettlement.SETTLED, railTime, railTime) })
+            .isEqualTo(SettlementOutcome.SETTLED)
+        assertThat(repo.settledAt).isEqualTo(railTime)
+        assertThat(runBlocking { svc.record("pay-1", RailSettlement.REJECTED, railTime.minusSeconds(60)) })
+            .isEqualTo(SettlementOutcome.UNCHANGED)
+        assertThat(repo.settledAt).isEqualTo(railTime)
+        assertThat(runBlocking { svc.record("pay-1", RailSettlement.SETTLED, railTime.plusSeconds(60), railTime) })
+            .isEqualTo(SettlementOutcome.UNCHANGED)
+        assertThat(repo.settledAt).isEqualTo(railTime)
+        assertThat(runBlocking { svc.record("pay-1", RailSettlement.REJECTED, railTime.plusSeconds(120)) })
+            .isEqualTo(SettlementOutcome.REJECTED)
         assertThat(repo.row.status).isEqualTo(InstructionStatus.REJECTED)
+        assertThat(repo.settledAt).isNull()
         // A late SETTLED after a return must not resurrect the payment.
-        assertThat(runBlocking { svc.record("pay-1", RailSettlement.SETTLED) }).isEqualTo(SettlementOutcome.UNCHANGED)
+        assertThat(runBlocking { svc.record("pay-1", RailSettlement.SETTLED, railTime.plusSeconds(180), railTime) })
+            .isEqualTo(SettlementOutcome.UNCHANGED)
         assertThat(repo.row.status).isEqualTo(InstructionStatus.REJECTED)
-        assertThat(runBlocking { svc.record("someone-elses-payment", RailSettlement.SETTLED) })
+        assertThat(runBlocking { svc.record("someone-elses-payment", RailSettlement.SETTLED, railTime, railTime) })
             .isEqualTo(SettlementOutcome.NOT_OURS)
         assertThat(counted).containsExactly(
             SettlementOutcome.SETTLED,
+            SettlementOutcome.UNCHANGED,
             SettlementOutcome.UNCHANGED,
             SettlementOutcome.REJECTED,
             SettlementOutcome.UNCHANGED,
@@ -259,7 +279,9 @@ class PaymentMandateAndSettlementTest {
     fun `a PENDING instruction is never marked settled by an event for its reference`() {
         val repo = Instructions(InstructionStatus.PENDING)
         val svc = PayoutSettlementService(repo)
-        assertThat(runBlocking { svc.record("pay-1", RailSettlement.SETTLED) }).isEqualTo(SettlementOutcome.UNCHANGED)
+        val settledAt = Instant.parse("2009-03-31T23:30:00Z")
+        assertThat(runBlocking { svc.record("pay-1", RailSettlement.SETTLED, settledAt, settledAt) })
+            .isEqualTo(SettlementOutcome.UNCHANGED)
         assertThat(repo.row.status).isEqualTo(InstructionStatus.PENDING)
     }
 
@@ -271,14 +293,23 @@ class PaymentMandateAndSettlementTest {
                 PayoutSettlementService(Instructions(InstructionStatus.SENT)),
             )
         val id = UUID.randomUUID()
-        fun body(status: String) = """{"paymentId":"$id","previousStatus":"SENT_TO_CLEARING","newStatus":"$status"}"""
+        val railTime = Instant.parse("2009-03-31T23:30:00Z")
+        fun body(status: String) =
+            """{"paymentId":"$id","previousStatus":"SENT_TO_CLEARING","newStatus":"$status","occurredAt":"$railTime","settledAt":"$railTime"}"""
 
-        assertThat(consumer.decode(body("SETTLED"))).isEqualTo(id to RailSettlement.SETTLED)
+        assertThat(consumer.decode(body("SETTLED"))).isEqualTo(
+            DomesticPaymentSettlementConsumer.DecodedSettlement(id, RailSettlement.SETTLED, railTime, railTime),
+        )
         listOf("REJECTED", "RETURNED", "CANCELLED").forEach {
-            assertThat(consumer.decode(body(it))).isEqualTo(id to RailSettlement.REJECTED)
+            assertThat(consumer.decode(body(it))).isEqualTo(
+                DomesticPaymentSettlementConsumer.DecodedSettlement(id, RailSettlement.REJECTED, railTime, null),
+            )
         }
         listOf("RECEIVED", "VALIDATED", "SENT_TO_CLEARING").forEach { assertThat(consumer.decode(body(it))).isNull() }
         assertThat(consumer.decode("{not json")).isNull()
         assertThat(consumer.decode("""{"paymentId":"nope","newStatus":"SETTLED"}""")).isNull()
+        assertThat(consumer.decode("""{"paymentId":"$id","newStatus":"SETTLED"}""")).isNull()
+        assertThat(consumer.decode("""{"paymentId":"$id","newStatus":"SETTLED","occurredAt":"$railTime"}"""))
+            .isEqualTo(DomesticPaymentSettlementConsumer.DecodedSettlement(id, RailSettlement.SETTLED, railTime, null))
     }
 }

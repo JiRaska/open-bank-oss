@@ -46,8 +46,13 @@ paths:
         Counts and sums only — no contract, party or participant attribute is returned. Counts of
         contracts in force at the period end by product line, age band and status at period end;
         contributions by source for the period and year to date; state contributions; payouts by
-        form; transfers in and out. Dates are a closed interval; timestamped facts are bucketed by
-        UTC date, so a closed period answers the same way every time. Served to staff and to
+        form; transfers in and out. Payouts include only SETTLED instructions, bucketed by
+        domestic-payment's persisted SETTLED transition time (`settledAt` on its status event),
+        not instruction creation, event creation or pension-service consumption time. Domestic
+        records that time after transaction-service booking; it is not an external rail timestamp.
+        Dates are a closed interval, bucketed by UTC date.
+        Late status events
+        can correct an earlier period. Served to staff and to
         tax-reporting-service's own client only (`pension.reporting.aggregate`).
       parameters:
         - { name: periodStart, in: query, required: true, schema: { type: string, format: date } }
@@ -62,7 +67,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409':
-          description: The period books more than one currency; figures are never summed across currencies
+          description: The period books more than one currency or a settled payout lacks a verifiable domestic transition time
   /api/v1/pension/contracts:
     get:
       tags: [Pension]

@@ -14,6 +14,7 @@ import com.openbank.pension.domain.reporting.PayoutLine
 import com.openbank.pension.domain.reporting.PayoutTotals
 import com.openbank.pension.domain.reporting.StateContributionFigures
 import com.openbank.pension.domain.reporting.TransferTotals
+import com.openbank.pension.domain.reporting.UnknownSettlementTimeException
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -23,8 +24,10 @@ import java.time.LocalDate
 
 class ParticipantReportingServiceTest {
 
-    private class Fake(val currencies: Set<String> = setOf("CZK")) : ParticipantReportingQueries {
+    private class Fake(val currencies: Set<String> = setOf("CZK"), val unknownSettlementTime: Boolean = false) :
+        ParticipantReportingQueries {
         val contributionWindows = mutableListOf<Pair<LocalDate, LocalDate>>()
+        override suspend fun hasUnknownSettlementTime(to: LocalDate) = unknownSettlementTime
         override suspend fun currencies(from: LocalDate, to: LocalDate) = currencies
         override suspend fun inForce(asOf: LocalDate) = listOf(
             InForceGroup("DPS", 17, "ACTIVE", 1),
@@ -49,6 +52,16 @@ class ParticipantReportingServiceTest {
         )
         override suspend fun transfers(from: LocalDate, to: LocalDate) =
             TransferTotals(1, BigDecimal.TEN, 0, BigDecimal.ZERO)
+    }
+
+    @Test
+    fun `unknown historical settlement time refuses incomplete figures`() {
+        assertThatThrownBy {
+            runBlocking {
+                ParticipantReportingService(Fake(unknownSettlementTime = true), "CZK")
+                    .aggregates(LocalDate.parse("2026-07-01"), LocalDate.parse("2026-09-30"))
+            }
+        }.isInstanceOf(UnknownSettlementTimeException::class.java)
     }
 
     @Test

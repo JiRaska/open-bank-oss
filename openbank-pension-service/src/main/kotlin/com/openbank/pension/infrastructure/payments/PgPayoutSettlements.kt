@@ -12,12 +12,14 @@ import io.vertx.mutiny.sqlclient.Pool
 import io.vertx.mutiny.sqlclient.Tuple
 import jakarta.inject.Singleton
 import java.time.Clock
+import java.time.Instant
 import java.time.ZoneOffset
 
 /**
  * Settlement read/write on `pension_payment_instructions` over the plain reactive pool: the caller
  * is a Kafka consumer, where no Hibernate session exists. The status guard is in the UPDATE itself
- * (`status = ANY($4)`), so two redeliveries racing each other change the row once.
+ * (`status = ANY($6)`), so two redeliveries racing each other change the row once. The persisted
+ * domestic settlement time is stored on SETTLED; an earlier rejection cannot overturn it.
  */
 @Singleton
 class PgPayoutSettlements(private val client: Pool, private val clock: Clock) : PayoutSettlementRepository {
@@ -44,15 +46,23 @@ class PgPayoutSettlements(private val client: Pool, private val clock: Clock) : 
         paymentRef: String,
         from: Set<InstructionStatus>,
         to: InstructionStatus,
+        occurredAt: Instant,
+        settledAt: Instant?,
     ): Boolean = client.preparedQuery(
         """
-            UPDATE pension_payment_instructions SET status = $1, updated_at = $2
-            WHERE payment_ref = $3 AND status = ANY($4)
+            UPDATE pension_payment_instructions
+               SET status = $1, updated_at = $2,
+                   settled_at = CASE WHEN $1 = 'SETTLED' THEN $3::timestamptz ELSE NULL END
+             WHERE payment_ref = $5 AND status = ANY($6)
+               AND (status <> 'SETTLED' OR $1 <> 'REJECTED' OR settled_at IS NULL
+                    OR $4::timestamptz >= settled_at)
         """.trimIndent(),
     ).execute(
         Tuple.of(
             to.name,
             clock.instant().atOffset(ZoneOffset.UTC),
+            settledAt?.atOffset(ZoneOffset.UTC),
+            occurredAt.atOffset(ZoneOffset.UTC),
             paymentRef,
             from.map {
                 it.name

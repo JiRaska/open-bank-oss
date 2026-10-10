@@ -7,6 +7,7 @@ package com.openbank.pension.application.usecase
 import com.openbank.pension.application.exit.InstructionStatus
 import com.openbank.pension.application.exit.PaymentInstruction
 import org.jboss.logging.Logger
+import java.time.Instant
 
 /**
  * Settlement view of `pension_payment_instructions` (#12378). Separate from the S5
@@ -18,7 +19,13 @@ interface PayoutSettlementRepository {
     suspend fun findByPaymentRef(paymentRef: String): PaymentInstruction?
 
     /** Records the rail's outcome; false when the row's status was not in [from] (replay / out of order). */
-    suspend fun markSettlement(paymentRef: String, from: Set<InstructionStatus>, to: InstructionStatus): Boolean
+    suspend fun markSettlement(
+        paymentRef: String,
+        from: Set<InstructionStatus>,
+        to: InstructionStatus,
+        occurredAt: Instant,
+        settledAt: Instant?,
+    ): Boolean
 }
 
 /** What domestic-payment says happened to a payment; anything in between is not an outcome yet. */
@@ -45,14 +52,21 @@ class PayoutSettlementService(
 ) {
     private val log = Logger.getLogger(PayoutSettlementService::class.java)
 
-    suspend fun record(paymentRef: String, settlement: RailSettlement): SettlementOutcome {
+    suspend fun record(
+        paymentRef: String,
+        settlement: RailSettlement,
+        occurredAt: Instant,
+        settledAt: Instant? = null,
+    ): SettlementOutcome {
         val instruction = instructions.findByPaymentRef(paymentRef) ?: return SettlementOutcome.NOT_OURS
         val (from, to) = when (settlement) {
             RailSettlement.SETTLED -> setOf(InstructionStatus.SENT) to InstructionStatus.SETTLED
             RailSettlement.REJECTED ->
                 setOf(InstructionStatus.SENT, InstructionStatus.SETTLED) to InstructionStatus.REJECTED
         }
-        val changed = instructions.markSettlement(paymentRef, from, to)
+        // The source payment's persisted transition time can precede status-event creation.
+        // A legacy SETTLED event without it still records SETTLED/null so reporting fails closed.
+        val changed = instructions.markSettlement(paymentRef, from, to, occurredAt, settledAt)
         val outcome = when {
             !changed -> SettlementOutcome.UNCHANGED
             to == InstructionStatus.SETTLED -> SettlementOutcome.SETTLED

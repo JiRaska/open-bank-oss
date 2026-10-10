@@ -23,6 +23,7 @@ import org.hamcrest.Matchers.equalTo
 import org.junit.jupiter.api.Test
 import java.nio.charset.StandardCharsets
 import java.sql.DriverManager
+import java.time.Instant
 import java.util.Optional
 import java.util.UUID
 import jakarta.enterprise.inject.Any as CdiAny
@@ -169,7 +170,10 @@ class PaymentAdaptersIT {
         val headers = RecordHeaders(
             listOf(RecordHeader(OutboxKafkaHeaders.HEADER_EVENT_TYPE, type.toByteArray(StandardCharsets.UTF_8))),
         )
-        val body = """{"paymentId":"$paymentId","previousStatus":"SENT_TO_CLEARING","newStatus":"$status"}"""
+        val at = Instant.parse("2026-10-10T12:00:00Z")
+        val settlementTime = if (status == "SETTLED") ",\"settledAt\":\"$at\"" else ""
+        val body = """{"paymentId":"$paymentId","previousStatus":"SENT_TO_CLEARING","newStatus":"$status",""" +
+            """"occurredAt":"$at"$settlementTime}"""
         return ConsumerRecord(
             "openbank.domestic.payment.events", 0, 0L, 0L, TimestampType.CREATE_TIME, -1, -1,
             paymentId.toString(), body, headers, Optional.empty(),

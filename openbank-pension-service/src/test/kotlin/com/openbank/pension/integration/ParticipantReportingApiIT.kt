@@ -4,18 +4,34 @@
 
 package com.openbank.pension.integration
 
+import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
+import com.openbank.pension.application.usecase.PayoutSettlementService
+import com.openbank.pension.application.usecase.RailSettlement
+import com.openbank.pension.infrastructure.payments.DomesticPaymentSettlementConsumer
 import com.openbank.pension.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
+import jakarta.inject.Inject
+import kotlinx.coroutines.runBlocking
+import org.apache.kafka.clients.consumer.ConsumerRecord
+import org.apache.kafka.common.header.internals.RecordHeader
+import org.apache.kafka.common.header.internals.RecordHeaders
+import org.apache.kafka.common.record.TimestampType
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.eclipse.microprofile.config.ConfigProvider
 import org.hamcrest.Matchers.equalTo
+import org.hamcrest.Matchers.nullValue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import java.nio.charset.StandardCharsets
 import java.sql.Connection
 import java.sql.DriverManager
+import java.time.Instant
+import java.time.OffsetDateTime
+import java.util.Optional
 import java.util.UUID
 
 /**
@@ -34,6 +50,12 @@ import java.util.UUID
 @QuarkusTest
 @QuarkusTestResource(PostgresTestResource::class)
 class ParticipantReportingApiIT {
+
+    @Inject
+    lateinit var settlements: PayoutSettlementService
+
+    @Inject
+    lateinit var settlementConsumer: DomesticPaymentSettlementConsumer
 
     companion object {
         private val ids = mutableMapOf<String, UUID>()
@@ -91,14 +113,22 @@ class ParticipantReportingApiIT {
         if (source == "EMPLOYER") UUID.randomUUID() else null,
     )
 
-    private fun Connection.instruction(key: String, purpose: String, amount: String, status: String, at: String) = exec(
+    private fun Connection.instruction(
+        key: String,
+        purpose: String,
+        amount: String,
+        status: String,
+        at: String,
+        settledAt: String? = if (status == "SETTLED") at else null,
+        currency: String = "CZK",
+    ) = exec(
         "INSERT INTO pension_payment_instructions (idempotency_key, contract_id, purpose, amount, currency, " +
             "creditor_iban, " +
-            "status, payment_ref, created_at, updated_at) VALUES (?, ?, ?, ?::numeric, 'CZK', " +
+            "status, payment_ref, created_at, updated_at, settled_at) VALUES (?, ?, ?, ?::numeric, ?, " +
             "'CZ6508000000192000145399', " +
-            "?, ?, ?::timestamptz, ?::timestamptz)",
-        "rep-${UUID.randomUUID()}", ids.getValue(key), purpose, amount, status,
-        if (status == "PENDING") null else "ref-${UUID.randomUUID()}", at, at,
+            "?, ?, ?::timestamptz, ?::timestamptz, ?::timestamptz)",
+        "rep-${UUID.randomUUID()}", ids.getValue(key), purpose, amount, currency, status,
+        if (status == "PENDING") null else "ref-${UUID.randomUUID()}", at, at, settledAt,
     )
 
     private fun Connection.transfer(key: String, direction: String, net: String, at: String) = exec(
@@ -133,12 +163,16 @@ class ParticipantReportingApiIT {
             c.contribution("B", "TRANSFER_IN", "50000", "2009-03-06")
 
             c.instruction("C", "LUMP_SUM", "120000", "SETTLED", "2009-03-20T11:00:00Z")
-            c.instruction("C", "PAYOUT_WITHHOLDING", "18000", "SENT", "2009-03-20T11:00:00Z")
+            c.instruction("C", "PAYOUT_WITHHOLDING", "18000", "SETTLED", "2009-03-20T11:00:00Z")
+            c.instruction("C", "PAYOUT_WITHHOLDING", "900", "SENT", "2009-03-20T11:00:00Z")
             c.instruction("D", "PHASED_WITHDRAWAL", "5000", "SENT", "2009-03-28T09:00:00Z")
+            c.instruction("D", "PHASED_WITHDRAWAL", "4000", "PENDING", "2009-03-28T09:00:00Z")
+            // A not-yet-paid EUR instruction must not trip the booked-currency conflict.
+            c.instruction("D", "PHASED_WITHDRAWAL", "25", "SENT", "2009-03-28T09:00:00Z", currency = "EUR")
             // Rejected by the bank: never counted as paid.
             c.instruction("D", "PHASED_WITHDRAWAL", "999", "REJECTED", "2009-03-29T09:00:00Z")
             // 1 April 00:30 UTC is April, whatever the session time zone.
-            c.instruction("A", "EARLY_WITHDRAWAL", "777", "SENT", "2009-04-01T00:30:00Z")
+            c.instruction("A", "EARLY_WITHDRAWAL", "777", "SETTLED", "2009-03-31T23:30:00Z", "2009-04-01T00:30:00Z")
 
             c.exec(
                 "INSERT INTO pension_incentive_claims (id, contract_id, incentive_id, period, basis, claimed_amount, " +
@@ -191,12 +225,11 @@ class ParticipantReportingApiIT {
             .body("contributionsYtd.total", equalTo(3030.0f))
             .body("stateContributions.claimed", equalTo(230.0f))
             .body("stateContributions.received", equalTo(230.0f))
-            .body("payouts.total", equalTo(125000.0f))
-            .body("payouts.cases", equalTo(2))
+            .body("payouts.total", equalTo(120000.0f))
+            .body("payouts.cases", equalTo(1))
             .body("payouts.taxWithheld", equalTo(18000.0f))
             .body("payouts.byForm.LUMP_SUM.amount", equalTo(120000.0f))
-            .body("payouts.byForm.PHASED_WITHDRAWAL.amount", equalTo(5000.0f))
-            .body("payouts.byForm.PHASED_WITHDRAWAL.count", equalTo(1))
+            .body("payouts.byForm.PHASED_WITHDRAWAL", nullValue())
             .body("transfers.inCount", equalTo(1))
             .body("transfers.inAmount", equalTo(50000.0f))
             .body("transfers.outCount", equalTo(1))
@@ -211,7 +244,127 @@ class ParticipantReportingApiIT {
 
     @Test
     @TestSecurity(user = "service-account-openbank-tax-reporting", roles = ["ROLE_API"])
-    fun `the April instruction at 00h30 UTC lands in April, and absent parameters are a 400`() {
+    fun `legacy settled event stays durably uncertain after handler failure`() {
+        val key = "rep-${UUID.randomUUID()}"
+        val ref = UUID.randomUUID()
+        jdbc { c ->
+            c.exec(
+                "INSERT INTO pension_payment_instructions " +
+                    "(idempotency_key, contract_id, purpose, amount, currency, creditor_iban, status, " +
+                    "payment_ref, created_at, updated_at) VALUES (?, ?, 'PHASED_WITHDRAWAL', 350, 'CZK', " +
+                    "'CZ6508000000192000145399', 'SENT', ?, '2009-06-30T23:30:00Z', '2009-06-30T23:30:00Z')",
+                key,
+                ids.getValue("A"),
+                ref.toString(),
+            )
+        }
+        try {
+            val headers = RecordHeaders(
+                listOf(
+                    RecordHeader(
+                        OutboxKafkaHeaders.HEADER_EVENT_TYPE,
+                        DomesticPaymentSettlementConsumer.STATUS_CHANGED.toByteArray(StandardCharsets.UTF_8),
+                    ),
+                ),
+            )
+            val body = """{"paymentId":"$ref","newStatus":"SETTLED","occurredAt":"2009-07-01T00:30:00Z"}"""
+            val record = ConsumerRecord(
+                "openbank.domestic.payment.events", 0, 0L, 0L, TimestampType.CREATE_TIME, -1, -1,
+                ref.toString(), body, headers, Optional.empty(),
+            )
+            assertThatThrownBy { runBlocking { settlementConsumer.consume(record) } }
+                .isInstanceOf(IllegalStateException::class.java)
+            jdbc { c ->
+                c.prepareStatement(
+                    "SELECT status, settled_at FROM pension_payment_instructions WHERE idempotency_key = ?",
+                ).use { statement ->
+                    statement.setString(1, key)
+                    statement.executeQuery().use { result ->
+                        assertThat(result.next()).isTrue()
+                        assertThat(result.getString(1)).isEqualTo("SETTLED")
+                        assertThat(result.getObject(2)).isNull()
+                    }
+                }
+            }
+            given().queryParam("periodStart", "2009-07-01").queryParam("periodEnd", "2009-07-31")
+                .`when`().get(PATH).then().statusCode(409)
+        } finally {
+            jdbc { c -> c.exec("DELETE FROM pension_payment_instructions WHERE idempotency_key = ?", key) }
+        }
+    }
+
+    @Test
+    @TestSecurity(user = "service-account-openbank-tax-reporting", roles = ["ROLE_API"])
+    fun `unknown legacy settlement time refuses a complete-looking return`() {
+        val key = "rep-${UUID.randomUUID()}"
+        jdbc { c ->
+            c.exec(
+                "INSERT INTO pension_payment_instructions " +
+                    "(idempotency_key, contract_id, purpose, amount, currency, creditor_iban, status, " +
+                    "payment_ref, created_at, updated_at) VALUES (?, ?, 'PHASED_WITHDRAWAL', 3000, 'CZK', " +
+                    "'CZ6508000000192000145399', 'SETTLED', ?, '2009-03-28T09:00:00Z', '2009-03-28T09:00:00Z')",
+                key,
+                ids.getValue("D"),
+                UUID.randomUUID().toString(),
+            )
+        }
+        try {
+            given().queryParam("periodStart", "2009-03-01").queryParam("periodEnd", "2009-03-31")
+                .`when`().get(PATH).then().statusCode(409)
+        } finally {
+            jdbc { c -> c.exec("DELETE FROM pension_payment_instructions WHERE idempotency_key = ?", key) }
+        }
+    }
+
+    @Test
+    @TestSecurity(user = "service-account-openbank-tax-reporting", roles = ["ROLE_API"])
+    fun `persisted settlement time wins over later status-event and consumption months`() {
+        val key = "rep-${UUID.randomUUID()}"
+        val ref = UUID.randomUUID().toString()
+        val settledAt = Instant.parse("2009-05-01T00:30:00Z")
+        val emittedAt = Instant.parse("2009-06-01T00:30:00Z")
+        jdbc { c ->
+            c.exec(
+                "INSERT INTO pension_payment_instructions " +
+                    "(idempotency_key, contract_id, purpose, amount, currency, creditor_iban, status, " +
+                    "payment_ref, created_at, updated_at) VALUES (?, ?, 'PHASED_WITHDRAWAL', 250, 'CZK', " +
+                    "'CZ6508000000192000145399', 'SENT', ?, '2009-04-30T23:30:00Z', '2009-04-30T23:30:00Z')",
+                key,
+                ids.getValue("A"),
+                ref,
+            )
+        }
+        try {
+            assertThat(runBlocking { settlements.record(ref, RailSettlement.SETTLED, emittedAt, settledAt) }.name)
+                .isEqualTo("SETTLED")
+            jdbc { c ->
+                c.prepareStatement("SELECT settled_at FROM pension_payment_instructions WHERE idempotency_key = ?")
+                    .use { statement ->
+                        statement.setString(1, key)
+                        statement.executeQuery().use { result ->
+                            assertThat(result.next()).isTrue()
+                            val recorded = result.getObject(1, OffsetDateTime::class.java).toInstant()
+                            assertThat(recorded).isEqualTo(settledAt)
+                        }
+                    }
+            }
+            given().queryParam("periodStart", "2009-04-01").queryParam("periodEnd", "2009-04-30")
+                .`when`().get(PATH).then().statusCode(200)
+                .body("payouts.byForm.PHASED_WITHDRAWAL", nullValue())
+            given().queryParam("periodStart", "2009-05-01").queryParam("periodEnd", "2009-05-31")
+                .`when`().get(PATH).then().statusCode(200)
+                .body("payouts.byForm.PHASED_WITHDRAWAL.amount", equalTo(250.0f))
+            given().queryParam("periodStart", "2009-06-01").queryParam("periodEnd", "2009-06-30")
+                .`when`().get(PATH).then().statusCode(200)
+                .body("payouts.byForm.PHASED_WITHDRAWAL", nullValue())
+        } finally {
+            jdbc { c -> c.exec("DELETE FROM pension_payment_instructions WHERE idempotency_key = ?", key) }
+        }
+    }
+
+    @Test
+    @TestSecurity(user = "service-account-openbank-tax-reporting", roles = ["ROLE_API"])
+    fun `the March instruction settled at 00h30 UTC in April belongs to April`() {
         given().queryParam("periodStart", "2009-04-01").queryParam("periodEnd", "2009-04-30")
             .`when`().get(PATH).then().statusCode(200)
             .body("payouts.byForm.EARLY_WITHDRAWAL.amount", equalTo(777.0f))

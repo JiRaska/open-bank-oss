@@ -18,7 +18,12 @@ import java.time.LocalDate
  * Dates are closed intervals [from, to]. Timestamped facts (payment instructions, transfer
  * completion, ledger postings) are bucketed by their UTC date.
  */
+// One aggregate query per statutory figure, plus the completeness guard.
+@Suppress("TooManyFunctions")
 interface ParticipantReportingQueries {
+    /** True if a settled payout created by [to] lacks its persisted domestic transition time. */
+    suspend fun hasUnknownSettlementTime(to: LocalDate): Boolean
+
     /** Distinct currencies booked in [from, to] across contributions and payouts. */
     suspend fun currencies(from: LocalDate, to: LocalDate): Set<String>
 
