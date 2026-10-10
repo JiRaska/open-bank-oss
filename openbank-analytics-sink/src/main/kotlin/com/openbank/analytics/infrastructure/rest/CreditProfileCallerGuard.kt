@@ -4,6 +4,7 @@
 
 package com.openbank.analytics.infrastructure.rest
 
+import com.openbank.libs.authz.ServiceAccountIdentity
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.ws.rs.ForbiddenException
 
@@ -31,7 +32,7 @@ internal val CREDIT_PROFILE_CALLERS = setOf(
  */
 internal fun requireNamedCreditProfileCaller(identity: SecurityIdentity) {
     if (CREDIT_PROFILE_STAFF_ROLES.any(identity::hasRole)) return
-    if (identity.principal?.name !in CREDIT_PROFILE_CALLERS) {
+    if (!ServiceAccountIdentity.isOneOf(identity, CREDIT_PROFILE_CALLERS)) {
         throw ForbiddenException("caller is not a named credit-profile reader")
     }
 }
