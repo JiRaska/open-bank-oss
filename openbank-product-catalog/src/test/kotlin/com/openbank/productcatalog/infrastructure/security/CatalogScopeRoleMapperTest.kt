@@ -23,9 +23,14 @@ class CatalogScopeRoleMapperTest {
         assertThat(mapper.roles(listOf("catalog:read", "catalog:publish")))
             .containsExactlyInAnyOrder(CatalogRoles.READ, CatalogRoles.PUBLISH)
         assertThat(mapper.roles("unrelated")).isEmpty()
-        assertThat(mapper.roles("pension:legal-approve"))
+        assertThat(mapper.roles("pension:legal-approve")).isEmpty()
+        assertThat(mapper.roles("pension:product-approve")).isEmpty()
+        assertThat(mapper.roles("catalog:read", setOf(CatalogRoles.PENSION_LEGAL_REALM_ROLE)))
+            .containsExactly(CatalogRoles.READ)
+        assertThat(mapper.roles("pension:legal-approve", setOf(CatalogRoles.PENSION_LEGAL_REALM_ROLE)))
             .containsExactly(CatalogRoles.PENSION_LEGAL_APPROVER)
-        assertThat(mapper.roles("pension:product-approve"))
+        assertThat(mapper.roles("pension:product-approve", setOf(CatalogRoles.PENSION_PRODUCT_REALM_ROLE)))
             .containsExactly(CatalogRoles.PENSION_PRODUCT_OWNER)
+        assertThat(mapper.roles("pension:legal-approve", setOf(CatalogRoles.PENSION_PRODUCT_REALM_ROLE))).isEmpty()
     }
 }

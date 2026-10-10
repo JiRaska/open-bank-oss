@@ -40,7 +40,11 @@ class PensionRevisionApprovalResource(
     private val identity: SecurityIdentity,
 ) {
     @GET
-    @Authorize(action = "catalog.pensionApproval.read", resource = "#offeringId")
+    @Authorize(
+        action = "catalog.pensionApproval.read",
+        resource = "#offeringId",
+        attributes = ["azp", "subject", "preferred_username"],
+    )
     @RolesAllowed(CatalogRoles.READ)
     suspend fun list(
         @PathParam("offeringId") offeringId: UUID,

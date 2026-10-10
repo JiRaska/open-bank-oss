@@ -43,6 +43,14 @@
       {
         "name": "ROLE_DEMO",
         "description": "Demo account — full access except Settings"
+      },
+      {
+        "name": "ROLE_PENSION_LEGAL_COUNSEL",
+        "description": "Individually assigned pension catalog legal reviewer; requires a separate approval scope"
+      },
+      {
+        "name": "ROLE_PENSION_PRODUCT_OWNER",
+        "description": "Individually assigned pension catalog product reviewer; requires a separate approval scope"
       }
     ]
   },
@@ -685,6 +693,24 @@
         "include.in.token.scope": "true",
         "display.on.consent.screen": "false"
       }
+    },
+    {
+      "name": "pension:legal-approve",
+      "description": "Pension catalog legal approval; requires separately assigned legal realm role",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      }
+    },
+    {
+      "name": "pension:product-approve",
+      "description": "Pension catalog product approval; requires separately assigned product realm role",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      }
     }
   ],
   "defaultDefaultClientScopes": [
@@ -1042,7 +1068,8 @@
       "defaultClientScopes": [
         "openid",
         "profile",
-        "roles"
+        "roles",
+        "catalog:read"
       ],
       "attributes": {}
     },

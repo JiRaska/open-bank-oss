@@ -1518,6 +1518,65 @@ test_pension_catalog_approval_read_requires_read_scope if {
 	}
 }
 
+test_pension_service_reads_only_own_catalog_approval_evidence if {
+	principal := {"id": "service-account-openbank-pension", "type": "HUMAN", "roles": ["ROLE_API", "CATALOG_SCOPE_READ"]}
+	attributes := {
+		"azp": "openbank-pension",
+		"preferred_username": "service-account-openbank-pension",
+		"subject": "verified-service-subject",
+	}
+	decision := rest.allow with input as {
+		"principal": principal,
+		"action": "catalog.pensionApproval.read",
+		"resource": {"type": "catalog", "id": "offering-1"},
+		"attributes": attributes,
+	}
+		with data.openbank.bundle as bundle
+	decision.allow == true
+	decision.reason == "pension-service-read-catalog-approval"
+
+	not rest.allow with input as {
+		"principal": principal,
+		"action": "catalog.publish",
+		"resource": {"type": "catalog", "id": "offering-1"},
+		"attributes": attributes,
+	}
+}
+
+test_pension_service_approval_read_rejects_wrong_client_or_missing_token_binding if {
+	principal := {"id": "service-account-openbank-pension", "type": "HUMAN", "roles": ["ROLE_API", "CATALOG_SCOPE_READ"]}
+	base := {
+		"principal": principal,
+		"action": "catalog.pensionApproval.read",
+		"resource": {"type": "catalog", "id": "offering-1"},
+	}
+	not rest.allow with input as object.union(base, {"attributes": {
+		"azp": "other-client",
+		"preferred_username": "service-account-openbank-pension",
+		"subject": "verified-service-subject",
+	}})
+	not rest.allow with input as object.union(base, {"attributes": {
+		"azp": "openbank-pension",
+		"preferred_username": "service-account-openbank-pension",
+		"subject": "",
+	}})
+	not rest.allow with input as object.union(base, {"attributes": {
+		"azp": "openbank-pension",
+		"preferred_username": "other-account",
+		"subject": "verified-service-subject",
+	}})
+	not rest.allow with input as {
+		"principal": {"id": "service-account-other", "type": "HUMAN", "roles": ["ROLE_API", "CATALOG_SCOPE_READ"]},
+		"action": "catalog.pensionApproval.read",
+		"resource": {"type": "catalog", "id": "offering-1"},
+		"attributes": {
+			"azp": "openbank-pension",
+			"preferred_username": "service-account-openbank-pension",
+			"subject": "verified-service-subject",
+		},
+	}
+}
+
 test_commstyle_publish_denies_service_account_with_every_role if {
 	not rest.allow with input as {
 		"principal": {

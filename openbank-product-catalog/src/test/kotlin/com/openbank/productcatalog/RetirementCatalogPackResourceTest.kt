@@ -22,6 +22,7 @@ import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.hasItem
+import org.hamcrest.Matchers.nullValue
 import org.junit.jupiter.api.MethodOrderer
 import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
@@ -260,10 +261,76 @@ class RetirementCatalogPackResourceTest {
     }
 
     @Test
+    @Suppress("LongMethod")
+    fun `successor preserves predecessor approved interval and exposes superseded state`() {
+        val offering = fixtureOfferings().first { it["attributes"]["productLine"].asText() == "DIP" }
+        val attributes = (offering["attributes"].deepCopy<JsonNode>() as ObjectNode).apply {
+            putArray("instrumentClasses").add("BOND_FUNDS").add("EQUITY_FUNDS")
+            put("reviewStatus", "LEGAL_AND_COMMERCIAL_REVIEWED")
+        }
+        val code = "CZ_DIP_SUCCESSOR_${UUID.randomUUID().toString().replace("-", "").uppercase()}"
+        val specificationId = createSpecification(code, version = 2)
+        val offeringId = createOffering(specificationId, code)
+        val predecessorId = createRevision(
+            offeringId,
+            offering,
+            version = 2,
+            attributes = attributes,
+            effectiveFrom = "2027-01-01T00:00:00Z",
+        )
+        setMaker(predecessorId, "independent-maker")
+        insertPensionApproval(predecessorId, "LEGAL_COUNSEL", "first-legal")
+        insertPensionApproval(predecessorId, "PRODUCT_OWNER", "first-product")
+        Given {
+            contentType("application/json")
+            header("If-Match", "\"0\"")
+            body("""{"reason":"first approved strategy"}""")
+        } When { post("/api/v2/offerings/$offeringId/revisions/$predecessorId/publish") } Then {
+            statusCode(200)
+        }
+        val originalDigest = approvalDigest(predecessorId)
+        val successorId = createRevision(
+            offeringId,
+            offering,
+            version = 2,
+            attributes = attributes,
+            effectiveFrom = "2027-02-01T00:00:00Z",
+        )
+        setMaker(successorId, "independent-maker")
+        insertPensionApproval(successorId, "LEGAL_COUNSEL", "second-legal")
+        insertPensionApproval(successorId, "PRODUCT_OWNER", "second-product")
+        Given {
+            contentType("application/json")
+            header("If-Match", "\"0\"")
+            body("""{"reason":"successor approved strategy"}""")
+        } When { post("/api/v2/offerings/$offeringId/revisions/$successorId/publish") } Then {
+            statusCode(200)
+        }
+        Given { this } When {
+            get("/api/v2/products/$offeringId?effectiveAt=2027-01-15T00:00:00Z")
+        } Then {
+            statusCode(200)
+            body("id", equalTo(predecessorId.toString()))
+            body("state", equalTo("SUPERSEDED"))
+            body("effectiveTo", equalTo("2027-02-01T00:00:00Z"))
+            body("pensionApprovedEffectiveTo", nullValue())
+            body("pensionApprovalDigest", equalTo(originalDigest))
+        }
+        Given { this } When {
+            get("/api/v2/products/$offeringId?effectiveAt=2027-02-15T00:00:00Z")
+        } Then {
+            statusCode(200)
+            body("id", equalTo(successorId.toString()))
+            body("state", equalTo("PUBLISHED"))
+            body("pensionApprovalDigest", equalTo(approvalDigest(successorId)))
+        }
+    }
+
+    @Test
     @Order(1)
     @TestSecurity(
         user = "legal-reviewer",
-        roles = ["ROLE_OPERATOR"],
+        roles = ["ROLE_OPERATOR", "ROLE_PENSION_LEGAL_COUNSEL"],
         augmentors = [com.openbank.productcatalog.infrastructure.security.CatalogScopeIdentityAugmentor::class],
     )
     @OidcSecurity(
@@ -314,7 +381,7 @@ class RetirementCatalogPackResourceTest {
     @Order(2)
     @TestSecurity(
         user = "product-reviewer",
-        roles = ["ROLE_OPERATOR"],
+        roles = ["ROLE_OPERATOR", "ROLE_PENSION_PRODUCT_OWNER"],
         augmentors = [com.openbank.productcatalog.infrastructure.security.CatalogScopeIdentityAugmentor::class],
     )
     @OidcSecurity(

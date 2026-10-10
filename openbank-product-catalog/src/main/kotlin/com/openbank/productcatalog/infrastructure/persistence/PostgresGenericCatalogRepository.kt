@@ -225,6 +225,7 @@ class PostgresGenericCatalogRepository(
                             }.flatMap {
                                 if (draft.schemaId == PENSION_SCHEMA && draft.schemaVersion == 2) {
                                     draft.pensionApprovalDigest = catalogJson.approvalDigest(draft.toDomain())
+                                    draft.pensionApprovedEffectiveTo = draft.effectiveTo
                                 }
                                 draft.state = RevisionState.PUBLISHED.name
                                 draft.checkerId = checkerId
@@ -609,6 +610,8 @@ class PostgresGenericCatalogRepository(
         checkerId = source.checkerId
         reason = source.reason
         contentHash = source.contentHash
+        pensionApprovalDigest = source.pensionApprovalDigest
+        pensionApprovedEffectiveTo = source.pensionApprovedEffectiveTo
         createdAt = source.createdAt
         updatedAt = source.updatedAt
         revision = source.revision
@@ -631,6 +634,7 @@ class PostgresGenericCatalogRepository(
         updatedAt = updatedAt,
         revision = revision,
         pensionApprovalDigest = pensionApprovalDigest,
+        pensionApprovedEffectiveTo = pensionApprovedEffectiveTo,
     )
 
     private fun SchemaRef.key(): String = "$id:$version"

@@ -24,7 +24,25 @@ class CatalogScopeAuthorizationTest {
     @Test
     @TestSecurity(user = "pension-legal", augmentors = [CatalogScopeIdentityAugmentor::class])
     @OidcSecurity(claims = [Claim(key = "scope", value = "pension:legal-approve")])
-    fun pensionLegalScopeCannotImpersonateProductOwner() {
+    fun pensionLegalScopeWithoutAssignedRoleCannotApprove() {
+        val base = "/api/v2/offerings/00000000-0000-0000-0000-000000000001" +
+            "/revisions/00000000-0000-0000-0000-000000000002/pension-approvals"
+        given().contentType("application/json").header("If-Match", "\"0\"")
+            .body("""{"reason":"review"}""")
+            .post("$base/PRODUCT_OWNER").then().statusCode(403)
+        given().contentType("application/json").header("If-Match", "\"0\"")
+            .body("""{"reason":"review"}""")
+            .post("$base/LEGAL_COUNSEL").then().statusCode(403)
+    }
+
+    @Test
+    @TestSecurity(
+        user = "pension-legal",
+        roles = ["ROLE_PENSION_LEGAL_COUNSEL"],
+        augmentors = [CatalogScopeIdentityAugmentor::class],
+    )
+    @OidcSecurity(claims = [Claim(key = "scope", value = "pension:legal-approve")])
+    fun pensionLegalRoleAndScopeAllowOnlyLegalApproval() {
         val base = "/api/v2/offerings/00000000-0000-0000-0000-000000000001" +
             "/revisions/00000000-0000-0000-0000-000000000002/pension-approvals"
         given().contentType("application/json").header("If-Match", "\"0\"")
@@ -33,6 +51,21 @@ class CatalogScopeAuthorizationTest {
         given().contentType("application/json").header("If-Match", "\"0\"")
             .body("""{"reason":"review"}""")
             .post("$base/LEGAL_COUNSEL").then().statusCode(404)
+    }
+
+    @Test
+    @TestSecurity(
+        user = "pension-legal",
+        roles = ["ROLE_PENSION_LEGAL_COUNSEL"],
+        augmentors = [CatalogScopeIdentityAugmentor::class],
+    )
+    @OidcSecurity(claims = [Claim(key = "scope", value = "catalog:read")])
+    fun pensionLegalRoleWithoutApprovalScopeCannotApprove() {
+        val base = "/api/v2/offerings/00000000-0000-0000-0000-000000000001" +
+            "/revisions/00000000-0000-0000-0000-000000000002/pension-approvals"
+        given().contentType("application/json").header("If-Match", "\"0\"")
+            .body("""{"reason":"review"}""")
+            .post("$base/LEGAL_COUNSEL").then().statusCode(403)
     }
 
     @Test

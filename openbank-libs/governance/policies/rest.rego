@@ -296,6 +296,21 @@ allowed_reasons contains "pension-catalog-read-approval" if {
 	"CATALOG_SCOPE_READ" in input.principal.roles
 }
 
+# Pension-service reads only its own approval evidence. The client id, stable token
+# subject and service-account username come from a verified JWT, not request headers.
+allowed_reasons contains "pension-service-read-catalog-approval" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-pension"
+	"ROLE_API" in input.principal.roles
+	"CATALOG_SCOPE_READ" in input.principal.roles
+	input.action == "catalog.pensionApproval.read"
+	input.resource.id
+	input.attributes.azp == "openbank-pension"
+	input.attributes.preferred_username == "service-account-openbank-pension"
+	is_string(input.attributes.subject)
+	input.attributes.subject != ""
+}
+
 # Authenticated customers may perform any `customer.*` action (initiate payments, enroll
 # devices, register, etc.). The JWT `sub` equals the partyId in the customer realm
 # (ADR-0065/0066). Per-handler IDOR guards (e.g. debtorAccountId ownership in
