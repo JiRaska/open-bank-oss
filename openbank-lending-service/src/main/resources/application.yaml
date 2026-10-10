@@ -310,6 +310,14 @@ lending:
       # readiness probe and every in-cluster plaintext caller get `connection refused`.
       # mTLS applies to the 8443 listener only. Runtime property; see #10505.
       insecure-requests: enabled
+      # A trusted client certificate identifies the transport peer; lending API callers
+      # still need a bearer identity for role and policy checks (#12511).
+      auth:
+        permission:
+          bearer-only:
+            paths: /api/*
+            policy: permit
+            auth-mechanism: bearer
     # RestCatalogLoanProfilePort calls product-catalog. Production uses a named TLS bucket over
     # product-catalog's private-CA mTLS listener (8443, client auth REQUIRED). Local/test fixtures
     # speak plain HTTP, so this stays under %prod: the client cert only exists in the cluster.
