@@ -47,6 +47,8 @@ from __future__ import annotations
 import argparse
 import pathlib
 import sys
+import tempfile
+from unittest.mock import patch
 
 import yaml
 
@@ -256,14 +258,34 @@ def selftest() -> int:
               f"{BASE_CONFIG.relative_to(REPO)} no longer parses, and every inheriting service "
               "would be flagged for a port that is in fact open.")
         return 1
-    inheritors = [s for s, p in configs.items() if (_load(REPO / s / "src/main/resources/application.yaml")
-                  or {}).get("quarkus", {}).get("management") is None and p["management"] is not None]
-    if not inheritors:
-        print("selftest FAIL: no service resolves its management port from the base, so the "
-              "layering path is untested — it would pass while doing nothing.")
-        return 1
-    print(f"selftest OK: {len(cases)} cases, both directions; "
-          f"{len(configs)} service config(s) ({len(inheritors)} inheriting management="f"{base['management']} from the shared base), {len(workloads())} workload(s) parsed.")
+    # Exercise the real loader against independent files: the fleet may legitimately
+    # declare management ports explicitly in every service.
+    with tempfile.TemporaryDirectory() as tmp:
+        fixture = pathlib.Path(tmp)
+        fixture_base = fixture / "openbank-libs-runtime/src/main/resources/application.yaml"
+        fixture_base.parent.mkdir(parents=True)
+        fixture_base.write_text("quarkus:\n  management:\n    port: 8085\n")
+        for service, text in {
+            "openbank-inherited-service": "quarkus:\n  http:\n    port: 8140\n",
+            "openbank-overridden-service": "quarkus:\n  management:\n    port: 9000\n",
+        }.items():
+            config = fixture / service / "src/main/resources/application.yaml"
+            config.parent.mkdir(parents=True)
+            config.write_text(text)
+        with patch.multiple(sys.modules[__name__], REPO=fixture, BASE_CONFIG=fixture_base):
+            resolved = service_ports()
+            if resolved["openbank-inherited-service"]["management"] != 8085:
+                print("selftest FAIL: service loader lost the base management port")
+                return 1
+            if resolved["openbank-overridden-service"]["management"] != 9000:
+                print("selftest FAIL: service management override lost precedence")
+                return 1
+            fixture_base.write_text("quarkus: {}\n")
+            if service_ports()["openbank-inherited-service"]["management"] is not None:
+                print("selftest FAIL: absent management port invented a listener")
+                return 1
+    print(f"selftest OK: {len(cases)} comparison cases and 3 loader fixtures; "
+          f"{len(configs)} service config(s), {len(workloads())} workload(s) parsed.")
     return 0
 
 
