@@ -11,7 +11,8 @@ package com.openbank.libs.persistence.outbox
  * The defaults describe 37 of the 38 tables in the fleet inventory (ADR-0327 Appendix A). The two
  * knobs exist for the outliers the appendix names, so they can adopt the base without a table
  * rewrite: `openbank-incentive-service` orders by `occurred_at` and stamps a `claim_token` on
- * claim ([orderColumn], [extraClaimAssignments]); `openbank-security-scanner`'s extra
+ * claim ([orderColumn], [extraClaimAssignments]) and records delivery in `published_at`
+ * ([sentAtColumn]); `openbank-security-scanner`'s extra
  * `aggregate_revision` column and the four `candidate`-aliased claims need nothing — an extra
  * column is invisible to these statements, and the alias was only ever a spelling of the same
  * query. Identifiers are validated to a plain SQL-identifier grammar because they are spliced
@@ -27,11 +28,16 @@ data class OutboxTableShape(
      * parameters other than the claim's own (`:now`, `:stale`, `:limit`, status names).
      */
     val extraClaimAssignments: String = "",
+    /** Column recording when the row reached the broker; `sent_at` everywhere but incentive (`published_at`). */
+    val sentAtColumn: String = "sent_at",
 ) {
     init {
         require(IDENTIFIER.matches(table)) { "outbox table name must be a plain SQL identifier, was '$table'" }
         require(IDENTIFIER.matches(orderColumn)) {
             "outbox order column must be a plain SQL identifier, was '$orderColumn'"
+        }
+        require(IDENTIFIER.matches(sentAtColumn)) {
+            "outbox sent-at column must be a plain SQL identifier, was '$sentAtColumn'"
         }
         require(!extraClaimAssignments.contains(';')) {
             "extraClaimAssignments must be a SET fragment, not a statement"
@@ -109,7 +115,7 @@ object OutboxSql {
      * index probe per id — and the transaction count is what D6 is about.
      */
     fun markSentBatch(shape: OutboxTableShape): String =
-        "UPDATE ${shape.table} SET status = :sent, sent_at = :now, updated_at = :now, " +
+        "UPDATE ${shape.table} SET status = :sent, ${shape.sentAtColumn} = :now, updated_at = :now, " +
             "attempt_count = attempt_count + 1, last_error = NULL WHERE event_id IN (:ids)"
 
     /** First half of `markFailed`: lock the row and read the attempt count the policy needs. */
@@ -133,7 +139,7 @@ object OutboxSql {
 
     /** D8: batched retention; the caller loops until a short batch. */
     fun purgeSent(shape: OutboxTableShape): String =
-        "DELETE FROM ${shape.table} WHERE id IN (SELECT id FROM ${shape.table} WHERE status = :sent AND sent_at < :cut LIMIT :limit)"
+        "DELETE FROM ${shape.table} WHERE id IN (SELECT id FROM ${shape.table} WHERE status = :sent AND ${shape.sentAtColumn} < :cut LIMIT :limit)"
 
     fun purgeDead(shape: OutboxTableShape): String =
         "DELETE FROM ${shape.table} WHERE id IN (SELECT id FROM ${shape.table} WHERE status = :dead AND updated_at < :cut LIMIT :limit)"
