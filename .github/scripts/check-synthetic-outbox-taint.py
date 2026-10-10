@@ -8,7 +8,7 @@ and lose that fact when an asynchronous event is persisted.  The common outbox c
 that fact as ``OutboxMessage.synthetic``.  A service using ``PanacheOutboxEntity`` must therefore
 make two independently verifiable commitments:
 
-* a Flyway migration adds a non-null ``synthetic`` column with a safe false default; and
+* a Flyway migration creates or adds a non-null ``synthetic`` column with a safe false default; and
 * an outbox writer that accepts ``OutboxMessage`` copies the message field into the persisted
   entity.
 
@@ -38,6 +38,11 @@ import tempfile
 ENTITY = re.compile(r"class\s+\w*OutboxEntity\s*:\s*PanacheOutboxEntity(?:V2)?\s*\(")
 MIGRATION = re.compile(
     r"ALTER\s+TABLE\s+\w+_outbox\s+ADD\s+COLUMN\s+synthetic\s+BOOLEAN\s+NOT\s+NULL\s+DEFAULT\s+FALSE\s*;",
+    re.IGNORECASE,
+)
+CREATE_WITH_SYNTHETIC = re.compile(
+    r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?\w+_outbox\s*\("
+    r"[^;]*?\bsynthetic\s+BOOLEAN\s+NOT\s+NULL\s+DEFAULT\s+FALSE\b[^;]*?\)\s*;",
     re.IGNORECASE,
 )
 # The extension mapper idiom exposes OutboxMessage.synthetic as the unqualified receiver property;
@@ -86,8 +91,15 @@ def service_findings(service: pathlib.Path) -> tuple[list[str], int]:
     if not entities:
         return [], 0
 
-    migrations = files(service, "src/main/resources/db/migration/*__synthetic_outbox_taint.sql")
-    migration_ok = any(MIGRATION.search(p.read_text(encoding="utf-8")) for p in migrations)
+    migrations = files(service, "src/main/resources/db/migration/*.sql")
+    migration_ok = any(
+        (
+            (p.name.endswith("__synthetic_outbox_taint.sql") and MIGRATION.search(source))
+            or CREATE_WITH_SYNTHETIC.search(source)
+        )
+        for p in migrations
+        if (source := re.sub(r"/\*[\s\S]*?\*/|--[^\n]*", "", p.read_text(encoding="utf-8")))
+    )
     # Some services own an outbox for an internally-derived event and have no OutboxMessage input
     # at all. A literal ``synthetic = false`` there is not a dropped marker: there is no marker at
     # this boundary to receive. Do not turn that distinct design decision into a false failure.
@@ -97,7 +109,7 @@ def service_findings(service: pathlib.Path) -> tuple[list[str], int]:
     if not migration_ok:
         findings.append(
             f"{service.name}: shared outbox entity has no synthetic taint Flyway migration "
-            "(ADD COLUMN synthetic BOOLEAN NOT NULL DEFAULT FALSE)"
+            "(CREATE TABLE or ADD COLUMN synthetic BOOLEAN NOT NULL DEFAULT FALSE)"
         )
     if uses_message_contract and not propagates:
         findings.append(
@@ -126,17 +138,23 @@ def write(root: pathlib.Path, rel: str, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
-def fixture(migration: str, writer: str, module: str = "openbank-demo-service") -> tuple[list[str], int]:
+def fixture(
+    migration: str,
+    writer: str,
+    module: str = "openbank-demo-service",
+    migration_name: str = "V1__synthetic_outbox_taint.sql",
+) -> tuple[list[str], int]:
     with tempfile.TemporaryDirectory() as temp:
         root = pathlib.Path(temp)
         write(root, f"{module}/src/main/kotlin/Outbox.kt", "class DemoOutboxEntity : PanacheOutboxEntity()\n" + writer)
         if migration:
-            write(root, f"{module}/src/main/resources/db/migration/V1__synthetic_outbox_taint.sql", migration)
+            write(root, f"{module}/src/main/resources/db/migration/{migration_name}", migration)
         return check(root)
 
 
 def self_test() -> int:
     valid_migration = "ALTER TABLE demo_outbox ADD COLUMN synthetic BOOLEAN NOT NULL DEFAULT FALSE;"
+    valid_create = "CREATE TABLE demo_outbox (id BIGINT PRIMARY KEY, synthetic BOOLEAN NOT NULL DEFAULT FALSE);"
     cases = {
         "valid extension mapper": (valid_migration, "fun OutboxMessage.toEntity() { synthetic = synthetic }", False),
         "valid parameter mapper": (valid_migration, "fun map(message: OutboxMessage) { synthetic = message.synthetic }", False),
@@ -192,11 +210,28 @@ def self_test() -> int:
             got = bool(findings)
         if got != expect_finding:
             failures.append(f"{label}: expected finding={expect_finding}, got {findings}")
+    create_cases = {
+        "new outbox table with safe synthetic default": (valid_create, False),
+        "new outbox table with true synthetic default": (
+            valid_create.replace("DEFAULT FALSE", "DEFAULT TRUE"), True
+        ),
+        "commented synthetic column is not a migration": (
+            "CREATE TABLE demo_outbox (id BIGINT PRIMARY KEY); -- synthetic BOOLEAN NOT NULL DEFAULT FALSE",
+            True,
+        ),
+    }
+    for label, (migration, expect_finding) in create_cases.items():
+        findings, _ = fixture(
+            migration, "fun OutboxMessage.toEntity() { synthetic = synthetic }",
+            migration_name="V5__restore_outbox.sql",
+        )
+        if bool(findings) != expect_finding:
+            failures.append(f"{label}: expected finding={expect_finding}, got {findings}")
     if failures:
         for failure in failures:
             print(f"::error::check-synthetic-outbox-taint self-test: {failure}")
         return 1
-    total = len(cases) + len(suffixless)
+    total = len(cases) + len(suffixless) + len(create_cases)
     print(f"check-synthetic-outbox-taint self-test: {total}/{total} passed")
     return 0
 

@@ -228,6 +228,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="vop-db-2",job="vop-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pension-fund",pod="pension-fund-db-1",job="pension-fund-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pension-fund",pod="pension-fund-db-2",job="pension-fund-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="pension",pod="pension-db-1",job="pension-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="pension",pod="pension-db-2",job="pension-db"}'
@@ -387,6 +391,8 @@ tests:
       - series: 'kube_namespace_created{namespace="payments"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="pension"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="pension-fund"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="pid"}'
         values: "1600000000+0x40"
@@ -662,6 +668,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="vop-db-2",job="vop-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pension-fund",pod="pension-fund-db-1",job="pension-fund-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pension-fund",pod="pension-fund-db-2",job="pension-fund-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="pension",pod="pension-db-1",job="pension-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="pension",pod="pension-db-2",job="pension-db"}'
@@ -821,6 +831,8 @@ tests:
       - series: 'kube_namespace_created{namespace="payments"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="pension"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="pension-fund"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="pid"}'
         values: "1600000000+0x40"
@@ -1073,6 +1085,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="vop-db-2",job="vop-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pension-fund",pod="pension-fund-db-1",job="pension-fund-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pension-fund",pod="pension-fund-db-2",job="pension-fund-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="pension",pod="pension-db-1",job="pension-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="pension",pod="pension-db-2",job="pension-db"}'
@@ -1234,6 +1250,8 @@ tests:
       - series: 'kube_namespace_created{namespace="payments"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="pension"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="pension-fund"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="pid"}'
         values: "1600000000+0x40"
@@ -1490,6 +1508,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="vop-db-2",job="vop-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pension-fund",pod="pension-fund-db-1",job="pension-fund-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pension-fund",pod="pension-fund-db-2",job="pension-fund-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="pension",pod="pension-db-1",job="pension-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="pension",pod="pension-db-2",job="pension-db"}'
@@ -1649,6 +1671,8 @@ tests:
       - series: 'kube_namespace_created{namespace="payments"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="pension"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="pension-fund"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="pid"}'
         values: "1600000000+0x40"
@@ -1910,6 +1934,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="vop-db-2",job="vop-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pension-fund",pod="pension-fund-db-1",job="pension-fund-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pension-fund",pod="pension-fund-db-2",job="pension-fund-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="pension",pod="pension-db-1",job="pension-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="pension",pod="pension-db-2",job="pension-db"}'
@@ -2067,6 +2095,8 @@ tests:
       - series: 'kube_namespace_created{namespace="payments"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="pension"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="pension-fund"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="pid"}'
         values: "1600000000+0x40"
@@ -2321,6 +2351,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="vop-db-2",job="vop-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pension-fund",pod="pension-fund-db-1",job="pension-fund-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pension-fund",pod="pension-fund-db-2",job="pension-fund-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="pension",pod="pension-db-1",job="pension-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="pension",pod="pension-db-2",job="pension-db"}'
@@ -2478,6 +2512,8 @@ tests:
       - series: 'kube_namespace_created{namespace="payments"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="pension"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="pension-fund"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="pid"}'
         values: "1600000000+0x40"

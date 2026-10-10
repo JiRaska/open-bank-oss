@@ -12,9 +12,8 @@ The service follows the hexagonal (ports & adapters) architecture mandated by [A
         │       │                   │                                    │
         │       │                   ├─► SanctionsScreeningPort ─────────►│──► sanctions-service
         │       │                   ├─► AmlCasePort ────────────────────►│──► aml-service
-        │       │                   ├─► SctInstPaymentRepository ───────►│──► PostgreSQL
-        │       │                   └─► SctInstEventPublisher ──────────►│──► openbank.sepa.instant.events
-        │       │                       (direct Kafka emitter, no outbox)│
+        │       │                   ├─► payment + outbox ────────────────►│──► PostgreSQL
+        │       │                   └─► outbox relay ────────────────────►│──► Kafka events
         └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -35,7 +34,7 @@ Pure Kotlin, no Quarkus.
 Use-cases and ports.
 
 - **Inbound ports** (`port/in`): `SubmitSctInstPaymentUseCase`, `GetSctInstPaymentUseCase`, `RecallSctInstPaymentUseCase` + `SubmitSctInstCommand`.
-- **Outbound ports** (`port/out`): `SctInstPaymentRepository`, `SctInstEventPublisher`, `SanctionsScreeningPort` (+ `ScreeningUnavailableException`), `AmlCasePort` (+ `OpenAmlCaseCommand`, `AmlCaseRiskLevel`).
+- **Outbound ports** (`port/out`): `SctInstPaymentRepository`, `SctInstOutboxRepository`, `SanctionsScreeningPort` (+ `ScreeningUnavailableException`), `AmlCasePort` (+ `OpenAmlCaseCommand`, `AmlCaseRiskLevel`).
 - `usecase/SctInstPaymentService` — orchestrates the screening gate (see flow below).
 
 ### Adapters (`infrastructure/`)
@@ -43,8 +42,9 @@ Use-cases and ports.
 - `rest/ExceptionMappers` — `NotFoundException → 404`, `BadRequestException → 400`.
 - `client/SanctionsScreeningAdapter` + `SanctionsServiceClient` — REST client to sanctions-service; maps remote status onto the local `ScreeningMatchStatus`, raises `ScreeningUnavailableException` when unreachable.
 - `client/AmlCaseAdapter` + `AmlServiceClient` — REST client to aml-service case store.
-- `persistence/` — `SctInstPaymentEntity`, Panache reactive repository, `SctInstMapper`.
-- `kafka/` — `KafkaSctInstEventPublisher`.
+- `persistence/` — payment and outbox entities, reactive repositories, `SctInstMapper`.
+- `outbox/` — `SctInstOutboxDispatcher` claims and retries committed events.
+- `kafka/` — `KafkaSctInstEventPublisher` sends the stored four-field payload.
 - `authz/AuthzProducer` — wires the libs authz client (ADR-0034).
 
 ## Screening gate flow (ADR-0032, instant-rail adaptation)
@@ -55,16 +55,26 @@ On `submit(command)`:
 2. Build the base payment (`status = PENDING`, `submittedAt = now`).
 3. **Screen debtor name, then creditor name** synchronously via `SanctionsScreeningPort`.
 4. `ScreeningPolicy.decide(results)`:
-   - **CLEAR → proceed**: `status = PROCESSING`, arm `executionTimeoutAt = now + execution-timeout-seconds (10s)`, persist, publish `SctInstPaymentSubmitted`.
+   - **CLEAR → proceed**: `status = PROCESSING`, arm `executionTimeoutAt = now + execution-timeout-seconds (10s)`, persist payment and `SctInstPaymentSubmitted` outbox row together.
    - **REVIEW → hold**: persist `PENDING`, open a **HIGH** AML case (`AML_HOLD`); never settle.
-   - **BLOCK → reject**: persist `REJECTED` (`reason = SANCTIONS_HIT`), open a **CRITICAL** AML case, publish `SctInstPaymentRejected`.
+   - **BLOCK → reject**: persist `REJECTED` (`reason = SANCTIONS_HIT`) and its event row together; open a **CRITICAL** AML case.
 5. **Screening outage** (`ScreeningUnavailableException`) → **fail closed**: hold `PENDING`, open a **MEDIUM** AML case (`SCREENING_UNAVAILABLE`). The payment is never released un-screened (ADR-0032 §C).
 
 Opening the AML case is **best-effort** (`openCaseQuietly`): a case-store outage logs an error but must never flip the screening verdict already rendered.
 
 ## Kafka publishing
 
-Lifecycle events (`SctInstPaymentSubmitted`/`Settled`/`Rejected`/…) are published directly from `SctInstPaymentService` at each transition via `SctInstEventPublisher` → `KafkaSctInstEventPublisher`, which emits to the `sct-inst-events-out` channel (Kafka topic `openbank.sepa.instant.events`). This is a direct, synchronous-emitter publish — not a transactional outbox — so delivery is not atomic with the DB write. An earlier transactional-outbox pipeline (`SctInstOutboxPort`/`SctInstOutboxDispatcher`) was built but never wired to a real call site and has been removed (issue #1034); `KafkaSctInstEventPublisher` was always the pipeline actually in use.
+The #12181 source candidate writes each event-producing payment transition and its outbox row in one PostgreSQL transaction. `SctInstOutboxDispatcher` later claims the row and retries delivery through `KafkaSctInstEventPublisher` to `openbank.sepa.instant.events`. This is at-least-once delivery: a broker acknowledgement followed by failure before `markSent` can replay the same event. The existing four-field Kafka payload stays unchanged; the record is now keyed by the payment id (per-payment ordering), and standard outbox headers carry the durable `ce-id` on every attempt. Audit-service uses that ID before the Kafka offset when the body has no `eventId`, so the audit consumer must be deployed before this producer. This describes source behavior, not proof that the candidate was reviewed, merged, or deployed.
+
+| Payment transition | Existing domain event | Candidate delivery guarantee |
+| --- | --- | --- |
+| New payment to `PROCESSING` | `SctInstPaymentSubmitted` | Payment and event row commit together; relay retries until sent or visible `DEAD`. |
+| New payment to `REJECTED` (screening or scheme) | `SctInstPaymentRejected` | Payment and event row commit together; same relay policy. |
+| `PROCESSING` to `SETTLED` | `SctInstPaymentSettled` | Status and event row commit together under the payment lock; same relay policy. |
+| `SETTLED` to `RECALLED` | `SctInstPaymentRecalled` | Status and event row commit together under the payment lock; same relay policy. |
+| New payment held at `PENDING` | No payment-domain event in the established schema | The payment row is durable, while opening the separate AML case remains best effort. No payment event delivery is claimed. |
+
+An idempotent repeat of an existing submission returns the existing payment without creating a second event. Historical transitions are not reconstructed by this migration; any missing audit fact needs separate approved reconciliation.
 
 ## Resilience & rate limiting
 
