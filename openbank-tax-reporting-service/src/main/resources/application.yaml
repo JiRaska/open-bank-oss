@@ -96,6 +96,29 @@ openbank:
   git:
     commit: "${GIT_COMMIT:unknown}"
 
+"%prod":
+  quarkus:
+    # East-west mTLS to the pension company's treasury-service instance (8443, client auth REQUIRED,
+    # ADR-0337): the call carries a bearer token and the cluster has no mesh, so plaintext 8160 is
+    # not an option (ASVS V9.1). Client certificate tax-reporting-internal-tls, mounted at
+    # /mnt/internal-tls in the cluster only (gitops); the server is verified against openbank-ca
+    # with HTTPS hostname verification (the default — never set to NONE). %prod only: the files
+    # exist only in the cluster, and the TLS registry loads them at boot.
+    tls:
+      treasury-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/internal-tls/tls.crt
+              key: /mnt/internal-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/internal-tls/ca.crt
+        protocols: TLSv1.3
+    rest-client:
+      treasury-service:
+        tls-configuration-name: treasury-authority
+
 "%test":
   quarkus:
     datasource:

@@ -82,10 +82,7 @@ class TreasuryCompanyPortfolio(
         val dto = try {
             client.get().periodEnd(periodEnd.toString())
         } catch (e: WebApplicationException) {
-            throw ReturnDataUnavailableException(
-                "pension company treasury answered ${e.response.status} for the portfolio at $periodEnd",
-                e,
-            )
+            throw unavailable(e.response.status, periodEnd, e)
         } catch (e: ProcessingException) {
             throw ReturnDataUnavailableException("pension company treasury unreachable: ${e.message}", e)
         }
@@ -93,6 +90,28 @@ class TreasuryCompanyPortfolio(
     }
 
     companion object {
+        /**
+         * A refusal by the treasury, as the reason the return is unavailable (503). 409 is the
+         * provider's "no custodian statement stored for that date" (PORTFOLIO_SNAPSHOT_MISSING —
+         * never an empty list, ADR-0337 amendment): a missing semt.002 upload, which an operator
+         * fixes by uploading it, so the reason names exactly that rather than a status code.
+         */
+        fun unavailable(status: Int, periodEnd: LocalDate, cause: Throwable? = null): ReturnDataUnavailableException =
+            if (status == HTTP_CONFLICT) {
+                ReturnDataUnavailableException(
+                    "no custodian statement for $periodEnd: the pension company's treasury holds no " +
+                        "semt.002 portfolio snapshot for that date (upload it, then assemble again)",
+                    cause,
+                )
+            } else {
+                ReturnDataUnavailableException(
+                    "pension company treasury answered $status for the portfolio at $periodEnd",
+                    cause,
+                )
+            }
+
+        private const val HTTP_CONFLICT = 409
+
         /** Wire -> port; any absent or unparsable field refuses the whole answer, never a default. */
         fun decode(dto: TreasuryPortfolioDto): CompanyPortfolio {
             fun bad(what: String): Nothing =

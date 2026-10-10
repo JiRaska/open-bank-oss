@@ -4,6 +4,45 @@
   },
   "interactions": [
     {
+      "description": "GET the pension company's portfolio for a year end with no custodian statement",
+      "providerStates": [
+        {
+          "name": "no portfolio snapshot exists for 2026-12-31"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/treasury/portfolio/period-end",
+        "query": {
+          "date": [
+            "2026-12-31"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "error": "PORTFOLIO_SNAPSHOT_MISSING"
+        },
+        "headers": {
+          "Content-Type": "application/json; charset=UTF-8"
+        },
+        "matchingRules": {
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json(;\\s?charset=[\\w\\-]+)?"
+                }
+              ]
+            }
+          }
+        },
+        "status": 409
+      }
+    },
+    {
       "description": "GET the pension company's portfolio with no M2M identity is refused",
       "providerStates": [
         {
