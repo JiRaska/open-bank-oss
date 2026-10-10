@@ -383,6 +383,16 @@ change_requirements:
     enforced: advisory
     target_enforce_date: "2026-12-31"
     ci_producer: ".github/scripts/check-jaxrs-path-prefix-leading-slash.py"
+  client_auth_bearer_paths:
+    detect: ["production Quarkus HTTP listener with client-auth required/request and class-level API @Path roots"]
+    require:
+      - "every API root and descendant is covered by a bearer-only HTTP permission"
+      - "no overlapping non-bearer permission can accept a certificate-only identity"
+      - "existing uncovered listeners remain advisory until real no-cert, cert-only and cert-plus-bearer HTTP proofs are recorded (#12511)"
+    gate: client-auth-bearer-paths
+    enforced: advisory
+    target_enforce_date: "2026-11-10"
+    ci_producer: ".github/scripts/check-client-auth-bearer-paths.py"
   db_backup_association:
     detect: ["openbank-infra/gitops/**/*.yaml (kind: Cluster, postgresql.cnpg.io)"]
     require:
