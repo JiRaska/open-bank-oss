@@ -118,8 +118,13 @@ spec:
             # (${PENSION_COMPANY_LEDGER_URL} in application.yaml, #12496). Declared HERE, not only in
             # application.yaml, because gen-network-policies.py derives ledger-pension-co's ingress
             # allow-list from this env URL — it is what admits this namespace and no other.
+            # Its private-CA mTLS listener on 8443, not plaintext 8101: the call carries a bearer
+            # token, there is no mesh, and ASVS V9.1 refuses a new http:// edge. The ledger
+            # requires a client certificate (tax-reporting-internal-tls, %prod TLS bucket
+            # internal-authority) and its server certificate is verified against openbank-ca with
+            # hostname verification (ledger-service-internal-tls dnsNames carry this host).
             - name: PENSION_COMPANY_LEDGER_URL
-              value: http://ledger-service.ledger-pension-co.svc:8101
+              value: https://ledger-service.ledger-pension-co.svc:8443
             # openbank.statutory-returns.company-books.opened (CompanyBooks, #12496): the first day
             # of the pension company's books: 2027-01-01, confirmed by owner 2026-10-10. Every
             # company-books return sums frozen periods from this date, so it must equal the real
@@ -159,6 +164,11 @@ spec:
               readOnly: true
             - name: kafka-truststore
               mountPath: /mnt/kafka-truststore
+              readOnly: true
+            # Private-CA client certificate + openbank-ca for the east-west mTLS edges
+            # (%prod TLS buckets in application.yaml).
+            - name: internal-tls
+              mountPath: /mnt/internal-tls
               readOnly: true
         # OPA policy decision point (ADR-0034). Co-located sidecar the app reaches on
         # localhost:8181 (AuthorizeInterceptor default). Bundle mounted read-only from the
@@ -245,6 +255,10 @@ spec:
         - name: kafka-truststore
           secret:
             secretName: kafka-cluster-ca-truststore
+            optional: false
+        - name: internal-tls
+          secret:
+            secretName: tax-reporting-internal-tls
             optional: false
         - name: opa-tmp
           emptyDir: {}

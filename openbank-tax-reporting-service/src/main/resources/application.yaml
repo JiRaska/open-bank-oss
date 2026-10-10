@@ -123,3 +123,28 @@ openbank:
       enabled: false
   authz:
     enforce: "false"
+
+"%prod":
+  quarkus:
+    # East-west mTLS (ASVS V9.1): the pension company's ledger-service (ADR-0337) is called on its
+    # private-CA listener, 8443, which REQUIRES a client certificate (ledger's %prod
+    # quarkus.http.ssl.client-auth). One client identity, tax-reporting-internal-tls, mounted at
+    # /mnt/internal-tls; its ca.crt is openbank-ca, which verifies the server. Hostname
+    # verification stays at Quarkus' default (HTTPS): the ledger certificate's dnsNames carry
+    # ledger-service.ledger-pension-co.svc. Under %prod only — the certificate exists only in the
+    # cluster, and local/test fixtures speak plain HTTP. ONE `tls:` map and ONE `rest-client:` map
+    # (SnakeYAML keeps only the last of a repeated key): add further upstreams to these maps.
+    tls:
+      internal-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/internal-tls/tls.crt
+              key: /mnt/internal-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/internal-tls/ca.crt
+        protocols: TLSv1.3
+    rest-client:
+      ledger-service:
+        tls-configuration-name: internal-authority
