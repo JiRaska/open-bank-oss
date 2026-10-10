@@ -52,7 +52,7 @@ class PensionCoInstanceSwitchesIT {
                         "(a new one would otherwise be silently left out of this proof)",
                 )
                 .containsExactlyInAnyOrderElementsOf(ENV_TO_PROPERTY.keys)
-            val overrides = ENV_TO_PROPERTY.mapKeys { it.value }.mapValues { (_, envName) -> env.getValue(envName) }
+            val overrides = ENV_TO_PROPERTY.entries.associate { (envName, prop) -> prop to env.getValue(envName) }
                 .toMutableMap()
             overrides["quarkus.flyway.locations"] = overrides.getValue("quarkus.flyway.locations")
                 .replace(MOUNT_PATH, chartOfAccountsDir().absolutePath)
@@ -60,9 +60,10 @@ class PensionCoInstanceSwitchesIT {
             return overrides
         }
 
-        private fun String.isSwitchLike() =
-            startsWith("OPENBANK_") || startsWith("LEDGER_") || startsWith("MP_MESSAGING_") ||
-                startsWith("QUARKUS_FLYWAY_")
+        private fun String.isSwitchLike() = startsWith("OPENBANK_") ||
+            startsWith("LEDGER_") ||
+            startsWith("MP_MESSAGING_") ||
+            startsWith("QUARKUS_FLYWAY_")
     }
 
     @Inject
@@ -77,8 +78,7 @@ class PensionCoInstanceSwitchesIT {
     @Inject
     lateinit var flyway: Flyway
 
-    private fun scheduledClasses(): List<String> =
-        scheduler.scheduledJobs.map { it.methodDescription ?: it.id }
+    private fun scheduledClasses(): List<String> = scheduler.scheduledJobs.map { it.methodDescription ?: it.id }
 
     @Test
     fun `the real scheduler runs the instance-local jobs and none of the bank-only ones`() {
@@ -124,8 +124,14 @@ class PensionCoInstanceSwitchesIT {
         assertThat(count("SELECT count(*) FROM gl_accounts WHERE code NOT LIKE 'PS%' AND is_enabled")).isZero()
     }
 
-    private fun count(sql: String): Long =
-        dataSource.connection.use { c -> c.createStatement().use { s -> s.executeQuery(sql).use { it.next(); it.getLong(1) } } }
+    private fun count(sql: String): Long = dataSource.connection.use { c ->
+        c.createStatement().use { s ->
+            s.executeQuery(sql).use {
+                it.next()
+                it.getLong(1)
+            }
+        }
+    }
 
     companion object {
         private const val COMPONENT = "../openbank-infra/gitops/components/ledger-pension-co"
@@ -171,7 +177,10 @@ class PensionCoInstanceSwitchesIT {
             val cm = File("$COMPONENT/chart-of-accounts.yaml").reader().use { r -> Yaml().loadAll(r).toList() }
                 .filterIsInstance<Map<String, Any?>>().single { it["kind"] == "ConfigMap" }
             val data = cm["data"] as Map<String, String>
-            val dir = File("build/pension-co-flyway").apply { deleteRecursively(); mkdirs() }
+            val dir = File("build/pension-co-flyway").apply {
+                deleteRecursively()
+                mkdirs()
+            }
             data.forEach { (name, sql) -> File(dir, name).writeText(sql) }
             return dir
         }
