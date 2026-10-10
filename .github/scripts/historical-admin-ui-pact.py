@@ -4,12 +4,12 @@
 import base64
 import json
 import os
-from pathlib import Path
 import re
 import sys
 import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
+from pathlib import Path
 
 PROVIDER = "openbank-product-catalog"
 CONSUMER = "openbank-admin-ui"
@@ -59,16 +59,25 @@ def preflight(env):
         raise ValueError("exact historical Pact fetch failed (transport error)") from None
     if pact.get("consumer", {}).get("name") != CONSUMER or pact.get("provider", {}).get("name") != PROVIDER:
         raise ValueError("historical Pact has unexpected consumer/provider names")
-    if not pact.get("interactions"):
-        raise ValueError("historical Pact has no interactions")
-    print("Exact historical Pact exists and has interactions; broker response remains private.")
+    interactions = pact.get("interactions")
+    if not isinstance(interactions, list) or not interactions:
+        raise ValueError("historical Pact has no interaction list")
+    with open(env["GITHUB_ENV"], "a", encoding="utf-8") as output:
+        output.write(f"HISTORICAL_PACT_INTERACTION_COUNT={len(interactions)}\n")
+    print(f"Exact historical Pact has {len(interactions)} interaction(s); broker response remains private.")
 
 
 def check_result():
+    try:
+        expected = int(os.environ["HISTORICAL_PACT_INTERACTION_COUNT"])
+    except (KeyError, ValueError) as error:
+        raise ValueError("historical Pact interaction count is missing or invalid") from error
+    if expected < 1:
+        raise ValueError("historical Pact interaction count must be positive")
     reports = Path(PROVIDER, "build/reports/tests/providerPactTest")
     xml_dir = Path(PROVIDER, "build/test-results/providerPactTest")
     files = list(xml_dir.glob(f"*{TEST_CLASS}*.xml"))
-    total = 0
+    successful_names = set()
     skipped_or_failed = 0
     for file in files:
         root = ET.parse(file).getroot()
@@ -77,10 +86,16 @@ def check_result():
                 if any(case.find(tag) is not None for tag in ("skipped", "failure", "error")):
                     skipped_or_failed += 1
                 else:
-                    total += 1
-    if total == 0 or skipped_or_failed:
-        raise ValueError(f"historical broker verifier requires successful interactions and zero skips/failures (reports: {reports})")
-    print(f"Historical broker verifier completed {total} interaction(s).")
+                    name = case.get("name", "")
+                    if not name or name in successful_names:
+                        raise ValueError("historical broker verifier has a duplicate or unnamed interaction")
+                    successful_names.add(name)
+    if len(successful_names) != expected or skipped_or_failed:
+        raise ValueError(
+            f"historical broker verifier requires {expected} distinct successful interactions and zero skips/failures "
+            f"(reports: {reports})"
+        )
+    print(f"Historical broker verifier completed {len(successful_names)} distinct interaction(s).")
 
 
 if __name__ == "__main__":
