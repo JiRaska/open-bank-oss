@@ -196,15 +196,16 @@ data:
             },
             "colorMode": "value",
             "graphMode": "area",
-            "textMode": "auto"
+            "textMode": "value_and_name"
           },
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(increase(openbank_pension_contributions_amount_total{outcome=\"credited\"}[$__range]))"
+              "legendFormat": "{{currency}}",
+              "expr": "sum by (currency) (increase(openbank_pension_contributions_amount_total{outcome=\"credited\"}[$__range]))"
             }
           ],
-          "description": "Money credited to contracts in the selected range, all sources and currencies summed in their own units.",
+          "description": "Money credited to contracts in the selected range, all sources, shown separately for each currency.",
           "id": 4,
           "gridPos": {
             "x": 8,
@@ -245,12 +246,13 @@ data:
             },
             "colorMode": "value",
             "graphMode": "area",
-            "textMode": "auto"
+            "textMode": "value_and_name"
           },
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(increase(openbank_pension_payout_amount_total[$__range]))"
+              "legendFormat": "{{currency}}",
+              "expr": "sum by (currency) (increase(openbank_pension_payout_amount_total[$__range]))"
             }
           ],
           "description": "Gross the participants confirmed. Not 'paid out': payment is the payment hub's to establish.",
@@ -294,12 +296,13 @@ data:
             },
             "colorMode": "value",
             "graphMode": "area",
-            "textMode": "auto"
+            "textMode": "value_and_name"
           },
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(increase(openbank_pension_transfer_amount_total{direction=\"IN\"}[$__range]))"
+              "legendFormat": "{{currency}}",
+              "expr": "sum by (currency) (increase(openbank_pension_transfer_amount_total{direction=\"IN\"}[$__range]))"
             }
           ],
           "id": 6,
@@ -342,12 +345,13 @@ data:
             },
             "colorMode": "value",
             "graphMode": "area",
-            "textMode": "auto"
+            "textMode": "value_and_name"
           },
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(increase(openbank_pension_transfer_amount_total{direction=\"OUT\"}[$__range]))"
+              "legendFormat": "{{currency}}",
+              "expr": "sum by (currency) (increase(openbank_pension_transfer_amount_total{direction=\"OUT\"}[$__range]))"
             }
           ],
           "id": 7,
