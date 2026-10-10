@@ -42,6 +42,9 @@ dependencies {
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(project(":openbank-libs-testing"))
+
+    // Provider replay of pension-service's consumer pact (#12350): FundAdministrationPort's calls.
+    testImplementation(libs.pact.provider)
 }
 
 // twins, and the synthetic-taint profile), and the default 512m heap ran out on the fourth boot
