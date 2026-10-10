@@ -95,7 +95,7 @@ class PensionTransferResource {
     @GET
     @Path("/{id}")
     @Operation(summary = "Status of one of the caller's transfers")
-    @Authorize(action = "pension.transfer.read", resource = "#id")
+    @Authorize(action = "pension.transfer.inspect", resource = "#id")
     suspend fun get(@HeaderParam(PARTY_HEADER) party: String?, @PathParam("id") id: UUID): TransferResponse =
         TransferResponse.from(transfers.get(id, partyOf(party)))
 }

@@ -84,7 +84,7 @@ class PensionDeathClaimResource {
 
     @GET
     @Operation(summary = "Death claims, newest first, optionally by status (operator queue)")
-    @Authorize(action = "pension.death.read")
+    @Authorize(action = "pension.death.inspect")
     suspend fun list(
         @QueryParam("status") status: DeathClaimStatus?,
         @QueryParam("limit") @DefaultValue("50") limit: Int,
@@ -96,7 +96,7 @@ class PensionDeathClaimResource {
     @GET
     @Path("/{claimId}")
     @Operation(summary = "One death claim with its claimants")
-    @Authorize(action = "pension.death.read", resource = "#claimId")
+    @Authorize(action = "pension.death.inspect", resource = "#claimId")
     suspend fun get(@PathParam("claimId") claimId: UUID) = DeathClaimResponse.from(claims.get(claimId))
 
     @PUT

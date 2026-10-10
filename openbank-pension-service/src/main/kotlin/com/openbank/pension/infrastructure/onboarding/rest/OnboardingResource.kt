@@ -116,7 +116,7 @@ class OnboardingResource {
     @GET
     @Path("/{id}")
     @Operation(summary = "Status of one of the caller's applications")
-    @Authorize(action = "pension.onboarding.read", resource = "#id")
+    @Authorize(action = "pension.onboarding.inspect", resource = "#id")
     suspend fun get(@HeaderParam(PARTY_HEADER) party: String?, @PathParam("id") id: UUID): ApplicationResponse =
         ApplicationResponse.from(onboarding.get(id, partyOf(party)))
 
@@ -149,7 +149,7 @@ class OnboardingResource {
     @GET
     @Path("/{id}/recommendation")
     @Operation(summary = "The strategy recommendation from the risk profile and years to retirement")
-    @Authorize(action = "pension.onboarding.read", resource = "#id")
+    @Authorize(action = "pension.onboarding.inspect", resource = "#id")
     suspend fun recommendation(
         @HeaderParam(PARTY_HEADER) party: String?,
         @PathParam("id") id: UUID,

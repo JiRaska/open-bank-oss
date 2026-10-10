@@ -68,7 +68,7 @@ test_service_account_may_not_read_the_payout_queue if {
 test_operator_may_read_a_contract if {
 	rest.allow with input as {
 		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
-		"action": "pension.contract.read",
+		"action": "pension.contract.inspect",
 	}
 }
 
@@ -96,7 +96,7 @@ test_other_service_account_may_not_create if {
 test_anonymous_may_not_read if {
 	not rest.allow with input as {
 		"principal": {"type": "ANONYMOUS", "id": "", "roles": []},
-		"action": "pension.contract.read",
+		"action": "pension.contract.inspect",
 	}
 }
 
@@ -177,7 +177,7 @@ test_service_account_operator_may_not_relay if {
 test_compliance_may_read_but_not_act if {
 	rest.allow with input as {
 		"principal": {"type": "HUMAN", "id": "carol", "roles": ["ROLE_COMPLIANCE"]},
-		"action": "pension.operator.read",
+		"action": "pension.operator.inspect",
 	}
 	not rest.allow with input as {
 		"principal": {"type": "HUMAN", "id": "carol", "roles": ["ROLE_COMPLIANCE"]},
@@ -190,7 +190,7 @@ test_compliance_may_read_but_not_act if {
 test_edge_may_read_funding if {
 	rest.allow with input as {
 		"principal": {"type": "HUMAN", "id": pension_edge, "roles": ["ROLE_API"]},
-		"action": "pension.funding.read",
+		"action": "pension.funding.inspect",
 	}
 }
 
@@ -260,7 +260,7 @@ test_operator_may_not_set_up_a_mandate if {
 test_operator_may_read_funding if {
 	rest.allow with input as {
 		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
-		"action": "pension.funding.read",
+		"action": "pension.funding.inspect",
 	}
 }
 
@@ -280,7 +280,7 @@ test_edge_may_sign_a_termination_and_confirm_a_payout if {
 test_operator_may_read_exits_but_not_move_money if {
 	rest.allow with input as {
 		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
-		"action": "pension.exit.read",
+		"action": "pension.exit.inspect",
 	}
 	not rest.allow with input as {
 		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
@@ -293,7 +293,7 @@ test_operator_may_read_exits_but_not_move_money if {
 }
 
 test_operator_may_work_a_death_claim if {
-	every action in {"pension.death.read", "pension.death.notify", "pension.death.verify", "pension.death.approve"} {
+	every action in {"pension.death.inspect", "pension.death.notify", "pension.death.verify", "pension.death.approve"} {
 		rest.allow with input as {
 			"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
 			"action": action,
@@ -319,5 +319,95 @@ test_viewer_may_not_notify_a_death if {
 	not rest.allow with input as {
 		"principal": {"type": "HUMAN", "id": "bob", "roles": ["ROLE_VIEWER"]},
 		"action": "pension.death.notify",
+	}
+}
+
+# --- #12371: no pension read rides the base read-any grants ------------------------------------
+# Base rest.rego admits any action ending in `.read`/`.list` to a HUMAN with ROLE_OPERATOR/ADMIN
+# (operator-read-any) or ROLE_COMPLIANCE (compliance-read-any), and the shared M2M account is
+# classified HUMAN and holds those roles. The reads are therefore named `*.inspect`; these tests
+# fail the day one is renamed back to `.read`.
+
+pension_inspect_actions := {
+	"pension.contract.inspect",
+	"pension.exit.inspect",
+	"pension.funding.inspect",
+	"pension.death.inspect",
+	"pension.onboarding.inspect",
+	"pension.transfer.inspect",
+	"pension.operator.inspect",
+}
+
+test_shared_service_account_may_not_inspect_any_pension_data if {
+	every action in pension_inspect_actions {
+		every role in {"ROLE_OPERATOR", "ROLE_COMPLIANCE", "ROLE_ADMIN"} {
+			not rest.allow with input as {
+				"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": [role]},
+				"action": action,
+			}
+		}
+	}
+}
+
+test_shared_service_account_with_every_role_may_not_inspect if {
+	every action in pension_inspect_actions {
+		not rest.allow with input as {
+			"principal": {
+				"type": "HUMAN", "id": "service-account-openbank-services",
+				"roles": ["ROLE_OPERATOR", "ROLE_COMPLIANCE", "ROLE_ADMIN", "ROLE_API"],
+			},
+			"action": action,
+		}
+	}
+}
+
+test_no_pension_action_carries_a_read_any_verb if {
+	every action in pension_inspect_actions {
+		not endswith(action, ".read")
+		not endswith(action, ".list")
+	}
+}
+
+# Known-positives: the narrow rules still admit the intended callers.
+test_staff_operator_may_inspect_staff_facing_pension_data if {
+	every action in {
+		"pension.contract.inspect", "pension.exit.inspect", "pension.funding.inspect",
+		"pension.death.inspect", "pension.operator.inspect",
+	} {
+		rest.allow with input as {
+			"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
+			"action": action,
+		}
+	}
+}
+
+test_edge_may_inspect_participant_pension_data if {
+	every action in {
+		"pension.contract.inspect", "pension.exit.inspect", "pension.funding.inspect",
+		"pension.onboarding.inspect", "pension.transfer.inspect",
+	} {
+		rest.allow with input as {
+			"principal": {"type": "HUMAN", "id": pension_edge, "roles": ["ROLE_API"]},
+			"action": action,
+		}
+	}
+}
+
+# Participant-scoped reads (the service requires X-Customer-Party-Id) are edge-only, staff too.
+test_staff_may_not_inspect_participant_only_reads if {
+	every action in {"pension.onboarding.inspect", "pension.transfer.inspect"} {
+		not rest.allow with input as {
+			"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR", "ROLE_COMPLIANCE"]},
+			"action": action,
+		}
+	}
+}
+
+test_edge_may_not_inspect_staff_only_reads if {
+	every action in {"pension.death.inspect", "pension.operator.inspect"} {
+		not rest.allow with input as {
+			"principal": {"type": "HUMAN", "id": pension_edge, "roles": ["ROLE_API"]},
+			"action": action,
+		}
 	}
 }
