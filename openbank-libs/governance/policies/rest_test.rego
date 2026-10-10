@@ -1577,7 +1577,7 @@ test_allow_human_admin_generic_read if {
 # service-account holding ROLE_OPERATOR/ROLE_ADMIN. The deployed realm gives
 # service-account-openbank-edge ROLE_OPERATOR and customer-edge reads ~20 services through it,
 # several with no edge-named rule — retiring this grant for machines needs that inventory first
-# (#12486). When it is retired, flip this to a deny.
+# (ADR-0223 D2(b–c)). When it is retired, flip this to a deny.
 test_operator_read_any_still_admits_service_account_pending_edge_inventory if {
 	reasons := rest.allowed_reasons with input as {
 		"principal": {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
