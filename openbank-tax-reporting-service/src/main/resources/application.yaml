@@ -79,6 +79,12 @@ mp:
         failure-strategy: dead-letter-queue
         dead-letter-queue:
           topic: openbank.dlq.tax-reporting.withholding-remitted-in
+          # Keep the original producer bytes, not a JSON-quoted String. The real broker IT
+          # caught SmallRye's otherwise selected JSON serializer double-encoding this value.
+          key:
+            serializer: org.apache.kafka.common.serialization.StringSerializer
+          value:
+            serializer: org.apache.kafka.common.serialization.StringSerializer
         connector: smallrye-kafka
         topic: openbank.interest.accrual.event
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
