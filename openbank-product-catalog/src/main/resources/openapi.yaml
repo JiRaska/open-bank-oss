@@ -1011,6 +1011,7 @@ components:
         checkerId: { type: [string, 'null'] }
         reason: { type: [string, 'null'] }
         contentHash: { type: [string, 'null'], pattern: '^[0-9a-f]{64}$' }
+        pensionApprovalDigest: { type: [string, 'null'], pattern: '^[0-9a-f]{64}$' }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
         revision: { type: integer, format: int64, minimum: 0 }

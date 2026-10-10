@@ -277,6 +277,25 @@ allowed_reasons contains "commstyle-read-publish-approval" if {
 	input.action == "commstyle.approval.read"
 }
 
+# Pension catalog approval is a distinct human decision, never a generic publish grant.
+# The endpoint checks the requested legal/product role and immutable JWT actor identity.
+allowed_reasons contains "pension-catalog-decide-approval" if {
+	input.principal.type == "HUMAN"
+	not startswith(input.principal.id, "service-account-")
+	input.action == "catalog.pensionApproval.decide"
+	input.resource.id
+	some role in {"PENSION_LEGAL_APPROVER", "PENSION_PRODUCT_OWNER"}
+	role in input.principal.roles
+}
+
+allowed_reasons contains "pension-catalog-read-approval" if {
+	input.principal.type == "HUMAN"
+	not startswith(input.principal.id, "service-account-")
+	input.action == "catalog.pensionApproval.read"
+	input.resource.id
+	"CATALOG_SCOPE_READ" in input.principal.roles
+}
+
 # Authenticated customers may perform any `customer.*` action (initiate payments, enroll
 # devices, register, etc.). The JWT `sub` equals the partyId in the customer realm
 # (ADR-0065/0066). Per-handler IDOR guards (e.g. debtorAccountId ownership in

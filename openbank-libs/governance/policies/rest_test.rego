@@ -1474,6 +1474,50 @@ test_commstyle_publish_allows_human_approver if {
 	decision.reason == "commstyle-publish"
 }
 
+test_pension_catalog_approval_allows_role_qualified_human if {
+	decision := rest.allow with input as {
+		"principal": {"id": "legal-reviewer", "type": "HUMAN", "roles": ["PENSION_LEGAL_APPROVER"]},
+		"action": "catalog.pensionApproval.decide",
+		"resource": {"type": "catalog", "id": "offering-1"},
+	}
+		with data.openbank.bundle as bundle
+
+	decision.allow == true
+	decision.reason == "pension-catalog-decide-approval"
+}
+
+test_pension_catalog_approval_does_not_grant_generic_publish if {
+	not rest.allow with input as {
+		"principal": {"id": "legal-reviewer", "type": "HUMAN", "roles": ["PENSION_LEGAL_APPROVER"]},
+		"action": "catalog.publish",
+		"resource": {"type": "catalog", "id": "offering-1"},
+	}
+}
+
+test_pension_catalog_approval_denies_service_account if {
+	not rest.allow with input as {
+		"principal": {"id": "service-account-catalog", "type": "HUMAN", "roles": ["PENSION_PRODUCT_OWNER"]},
+		"action": "catalog.pensionApproval.decide",
+		"resource": {"type": "catalog", "id": "offering-1"},
+	}
+}
+
+test_pension_catalog_approval_read_requires_read_scope if {
+	decision := rest.allow with input as {
+		"principal": {"id": "legal-reviewer", "type": "HUMAN", "roles": ["CATALOG_SCOPE_READ"]},
+		"action": "catalog.pensionApproval.read",
+		"resource": {"type": "catalog", "id": "offering-1"},
+	}
+		with data.openbank.bundle as bundle
+
+	decision.allow == true
+	not rest.allow with input as {
+		"principal": {"id": "legal-reviewer", "type": "HUMAN", "roles": ["PENSION_LEGAL_APPROVER"]},
+		"action": "catalog.pensionApproval.read",
+		"resource": {"type": "catalog", "id": "offering-1"},
+	}
+}
+
 test_commstyle_publish_denies_service_account_with_every_role if {
 	not rest.allow with input as {
 		"principal": {

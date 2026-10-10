@@ -12,6 +12,8 @@ import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.module.kotlin.extensions.Extract
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
@@ -20,7 +22,10 @@ import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.hasItem
+import org.junit.jupiter.api.MethodOrderer
+import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.TestMethodOrder
 import java.time.Instant
 import java.util.UUID
 import javax.sql.DataSource
@@ -40,6 +45,7 @@ import javax.sql.DataSource
     initArgs = [ResourceArg(name = "db", value = "openbank_products")],
 )
 @TestSecurity(user = "retirement-pack-operator", roles = ["ROLE_OPERATOR"])
+@TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 class RetirementCatalogPackResourceTest {
 
     @Inject
@@ -254,6 +260,120 @@ class RetirementCatalogPackResourceTest {
     }
 
     @Test
+    @Order(1)
+    @TestSecurity(
+        user = "legal-reviewer",
+        roles = ["ROLE_OPERATOR"],
+        augmentors = [com.openbank.productcatalog.infrastructure.security.CatalogScopeIdentityAugmentor::class],
+    )
+    @OidcSecurity(
+        claims = [
+            Claim(key = "scope", value = "pension:legal-approve"),
+            Claim(key = "iss", value = "https://example.invalid/legal-issuer"),
+            Claim(key = "sub", value = "legal-reviewer"),
+        ],
+    )
+    fun `legal JWT approval rejects maker and cross role then records evidence`() {
+        val offering = fixtureOfferings().first { it["attributes"]["productLine"].asText() == "DIP" }
+        val uniqueCode = "CZ_DIP_JWT_${UUID.randomUUID().toString().replace("-", "").uppercase()}"
+        val specificationId = createSpecification(uniqueCode, version = 2)
+        val offeringId = createOffering(specificationId, uniqueCode)
+        val attributes = (offering["attributes"].deepCopy<JsonNode>() as ObjectNode).apply {
+            putArray("instrumentClasses").add("BOND_FUNDS").add("EQUITY_FUNDS")
+            put("reviewStatus", "LEGAL_AND_COMMERCIAL_REVIEWED")
+        }
+        val revisionId = createRevision(
+            offeringId,
+            offering,
+            version = 2,
+            attributes = attributes,
+            effectiveFrom = "2027-05-01T00:00:00Z",
+        )
+        val base = "/api/v2/offerings/$offeringId/revisions/$revisionId/pension-approvals"
+        Given {
+            contentType("application/json")
+            header("If-Match", "\"0\"")
+            body("""{"reason":"independent legal review"}""")
+        } When { post("$base/PRODUCT_OWNER") } Then { statusCode(403) }
+        Given {
+            contentType("application/json")
+            header("If-Match", "\"0\"")
+            body("""{"reason":"independent legal review"}""")
+        } When { post("$base/LEGAL_COUNSEL") } Then { statusCode(403) }
+        setMaker(revisionId, "independent-maker")
+        Given {
+            contentType("application/json")
+            header("If-Match", "\"0\"")
+            body("""{"reason":"independent legal review"}""")
+        } When { post("$base/LEGAL_COUNSEL") } Then { statusCode(201) }
+        httpApprovalOffering = offeringId
+        httpApprovalRevision = revisionId
+    }
+
+    @Test
+    @Order(2)
+    @TestSecurity(
+        user = "product-reviewer",
+        roles = ["ROLE_OPERATOR"],
+        augmentors = [com.openbank.productcatalog.infrastructure.security.CatalogScopeIdentityAugmentor::class],
+    )
+    @OidcSecurity(
+        claims = [
+            Claim(key = "scope", value = "pension:product-approve"),
+            Claim(key = "iss", value = "https://example.invalid/product-issuer"),
+            Claim(key = "sub", value = "product-reviewer"),
+        ],
+    )
+    fun `product JWT approval completes distinct evidence and permits publish`() {
+        val offeringId = requireNotNull(httpApprovalOffering)
+        val revisionId = requireNotNull(httpApprovalRevision)
+        val base = "/api/v2/offerings/$offeringId/revisions/$revisionId"
+        Given {
+            contentType("application/json")
+            header("If-Match", "\"0\"")
+            body("""{"reason":"independent product review"}""")
+        } When { post("$base/pension-approvals/LEGAL_COUNSEL") } Then { statusCode(403) }
+        Given {
+            contentType("application/json")
+            header("If-Match", "\"0\"")
+            body("""{"reason":"independent product review"}""")
+        } When { post("$base/pension-approvals/PRODUCT_OWNER") } Then { statusCode(201) }
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "SELECT role, issuer, subject FROM pension_revision_approvals WHERE revision_id = ? ORDER BY role",
+            ).use { statement ->
+                statement.setObject(1, revisionId)
+                statement.executeQuery().use { rows ->
+                    check(rows.next())
+                    assertThat(rows.getString("role")).isEqualTo("LEGAL_COUNSEL")
+                    assertThat(rows.getString("issuer")).isEqualTo("https://example.invalid/legal-issuer")
+                    assertThat(rows.getString("subject")).isEqualTo("legal-reviewer")
+                    check(rows.next())
+                    assertThat(rows.getString("role")).isEqualTo("PRODUCT_OWNER")
+                    assertThat(rows.getString("issuer")).isEqualTo("https://example.invalid/product-issuer")
+                    assertThat(rows.getString("subject")).isEqualTo("product-reviewer")
+                    assertThat(rows.next()).isFalse()
+                }
+            }
+        }
+        Given {
+            contentType("application/json")
+            header("If-Match", "\"0\"")
+            body("""{"reason":"separately reviewed pension composition"}""")
+        } When { post("$base/publish") } Then {
+            statusCode(200)
+            body("state", equalTo("PUBLISHED"))
+        }
+        Given { this } When {
+            get("/api/v2/products/$offeringId?effectiveAt=2027-05-02T00:00:00Z")
+        } Then {
+            statusCode(200)
+            body("id", equalTo(revisionId.toString()))
+            body("pensionApprovalDigest", equalTo(approvalDigest(revisionId)))
+        }
+    }
+
+    @Test
     fun `inconsistent or out-of-range retirement attributes are rejected`() {
         val base = fixtureOfferings().first { it["attributes"]["productLine"].asText() == "DPS" }["attributes"]
         validate(base.toString(), expectedValid = true)
@@ -356,6 +476,18 @@ class RetirementCatalogPackResourceTest {
         }
     }
 
+    private fun approvalDigest(revisionId: UUID): String = dataSource.connection.use { connection ->
+        connection.prepareStatement(
+            "SELECT pension_approval_digest FROM catalog_revisions WHERE id = ?",
+        ).use { statement ->
+            statement.setObject(1, revisionId)
+            statement.executeQuery().use { rows ->
+                check(rows.next())
+                requireNotNull(rows.getString(1))
+            }
+        }
+    }
+
     private fun setDraftReviewStatus(revisionId: UUID, status: String) {
         dataSource.connection.use { connection ->
             connection.prepareStatement(
@@ -414,5 +546,7 @@ class RetirementCatalogPackResourceTest {
     private companion object {
         const val SCHEMA_ID = "org.openbank.retirement.pension-savings"
         val STRATEGIES = listOf("CONSERVATIVE", "BALANCED", "DYNAMIC", "LIFECYCLE")
+        var httpApprovalOffering: UUID? = null
+        var httpApprovalRevision: UUID? = null
     }
 }

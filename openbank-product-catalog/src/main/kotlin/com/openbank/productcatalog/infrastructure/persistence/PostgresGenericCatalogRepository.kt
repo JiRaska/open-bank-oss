@@ -630,6 +630,7 @@ class PostgresGenericCatalogRepository(
         createdAt = createdAt,
         updatedAt = updatedAt,
         revision = revision,
+        pensionApprovalDigest = pensionApprovalDigest,
     )
 
     private fun SchemaRef.key(): String = "$id:$version"

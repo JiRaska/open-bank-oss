@@ -40,13 +40,8 @@ class PensionRevisionApprovalResource(
     private val identity: SecurityIdentity,
 ) {
     @GET
-    @Authorize(action = "catalog.read", resource = "#offeringId")
-    @RolesAllowed(
-        CatalogRoles.READ,
-        CatalogRoles.AUTHOR,
-        CatalogRoles.PENSION_LEGAL_APPROVER,
-        CatalogRoles.PENSION_PRODUCT_OWNER,
-    )
+    @Authorize(action = "catalog.pensionApproval.read", resource = "#offeringId")
+    @RolesAllowed(CatalogRoles.READ)
     suspend fun list(
         @PathParam("offeringId") offeringId: UUID,
         @PathParam("revisionId") revisionId: UUID,
@@ -56,7 +51,7 @@ class PensionRevisionApprovalResource(
     }
 
     @POST
-    @Authorize(action = "catalog.publish", resource = "#offeringId")
+    @Authorize(action = "catalog.pensionApproval.decide", resource = "#offeringId")
     @Path("/{role}")
     @Consumes(MediaType.APPLICATION_JSON)
     @RolesAllowed(CatalogRoles.PENSION_LEGAL_APPROVER, CatalogRoles.PENSION_PRODUCT_OWNER)
