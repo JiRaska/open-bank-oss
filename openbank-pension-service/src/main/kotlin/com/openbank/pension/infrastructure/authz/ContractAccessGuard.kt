@@ -80,8 +80,7 @@ class ContractAccessGuard {
 
     // Pension-local until the libs ServiceAccountIdentity helper (#12463) lands; Keycloak names every
     // client_credentials principal `service-account-<clientId>`.
-    private fun isServiceAccount(): Boolean =
-        identity.principal?.name?.startsWith(SERVICE_ACCOUNT_PREFIX) ?: false
+    private fun isServiceAccount(): Boolean = identity.principal?.name?.startsWith(SERVICE_ACCOUNT_PREFIX) ?: false
 
     private fun vouchedParty(header: String): UUID {
         val principal = identity.principal?.name
