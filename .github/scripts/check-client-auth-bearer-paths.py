@@ -131,12 +131,18 @@ def covers(pattern: str, root: str) -> bool:
 def overlaps(pattern: str, root: str) -> bool:
     if pattern == root or covers(pattern, root):
         return True
-    if pattern.endswith("/*") and "*" not in pattern[:-1]:
-        prefix = pattern[:-2]
-        return prefix.startswith(root.rstrip("/") + "/")
     if "*" in pattern or "{" in pattern or "}" in pattern:
-        return True  # cannot prove a competing permission disjoint: fail closed
-    return pattern.startswith(root.rstrip("/") + "/") or root.startswith(pattern.rstrip("/") + "/")
+        if not pattern.endswith("/*") or "*" in pattern[:-1] or "{" in pattern or "}" in pattern:
+            return True  # cannot prove a competing permission disjoint: fail closed
+        pattern = pattern[:-2]
+        wildcard = True
+    else:
+        wildcard = False
+    route = [part for part in root.strip("/").split("/") if part]
+    candidate = [part for part in pattern.strip("/").split("/") if part]
+    shared = min(len(route), len(candidate))
+    same = all(a == b or (a.startswith("{") and a.endswith("}")) for a, b in zip(route[:shared], candidate[:shared]))
+    return same and (wildcard or len(candidate) >= len(route))
 
 
 def findings_for(doc: dict, sources: dict[str, str]) -> tuple[bool, list[str]]:
@@ -189,6 +195,7 @@ def self_test() -> int:
         ("second root uncovered", good, {**source, "Other.kt": '@Path("/internal/items")\nclass OtherResource\n'}, True),
         ("client interface does not count", good, {"Client.kt": '@Path("/other")\ninterface OutboundClient\n', **source}, False),
         ("more-specific non-bearer overlap", {"%prod": {**good["%prod"], "quarkus.http.auth.permission.open.paths": "/api/v1/things/public/*", "quarkus.http.auth.permission.open.policy": "permit"}}, source, True),
+        ("path-parameter overlap", {"%prod": {**good["%prod"], "quarkus.http.auth.permission.open.paths": "/api/v1/accounts/123/authorizations/*", "quarkus.http.auth.permission.open.policy": "permit"}}, {"Resource.kt": '@Path("/api/v1/accounts/{accountId}/authorizations")\nclass Resource\n'}, True),
         ("unresolved client-auth", {"%prod": {"quarkus.http.ssl.client-auth": "${CLIENT_AUTH:required}"}}, source, True),
         ("zero resource roots", good, {"Client.kt": '@Path("/api/v1/things")\ninterface OutboundClient\n'}, True),
     ]
