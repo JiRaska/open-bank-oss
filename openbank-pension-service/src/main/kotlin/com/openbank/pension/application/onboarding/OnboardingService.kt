@@ -32,6 +32,9 @@ import com.openbank.pension.domain.pack.ProviderType
 import com.openbank.pension.domain.questionnaire.QuestionSetRegistry
 import com.openbank.pension.domain.questionnaire.ReassessmentPolicy
 import com.openbank.pension.domain.questionnaire.RefreshReason
+import com.openbank.pension.domain.questionnaire.StrategyInstrumentDecision
+import com.openbank.pension.domain.questionnaire.StrategyInstrumentGate
+import com.openbank.pension.domain.questionnaire.StrategyInstrumentMappingPort
 import com.openbank.pension.domain.questionnaire.WarningAcknowledgement
 import com.openbank.pension.domain.questionnaire.WarningCode
 import com.openbank.pension.domain.questionnaire.WarningPolicy
@@ -97,6 +100,7 @@ class OnboardingService(
     private val tx: TransactionRunner,
     private val clock: Clock,
     private val questionSets: QuestionSetRegistry,
+    private val instrumentMappings: StrategyInstrumentMappingPort? = null,
 ) {
 
     private fun today(): LocalDate = LocalDate.now(clock)
@@ -214,7 +218,33 @@ class OnboardingService(
         build: (OnboardingApplication, OnboardingRules) -> SuitabilityAssessment,
     ): Pair<OnboardingApplication, StrategyRecommendation> {
         val application = live(id, partyId)
-        val assessment = build(application, rulesFor(application))
+        val onboarding = rulesFor(application)
+        val built = build(application, onboarding)
+        if (onboarding.questionnaire.appropriatenessTest) {
+            check(built.questionnaire != null) {
+                "the versioned questionnaire is required to assess instrument-class appropriateness"
+            }
+        }
+        val assessment = if (onboarding.questionnaire.appropriatenessTest) {
+            val catalog = checkNotNull(instrumentMappings) { "instrument mapping catalog is unavailable" }
+            built.copy(
+                strategyInstrumentMappings = onboarding.strategies.map { strategy ->
+                    val matches = catalog.effectivePublished(
+                        application.jurisdiction, application.productLine, strategy.code, now(),
+                    )
+                    check(matches.size == 1) {
+                        "exactly one published instrument mapping is required for ${strategy.code}"
+                    }
+                    val mapping = matches.single()
+                    check(
+                        mapping.jurisdiction == application.jurisdiction &&
+                            mapping.productLine == application.productLine &&
+                            mapping.strategyCode == strategy.code,
+                    ) { "instrument mapping scope mismatch" }
+                    mapping
+                },
+            )
+        } else built
         val recommendation = recommend(application, assessment)
         val saved = tx.inTransaction {
             application.assessmentId?.let { previous ->
@@ -353,7 +383,11 @@ class OnboardingService(
         val onboarding = rulesFor(application)
         requireNotNull(onboarding.strategy(strategyCode)) { "strategy $strategyCode is not offered under this pack" }
         val assessment = currentAssessment(application)
-        val required = WarningPolicy.required(strategyCode, assessment, recommend(application, assessment))
+        val required = WarningPolicy.required(
+            strategyCode,
+            assessmentForChoice(application, assessment, strategyCode),
+            recommend(application, assessment),
+        )
         require(codes.isNotEmpty()) { "at least one warning code is required" }
         require(required.containsAll(codes)) {
             "warnings ${(codes - required).joinToString()} do not apply to $strategyCode"
@@ -372,6 +406,18 @@ class OnboardingService(
         return recommend(application, currentAssessment(application))
     }
 
+    /** Strategy-specific warning preview, using the same mapping decision as acknowledgement and choice. */
+    suspend fun requiredWarnings(id: UUID, partyId: UUID, strategyCode: String): Set<WarningCode> {
+        val application = get(id, partyId)
+        require(offers(application, strategyCode)) { "strategy $strategyCode is not offered under this pack" }
+        val assessment = currentAssessment(application)
+        return WarningPolicy.required(
+            strategyCode,
+            assessmentForChoice(application, assessment, strategyCode),
+            recommend(application, assessment),
+        )
+    }
+
     /**
      * Fixes the strategy and issues the key-information document for exactly it. Under MiFID a
      * strategy above the suitable class is refused; under a lighter regime the pack may allow it
@@ -384,7 +430,12 @@ class OnboardingService(
         val recommendation = recommend(application, assessment)
         val code = command.strategyCode ?: recommendation.recommended
         requireNotNull(onboarding.strategy(code)) { "strategy $code is not offered under this pack" }
-        val required = WarningPolicy.required(code, assessment, recommendation)
+        val decision = instrumentDecision(application, assessment, code)
+        val required = WarningPolicy.required(
+            code,
+            if (decision == null) assessment else assessment.copy(appropriate = decision.appropriate),
+            recommendation,
+        )
         if (WarningCode.STRATEGY_ABOVE_PROFILE in required) {
             require(WarningPolicy.overridable(WarningCode.STRATEGY_ABOVE_PROFILE, onboarding)) {
                 "strategy $code is above the suitable risk class ${recommendation.maxRiskClass}"
@@ -404,7 +455,7 @@ class OnboardingService(
             ),
         )
         val kid = IssuedKid(document.documentId, document.sha256, code, now())
-        return applications.save(application.issueKid(code, required.isNotEmpty(), kid, now()))
+        return applications.save(application.issueKid(code, required.isNotEmpty(), kid, now(), decision))
     }
 
     suspend fun acceptKid(id: UUID, partyId: UUID, documentId: String): OnboardingApplication =
@@ -425,6 +476,7 @@ class OnboardingService(
         check(live.status == OnboardingStatus.KID_ACCEPTED) { "the key-information document must be accepted first" }
         val kid = checkNotNull(live.kid)
         requireWarningsAcknowledged(live)
+        requireCurrentInstrumentDecision(live)
         // Bound to THIS application and THIS document; the signer is the acting party (the
         // guardian, for a ward). sca-service spends the challenge, so it cannot sign twice.
         val outcome = signatures.verify(partyId, challengeId, kid.sha256, "pension-onboarding:$id:${kid.documentId}")
@@ -665,7 +717,9 @@ class OnboardingService(
     private suspend fun requireWarningsAcknowledged(application: OnboardingApplication) {
         val assessment = currentAssessment(application)
         val strategy = checkNotNull(application.chosenStrategy) { "no strategy has been chosen" }
-        val required = WarningPolicy.required(strategy, assessment, recommend(application, assessment))
+        val required = WarningPolicy.required(
+            strategy, assessmentForChoice(application, assessment, strategy), recommend(application, assessment),
+        )
         val missing = missingWarnings(application, required, assessment, strategy)
         check(missing.isEmpty()) { "warnings must be acknowledged before signing: ${missing.joinToString()}" }
     }
@@ -692,6 +746,49 @@ class OnboardingService(
     private fun questionSetFor(application: OnboardingApplication, assessment: SuitabilityAssessment) =
         assessment.questionnaire?.let { questionSets.questionSet(it.questionSetId, it.questionSetVersion) }
             ?: questionSets.questionSet(application.jurisdiction, application.productLine)
+
+    private suspend fun assessmentForChoice(
+        application: OnboardingApplication,
+        assessment: SuitabilityAssessment,
+        strategy: String,
+    ): SuitabilityAssessment = instrumentDecision(application, assessment, strategy)?.let {
+        assessment.copy(appropriate = it.appropriate)
+    } ?: assessment
+
+    private suspend fun instrumentDecision(
+        application: OnboardingApplication,
+        assessment: SuitabilityAssessment,
+        strategy: String,
+    ): StrategyInstrumentDecision? {
+        val questionnaire = rulesFor(application).questionnaire
+        if (!questionnaire.appropriatenessTest) return null
+        val pinned = checkNotNull(assessment.strategyInstrumentMappings) {
+            "assessment predates strategy instrument mapping; answer the questionnaire again"
+        }.filter { it.strategyCode == strategy }
+        check(pinned.size == 1) { "assessment has no unique instrument mapping for $strategy" }
+        val current = checkNotNull(instrumentMappings) { "instrument mapping catalog is unavailable" }
+            .effectivePublished(application.jurisdiction, application.productLine, strategy, now())
+        val decision = StrategyInstrumentGate.evaluate(
+            assessment, application.jurisdiction, strategy, pinned, questionnaire.appropriatenessMinScore,
+        )
+        StrategyInstrumentGate.requireCurrent(decision, current)
+        return decision
+    }
+
+    private suspend fun requireCurrentInstrumentDecision(application: OnboardingApplication) {
+        if (!rulesFor(application).questionnaire.appropriatenessTest) return
+        val assessment = currentAssessment(application)
+        val strategy = checkNotNull(application.chosenStrategy)
+        val pinned = checkNotNull(application.strategyInstrumentDecision) {
+            "strategy decision predates instrument mapping; choose the strategy again"
+        }
+        check(pinned.assessmentId == assessment.id && pinned.strategyCode == strategy) {
+            "strategy instrument decision does not match the current assessment"
+        }
+        check(pinned == instrumentDecision(application, assessment, strategy)) {
+            "strategy instrument decision has changed"
+        }
+    }
 
     private fun rulesFor(application: OnboardingApplication) =
         rules.rules(application.jurisdiction, application.productLine, application.packVersion)

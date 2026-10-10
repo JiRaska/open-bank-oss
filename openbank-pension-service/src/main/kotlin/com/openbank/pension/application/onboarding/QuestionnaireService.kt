@@ -16,7 +16,6 @@ import com.openbank.pension.domain.questionnaire.QuestionnaireProgress
 import com.openbank.pension.domain.questionnaire.QuestionnaireRecord
 import com.openbank.pension.domain.questionnaire.ReassessmentPolicy
 import com.openbank.pension.domain.questionnaire.WarningCode
-import com.openbank.pension.domain.questionnaire.WarningPolicy
 import java.math.BigDecimal
 import java.time.Clock
 import java.time.LocalDate
@@ -153,11 +152,7 @@ class QuestionnaireService(
             assessment = assessment,
             questionSet = setFor(application, assessment),
             recommendation = recommendation,
-            recommendedStrategyWarnings = WarningPolicy.required(
-                recommendation.recommended,
-                assessment,
-                recommendation,
-            ),
+            recommendedStrategyWarnings = onboarding.requiredWarnings(id, partyId, recommendation.recommended),
         )
     }
 
@@ -169,8 +164,7 @@ class QuestionnaireService(
         }
         val assessment =
             checkNotNull(onboarding.assessmentOf(id, partyId)) { "the questionnaire has not been answered" }
-        val recommendation = onboarding.recommendation(id, partyId)
-        return setFor(application, assessment) to WarningPolicy.required(strategyCode, assessment, recommendation)
+        return setFor(application, assessment) to onboarding.requiredWarnings(id, partyId, strategyCode)
     }
 
     private fun view(application: OnboardingApplication, previous: SuitabilityAssessment?): QuestionnaireView {

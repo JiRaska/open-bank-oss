@@ -9,6 +9,7 @@ import com.openbank.pension.application.onboarding.GeneratedDocument
 import com.openbank.pension.application.onboarding.KeyInformationDocumentPort
 import com.openbank.pension.application.onboarding.OnboardingApplicationRepository
 import com.openbank.pension.application.onboarding.OnboardingService
+import com.openbank.pension.application.onboarding.ProfileView
 import com.openbank.pension.application.onboarding.QuestionnaireService
 import com.openbank.pension.application.onboarding.SignatureVerificationPort
 import com.openbank.pension.application.onboarding.SuitabilityAssessmentRepository
@@ -16,14 +17,18 @@ import com.openbank.pension.domain.model.ContributionFrequency
 import com.openbank.pension.domain.model.ContributionSchedule
 import com.openbank.pension.domain.model.ProductLine
 import com.openbank.pension.domain.onboarding.ApplicantFacts
+import com.openbank.pension.domain.onboarding.EsgPreference
 import com.openbank.pension.domain.onboarding.IssuedKid
 import com.openbank.pension.domain.onboarding.OnboardingApplication
 import com.openbank.pension.domain.onboarding.OnboardingKind
 import com.openbank.pension.domain.onboarding.QuestionnaireAnswers
 import com.openbank.pension.domain.onboarding.SuitabilityAssessment
 import com.openbank.pension.domain.pack.ProviderType
+import com.openbank.pension.domain.questionnaire.InstrumentCompetence
 import com.openbank.pension.domain.questionnaire.LocalizedText
 import com.openbank.pension.domain.questionnaire.QuestionnaireRecord
+import com.openbank.pension.domain.questionnaire.StrategyInstrumentMapping
+import com.openbank.pension.domain.questionnaire.StrategyInstrumentMappingPort
 import com.openbank.pension.domain.questionnaire.SustainabilityPreference
 import com.openbank.pension.domain.questionnaire.WarningCode
 import com.openbank.pension.domain.questionnaire.WarningPolicy
@@ -31,6 +36,7 @@ import com.openbank.pension.infrastructure.onboarding.pack.OnboardingRulesLoader
 import com.openbank.pension.infrastructure.onboarding.pack.QuestionSetLoader
 import com.openbank.pension.infrastructure.onboarding.pack.StaticOnboardingRulesRegistry
 import com.openbank.pension.infrastructure.onboarding.pack.StaticQuestionSetRegistry
+import com.openbank.pension.infrastructure.onboarding.rest.ProfileResponse
 import com.openbank.pension.infrastructure.pack.JurisdictionPackLoader
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -238,5 +244,82 @@ class QuestionnaireWarningGateTest {
             ChooseStrategyCommand("DYNAMIC", false, "en"),
         )
         assertThat(issued.chosenStrategy).isEqualTo("DYNAMIC")
+    }
+
+    @Test
+    fun `pre-mapping DIP assessment cannot choose a strategy or spend SCA`(): Unit = runBlocking {
+        val dip = submitted().copy(productLine = ProductLine.DIP)
+        val oldAssessment = assessment.copy(productLine = ProductLine.DIP, appropriate = true)
+        coEvery { applications.findById(dip.id) } returns dip
+        coEvery { assessments.findById(oldAssessment.id) } returns oldAssessment
+        assertThatThrownBy {
+            runBlocking { service.chooseStrategy(dip.id, party, ChooseStrategyCommand("BALANCED", false, "en")) }
+        }.hasMessageContaining("predates strategy instrument mapping")
+        coVerify(exactly = 0) { documents.generate(any()) }
+
+        val bypassed = dip.issueKid("BALANCED", false, IssuedKid("doc-1", "sha-doc", "BALANCED", now), now)
+            .acceptKid("doc-1", now)
+        coEvery { applications.findById(dip.id) } returns bypassed
+        assertThatThrownBy { runBlocking { service.sign(dip.id, party, "sca-1") } }
+            .hasMessageContaining("predates strategy instrument mapping")
+        coVerify(exactly = 0) { signatures.verify(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `legacy DIP scales cannot create an assessment without per-class evidence`(): Unit = runBlocking {
+        val dip = submitted().copy(productLine = ProductLine.DIP)
+        coEvery { applications.findById(dip.id) } returns dip
+        assertThatThrownBy {
+            runBlocking {
+                service.submitQuestionnaire(
+                    dip.id,
+                    party,
+                    QuestionnaireAnswers(
+                        knowledgeLevel = 3,
+                        experienceLevel = 3,
+                        riskAppetite = 1,
+                        lossTolerance = 1,
+                        financialSituationStable = true,
+                        esgPreference = EsgPreference.NONE,
+                    ),
+                )
+            }
+        }.hasMessageContaining("versioned questionnaire is required")
+        coVerify(exactly = 0) { assessments.save(any()) }
+    }
+
+    @Test
+    fun `warning preview uses selected strategy class rather than aggregate score`(): Unit = runBlocking {
+        val mapping = StrategyInstrumentMapping("CZ", ProductLine.DIP, "BALANCED", "revision-7", setOf("EQUITY"))
+        val dip = submitted().copy(productLine = ProductLine.DIP)
+        val assessed = assessment.copy(
+            productLine = ProductLine.DIP,
+            appropriate = true,
+            questionnaire = QuestionnaireRecord(
+                "cz-dip", 1, emptyMap(), 3, emptyList(),
+                listOf(InstrumentCompetence("EQUITY", 0, 0)),
+                SustainabilityPreference.NONE, null, null, null, emptyList(),
+            ),
+            strategyInstrumentMappings = listOf(mapping),
+        )
+        val catalog = mockk<StrategyInstrumentMappingPort>()
+        coEvery { catalog.effectivePublished("CZ", ProductLine.DIP, "BALANCED", any()) } returns listOf(mapping)
+        coEvery { applications.findById(dip.id) } returns dip
+        coEvery { assessments.findById(assessed.id) } returns assessed
+        val mappedService = OnboardingService(
+            applications, assessments, mockk(), mockk(), packs, rules, mockk(), mockk(), documents, signatures,
+            mockk(), mockk(), clock, questionSets, catalog,
+        )
+        assertThat(mappedService.requiredWarnings(dip.id, party, "BALANCED"))
+            .contains(WarningCode.PRODUCT_NOT_APPROPRIATE)
+        val recommendation = mappedService.recommendation(dip.id, party)
+        val profile = ProfileResponse.from(
+            ProfileView(
+                assessed, questionSets.questionSet("CZ", ProductLine.DIP), recommendation,
+                setOf(WarningCode.PRODUCT_NOT_APPROPRIATE),
+            ),
+            "en",
+        )
+        assertThat(profile.appropriate).isNull()
     }
 }
