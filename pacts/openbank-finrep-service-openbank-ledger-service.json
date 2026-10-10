@@ -31,11 +31,281 @@
             "evidenceState": "LINES_V1",
             "periodType": "MONTH",
             "status": "FROZEN",
+            "to": "2000-01-31"
+          },
+          {
+            "evidenceState": "LINES_V1",
+            "periodType": "MONTH",
+            "status": "FROZEN",
+            "to": "2000-02-29"
+          },
+          {
+            "evidenceState": "LINES_V1",
+            "periodType": "MONTH",
+            "status": "FROZEN",
+            "to": "2000-03-31"
+          },
+          {
+            "evidenceState": "LINES_V1",
+            "periodType": "MONTH",
+            "status": "FROZEN",
+            "to": "2000-04-30"
+          },
+          {
+            "evidenceState": "LINES_V1",
+            "periodType": "MONTH",
+            "status": "FROZEN",
+            "to": "2000-05-31"
+          },
+          {
+            "evidenceState": "LINES_V1",
+            "periodType": "MONTH",
+            "status": "FROZEN",
             "to": "2000-06-30"
           }
         ],
         "headers": {
           "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET frozen January-to-date movements for FINREP F02",
+      "providerStates": [
+        {
+          "name": "ledger has frozen monthly trial balance for the reporting date"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v1/ledger/periods/MONTH/2000-06-30/frozen-year-to-date-trial-balance"
+      },
+      "response": {
+        "body": {
+          "balanced": true,
+          "from": "2000-01-01",
+          "lines": [
+            {
+              "code": "1100",
+              "currency": "CZK",
+              "net": 100.0,
+              "type": "ASSET"
+            }
+          ],
+          "period": "MONTH:2000-06",
+          "sourceContentHashes": [
+            "0000000000000000000000000000000000000000000000000000000000000000",
+            "0000000000000000000000000000000000000000000000000000000000000000",
+            "0000000000000000000000000000000000000000000000000000000000000000",
+            "0000000000000000000000000000000000000000000000000000000000000000",
+            "0000000000000000000000000000000000000000000000000000000000000000",
+            "0000000000000000000000000000000000000000000000000000000000000000"
+          ],
+          "sourcePeriods": [
+            "MONTH:2000-01",
+            "MONTH:2000-02",
+            "MONTH:2000-03",
+            "MONTH:2000-04",
+            "MONTH:2000-05",
+            "MONTH:2000-06"
+          ],
+          "to": "2000-06-30"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.balanced": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.lines": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 0
+                }
+              ]
+            },
+            "$.lines[*].code": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.lines[*].currency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.lines[*].net": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.lines[*].type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.sourceContentHashes[0]": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.sourceContentHashes[1]": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.sourceContentHashes[2]": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.sourceContentHashes[3]": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.sourceContentHashes[4]": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.sourceContentHashes[5]": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET mutable January-to-date movements for FINREP F02 preview",
+      "providerStates": [
+        {
+          "name": "ledger has frozen monthly trial balance for the reporting date"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v1/ledger/periods/MONTH/2000-06-30/year-to-date-trial-balance"
+      },
+      "response": {
+        "body": {
+          "balanced": true,
+          "from": "2000-01-01",
+          "lines": [
+            {
+              "code": "1100",
+              "currency": "CZK",
+              "net": 100.0,
+              "type": "ASSET"
+            }
+          ],
+          "period": "MONTH:2000-06",
+          "to": "2000-06-30"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.balanced": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.lines": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 0
+                }
+              ]
+            },
+            "$.lines[*].code": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.lines[*].currency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.lines[*].net": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.lines[*].type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
         },
         "status": 200
       }

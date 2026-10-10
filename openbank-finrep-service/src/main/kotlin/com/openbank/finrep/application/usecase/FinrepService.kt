@@ -80,8 +80,8 @@ class FinrepService(private val ledgerPort: LedgerPort, private val metrics: Fin
     ): TrialBalanceSnapshot = try {
         when {
             templateId == "F02.00" && evidence == TrialBalanceEvidence.FROZEN ->
-                ledgerPort.getFrozenPeriodMovements(asOf)
-            templateId == "F02.00" -> ledgerPort.getLivePeriodMovements(asOf)
+                ledgerPort.getYearToDateMovements(asOf)
+            templateId == "F02.00" -> ledgerPort.getLiveYearToDateMovements(asOf)
             evidence == TrialBalanceEvidence.FROZEN -> ledgerPort.getTrialBalance(asOf)
             else -> ledgerPort.getLiveTrialBalance(asOf)
         }

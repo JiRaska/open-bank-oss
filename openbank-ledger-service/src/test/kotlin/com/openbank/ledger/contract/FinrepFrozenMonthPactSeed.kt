@@ -34,7 +34,31 @@ object FinrepFrozenMonthPactSeed {
         journal(c)
         line(c, CASH_LINE_ID, CASH_GL_ID, "D", 1)
         line(c, DEPOSITS_LINE_ID, DEPOSITS_GL_ID, "C", 2)
+        (1..5).forEach { month -> emptyEvidence(c, month) }
         evidence(c)
+    }
+
+    private fun emptyEvidence(c: Connection, month: Int) {
+        val period = PeriodType.MONTH.of(LocalDate.of(2000, month, 1))
+        val hash = PeriodTrialBalance(period, emptyList()).contentHash()
+        val periodId = UUID.fromString("00000000-0000-0000-0000-%012d".format(9601 + month))
+        val computedAt = Timestamp.from(Instant.parse("2000-07-01T00:00:00Z"))
+        val frozenAt = Timestamp.from(Instant.parse("2000-07-02T00:00:00Z"))
+        c.prepareStatement(
+            """insert into ledger_closed_period (id, period_type, period_from, period_to, status, evidence_state, computed_at, total_debits, total_credits, account_count, content_hash, drafted_by, frozen_by, frozen_at, created_at, updated_at)
+               values (?, 'MONTH', ?, ?, 'FROZEN', 'LINES_V1', ?, 0, 0, 0, ?, 'maker', 'checker', ?, ?, ?)
+               on conflict (period_type, period_from) do nothing""",
+        ).use { s ->
+            s.setObject(1, periodId)
+            s.setObject(2, java.sql.Date.valueOf(period.from))
+            s.setObject(3, java.sql.Date.valueOf(period.to))
+            s.setTimestamp(4, computedAt)
+            s.setString(5, hash)
+            s.setTimestamp(6, frozenAt)
+            s.setTimestamp(7, computedAt)
+            s.setTimestamp(8, frozenAt)
+            s.executeUpdate()
+        }
     }
 
     private fun journal(c: Connection) = c.prepareStatement(

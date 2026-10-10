@@ -62,14 +62,14 @@ class FinrepServiceTest {
             TrialBalanceLineDto(code = "4100", accountType = "INCOME", net = BigDecimal("-120000"), currency = "CZK"),
             TrialBalanceLineDto(code = "5100", accountType = "EXPENSE", net = BigDecimal("80000"), currency = "CZK"),
         )
-        coEvery { ledgerPort.getFrozenPeriodMovements(asOf) } returns snapshot(lines, ledgerSays = true)
+        coEvery { ledgerPort.getYearToDateMovements(asOf) } returns snapshot(lines, ledgerSays = true)
         val service = FinrepService(ledgerPort, FinrepMetricsAdapter(registry))
 
         val template = service.getTemplate(GetFinrepTemplateQuery(templateId = "F02.00", asOf = asOf))
 
         assertThat(template.templateId).isEqualTo("F02.00")
         assertThat(template.cells).anyMatch { it.rowRef == "r0670" && it.value == BigDecimal("40000") }
-        coVerify(exactly = 1) { ledgerPort.getFrozenPeriodMovements(asOf) }
+        coVerify(exactly = 1) { ledgerPort.getYearToDateMovements(asOf) }
         coVerify(exactly = 0) { ledgerPort.getTrialBalance(any()) }
     }
 
@@ -80,14 +80,14 @@ class FinrepServiceTest {
             TrialBalanceLineDto("4100", "INCOME", BigDecimal("-120000"), "CZK"),
             TrialBalanceLineDto("5100", "EXPENSE", BigDecimal("80000"), "CZK"),
         )
-        coEvery { ledgerPort.getLivePeriodMovements(asOf) } returns snapshot(movements, ledgerSays = true)
+        coEvery { ledgerPort.getLiveYearToDateMovements(asOf) } returns snapshot(movements, ledgerSays = true)
 
         val template = FinrepService(ledgerPort, FinrepMetricsAdapter(registry)).getTemplate(
             GetFinrepTemplateQuery("F02.00", asOf, TrialBalanceEvidence.LIVE_PREVIEW),
         )
 
         assertThat(template.cells).anyMatch { it.rowRef == "r0670" && it.value == BigDecimal("40000") }
-        coVerify(exactly = 1) { ledgerPort.getLivePeriodMovements(asOf) }
+        coVerify(exactly = 1) { ledgerPort.getLiveYearToDateMovements(asOf) }
         coVerify(exactly = 0) { ledgerPort.getLiveTrialBalance(any()) }
     }
 

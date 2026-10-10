@@ -176,6 +176,53 @@ class LedgerTrialBalancePactConsumerTest {
         .body(periodMovementsBody())
         .toPact()
 
+    @Pact(consumer = "openbank-finrep-service", provider = "openbank-ledger-service")
+    fun frozenYearToDateMovementsPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("ledger has frozen monthly trial balance for the reporting date")
+        .uponReceiving("GET frozen January-to-date movements for FINREP F02")
+        .path("$LEDGER_MONTH_TRIAL_BALANCE_PATH/$REPORTING_DATE/frozen-year-to-date-trial-balance")
+        .method("GET")
+        .headers(mapOf("Accept" to "application/json"))
+        .willRespondWith()
+        .status(200)
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(yearToDateMovementsBody(frozen = true))
+        .toPact()
+
+    @Pact(consumer = "openbank-finrep-service", provider = "openbank-ledger-service")
+    fun liveYearToDateMovementsPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("ledger has frozen monthly trial balance for the reporting date")
+        .uponReceiving("GET mutable January-to-date movements for FINREP F02 preview")
+        .path("$LEDGER_MONTH_TRIAL_BALANCE_PATH/$REPORTING_DATE/year-to-date-trial-balance")
+        .method("GET")
+        .headers(mapOf("Accept" to "application/json"))
+        .willRespondWith()
+        .status(200)
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(yearToDateMovementsBody(frozen = false))
+        .toPact()
+
+    private fun yearToDateMovementsBody(frozen: Boolean) = newJsonBody { o ->
+        o.stringValue("period", "MONTH:2000-06")
+        o.stringValue("from", "2000-01-01")
+        o.stringValue("to", REPORTING_DATE)
+        o.booleanType("balanced", true)
+        if (frozen) {
+            o.array("sourcePeriods") { periods ->
+                (1..6).forEach { month -> periods.stringValue("MONTH:2000-%02d".format(month)) }
+            }
+            o.array("sourceContentHashes") { hashes ->
+                (1..6).forEach { hashes.stringType("0".repeat(64)) }
+            }
+        }
+        o.minArrayLike("lines", 0, 1) { line ->
+            line.stringType("code", "1100")
+            line.stringType("type", "ASSET")
+            line.decimalType("net", 100.0)
+            line.stringType("currency", "CZK")
+        }
+    }.build()
+
     private fun periodMovementsBody() = newJsonBody { o ->
         o.stringValue("period", "MONTH:2000-06")
         o.booleanType("balanced", true)
@@ -200,11 +247,13 @@ class LedgerTrialBalancePactConsumerTest {
         .headers(mapOf("Content-Type" to "application/json"))
         .body(
             newJsonArray { a ->
-                a.`object` { period ->
-                    period.stringValue("periodType", "MONTH")
-                    period.stringValue("to", REPORTING_DATE)
-                    period.stringValue("status", "FROZEN")
-                    period.stringValue("evidenceState", "LINES_V1")
+                (1..6).forEach { month ->
+                    a.`object` { period ->
+                        period.stringValue("periodType", "MONTH")
+                        period.stringValue("to", java.time.YearMonth.of(2000, month).atEndOfMonth().toString())
+                        period.stringValue("status", "FROZEN")
+                        period.stringValue("evidenceState", "LINES_V1")
+                    }
                 }
             }.build(),
         )
@@ -271,8 +320,8 @@ class LedgerTrialBalancePactConsumerTest {
             .extract().body().asString()
         val periods: List<ClosedPeriodResponse> = json.readValue(body)
 
-        assertThat(periods).hasSize(1)
-        val period = periods.single()
+        assertThat(periods).hasSize(6)
+        val period = periods.last()
         assertThat(period.periodType).isEqualTo("MONTH")
         assertThat(period.to).isEqualTo(LocalDate.parse(REPORTING_DATE))
         assertThat(period.status).isEqualTo("FROZEN")
@@ -311,6 +360,24 @@ class LedgerTrialBalancePactConsumerTest {
         given().baseUri(mockServer.getUrl()).accept("application/json")
             .get(ledgerLiveMovementsPath.replace("{asOf}", REPORTING_DATE))
             .then().statusCode(200)
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "frozenYearToDateMovementsPact")
+    fun `F02 frozen YTD client path is pinned`(mockServer: MockServer) {
+        assertThat(ledgerFrozenYearToDatePath)
+            .isEqualTo("$LEDGER_MONTH_TRIAL_BALANCE_PATH/{asOf}/frozen-year-to-date-trial-balance")
+        given().baseUri(mockServer.getUrl()).accept("application/json")
+            .get(ledgerFrozenYearToDatePath.replace("{asOf}", REPORTING_DATE)).then().statusCode(200)
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "liveYearToDateMovementsPact")
+    fun `F02 live YTD client path is pinned`(mockServer: MockServer) {
+        assertThat(ledgerLiveYearToDatePath)
+            .isEqualTo("$LEDGER_MONTH_TRIAL_BALANCE_PATH/{asOf}/year-to-date-trial-balance")
+        given().baseUri(mockServer.getUrl()).accept("application/json")
+            .get(ledgerLiveYearToDatePath.replace("{asOf}", REPORTING_DATE)).then().statusCode(200)
     }
 
     /** Issues the request against the path the production client is annotated with. */
@@ -354,6 +421,10 @@ class LedgerTrialBalancePactConsumerTest {
             LedgerRestClient::class.java.getDeclaredMethod("getFrozenPeriodMovements", String::class.java)
         private val getLiveMovementsMethod =
             LedgerRestClient::class.java.getDeclaredMethod("getLivePeriodMovements", String::class.java)
+        private val getFrozenYearToDateMethod =
+            LedgerRestClient::class.java.getDeclaredMethod("getYearToDateMovements", String::class.java)
+        private val getLiveYearToDateMethod =
+            LedgerRestClient::class.java.getDeclaredMethod("getLiveYearToDateMovements", String::class.java)
         private val listClosedPeriodsMethod = LedgerRestClient::class.java.getDeclaredMethod(
             "listClosedPeriods",
             String::class.java,
@@ -382,6 +453,16 @@ class LedgerTrialBalancePactConsumerTest {
         val ledgerLiveMovementsPath: String = listOf(
             LedgerRestClient::class.java.getAnnotation(Path::class.java).value,
             getLiveMovementsMethod.getAnnotation(Path::class.java).value,
+        ).joinToString("/") { it.trim('/') }.let { "/$it" }
+
+        val ledgerFrozenYearToDatePath: String = listOf(
+            LedgerRestClient::class.java.getAnnotation(Path::class.java).value,
+            getFrozenYearToDateMethod.getAnnotation(Path::class.java).value,
+        ).joinToString("/") { it.trim('/') }.let { "/$it" }
+
+        val ledgerLiveYearToDatePath: String = listOf(
+            LedgerRestClient::class.java.getAnnotation(Path::class.java).value,
+            getLiveYearToDateMethod.getAnnotation(Path::class.java).value,
         ).joinToString("/") { it.trim('/') }.let { "/$it" }
 
         val ledgerPeriodsPath: String = LedgerRestClient::class.java.getAnnotation(Path::class.java).value

@@ -23,6 +23,7 @@ import com.openbank.ledger.domain.model.ClosedPeriodVerification
 import com.openbank.ledger.domain.model.PeriodTrialBalance
 import com.openbank.ledger.domain.model.PeriodType
 import com.openbank.ledger.domain.model.TrialBalanceLine
+import com.openbank.ledger.domain.model.YearToDateTrialBalance
 import com.openbank.ledger.domain.model.requireValid
 import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.domain.identifiers.Ids
@@ -32,6 +33,8 @@ import java.math.BigDecimal
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
+import java.time.YearMonth
+import java.util.UUID
 
 /**
  * The statutory period close (ADR-0096 D1), with the ledger as sole golden source (ADR-0039).
@@ -145,6 +148,92 @@ class ClosedPeriodService(
                 )
             }
         }
+    }
+
+    override suspend fun getFrozenYearToDateTrialBalance(query: GetPeriodTrialBalanceQuery): YearToDateTrialBalance {
+        val target = query.period
+        requireValid(target.type == PeriodType.MONTH) { "A year-to-date balance requires a MONTH period" }
+        val yearStart = LocalDate.of(target.to.year, 1, 1)
+        getFrozenTrialBalance(query)
+        val closes = closedPeriodRepository.findRange(yearStart, target.to)
+            .filter { it.period.type == PeriodType.MONTH && !it.period.to.isAfter(target.to) }
+            .sortedBy { it.period.from }
+        val expectedMonths = (1..target.to.monthValue).map { YearMonth.of(target.to.year, it) }
+        if (closes.map { YearMonth.from(it.period.from) } != expectedMonths) {
+            throw ClosedPeriodConflictException("Frozen year-to-date evidence has a missing or duplicate month")
+        }
+        val accumulated = accumulateYearMovements(closes)
+        requireYearReconciled(accumulated, journalRepository.trialBalanceForPeriod(yearStart, target.to))
+        val balance = PeriodTrialBalance(target, accumulated.values.sortedWith(compareBy({ it.code }, { it.currency })))
+        if (!balance.isBalanced) {
+            throw ClosedPeriodConflictException("Frozen year-to-date evidence is not balanced")
+        }
+        return YearToDateTrialBalance(
+            balance = balance,
+            from = yearStart,
+            to = target.to,
+            sourcePeriods = closes.map { it.period.label },
+            sourceContentHashes = closes.map { it.contentHash },
+        )
+    }
+
+    private suspend fun accumulateYearMovements(
+        closes: List<ClosedPeriodRecord>,
+    ): Map<Pair<UUID, String>, TrialBalanceLine> {
+        val accumulated = mutableMapOf<Pair<UUID, String>, TrialBalanceLine>()
+        closes.forEach { record ->
+            val movement = frozenEvidence(record)
+            val keys = movement.lines.map { it.glAccountId to it.currency }
+            if (keys.size != keys.toSet().size) {
+                throw ClosedPeriodConflictException("Duplicate account/currency in frozen monthly evidence")
+            }
+            movement.lines.forEach { line ->
+                val key = line.glAccountId to line.currency
+                val old = accumulated[key]
+                if (old != null && (old.code != line.code || old.type != line.type)) {
+                    throw ClosedPeriodConflictException("Account identity changed across frozen monthly evidence")
+                }
+                accumulated[key] = line.copy(
+                    totalDebit = (old?.totalDebit ?: BigDecimal.ZERO).add(line.totalDebit),
+                    totalCredit = (old?.totalCredit ?: BigDecimal.ZERO).add(line.totalCredit),
+                )
+            }
+        }
+        return accumulated
+    }
+
+    private fun requireYearReconciled(
+        accumulated: Map<Pair<UUID, String>, TrialBalanceLine>,
+        journal: List<TrialBalanceLine>,
+    ) {
+        val journalKeys = journal.map { it.glAccountId to it.currency }
+        val duplicateJournalKey = journalKeys.size != journalKeys.toSet().size
+        val accountSetMismatch = journalKeys.toSet() != accumulated.keys
+        val grossMismatch = journal.any { line ->
+            val attested = accumulated[line.glAccountId to line.currency]
+            attested == null || !sameYearGross(attested, line)
+        }
+        if (duplicateJournalKey || accountSetMismatch || grossMismatch) {
+            throw ClosedPeriodConflictException("Frozen year-to-date evidence does not reconcile to the journal")
+        }
+    }
+
+    private fun sameYearGross(attested: TrialBalanceLine, journal: TrialBalanceLine): Boolean =
+        attested.code == journal.code &&
+            attested.type == journal.type &&
+            attested.totalDebit.compareTo(journal.totalDebit) == 0 &&
+            attested.totalCredit.compareTo(journal.totalCredit) == 0
+
+    override suspend fun getLiveYearToDateTrialBalance(asOf: LocalDate): YearToDateTrialBalance {
+        val yearStart = LocalDate.of(asOf.year, 1, 1)
+        return YearToDateTrialBalance(
+            balance = PeriodTrialBalance(
+                PeriodType.MONTH.of(asOf),
+                journalRepository.trialBalanceForPeriod(yearStart, asOf),
+            ),
+            from = yearStart,
+            to = asOf,
+        )
     }
 
     override suspend fun createDraft(command: CreateClosedPeriodDraftCommand): ClosedPeriodRecord {

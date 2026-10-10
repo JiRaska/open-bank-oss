@@ -56,6 +56,12 @@ interface LedgerPort {
     /** One mutable MONTH's movements for the F02 internal working preview. */
     suspend fun getLivePeriodMovements(asOf: LocalDate): TrialBalanceSnapshot
 
+    /** Attested January-to-month-end F02 flow. */
+    suspend fun getYearToDateMovements(asOf: LocalDate): TrialBalanceSnapshot
+
+    /** Mutable January-to-exact-date F02 preview. */
+    suspend fun getLiveYearToDateMovements(asOf: LocalDate): TrialBalanceSnapshot
+
     suspend fun listClosedPeriods(): List<ClosedPeriodDto>
 }
 

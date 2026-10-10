@@ -2,6 +2,8 @@
 
 Supervisory financial and prudential reporting (ADR-0097): renders EBA FINREP templates (F01.01 Assets, F01.02 Liabilities, F01.03 Equity, F02.00 Profit & Loss) and the COREP C 01.00 Own Funds template from openbank-ledger-service's GL trial balance.
 
+F01 and COREP stock cells read the ledger's cumulative closing balance for the report month. F02 profit and loss reads movements from January 1 through the report month, resetting at each calendar year. A frozen F02 render requires an attested close for every month in that range; a working preview reads the live journal only through the exact requested date. A date inside a month cannot request frozen F02 evidence.
+
 ## Interface
 
 The committed `src/main/resources/openapi.yaml` defines the API contract. Read `/q/openapi` on the running service for the exact paths, request bodies, responses, and contract version of its image.

@@ -25,6 +25,7 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import java.math.BigDecimal
 import java.time.LocalDate
+import java.time.YearMonth
 
 /**
  * Outbound client for openbank-ledger-service's GL trial balance.
@@ -68,6 +69,14 @@ interface LedgerRestClient {
     fun getLivePeriodMovements(@PathParam("asOf") asOf: String): Uni<ClosedPeriodTrialBalanceResponse>
 
     @GET
+    @Path("/MONTH/{asOf}/frozen-year-to-date-trial-balance")
+    fun getYearToDateMovements(@PathParam("asOf") asOf: String): Uni<ClosedPeriodTrialBalanceResponse>
+
+    @GET
+    @Path("/MONTH/{asOf}/year-to-date-trial-balance")
+    fun getLiveYearToDateMovements(@PathParam("asOf") asOf: String): Uni<ClosedPeriodTrialBalanceResponse>
+
+    @GET
     fun listClosedPeriods(
         @QueryParam("from") from: String,
         @QueryParam("to") to: String,
@@ -91,6 +100,10 @@ data class ClosedPeriodTrialBalanceResponse(
     val period: String,
     val balanced: Boolean?,
     val lines: List<TrialBalanceLineResponse>,
+    val from: LocalDate? = null,
+    val to: LocalDate? = null,
+    val sourcePeriods: List<String>? = null,
+    val sourceContentHashes: List<String>? = null,
 )
 
 data class ClosedPeriodResponse(
@@ -124,6 +137,36 @@ class LedgerAdapter(@RestClient private val client: LedgerRestClient) : LedgerPo
 
     override suspend fun getLivePeriodMovements(asOf: LocalDate): TrialBalanceSnapshot =
         client.getLivePeriodMovements(asOf.toString()).awaitSuspending().toSnapshot()
+
+    override suspend fun getYearToDateMovements(asOf: LocalDate): TrialBalanceSnapshot {
+        require(asOf == YearMonth.from(asOf).atEndOfMonth()) {
+            "A frozen year-to-date FINREP flow requires a month-end reporting date"
+        }
+        val response = client.getYearToDateMovements(asOf.toString()).awaitSuspending()
+        val expectedMonths = (1..asOf.monthValue).map { month -> "MONTH:%04d-%02d".format(asOf.year, month) }
+        check(
+            response.period == expectedMonths.last() &&
+                response.from == LocalDate.of(asOf.year, 1, 1) &&
+                response.to == asOf,
+        ) { "Ledger returned a year-to-date flow for a different reporting window" }
+        val sourceHashes = response.sourceContentHashes.orEmpty()
+        check(
+            response.sourcePeriods == expectedMonths &&
+                sourceHashes.size == expectedMonths.size &&
+                sourceHashes.all { it.matches(Regex("[0-9a-f]{64}")) },
+        ) { "Ledger year-to-date flow has incomplete frozen monthly evidence lineage" }
+        return response.toSnapshot()
+    }
+
+    override suspend fun getLiveYearToDateMovements(asOf: LocalDate): TrialBalanceSnapshot {
+        val response = client.getLiveYearToDateMovements(asOf.toString()).awaitSuspending()
+        check(
+            response.period == "MONTH:%04d-%02d".format(asOf.year, asOf.monthValue) &&
+                response.from == LocalDate.of(asOf.year, 1, 1) &&
+                response.to == asOf,
+        ) { "Ledger returned a preview flow for a different year-to-date window" }
+        return response.toSnapshot()
+    }
 
     private fun ClosedPeriodTrialBalanceResponse.toSnapshot(): TrialBalanceSnapshot = TrialBalanceSnapshot(
         lines = lines.map { line ->

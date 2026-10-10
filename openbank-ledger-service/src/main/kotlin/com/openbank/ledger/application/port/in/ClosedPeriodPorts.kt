@@ -8,6 +8,7 @@ import com.openbank.ledger.domain.model.AccountingPeriod
 import com.openbank.ledger.domain.model.ClosedPeriodRecord
 import com.openbank.ledger.domain.model.ClosedPeriodVerification
 import com.openbank.ledger.domain.model.PeriodTrialBalance
+import com.openbank.ledger.domain.model.YearToDateTrialBalance
 import java.time.LocalDate
 
 data class GetPeriodTrialBalanceQuery(val period: AccountingPeriod)
@@ -41,6 +42,7 @@ data class ListClosedPeriodsQuery(val from: LocalDate, val to: LocalDate)
  * 501/2002 Sb. — rozvaha, výkaz zisku a ztráty, příloha) are a projection over the frozen artefact
  * and are deliberately not built here: that mapping is regulatory content, not something to infer.
  */
+@Suppress("TooManyFunctions") // One statutory-close boundary owns monthly stock, yearly flow, and lifecycle reads.
 interface ClosedPeriodUseCase {
     suspend fun getTrialBalance(query: GetPeriodTrialBalanceQuery): PeriodTrialBalance
 
@@ -55,6 +57,12 @@ interface ClosedPeriodUseCase {
      * `LINES_V1` month's evidence up to it, fail-closed on any gap in that chain (#12499).
      */
     suspend fun getFrozenClosingBalance(query: GetPeriodTrialBalanceQuery): PeriodTrialBalance
+
+    /** Immutable January-through-target-month movement, with complete attested monthly evidence. */
+    suspend fun getFrozenYearToDateTrialBalance(query: GetPeriodTrialBalanceQuery): YearToDateTrialBalance
+
+    /** Mutable January-through-exact-date movement for a working preview. */
+    suspend fun getLiveYearToDateTrialBalance(asOf: LocalDate): YearToDateTrialBalance
     suspend fun createDraft(command: CreateClosedPeriodDraftCommand): ClosedPeriodRecord
     suspend fun freeze(command: FreezeClosedPeriodCommand): ClosedPeriodRecord
     suspend fun get(query: GetClosedPeriodQuery): ClosedPeriodRecord
