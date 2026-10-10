@@ -380,6 +380,61 @@ class LedgerTrialBalancePactConsumerTest {
             .get(ledgerLiveYearToDatePath.replace("{asOf}", REPORTING_DATE)).then().statusCode(200)
     }
 
+    @Pact(consumer = "openbank-finrep-service", provider = "openbank-ledger-service")
+    fun anonymousClosingPact(builder: PactDslWithProvider): RequestResponsePact =
+        anonymousReadPact(builder, "frozen-closing-balance")
+
+    @Test
+    @PactTestFor(pactMethod = "anonymousClosingPact")
+    fun `anonymous frozen-closing-balance read is refused 401`(mockServer: MockServer) {
+        given().baseUri(mockServer.getUrl()).accept("application/json")
+            .get(ledgerTrialBalancePath.replace("{asOf}", REPORTING_DATE)).then().statusCode(401)
+    }
+
+    @Pact(consumer = "openbank-finrep-service", provider = "openbank-ledger-service")
+    fun anonymousLiveClosingPact(builder: PactDslWithProvider): RequestResponsePact =
+        anonymousReadPact(builder, "closing-balance")
+
+    @Test
+    @PactTestFor(pactMethod = "anonymousLiveClosingPact")
+    fun `anonymous closing-balance read is refused 401`(mockServer: MockServer) {
+        given().baseUri(mockServer.getUrl()).accept("application/json")
+            .get(ledgerLiveTrialBalancePath.replace("{asOf}", REPORTING_DATE)).then().statusCode(401)
+    }
+
+    @Pact(consumer = "openbank-finrep-service", provider = "openbank-ledger-service")
+    fun anonymousYtdPact(builder: PactDslWithProvider): RequestResponsePact =
+        anonymousReadPact(builder, "frozen-year-to-date-trial-balance")
+
+    @Test
+    @PactTestFor(pactMethod = "anonymousYtdPact")
+    fun `anonymous frozen-year-to-date-trial-balance read is refused 401`(mockServer: MockServer) {
+        given().baseUri(mockServer.getUrl()).accept("application/json")
+            .get(ledgerFrozenYearToDatePath.replace("{asOf}", REPORTING_DATE)).then().statusCode(401)
+    }
+
+    @Pact(consumer = "openbank-finrep-service", provider = "openbank-ledger-service")
+    fun anonymousLiveYtdPact(builder: PactDslWithProvider): RequestResponsePact =
+        anonymousReadPact(builder, "year-to-date-trial-balance")
+
+    @Test
+    @PactTestFor(pactMethod = "anonymousLiveYtdPact")
+    fun `anonymous year-to-date-trial-balance read is refused 401`(mockServer: MockServer) {
+        given().baseUri(mockServer.getUrl()).accept("application/json")
+            .get(ledgerLiveYearToDatePath.replace("{asOf}", REPORTING_DATE)).then().statusCode(401)
+    }
+
+    private fun anonymousReadPact(builder: PactDslWithProvider, suffix: String): RequestResponsePact = builder
+        // Existing provider verifier replays this state without @TestSecurity.
+        .given("no valid M2M identity is presented")
+        .uponReceiving("GET $suffix for FINREP without an authenticated identity")
+        .path("$LEDGER_MONTH_TRIAL_BALANCE_PATH/$REPORTING_DATE/$suffix")
+        .method("GET")
+        .headers(mapOf("Accept" to "application/json"))
+        .willRespondWith()
+        .status(401)
+        .toPact()
+
     /** Issues the request against the path the production client is annotated with. */
     private fun fetchTrialBalance(mockServer: MockServer, asOf: String): ClosedPeriodTrialBalanceResponse {
         val body = given()
