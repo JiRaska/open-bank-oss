@@ -157,6 +157,7 @@ silently re-suspend a credential the customer was just given back.
 
 ## 6. Change log
 
+- **2026-10-08** — **OPA authorization ENFORCED (`AUTHZ_ENFORCE=true`, #12325).** Every `@Authorize` method now blocks on a deny (403) and fails closed when the PDP is unreachable (503); before this the decisions were advisory. Checked with `opa eval` against the deployed `card-processing-opa-bundle` ConfigMap (identical to the repo copy): staff `ROLE_OPERATOR`/`ROLE_ADMIN` may authorise, clear, reverse, read and work the token and dispute desks; `cardprocessing.simulate` is `ROLE_ADMIN` only; `ROLE_VIEWER` and `ROLE_COMPLIANCE` read only; a customer bearer, an AI agent, an anonymous caller and every `ROLE_API` service account (including `openbank-services` as the deployed realm defines it) are denied. With `card_processing_rest_ext.rego` removed, the operator write and the viewer read cells turn DENY. Live evidence: no `openbank_authz_decisions_total` series for this service over the 8-day Prometheus window and no business-endpoint requests at all, and the NetworkPolicy admits only same-namespace pods (none calls this service) and admin-ui. Residual: the workload is a plain Deployment with no canary analysis. The acquirer/processor adapter the rego anticipates does not exist yet; when it lands as `service-account-openbank-services` holding only `ROLE_API` (the deployed realm), it will be DENIED and needs an identity-scoped rule naming its own client first. The write grant is still role-based: any identity holding `ROLE_OPERATOR` (including `service-account-openbank-edge` in the deployed realm, and `openbank-services` in the CI/docker realms) reaches `cardprocessing.authorize/clear/reverse`. Rollback: set `AUTHZ_ENFORCE` back to `"false"` and restore the allowlist entry in `check-authz-enforce-money-path.py`.
 - **2026-09-05** — Initial threat model, authored with the service (ADR-0283 phase 1, #8809).
   Money-path from the first commit: `rules.yaml: money_path_services`, an SLO pair, a journey
   accountability entry and this document all land in the same PR as the code, rather than being
@@ -200,6 +201,14 @@ silently re-suspend a credential the customer was just given back.
   the UPDATE on a row lock and moves the version underneath it). Residual: a replay does not re-attempt a `FAILED` ledger posting
   — operations re-drive it (§5, runbook). The 2026-09-05 entry says the service was listed in `rules.yaml: money_path_services`; it was
   not, and is added alongside this fix.
+- **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `card_outbox` kept every SENT
+  row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime
+  `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than
+  `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; the v1 repository opts in by
+  delegating `SentOutboxRetention` to `PanacheOutboxRetention`. PENDING, FAILED, DISPATCHING and DEAD rows are
+  never touched. Information disclosure: shrinks the window in which a database read exposes past
+  authorisation-event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now
+  comes from the broker or audit-service, not this table.
 - **2026-10-04** — Shadow fraud scoring had never scored a card authorisation (STRIDE-R, #12064).
   The fraud client sent `currencyCode` with no `rail`, both non-null in fraud-service's
   `ScoreFraudRequest`, so every call was refused with a 400; it also sent the amount in MINOR units

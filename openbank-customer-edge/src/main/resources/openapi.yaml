@@ -44,7 +44,7 @@ info:
   # 1.74.0 -> 1.75.0 (#10016): additive — GET /capabilities (ADR-0310 D5).
   # 1.75.0 -> 1.76.0 (#11966): additive — /holdings, the customer write side of the declared
   # holdings that GET /net-worth reads (ADR-0301 D1).
-  version: 1.79.0
+  version: 1.79.1
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -2280,7 +2280,7 @@ paths:
               properties:
                 debtorAccountId: {type: string, format: uuid}
                 amount: {type: string, example: '250.00'}
-                currency: {type: string, default: CZK}
+                currency: {type: string, default: CZK, description: 'CZK only for domestic clearing (case-insensitive)'}
                 creditorAccountNumber: {type: string, description: 'Czech "number/bankcode"', example: '2000145399/0800'}
                 creditorName: {type: string}
                 variableSymbol: {type: string, nullable: true}
@@ -2300,7 +2300,7 @@ paths:
         '201':
           description: Payment instruction created
         '400':
-          description: Malformed currency, debtor IBAN, creditor account, or incomplete body
+          description: Malformed request or CURRENCY_NOT_ALLOWED when currency is not CZK; rejected before spend reservation or SCA
         '403':
           description: >-
             Caller may not debit this account — not the owner and no authorising delegation grant

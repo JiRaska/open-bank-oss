@@ -27,7 +27,7 @@ class CatalogPackSeeder(
     private val catalogJson: CatalogJson,
     private val schemaProfile: CatalogSchemaProfile,
     private val clock: Clock,
-    @ConfigProperty(name = "openbank.catalog.packs", defaultValue = "banking,insurance")
+    @ConfigProperty(name = "openbank.catalog.packs", defaultValue = "banking,insurance,retirement")
     private val enabledPacks: java.util.Optional<String>,
 ) {
     @Suppress("UnusedParameter")
@@ -173,6 +173,12 @@ class CatalogPackSeeder(
                 "org.openbank.insurance.term-life",
                 2,
                 "/catalog-packs/insurance/term-life-v2.schema.json",
+            ),
+            PackSchema(
+                "retirement",
+                "org.openbank.retirement.pension-savings",
+                1,
+                "/catalog-packs/retirement/pension-savings-v1.schema.json",
             ),
         )
     }

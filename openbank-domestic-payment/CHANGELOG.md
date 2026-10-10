@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.22.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.21.9...domestic-payment-v0.22.0) (2026-10-09)
+
+
+### Features
+
+* **libs:** purge SENT outbox rows fleet-wide with one shared retention job ([#11899](https://github.com/JiRaska/open-bank-oss/issues/11899)) ([b322ed7](https://github.com/JiRaska/open-bank-oss/commit/b322ed7116137ecc8f132dc79cd79444c995bb2f))
+
+## [0.21.9](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.21.8...domestic-payment-v0.21.9) (2026-10-09)
+
+
+### Bug Fixes
+
+* **domestic-payment:** refuse non-CZK submissions on the domestic rail ([#12305](https://github.com/JiRaska/open-bank-oss/issues/12305)) ([3efd3a2](https://github.com/JiRaska/open-bank-oss/commit/3efd3a2595d12c7b7c1f6df26bfc348675d138c6))
+
 ## [0.21.8](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.21.7...domestic-payment-v0.21.8) (2026-10-07)
 
 
