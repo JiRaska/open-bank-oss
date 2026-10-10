@@ -1,7 +1,7 @@
 # pension-service: participant-side pension contracts (ADR-0334 S1). Reactive Postgres datasource
 # + Flyway JDBC migrations against the single-owner CNPG cluster. Publishes and consumes nothing
-# yet and calls no other service. OIDC bearer validation points at Keycloak. Reachable only
-# in-cluster via ClusterIP, no ingress — the customer path is customer-edge.
+# yet; reads product-catalog and pension-fund-service. OIDC bearer validation points at Keycloak.
+# Reachable only in-cluster via ClusterIP, no ingress — the customer path is customer-edge.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -170,6 +170,10 @@ spec:
               value: http://party-service.party.svc:8111
             - name: ACCOUNT_SERVICE_URL
               value: http://account-service.accounts.svc:8100
+            # StrategyInstrumentCatalogAdapter reads published v2 offerings with pension's own
+            # client-credentials token. Declare this edge in env for the generated ingress policy.
+            - name: PRODUCT_CATALOG_SERVICE_URL
+              value: http://product-catalog.accounts.svc:8104
             # OPA sidecar enforced from the first rollout: pension_rest_ext.rego grants the
             # participant actions to the edge principal only, and no service-account reaches a
             # write by any rule.

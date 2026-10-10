@@ -22,6 +22,23 @@ import org.junit.jupiter.api.Test
 )
 class CatalogScopeAuthorizationTest {
     @Test
+    @TestSecurity(user = "pension-catalog-reader", augmentors = [CatalogScopeIdentityAugmentor::class])
+    @OidcSecurity(claims = [Claim(key = "scope", value = "catalog:read")])
+    fun readScopeAllowsV2ReadsButNotAuthoring() {
+        given().get("/api/v2/offerings").then().statusCode(200)
+        given().get("/api/v2/products/00000000-0000-0000-0000-000000000001")
+            .then().statusCode(404)
+        given().contentType("application/json")
+            .body(
+                """
+                {"code":"PENSION_READ_ONLY","schemaRef":{
+                    "id":"org.openbank.insurance.term-life","version":1}}
+                """.trimIndent(),
+            )
+            .post("/api/v2/specifications").then().statusCode(403)
+    }
+
+    @Test
     @TestSecurity(user = "external-catalog-author", augmentors = [CatalogScopeIdentityAugmentor::class])
     @OidcSecurity(claims = [Claim(key = "scope", value = "catalog:read catalog:author")])
     fun authorizesProviderNeutralOidcScopesWithoutOpenBankRoles() {
