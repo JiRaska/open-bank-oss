@@ -3,7 +3,6 @@
 # on a line that has become compliant), and nothing may be added.
 openbank-account-service
 openbank-aml-service
-openbank-ap2-service
 openbank-consent-service
 openbank-document-service
 openbank-ledger-service
