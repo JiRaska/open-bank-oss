@@ -246,3 +246,27 @@ allowed_reasons contains "operator-pension-annuity-manage" if {
 		"pension.operator.annuity-purchase",
 	}
 }
+
+# ---------------------------------------------------------------------------------------------
+# #12425 — participant aggregates for the ČNB returns (ParticipantReportingResource).
+#   pension.reporting.aggregate  — GET /pension/reporting/participant-aggregates
+# Counts and sums only. The verb is deliberately NOT `.read`/`.list`: base rest.rego's
+# operator-read-any and compliance-read-any grant every such action to any HUMAN holding the role,
+# and the shared service-account is HUMAN with ROLE_OPERATOR — so a `.read` name would hand these
+# figures to every backend service unless an exclusion list (absent on this base) vetoed it.
+# Served to real staff and to tax-reporting-service's OWN client, and to nothing else.
+# ---------------------------------------------------------------------------------------------
+allowed_reasons contains "staff-pension-reporting-read" if {
+	input.principal.type == "HUMAN"
+	not startswith(input.principal.id, "service-account-")
+	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE", "ROLE_AUDITOR"}
+	role in input.principal.roles
+	input.action == "pension.reporting.aggregate"
+}
+
+allowed_reasons contains "service-tax-reporting-participant-aggregates" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-tax-reporting"
+	"ROLE_API" in input.principal.roles
+	input.action == "pension.reporting.aggregate"
+}
