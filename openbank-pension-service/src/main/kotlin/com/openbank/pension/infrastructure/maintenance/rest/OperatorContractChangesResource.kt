@@ -25,7 +25,7 @@ import java.util.UUID
  * The caller is staff via [ContractAccessGuard.readerFor] with no party header.
  */
 @Tag(name = "Pension operations", description = "Operator views of pension contracts")
-@Path("/api/v1/pension/operator/contracts/{contractId}")
+@Path("/api/v2/pension/operator/contracts/{contractId}")
 @Produces(MediaType.APPLICATION_JSON)
 @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, Roles.COMPLIANCE)
 class OperatorContractChangesResource {

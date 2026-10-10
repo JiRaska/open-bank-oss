@@ -46,7 +46,7 @@ import java.util.UUID
  * `@Path` directly above `class` (#3371); nullable params checked in the body (#3104).
  */
 @Tag(name = "Pension exits", description = "Early termination, regular payout, partial withdrawal")
-@Path("/api/v1/pension/contracts/{contractId}/exit")
+@Path("/api/v2/pension/contracts/{contractId}/exit")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)

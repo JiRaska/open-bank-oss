@@ -91,27 +91,27 @@ class PensionIntegrationRoutesIT {
     @TestSecurity(user = "edge", roles = ["ROLE_API"])
     fun `a retried POST with the same key is answered from the first response and creates nothing new`() {
         val key = UUID.randomUUID().toString()
-        val first = edge(key = key).body(startBody).post("/api/v1/pension/onboarding/applications")
+        val first = edge(key = key).body(startBody).post("/api/v2/pension/onboarding/applications")
             .then().statusCode(201).extract()
-        val replay = edge(key = key).body(startBody).post("/api/v1/pension/onboarding/applications")
+        val replay = edge(key = key).body(startBody).post("/api/v2/pension/onboarding/applications")
             .then().statusCode(201).header("Idempotent-Replayed", "true").extract()
         assertThat(replay.path<String>("applicationId")).isEqualTo(first.path<String>("applicationId"))
 
-        val other = edge().body(startBody).post("/api/v1/pension/onboarding/applications")
+        val other = edge().body(startBody).post("/api/v2/pension/onboarding/applications")
             .then().statusCode(201).extract()
         assertThat(other.path<String>("applicationId")).isNotEqualTo(first.path<String>("applicationId"))
 
         // The same key from ANOTHER participant is another scope: it never reads the first response.
         val stranger = edge(asParty = UUID.randomUUID(), key = key).body(startBody)
-            .post("/api/v1/pension/onboarding/applications").then().statusCode(201).extract()
+            .post("/api/v2/pension/onboarding/applications").then().statusCode(201).extract()
         assertThat(stranger.path<String>("applicationId")).isNotEqualTo(first.path<String>("applicationId"))
     }
 
     @Test
     @TestSecurity(user = "edge", roles = ["ROLE_API"])
     fun `a POST without an Idempotency-Key is refused before anything runs`() {
-        edge(key = null).body(startBody).post("/api/v1/pension/onboarding/applications").then().statusCode(400)
-        edge(key = null).body("{}").post("/api/v1/pension/simulations").then().statusCode(400)
+        edge(key = null).body(startBody).post("/api/v2/pension/onboarding/applications").then().statusCode(400)
+        edge(key = null).body("{}").post("/api/v2/pension/simulations").then().statusCode(400)
     }
 
     // ---- simulation ------------------------------------------------------------------------------
@@ -122,7 +122,7 @@ class PensionIntegrationRoutesIT {
         edge().body(
             """{"jurisdiction":"CZ","productLine":"DPS","strategyCode":"BALANCED","monthlyContribution":1700,
                 "employerMonthlyContribution":500,"horizonYears":25}""",
-        ).post("/api/v1/pension/simulations").then().statusCode(200)
+        ).post("/api/v2/pension/simulations").then().statusCode(200)
             .body("illustrative", equalTo(true))
             .body("disclaimer", notNullValue())
             .body("requestedStrategy", equalTo("BALANCED"))
@@ -133,9 +133,9 @@ class PensionIntegrationRoutesIT {
         edge().body(
             """{"jurisdiction":"CZ","productLine":"DPS","strategyCode":"NOPE","monthlyContribution":1,"horizonYears":5}""",
         )
-            .post("/api/v1/pension/simulations").then().statusCode(400)
+            .post("/api/v2/pension/simulations").then().statusCode(400)
         edge().body("""{"jurisdiction":"CZ","productLine":"DPS","monthlyContribution":1,"horizonYears":61}""")
-            .post("/api/v1/pension/simulations").then().statusCode(400)
+            .post("/api/v2/pension/simulations").then().statusCode(400)
     }
 
     // ---- operator lists --------------------------------------------------------------------------
@@ -143,18 +143,18 @@ class PensionIntegrationRoutesIT {
     @Test
     @TestSecurity(user = "edge", roles = ["ROLE_API"])
     fun `the customer edge cannot read the operator payout or death-claim queues`() {
-        edge().get("/api/v1/pension/operator/payouts").then().statusCode(403)
-        edge().get("/api/v1/pension/death-claims").then().statusCode(403)
+        edge().get("/api/v2/pension/operator/payouts").then().statusCode(403)
+        edge().get("/api/v2/pension/death-claims").then().statusCode(403)
     }
 
     @Test
     @TestSecurity(user = "ops", roles = ["ROLE_OPERATOR"])
     fun `staff list payouts by contract and death claims`() {
-        given().get("/api/v1/pension/operator/payouts?limit=5").then().statusCode(200)
-        given().get("/api/v1/pension/operator/payouts?contractId=${UUID.randomUUID()}").then().statusCode(200)
+        given().get("/api/v2/pension/operator/payouts?limit=5").then().statusCode(200)
+        given().get("/api/v2/pension/operator/payouts?contractId=${UUID.randomUUID()}").then().statusCode(200)
             .body("size()", equalTo(0))
-        given().get("/api/v1/pension/death-claims?status=NOTIFIED").then().statusCode(200)
-        given().get("/api/v1/pension/operator/payouts?status=NOPE").then().statusCode(404)
+        given().get("/api/v2/pension/death-claims?status=NOTIFIED").then().statusCode(200)
+        given().get("/api/v2/pension/operator/payouts?status=NOPE").then().statusCode(404)
     }
 
     // ---- payout-account change -------------------------------------------------------------------
@@ -172,10 +172,10 @@ class PensionIntegrationRoutesIT {
     private fun confirmedPayout(contract: UUID, form: String): String {
         val months = if (form == "PHASED_WITHDRAWAL") ""","months":12""" else ""
         val payout: String = edge().body("""{"form":"$form"$months}""")
-            .post("/api/v1/pension/contracts/$contract/exit/payouts/quote").then().statusCode(201)
+            .post("/api/v2/pension/contracts/$contract/exit/payouts/quote").then().statusCode(201)
             .extract().path("payoutId")
         edge().body("""{"scaChallengeId":"sca-${UUID.randomUUID()}","payoutIban":"$IBAN"}""")
-            .post("/api/v1/pension/contracts/$contract/exit/payouts/$payout/confirm").then().statusCode(200)
+            .post("/api/v2/pension/contracts/$contract/exit/payouts/$payout/confirm").then().statusCode(200)
         return payout
     }
 
@@ -184,7 +184,7 @@ class PensionIntegrationRoutesIT {
     fun `an account change is held, notified and never redirects the signed account or a pending change`() {
         val contract = retiredContract()
         val payout = confirmedPayout(contract, "PHASED_WITHDRAWAL")
-        val path = "/api/v1/pension/contracts/$contract/exit/payouts/$payout/account"
+        val path = "/api/v2/pension/contracts/$contract/exit/payouts/$payout/account"
 
         edge(key = null).body("""{"scaChallengeId":"sca-${UUID.randomUUID()}","payoutIban":"$OTHER_IBAN"}""").put(path)
             .then().statusCode(200)
@@ -208,10 +208,10 @@ class PensionIntegrationRoutesIT {
     fun `an account change before the payout is confirmed is refused - the account is part of the signature`() {
         val contract = retiredContract()
         val payout: String = edge().body("""{"form":"PHASED_WITHDRAWAL","months":12}""")
-            .post("/api/v1/pension/contracts/$contract/exit/payouts/quote").then().statusCode(201)
+            .post("/api/v2/pension/contracts/$contract/exit/payouts/quote").then().statusCode(201)
             .extract().path("payoutId")
         edge(key = null).body("""{"scaChallengeId":"sca-${UUID.randomUUID()}","payoutIban":"$OTHER_IBAN"}""")
-            .put("/api/v1/pension/contracts/$contract/exit/payouts/$payout/account").then().statusCode(409)
+            .put("/api/v2/pension/contracts/$contract/exit/payouts/$payout/account").then().statusCode(409)
     }
 
     /**
@@ -223,9 +223,9 @@ class PensionIntegrationRoutesIT {
     fun `concurrent confirmations of one quote - exactly one wins and its signed account is the one stored`() {
         val contract = retiredContract()
         val payout: String = edge().body("""{"form":"PHASED_WITHDRAWAL","months":12}""")
-            .post("/api/v1/pension/contracts/$contract/exit/payouts/quote").then().statusCode(201)
+            .post("/api/v2/pension/contracts/$contract/exit/payouts/quote").then().statusCode(201)
             .extract().path("payoutId")
-        val confirm = "/api/v1/pension/contracts/$contract/exit/payouts/$payout/confirm"
+        val confirm = "/api/v2/pension/contracts/$contract/exit/payouts/$payout/confirm"
         val pool = java.util.concurrent.Executors.newFixedThreadPool(2)
         val start = java.util.concurrent.CountDownLatch(1)
         val attempts = listOf(IBAN, OTHER_IBAN).map { iban ->
@@ -241,7 +241,7 @@ class PensionIntegrationRoutesIT {
         val winners = results.filter { it.second == 200 }
         assertThat(winners).describedAs("results %s", results).hasSize(1)
         assertThat(results.filter { it.second != 200 }.map { it.second }).allMatch { it == 409 }
-        edge(key = null).get("/api/v1/pension/contracts/$contract/exit/payouts/$payout").then().statusCode(200)
+        edge(key = null).get("/api/v2/pension/contracts/$contract/exit/payouts/$payout").then().statusCode(200)
             .body("payoutAccountLast4", equalTo(winners.single().first.takeLast(4)))
     }
 
@@ -250,10 +250,10 @@ class PensionIntegrationRoutesIT {
     fun `a single-payment form has no later payments to redirect`() {
         val contract = retiredContract()
         val payout: String = edge().body("""{"form":"LUMP_SUM"}""")
-            .post("/api/v1/pension/contracts/$contract/exit/payouts/quote").then().statusCode(201)
+            .post("/api/v2/pension/contracts/$contract/exit/payouts/quote").then().statusCode(201)
             .extract().path("payoutId")
         edge(key = null).body("""{"scaChallengeId":"sca-${UUID.randomUUID()}","payoutIban":"$OTHER_IBAN"}""")
-            .put("/api/v1/pension/contracts/$contract/exit/payouts/$payout/account").then().statusCode(409)
+            .put("/api/v2/pension/contracts/$contract/exit/payouts/$payout/account").then().statusCode(409)
     }
 
     private companion object {

@@ -92,7 +92,7 @@ data class ReturnReportRunResponse(val filed: Boolean, val report: ReturnReportR
     name = "Pension funding operations",
     description = "Operator queue, employer batches and state incentive claim batches",
 )
-@Path("/api/v1/pension/funding/operations/state-contribution")
+@Path("/api/v2/pension/funding/operations/state-contribution")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, Roles.PAYMENTS)

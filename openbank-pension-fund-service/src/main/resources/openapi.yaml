@@ -2,7 +2,8 @@ openapi: 3.1.0
 info:
   title: OpenBank Pension Fund Service API
   # 1.0.0: first contract (ADR-0334 slice S4, issue #12350).
-  version: 1.0.0
+  # 1.0.1: editorial — OrderRequest documents the same-currency rule for a switch (400 otherwise).
+  version: 1.0.1
   description: |
     Provider side of the pension platform (ADR-0334 §1): segregated funds, fund strategies with
     lifecycle glide paths, the unit register and NAV.

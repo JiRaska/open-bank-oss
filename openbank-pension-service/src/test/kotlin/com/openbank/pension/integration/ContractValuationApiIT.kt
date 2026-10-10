@@ -40,7 +40,7 @@ class ContractValuationApiIT {
     @Inject
     lateinit var register: InMemoryFundAdministrationAdapter
 
-    private val base = "/api/v1/pension/contracts"
+    private val base = "/api/v2/pension/contracts"
     private val fundPriced = UUID.randomUUID()
     private val fundNew = UUID.randomUUID()
 
@@ -145,26 +145,26 @@ class ContractValuationApiIT {
         val id = seededContract(UUID.randomUUID())
         val active = seedMandate(id, "ACTIVE")
         seedMandate(id, "CANCELLED")
-        spec(null).get("/api/v1/pension/operator/mandates?contractId=$id").then().statusCode(200)
+        spec(null).get("/api/v2/pension/operator/mandates?contractId=$id").then().statusCode(200)
             .body("", hasSize<Any>(2))
-        spec(null).get("/api/v1/pension/operator/mandates?contractId=$id&status=ACTIVE").then().statusCode(200)
+        spec(null).get("/api/v2/pension/operator/mandates?contractId=$id&status=ACTIVE").then().statusCode(200)
             .body("", hasSize<Any>(1)).body("[0].id", equalTo(active.toString()))
             .body("[0].kind", equalTo("STANDING_ORDER"))
-        spec(null).get("/api/v1/pension/operator/mandates?limit=0").then().statusCode(400)
+        spec(null).get("/api/v2/pension/operator/mandates?limit=0").then().statusCode(400)
         // Staff never act "as" a participant on the operator list.
-        spec(UUID.randomUUID()).get("/api/v1/pension/operator/mandates").then().statusCode(403)
+        spec(UUID.randomUUID()).get("/api/v2/pension/operator/mandates").then().statusCode(403)
     }
 
     @Test
     @TestSecurity(user = "edge", roles = ["ROLE_API"])
     fun `the edge cannot reach the operator mandates list`() {
-        spec(null).get("/api/v1/pension/operator/mandates").then().statusCode(403)
+        spec(null).get("/api/v2/pension/operator/mandates").then().statusCode(403)
     }
 
     @Test
     fun `no identity is 401`() {
         given().get("$base/${UUID.randomUUID()}/valuation").then().statusCode(401)
-        given().get("/api/v1/pension/operator/mandates").then().statusCode(401)
+        given().get("/api/v2/pension/operator/mandates").then().statusCode(401)
     }
 
     // --- seeding (same idiom as FundingApiIT) ----------------------------------------------

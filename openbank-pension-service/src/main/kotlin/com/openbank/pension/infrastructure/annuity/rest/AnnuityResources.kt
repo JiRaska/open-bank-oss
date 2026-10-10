@@ -37,7 +37,7 @@ private const val PARTY_HEADER = ContractAccessGuard.PARTY_HEADER
  * `@Path` directly above `class` (#3371); nullable params checked in the body (#3104).
  */
 @Tag(name = "Pension annuity", description = "Annuity offers from partner insurers, selection, cancellation")
-@Path("/api/v1/pension/contracts/{contractId}/exit/payouts/{payoutId}/annuity")
+@Path("/api/v2/pension/contracts/{contractId}/exit/payouts/{payoutId}/annuity")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)

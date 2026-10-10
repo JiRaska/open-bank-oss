@@ -199,7 +199,7 @@ openbank:
     enabled: true
     max-concurrent-requests: 100
   api:
-    version: "1"
+    version: "2"
   build:
     time: "${BUILD_TIME:unknown}"
   git:

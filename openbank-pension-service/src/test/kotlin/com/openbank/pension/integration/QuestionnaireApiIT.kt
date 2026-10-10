@@ -32,7 +32,7 @@ import java.util.UUID
 @QuarkusTestResource(PostgresTestResource::class)
 class QuestionnaireApiIT {
 
-    private val apps = "/api/v1/pension/onboarding/applications"
+    private val apps = "/api/v2/pension/onboarding/applications"
     private val party: UUID = UUID.randomUUID()
 
     private fun call(method: String, path: String, body: String? = null, asParty: UUID? = party): ValidatableResponse =

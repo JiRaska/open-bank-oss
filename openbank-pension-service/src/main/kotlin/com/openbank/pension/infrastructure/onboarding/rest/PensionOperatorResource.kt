@@ -40,7 +40,7 @@ import java.util.UUID
  * `service-account-` principal off the write actions.
  */
 @Tag(name = "Pension operations", description = "Operator views of onboarding and transfers")
-@Path("/api/v1/pension/operator")
+@Path("/api/v2/pension/operator")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)

@@ -50,7 +50,7 @@ import java.util.UUID
  * refuses a staff write, and OPA grants staff read only).
  */
 @Tag(name = "Pension", description = "Pension contracts, strategy elections and jurisdiction-pack evaluation")
-@Path("/api/v1/pension/contracts")
+@Path("/api/v2/pension/contracts")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)

@@ -77,7 +77,7 @@ class PensionExitApiIT {
         ContractFixtures.activeContract(contractUseCase, contractRepository, party)
     }
 
-    private val contracts = "/api/v1/pension/contracts"
+    private val contracts = "/api/v2/pension/contracts"
     private val iban = "CZ6508000000192000145399"
     private val party: UUID = UUID.randomUUID()
 
@@ -192,7 +192,7 @@ class PensionExitApiIT {
     @TestSecurity(user = "edge", roles = ["ROLE_API"])
     fun `the customer edge cannot reach the operator death-claim routes`() {
         req().body("""{"contractId":"${UUID.randomUUID()}","dateOfDeath":"2026-01-01","evidenceRef":"x"}""")
-            .post("/api/v1/pension/death-claims").then().statusCode(403)
+            .post("/api/v2/pension/death-claims").then().statusCode(403)
     }
 
     @Test
@@ -200,15 +200,15 @@ class PensionExitApiIT {
     fun `a death claim freezes the contract, refuses self-approval and pays each verified claimant their share`() {
         val id = activeContractDirect().also { fund.setValue(it, BigDecimal("100000.01")) }
         val notify = """{"contractId":"$id","dateOfDeath":"2026-09-01","evidenceRef":"death-cert-1"}"""
-        val claimId: String = req(null, "d-1").body(notify).post("/api/v1/pension/death-claims").then().statusCode(201)
+        val claimId: String = req(null, "d-1").body(notify).post("/api/v2/pension/death-claims").then().statusCode(201)
             .body("status", equalTo("NOTIFIED")).extract().path("claimId")
-        req(null, "d-1").body(notify).post("/api/v1/pension/death-claims").then().statusCode(201)
+        req(null, "d-1").body(notify).post("/api/v2/pension/death-claims").then().statusCode(201)
             .body("claimId", equalTo(claimId))
         assertThat(staffStatus(id)).isEqualTo("TERMINATING")
 
-        val claimants: List<Map<String, Any>> = req(null).get("/api/v1/pension/death-claims/$claimId").then()
+        val claimants: List<Map<String, Any>> = req(null).get("/api/v2/pension/death-claims/$claimId").then()
             .statusCode(200).extract().path("claimants")
-        val claimPath = "/api/v1/pension/death-claims/$claimId"
+        val claimPath = "/api/v2/pension/death-claims/$claimId"
         req(
             null,
         ).body(

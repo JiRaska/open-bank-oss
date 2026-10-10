@@ -41,7 +41,7 @@ import java.util.UUID
  * `@Path` sits directly above `class` (#3371).
  */
 @Tag(name = "Pension valuation", description = "Holdings at the latest published NAV and unit transactions")
-@Path("/api/v1/pension/contracts/{contractId}")
+@Path("/api/v2/pension/contracts/{contractId}")
 @Produces(MediaType.APPLICATION_JSON)
 @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN, Roles.COMPLIANCE)
 class ContractValuationResource {

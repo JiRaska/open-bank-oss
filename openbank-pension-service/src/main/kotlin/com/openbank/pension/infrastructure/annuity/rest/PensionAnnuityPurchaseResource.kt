@@ -31,7 +31,7 @@ private const val PARTY_HEADER = ContractAccessGuard.PARTY_HEADER
 
 /** Operator view and status sync of annuity purchases (#12383). */
 @Tag(name = "Pension operations", description = "Annuity purchases")
-@Path("/api/v1/pension/operator/annuity-purchases")
+@Path("/api/v2/pension/operator/annuity-purchases")
 @Produces(MediaType.APPLICATION_JSON)
 @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, Roles.COMPLIANCE)
 class PensionAnnuityPurchaseResource {

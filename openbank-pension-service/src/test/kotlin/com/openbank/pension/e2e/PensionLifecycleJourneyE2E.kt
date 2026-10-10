@@ -305,7 +305,7 @@ class PensionLifecycleJourneyE2E {
         BigDecimal(results.getString("find { it.incentiveId == '$incentiveId' }.amount"))
 
     private companion object {
-        const val BASE = "/api/v1/pension/contracts"
+        const val BASE = "/api/v2/pension/contracts"
         const val JSON = "application/json"
         const val PARTY = "X-Customer-Party-Id"
         const val IDEMPOTENCY = "Idempotency-Key"

@@ -41,7 +41,7 @@ import java.util.UUID
  * `@Path` directly above `class` (#3371); nullable params checked in the body (#3104).
  */
 @Tag(name = "Pension contract changes", description = "Contribution schedule and beneficiary changes, with history")
-@Path("/api/v1/pension/contracts/{contractId}")
+@Path("/api/v2/pension/contracts/{contractId}")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)

@@ -50,7 +50,7 @@ import java.util.UUID
  * `@Path` sits directly above `class` (#3371); absent parameters are nullable and checked (#3104).
  */
 @Tag(name = "Pension onboarding", description = "Digital onboarding of a new pension contract or a transfer-in")
-@Path("/api/v1/pension/onboarding/applications")
+@Path("/api/v2/pension/onboarding/applications")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @RolesAllowed(Roles.API)

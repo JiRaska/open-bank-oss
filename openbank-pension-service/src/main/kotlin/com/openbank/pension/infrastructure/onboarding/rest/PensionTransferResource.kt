@@ -34,7 +34,7 @@ import java.util.UUID
  * contract answers 404.
  */
 @Tag(name = "Pension transfers", description = "Transfers of a pension contract between providers")
-@Path("/api/v1/pension/transfers")
+@Path("/api/v2/pension/transfers")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @RolesAllowed(Roles.API)

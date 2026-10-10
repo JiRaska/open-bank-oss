@@ -38,7 +38,7 @@ import java.util.UUID
 @QuarkusTestResource(PostgresTestResource::class)
 class PensionContractApiIT {
 
-    private val base = "/api/v1/pension/contracts"
+    private val base = "/api/v2/pension/contracts"
     private val party: UUID = UUID.randomUUID()
 
     private fun createBody(providerType: String = "PENSION_COMPANY") = """

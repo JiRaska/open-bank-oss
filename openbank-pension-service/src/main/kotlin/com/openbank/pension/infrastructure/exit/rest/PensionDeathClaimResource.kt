@@ -40,7 +40,7 @@ import java.util.UUID
  * four-eyes, enforced in the aggregate (the registering operator cannot approve).
  */
 @Tag(name = "Pension death claims", description = "Operator-driven settlement on the participant's death")
-@Path("/api/v1/pension/death-claims")
+@Path("/api/v2/pension/death-claims")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
