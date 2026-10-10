@@ -159,6 +159,7 @@ class RetirementCatalogPackResourceTest {
 
     @Test
     @Suppress("LongMethod")
+    @TestSecurity(user = "retirement-pack-operator", roles = ["ROLE_OPERATOR", "CATALOG_SCOPE_READ"])
     fun `v2 pension revision needs distinct legal and product evidence before publication`() {
         val offering = fixtureOfferings().first { it["attributes"]["productLine"].asText() == "DIP" }
         val specificationId = createSpecification("CZ_DIP_CLASSES_V2", version = 2)
@@ -204,6 +205,12 @@ class RetirementCatalogPackResourceTest {
             statusCode(200)
             body("content.attributes.instrumentClasses", equalTo(listOf("BOND_FUNDS", "EQUITY_FUNDS")))
         }
+        Given { this } When {
+            get("/api/v2/offerings/$offeringId/revisions/$revisionId/pension-approvals")
+        } Then {
+            statusCode(200)
+            body("size()", equalTo(2))
+        }
 
         val staleOffering = createOffering(specificationId, "CZ_DIP_CLASSES_STALE_V2")
         val staleRevision = createRevision(
@@ -216,19 +223,12 @@ class RetirementCatalogPackResourceTest {
         setMaker(staleRevision, "independent-retirement-maker")
         insertPensionApproval(staleRevision, "LEGAL_COUNSEL", "legal-subject")
         insertPensionApproval(staleRevision, "PRODUCT_OWNER", "product-subject")
-        dataSource.connection.use { connection ->
-            connection.prepareStatement(
-                "UPDATE catalog_revisions SET effective_to = ?, lock_version = lock_version + 1 WHERE id = ?",
-            ).use { statement ->
-                statement.setTimestamp(1, java.sql.Timestamp.from(Instant.parse("2027-03-01T00:00:00Z")))
-                statement.setObject(2, staleRevision)
-                statement.executeUpdate()
-            }
-        }
+        setDraftReviewStatus(staleRevision, "ILLUSTRATIVE_REQUIRES_LEGAL_AND_COMMERCIAL_REVIEW")
+        setDraftReviewStatus(staleRevision, "LEGAL_AND_COMMERCIAL_REVIEWED")
         Given {
             contentType("application/json")
-            body("""{"reason":"changed effective interval"}""")
-            header("If-Match", "\"1\"")
+            body("""{"reason":"reverted draft must be reapproved"}""")
+            header("If-Match", "\"2\"")
         } When { post("/api/v2/offerings/$staleOffering/revisions/$staleRevision/publish") } Then {
             statusCode(409)
         }
@@ -356,12 +356,26 @@ class RetirementCatalogPackResourceTest {
         }
     }
 
+    private fun setDraftReviewStatus(revisionId: UUID, status: String) {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "UPDATE catalog_revisions SET content = jsonb_set(" +
+                    "content, '{attributes,reviewStatus}', to_jsonb(CAST(? AS text))), " +
+                    "lock_version = lock_version + 1 WHERE id = ?",
+            ).use { statement ->
+                statement.setString(1, status)
+                statement.setObject(2, revisionId)
+                statement.executeUpdate()
+            }
+        }
+    }
+
     @Suppress("NestedBlockDepth")
     private fun insertPensionApproval(revisionId: UUID, role: String, subject: String) {
         dataSource.connection.use { connection ->
             val revision = connection.prepareStatement(
                 "SELECT offering_id, schema_id, schema_version, effective_from, effective_to, " +
-                    "content FROM catalog_revisions WHERE id = ?",
+                    "content, lock_version FROM catalog_revisions WHERE id = ?",
             ).use { statement ->
                 statement.setObject(1, revisionId)
                 statement.executeQuery().use { result ->
@@ -369,6 +383,7 @@ class RetirementCatalogPackResourceTest {
                     mapper.createObjectNode().apply {
                         put("offeringId", result.getObject("offering_id").toString())
                         put("revisionId", revisionId.toString())
+                        put("revisionNumber", result.getLong("lock_version"))
                         put("schemaId", result.getString("schema_id"))
                         put("schemaVersion", result.getInt("schema_version"))
                         put("effectiveFrom", result.getTimestamp("effective_from")?.toInstant()?.toString())

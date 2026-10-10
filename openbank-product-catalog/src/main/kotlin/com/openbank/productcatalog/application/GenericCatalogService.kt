@@ -227,8 +227,7 @@ class GenericCatalogService(
         if (revision.schemaRef.id != PENSION_SCHEMA || revision.schemaRef.version != 2) {
             throw CatalogConflictException("revision is not pension pack v2")
         }
-        val digest = catalogJson.approvalDigest(revision)
-        return repository.pensionApprovals(revisionId).filter { it.digest == digest }
+        return repository.pensionApprovals(revisionId)
     }
 
     suspend fun findPublished(offeringId: UUID, effectiveAt: Instant): ProductRevision =

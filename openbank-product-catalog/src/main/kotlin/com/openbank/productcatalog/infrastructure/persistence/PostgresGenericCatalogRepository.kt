@@ -223,6 +223,9 @@ class PostgresGenericCatalogRepository(
                             requirePensionApprovals(session, draft).flatMap {
                                 preparePublication(session, draft, at, checkerId)
                             }.flatMap {
+                                if (draft.schemaId == PENSION_SCHEMA && draft.schemaVersion == 2) {
+                                    draft.pensionApprovalDigest = catalogJson.approvalDigest(draft.toDomain())
+                                }
                                 draft.state = RevisionState.PUBLISHED.name
                                 draft.checkerId = checkerId
                                 draft.reason = reason
@@ -306,10 +309,26 @@ class PostgresGenericCatalogRepository(
 
     override suspend fun pensionApprovals(revisionId: UUID): List<PensionRevisionApproval> =
         sessions.withSession { session ->
-            session.createQuery(
-                "FROM PensionRevisionApprovalEntity WHERE revisionId = :id ORDER BY approvedAt, role",
-                PensionRevisionApprovalEntity::class.java,
-            ).setParameter("id", revisionId).resultList
+            session.find(CatalogRevisionEntity::class.java, revisionId).flatMap { revision ->
+                if (revision == null) {
+                    Uni.createFrom().item(emptyList())
+                } else {
+                    val digest = if (revision.state == RevisionState.DRAFT.name) {
+                        catalogJson.approvalDigest(revision.toDomain())
+                    } else {
+                        revision.pensionApprovalDigest
+                    }
+                    if (digest == null) {
+                        Uni.createFrom().item(emptyList())
+                    } else {
+                        session.createQuery(
+                            "FROM PensionRevisionApprovalEntity WHERE revisionId = :id AND digest = :digest " +
+                                "ORDER BY approvedAt, role",
+                            PensionRevisionApprovalEntity::class.java,
+                        ).setParameter("id", revisionId).setParameter("digest", digest).resultList
+                    }
+                }
+            }
         }.map { rows -> rows.map { it.toDomain() } }.awaitSuspending()
 
     @Suppress("ThrowsCount")

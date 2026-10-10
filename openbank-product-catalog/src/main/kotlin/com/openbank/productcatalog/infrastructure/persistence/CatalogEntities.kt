@@ -112,6 +112,9 @@ class CatalogRevisionEntity {
     @Column(name = "content_hash")
     var contentHash: String? = null
 
+    @Column(name = "pension_approval_digest")
+    var pensionApprovalDigest: String? = null
+
     @Column(name = "created_at")
     lateinit var createdAt: Instant
 

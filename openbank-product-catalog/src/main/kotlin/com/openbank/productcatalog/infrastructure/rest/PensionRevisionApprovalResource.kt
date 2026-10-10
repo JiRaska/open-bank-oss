@@ -4,6 +4,7 @@
 
 package com.openbank.productcatalog.infrastructure.rest
 
+import com.openbank.libs.authz.Authorize
 import com.openbank.productcatalog.application.CatalogForbiddenException
 import com.openbank.productcatalog.application.CatalogNotFoundException
 import com.openbank.productcatalog.application.CatalogPreconditionRequiredException
@@ -39,7 +40,13 @@ class PensionRevisionApprovalResource(
     private val identity: SecurityIdentity,
 ) {
     @GET
-    @RolesAllowed(CatalogRoles.AUTHOR, CatalogRoles.PENSION_LEGAL_APPROVER, CatalogRoles.PENSION_PRODUCT_OWNER)
+    @Authorize(action = "catalog.read", resource = "#offeringId")
+    @RolesAllowed(
+        CatalogRoles.READ,
+        CatalogRoles.AUTHOR,
+        CatalogRoles.PENSION_LEGAL_APPROVER,
+        CatalogRoles.PENSION_PRODUCT_OWNER,
+    )
     suspend fun list(
         @PathParam("offeringId") offeringId: UUID,
         @PathParam("revisionId") revisionId: UUID,
@@ -49,6 +56,7 @@ class PensionRevisionApprovalResource(
     }
 
     @POST
+    @Authorize(action = "catalog.publish", resource = "#offeringId")
     @Path("/{role}")
     @Consumes(MediaType.APPLICATION_JSON)
     @RolesAllowed(CatalogRoles.PENSION_LEGAL_APPROVER, CatalogRoles.PENSION_PRODUCT_OWNER)

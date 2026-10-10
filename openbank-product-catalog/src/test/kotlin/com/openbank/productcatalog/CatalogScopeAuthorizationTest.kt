@@ -42,6 +42,10 @@ class CatalogScopeAuthorizationTest {
         given().get("/api/v2/offerings").then().statusCode(200)
         given().get("/api/v2/products/00000000-0000-0000-0000-000000000001")
             .then().statusCode(404)
+        given().get(
+            "/api/v2/offerings/00000000-0000-0000-0000-000000000001" +
+                "/revisions/00000000-0000-0000-0000-000000000002/pension-approvals",
+        ).then().statusCode(404)
         given().contentType("application/json")
             .body(
                 """

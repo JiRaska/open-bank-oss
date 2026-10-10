@@ -63,6 +63,7 @@ class CatalogJson(private val mapper: ObjectMapper) {
         mapper.createObjectNode().apply {
             put("offeringId", revision.offeringId.toString())
             put("revisionId", revision.id.toString())
+            put("revisionNumber", revision.revision)
             put("schemaId", revision.schemaRef.id)
             put("schemaVersion", revision.schemaRef.version)
             put("effectiveFrom", revision.effectiveFrom?.toString())

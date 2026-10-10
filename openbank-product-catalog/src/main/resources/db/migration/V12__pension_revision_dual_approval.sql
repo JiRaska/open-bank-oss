@@ -1,6 +1,10 @@
 -- #12384: immutable, role-qualified evidence for each exact pension catalog revision.
 -- Rollback: stop pension publication, preserve this evidentiary table in backup, then drop its
 -- trigger/function and table only after the approved migration rollback plan is executed.
+ALTER TABLE catalog_revisions
+    ADD COLUMN pension_approval_digest CHAR(64)
+    CHECK (pension_approval_digest IS NULL OR pension_approval_digest ~ '^[0-9a-f]{64}$');
+
 CREATE TABLE pension_revision_approvals (
     id UUID PRIMARY KEY,
     revision_id UUID NOT NULL REFERENCES catalog_revisions (id),
@@ -22,3 +26,17 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER pension_revision_approvals_immutable
     BEFORE UPDATE OR DELETE ON pension_revision_approvals
     FOR EACH ROW EXECUTE FUNCTION forbid_pension_revision_approval_mutation();
+
+CREATE FUNCTION forbid_published_pension_digest_mutation() RETURNS TRIGGER AS $$
+BEGIN
+    IF OLD.state IN ('PUBLISHED', 'SUPERSEDED')
+        AND NEW.pension_approval_digest IS DISTINCT FROM OLD.pension_approval_digest THEN
+        RAISE EXCEPTION 'published pension approval digest is immutable';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER pension_publication_digest_immutable
+    BEFORE UPDATE ON catalog_revisions
+    FOR EACH ROW EXECUTE FUNCTION forbid_published_pension_digest_mutation();
