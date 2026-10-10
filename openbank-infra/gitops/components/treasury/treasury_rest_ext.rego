@@ -133,11 +133,11 @@ allowed_reasons contains "treasury-portfolio-upload" if {
 # tax-reporting, and ONLY tax-reporting, reads the period-end portfolio for PSP 34-12 PS. Gated on
 # its own identity (Keycloak service-account-<clientId>), never on a role every machine may hold;
 # its whole grant here is this one read — never the upload, never any other treasury action.
-tax_reporting_service_account := "service-account-openbank-tax-reporting"
+treasury_portfolio_reader_account := "service-account-openbank-tax-reporting"
 
 allowed_reasons contains "service-tax-reporting-portfolio-read" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == tax_reporting_service_account
+	input.principal.id == treasury_portfolio_reader_account
 	"ROLE_API" in input.principal.roles
 	input.action == "treasury.portfolio.read"
 }

@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: treasury-service
     app.kubernetes.io/part-of: treasury
   annotations:
-    openbank.tech/policy-checksum: "5bb3a1d071416c3e"
+    openbank.tech/policy-checksum: "7ea6eceac2588ffc"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -738,11 +738,11 @@ data:
     # tax-reporting, and ONLY tax-reporting, reads the period-end portfolio for PSP 34-12 PS. Gated on
     # its own identity (Keycloak service-account-<clientId>), never on a role every machine may hold;
     # its whole grant here is this one read — never the upload, never any other treasury action.
-    tax_reporting_service_account := "service-account-openbank-tax-reporting"
+    treasury_portfolio_reader_account := "service-account-openbank-tax-reporting"
 
     allowed_reasons contains "service-tax-reporting-portfolio-read" if {
     	input.principal.type == "HUMAN"
-    	input.principal.id == tax_reporting_service_account
+    	input.principal.id == treasury_portfolio_reader_account
     	"ROLE_API" in input.principal.roles
     	input.action == "treasury.portfolio.read"
     }
