@@ -22,7 +22,7 @@ import java.net.InetSocketAddress
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
- * Golden end to end (ADR-0337): ČNB PSP 10-12 PS, PSP 20-12 PS and PEF 12-04 PS assembled through
+ * Golden end to end (ADR-0337): ČNB PSP 10-12 PS, PSP 20-12 PS, PEF 12-04 PS and PSP 34-12 PS assembled through
  * the published route, the real REST client, the real catalogue rules and Postgres, from a stub of
  * the pension company's ledger instance serving its frozen-trial-balance route exactly as ledger
  * does — 200 for a FROZEN LINES_V1 period, 409 for anything else.
@@ -69,9 +69,28 @@ class CompanyBooksGoldenIT {
 
     @Test
     @TestSecurity(user = "filer", roles = ["ROLE_OPERATOR"])
-    fun `a month not yet frozen is 503 naming the ledger answer, and the company portfolio stays unsourced`() {
+    fun `a month not yet frozen is 503 naming the ledger answer`() {
         assemble("PSP10-12-PS", "2025-04").then().statusCode(503).body(containsString("409"))
-        assemble("PSP34-12-PS", "2025-Q1").then().statusCode(503).body(containsString("not a ledger fact"))
+    }
+
+    /** PSP 34-12 PS from the company's own treasury portfolio (same app: one more restart broke later ITs). */
+    @Test
+    @TestSecurity(user = "filer", roles = ["ROLE_OPERATOR"])
+    fun `PSP 34-12 PS assembles from the company's own treasury portfolio`() {
+        val d = datapoints("PSP34-12-PS", "2025-Q1")
+        assertThat(d.getValue("holdings_carrying_value")).isEqualByComparingTo("3923611.10")
+        assertThat(d.getValue("holdings_count")).isEqualByComparingTo("3")
+        assertThat(d.getValue("government_bond_quantity")).isEqualByComparingTo("1500")
+        assertThat(d.getValue("government_bond_valuation")).isEqualByComparingTo("1511111.10")
+        assertThat(d.getValue("equity_valuation")).isEqualByComparingTo("2412500.00")
+        assertThat(d.getValue("deposit_valuation")).isEqualByComparingTo("0")
+        assertThat(CompanyLedgerStub.requests).contains("/api/v1/treasury/portfolio/period-end?date=2025-03-31")
+    }
+
+    @Test
+    @TestSecurity(user = "filer", roles = ["ROLE_OPERATOR"])
+    fun `a treasury that cannot answer is 503 naming its status`() {
+        assemble("PSP34-12-PS", "2025-Q2").then().statusCode(503).body(containsString("treasury answered 503"))
     }
 }
 
@@ -84,6 +103,14 @@ class CompanyLedgerStub : QuarkusTestResourceLifecycleManager {
         server.createContext("/") { exchange ->
             val target = exchange.requestURI.toString()
             requests += target
+            if (target.startsWith("/api/v1/treasury/")) {
+                val ok = target == "/api/v1/treasury/portfolio/period-end?date=2025-03-31"
+                val bytes = (if (ok) PORTFOLIO else """{"error":"no valuation for the date"}""").toByteArray()
+                exchange.responseHeaders.add("Content-Type", "application/json")
+                exchange.sendResponseHeaders(if (ok) 200 else 503, bytes.size.toLong())
+                exchange.responseBody.use { it.write(bytes) }
+                return@createContext
+            }
             val name = Regex("/api/v1/ledger/periods/(YEAR|MONTH)/(\\d{4})-(\\d{2})-01/frozen-trial-balance")
                 .matchEntire(target)?.destructured?.let { (type, year, month) ->
                     if (type == "YEAR") "YEAR-$year" else "MONTH-$year-$month"
@@ -104,6 +131,8 @@ class CompanyLedgerStub : QuarkusTestResourceLifecycleManager {
         return mapOf(
             "quarkus.rest-client.ledger-service.url" to "http://localhost:${server.address.port}",
             "openbank.statutory-returns.company-books.opened" to "2024-01-01",
+            // The pension company's treasury instance (PSP 34-12 PS) is served by the same stub.
+            "quarkus.rest-client.treasury-service.url" to "http://localhost:${server.address.port}",
         )
     }
 
@@ -113,5 +142,16 @@ class CompanyLedgerStub : QuarkusTestResourceLifecycleManager {
 
     companion object {
         val requests = CopyOnWriteArrayList<String>()
+
+        private val PORTFOLIO = """
+            {"asOf":"2025-03-31","currency":"CZK","positions":[
+              {"instrumentClass":"GOVERNMENT_BOND","isin":"CZ0001005037","quantity":"1000",
+               "valuation":"1012345.67","valuationCurrency":"CZK"},
+              {"instrumentClass":"GOVERNMENT_BOND","isin":"CZ0001004600","quantity":"500",
+               "valuation":"498765.43","valuationCurrency":"CZK"},
+              {"instrumentClass":"EQUITY","isin":"CZ0008019106","quantity":"2500",
+               "valuation":"2412500.00","valuationCurrency":"CZK"}
+            ]}
+        """.trimIndent()
     }
 }

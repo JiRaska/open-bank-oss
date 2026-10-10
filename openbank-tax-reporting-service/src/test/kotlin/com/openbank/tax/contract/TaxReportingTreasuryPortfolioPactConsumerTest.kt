@@ -20,9 +20,11 @@ import com.openbank.tax.domain.returns.ReportingPeriod
 import com.openbank.tax.infrastructure.returns.CatalogueParser
 import com.openbank.tax.infrastructure.returns.pension.FundPeriodFiguresDto
 import com.openbank.tax.infrastructure.returns.pension.ParticipantAggregatesDto
-import com.openbank.tax.infrastructure.returns.pension.PensionReportingClient
 import com.openbank.tax.infrastructure.returns.pension.PensionReportingSources
 import com.openbank.tax.infrastructure.returns.pension.PensionReturnDataAdapter
+import com.openbank.tax.infrastructure.returns.pension.TreasuryCompanyPortfolio
+import com.openbank.tax.infrastructure.returns.pension.TreasuryPortfolioClient
+import com.openbank.tax.infrastructure.returns.pension.TreasuryPortfolioDto
 import io.restassured.RestAssured.given
 import jakarta.ws.rs.Path
 import kotlinx.coroutines.runBlocking
@@ -33,52 +35,39 @@ import java.time.LocalDate
 import java.util.UUID
 
 /**
- * Consumer contract: tax-reporting-service -> pension-service
- * `GET /api/v1/pension/reporting/participant-aggregates` (#12425). Replayed by pension-service's
- * `PensionPactFolderProviderVerificationTest` (AS service-account-openbank-tax-reporting) and
- * `PensionReportingNegativeAuthProviderVerificationTest`. Literal expected path, reflected request
- * path; the decoded body goes through the real PSP 31-04 mapping.
+ * Consumer contract: tax-reporting-service -> the pension company's treasury-service instance
+ * `GET /api/v1/treasury/portfolio/period-end?date=` (ČNB PSP 34-12 PS, ADR-0337). Replayed by
+ * treasury-service's @PactFolder provider verification and its negative-auth twin (branch
+ * feat/treasury-pension-co-portfolio). Literal expected path, reflected request path; the decoded
+ * body goes through the real PSP 34-12 PS mapping and catalogue rules.
  */
 @ExtendWith(PactConsumerTestExt::class)
-@PactTestFor(providerName = TaxReportingPensionPactConsumerTest.PROVIDER, pactVersion = PactSpecVersion.V3)
-class TaxReportingPensionPactConsumerTest {
+@PactTestFor(providerName = TaxReportingTreasuryPortfolioPactConsumerTest.PROVIDER, pactVersion = PactSpecVersion.V3)
+class TaxReportingTreasuryPortfolioPactConsumerTest {
 
     private val mapper = jacksonObjectMapper().findAndRegisterModules()
         .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
 
-    private fun contributions(o: au.com.dius.pact.consumer.dsl.LambdaDslObject) {
-        o.numberType("participant", 0)
-        o.numberType("employer", 0)
-        o.numberType("state", 0)
-        o.numberType("transferIn", 0)
-        o.numberType("total", 0)
-    }
-
     @Pact(consumer = CONSUMER, provider = PROVIDER)
-    fun aggregatesPact(builder: PactDslWithProvider): RequestResponsePact = builder
+    fun portfolioPact(builder: PactDslWithProvider): RequestResponsePact = builder
         .given(STATE)
-        .uponReceiving("GET participant aggregates for the third quarter of 2026")
+        .uponReceiving("GET the pension company's portfolio at the 2026 year end")
         .path(EXPECTED_PATH)
-        .query("periodStart=2026-07-01&periodEnd=2026-09-30")
+        .query("date=2026-12-31")
         .method("GET")
         .willRespondWith()
         .status(200)
         .headers(mapOf("Content-Type" to "application/json"))
         .body(
             newJsonBody { o ->
-                o.stringValue("periodStart", "2026-07-01")
-                o.stringValue("periodEnd", "2026-09-30")
+                o.stringValue("asOf", "2026-12-31")
                 o.stringType("currency", "CZK")
-                o.`object`("participants") { p ->
-                    p.integerType("inForce", 0)
-                    p.integerType("contributing", 0)
-                    p.integerType("pensioners", 0)
-                }
-                o.`object`("contributionsYtd") { c -> contributions(c) }
-                o.`object`("payoutsYtd") { p ->
-                    p.numberType("total", 0)
-                    p.integerType("cases", 0)
-                    p.numberType("taxWithheld", 0)
+                o.minArrayLike("positions", 1) { p ->
+                    p.stringType("instrumentClass", "GOVERNMENT_BOND")
+                    p.stringType("isin", "CZ0001005037")
+                    p.stringMatcher("quantity", DECIMAL, "1000")
+                    p.stringMatcher("valuation", DECIMAL, "1012345.67")
+                    p.stringType("valuationCurrency", "CZK")
                 }
             }.build(),
         )
@@ -87,72 +76,68 @@ class TaxReportingPensionPactConsumerTest {
     @Pact(consumer = CONSUMER, provider = PROVIDER)
     fun unauthenticatedPact(builder: PactDslWithProvider): RequestResponsePact = builder
         .given(NEGATIVE_AUTH_STATE)
-        .uponReceiving("GET participant aggregates with no M2M identity is refused")
+        .uponReceiving("GET the pension company's portfolio with no M2M identity is refused")
         .path(EXPECTED_PATH)
-        .query("periodStart=2026-07-01&periodEnd=2026-09-30")
+        .query("date=2026-12-31")
         .method("GET")
         .willRespondWith()
         .status(401)
         .toPact()
 
     @Test
-    @PactTestFor(pactMethod = "aggregatesPact")
-    fun `the aggregates decode into the adapter DTO and assemble PSP 31-04`(mockServer: MockServer) {
+    @PactTestFor(pactMethod = "portfolioPact")
+    fun `the portfolio decodes into the adapter DTO and assembles PSP 34-12 PS`(mockServer: MockServer) {
         assertThat(clientPath()).isEqualTo(EXPECTED_PATH)
-        val body = given().baseUri(mockServer.getUrl())
-            .queryParam("periodStart", "2026-07-01").queryParam("periodEnd", "2026-09-30")
+        val body = given().baseUri(mockServer.getUrl()).queryParam("date", "2026-12-31")
             .get(clientPath()).then().statusCode(200).extract().asString()
-        val aggregates = mapper.readValue<ParticipantAggregatesDto>(body)
+        val portfolio = TreasuryCompanyPortfolio.decode(mapper.readValue<TreasuryPortfolioDto>(body))
         val catalogue = CatalogueParser.parse(mapper, "statutory-returns/cz/pension-cnb.v1.json")
-        val definition = catalogue.definition("PSP31-04")!!
+        val definition = catalogue.definition("PSP34-12-PS")!!
         val values = runBlocking {
-            PensionReturnDataAdapter(
-                FixedSources(aggregates),
-                NoCorporateFacts,
-                NoCompanyBooks,
-                NoCompanyPortfolio,
-                "CZK",
-            )
+            PensionReturnDataAdapter(NoSources, NoCorporateFacts, NoCompanyBooks, { portfolio }, "CZK")
                 .fetch(
                     catalogue,
                     definition,
                     "company",
-                    ReportingPeriod(Periodicity.QUARTER, LocalDate.parse("2026-09-30")),
+                    ReportingPeriod(Periodicity.QUARTER, LocalDate.parse("2026-12-31")),
                 )
         }
         assertThat(values.keys).containsExactlyInAnyOrderElementsOf(definition.datapoints)
+        assertThat(values.getValue("government_bond_valuation")).isEqualByComparingTo("1012345.67")
         assertThat(definition.validate(values)).isEmpty()
     }
 
     @Test
     @PactTestFor(pactMethod = "unauthenticatedPact")
     fun `a read with no identity is refused with 401`(mockServer: MockServer) {
-        given().baseUri(mockServer.getUrl())
-            .queryParam("periodStart", "2026-07-01").queryParam("periodEnd", "2026-09-30")
+        given().baseUri(mockServer.getUrl()).queryParam("date", "2026-12-31")
             .get(clientPath()).then().statusCode(401)
     }
 
-    private class FixedSources(private val aggregates: ParticipantAggregatesDto) : PensionReportingSources {
+    private object NoSources : PensionReportingSources {
         override suspend fun fund(fundId: UUID, from: LocalDate, to: LocalDate): FundPeriodFiguresDto =
-            error("not used by PSP 31-04")
+            error("not used by PSP 34-12 PS")
 
-        override suspend fun participants(from: LocalDate, to: LocalDate) = aggregates
+        override suspend fun participants(from: LocalDate, to: LocalDate): ParticipantAggregatesDto =
+            error("not used by PSP 34-12 PS")
     }
 
     companion object {
         const val CONSUMER = "openbank-tax-reporting-service"
-        const val PROVIDER = "openbank-pension-service"
+        const val PROVIDER = "openbank-treasury-service"
         const val NEGATIVE_AUTH_STATE = "no valid M2M identity is presented"
 
-        /** Must match PensionPactFolderProviderVerificationTest (openbank-pension-service). */
-        const val STATE = "pension participant activity may exist for the third quarter of 2026"
+        /** Must match the treasury-service @PactFolder provider state (feat/treasury-pension-co-portfolio). */
+        const val STATE = "the pension company holds investment positions at 2026-12-31"
 
-        /** LITERAL, retyped from pension-service's ParticipantReportingResource — never derived from the client. */
-        const val EXPECTED_PATH = "/api/v1/pension/reporting/participant-aggregates"
+        /** LITERAL, retyped from the shared portfolio contract — never derived from the client. */
+        const val EXPECTED_PATH = "/api/v1/treasury/portfolio/period-end"
+
+        private const val DECIMAL = "-?[0-9]+(\\.[0-9]+)?"
 
         fun clientPath(): String {
-            val base = PensionReportingClient::class.java.getAnnotation(Path::class.java).value
-            val sub = PensionReportingClient::class.java.methods.single { it.name == "participantAggregates" }
+            val base = TreasuryPortfolioClient::class.java.getAnnotation(Path::class.java).value
+            val sub = TreasuryPortfolioClient::class.java.methods.single { it.name == "periodEnd" }
                 .getAnnotation(Path::class.java).value
             return base + sub
         }

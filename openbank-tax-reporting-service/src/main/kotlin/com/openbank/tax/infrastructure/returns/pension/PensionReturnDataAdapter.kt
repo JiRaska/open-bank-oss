@@ -4,6 +4,7 @@
 
 package com.openbank.tax.infrastructure.returns.pension
 
+import com.openbank.tax.application.port.out.CompanyPortfolioPort
 import com.openbank.tax.application.port.out.CorporateFactsPort
 import com.openbank.tax.application.port.out.ReturnDataPort
 import com.openbank.tax.application.port.out.ReturnDataUnavailableException
@@ -15,6 +16,7 @@ import com.openbank.tax.domain.returns.ReturnDefinition
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.ProcessingException
 import jakarta.ws.rs.WebApplicationException
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import java.math.BigDecimal
 import java.time.LocalDate
@@ -66,6 +68,9 @@ class PensionReturnDataAdapter(
     private val sources: PensionReportingSources,
     private val corporate: CorporateFactsPort,
     private val companyBooks: CompanyBooksPort,
+    private val companyPortfolio: CompanyPortfolioPort,
+    @ConfigProperty(name = "openbank.statutory-returns.company-books.currency", defaultValue = "CZK")
+    private val reportingCurrency: String,
 ) : ReturnDataPort {
     override val available: Boolean = true
 
@@ -85,6 +90,10 @@ class PensionReturnDataAdapter(
         val to = period.endDate
         if (definition.code == "PSP31-04") return companyFlows(sources.participants(from, to))
         if (definition.code in COMPANY_BOOK_RETURNS) return companyBooks(definition.code, companyBooks.figures(to))
+        if (definition.code == "PSP34-12-PS") {
+            // The pension company's own portfolio, from its own treasury instance (ADR-0337).
+            return Psp3412PsAssembler.assemble(companyPortfolio.portfolio(to), to, reportingCurrency).datapoints
+        }
         CORPORATE_RETURNS[definition.code]?.let { needed ->
             return corporateReturn(definition.code, entityId, needed, from, to)
         }
@@ -268,14 +277,12 @@ class PensionReturnDataAdapter(
         )
 
         /**
-         * Returns no service in this platform owns the figures for. The company's own balance
-         * sheet and P&L come from its own ledger (ADR-0337) and its capital, organisation and
-         * dividends from the corporate register; its own investment holdings have no source.
+         * Returns no service in this platform owns the figures for, refused by name. EMPTY since the
+         * company's own portfolio (PSP 34-12 PS) is read from its treasury instance (ADR-0337): the
+         * balance sheet and P&L come from its ledger, capital, organisation and dividends from the
+         * corporate register. Kept so a future unsourced return is refused with a reason, not a 500.
          */
-        val UNSOURCED: Map<String, String> = mapOf(
-            "PSP34-12-PS" to "the pension company's own holdings (instruments and their count) are not a ledger " +
-                "fact and no position source exists for the company's own investments (ADR-0337)",
-        )
+        val UNSOURCED: Map<String, String> = emptyMap()
 
         /** Company returns read from the pension company's own ledger (ADR-0337). */
         private val COMPANY_BOOK_RETURNS = setOf("PSP10-12-PS", "PSP20-12-PS", "PEF12-04-PS")
