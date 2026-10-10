@@ -463,6 +463,12 @@ spec:
         - record: openbank:cnpg_cluster_expected
           expr: vector(1)
           labels:
+            namespace: treasury-pension-co
+            cluster: treasury-pension-co-db
+            origin: manifest
+        - record: openbank:cnpg_cluster_expected
+          expr: vector(1)
+          labels:
             namespace: treasury
             cluster: treasury-db
             origin: manifest
@@ -830,6 +836,11 @@ spec:
           labels:
             namespace: tpp-registry
             cluster: tpp-registry-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: treasury-pension-co
+            cluster: treasury-pension-co-db
         - record: openbank:cnpg_cluster_instances_declared
           expr: vector(2)
           labels:
