@@ -58,6 +58,53 @@ class RetirementCatalogPackResourceTest {
     }
 
     @Test
+    fun `retirement v2 requires selected unique questionnaire instrument classes while v1 remains valid`() {
+        val attributes = fixtureOfferings().first { it["attributes"]["productLine"].asText() == "DIP" }["attributes"]
+        validate(attributes.toString(), expectedValid = true, version = 1)
+        validate(attributes.toString(), expectedValid = false, version = 2)
+        validate(attributes.with { putArray("instrumentClasses") }, expectedValid = false, version = 2)
+        validate(
+            attributes.with { putArray("instrumentClasses").add("BOND_FUNDS").add("BOND_FUNDS") },
+            expectedValid = false,
+            version = 2,
+        )
+        validate(attributes.with { putArray("instrumentClasses").add("UNKNOWN") }, expectedValid = false, version = 2)
+        validate(
+            attributes.with { putArray("instrumentClasses").add("BOND_FUNDS").add("EQUITY_FUNDS") },
+            expectedValid = true,
+            version = 2,
+        )
+    }
+
+    @Test
+    fun `v2 represents every current DPS and DIP onboarding strategy`() {
+        val byLine = fixtureOfferings().associateBy { it["attributes"]["productLine"].asText() }
+        mapOf(
+            "DPS" to listOf("CONSERVATIVE", "BALANCED", "SUSTAINABLE_BALANCED", "DYNAMIC", "LIFECYCLE"),
+            "DIP" to listOf(
+                "CONSERVATIVE",
+                "BALANCED",
+                "SUSTAINABLE_BALANCED",
+                "DYNAMIC",
+                "EQUITY_GLOBAL",
+                "LIFECYCLE",
+            ),
+        ).forEach { (line, strategies) ->
+            val base = requireNotNull(byLine[line])["attributes"]
+            strategies.forEach { strategy ->
+                validate(
+                    base.with {
+                        put("fundStrategy", strategy)
+                        putArray("instrumentClasses").add(if (line == "DPS") "PENSION_FUNDS" else "BOND_FUNDS")
+                    },
+                    expectedValid = true,
+                    version = 2,
+                )
+            }
+        }
+    }
+
+    @Test
     fun `every illustrative CZ DPS and DIP offering validates against the pack`() {
         val offerings = fixtureOfferings()
         assertThat(offerings.map { it["attributes"]["productLine"].asText() to it["attributes"]["fundStrategy"].asText() })
@@ -106,6 +153,34 @@ class RetirementCatalogPackResourceTest {
     }
 
     @Test
+    fun `selected v2 instrument coverage survives independent publication`() {
+        val offering = fixtureOfferings().first { it["attributes"]["productLine"].asText() == "DIP" }
+        val specificationId = createSpecification("CZ_DIP_CLASSES_V2", version = 2)
+        val offeringId = createOffering(specificationId, "CZ_DIP_CLASSES_V2")
+        val attributes = (offering["attributes"].deepCopy<JsonNode>() as ObjectNode).apply {
+            putArray("instrumentClasses").add("BOND_FUNDS").add("EQUITY_FUNDS")
+        }
+        val revisionId = createRevision(offeringId, offering, version = 2, attributes = attributes)
+        setMaker(revisionId, "independent-retirement-maker")
+        Given {
+            contentType("application/json")
+            body("""{"reason":"reviewed instrument class coverage"}""")
+            header("If-Match", "\"0\"")
+        } When {
+            post("/api/v2/offerings/$offeringId/revisions/$revisionId/publish")
+        } Then {
+            statusCode(200)
+            body("state", equalTo("PUBLISHED"))
+        }
+        Given { this } When {
+            get("/api/v2/products/$offeringId")
+        } Then {
+            statusCode(200)
+            body("content.attributes.instrumentClasses", equalTo(listOf("BOND_FUNDS", "EQUITY_FUNDS")))
+        }
+    }
+
+    @Test
     fun `inconsistent or out-of-range retirement attributes are rejected`() {
         val base = fixtureOfferings().first { it["attributes"]["productLine"].asText() == "DPS" }["attributes"]
         validate(base.toString(), expectedValid = true)
@@ -132,22 +207,22 @@ class RetirementCatalogPackResourceTest {
     private fun JsonNode.with(change: ObjectNode.() -> Unit): String =
         (deepCopy<JsonNode>() as ObjectNode).apply(change).toString()
 
-    private fun validate(attributes: String, expectedValid: Boolean) {
+    private fun validate(attributes: String, expectedValid: Boolean, version: Int = 1) {
         Given {
             contentType("application/json")
             body("""{"attributes":$attributes}""")
         } When {
-            post("/api/v2/product-types/$SCHEMA_ID/versions/1/validate")
+            post("/api/v2/product-types/$SCHEMA_ID/versions/$version/validate")
         } Then {
             statusCode(200)
             body("valid", equalTo(expectedValid))
         }
     }
 
-    private fun createSpecification(code: String): UUID = UUID.fromString(
+    private fun createSpecification(code: String, version: Int = 1): UUID = UUID.fromString(
         Given {
             contentType("application/json")
-            body("""{"code":"$code","schemaRef":{"id":"$SCHEMA_ID","version":1}}""")
+            body("""{"code":"$code","schemaRef":{"id":"$SCHEMA_ID","version":$version}}""")
         } When {
             post("/api/v2/specifications")
         } Then {
@@ -170,15 +245,20 @@ class RetirementCatalogPackResourceTest {
         },
     )
 
-    private fun createRevision(offeringId: UUID, offering: JsonNode): UUID = UUID.fromString(
+    private fun createRevision(
+        offeringId: UUID,
+        offering: JsonNode,
+        version: Int = 1,
+        attributes: JsonNode = offering["attributes"],
+    ): UUID = UUID.fromString(
         Given {
             contentType("application/json")
             body(
                 mapper.writeValueAsString(
                     mapOf(
-                        "schemaRef" to mapOf("id" to SCHEMA_ID, "version" to 1),
+                        "schemaRef" to mapOf("id" to SCHEMA_ID, "version" to version),
                         "name" to mapOf("en" to offering["name"].asText()),
-                        "attributes" to offering["attributes"],
+                        "attributes" to attributes,
                     ),
                 ),
             )

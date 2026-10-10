@@ -180,6 +180,12 @@ class CatalogPackSeeder(
                 1,
                 "/catalog-packs/retirement/pension-savings-v1.schema.json",
             ),
+            PackSchema(
+                "retirement",
+                "org.openbank.retirement.pension-savings",
+                2,
+                "/catalog-packs/retirement/pension-savings-v2.schema.json",
+            ),
         )
     }
 }
