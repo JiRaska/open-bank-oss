@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: ledger-service
     app.kubernetes.io/part-of: ledger
   annotations:
-    openbank.tech/policy-checksum: "5d1224e3e170fa8d"
+    openbank.tech/policy-checksum: "1c6822a8db8d3687"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -710,7 +710,7 @@ data:
     # LedgerRestClient uses for its FINREP/COREP renders (service-ledger-read admitted it before).
     # Staff only — a service-account holding ROLE_OPERATOR or ROLE_VIEWER is NOT staff here; the
     # machine callers are named by identity, one rule each.
-    allowed_reasons contains "ledger-close-inspect" if {
+    allowed_reasons contains "ledger-close-inspect-read" if {
     	input.principal.type == "HUMAN"
     	not startswith(object.get(input.principal, "id", ""), "service-account-")
     	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_VIEWER", "ROLE_AUDITOR"}

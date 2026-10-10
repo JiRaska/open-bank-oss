@@ -76,7 +76,7 @@ class ClosedPeriodResource(private val closedPeriodUseCase: ClosedPeriodUseCase)
     // the one ledger read a filing service needs, and a dedicated action lets a policy grant
     // exactly this endpoint. The verb is deliberately not `read`/`list`, so the base
     // operator-read-any / *-read-any rules can never match it implicitly — every holder is named
-    // in ledger_rest_ext.rego (`ledger-close-inspect`, `service-ledger-close-inspect`).
+    // in ledger_rest_ext.rego (`ledger-close-inspect-read`, `service-ledger-close-inspect`).
     @Authorize(action = "ledger.close.inspect", resource = "#date")
     @Operation(summary = "Immutable FROZEN LINES_V1 trial balance for regulatory reporting (fail-closed)")
     suspend fun frozenTrialBalance(@PathParam("type") type: String, @PathParam("date") date: String): Response {

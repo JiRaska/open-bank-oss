@@ -363,7 +363,7 @@ test_close_inspect_keeps_every_previous_staff_reader if {
 		p := {"type": "HUMAN", "id": "u-staff", "roles": [role]}
 		decision := rest.allow with input as inspect_input(p) with data.rules as rules_mock
 		decision.allow == true
-		"ledger-close-inspect" in rest.allowed_reasons with input as inspect_input(p) with data.rules as rules_mock
+		"ledger-close-inspect-read" in rest.allowed_reasons with input as inspect_input(p) with data.rules as rules_mock
 	}
 }
 

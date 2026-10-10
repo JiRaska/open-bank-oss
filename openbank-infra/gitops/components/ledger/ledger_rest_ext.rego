@@ -109,7 +109,7 @@ allowed_reasons contains "service-ledger-read" if {
 # LedgerRestClient uses for its FINREP/COREP renders (service-ledger-read admitted it before).
 # Staff only — a service-account holding ROLE_OPERATOR or ROLE_VIEWER is NOT staff here; the
 # machine callers are named by identity, one rule each.
-allowed_reasons contains "ledger-close-inspect" if {
+allowed_reasons contains "ledger-close-inspect-read" if {
 	input.principal.type == "HUMAN"
 	not startswith(object.get(input.principal, "id", ""), "service-account-")
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_VIEWER", "ROLE_AUDITOR"}
