@@ -101,6 +101,12 @@ authz:
 openbank:
   api:
     version: "1"
+  # ADR-0336: catalogue-defined statutory returns. Until the reporting start and fund roster are
+  # configured, deadline checks fail closed and workflow liveness cannot report success.
+  statutory-returns:
+    catalogues: statutory-returns/cz/pension-cnb.v1.json
+    company-id: company
+    deadline-check-every: 1h
   build:
     time: "${BUILD_TIME:unknown}"
   git:
