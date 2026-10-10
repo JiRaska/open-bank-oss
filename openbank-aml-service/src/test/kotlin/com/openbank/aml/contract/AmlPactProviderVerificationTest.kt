@@ -15,6 +15,8 @@ import au.com.dius.pact.provider.junitsupport.loader.PactFolder
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
@@ -63,6 +65,13 @@ import org.junit.jupiter.api.extension.ExtendWith
  * the caller is authorised.
  */
 @QuarkusTest
+@OidcSecurity(
+    claims = [
+        Claim(key = "azp", value = "openbank-admin-ui"),
+        Claim(key = "sub", value = "pact-verifier"),
+        Claim(key = "preferred_username", value = "pact-verifier"),
+    ],
+)
 @QuarkusTestResource(com.openbank.aml.it.PostgresRedisTestResource::class)
 @TestSecurity(user = "pact-verifier", roles = ["ROLE_OPERATOR", "ROLE_COMPLIANCE"])
 @Provider("openbank-aml-service")

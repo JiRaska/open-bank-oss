@@ -156,3 +156,5 @@ Events are **append-only**; corrections are made through a follow-up transition 
 ## AML case creation caller identity
 
 The `POST /api/v1/aml/cases` role gate admits `ROLE_API` for the named domestic-payment, SEPA-payment, SEPA-instant and FX service accounts. The resource then binds each machine caller to its verified JWT `azp`, subject and Keycloak service-account username; a role or username alone does not authorize case creation. Staff roles remain usable from verified interactive user sessions.
+
+HTTP authentication fixtures exercise interactive staff JWT claims alongside their roles. Negative unauthenticated Pact interactions remain in their separate provider test without a synthetic identity.
