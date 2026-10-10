@@ -310,6 +310,19 @@ lending:
       # readiness probe and every in-cluster plaintext caller get `connection refused`.
       # mTLS applies to the 8443 listener only. Runtime property; see #10505.
       insecure-requests: enabled
+      # Listener parity (#12511, the #12506 pattern): with client-auth on, Quarkus ALSO registers its
+      # mTLS authentication mechanism, which turns any trusted client certificate into an authenticated
+      # SecurityIdentity of its own — on 8443 only. The API must be authenticated identically on both
+      # listeners, by the OIDC bearer OPA decides on, so /api/* accepts the bearer mechanism ONLY; the
+      # certificate stays transport authentication. Measured before this: a fleet-CA certificate with no
+      # bearer reached the API as an authenticated principal (403 from authz, not 401).
+      # LendingListenerAuthParityIT holds both listeners to it with the production listener shape.
+      auth:
+        permission:
+          bearer-only:
+            paths: /api/*
+            policy: permit
+            auth-mechanism: bearer
     # RestCatalogLoanProfilePort calls product-catalog. Production uses a named TLS bucket over
     # product-catalog's private-CA mTLS listener (8443, client auth REQUIRED). Local/test fixtures
     # speak plain HTTP, so this stays under %prod: the client cert only exists in the cluster.

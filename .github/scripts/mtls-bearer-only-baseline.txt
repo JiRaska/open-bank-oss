@@ -7,7 +7,6 @@ openbank-ap2-service
 openbank-consent-service
 openbank-document-service
 openbank-ledger-service
-openbank-lending-service
 openbank-party-service
 openbank-product-catalog
 openbank-risk-engine
