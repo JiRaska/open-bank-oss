@@ -248,16 +248,25 @@ def self_test() -> int:
             return {"commit": {"committer": {"date": old.isoformat()}}}
         raise AssertionError(f"unexpected API read {path}")
 
+    conflict = json.dumps({"message": "merge conflict between base and head", "status": "422"})
     with patch.dict(globals(), {"required_policy": lambda *_: (["Gitleaks"], True),
                                 "get": fixture_get, "head_checks": lambda *_: {"Gitleaks": "success"}}):
-        for status, want in ((403, 1), (409, 0)):
-            with patch.dict(globals(), {"api": lambda *_args, code=status: (code, "denied")}):
+        for label, status, body, want, marker in (
+            ("permission denied", 403, "denied", 1, "::error::FAILED"),
+            ("head race", 409, "changed", 0, "head changed during update"),
+            ("reported merge conflict", 422, conflict, 0, "left for a human"),
+            ("other validation error", 422, '{"message":"Validation Failed"}', 1, "::error::FAILED"),
+            ("unreadable validation error", 422, "not JSON", 1, "::error::FAILED"),
+        ):
+            with patch.dict(globals(), {"api": lambda *_args, code=status, data=body: (code, data)}):
                 output = io.StringIO()
                 with contextlib.redirect_stdout(output):
                     result = run("example/repo", "main", 5, 0, False, 20)
-                ok = result == want and (("::error::FAILED" in output.getvalue()) == (status == 403))
+                ok = result == want and marker in output.getvalue()
+                if status == 422 and want == 0:
+                    ok = ok and "0 update(s), 0 failed update(s)" in output.getvalue()
                 failures += not ok
-                print(f"{'PASS' if ok else 'FAIL'}  update-branch HTTP {status} -> exit {result}")
+                print(f"{'PASS' if ok else 'FAIL'}  update-branch {label} HTTP {status} -> exit {result}")
     def capped_get(path: str) -> object:
         if "/pulls/42/commits?" in path:
             return [update, update]
@@ -436,6 +445,21 @@ def branch_update_count(repo: str, number: int, branch: str) -> int:
     )
 
 
+def is_merge_conflict(code: int, data: object) -> bool:
+    """Recognize only GitHub's explicit update-branch merge-conflict response.
+
+    Other 422 responses can mean invalid input or a policy failure and must keep
+    the workflow red. `api()` currently returns error bodies as JSON text.
+    """
+    if code != 422:
+        return False
+    try:
+        body = json.loads(data) if isinstance(data, str) else data
+    except ValueError:
+        return False
+    return isinstance(body, dict) and body.get("message") == "merge conflict between base and head"
+
+
 def run(repo: str, branch: str, max_updates: int, debounce: int, dry_run: bool,
         fleet_threshold: int, max_updates_per_pr: int = 2) -> int:
     required, strict = required_policy(repo, branch)
@@ -516,6 +540,10 @@ def run(repo: str, branch: str, max_updates: int, debounce: int, dry_run: bool,
         elif code == 409:
             # A competing update changed the expected head. The next run re-reads it.
             print(f"SKIP   #{n} {sha[:9]}: head changed during update ({code})")
+        elif is_merge_conflict(code, data):
+            # GitHub can report `unknown` before it has computed conflicts. Its
+            # update endpoint is authoritative here; the author must resolve it.
+            print(f"SKIP   #{n} {sha[:9]}: merge conflict between base and head — left for a human")
         else:
             failed_updates += 1
             print(f"::error::FAILED #{n} {sha[:9]}: update-branch -> {code}: {data}")
