@@ -63,7 +63,14 @@
 # ===========================================================================
 
 locals {
-  arc_reaper_image = "public.ecr.aws/docker/library/alpine:3.21.3" # ECR Public (anonymous, un-throttled), arch-multi; jq+curl via apk
+  # alpine:3.21.3 from ECR Public (arch-multi; jq+curl via apk), addressed through the
+  # private ECR pull-through rule rather than at public.ecr.aws. Kyverno's
+  # ecr-pull-through-rewrite-cel rewrites a public.ecr.aws/ ref to exactly this path at
+  # CronJob admission (autogen); written here verbatim, tofu's state matches the live
+  # object and the policy is a no-op on it (idempotent: the ECR host matches no origin
+  # prefix). Writing the origin ref instead made every plan revert Kyverno's rewrite and
+  # every apply get rewritten back — a perpetual in-place diff.
+  arc_reaper_image = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${data.aws_region.current.region}.amazonaws.com/${aws_ecr_pull_through_cache_rule.ecr_public.ecr_repository_prefix}/docker/library/alpine:3.21.3"
 
   # POSIX sh + jq, run against the in-cluster Kubernetes API with the reaper SA
   # token. No ${...}/%{...} sequences here on purpose, so the script passes
