@@ -9,6 +9,8 @@ import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.module.kotlin.extensions.Extract
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
@@ -87,6 +89,13 @@ class PartySequenceAllocationIT {
 
     @Test
     @TestSecurity(user = "sequence-it", roles = ["ROLE_ADMIN", "ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = "sequence-it"),
+            Claim(key = "preferred_username", value = "sequence-it"),
+        ],
+    )
     fun `saving a payee allocates an id and writes the row`() {
         val partyId = createParty("payee-seq-${UUID.randomUUID()}@example.cz")
 
