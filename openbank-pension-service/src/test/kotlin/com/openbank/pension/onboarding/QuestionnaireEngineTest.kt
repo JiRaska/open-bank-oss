@@ -8,6 +8,7 @@ import com.openbank.pension.domain.model.ProductLine
 import com.openbank.pension.domain.onboarding.AssessmentStatus
 import com.openbank.pension.domain.onboarding.EsgPreference
 import com.openbank.pension.domain.onboarding.QuestionnaireRegime
+import com.openbank.pension.domain.onboarding.QuestionnaireRules
 import com.openbank.pension.domain.onboarding.RecommendationReason
 import com.openbank.pension.domain.onboarding.RiskLabel
 import com.openbank.pension.domain.onboarding.StrategyRecommendation
@@ -99,6 +100,14 @@ class QuestionnaireEngineTest {
     }
 
     @Test
+    fun `registry keeps older versions for rendering stored assessments`() {
+        val newer = dip.copy(version = dip.version + 1)
+        val versioned = StaticQuestionSetRegistry(sets + newer, onboardingRules)
+        assertThat(versioned.questionSet("CZ", ProductLine.DIP)).isEqualTo(newer)
+        assertThat(versioned.questionSet(dip.id, dip.version)).isEqualTo(dip)
+    }
+
+    @Test
     fun `a MiFID set without a knowledge question, or a set missing warning wording, is refused`() {
         assertThatThrownBy {
             dip.copy(
@@ -185,6 +194,20 @@ class QuestionnaireEngineTest {
         assertThat(expert.appropriate).isTrue()
     }
 
+    @Test
+    fun `appropriateness cannot combine knowledge and experience from different instruments`() {
+        val crossed = dipAnswers(knowledge = "DONT_KNOW", experience = "NEVER") + mapOf(
+            "dip.knowledge_bonds" to "CORRECT",
+            "dip.experience_equity" to "PROFESSIONALLY",
+        )
+        val profile = QuestionnaireEngine.profile(dip, crossed)
+        assertThat(profile.competence.map { it.knowledge + it.experience }).containsExactly(3, 3)
+        val assessment = assess(profile, dipRules.questionnaire.copy(appropriatenessMinScore = 4))
+        assertThat(assessment.appropriate).isFalse()
+        assertThat(WarningPolicy.required("BALANCED", assessment, recommendation))
+            .containsExactly(WarningCode.PRODUCT_NOT_APPROPRIATE)
+    }
+
     // --- validation, progress, consistency ------------------------------------------------------
 
     @Test
@@ -254,12 +277,15 @@ class QuestionnaireEngineTest {
 
     // --- warnings ------------------------------------------------------------------------------------
 
-    private fun assess(profile: com.openbank.pension.domain.questionnaire.QuestionnaireProfile) =
+    private fun assess(
+        profile: com.openbank.pension.domain.questionnaire.QuestionnaireProfile,
+        rules: QuestionnaireRules = dipRules.questionnaire,
+    ) =
         SuitabilityAssessment.fromQuestionnaire(
             UUID.randomUUID(),
             UUID.randomUUID(),
             ProductLine.DIP,
-            dipRules.questionnaire,
+            rules,
             profile,
             QuestionnaireRecord(
                 dip.id, dip.version, emptyMap(), profile.riskClass, profile.bindingReasons, profile.competence,
