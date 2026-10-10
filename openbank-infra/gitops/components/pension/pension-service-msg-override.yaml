@@ -1,0 +1,21 @@
+# group.id / auto.offset.reset for pension-service's Kafka channel (#12378), as a properties file.
+# SmallRye's YAML source quotes a dotted leaf key (`group.id` registers as `"group.id"`), so the
+# connector never reads it from application.yaml (#686); env vars reverse-map ambiguously for
+# hyphenated channel names (quarkusio/quarkus#30106). config_ordinal=500 outranks the baked
+# application.yaml. Loaded via QUARKUS_CONFIG_LOCATIONS on pension-service.yaml.
+#
+# auto.offset.reset=latest: a NEW group starts at the head. The channel only writes outcomes for
+# payments pension-service itself sent, which all post-date this consumer.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pension-service-msg-override
+  namespace: pension
+  labels:
+    app.kubernetes.io/name: pension-service
+    app.kubernetes.io/part-of: pension
+data:
+  override.properties: |
+    config_ordinal=500
+    mp.messaging.incoming.domestic-payment-events-in.group.id=pension-service-domestic-payment
+    mp.messaging.incoming.domestic-payment-events-in.auto.offset.reset=latest

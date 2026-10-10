@@ -4,6 +4,7 @@
 
 package com.openbank.pension.application.port.out
 
+import com.openbank.pension.domain.model.ContractStatus
 import com.openbank.pension.domain.model.PensionContract
 import java.util.UUID
 
@@ -16,4 +17,10 @@ interface PensionContractRepository {
     suspend fun findById(id: UUID): PensionContract?
 
     suspend fun findByIdempotencyKey(participantPartyId: UUID, idempotencyKey: String): PensionContract?
+
+    /** The participant's contracts, newest first (ADR-0334 S8: the edge's contract list). */
+    suspend fun findByParticipant(participantPartyId: UUID, limit: Int): List<PensionContract>
+
+    /** Staff view: contracts newest first, optionally in one status. */
+    suspend fun findByStatus(status: ContractStatus?, limit: Int): List<PensionContract>
 }

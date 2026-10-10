@@ -1030,6 +1030,23 @@
       "attributes": {}
     },
     {
+      "clientId": "openbank-pension",
+      "name": "OpenBank Pension Service",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "CHANGE_ME_LOCAL_DEV_ONLY",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "protocol": "openid-connect",
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "attributes": {}
+    },
+    {
       "clientId": "openbank-analytics-sink",
       "name": "OpenBank Analytics Sink",
       "enabled": true,
@@ -1438,6 +1455,14 @@
       "username": "service-account-openbank-kyb",
       "enabled": true,
       "serviceAccountClientId": "openbank-kyb",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-pension",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-pension",
       "realmRoles": [
         "ROLE_API"
       ]

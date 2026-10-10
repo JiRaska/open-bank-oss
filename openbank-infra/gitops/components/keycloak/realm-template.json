@@ -1260,6 +1260,25 @@
       "secret": "__KYB_CLIENT_SECRET__"
     },
     {
+      "clientId": "openbank-pension",
+      "name": "OpenBank Pension Service",
+      "description": "Per-service M2M client for pension-service's FundAdministrationPort calls to pension-fund-service (holdings read, unit orders) (ADR-0334 S8). Holds ROLE_API only; pension-fund-service grants those actions to this identity alone.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__PENSION_CLIENT_SECRET__"
+    },
+    {
       "clientId": "openbank-analytics-sink",
       "name": "OpenBank Analytics Sink",
       "description": "Per-service M2M client for analytics-sink's account-registry sweep (account.list) (issue #10486). Holds ROLE_API only; its actions are granted by identity in the upstream OPA rego.",
@@ -1869,6 +1888,14 @@
       "username": "service-account-openbank-kyb",
       "enabled": true,
       "serviceAccountClientId": "openbank-kyb",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-pension",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-pension",
       "realmRoles": [
         "ROLE_API"
       ]

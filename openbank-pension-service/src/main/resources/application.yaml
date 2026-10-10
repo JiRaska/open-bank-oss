@@ -57,6 +57,51 @@ quarkus:
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
 
+  # pension-service's OWN machine identity (ADR-0334 S8): Keycloak client `openbank-pension`,
+  # ROLE_API only. Used by the pension-fund-service rest-client (FundAdministrationPort) and the
+  # sca/party/account identity checks (#12377);
+  # pension-fund-service admits holdings and orders for service-account-openbank-pension alone.
+  # Never the shared openbank-services client.
+  oidc-client:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+    client-id: openbank-pension
+    credentials:
+      secret: ${OIDC_PENSION_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    grant:
+      type: client
+
+  rest-client:
+    pension-fund-service:
+      url: ${PENSION_FUND_SERVICE_URL:http://localhost:8162}
+      connect-timeout: 2000
+      read-timeout: 5000
+    # #12378 payment adapters (prod build only; %dev/%test use the stubs). Same OWN client token.
+    standing-order-service:
+      url: ${STANDING_ORDER_SERVICE_URL:http://localhost:8121}
+      connect-timeout: 2000
+      read-timeout: 5000
+    sdd-service:
+      url: ${SDD_SERVICE_URL:http://localhost:8129}
+      connect-timeout: 2000
+      read-timeout: 5000
+    domestic-payment:
+      url: ${DOMESTIC_PAYMENT_URL:http://localhost:8116}
+      connect-timeout: 2000
+      read-timeout: 10000
+    # Identity and SCA checks (#12377), same own client (openbank-pension). Read timeouts are short:
+    # a slow check fails closed (503), never passes.
+    sca-service:
+      url: ${SCA_SERVICE_URL:http://localhost:8110}
+      connect-timeout: 2000
+      read-timeout: 3000
+    party-service:
+      url: ${PARTY_SERVICE_URL:http://localhost:8111}
+      connect-timeout: 2000
+      read-timeout: 3000
+    account-service:
+      url: ${ACCOUNT_SERVICE_URL:http://localhost:8100}
+      connect-timeout: 2000
+      read-timeout: 3000
 
   shutdown:
     timeout: 30S
@@ -87,6 +132,69 @@ quarkus:
 
 
 openbank:
+  # Temporal (ADR-0334 S8). One client, one namespace; each workflow family polls its OWN task
+  # queue, so a worker never receives a task type it did not register. The worker switch follows
+  # the fleet convention openbank.<service>.worker.enabled. Every value is an env override.
+  temporal:
+    enabled: ${OPENBANK_TEMPORAL_ENABLED:false}
+    server-url: ${OPENBANK_TEMPORAL_SERVER_URL:localhost:7233}
+    namespace: ${OPENBANK_TEMPORAL_NAMESPACE:openbank-pension}
+  pension:
+    # Required in production; dev/test profiles use a synthetic fixture provider.
+    # This only constrains creation, not authorization or existing-data isolation.
+    provider-entity-id: ${OPENBANK_PENSION_PROVIDER_ENTITY_ID}
+    worker:
+      enabled: ${OPENBANK_PENSION_WORKER_ENABLED:true}
+    onboarding:
+      # Onboarding, transfer-in and transfer-out workflows (S2).
+      task-queue: ${OPENBANK_PENSION_ONBOARDING_TASK_QUEUE:pension-onboarding}
+    # FAIL CLOSED by default: the KYC, document, SCA and counterparty ports are stubs until their
+    # real adapters land. Off, every stubbed call answers 503.
+    stub-integrations:
+      enabled: false
+    # Retirement simulation (ADR-0334 S8): the provider's ASSUMED annual return per strategy code.
+    # Illustrative configuration, not a forecast; a strategy missing here is not projected.
+    simulation:
+      assumed-annual-returns:
+        CONSERVATIVE: "0.015"
+        BALANCED: "0.035"
+        SUSTAINABLE_BALANCED: "0.035"
+        DYNAMIC: "0.050"
+    exit:
+      # Early termination, payout and death settlement workflows (S5).
+      task-queue: ${OPENBANK_PENSION_EXIT_TASK_QUEUE:pension-exit}
+      stub:
+        # FAIL CLOSED: the SCA, own-account and beneficiary-KYC stubs refuse everything unless a
+        # profile turns them on.
+        checks-accept: false
+        default-value: "0"
+    # #12378: the provider's own accounts. Deliberately NO defaults: an unconfigured deployment
+    # refuses every mandate / payout (PaymentRailRefusedException) instead of paying from, or
+    # collecting into, an account nobody designated.
+    payments:
+      collection:
+        iban: ${OPENBANK_PENSION_COLLECTION_IBAN:}
+        name: ${OPENBANK_PENSION_COLLECTION_NAME:}
+        creditor-identifier: ${OPENBANK_PENSION_SEPA_CREDITOR_ID:}
+      payout:
+        account-id: ${OPENBANK_PENSION_PAYOUT_ACCOUNT_ID:}
+        account-number: ${OPENBANK_PENSION_PAYOUT_ACCOUNT_NUMBER:}
+        bank-code: ${OPENBANK_PENSION_PAYOUT_BANK_CODE:}
+        name: ${OPENBANK_PENSION_PAYOUT_ACCOUNT_NAME:}
+    # CZ state contribution (ZDPS 427/2011, #12382). company-ico is deliberately NOT defined here:
+    # unset (env OPENBANK_PENSION_STATE_CONTRIBUTION_CZ_COMPANY_ICO), nothing is filed. The daily
+    # deadline job files a closed quarter in its filing month, builds the monthly return report by
+    # the 10th, and counts missed deadlines.
+    state-contribution:
+      cz:
+        deadline-cron: ${OPENBANK_PENSION_CZ_DEADLINE_CRON:0 30 5 * * ?}
+    # Annuity partner integration (#12383). Partners are REGISTRY data (operator, four-eyes); this is
+    # only how long a quote round waits, and whether a partner endpoint may be plain http (never in
+    # prod). A reference-protocol partner's credential is openbank.pension.annuity.partners.<id>.token
+    # (a secret, injected per environment); without one that partner is never called.
+    annuity:
+      quote-timeout: PT5S
+      allow-insecure-endpoints: false
   rate-limit:
     enabled: true
     max-concurrent-requests: 100
@@ -96,6 +204,35 @@ openbank:
     time: "${BUILD_TIME:unknown}"
   git:
     commit: "${GIT_COMMIT:unknown}"
+
+mp:
+  messaging:
+    connector:
+      smallrye-kafka:
+        security.protocol: ${KAFKA_SECURITY_PROTOCOL:PLAINTEXT}
+        ssl.keystore.location: ${KAFKA_SSL_KEYSTORE_LOCATION:}
+        ssl.keystore.type: ${KAFKA_SSL_KEYSTORE_TYPE:PKCS12}
+        ssl.keystore.password: ${KAFKA_SSL_KEYSTORE_PASSWORD:}
+        ssl.truststore.location: ${KAFKA_SSL_TRUSTSTORE_LOCATION:}
+        ssl.truststore.type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
+        ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
+    incoming:
+      # #12378: domestic-payment status changes -> payout instruction SETTLED / REJECTED.
+      # group.id / auto.offset.reset are NOT YAML keys here: SmallRye's YAML source quotes a dotted
+      # leaf key and the connector never reads it (#686). They come from the
+      # pension-service-msg-override ConfigMap (override.properties, config_ordinal=500).
+      domestic-payment-events-in:
+        connector: smallrye-kafka
+        topic: openbank.domestic.payment.events
+        client.id: pension-service-domestic-payment-${quarkus.uuid}
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        # A rethrow parks the record instead of stopping the channel (SmallRye's default `fail`).
+        # Explicit topic (the implicit one is derived from the channel name, which repeats across
+        # services) and NESTED, never the dotted one-liner, which is inert (#5745/#5752).
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.pension.domestic-payment-events-in
 
 opa:
   url: "${OPA_URL:http://localhost:8181}"
@@ -110,6 +247,23 @@ authz:
     enforce: "${AUTHZ_FOUR_EYES_ENFORCE:false}"
 
 "%dev":
+  openbank:
+    pension:
+      # Synthetic development identity, shared with test and sandbox fixtures.
+      provider-entity-id: ${OPENBANK_PENSION_PROVIDER_ENTITY_ID:00000000-0000-4000-8000-000000000001}
+      stub-integrations:
+        enabled: true
+      worker:
+        enabled: false
+      exit:
+        stub:
+          checks-accept: true
+          default-value: "250000.00"
+      state-contribution:
+        cz:
+          company-ico: "12345678"
+      annuity:
+        allow-insecure-endpoints: true
   quarkus:
     log:
       level: DEBUG
@@ -117,11 +271,41 @@ authz:
       tls:
         verification: none
       enabled: false
+    # The in-memory fund register replaces the REST adapter in dev; no token is ever minted.
+    oidc-client:
+      enabled: false
   authz:
     enforce: "false"
+  mp:
+    messaging:
+      incoming:
+        domestic-payment-events-in:
+          connector: smallrye-in-memory
 
 "%test":
+  openbank:
+    pension:
+      provider-entity-id: "00000000-0000-4000-8000-000000000001"
+      # No Temporal frontend in @QuarkusTest: the tests register their own in-process worker.
+      worker:
+        enabled: false
+      stub-integrations:
+        enabled: true
+      exit:
+        stub:
+          checks-accept: true
+      state-contribution:
+        cz:
+          company-ico: "12345678"
+      annuity:
+        allow-insecure-endpoints: true
   quarkus:
+    # The settlement channel runs on the in-memory connector in tests; no broker is started.
+    kafka:
+      devservices:
+        enabled: false
+    scheduler:
+      enabled: false
     datasource:
       reactive:
         url: vertx-reactive:postgresql://localhost:5433/openbank_pension_test
@@ -129,5 +313,12 @@ authz:
       enabled: false
     oidc:
       enabled: false
+    oidc-client:
+      enabled: false
   authz:
     enforce: "false"
+  mp:
+    messaging:
+      incoming:
+        domestic-payment-events-in:
+          connector: smallrye-in-memory

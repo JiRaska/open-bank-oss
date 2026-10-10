@@ -7,22 +7,20 @@ package com.openbank.pension.infrastructure.rest
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import com.openbank.pension.application.port.`in`.CreateDraftCommand
-import com.openbank.pension.application.port.`in`.EarlyTerminationCommand
 import com.openbank.pension.application.port.`in`.IncentiveEvaluationCommand
 import com.openbank.pension.application.port.`in`.PensionContractUseCase
+import com.openbank.pension.domain.model.ContractStatus
 import com.openbank.pension.domain.model.ContributionSchedule
-import com.openbank.pension.domain.pack.SurrenderInputs
 import com.openbank.pension.infrastructure.authz.ContractAccessGuard
 import com.openbank.pension.infrastructure.rest.dto.ContractResponse
 import com.openbank.pension.infrastructure.rest.dto.CreateContractRequest
-import com.openbank.pension.infrastructure.rest.dto.EarlyTerminationRequest
-import com.openbank.pension.infrastructure.rest.dto.EarlyTerminationResponse
 import com.openbank.pension.infrastructure.rest.dto.ElectStrategyRequest
 import com.openbank.pension.infrastructure.rest.dto.IncentiveEvaluationRequest
 import com.openbank.pension.infrastructure.rest.dto.IncentiveResultResponse
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
+import jakarta.ws.rs.DefaultValue
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
@@ -30,6 +28,7 @@ import jakarta.ws.rs.PUT
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
+import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.openapi.annotations.Operation
@@ -97,11 +96,20 @@ class PensionContractResource {
                 beneficiaries = body.beneficiaries.orEmpty().mapIndexed { i, b ->
                     requireNotNull(b) { "beneficiaries[$i] must not be null" }.toDomain(i)
                 },
-                idempotencyKey = idempotencyKey(idempotencyKey),
+                idempotencyKey = requireIdempotencyKey(idempotencyKey),
             ),
         )
         return Response.status(Response.Status.CREATED).entity(ContractResponse.from(contract)).build()
     }
+
+    @GET
+    @Operation(summary = "The participant's own contracts (edge), or staff: contracts by status, newest first")
+    @Authorize(action = "pension.contract.read")
+    suspend fun list(
+        @HeaderParam("X-Customer-Party-Id") party: String?,
+        @QueryParam("status") status: ContractStatus?,
+        @QueryParam("limit") @DefaultValue("50") limit: Int,
+    ): List<ContractResponse> = contracts.list(access.readerFor(party), status, limit).map(ContractResponse::from)
 
     @GET
     @Path("/{id}")
@@ -121,24 +129,7 @@ class PensionContractResource {
     ): ContractResponse = ContractResponse.from(
         contracts.submit(
             access.actingParticipant(party).also {
-                idempotencyKey(idempotencyKey)
-            },
-            id,
-        ),
-    )
-
-    @POST
-    @Path("/{id}/activate")
-    @Operation(summary = "PENDING_ACTIVATION -> ACTIVE; the contract start date is set today")
-    @Authorize(action = "pension.contract.activate", resource = "#id")
-    suspend fun activate(
-        @PathParam("id") id: UUID,
-        @HeaderParam("X-Customer-Party-Id") party: String?,
-        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
-    ): ContractResponse = ContractResponse.from(
-        contracts.activate(
-            access.actingParticipant(party).also {
-                idempotencyKey(idempotencyKey)
+                requireIdempotencyKey(idempotencyKey)
             },
             id,
         ),
@@ -151,12 +142,27 @@ class PensionContractResource {
     suspend fun electStrategy(
         @PathParam("id") id: UUID,
         @HeaderParam("X-Customer-Party-Id") party: String?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         request: ElectStrategyRequest?,
     ): ContractResponse {
+        requireIdempotencyKey(idempotencyKey)
         val body = requireNotNull(request) { "request body is required" }
         val code = requireNotNull(body.strategyCode) { "strategyCode is required" }
+        val acknowledged = body.acknowledgedWarnings.orEmpty().mapIndexed { i, w ->
+            requireNotNull(w) { "acknowledgedWarnings[$i] must not be null" }
+        }.toSet()
         return ContractResponse.from(
-            contracts.electStrategy(access.actingParticipant(party), id, code, body.effectiveFrom),
+            contracts.electStrategy(
+                com.openbank.pension.application.port.`in`.ElectStrategyCommand(
+                    access.actingParticipant(party),
+                    id,
+                    code,
+                    body.effectiveFrom,
+                    body.scaChallengeId,
+                    acknowledged,
+                    body.language,
+                ),
+            ),
         )
     }
 
@@ -171,7 +177,7 @@ class PensionContractResource {
     ): ContractResponse = ContractResponse.from(
         contracts.suspendContributions(
             access.actingParticipant(party).also {
-                idempotencyKey(idempotencyKey)
+                requireIdempotencyKey(idempotencyKey)
             },
             id,
         ),
@@ -188,7 +194,7 @@ class PensionContractResource {
     ): ContractResponse = ContractResponse.from(
         contracts.resumeContributions(
             access.actingParticipant(party).also {
-                idempotencyKey(idempotencyKey)
+                requireIdempotencyKey(idempotencyKey)
             },
             id,
         ),
@@ -204,7 +210,7 @@ class PensionContractResource {
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         request: IncentiveEvaluationRequest?,
     ): List<IncentiveResultResponse> {
-        idempotencyKey(idempotencyKey)
+        requireIdempotencyKey(idempotencyKey)
         val body = requireNotNull(request) { "request body is required" }
         return contracts.evaluateIncentives(
             IncentiveEvaluationCommand(
@@ -219,46 +225,4 @@ class PensionContractResource {
             ),
         ).map(IncentiveResultResponse::from)
     }
-
-    @POST
-    @Path("/{id}/early-termination")
-    @Operation(summary = "Surrender preview; with confirm=true the contract moves to TERMINATING")
-    @Authorize(action = "pension.contract.terminate", resource = "#id")
-    suspend fun earlyTermination(
-        @PathParam("id") id: UUID,
-        @HeaderParam("X-Customer-Party-Id") party: String?,
-        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
-        request: EarlyTerminationRequest?,
-    ): EarlyTerminationResponse {
-        idempotencyKey(idempotencyKey)
-        val body = requireNotNull(request) { "request body is required" }
-        val received = body.incentivesReceived.orEmpty().mapValues { (incentive, years) ->
-            years.orEmpty().mapValues { (year, amount) ->
-                requireNotNull(amount) { "incentivesReceived['$incentive'][$year] must not be null" }
-            }
-        }
-        val result = contracts.requestEarlyTermination(
-            EarlyTerminationCommand(
-                caller = access.actingParticipant(party),
-                contractId = id,
-                inputs = SurrenderInputs(
-                    currentValue = requireNotNull(body.currentValue) { "currentValue is required" },
-                    incentivesReceived = received,
-                ),
-                confirm = body.confirm ?: false,
-            ),
-        )
-        return EarlyTerminationResponse.from(result.contract, result.preview)
-    }
-}
-
-private const val MAX_IDEMPOTENCY_KEY_LENGTH = 256
-
-/** Required on every POST (money-path idempotency rule); validated before any work is done. */
-private fun idempotencyKey(value: String?): String {
-    val key = requireNotNull(value) { "header 'Idempotency-Key' is required" }
-    require(key.isNotBlank() && key.length <= MAX_IDEMPOTENCY_KEY_LENGTH) {
-        "Idempotency-Key must be 1..$MAX_IDEMPOTENCY_KEY_LENGTH characters"
-    }
-    return key
 }

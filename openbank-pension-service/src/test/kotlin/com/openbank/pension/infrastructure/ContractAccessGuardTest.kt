@@ -72,4 +72,20 @@ class ContractAccessGuardTest {
         val staffWithHeader = guard("alice", "ROLE_OPERATOR")
         assertThatThrownBy { staffWithHeader.readerFor(owner.toString()) }.isInstanceOf(ForbiddenException::class.java)
     }
+
+    @Test
+    fun `a service account holding a staff role is not staff`() {
+        // The shared backend client carries ROLE_OPERATOR in some realms (#3765/#3734).
+        for (role in ContractAccessGuard.STAFF_ROLES) {
+            val shared = guard("service-account-openbank-services", role, "ROLE_API")
+            assertThatThrownBy { shared.readerFor(null) }.isInstanceOf(ForbiddenException::class.java)
+            assertThatThrownBy { shared.staffActor(null) }.isInstanceOf(ForbiddenException::class.java)
+        }
+        // Even the trusted relay is no staff without a participant header.
+        val edgeAsOperator = guard(ContractAccessGuard.DEFAULT_RELAY, "ROLE_OPERATOR")
+        assertThatThrownBy { edgeAsOperator.readerFor(null) }.isInstanceOf(ForbiddenException::class.java)
+        assertThat(edgeAsOperator.readerFor(owner.toString())).isEqualTo(Caller.customer(owner))
+        // A human with the same role still is.
+        assertThat(guard("alice", "ROLE_COMPLIANCE").readerFor(null)).isEqualTo(Caller.STAFF)
+    }
 }
