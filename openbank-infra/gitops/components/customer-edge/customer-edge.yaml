@@ -76,7 +76,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-customer-edge-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "0b0a6008c1d5ef1a"
+        openbank.tech/policy-checksum: "45043bf077fa5b95"
     spec:
       # Dedicated SA so EKS Pod Identity can hand the edge (and ONLY the edge) the
       # feedback-screenshots S3 role — ADR-0192, openbank-infra/aws/envs/sandbox-platform/
