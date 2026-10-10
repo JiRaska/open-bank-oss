@@ -200,3 +200,22 @@ openbank-sdd-service.
   CANCELLED), so no stored order is affected and the execution path needs no change — a hypothetical
   legacy row would still be refused by sepa-payment and recorded as a failure. No new endpoint,
   caller, privilege or event. Rollback: revert the commit.
+
+
+## Pension integration boundary (ADR-0334/0335, #12435)
+
+**Pension contribution scheduling.** This integration adds the `pension` namespace to `standing-order-service-ingress-allow-list`.
+That grants namespace-wide network reachability to the selected provider pods; it does not
+restrict traffic to one workload and does not grant an application action. The pension REST
+client uses its own `openbank-pension` client-credentials identity for `POST /api/v1/standing-orders and DELETE /api/v1/standing-orders/{id}`.
+
+**Threat and required controls.** Creation and cancellation change future payment execution. A supplied party or order id is not proof of ownership; providers must bind the requested action to the entitled party and account. Creation must retain durable idempotency, and cancellation must reject unrelated orders.
+Compromise of any admitted namespace workload is therefore a network threat, while compromise
+of the pension client credential reaches whichever actions its provider authorization permits.
+Keep token validation, identity-scoped authorization and the provider's domain checks enabled.
+
+**Rollout dependency and proof limits.** The integration depends on #12419 for scoped downstream
+authorization; the allow-list change alone does not prove that grant is deployed or correct.
+Review the corresponding provider grant and negative caller/ownership tests before enabling
+this integration. Consumer contracts pin request/response shape; they do not prove a live token
+or account entitlement. No live deployment verification is claimed by this documentation update.

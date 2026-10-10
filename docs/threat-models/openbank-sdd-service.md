@@ -147,3 +147,22 @@ instruction, but the irreversible debit lives downstream.
   `SddOutboxAtomicityIT`'s same-`xmin` proof still applies), and the publish bulkhead widens from
   1 to `OutboxDispatch.SEND_CONCURRENCY` (D), bounded per batch. Rollback: revert the commit; the
   additive column and indexes are inert under the v1 repository.
+
+
+## Pension integration boundary (ADR-0334/0335, #12435)
+
+**Pension mandate registration and cancellation.** This integration adds the `pension` namespace to `sdd-service-ingress-allow-list`.
+That grants namespace-wide network reachability to the selected provider pods; it does not
+restrict traffic to one workload and does not grant an application action. The pension REST
+client uses its own `openbank-pension` client-credentials identity for `POST /api/v1/sdd/mandates and POST /api/v1/sdd/mandates/{id}/cancel`.
+
+**Threat and required controls.** Registration or cancellation affects collection authority. The provider must verify the debtor party owns the stated account and must not let the caller cancel another party's mandate merely by knowing its id. Preserve mandate idempotency and lifecycle validation.
+Compromise of any admitted namespace workload is therefore a network threat, while compromise
+of the pension client credential reaches whichever actions its provider authorization permits.
+Keep token validation, identity-scoped authorization and the provider's domain checks enabled.
+
+**Rollout dependency and proof limits.** The integration depends on #12419 for scoped downstream
+authorization; the allow-list change alone does not prove that grant is deployed or correct.
+Review the corresponding provider grant and negative caller/ownership tests before enabling
+this integration. Consumer contracts pin request/response shape; they do not prove a live token
+or account entitlement. No live deployment verification is claimed by this documentation update.
