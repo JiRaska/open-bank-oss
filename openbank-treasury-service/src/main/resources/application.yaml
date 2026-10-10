@@ -272,6 +272,19 @@ authz:
       # Keep the plain-HTTP port (8160): with client-auth REQUIRED Quarkus otherwise drops the HTTP
       # listener, and the readiness probe and admin-ui's staff path use it. Runtime property, #10441.
       insecure-requests: enabled
+      # Listener parity (ADR-0337): with client-auth on, Quarkus ALSO registers its mTLS
+      # authentication mechanism, which turns a trusted client certificate into a SecurityIdentity
+      # of its own — on 8443 only. The API must be authenticated identically on both listeners, by
+      # the OIDC bearer OPA decides on, so /api/* accepts the bearer mechanism ONLY; the certificate
+      # stays transport authentication. Measured: without this, a trusted certificate with no bearer
+      # reached the handler as an authenticated principal (403 from authz, not 401).
+      # ListenerAuthParityIT holds both listeners to 401 without a bearer.
+      auth:
+        permission:
+          bearer-only:
+            paths: /api/*
+            policy: permit
+            auth-mechanism: bearer
     # ledger-service's 8443 listener is private-CA mTLS with client auth REQUIRED; the
     # treasury-internal-tls certificate is mounted at /mnt/ledger-tls in the cluster only.
     tls:
