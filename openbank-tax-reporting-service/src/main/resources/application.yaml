@@ -6,26 +6,58 @@ quarkus:
     port: 8152
   datasource:
     db-kind: postgresql
-    username: ${DB_USERNAME:openbank}
-    password: ${DB_PASSWORD:openbank}
+    username: openbank
+    password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
     reactive:
-      url: ${DB_REACTIVE_URL:vertx-reactive:postgresql://localhost:5432/openbank_tax_reporting}
+      url: vertx-reactive:postgresql://localhost:5432/openbank_tax_reporting
+    # A LITERAL jdbc url, not only an env expression: Flyway migrates the DEFAULT (Agroal/JDBC)
+    # datasource, and a service that boots only because the environment supplied one cannot start
+    # from this repo alone (check-flyway-default-datasource.py, #3080). The deployed values come
+    # from QUARKUS_DATASOURCE_* env in the gitops manifest, which outranks this file.
     jdbc:
-      url: ${DB_JDBC_URL:jdbc:postgresql://localhost:5432/openbank_tax_reporting}
+      url: jdbc:postgresql://localhost:5432/openbank_tax_reporting
   hibernate-orm:
     database:
       generation: none
   flyway:
+    # Committing migrations does not run them — this key defaults to FALSE (#3350).
     migrate-at-start: true
     baseline-on-migrate: true
+    connect-retries: 10
+    connect-retries-interval: 2S
+  # Bearer validation only: this service calls nobody. The fleet has exactly one confidential
+  # client, `openbank-services` (rules.yaml: oidc_secret_convention), so no realm change is needed.
   oidc:
-    auth-server-url: ${OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
-    client-id: ${OIDC_CLIENT_ID:openbank-tax-reporting-service}
-    tls:
-      verification: ${OIDC_TLS_VERIFICATION:required}
-  kafka:
-    bootstrap:
-      servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    auth-server-url: http://localhost:8080/realms/openbank
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+  # Health and metrics on the fleet-common management port, scraped by the fleet PodMonitor
+  # (port name `management`) and probed by the kubelet.
+  management:
+    enabled: true
+    port: 8085
+    host: 0.0.0.0
+    root-path: /q
+  smallrye-health:
+    root-path: /q/health
+  otel:
+    exporter:
+      otlp:
+        endpoint: http://localhost:4317
+    resource:
+      attributes:
+        service.name: openbank-tax-reporting-service
+  shutdown:
+    timeout: 30S
+  dev-ui:
+    enabled: false
+
+# Read by the Kafka connector as the default broker config; the deployed value (Strimzi mTLS
+# bootstrap) comes from KAFKA_BOOTSTRAP_SERVERS in the gitops manifest.
+kafka:
+  bootstrap:
+    servers: localhost:9092
 
 mp:
   messaging:
@@ -38,11 +70,28 @@ mp:
       # auto.offset.reset stays `latest`, so a fresh deploy does not replay historical remittances
       # into filing periods that were already assembled. Backfilling an earlier period is an
       # explicit operator action, not something a deploy does by accident.
+      #
+      # A failed write is RETHROWN (WithholdingRemittedConsumer), so the record goes to this
+      # channel's dead-letter topic rather than halting the group. The topic is NESTED, not the
+      # dotted one-liner: SmallRye quotes a dotted leaf key and the connector never reads it
+      # (#5752). The KafkaTopic CR and the KafkaUser Write ACL for it live in
+      # openbank-infra/gitops/components/tax-reporting/ — all three or the DLQ send itself wedges.
       withholding-remitted-in:
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.tax-reporting.withholding-remitted-in
         connector: smallrye-kafka
         topic: openbank.interest.accrual.event
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
         key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+
+opa:
+  url: "${OPA_URL:http://localhost:8181}"
+  path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
+
+# @Authorize on TaxFilingResource asks the co-located OPA sidecar (tax_reporting_rest_ext.rego).
+authz:
+  enforce: "${AUTHZ_ENFORCE:true}"
 
 openbank:
   api:
@@ -59,9 +108,13 @@ openbank:
         url: vertx-reactive:postgresql://localhost:5432/openbank_tax_reporting_it
       jdbc:
         url: jdbc:postgresql://localhost:5432/openbank_tax_reporting_it
+    management:
+      enabled: false
     oidc:
       enabled: false
     devservices:
       enabled: false
     scheduler:
       enabled: false
+  authz:
+    enforce: "false"

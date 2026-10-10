@@ -1,45 +1,35 @@
 # openbank-tax-reporting-service — agent notes
 
-## This service is NOT DEPLOYED, and that is deliberate
+## Deployed since #5760 (owner decision)
 
-`grep -rn "tax-reporting" openbank-infra/gitops/` returns **zero hits**. There is no Deployment,
-no Rollout, no KafkaUser, no auto-deploy entry and no ECR repository. This is known and recorded
-outside this file too — `openbank-infra/aws/envs/sandbox-platform/ecr-service-repositories.tf`
-explains why the ECR list is not derived from release-please's package list and names this module
-as "a released component with no gitops workload, no auto-deploy entry and — correctly — no
-repository".
+The service was a released component with no runtime for its whole life until #5760. The owner
+decided to deploy it, because it hosts the §38d withholding filing (ADR-0180) and the statutory
+returns of ADR-0336. Its workload lives in `openbank-infra/gitops/components/tax-reporting/`
+(namespace `tax-reporting`, Argo app `apps/tax-reporting.yaml`):
 
-It is nevertheless a **released component**: it has a `version.txt`, is registered in
-`release-please-config.json` + `.release-please-manifest.json`, and accrues version bumps and
-changelog entries for a workload nobody runs.
+- `tax-reporting-service` Deployment with an OPA sidecar. The service listens on HTTP 8152 and
+  management 8085.
+- `tax-reporting-db`, a two-instance CNPG cluster with S3 backup. Its Pod Identity association is
+  in `db-backups.tf` and must be applied before the cluster exists.
+- The `tax-reporting-service` KafkaUser. It holds Read on `openbank.interest.accrual.event` and on
+  the group `openbank-tax-reporting-service`, and Write on
+  `openbank.dlq.tax-reporting.withholding-remitted-in`. The DLQ topic CR is in
+  `components/kafka/kafka-dlq-topics.yaml`.
+- `tax_reporting_rest_ext.rego` plus its tests, which `gen-tax-reporting-opa-bundle.sh` bundles.
 
-### What follows from that, so nobody re-derives it a fourth time
+### Things that follow from the history
 
-- **Nothing here has ever executed in an environment.** The §38d withholding consumer, the ports,
-  the schema and the migrations are real code with no runtime. `db/migration` has never been
-  applied anywhere, so — unusually for this repo — the Flyway "never edit an applied migration"
-  rule does not bind yet.
-- **The production-readiness matrix reports this service as `NOT-DEPLOYED`, not NO-GO** (#5706).
-  Its C5 ("no CNPG cluster"), C7 (no NetworkPolicy) and C8 ("not deployed") are consequences of
-  the absent workload rather than controls anyone skipped, and **none of them can be closed by a
-  repo change**. Do not try to raise them.
-- **C3 has no contract test and cannot honestly get one.** Nothing in the repo consumes this
-  service's HTTP API and it ships no outbound rest-client, so there is no consumer whose
-  expectations a pact could encode. Authoring one against an invented consumer would be a scoring
-  artifact of exactly the kind the C3 probe was repaired to reject.
-- **The absent KafkaUser is a consequence, not an independent gap** — that framing was corrected
-  in #5760. `check-incoming-dlq-wiring.py` carries a baseline entry for
-  `openbank.dlq.tax-reporting.withholding-remitted-in` for the same reason (#5751), and it comes
-  off the day this deploys.
-- **`docs/runbooks/svc-tax-reporting.md` is generated and carries a NOT DEPLOYED banner.** Every
-  `kubectl` line in it names a namespace that does not exist. Never hand-edit it (ADR-0029 rule
-  #6); the banner comes from `generate-service-runbooks.py` and disappears on its own once a
-  workload exists.
-
-### The open decision (#5760) — an owner's, not an agent's
-
-Whether this service should be deployed at all. If yes, it needs the full gitops set: workload,
-KafkaUser with Read on its source topic and Write on its DLQ, auto-deploy entry, ECR repository —
-and the DLQ baseline entry comes off. If no, it should be said out loud here and the release
-registration reconsidered, because a component that releases forever and runs never is a standing
-source of exactly this confusion.
+- **V1 has now been applied by the first deploy.** Before #5760 the "never edit an applied
+  migration" rule did not bind, because nothing had run. It binds from here on.
+- **The consumer group is `quarkus.application.name`.** `group.id` is deliberately not a YAML key
+  (the dotted-key footgun, #686). The KafkaUser grants exactly that group name. Renaming the
+  application renames the group, and the ACL would then deny it silently.
+- **A dead-lettered remittance is a hole in a tax return.** The channel dead-letters instead of
+  halting, but a record on the DLQ is still missing from that period's §38d total until someone
+  replays it.
+- **Every new route needs `@Authorize` and a rule in `tax_reporting_rest_ext.rego`.** A route with
+  only `@RolesAllowed` never asks OPA, so the service-account exclusion does not apply to it.
+- **C3 still has no contract test.** Nothing in the repo consumes this service's HTTP API, and it
+  ships no outbound rest-client. Do not author a pact against an invented consumer.
+- `docs/runbooks/svc-tax-reporting.md` is generated by `generate-service-runbooks.py`. Never
+  hand-edit it.
