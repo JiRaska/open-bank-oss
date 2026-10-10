@@ -5236,7 +5236,7 @@ gates:
   - id: oidc-client-configured
     name: "outbound OIDC filter ⇒ a client it can actually mint from (enforced)"
     group: security
-    budget_seconds: 19
+    budget_seconds: 30  # 33 deployed modules; exact-main CI measured 19.2s on 2026-10-10
     mode: enforced
     rationale: "An unmintable outbound token fails as a 401 from the CALLEE, which reads as an authorization problem and sends the reader to Keycloak; no test can catch it because a mock port, a @QuarkusTest security context and a pact mock server all supply the very token the real client cannot obtain (#3921: ledger's daily FX revaluation had never once succeeded, and settlement, money-path, had no client block at all)."
     review_after: "2027-02-16"

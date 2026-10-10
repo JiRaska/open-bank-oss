@@ -88,6 +88,11 @@ def base_ports() -> dict[str, int | None]:
     return _ports_of(doc) if doc is not None else {"http": None, "management": None}
 
 
+def _layer_ports(own: dict[str, int | None], base: dict[str, int | None]) -> dict[str, int | None]:
+    """Resolve the service's ports over the lower-priority shared runtime config."""
+    return {k: own[k] if own[k] is not None else base[k] for k in ("http", "management")}
+
+
 def service_ports() -> dict[str, dict[str, int | None]]:
     """{service: {"http": port, "management": port}}, service file layered over the shared base."""
     base = base_ports()
@@ -100,9 +105,7 @@ def service_ports() -> dict[str, dict[str, int | None]]:
             continue
         own = _ports_of(doc)
         # The service's own value wins where it sets one; the base fills the rest.
-        out[path.parts[len(REPO.parts)]] = {
-            k: own[k] if own[k] is not None else base[k] for k in ("http", "management")
-        }
+        out[path.parts[len(REPO.parts)]] = _layer_ports(own, base)
     return out
 
 
@@ -256,14 +259,20 @@ def selftest() -> int:
               f"{BASE_CONFIG.relative_to(REPO)} no longer parses, and every inheriting service "
               "would be flagged for a port that is in fact open.")
         return 1
-    inheritors = [s for s, p in configs.items() if (_load(REPO / s / "src/main/resources/application.yaml")
-                  or {}).get("quarkus", {}).get("management") is None and p["management"] is not None]
-    if not inheritors:
-        print("selftest FAIL: no service resolves its management port from the base, so the "
-              "layering path is untested — it would pass while doing nothing.")
+    # Every current service may declare a management port explicitly. Keep the lower-priority
+    # inheritance branch falsifiable without requiring that incidental fleet shape: the same
+    # resolver used by service_ports() must inherit a missing value and honour an override.
+    missing = _ports_of({"quarkus": {"http": {"port": 8140}}})
+    inherited = _layer_ports(missing, base)
+    overridden = _layer_ports({"http": 8140, "management": 8086}, base)
+    if inherited != {"http": 8140, "management": base["management"]} or overridden != {
+        "http": 8140, "management": 8086,
+    }:
+        print("selftest FAIL: shared management port inheritance or service override is broken.")
         return 1
     print(f"selftest OK: {len(cases)} cases, both directions; "
-          f"{len(configs)} service config(s) ({len(inheritors)} inheriting management="f"{base['management']} from the shared base), {len(workloads())} workload(s) parsed.")
+          f"{len(configs)} service config(s), shared management={base['management']}, "
+          f"{len(workloads())} workload(s) parsed.")
     return 0
 
 
