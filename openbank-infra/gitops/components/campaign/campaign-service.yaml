@@ -34,7 +34,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-campaign-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "778de022bd4d891a"
+        openbank.tech/policy-checksum: "57a650d6b6028215"
       labels:
         app.kubernetes.io/name: campaign-service
         app.kubernetes.io/part-of: campaign

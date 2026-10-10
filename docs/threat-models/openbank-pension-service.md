@@ -91,9 +91,9 @@ order mis-states a participant's savings.
 `service-pension-unit-register`) admits that one principal id, and only with `ROLE_API`, to
 `pension-fund.holding.inspect`, `pension-fund.order.place` and the reference reads `fund.read`,
 `strategy.read`, `nav.read` — never NAV calculation/approval, fund or strategy administration.
-Every staff write excludes `service-account-*` principals. The non-read `holding.inspect` action
-matches neither base `operator-read-any` nor `compliance-read-any`, so the shared M2M account
-(`ROLE_OPERATOR` and `ROLE_COMPLIANCE`) is denied. Policy tests:
+Every staff write excludes `service-account-*` principals, and the holdings action uses a non-read
+verb so neither base `operator-read-any` nor `compliance-read-any` admits it: the shared M2M
+account is denied whether it holds `ROLE_OPERATOR`, `ROLE_COMPLIANCE` or `ROLE_ADMIN`. Policy tests:
 `pension_fund_rest_ext_test.rego` (`test_pension_service_places_orders_but_cannot_administer`).
 
 | Threat | Vector | Mitigation |
