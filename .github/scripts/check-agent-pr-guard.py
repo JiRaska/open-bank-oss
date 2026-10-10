@@ -408,10 +408,11 @@ def _is_sha(value):
 def net_patch(base_sha, sha):
     """The PR's own change as of `sha`: the diff from merge-base(base, sha) to sha, per file.
 
-    Keyed on the patch TEXT (plus name/status/rename source), never on blob SHAs: a file the
-    PR touches can legitimately reach a new blob because main changed lines elsewhere in it,
-    and then the patch's context lines or offsets also change — which this treats as a
-    DIFFERENT patch (fail closed), not as equality."""
+    Require both rendered patch text and the complete Git blob identity. GitHub does not
+    attest that a rendered per-file patch is complete; equal rendered prefixes alone cannot
+    prove equal content. A base merge that changes unrelated lines in a PR-touched file may
+    now require re-approval even when the rendered patch is equal. That conservative denial
+    is preferable to carrying approval across an unverified content change."""
     data = _gh(["api", f"repos/{REPO}/compare/{base_sha}...{sha}"])
     if data.get("status") not in {"ahead", "diverged"}:
         raise Undetermined(f"compare {base_sha[:10]}...{sha[:10]} is `{data.get('status')}` — no PR change to compare")
@@ -422,48 +423,54 @@ def net_patch(base_sha, sha):
         raise Undetermined(f"compare {base_sha[:10]}...{sha[:10]} hit the {COMPARE_FILE_CAP}-file cap — possibly truncated")
     out = []
     for f in files:
-        if "patch" not in f or f.get("filename") is None:
+        if "patch" not in f or f.get("filename") is None or not _is_sha(f.get("sha")):
             # Binary file, or a patch GitHub declined to render: its content cannot be compared.
-            raise Undetermined(f"compare {sha[:10]}: no patch text for `{f.get('filename')}`")
-        out.append((f["filename"], f.get("status"), f.get("previous_filename"), f["patch"]))
+            raise Undetermined(f"compare {sha[:10]}: incomplete file identity for `{f.get('filename')}`")
+        out.append((f["filename"], f.get("status"), f.get("previous_filename"), f["patch"], f["sha"]))
     return sorted(out, key=lambda t: t[0])
 
 
 def only_base_merges_since(approved, head, base_sha):
-    """True iff walking FIRST parents from head reaches `approved`, and every commit on that
-    walk is a two-parent merge whose SECOND parent is already contained in the base branch.
+    """Return base-merge SHAs in chronological order if walking FIRST parents from head
+    reaches `approved`; otherwise return None.
 
-    Commits pulled in through those second parents are main's own commits, already reviewed
-    on main's terms. Anything else — a normal commit, an octopus, a merge of a non-main
-    branch, an approved SHA that is not on the first-parent line (force-push, rebase) —
-    returns False."""
+    Every walked commit must be a two-parent merge whose SECOND parent is contained in the
+    base branch. Commits pulled in through those second parents are main's own commits.
+    Anything else — a normal commit, octopus, merge of another branch, or force-push —
+    returns None."""
     cur = head
+    merges = []
     for _ in range(MAX_CARRY_OVER_COMMITS):
         if cur == approved:
-            return True
+            return list(reversed(merges))
         commit = _gh(["api", f"repos/{REPO}/commits/{cur}"])
         parents = [p.get("sha") for p in (commit.get("parents") or [])]
         if len(parents) != 2 or not all(_is_sha(p) for p in parents):
-            return False
+            return None
         reach = _gh(["api", f"repos/{REPO}/compare/{base_sha}...{parents[1]}"])
         if reach.get("status") not in {"behind", "identical"}:
-            return False
+            return None
+        merges.append(cur)
         cur = parents[0]
+    if cur == approved:
+        return list(reversed(merges))
     raise Undetermined(f"more than {MAX_CARRY_OVER_COMMITS} commits between approval and head")
 
 
 def content_unchanged_since(approved, head, base_sha):
     """Approval at `approved` carries to `head` iff only base merges happened in between AND
-    the PR's net patch is byte-identical at both. Both halves are needed: the merge-shape
-    check alone would accept a merge commit that also edits files (an "evil merge") or a
-    conflict resolution that rewrites the PR; the patch check alone would accept a new commit
-    that happens to restore an identical diff after intermediate unreviewed states, and would
-    say nothing about ancestry."""
+    the PR's net patch and blob identity remain equal after EVERY merge. Checking only the
+    endpoints would allow an evil merge that changes the PR followed by one that restores it."""
     if not (_is_sha(approved) and _is_sha(head) and _is_sha(base_sha)):
         raise Undetermined("malformed SHA in carry-over evaluation")
-    if not only_base_merges_since(approved, head, base_sha):
+    merges = only_base_merges_since(approved, head, base_sha)
+    if merges is None:
         return False
-    return net_patch(base_sha, approved) == net_patch(base_sha, head)
+    approved_patch = net_patch(base_sha, approved)
+    for merge in merges:
+        if net_patch(base_sha, merge) != approved_patch:
+            return False
+    return True
 
 
 def owner_approval_allows(n, files):

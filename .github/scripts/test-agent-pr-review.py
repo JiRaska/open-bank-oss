@@ -109,11 +109,14 @@ class ReviewTests(unittest.TestCase):
 R = guard.REPO
 MAIN = 'f' * 40          # current tip of main
 M1 = 'e' * 40            # a main commit merged into the PR
+M2 = 'd' * 40            # a later main commit merged into the PR
 APPROVED = '1' * 40      # the head the owner approved
 OTHER = '2' * 40         # an unrelated, non-main commit
 HEAD = '3' * 40          # the current PR head
+MID = '4' * 40           # an intermediate base-merge head
 N = 11740
-PATCH = [dict(filename='openbank-ledger-service/A.kt', status='modified', patch='@@ -1 +1 @@\n-a\n+b')]
+PATCH = [dict(filename='openbank-ledger-service/A.kt', status='modified',
+              patch='@@ -1 +1 @@\n-a\n+b', sha='a' * 40)]
 
 
 class FakeGitHub:
@@ -153,9 +156,9 @@ def decision(i, action, sha, when='2026-10-10T10:00:00Z'):
 
 
 class CarryOverTests(unittest.TestCase):
-    def allows(self, parents, patches, comments):
+    def allows(self, parents, patches, comments, main_has=(M1, MAIN)):
         with patch.dict(guard.os.environ, {}, clear=True), \
-                patch.object(guard, '_gh', side_effect=FakeGitHub(parents, patches, comments)):
+                patch.object(guard, '_gh', side_effect=FakeGitHub(parents, patches, comments, main_has)):
             return guard.owner_approval_allows(N, ['openbank-ledger-service/A.kt'])
 
     def test_a_pure_base_merge_keeps_the_approval(self):
@@ -168,9 +171,30 @@ class CarryOverTests(unittest.TestCase):
                                      [decision(1, 'approve', APPROVED)]))
 
     def test_b2_merge_that_adds_a_file_voids_it(self):
-        extra = PATCH + [dict(filename='x.kt', status='added', patch='+x')]
+        extra = PATCH + [dict(filename='x.kt', status='added', patch='+x', sha='b' * 40)]
         self.assertFalse(self.allows({HEAD: [APPROVED, M1]}, {APPROVED: PATCH, HEAD: extra},
                                      [decision(1, 'approve', APPROVED)]))
+
+    def test_b3_equal_rendered_patch_with_different_blob_voids_it(self):
+        # GitHub does not attest that files[].patch contains the whole change. An equal
+        # rendered prefix cannot override a different content-addressed blob identity.
+        hidden_tail = [dict(PATCH[0], sha='b' * 40)]
+        self.assertFalse(self.allows({HEAD: [APPROVED, M1]},
+                                     {APPROVED: PATCH, HEAD: hidden_tail},
+                                     [decision(1, 'approve', APPROVED)]))
+
+    def test_b4_intermediate_content_change_cannot_be_restored_to_keep_approval(self):
+        mutated = [dict(PATCH[0], patch='@@ -1 +1 @@\n-a\n+EVIL', sha='b' * 40)]
+        self.assertFalse(self.allows({MID: [APPROVED, M1], HEAD: [MID, M2]},
+                                     {APPROVED: PATCH, MID: mutated, HEAD: PATCH},
+                                     [decision(1, 'approve', APPROVED)],
+                                     main_has=(M1, M2, MAIN)))
+
+    def test_two_content_neutral_base_merges_keep_approval(self):
+        self.assertTrue(self.allows({MID: [APPROVED, M1], HEAD: [MID, M2]},
+                                    {APPROVED: PATCH, MID: PATCH, HEAD: PATCH},
+                                    [decision(1, 'approve', APPROVED)],
+                                    main_has=(M1, M2, MAIN)))
 
     def test_c_normal_commit_voids_it_even_with_an_equal_patch(self):
         self.assertFalse(self.allows({HEAD: [APPROVED]}, {APPROVED: PATCH, HEAD: PATCH},
@@ -186,8 +210,10 @@ class CarryOverTests(unittest.TestCase):
                                      [decision(1, 'approve', APPROVED)]))
 
     def test_e_truncated_or_failed_compare_is_undetermined(self):
-        capped = [dict(filename=f'f{i}', status='modified', patch='+') for i in range(guard.COMPARE_FILE_CAP)]
-        for bad in (capped, 'ERROR', [dict(filename='bin.png', status='modified')]):
+        capped = [dict(filename=f'f{i}', status='modified', patch='+', sha='a' * 40)
+                  for i in range(guard.COMPARE_FILE_CAP)]
+        for bad in (capped, 'ERROR', [dict(filename='bin.png', status='modified', sha='a' * 40)],
+                    [dict(filename='x.kt', status='modified', patch='+x')]):
             with self.assertRaises(guard.Undetermined):
                 self.allows({HEAD: [APPROVED, M1]}, {APPROVED: PATCH, HEAD: bad},
                             [decision(1, 'approve', APPROVED)])
