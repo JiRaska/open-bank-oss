@@ -317,7 +317,7 @@ _PREFETCHED: dict[tuple[str, str], str | None] = {}
 
 def prefetch(ref: str, rels: list[str]) -> None:
     """Load many paths at `ref` with one git process; read_at_ref answers from it."""
-    for rel, text in zip(rels, _cat_files_raw(ref, rels)):
+    for rel, text in zip(rels, _cat_files_raw(ref, rels), strict=True):
         _PREFETCHED[(ref, rel)] = text
 
 
@@ -517,7 +517,7 @@ def workloads_at(ref: str | None) -> list[tuple[str, str, str]]:
                        f"{COMPONENTS_REL}/*/*.yaml", f"{COMPONENTS_REL}/*/*.yml") or ""
         rels = [line.split(":", 1)[1] if line.startswith(f"{ref}:") else line
                 for line in listing.splitlines()]
-        items = list(zip(rels, _cat_files(ref, rels)))
+        items = list(zip(rels, _cat_files(ref, rels), strict=True))
     for rel, text in items:
         comp = rel.split("/")[3]
         for doc in split_yaml_documents(text):
