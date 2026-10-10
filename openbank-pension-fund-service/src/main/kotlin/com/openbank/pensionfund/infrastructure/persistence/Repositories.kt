@@ -34,3 +34,6 @@ class UnitHoldingRepository : PanacheRepositoryBase<UnitHoldingEntity, UUID>
 
 @ApplicationScoped
 class UnitTransactionRepository : PanacheRepositoryBase<UnitTransactionEntity, UUID>
+
+@ApplicationScoped
+class ClassificationReceiptRepository : PanacheRepositoryBase<ClassificationReceiptEntity, String>
