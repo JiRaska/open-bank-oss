@@ -4,6 +4,7 @@
 
 package com.openbank.party.infrastructure.rest
 
+import com.openbank.libs.authz.ServiceAccountIdentity
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.ws.rs.ForbiddenException
 
@@ -24,7 +25,7 @@ internal val PARTY_CREATE_CALLERS = setOf("service-account-openbank-kyb")
  */
 internal fun requireNamedPartyCreateCaller(identity: SecurityIdentity) {
     if (PARTY_CREATE_STAFF_ROLES.any(identity::hasRole)) return
-    if (identity.principal?.name !in PARTY_CREATE_CALLERS) {
+    if (!ServiceAccountIdentity.isOneOf(identity, PARTY_CREATE_CALLERS)) {
         throw ForbiddenException("caller is not a named party-create service")
     }
 }

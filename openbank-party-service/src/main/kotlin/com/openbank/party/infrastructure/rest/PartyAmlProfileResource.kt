@@ -9,6 +9,7 @@ import com.openbank.libs.audit.AuditEvent
 import com.openbank.libs.audit.AuditEventPublisher
 import com.openbank.libs.audit.AuditResult
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.authz.ServiceAccountIdentity
 import com.openbank.party.application.port.`in`.DeclareAmlProfileCommand
 import com.openbank.party.application.port.`in`.PartyAmlProfileUseCase
 import com.openbank.party.domain.model.AccountPurpose
@@ -113,7 +114,7 @@ class PartyAmlProfileResource {
     private fun callerMayDeclare(): Boolean {
         val edge = if (this::customerEdgePrincipal.isInitialized) customerEdgePrincipal else ""
         return securityIdentity.hasRole("ROLE_API") ||
-            (edge.isNotBlank() && securityIdentity.principal?.name == edge)
+            ServiceAccountIdentity.isPrincipal(securityIdentity, edge)
     }
 }
 

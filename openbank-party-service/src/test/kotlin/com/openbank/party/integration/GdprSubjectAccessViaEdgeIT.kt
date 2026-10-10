@@ -10,6 +10,8 @@ import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
@@ -86,6 +88,13 @@ class GdprSubjectAccessViaEdgeIT {
 
     @Test
     @TestSecurity(user = EDGE_PRINCIPAL, roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "5f0c2a8e-7d1b-4c3e-9a6f-2b8d4e1c7a90"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = EDGE_PRINCIPAL),
+        ],
+    )
     fun `the customer edge may fetch the Art 15 export for the subject its header names`() {
         Given {
             header(PartyResource.CUSTOMER_PARTY_HEADER, subjectId)
@@ -98,6 +107,13 @@ class GdprSubjectAccessViaEdgeIT {
 
     @Test
     @TestSecurity(user = EDGE_PRINCIPAL, roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "5f0c2a8e-7d1b-4c3e-9a6f-2b8d4e1c7a90"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = EDGE_PRINCIPAL),
+        ],
+    )
     fun `the customer edge may fetch the Art 20 portability export for the subject its header names`() {
         Given {
             header(PartyResource.CUSTOMER_PARTY_HEADER, subjectId)
@@ -110,6 +126,13 @@ class GdprSubjectAccessViaEdgeIT {
 
     @Test
     @TestSecurity(user = EDGE_PRINCIPAL, roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "5f0c2a8e-7d1b-4c3e-9a6f-2b8d4e1c7a90"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = EDGE_PRINCIPAL),
+        ],
+    )
     fun `a header naming a different party cannot export the party in the path`() {
         Given {
             header(PartyResource.CUSTOMER_PARTY_HEADER, UUID.randomUUID().toString())
@@ -122,6 +145,13 @@ class GdprSubjectAccessViaEdgeIT {
 
     @Test
     @TestSecurity(user = EDGE_PRINCIPAL, roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "5f0c2a8e-7d1b-4c3e-9a6f-2b8d4e1c7a90"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = EDGE_PRINCIPAL),
+        ],
+    )
     fun `the edge principal without a party header is refused`() {
         Given { this } When { get("/api/v1/parties/$subjectId/gdpr-export") } Then { statusCode(403) }
     }
@@ -142,6 +172,37 @@ class GdprSubjectAccessViaEdgeIT {
     @TestSecurity(user = "dpo.admin", roles = ["ROLE_ADMIN"])
     fun `an admin still exports without any header (unchanged behaviour control)`() {
         Given { this } When { get("/api/v1/parties/$subjectId/gdpr-export") } Then { statusCode(200) }
+    }
+
+    @Test
+    @TestSecurity(user = EDGE_PRINCIPAL, roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "5f0c2a8e-7d1b-4c3e-9a6f-2b8d4e1c7a90"),
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "preferred_username", value = EDGE_PRINCIPAL),
+        ],
+    )
+    fun `the edge's principal name on a token issued to another client is refused (#12448)`() {
+        Given {
+            header(PartyResource.CUSTOMER_PARTY_HEADER, subjectId)
+        } When {
+            get("/api/v1/parties/$subjectId/gdpr-export")
+        } Then {
+            statusCode(403)
+        }
+    }
+
+    @Test
+    @TestSecurity(user = EDGE_PRINCIPAL, roles = ["ROLE_OPERATOR"])
+    fun `a non-JWT principal carrying the edge's name is refused (#12448)`() {
+        Given {
+            header(PartyResource.CUSTOMER_PARTY_HEADER, subjectId)
+        } When {
+            get("/api/v1/parties/$subjectId/gdpr-export")
+        } Then {
+            statusCode(403)
+        }
     }
 
     companion object {

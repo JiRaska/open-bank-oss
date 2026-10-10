@@ -9,6 +9,7 @@ import com.openbank.libs.audit.AuditEvent
 import com.openbank.libs.audit.AuditEventPublisher
 import com.openbank.libs.audit.AuditResult
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.authz.ServiceAccountIdentity
 import com.openbank.libs.flags.FeatureClient
 import com.openbank.libs.flags.FeatureFlag
 import com.openbank.party.application.port.`in`.AddDocumentCommand
@@ -129,7 +130,7 @@ class PartyResource {
         // would throw there instead of refusing. In a CDI context `defaultValue` guarantees it is
         // set, so this branch is unreachable in production and reads as "no principal configured".
         val permitted = if (this::gdprCustomerEdgePrincipal.isInitialized) gdprCustomerEdgePrincipal else ""
-        return permitted.isNotBlank() && securityIdentity.principal?.name == permitted
+        return ServiceAccountIdentity.isPrincipal(securityIdentity, permitted)
     }
 
     /**

@@ -10,6 +10,8 @@ import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.module.kotlin.extensions.Extract
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
@@ -112,6 +114,13 @@ class PartyAmlProfileApiIT {
     @Test
     @Order(1)
     @TestSecurity(user = EDGE, roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "5f0c2a8e-7d1b-4c3e-9a6f-2b8d4e1c7a90"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = EDGE),
+        ],
+    )
     fun `a person with no declaration answers 404, and the party GET reports every derived fact as unknown`() {
         val id = createParty("INDIVIDUAL")
         personId = id
@@ -130,6 +139,13 @@ class PartyAmlProfileApiIT {
     @Test
     @Order(2)
     @TestSecurity(user = EDGE, roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "5f0c2a8e-7d1b-4c3e-9a6f-2b8d4e1c7a90"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = EDGE),
+        ],
+    )
     fun `the edge declares a CZ-only profile - version 1, derived columns written, PARTY_UPDATED in the outbox`() {
         val id = requireNotNull(personId)
         put(id, CZ_ONLY, 200).body("version", equalTo(1))
@@ -165,6 +181,13 @@ class PartyAmlProfileApiIT {
     @Test
     @Order(3)
     @TestSecurity(user = EDGE, roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "5f0c2a8e-7d1b-4c3e-9a6f-2b8d4e1c7a90"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = EDGE),
+        ],
+    )
     fun `a re-declaration becomes version 2, keeps version 1 unchanged, and moves the derived columns`() {
         val id = requireNotNull(personId)
         put(id, FOREIGN_PEP, 200).body("version", equalTo(2))
@@ -228,6 +251,40 @@ class PartyAmlProfileApiIT {
 
     @Test
     @Order(5)
+    @TestSecurity(user = EDGE, roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "5f0c2a8e-7d1b-4c3e-9a6f-2b8d4e1c7a90"),
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "preferred_username", value = EDGE),
+        ],
+    )
+    fun `the edge's principal name on a token issued to another client cannot declare (#12448)`() {
+        val id = requireNotNull(personId)
+        put(id, CZ_ONLY, 403)
+        assertThat(query("SELECT version FROM party_aml_profiles WHERE party_id = ?", id) { it.getInt(1) })
+            .containsExactlyInAnyOrder(1, 2)
+    }
+
+    @Test
+    @Order(5)
+    @TestSecurity(user = EDGE, roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "5f0c2a8e-7d1b-4c3e-9a6f-2b8d4e1c7a90"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "alice"),
+        ],
+    )
+    fun `a human token issued through the edge client cannot declare (#12448)`() {
+        val id = requireNotNull(personId)
+        put(id, CZ_ONLY, 403)
+        assertThat(query("SELECT version FROM party_aml_profiles WHERE party_id = ?", id) { it.getInt(1) })
+            .containsExactlyInAnyOrder(1, 2)
+    }
+
+    @Test
+    @Order(5)
     @TestSecurity(user = "staff-reader", roles = ["ROLE_VIEWER"])
     fun `a viewer cannot declare`() {
         put(requireNotNull(personId), CZ_ONLY, 403)
@@ -236,6 +293,13 @@ class PartyAmlProfileApiIT {
     @Test
     @Order(6)
     @TestSecurity(user = EDGE, roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "5f0c2a8e-7d1b-4c3e-9a6f-2b8d4e1c7a90"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = EDGE),
+        ],
+    )
     fun `invalid declarations answer 400 and store nothing`() {
         val id = requireNotNull(personId)
         listOf(
@@ -259,6 +323,13 @@ class PartyAmlProfileApiIT {
     @Test
     @Order(7)
     @TestSecurity(user = EDGE, roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "5f0c2a8e-7d1b-4c3e-9a6f-2b8d4e1c7a90"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = EDGE),
+        ],
+    )
     fun `an unknown party is 404 and a company is 422`() {
         val stranger = UUID.randomUUID()
         put(stranger, CZ_ONLY, 404)
