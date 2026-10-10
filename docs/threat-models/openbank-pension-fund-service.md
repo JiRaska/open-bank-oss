@@ -34,8 +34,8 @@ contact data.
    `pension-fund.holding.inspect` ends in neither `.read` nor `.list`, so base rest.rego's
    `operator-read-any` and `compliance-read-any` cannot admit the shared service-account even
    when it holds both roles. The identity-scoped pension-fund rule decides access. The old
-   `pension-fund.holding.read` entry remains in `operator_read_any_excluded_actions` as an inert
-   guard for the retired action; no endpoint uses it, and it cannot override compliance grants.
+   `pension-fund.holding.read` entry remains in `operator_read_any_excluded_actions` for the retired
+   action; current endpoints use `holding.inspect` and rely on the identity-scoped rule.
 3. Market prices enter through `MarketPricePort`. The shipped adapter (`StubMarketPriceAdapter`)
    knows no prices, so every position must be priced in the request by the calculating
    administrator; an unpriced position is refused, never valued at an invented number.
