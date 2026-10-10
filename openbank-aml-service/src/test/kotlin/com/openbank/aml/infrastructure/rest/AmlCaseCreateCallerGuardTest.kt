@@ -12,6 +12,7 @@ import jakarta.ws.rs.ForbiddenException
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatCode
 import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.eclipse.microprofile.jwt.JsonWebToken
 import org.junit.jupiter.api.Test
 import java.io.File
 
@@ -23,10 +24,30 @@ import java.io.File
  */
 class AmlCaseCreateCallerGuardTest {
 
-    private fun identity(name: String, vararg roles: String) = QuarkusSecurityIdentity.builder()
-        .setPrincipal(QuarkusPrincipal(name))
-        .addRoles(roles.toSet())
-        .build()
+    /**
+     * #12448: a `service-account-<client>` name becomes that client's OWN verified service-account
+     * token (`azp` = client, `preferred_username` = the name, `sub` set) — the only shape the guard
+     * admits. Any other name stays a plain, non-JWT principal.
+     */
+    private fun identity(name: String, vararg roles: String) = if (name.startsWith("service-account-")) {
+        jwtIdentity(name.removePrefix("service-account-"), name, *roles)
+    } else {
+        QuarkusSecurityIdentity.builder().setPrincipal(QuarkusPrincipal(name)).addRoles(roles.toSet()).build()
+    }
+
+    private fun jwtIdentity(azp: String?, username: String?, vararg roles: String, sub: String? = "sa-subject") =
+        QuarkusSecurityIdentity.builder()
+            .setPrincipal(TestJwt(mapOf("azp" to azp, "preferred_username" to username, "sub" to sub)))
+            .addRoles(roles.toSet())
+            .build()
+
+    private class TestJwt(private val claims: Map<String, Any?>) : JsonWebToken {
+        override fun getName(): String = claims["preferred_username"] as String? ?: "anonymous"
+        override fun getClaimNames(): Set<String> = claims.filterValues { it != null }.keys
+
+        @Suppress("UNCHECKED_CAST")
+        override fun <T : Any?> getClaim(claimName: String): T = claims[claimName] as T
+    }
 
     @Test
     fun `each named payment or FX principal with ROLE_API only may open a case`() {
@@ -74,5 +95,24 @@ class AmlCaseCreateCallerGuardTest {
             .substringBefore("\n}")
         val inRego = Regex("\"(service-account-[a-z0-9-]+)\"").findAll(rule).map { it.groupValues[1] }.toSet()
         assertThat(inRego).isEqualTo(AML_CASE_CREATE_CALLERS)
+    }
+
+    @Test
+    fun `an allowed principal's name on a token issued to another client is refused`() {
+        val impostor = jwtIdentity("openbank-admin-ui", "service-account-openbank-fx", "ROLE_API")
+        assertThatThrownBy { requireNamedMachineCaller(impostor) }.isInstanceOf(ForbiddenException::class.java)
+    }
+
+    @Test
+    fun `a human token issued through an allowed client, or a non-JWT principal so named, is refused`() {
+        val human = jwtIdentity("openbank-fx", "alice", "ROLE_API")
+        assertThatThrownBy { requireNamedMachineCaller(human) }.isInstanceOf(ForbiddenException::class.java)
+        val named = QuarkusSecurityIdentity.builder()
+            .setPrincipal(QuarkusPrincipal("service-account-openbank-fx"))
+            .addRole("ROLE_API")
+            .build()
+        assertThatThrownBy { requireNamedMachineCaller(named) }.isInstanceOf(ForbiddenException::class.java)
+        val noSubject = jwtIdentity("openbank-fx", "service-account-openbank-fx", "ROLE_API", sub = null)
+        assertThatThrownBy { requireNamedMachineCaller(noSubject) }.isInstanceOf(ForbiddenException::class.java)
     }
 }

@@ -13,6 +13,7 @@ import com.openbank.aml.infrastructure.rest.dto.CreateAmlCaseRequest
 import com.openbank.aml.infrastructure.rest.dto.UpdateAmlDecisionRequest
 import com.openbank.aml.infrastructure.rest.dto.toResponse
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.authz.ServiceAccountIdentity
 import com.openbank.libs.idempotency.IdempotencyKeyReusedException
 import com.openbank.libs.idempotency.IdempotencyRequestInProgressException
 import com.openbank.libs.idempotency.IdempotencyScope
@@ -202,7 +203,7 @@ internal val AML_CASE_CREATE_CALLERS = setOf(
  */
 internal fun requireNamedMachineCaller(identity: SecurityIdentity) {
     if (AML_CASE_CREATE_STAFF_ROLES.any(identity::hasRole)) return
-    if (identity.principal?.name !in AML_CASE_CREATE_CALLERS) {
+    if (!ServiceAccountIdentity.isOneOf(identity, AML_CASE_CREATE_CALLERS)) {
         throw ForbiddenException("caller is not a named AML case-open service")
     }
 }
