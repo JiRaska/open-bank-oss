@@ -1,0 +1,13 @@
+# check-mtls-bearer-only.py baseline (#12511): modules whose %prod listener sets client-auth
+# without a bearer-only API permission. Ratchet-only — each fix deletes its line (the gate fails
+# on a line that has become compliant), and nothing may be added.
+openbank-account-service
+openbank-aml-service
+openbank-ap2-service
+openbank-consent-service
+openbank-document-service
+openbank-ledger-service
+openbank-lending-service
+openbank-party-service
+openbank-product-catalog
+openbank-sca-service
