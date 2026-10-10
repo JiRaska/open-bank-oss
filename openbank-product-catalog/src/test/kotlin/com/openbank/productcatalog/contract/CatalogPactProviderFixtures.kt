@@ -4,6 +4,9 @@
 
 package com.openbank.productcatalog.contract
 
+import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.productcatalog.infrastructure.catalog.CatalogJson
 import jakarta.enterprise.context.ApplicationScoped
 import java.sql.Connection
 import java.time.OffsetDateTime
@@ -12,7 +15,11 @@ import javax.sql.DataSource
 
 /** Provider-state data only; every fixture uses a separate aggregate so Pact order is irrelevant. */
 @ApplicationScoped
-class CatalogPactProviderFixtures(private val dataSource: DataSource) {
+class CatalogPactProviderFixtures(
+    private val dataSource: DataSource,
+    private val mapper: ObjectMapper,
+    private val catalogJson: CatalogJson,
+) {
     fun specificationCodeIsAvailable() = dataSource.connection.use { connection ->
         connection.prepareStatement("DELETE FROM catalog_specifications WHERE code = ?").use { statement ->
             statement.setString(1, "PACT_STUDIO_SPEC")
@@ -142,6 +149,19 @@ class CatalogPactProviderFixtures(private val dataSource: DataSource) {
 
     /** Synthetic published DIP revision with two immutable, role-qualified approvals. */
     fun publishedPensionStrategyApprovalsExist() = dataSource.connection.use { connection ->
+        val content = mapper.readTree(PENSION_REVISION_CONTENT)
+        val approvalDigest = catalogJson.sha256(
+            mapper.createObjectNode().apply {
+                put("offeringId", PENSION_OFFERING_ID.toString())
+                put("revisionId", PENSION_REVISION_ID.toString())
+                put("revisionNumber", 0)
+                put("schemaId", PENSION_SCHEMA_ID)
+                put("schemaVersion", 2)
+                put("effectiveFrom", "2026-10-01T00:00:00Z")
+                put("effectiveTo", "2026-11-01T00:00:00Z")
+                set<JsonNode>("content", content)
+            },
+        )
         connection.prepareStatement(
             "INSERT INTO catalog_specifications " +
                 "(id, code, schema_id, schema_version, created_at, lock_version) VALUES (?, ?, ?, 2, ?, 0) " +
@@ -171,8 +191,8 @@ class CatalogPactProviderFixtures(private val dataSource: DataSource) {
             statement.setString(7, "pact-pension-maker")
             statement.setString(8, "pact-pension-checker")
             statement.setString(9, "independently reviewed DIP strategy fixture")
-            statement.setString(10, "a".repeat(64))
-            statement.setString(11, PENSION_APPROVAL_DIGEST)
+            statement.setString(10, catalogJson.sha256(content))
+            statement.setString(11, approvalDigest)
             statement.setObject(12, PENSION_FIXTURE_TIME)
             statement.setObject(13, PENSION_FIXTURE_TIME)
             statement.executeUpdate()
@@ -188,7 +208,7 @@ class CatalogPactProviderFixtures(private val dataSource: DataSource) {
                 statement.setString(3, role)
                 statement.setString(4, "pact-fixture")
                 statement.setString(5, "pact-$role")
-                statement.setString(6, PENSION_APPROVAL_DIGEST)
+                statement.setString(6, approvalDigest)
                 statement.setString(7, "independent $role review")
                 statement.setObject(8, OffsetDateTime.parse("2026-10-08T${10 + index}:00:00Z"))
                 statement.executeUpdate()
@@ -273,7 +293,6 @@ class CatalogPactProviderFixtures(private val dataSource: DataSource) {
         val PENSION_LEGAL_APPROVAL_ID: UUID = UUID.fromString("40000000-0000-0000-0000-000000000084")
         val PENSION_PRODUCT_APPROVAL_ID: UUID = UUID.fromString("40000000-0000-0000-0000-000000000085")
         const val PENSION_SCHEMA_ID = "org.openbank.retirement.pension-savings"
-        val PENSION_APPROVAL_DIGEST = "b".repeat(64)
         val PENSION_FIXTURE_TIME: OffsetDateTime = OffsetDateTime.parse("2026-10-08T09:00:00Z")
         const val PENSION_REVISION_CONTENT =
             """{"name":{"en":"Pact DIP strategy"},"attributes":{"productLine":"DIP","jurisdictionPackId":"CZ/DIP","fundStrategy":"DYNAMIC","reviewStatus":"LEGAL_AND_COMMERCIAL_REVIEWED","instrumentClasses":["BOND_FUNDS","EQUITY_FUNDS"]},"prices":[],"eligibility":[],"relationships":[],"documentCodes":[]}"""
