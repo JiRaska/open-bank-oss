@@ -31,7 +31,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-pension-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "c957cd4ef5f7e7f0"
+        openbank.tech/policy-checksum: "55438710f85d746d"
       labels:
         app.kubernetes.io/name: pension-service
         app.kubernetes.io/part-of: pension
