@@ -33,26 +33,25 @@ check() {
 
 echo "resolve-can-i-deploy-selector.sh"
 
-# 1. The common case: path-scoped CI skipped this service on this commit, so the broker has
-#    no version for it. Must keep today's behaviour exactly — `--version` would error here.
-check "no version for this commit → latest/main" "--latest main" no
+# 1. A known Pact participant without this SHA must not inherit a green latest/main verdict.
+#    The exact query fails until Services CI publishes and verifies this version.
+check "known participant without version → ask exact SHA" "--version ${SHA}" no
 
 # 2. THE POINT OF THE FILE. This commit's version IS published, so ask about it precisely.
 #    Returning `--latest main` here is the false-green path: the verdict would be about a
 #    different, older version than the image being deployed.
 check "version present → ask about THIS commit" "--version ${SHA}" yes
 
-# 3. Broker probe failed. Must fall back, not invent precision — asking `--version` for a
-#    version that may not exist would turn an unreachable broker into a fleet-wide block.
-check "probe inconclusive → latest/main" "--latest main" unknown
+# 3. Broker probe failed. The CLI may recover, but may only answer about this exact SHA.
+check "probe inconclusive → ask exact SHA" "--version ${SHA}" unknown
 
-# 4. Unset variable behaves as `unknown`, not as `yes`. A caller that forgets to export the
-#    probe must not silently get the precise-but-possibly-wrong question.
+# 4. Unset variable behaves as `unknown`. A caller that forgets to export the probe must
+#    never fall back to latest/main.
 got_unset="$(unset PACT_VERSION_PRESENT; bash "$RESOLVE" openbank-demo-service "$SHA" | cut -f1)"
-if [ "$got_unset" = "--latest main" ]; then
-  echo "  ok   unset probe → latest/main"
+if [ "$got_unset" = "--version ${SHA}" ]; then
+  echo "  ok   unset probe → exact SHA"
 else
-  echo "  FAIL unset probe: want '--latest main', got '${got_unset}'"
+  echo "  FAIL unset probe: want '--version ${SHA}', got '${got_unset}'"
   fails=$((fails + 1))
 fi
 
@@ -98,24 +97,21 @@ fi
 #    about an unrelated commit (#3306). Refuse instead.
 check "dispatch + no version → REFUSE" "REFUSE" no workflow_dispatch
 
-# 6. REGRESSION GUARD. The push path must be untouched: most of the fleet legitimately has no
-#    version on most commits, and refusing there would block every deploy. If someone widens
-#    the refusal to all events, this is what goes red.
-check "push + no version → still latest/main (unchanged)" "--latest main" no push
+# 6. Pushes may still be waiting for publication. They ask about the image SHA exactly;
+#    a missing version fails and can clear after Services CI publishes it.
+check "push + no version → ask exact SHA" "--version ${SHA}" no push
 
-# 7. Same guard for the implicit case: no EVENT_NAME exported behaves as a push, so a caller
-#    that forgets to pass it keeps today's behaviour rather than blocking the fleet.
-check "no EVENT_NAME + no version → latest/main" "--latest main" no
+# 7. No EVENT_NAME exported behaves as a push and still asks about the image SHA.
+check "no EVENT_NAME + no version → ask exact SHA" "--version ${SHA}" no
 
 # 8. A dispatch is only refused when the version is genuinely absent. With the version present
 #    the precise question is still the right one, dispatch or not. Co-deploy reuses this exact
 #    selector for every member: `--latest main` would instead ask about a later, unrelated image.
 check "dispatch/co-deploy + version present → ask about THIS commit" "--version ${SHA}" yes workflow_dispatch
 
-# 9. A dispatch with an inconclusive probe must NOT be refused: an unreachable broker is not
-#    evidence that the version is missing, and turning a probe outage into a hard stop would
-#    make the gate fail closed on infrastructure rather than on contracts.
-check "dispatch + probe inconclusive → latest/main, not REFUSE" "--latest main" unknown workflow_dispatch
+# 9. A dispatch with an inconclusive probe may ask the CLI about the exact SHA; it cannot
+#    infer absence or equivalence from a failed probe.
+check "dispatch + probe inconclusive → ask exact SHA" "--version ${SHA}" unknown workflow_dispatch
 
 # The distinction the REFUSE branch got wrong: a service the broker has never heard of has no
 # contracts to verify, so refusing makes its FIRST deploy impossible. Measured on
