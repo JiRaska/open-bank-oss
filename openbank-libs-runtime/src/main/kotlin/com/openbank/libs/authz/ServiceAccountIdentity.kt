@@ -23,8 +23,7 @@ import java.security.Principal
  *
  * Callers keep their existing allow-lists of principal NAMES (`service-account-<client>`); the name
  * is only ever compared with the one DERIVED from the verified `azp`, never with the token's own
- * name claim alone. The check is enforced against regressions by
- * `.github/scripts/check-service-account-name-compare.py`.
+ * name claim alone. ServiceAccountIdentityTest exercises these identity checks.
  */
 object ServiceAccountIdentity {
 
