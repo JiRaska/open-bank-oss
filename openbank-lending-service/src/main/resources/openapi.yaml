@@ -23,7 +23,8 @@ info:
   # optional contractNumber on LoanBookEntry, and a Loan response schema carrying it on
   # GET /loans, /loans/active and /loans/{id}. 1.30.0 is claimed by open PR #10266.
   # 1.31.0 -> 1.32.0: additive optional limit on the loan-application list for bounded Customer 360 reads.
-  # 1.37.0: document the existing Money response shape separately from accepted requests (#10558).
+  # 1.36.0 -> 1.37.0: document the existing Money response shape, including loan installment
+  # schedule and repayment responses, separately from accepted requests (#10558).
   version: 1.37.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
@@ -792,7 +793,13 @@ paths:
       parameters:
         - $ref: '#/components/parameters/IdPath'
       responses:
-        '200': { description: The repayment schedule }
+        '200':
+          description: The repayment schedule
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/LoanInstallment' }
         '403':
           $ref: '#/components/responses/Forbidden'
   /api/v1/lending/loans/{id}/installments/{installmentId}/repay:
@@ -807,7 +814,11 @@ paths:
           required: true
           schema: { type: string, format: uuid }
       responses:
-        '200': { description: Repayment recorded }
+        '200':
+          description: Repayment recorded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoanInstallment' }
         '403':
           $ref: '#/components/responses/Forbidden'
         '409':
@@ -2113,6 +2124,24 @@ components:
             Human contract number (#11107): UV-<origination year (UTC)>-<per-year sequence,
             zero-padded to at least six digits>. Unique, assigned at creation, immutable; the
             sequence is gap-tolerant (a rolled-back creation may leave a hole).
+    LoanInstallment:
+      type: object
+      description: One persisted contractual installment; all five monetary fields use the lending Money response form.
+      required: [id, loanId, number, dueDate, openingBalance, principal, interest, payment, closingBalance, paid, interestAccrued]
+      properties:
+        id: { type: string, format: uuid }
+        loanId: { type: string, format: uuid }
+        number: { type: integer }
+        dueDate: { type: string, format: date }
+        openingBalance: { $ref: '#/components/schemas/MoneyResponse' }
+        principal: { $ref: '#/components/schemas/MoneyResponse' }
+        interest: { $ref: '#/components/schemas/MoneyResponse' }
+        payment: { $ref: '#/components/schemas/MoneyResponse' }
+        closingBalance: { $ref: '#/components/schemas/MoneyResponse' }
+        paid: { type: boolean }
+        paidAt: { type: string, format: date-time, nullable: true }
+        interestAccrued: { type: boolean }
+        accruedAt: { type: string, format: date-time, nullable: true }
     RemainingInstallment:
       type: object
       required: [number, dueDate, principal, interest]
