@@ -6,9 +6,16 @@ package com.openbank.lending.integration
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.lending.application.usecase.LendingService
+import com.openbank.lending.application.usecase.TerminationService
+import com.openbank.lending.domain.model.Collateral
+import com.openbank.lending.domain.model.CollateralType
+import com.openbank.lending.domain.model.Loan
 import com.openbank.lending.domain.model.LoanInstallment
+import com.openbank.libs.domain.identifiers.LoanApplicationId
 import com.openbank.libs.domain.identifiers.LoanId
 import com.openbank.libs.domain.money.Money
+import com.openbank.libs.lending.AmortizationMethod
+import com.openbank.libs.lending.SettlementQuote
 import io.mockk.every
 import io.mockk.mockk
 import io.quarkus.test.common.QuarkusTestResource
@@ -21,7 +28,9 @@ import io.smallrye.mutiny.Uni
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.yaml.snakeyaml.Yaml
+import java.math.BigDecimal
 import java.time.LocalDate
+import java.time.OffsetDateTime
 import java.util.UUID
 
 /** Real HTTP serialization of a schedule row; only the use case is replaced with a deterministic fixture. */
@@ -31,6 +40,26 @@ import java.util.UUID
     initArgs = [ResourceArg(name = "db", value = "openbank_lending_it")],
 )
 class InstallmentMoneyWireIT {
+    private val mapper = ObjectMapper()
+    private val api = Yaml().load<Map<String, Any>>(javaClass.classLoader.getResourceAsStream("openapi.yaml")!!)
+    private val paths = api["paths"] as Map<*, *>
+    private val schemas = (api["components"] as Map<*, *>)["schemas"] as Map<*, *>
+
+    private fun responseSchema(path: String, method: String, status: String): Map<*, *> {
+        val operation = (paths[path] as Map<*, *>)[method] as Map<*, *>
+        val response = (operation["responses"] as Map<*, *>)[status] as Map<*, *>
+        return ((response["content"] as Map<*, *>)["application/json"] as Map<*, *>)["schema"] as Map<*, *>
+    }
+
+    private fun assertMoney(value: com.fasterxml.jackson.databind.JsonNode, field: String) {
+        val money = value.path(field)
+        val required = (schemas["MoneyResponse"] as Map<*, *>)["required"] as List<*>
+        required.forEach { assertThat(money.has(it as String)).describedAs("$field.$it").isTrue() }
+        assertThat(money.path("amount").isNumber).describedAs(field).isTrue()
+        assertThat(money.path("currency").path("code").asText()).isEqualTo("EUR")
+        assertThat(money.path("currency").path("defaultFractionDigits").asInt()).isEqualTo(2)
+    }
+
     @Test
     @TestSecurity(user = "wire-it-officer", roles = ["ROLE_LENDING_OFFICER"])
     fun `schedule Money fields match the published installment schema`() {
@@ -84,5 +113,113 @@ class InstallmentMoneyWireIT {
         val repayContent = repayResponse["content"] as Map<*, *>
         val repaySchema = (repayContent["application/json"] as Map<*, *>)["schema"] as Map<*, *>
         assertThat(repaySchema["\$ref"]).isEqualTo("#/components/schemas/LoanInstallment")
+    }
+
+    @Test
+    @TestSecurity(user = "wire-it-officer", roles = ["ROLE_LENDING_OFFICER"])
+    fun `settlement quote serializes five Money fields declared by its response schema`() {
+        val id = LoanId(UUID.randomUUID())
+        val amount = Money.of("100.00", "EUR")
+        val quote = SettlementQuote(
+            LocalDate.of(2026, 10, 10),
+            LocalDate.of(2026, 11, 10),
+            amount,
+            amount,
+            amount,
+            amount,
+            amount,
+            false,
+        )
+        val termination = mockk<TerminationService>()
+        every { termination.requestSettlementQuote(id, any()) } returns Uni.createFrom().item(quote)
+        QuarkusMock.installMockForType(termination, TerminationService::class.java)
+        val body = given().contentType("application/json")
+            .post("/api/v1/lending/loans/${id.value}/settlement-quote").then()
+            .statusCode(201).extract().body().asString()
+        val value = mapper.readTree(body)
+        val schema = schemas["SettlementQuote"] as Map<*, *>
+        val properties = schema["properties"] as Map<*, *>
+        (schema["required"] as List<*>).forEach {
+            assertThat(value.has(it as String)).describedAs("required $it").isTrue()
+        }
+        listOf("outstandingPrincipal", "accruedInterest", "compensation", "unappliedCredit", "total").forEach { field ->
+            assertThat((properties[field] as Map<*, *>)["\$ref"]).isEqualTo("#/components/schemas/MoneyResponse")
+            assertMoney(value, field)
+        }
+        assertThat(responseSchema("/api/v1/lending/loans/{id}/settlement-quote", "post", "201")["\$ref"])
+            .isEqualTo("#/components/schemas/SettlementQuote")
+    }
+
+    @Test
+    @TestSecurity(user = "wire-it-officer", roles = ["ROLE_LENDING_OFFICER"])
+    fun `collateral list serializes Money and its three routes declare the same response schema`() {
+        val id = LoanId(UUID.randomUUID())
+        val collateral = Collateral(
+            loanId = id,
+            type = CollateralType.REAL_ESTATE,
+            marketValue = Money.of("100.00", "EUR"),
+            valuedAt = OffsetDateTime.parse("2026-10-10T12:00:00Z"),
+            registeredBy = "wire-it-officer",
+            createdAt = OffsetDateTime.parse("2026-10-10T12:00:00Z"),
+        )
+        val lending = mockk<LendingService>()
+        every { lending.list(id) } returns Uni.createFrom().item(listOf(collateral))
+        QuarkusMock.installMockForType(lending, LendingService::class.java)
+        val body = given().get("/api/v1/lending/loans/${id.value}/collateral").then()
+            .statusCode(200).extract().body().asString()
+        val value = mapper.readTree(body).single()
+        val schema = schemas["Collateral"] as Map<*, *>
+        (schema["required"] as List<*>).forEach {
+            assertThat(value.has(it as String)).describedAs("required $it").isTrue()
+        }
+        assertThat(((schema["properties"] as Map<*, *>)["marketValue"] as Map<*, *>)["\$ref"])
+            .isEqualTo("#/components/schemas/MoneyResponse")
+        assertMoney(value, "marketValue")
+        val listed = responseSchema("/api/v1/lending/loans/{id}/collateral", "get", "200")
+        assertThat((listed["items"] as Map<*, *>)["\$ref"]).isEqualTo("#/components/schemas/Collateral")
+        assertThat(responseSchema("/api/v1/lending/loans/{id}/collateral", "post", "201")["\$ref"])
+            .isEqualTo("#/components/schemas/Collateral")
+        assertThat(responseSchema("/api/v1/lending/collateral/{id}/decision", "post", "200")["\$ref"])
+            .isEqualTo("#/components/schemas/Collateral")
+    }
+
+    @Test
+    @TestSecurity(user = "wire-it-officer", roles = ["ROLE_CREDIT_RISK"])
+    fun `loan transition serializes principal Money and lifecycle routes declare Loan`() {
+        val id = LoanId(UUID.randomUUID())
+        val now = OffsetDateTime.parse("2026-10-10T12:00:00Z")
+        val loan = Loan(
+            id = id,
+            applicationId = LoanApplicationId.random(),
+            partyId = UUID.randomUUID(),
+            principal = Money.of("100.00", "EUR"),
+            nominalAnnualRate = BigDecimal("0.05"),
+            termPeriods = 12,
+            method = AmortizationMethod.ANNUITY,
+            firstDueDate = LocalDate.of(2026, 11, 1),
+            disbursedAt = now,
+            createdAt = now,
+        )
+        val termination = mockk<TerminationService>()
+        every { termination.markDelinquent(id, any()) } returns Uni.createFrom().item(loan)
+        QuarkusMock.installMockForType(termination, TerminationService::class.java)
+        val body = given().contentType("application/json")
+            .post("/api/v1/lending/loans/${id.value}/mark-delinquent").then()
+            .statusCode(200).extract().body().asString()
+        val value = mapper.readTree(body)
+        assertMoney(value, "principal")
+        assertThat(((schemas["Loan"] as Map<*, *>)["properties"] as Map<*, *>)["principal"])
+            .isEqualTo(mapOf("\$ref" to "#/components/schemas/MoneyResponse"))
+        listOf(
+            "/settle", "/withdrawal", "/mark-delinquent", "/mark-defaulted", "/forbearance",
+            "/termination/propose", "/termination/decide", "/accelerate", "/writeoff", "/reschedule",
+        ).forEach { suffix ->
+            assertThat(responseSchema("/api/v1/lending/loans/{id}$suffix", "post", "200")["\$ref"])
+                .describedAs(suffix).isEqualTo("#/components/schemas/Loan")
+        }
+        listOf("/advance", "/decision").forEach { suffix ->
+            assertThat(responseSchema("/api/v1/lending/applications/{id}$suffix", "post", "200")["\$ref"])
+                .describedAs(suffix).isEqualTo("#/components/schemas/LoanApplicationResponse")
+        }
     }
 }

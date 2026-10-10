@@ -543,7 +543,11 @@ paths:
       parameters:
         - $ref: '#/components/parameters/IdPath'
       responses:
-        '201': { description: Quote issued and persisted with its validity window }
+        '201':
+          description: Quote issued and persisted with its validity window
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SettlementQuote' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '422': { description: Loan not in a quotable state }
   /api/v1/lending/loans/{id}/settle:
@@ -554,7 +558,11 @@ paths:
       parameters:
         - $ref: '#/components/parameters/IdPath'
       responses:
-        '200': { description: Loan settled and closed }
+        '200':
+          description: Loan settled and closed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Loan' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '422': { description: No valid quote or invalid state }
   /api/v1/lending/loans/{id}/withdrawal:
@@ -565,7 +573,11 @@ paths:
       parameters:
         - $ref: '#/components/parameters/IdPath'
       responses:
-        '200': { description: Contract unwound with statutory day interest }
+        '200':
+          description: Contract unwound with statutory day interest
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Loan' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '422': { description: Cooling-off window closed or no pack }
   /api/v1/lending/loans/{id}/mark-delinquent:
@@ -576,7 +588,11 @@ paths:
       parameters:
         - $ref: '#/components/parameters/IdPath'
       responses:
-        '200': { description: Loan marked DELINQUENT }
+        '200':
+          description: Loan marked DELINQUENT
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Loan' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '422': { description: No past-due installment }
   /api/v1/lending/loans/{id}/mark-defaulted:
@@ -587,7 +603,11 @@ paths:
       parameters:
         - $ref: '#/components/parameters/IdPath'
       responses:
-        '200': { description: Loan marked DEFAULTED }
+        '200':
+          description: Loan marked DEFAULTED
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Loan' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '422': { description: DPD below threshold }
   /api/v1/lending/loans/{id}/forbearance:
@@ -598,7 +618,11 @@ paths:
       parameters:
         - $ref: '#/components/parameters/IdPath'
       responses:
-        '200': { description: Assessment recorded (FORBEARANCE_ASSESSED) }
+        '200':
+          description: Assessment recorded (FORBEARANCE_ASSESSED)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Loan' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '422': { description: Not in DEFAULTED state }
   /api/v1/lending/loans/{id}/termination/propose:
@@ -609,7 +633,11 @@ paths:
       parameters:
         - $ref: '#/components/parameters/IdPath'
       responses:
-        '200': { description: Termination proposed }
+        '200':
+          description: Termination proposed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Loan' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '422': { description: Ground not permitted by the pinned pack }
   /api/v1/lending/loans/{id}/termination/decide:
@@ -620,7 +648,11 @@ paths:
       parameters:
         - $ref: '#/components/parameters/IdPath'
       responses:
-        '200': { description: TERMINATION_NOTICED with the pack notice period }
+        '200':
+          description: TERMINATION_NOTICED with the pack notice period
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Loan' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '422': { description: Four-eyes violation }
   /api/v1/lending/loans/{id}/accelerate:
@@ -631,7 +663,11 @@ paths:
       parameters:
         - $ref: '#/components/parameters/IdPath'
       responses:
-        '200': { description: Loan ACCELERATED — full balance due }
+        '200':
+          description: Loan ACCELERATED — full balance due
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Loan' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '422': { description: Notice period not yet elapsed }
   /api/v1/lending/applications/{id}/evidence:
@@ -667,7 +703,11 @@ paths:
       parameters:
         - $ref: '#/components/parameters/IdPath'
       responses:
-        '200': { description: Application advanced to the next state }
+        '200':
+          description: Application advanced to the next state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoanApplicationResponse' }
         '404': { description: Application not found }
         '409':
           description: >-
@@ -700,7 +740,11 @@ paths:
             schema:
               $ref: '#/components/schemas/DecisionRequest'
       responses:
-        '200': { description: Decision applied }
+        '200':
+          description: Decision applied
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoanApplicationResponse' }
         '403':
           $ref: '#/components/responses/Forbidden'
         '409':
@@ -838,7 +882,11 @@ paths:
             schema:
               $ref: '#/components/schemas/WriteOffRequest'
       responses:
-        '200': { description: Loan written off }
+        '200':
+          description: Loan written off
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Loan' }
         '403':
           $ref: '#/components/responses/Forbidden'
         '409':
@@ -861,7 +909,11 @@ paths:
             schema:
               $ref: '#/components/schemas/RescheduleRequest'
       responses:
-        '200': { description: Loan rescheduled }
+        '200':
+          description: Loan rescheduled
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Loan' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '403':
@@ -890,7 +942,11 @@ paths:
             schema:
               $ref: '#/components/schemas/CollateralRequest'
       responses:
-        '201': { description: Collateral registered (PENDING) }
+        '201':
+          description: Collateral registered (PENDING)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Collateral' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '403':
@@ -902,7 +958,13 @@ paths:
       parameters:
         - $ref: '#/components/parameters/IdPath'
       responses:
-        '200': { description: Collateral for the loan }
+        '200':
+          description: Collateral for the loan
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Collateral' }
         '403':
           $ref: '#/components/responses/Forbidden'
   /api/v1/lending/collateral/{id}/decision:
@@ -920,7 +982,11 @@ paths:
             schema:
               $ref: '#/components/schemas/CollateralDecisionRequest'
       responses:
-        '200': { description: Decision applied }
+        '200':
+          description: Decision applied
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Collateral' }
         '403':
           $ref: '#/components/responses/Forbidden'
         '409':
@@ -2142,6 +2208,35 @@ components:
         paidAt: { type: string, format: date-time, nullable: true }
         interestAccrued: { type: boolean }
         accruedAt: { type: string, format: date-time, nullable: true }
+    SettlementQuote:
+      type: object
+      required: [asOfDate, validUntil, outstandingPrincipal, accruedInterest, compensation, unappliedCredit, total, compensationCapped]
+      properties:
+        asOfDate: { type: string, format: date }
+        validUntil: { type: string, format: date }
+        outstandingPrincipal: { $ref: '#/components/schemas/MoneyResponse' }
+        accruedInterest: { $ref: '#/components/schemas/MoneyResponse' }
+        compensation: { $ref: '#/components/schemas/MoneyResponse' }
+        unappliedCredit: { $ref: '#/components/schemas/MoneyResponse' }
+        total: { $ref: '#/components/schemas/MoneyResponse' }
+        compensationCapped: { type: boolean }
+    Collateral:
+      type: object
+      required: [id, loanId, type, marketValue, haircut, valuedAt, status, registeredBy, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        loanId: { type: string, format: uuid }
+        type: { type: string, enum: [REAL_ESTATE, VEHICLE, SECURITIES, CASH_DEPOSIT, GUARANTEE, OTHER] }
+        description: { type: string, nullable: true }
+        marketValue: { $ref: '#/components/schemas/MoneyResponse' }
+        haircut: { type: number, minimum: 0, maximum: 1 }
+        valuedAt: { type: string, format: date-time }
+        status: { type: string, enum: [PENDING, APPROVED, REJECTED] }
+        registeredBy: { type: string }
+        decidedBy: { type: string, nullable: true }
+        decidedAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+        releasedAt: { type: string, format: date-time, nullable: true }
     RemainingInstallment:
       type: object
       required: [number, dueDate, principal, interest]

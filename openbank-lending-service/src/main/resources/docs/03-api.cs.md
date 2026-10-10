@@ -57,6 +57,7 @@ historie nepovažoval za provedený přechod.
 - **Money v požadavku** — `{ amount: number|string, currency: "EUR" }`; přijímá se také starší tvar `{ currency: { code: "EUR" } }`. Měna je kód ISO-4217.
 - **Money v odpovědi** — dosavadní tvar je `{ amount: number, currency: { code: "EUR", defaultFractionDigits: 2 }, isNonNegative: boolean, isZero: boolean, isNegative: boolean, isPositive: boolean }`. Schéma OpenAPI `MoneyResponse` jej popisuje samostatně, aby generovaný klient nepovažoval vstupní řetězec měny za zaručený tvar odpovědi.
 - **Splátkový kalendář a výsledek splátky** — `LoanInstallment` používá stejný tvar `MoneyResponse` pro počáteční zůstatek, jistinu, úrok, splátku a konečný zůstatek.
+- **Další peněžní odpovědi** — nabídka předčasného splacení obsahuje pět polí `MoneyResponse`; zajištění takto vrací `marketValue`. Přechody stavu úvěru vracejí `Loan` s jistinou `MoneyResponse` a postup či rozhodnutí o žádosti vrací `LoanApplicationResponse` s požadovanou částkou.
 
 Validace (aplikační služba): požadovaná částka musí být kladná, term ≥ 1 období, nominální sazba ≥ 0, identita navrhovatele neprázdná, haircut v `[0,1]`.
 

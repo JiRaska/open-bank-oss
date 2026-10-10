@@ -57,6 +57,7 @@ refused command for a transition.
 - **Money in requests** — `{ amount: number|string, currency: "EUR" }`; the legacy `{ currency: { code: "EUR" } }` form is also accepted. The currency is an ISO-4217 code.
 - **Money in responses** — the existing wire form is `{ amount: number, currency: { code: "EUR", defaultFractionDigits: 2 }, isNonNegative: boolean, isZero: boolean, isNegative: boolean, isPositive: boolean }`. The OpenAPI `MoneyResponse` schema describes it separately so generated clients do not read the request's string currency shape as a response guarantee.
 - **Repayment schedule and repayment result** — `LoanInstallment` uses that same `MoneyResponse` form for opening balance, principal, interest, payment and closing balance.
+- **Other monetary responses** — settlement quotes expose five `MoneyResponse` fields; collateral returns `marketValue` in that form. Loan lifecycle transitions return `Loan` with a `MoneyResponse` principal, and application advancement/decision returns `LoanApplicationResponse` with its requested amount.
 
 Validation (application service): requested amount must be positive, term ≥ 1 period, nominal rate ≥ 0, proposer identity non-blank, haircut within `[0,1]`.
 
