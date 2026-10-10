@@ -6,6 +6,7 @@ package com.openbank.pensionfund.infrastructure.persistence
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
+import com.openbank.pensionfund.application.port.ClassificationReceipt
 import com.openbank.pensionfund.application.port.PensionFundStore
 import com.openbank.pensionfund.application.port.StoreChanges
 import com.openbank.pensionfund.domain.model.AllocationTarget
@@ -51,6 +52,7 @@ class PanachePensionFundStore(
     private val transactions: UnitTransactionRepository,
     private val positions: FundNavPositionRepository,
     private val classifications: PositionClassificationCorrectionRepository,
+    private val receipts: ClassificationReceiptRepository,
 ) : PensionFundStore {
 
     private val json = jacksonObjectMapper().findAndRegisterModules()
@@ -64,6 +66,18 @@ class PanachePensionFundStore(
         Panache.withTransaction {
             Panache.getSession().flatMap { session ->
                 val writes = mutableListOf<() -> Uni<*>>()
+                // Insert-only, first: a competing request cannot apply its mutation after this key wins.
+                changes.classificationReceipt?.let { receipt ->
+                    writes += {
+                        session.persist(
+                            ClassificationReceiptEntity().also {
+                                it.key = receipt.key
+                                it.fingerprint = receipt.fingerprint
+                                it.responseSnapshot = json.writeValueAsString(receipt.result)
+                            },
+                        ).flatMap { session.flush() }
+                    }
+                }
                 changes.funds.forEach { f -> writes += { session.merge(f.toEntity()) } }
                 changes.strategies.forEach { s -> writes += { session.merge(s.toEntity()) } }
                 changes.strategyChanges.forEach { c -> writes += { session.merge(c.toEntity()) } }
@@ -72,12 +86,34 @@ class PanachePensionFundStore(
                 changes.holdings.forEach { h -> writes += { session.merge(h.toEntity()) } }
                 changes.transactions.forEach { t -> writes += { session.merge(t.toEntity()) } }
                 changes.navPositions.forEach { p -> writes += { session.persist(p.toEntity()) } }
-                changes.classificationCorrections.forEach { c -> writes += { session.merge(c.toEntity()) } }
+                changes.classificationCorrections.forEach { c ->
+                    writes += {
+                        if (c.status == ClassificationCorrectionStatus.PROPOSED) {
+                            session.persist(c.toEntity())
+                        } else {
+                            session.createQuery<Int>(
+                                "update PositionClassificationCorrectionEntity set status = :status, " +
+                                    "decidedBy = :actor, decidedAt = :at where id = :id and status = 'PROPOSED'",
+                            )
+                                .setParameter("status", c.status.name)
+                                .setParameter("actor", c.decidedBy)
+                                .setParameter("at", c.decidedAt)
+                                .setParameter("id", c.id)
+                                .executeUpdate()
+                                .invoke { count -> check(count == 1) { "correction ${c.id} was already decided" } }
+                        }
+                    }
+                }
                 writes.fold(Uni.createFrom().voidItem() as Uni<*>) { acc, w -> acc.flatMap { w() } }
                     .flatMap { session.flush() }
             }
         }.awaitSuspending()
     }
+
+    override suspend fun classificationReceipt(key: String): ClassificationReceipt? =
+        read { receipts.findById(key) }?.let {
+            ClassificationReceipt(it.key, it.fingerprint, json.readValue(it.responseSnapshot))
+        }
 
     private suspend fun <T> read(block: () -> Uni<T>): T = Panache.withSession { block() }.awaitSuspending()
 
