@@ -71,6 +71,10 @@ quarkus:
       type: client
 
   rest-client:
+    product-catalog:
+      url: ${PRODUCT_CATALOG_SERVICE_URL:http://localhost:8104}
+      connect-timeout: 2000
+      read-timeout: 5000
     pension-fund-service:
       url: ${PENSION_FUND_SERVICE_URL:http://localhost:8162}
       connect-timeout: 2000
