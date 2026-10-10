@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: statement-service
     app.kubernetes.io/part-of: statements
   annotations:
-    openbank.tech/policy-checksum: "ad99f0107d659175"
+    openbank.tech/policy-checksum: "068c2654b17142ec"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -104,8 +104,20 @@ data:
     	input.principal.attributes.tenant == input.resource.attributes.tenant
     }
 
+    # Compliance staff may read any resource (audit duty). STAFF ONLY: a Keycloak
+    # client_credentials token is classified HUMAN (rules.yaml: authz_policy.
+    # principal_type_service_unreachable), so without the `service-account-` exclusion any machine
+    # identity holding ROLE_COMPLIANCE reached every `*.read` fleet-wide — including the reads
+    # rules.yaml: authz.operator_read_any_excluded_actions withholds from operator-read-any, and no
+    # per-service rule can veto it because the decision is a union of reasons (#3765, ADR-0223).
+    # Measured before this line was added: no service-account holds ROLE_COMPLIANCE in the deployed
+    # realm (realm-template.json) or the docker realm; only the CI realm's shared
+    # service-account-openbank-services does, and every CI workflow using that realm runs with
+    # authz.enforce=false, so no real M2M caller relied on this grant. A machine that needs a read
+    # gets a rule naming its `service-account-<client>` id in the target service's rest_ext.
     allowed_reasons contains "compliance-read-any" if {
     	input.principal.type == "HUMAN"
+    	not startswith(input.principal.id, "service-account-")
     	"ROLE_COMPLIANCE" in input.principal.roles
     	endswith(input.action, ".read")
     }
@@ -548,9 +560,10 @@ data:
     # Here it cannot be bypassed by adding a new reason.
     #
     # What this does NOT block, by design:
-    #  - READS. `operator-read-any` / `compliance-read-any` are how real M2M callers fetch
-    #    cross-service data today (party-service's GDPR Art. 15 aggregation against kyc-service
-    #    and card-issuance-service depends on exactly that), so they are untouched.
+    #  - READS. `operator-read-any` is how real M2M callers fetch cross-service data today
+    #    (party-service's GDPR Art. 15 aggregation against kyc-service and card-issuance-service
+    #    depends on exactly that), so it is untouched here. `compliance-read-any` excludes every
+    #    `service-account-*` principal on its own rule (see there).
     #  - Writes granted by a reason that names the caller. A rule that identifies a specific
     #    verified caller by `input.principal.id` and scopes the action set — e.g.
     #    `service-consent-m2m-marketing`, `m2m-sanctions-screening`,
