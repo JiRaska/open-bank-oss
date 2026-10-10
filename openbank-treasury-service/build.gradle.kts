@@ -41,6 +41,8 @@ dependencies {
 
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
+    // semt.002 statement-of-holdings reader (ADR-0337 amendment): the fleet's ISO 20022 library.
+    implementation(project(":openbank-libs-iso20022"))
 
     testImplementation(libs.quarkus.junit5)
     testImplementation(libs.quarkus.test.security)

@@ -36,7 +36,11 @@ info:
   # 1.18.0: additive — product limits (ADR-0315 D4): per-product allowed currencies, maximum
   #         principal and maximum tenor, declared in configuration. Enforced at submit and
   #         re-checked at approval: 422 PRODUCT_LIMIT_BREACHED with Error.breaches. Not overridable.
-  version: 1.18.0
+  # 1.19.0: additive — portfolio statements of holdings (ADR-0337 amendment): POST
+  #         /portfolio/statements (custodian semt.002; a correction supersedes, the prior version is
+  #         kept), GET /portfolio/statements?date= (the version trail) and GET
+  #         /portfolio/period-end?date= (tax-reporting's PSP 34-12 PS source; 409 when no statement).
+  version: 1.19.0
   description: |
     The bank's own money-market deals (ADR-0315). A deal moves
     `DRAFT → PENDING_APPROVAL → BOOKED → CONFIRMED → SETTLED → MATURED`, or to `CANCELLED` (before
@@ -623,6 +627,107 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /api/v1/treasury/portfolio/statements:
+    post:
+      tags: [Portfolio]
+      operationId: uploadPortfolioStatement
+      summary: Upload a custodian's semt.002 period-end statement of holdings
+      description: |
+        ADR-0337 amendment. One complete page (`Pgntn` page 1, last page) of a complete (`UpdTp`
+        COMP) semt.002 for a configured safekeeping account of this deployment's entity. Every
+        holding needs an ISIN, a quantity, a valuation in the account base currency (one currency
+        for the whole statement) and a CFI the configured prefix mapping covers — an unmapped or
+        missing CFI refuses the WHOLE statement, naming every unclassifiable ISIN. DOCTYPE is
+        refused. Nothing is posted.
+        Idempotent: the same Idempotency-Key with the same bytes, or the same bytes as the date's
+        current version under any key, returns the stored version. Different bytes for a date that
+        already has a statement are a CORRECTION: stored as the next version, which supersedes the
+        current one; the superseded version is kept. The key reused on other bytes is 409.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/xml:
+            schema:
+              type: string
+          text/xml:
+            schema:
+              type: string
+      responses:
+        '201':
+          description: The stored version (or the existing one on an idempotent re-ingestion)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PortfolioStatement'
+        '400':
+          description: Missing Idempotency-Key, malformed or partial semt.002, unmapped CFI, unconfigured account or no portfolio entity on this deployment, mixed valuation currencies, or a figure the store cannot hold exactly
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/InvalidState'
+    get:
+      tags: [Portfolio]
+      operationId: listPortfolioStatementVersions
+      summary: Every version stored for a statement date, oldest first (the correction trail)
+      parameters:
+        - $ref: '#/components/parameters/PortfolioDate'
+      responses:
+        '200':
+          description: The versions, oldest first (empty when none is stored)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/PortfolioStatement'}
+        '400':
+          description: Missing or malformed date
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/treasury/portfolio/period-end:
+    get:
+      tags: [Portfolio]
+      operationId: getPeriodEndPortfolio
+      summary: The portfolio at exactly that date (tax-reporting's PSP 34-12 PS source)
+      description: |
+        The CURRENT version of the statement of holdings stated at exactly `date`. With no statement
+        for that date the answer is 409 `PORTFOLIO_SNAPSHOT_MISSING` — never an empty list: an
+        empty portfolio (a statement with no holdings, 200 with `positions: []`) and a missing
+        statement must not look the same. Decimals are strings.
+      parameters:
+        - $ref: '#/components/parameters/PortfolioDate'
+      responses:
+        '200':
+          description: The portfolio at that date
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PeriodEndPortfolio'
+        '400':
+          description: Missing or malformed date
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: No statement of holdings is stored for that date
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -631,6 +736,13 @@ components:
       bearerFormat: JWT
 
   parameters:
+    PortfolioDate:
+      name: date
+      in: query
+      required: true
+      schema:
+        type: string
+        format: date
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -1067,3 +1179,46 @@ components:
             up to the CLBD date). Refused at upload today; a statement stored before that rule still
             reconciles, and each such entry is listed here AND in unmatchedStatementEntries.
           items: {$ref: '#/components/schemas/NostroStatementEntry'}
+    PortfolioPosition:
+      type: object
+      required: [instrumentClass, isin, cfi, quantity, valuation, valuationCurrency]
+      properties:
+        instrumentClass:
+          type: string
+          description: Mapped from the CFI by the configured prefix mapping (openbank.treasury.portfolio.cfi-classes)
+        isin: {type: string, pattern: '^[A-Z]{2}[A-Z0-9]{9}[0-9]$'}
+        cfi: {type: string, pattern: '^[A-Z]{6}$'}
+        quantity: {type: string, description: 'Units, or nominal for debt instruments, as stated (decimal string)'}
+        valuation: {type: string, description: 'Holding value in valuationCurrency (decimal string)'}
+        valuationCurrency: {type: string}
+    PeriodEndPortfolio:
+      type: object
+      required: [asOf, entity, currency, statementUuid, version, positions]
+      properties:
+        asOf: {type: string, format: date}
+        entity: {type: string}
+        currency: {type: string}
+        statementUuid: {type: string, format: uuid}
+        statementId: {type: [string, 'null']}
+        version: {type: integer, minimum: 1}
+        positions:
+          type: array
+          items: {$ref: '#/components/schemas/PortfolioPosition'}
+    PortfolioStatement:
+      type: object
+      required: [id, entity, safekeepingAccount, statementDate, currency, version, positionCount, sha256, uploadedBy, uploadedAt]
+      properties:
+        id: {type: string, format: uuid}
+        entity: {type: string}
+        statementId: {type: [string, 'null']}
+        safekeepingAccount: {type: string}
+        statementDate: {type: string, format: date}
+        currency: {type: string}
+        version: {type: integer, minimum: 1}
+        supersedes: {type: [string, 'null'], format: uuid}
+        supersededBy: {type: [string, 'null'], format: uuid}
+        supersededAt: {type: [string, 'null'], format: date-time}
+        positionCount: {type: integer}
+        sha256: {type: string}
+        uploadedBy: {type: string}
+        uploadedAt: {type: string, format: date-time}

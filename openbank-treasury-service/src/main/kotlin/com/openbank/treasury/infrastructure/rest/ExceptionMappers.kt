@@ -7,6 +7,7 @@ package com.openbank.treasury.infrastructure.rest
 import com.openbank.treasury.application.port.out.DealNotFoundException
 import com.openbank.treasury.application.port.out.LedgerUnavailableException
 import com.openbank.treasury.application.port.out.NostroAccountNotFoundException
+import com.openbank.treasury.application.port.out.PortfolioSnapshotMissingException
 import com.openbank.treasury.application.port.out.StatementNotFoundException
 import com.openbank.treasury.domain.model.ActorNotPermittedException
 import com.openbank.treasury.domain.model.FourEyesViolationException
@@ -43,6 +44,11 @@ class ExceptionMappers {
     @ServerExceptionMapper
     fun ledgerUnavailable(e: LedgerUnavailableException): Response =
         error(Response.Status.BAD_GATEWAY.statusCode, "LEDGER_UNAVAILABLE", e.message)
+
+    /** ADR-0337 amendment D2: no snapshot for the date is a 409, never an empty list. */
+    @ServerExceptionMapper
+    fun portfolioMissing(e: PortfolioSnapshotMissingException): Response =
+        error(Response.Status.CONFLICT.statusCode, "PORTFOLIO_SNAPSHOT_MISSING", e.message)
 
     @ServerExceptionMapper
     fun conflict(e: IllegalStateException): Response =
