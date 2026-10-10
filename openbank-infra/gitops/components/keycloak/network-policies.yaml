@@ -155,6 +155,9 @@ spec:
               kubernetes.io/metadata.name: payments
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: pension
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: pid
         - namespaceSelector:
             matchLabels:

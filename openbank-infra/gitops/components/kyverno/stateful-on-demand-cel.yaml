@@ -84,6 +84,7 @@ spec:
           'payments/swift-service-db',
           'payments/transaction-db',
           'payments/vop-db',
+          'pension/pension-db',
           'psd2/psd2-db',
           'sanctions/sanctions-db',
           'sca/sca-db',
