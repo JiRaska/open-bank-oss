@@ -1260,6 +1260,25 @@
       "secret": "__KYB_CLIENT_SECRET__"
     },
     {
+      "clientId": "openbank-tax-reporting",
+      "name": "OpenBank Tax Reporting Service",
+      "description": "Per-service M2M client for tax-reporting-service's reads of the pension reporting read models (pension-fund.reporting.read, pension.reporting.aggregate) (#12425). Holds ROLE_API only.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__TAX_REPORTING_CLIENT_SECRET__"
+    },
+    {
       "clientId": "openbank-analytics-sink",
       "name": "OpenBank Analytics Sink",
       "description": "Per-service M2M client for analytics-sink's account-registry sweep (account.list) (issue #10486). Holds ROLE_API only; its actions are granted by identity in the upstream OPA rego.",
@@ -1869,6 +1888,14 @@
       "username": "service-account-openbank-kyb",
       "enabled": true,
       "serviceAccountClientId": "openbank-kyb",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-tax-reporting",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-tax-reporting",
       "realmRoles": [
         "ROLE_API"
       ]
