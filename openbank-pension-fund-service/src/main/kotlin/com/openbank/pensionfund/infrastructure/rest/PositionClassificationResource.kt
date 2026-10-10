@@ -8,6 +8,7 @@ import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import com.openbank.pensionfund.application.usecase.ClassificationCorrectionRequest
 import com.openbank.pensionfund.application.usecase.PositionClassificationService
+import com.openbank.pensionfund.domain.model.ClassificationTarget
 import com.openbank.pensionfund.domain.model.InstrumentClass
 import com.openbank.pensionfund.domain.model.NavPosition
 import com.openbank.pensionfund.domain.model.PositionClassificationCorrection
@@ -51,7 +52,7 @@ class PositionClassificationResource {
         val dto = requireNotNull(body) { "request body is required" }
         val request = ClassificationCorrectionRequest(
             positionId = requireNotNull(dto.positionId) { "positionId is required" },
-            toClass = requireNotNull(dto.toClass) { "toClass is required" },
+            toClass = requireNotNull(dto.toClass) { "toClass is required" }.instrumentClass(),
             reason = requireNotNull(dto.reason) { "reason is required" },
         )
         return ClassificationCorrectionResponse.from(classification.propose(request, identity.actor()))
@@ -76,7 +77,7 @@ class PositionClassificationResource {
 
 data class ClassificationCorrectionDto(
     val positionId: UUID? = null,
-    val toClass: InstrumentClass? = null,
+    val toClass: ClassificationTarget? = null,
     val reason: String? = null,
 )
 

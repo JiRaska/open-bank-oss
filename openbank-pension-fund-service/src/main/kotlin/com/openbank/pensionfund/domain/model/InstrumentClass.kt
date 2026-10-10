@@ -29,6 +29,20 @@ enum class InstrumentClass {
     UNCLASSIFIED,
 }
 
+/** A classification an operator may propose; unknown is a recorded state, never a correction target. */
+enum class ClassificationTarget {
+    DEPOSIT,
+    DEBT_SECURITY,
+    LOAN,
+    EQUITY,
+    FUND_SHARE,
+    DERIVATIVE,
+    OTHER,
+    ;
+
+    fun instrumentClass(): InstrumentClass = InstrumentClass.valueOf(name)
+}
+
 enum class ClassificationCorrectionStatus { PROPOSED, APPROVED, REJECTED }
 
 /**
