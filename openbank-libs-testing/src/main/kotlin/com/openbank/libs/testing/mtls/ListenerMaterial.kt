@@ -5,12 +5,16 @@
 package com.openbank.libs.testing.mtls
 
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
+import com.sun.net.httpserver.HttpServer
+import java.net.InetAddress
+import java.net.InetSocketAddress
 import java.nio.file.Files
 import java.nio.file.Path
 import java.security.KeyFactory
 import java.security.KeyPairGenerator
 import java.security.KeyStore
 import java.security.Signature
+import java.security.interfaces.RSAPublicKey
 import java.security.spec.PKCS8EncodedKeySpec
 import java.time.Instant
 import java.util.Base64
@@ -23,8 +27,9 @@ import javax.net.ssl.TrustManagerFactory
  * Ephemeral key material for [ListenerAuthParityConformance] (#12511): a server certificate for
  * the 8443 listener, one client certificate the listener trusts (the stand-in for a fleet-CA
  * workload certificate), and an RSA key pair whose public half the service's OIDC bearer
- * mechanism verifies locally — so the bearer is a REAL signed token, checked by the production
- * mechanism, with no identity provider running. Nothing is committed; everything lives in a temp
+ * mechanism verifies through a local realm stand-in (discovery + JWKS over loopback) — so the
+ * bearer is a REAL signed token, checked by the production mechanism and its production
+ * discovery path, with no identity provider running. Nothing is committed; everything lives in a temp
  * directory deleted at [stop].
  *
  * A test profile's resources load in a different classloader from the test class, so the
@@ -42,6 +47,8 @@ class ListenerMaterial : QuarkusTestResourceLifecycleManager {
         Files.write(dir.resolve("signing.key"), signing.private.encoded)
         System.setProperty(DIR_PROPERTY, dir.toString())
         System.setProperty(PASSWORD_PROPERTY, password)
+        val realm = startRealm(signing.public as RSAPublicKey)
+        System.setProperty(ISSUER_PROPERTY, realm)
         // Also under `%test.` for the reason ProductionListenerProfile gives.
         return mapOf(
             "quarkus.http.ssl.certificate.files" to dir.resolve("tls.crt").toString(),
@@ -49,24 +56,48 @@ class ListenerMaterial : QuarkusTestResourceLifecycleManager {
             "quarkus.http.ssl.certificate.trust-store-files" to dir.resolve("client.crt").toString(),
             "quarkus.http.ssl.protocols" to "TLSv1.3",
             "quarkus.http.test-ssl-port" to "0",
-            // The production bearer mechanism, verifying against a local public key instead of
-            // the realm's JWKS. auth-server-url is blanked (empty = unset in SmallRye): while it is
-            // set, the tenant still dials the realm at the first request even with public-key.
-            // (quarkus.oidc.enabled is build time: ProductionListenerProfile sets it.)
-            "quarkus.oidc.auth-server-url" to "",
-            "quarkus.oidc.public-key" to Base64.getEncoder().encodeToString(signing.public.encoded),
-            "quarkus.oidc.token.issuer" to ISSUER,
+            // The production bearer mechanism, unchanged: discovery + JWKS, served by a local
+            // realm stand-in ([startRealm]) that publishes the signing key. No identity provider.
+            "quarkus.oidc.auth-server-url" to realm,
         ).flatMap { (k, v) -> listOf(k to v, "%test.$k" to v) }.toMap()
     }
 
+    private var server: HttpServer? = null
+
+    /** Serves `.well-known/openid-configuration` and the JWKS for the signing key; returns the realm URL (= issuer). */
+    private fun startRealm(key: RSAPublicKey): String {
+        val http = HttpServer.create(InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0)
+        val realm = "http://127.0.0.1:${http.address.port}/realms/listener-parity"
+        val enc = Base64.getUrlEncoder().withoutPadding()
+        fun unsigned(n: java.math.BigInteger) = n.toByteArray().let { if (it[0].toInt() == 0) it.copyOfRange(1, it.size) else it }
+        val jwks = """{"keys":[{"kty":"RSA","kid":"$KID","use":"sig","alg":"RS256",""" +
+            """"n":"${enc.encodeToString(unsigned(key.modulus))}","e":"${enc.encodeToString(unsigned(key.publicExponent))}"}]}"""
+        val discovery = """{"issuer":"$realm","jwks_uri":"$realm/protocol/openid-connect/certs",""" +
+            """"token_endpoint":"$realm/protocol/openid-connect/token","authorization_endpoint":"$realm/protocol/openid-connect/auth"}"""
+        fun serve(path: String, body: String) = http.createContext(path) { ex ->
+            val bytes = body.toByteArray()
+            ex.responseHeaders.add("Content-Type", "application/json")
+            ex.sendResponseHeaders(HTTP_OK, bytes.size.toLong())
+            ex.responseBody.use { it.write(bytes) }
+        }
+        serve("/realms/listener-parity/.well-known/openid-configuration", discovery)
+        serve("/realms/listener-parity/protocol/openid-connect/certs", jwks)
+        http.start()
+        server = http
+        return realm
+    }
+
     override fun stop() {
+        server?.stop(0)
         System.getProperty(DIR_PROPERTY)?.let { d ->
             Files.walk(Path.of(d)).use { paths -> paths.sorted(Comparator.reverseOrder()).forEach(Files::delete) }
         }
     }
 
     companion object {
-        const val ISSUER = "https://listener-parity.openbank.test"
+        private const val ISSUER_PROPERTY = "openbank.test.listener-parity.issuer"
+        private const val KID = "listener-parity"
+        private const val HTTP_OK = 200
         private const val DIR_PROPERTY = "openbank.test.listener-parity.dir"
         private const val PASSWORD_PROPERTY = "openbank.test.listener-parity.password"
         private const val RSA_BITS = 2048
@@ -98,10 +129,10 @@ class ListenerMaterial : QuarkusTestResourceLifecycleManager {
         /** An RS256 access token the service's OIDC mechanism accepts: right issuer, right key, not expired. */
         fun bearer(roles: List<String> = listOf("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")): String {
             val now = Instant.now().epochSecond
-            val header = """{"alg":"RS256","typ":"JWT"}"""
+            val header = """{"alg":"RS256","typ":"JWT","kid":"$KID"}"""
             val rolesJson = roles.joinToString(",") { "\"$it\"" }
             val claims =
-                """{"iss":"$ISSUER","sub":"listener-parity-test","preferred_username":"listener-parity-test",""" +
+                """{"iss":"${System.getProperty(ISSUER_PROPERTY)}","sub":"listener-parity-test","preferred_username":"listener-parity-test",""" +
                     """"iat":$now,"exp":${now + TOKEN_TTL_SECONDS},"realm_access":{"roles":[$rolesJson]},"groups":[$rolesJson]}"""
             val enc = Base64.getUrlEncoder().withoutPadding()
             val signingInput = enc.encodeToString(header.toByteArray()) + "." + enc.encodeToString(claims.toByteArray())
