@@ -52,7 +52,11 @@ class FxRevaluationScheduler(
     // running left NO runtime signal at all: this job has no metric, no watchdog and no alert rule of any
     // kind, so success and failure both ended in a log line (#2239).
     fun onStart(@Observes @Suppress("UNUSED_PARAMETER") ev: StartupEvent) {
-        liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, Duration.ofDays(1))
+        // A switched-off job registers no heartbeat (ScheduleSwitch): it cannot run, so a seeded
+        // age would only grow until WorkflowLivenessStale fired on an instance that runs without it.
+        if (!ScheduleSwitch.isOff(CRON_PROPERTY)) {
+            liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, Duration.ofDays(1))
+        }
     }
 
     // `suspend`, never `runBlocking` (#2187, the fleet sweep of #2148). Quarkus invokes a plain
@@ -94,10 +98,13 @@ class FxRevaluationScheduler(
         }
     }
 
-    private companion object {
+    internal companion object {
         const val JOB_NAME = "ledger.fx-revaluation"
 
         /** ADR-0160 mechanism 3 workflow tag — stable, low-cardinality. */
         const val WORKFLOW_NAME = "ledger-fx-revaluation"
+
+        /** The property this job's `@Scheduled` cron expression reads. */
+        const val CRON_PROPERTY = "openbank.ledger.fx-revaluation.cron"
     }
 }

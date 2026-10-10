@@ -603,3 +603,16 @@ set) apply equally to the new `ledger.approval.decide` action.
   (uninitialized-property crash) on a malformed request back to the intended 400; no endpoint,
   authorization, self-approval or wire-shape change. Rollback: revert to the eager
   `SecurityIdentity` parameter.
+- **2026-10-10** — **`ledger.close.inspect`: the frozen trial balance gets its own action (ADR-0337, #12496).**
+  `GET /api/v1/ledger/periods/{type}/{date}/frozen-trial-balance` authorizes as `ledger.close.inspect`
+  instead of `ledger.read`, so a policy can grant the attested statutory trial balance without every
+  journal, live trial balance and control-account read (the pension company's ledger grants
+  tax-reporting this action alone). **STRIDE-I/E:** no audience change on the bank's ledger — the verb is
+  not `read`/`list`, so no base `*-read-any` rule reaches it, and `ledger_rest_ext.rego` names the
+  previous holders explicitly: staff with OPERATOR/ADMIN/VIEWER/AUDITOR (`service-account-*` excluded)
+  and the shared `openbank-services` client finrep reads it with. Measured with `opa eval` against the
+  regenerated bundle: those five ALLOW; ROLE_COMPLIANCE, settlement, treasury, edge and tax-reporting
+  DENY. Dropping the service-account exclusion, the shared client's `principal.id` line or its rule each
+  turns `opa test` red. RBAC unchanged. Rollback: revert the annotation and the two rego reasons together.
+  Same change: a cron job switched `off` no longer registers a workflow-liveness gauge (no security
+  surface; removes a stale-alert source on instances that run without it).

@@ -72,7 +72,12 @@ class ClosedPeriodResource(private val closedPeriodUseCase: ClosedPeriodUseCase)
     @GET
     @Path("/{type}/{date}/frozen-trial-balance")
     @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
-    @Authorize(action = "ledger.read", resource = "#date")
+    // Its OWN action, not ledger.read (ADR-0337, #12496): the attested statutory trial balance is
+    // the one ledger read a filing service needs, and a dedicated action lets a policy grant
+    // exactly this endpoint. The verb is deliberately not `read`/`list`, so the base
+    // operator-read-any / *-read-any rules can never match it implicitly — every holder is named
+    // in ledger_rest_ext.rego (`ledger-close-inspect-read`, `service-ledger-close-inspect`).
+    @Authorize(action = "ledger.close.inspect", resource = "#date")
     @Operation(summary = "Immutable FROZEN LINES_V1 trial balance for regulatory reporting (fail-closed)")
     suspend fun frozenTrialBalance(@PathParam("type") type: String, @PathParam("date") date: String): Response {
         val tb = closedPeriodUseCase.getFrozenTrialBalance(GetPeriodTrialBalanceQuery(period(type, date)))

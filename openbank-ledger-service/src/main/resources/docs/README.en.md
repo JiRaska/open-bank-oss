@@ -24,3 +24,17 @@ This documentation is published directly by the service at the management endpoi
 - **Outbox:** `ledger_outbox` → Kafka topic `openbank.ledger.journal.posted` (regulatory-grade dispatch, ADR-0050)
 - **Idempotency:** `idempotencyKey` field on the post-journal request → `ledger_idempotency` table (DB-backed, not Redis)
 - **Auth:** Keycloak OIDC (RS256 JWT). Reads gated to `ROLE_API`/`ROLE_AUDITOR`/`ROLE_VIEWER`/`ROLE_OPERATOR`/`ROLE_ADMIN`; posting/reversing/FX-revaluation are `ROLE_OPERATOR` only. No endpoint is unauthenticated (ADR-0018).
+
+
+### Frozen trial-balance authorization and disabled jobs
+
+`GET /api/v1/ledger/periods/{type}/{date}/frozen-trial-balance` requires the dedicated
+OPA action `ledger.close.inspect`. Generic read grants do not cover this action;
+the ledger policy declares its permitted staff roles and machine identity explicitly.
+It reads the immutable FROZEN trial balance without changing the close.
+
+Setting `openbank.ledger.accounting-day.cron`, `openbank.ledger.fx-revaluation.cron`
+or `openbank.ledger.tieout.cron` to `off` or `disabled` disables that trigger and
+omits its workflow-liveness heartbeat at startup. An absent heartbeat for a
+deliberately disabled job does not indicate a successful run. Other scheduler
+metrics retain their existing behavior.

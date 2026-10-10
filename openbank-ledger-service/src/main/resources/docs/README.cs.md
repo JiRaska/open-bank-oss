@@ -24,3 +24,17 @@ Tato dokumentace je publikována přímo službou na management endpointu `/q/op
 - **Outbox:** `ledger_outbox` → Kafka topic `openbank.ledger.journal.posted` (regulatorní dispatch, ADR-0050)
 - **Idempotence:** pole `idempotencyKey` v požadavku na zaúčtování → tabulka `ledger_idempotency` (v DB, ne Redis)
 - **Auth:** Keycloak OIDC (RS256 JWT). Čtení omezeno na `ROLE_API`/`ROLE_AUDITOR`/`ROLE_VIEWER`/`ROLE_OPERATOR`/`ROLE_ADMIN`; účtování/storno/FX revalvace jen `ROLE_OPERATOR`. Žádný endpoint není neautentizovaný (ADR-0018).
+
+
+### Autorizace zmrazené předvahy a vypnuté úlohy
+
+`GET /api/v1/ledger/periods/{type}/{date}/frozen-trial-balance` vyžaduje samostatnou
+akci OPA `ledger.close.inspect`. Obecné oprávnění ke čtení tuto akci nepokrývá;
+politika ledgeru výslovně určuje povolené role zaměstnanců a strojovou identitu.
+Čte neměnnou předvahu FROZEN bez změny uzávěrky.
+
+Hodnota `off` nebo `disabled` v `openbank.ledger.accounting-day.cron`,
+`openbank.ledger.fx-revaluation.cron` či `openbank.ledger.tieout.cron` vypne daný
+trigger a při startu neregistruje jeho heartbeat životnosti workflow. Nepřítomnost
+heartbeat u záměrně vypnuté úlohy neznamená úspěšné provedení. Ostatní metriky
+plánovačů zachovávají dosavadní chování.

@@ -15,6 +15,11 @@
 #   ledger.create   — POST a balanced journal entry (LedgerResource.postJournal).
 #   ledger.close.draft — create/refresh a period or fiscal-year close DRAFT; human-only
 #                      because its recorded principal becomes maker evidence.
+#   ledger.close.inspect — read the attested, immutable FROZEN trial balance of a closed period
+#                      (GET /api/v1/ledger/periods/{type}/{date}/frozen-trial-balance). Its own
+#                      action so a filing service can be granted exactly this read and no other
+#                      (ADR-0337, #12496). Not a read/list verb on purpose: the base *-read-any
+#                      rules never match it, so every holder is named below.
 #   ledger.reverse  — reverse a posted journal entry (#journalId)
 #   ledger.approve  — attest a DRAFT year-close (#fiscalYear) — a statutory close,
 #                      not a routine posting; kept operator-only, no M2M path.
@@ -95,6 +100,27 @@ allowed_reasons contains "service-ledger-read" if {
 	input.principal.id == "service-account-openbank-services"
 	some verb in {"list", "read"}
 	endswith(input.action, sprintf(".%v", [verb]))
+}
+
+# ── ledger.close.inspect: the frozen statutory trial balance (ADR-0337, #12496) ─────────────
+# Same audience the endpoint had while it was ledger.read, spelled out because no base rule
+# reaches a non-read verb: staff with a read role (operator-read-any + viewer-auditor-ledger-read
+# admitted them before), and the shared openbank-services client, which finrep-service's
+# LedgerRestClient uses for its FINREP/COREP renders (service-ledger-read admitted it before).
+# Staff only — a service-account holding ROLE_OPERATOR or ROLE_VIEWER is NOT staff here; the
+# machine callers are named by identity, one rule each.
+allowed_reasons contains "ledger-close-inspect-read" if {
+	input.principal.type == "HUMAN"
+	not startswith(object.get(input.principal, "id", ""), "service-account-")
+	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_VIEWER", "ROLE_AUDITOR"}
+	role in input.principal.roles
+	input.action == "ledger.close.inspect"
+}
+
+allowed_reasons contains "service-ledger-close-inspect" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-services"
+	input.action == "ledger.close.inspect"
 }
 
 # Operators and admins may perform routine ledger writes. Close DRAFT creation has a
