@@ -140,3 +140,18 @@ test_without_the_exclusion_the_base_rule_reopens_holdings if {
 	}
 		with data.rules as {}
 }
+
+# compliance-read-any honours the same exclusion: the CI realm also gives the shared client
+# ROLE_COMPLIANCE, which re-admitted it to holdings before.
+test_shared_client_with_compliance_role_cannot_read_holdings if {
+	not rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_COMPLIANCE"]},
+		"action": "pension-fund.holding.read",
+	}
+		with data.rules as excluded
+	rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "carol", "roles": ["ROLE_COMPLIANCE"]},
+		"action": "pension-fund.holding.read",
+	}
+		with data.rules as excluded
+}

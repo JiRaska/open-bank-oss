@@ -94,6 +94,10 @@ allowed_reasons contains "compliance-read-any" if {
 	input.principal.type == "HUMAN"
 	"ROLE_COMPLIANCE" in input.principal.roles
 	endswith(input.action, ".read")
+
+	# Same exclusion as operator-read-any: the CI realm gives the shared backend client
+	# ROLE_COMPLIANCE as well, so without it an excluded read stayed reachable by every service.
+	not operator_read_any_excluded(input.action)
 }
 
 # AI agents go through this same query when the agent's tool wraps a REST call

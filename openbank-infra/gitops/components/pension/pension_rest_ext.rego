@@ -262,3 +262,20 @@ allowed_reasons contains "operator-pension-mandate-read" if {
 	role in input.principal.roles
 	input.action == "pension.operator.mandate-read"
 }
+
+# ---------------------------------------------------------------------------------------------
+# Participant-data reads are excluded from base rest.rego's operator-read-any
+# (rules.yaml: authz.operator_read_any_excluded_actions): the shared backend client
+# (service-account-openbank-services) is classified HUMAN and holds ROLE_OPERATOR in some realms,
+# (and ROLE_COMPLIANCE in the CI realm), so the generic rules handed it every participant's
+# onboarding, assessment and transfers. Staff keep these reads through this rule (compliance also
+# keeps death-claim reads, which compliance-read-any used to give it); every other participant
+# read already has its own human-staff rule above. The edge relays the participant through its edge-service-* rules.
+# ---------------------------------------------------------------------------------------------
+allowed_reasons contains "operator-pension-participant-read" if {
+	input.principal.type == "HUMAN"
+	not startswith(input.principal.id, "service-account-")
+	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE"}
+	role in input.principal.roles
+	input.action in {"pension.onboarding.read", "pension.transfer.read", "pension.death.read"}
+}
