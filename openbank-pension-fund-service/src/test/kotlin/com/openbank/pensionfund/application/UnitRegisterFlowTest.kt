@@ -16,10 +16,13 @@ import com.openbank.pensionfund.domain.model.FourEyesViolationException
 import com.openbank.pensionfund.domain.model.NavStatus
 import com.openbank.pensionfund.domain.model.OrderStatus
 import com.openbank.pensionfund.domain.model.OrderType
+import com.openbank.pensionfund.domain.model.UnitOrder
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import java.math.BigDecimal
 import java.time.Clock
 import java.time.Instant
@@ -126,6 +129,147 @@ class UnitRegisterFlowTest {
         val holdings = register.valuation(contract).holdings.associateBy { it.fundId }
         assertThat(holdings.getValue(source.id).units).isEqualByComparingTo("300")
         assertThat(holdings.getValue(target.id).units).isEqualByComparingTo("200")
+    }
+
+    @Test
+    fun `cross currency switches fail before recording an order or changing holdings`(): Unit = runBlocking {
+        val source = admin.createFund(definition("CZ0000000102"))
+        val target = admin.createFund(definition("CZ0000000110").copy(currency = "EUR"))
+        register.place(
+            PlaceOrderCommand(contract, source.id, OrderType.SUBSCRIBE, BigDecimal("100"), null, null, key()),
+        )
+        later()
+        publish(source.id, "0")
+        val heldBefore = store.holdings.toMap()
+        val ordersBefore = store.orders.toMap()
+        assertThatThrownBy {
+            runBlocking {
+                register.place(
+                    PlaceOrderCommand(
+                        contract,
+                        source.id,
+                        OrderType.SWITCH_OUT,
+                        null,
+                        BigDecimal("50"),
+                        target.id,
+                        key(),
+                    ),
+                )
+            }
+        }.isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("cross-currency switches")
+        assertThat(store.orders).isEqualTo(ordersBefore)
+        assertThat(store.holdings).isEqualTo(heldBefore)
+    }
+
+    @Test
+    fun `legacy cross currency switch blocks NAV publication without partial settlement`(): Unit = runBlocking {
+        val source = admin.createFund(definition("CZ0000000136"))
+        val target = admin.createFund(definition("CZ0000000144").copy(currency = "EUR"))
+        register.place(
+            PlaceOrderCommand(contract, source.id, OrderType.SUBSCRIBE, BigDecimal("100"), null, null, key()),
+        )
+        later()
+        publish(source.id, "0")
+        // Model an order persisted before the placement guard existed.
+        val legacy = UnitOrder(
+            id = UUID.randomUUID(), contractId = contract, fundId = source.id, type = OrderType.SWITCH_OUT,
+            amount = null, units = BigDecimal("50"), targetFundId = target.id, parentOrderId = null,
+            status = OrderStatus.PENDING, placedAt = clock.instant(), idempotencyKey = key(),
+        )
+        store.orders[legacy.id] = legacy
+        register.place(
+            PlaceOrderCommand(contract, source.id, OrderType.SUBSCRIBE, BigDecimal("10"), null, null, key()),
+        )
+        val nav = navs.calculate(
+            source.id,
+            NavCalculationRequest(LocalDate.parse("2026-10-10"), emptyList(), BigDecimal("100"), BigDecimal.ZERO),
+            "maker",
+        )
+        val navsBefore = store.navs.toMap()
+        val ordersBefore = store.orders.toMap()
+        val holdingsBefore = store.holdings.toMap()
+        val transactionsBefore = store.transactions.toMap()
+        later()
+        assertThatThrownBy { runBlocking { navs.publish(nav.id, "checker") } }
+            .isInstanceOf(IllegalStateException::class.java).hasMessageContaining("cross-currency switches")
+        assertThat(store.navs).isEqualTo(navsBefore)
+        assertThat(store.orders).isEqualTo(ordersBefore)
+        assertThat(store.holdings).isEqualTo(holdingsBefore)
+        assertThat(store.transactions).isEqualTo(transactionsBefore)
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["cross-currency", "missing-parent", "pending-parent", "wrong-target", "wrong-type"])
+    fun `legacy switch in requires a settled matching same currency source`(defect: String): Unit = runBlocking {
+        val source = admin.createFund(definition("CZ0000000151"))
+        val target = admin.createFund(
+            definition("CZ0000000169").copy(currency = if (defect == "cross-currency") "EUR" else "CZK"),
+        )
+        val parent = UnitOrder(
+            id = UUID.randomUUID(), contractId = contract, fundId = source.id,
+            type = if (defect == "wrong-type") OrderType.REDEEM else OrderType.SWITCH_OUT,
+            amount = null, units = BigDecimal("50"),
+            targetFundId = when (defect) {
+                "wrong-type" -> null
+                "wrong-target" -> UUID.randomUUID()
+                else -> target.id
+            },
+            parentOrderId = null,
+            status = if (defect == "pending-parent") OrderStatus.PENDING else OrderStatus.SETTLED,
+            placedAt = clock.instant().minusSeconds(60), settledAt = clock.instant(), navId = UUID.randomUUID(),
+        )
+        if (defect != "missing-parent") store.orders[parent.id] = parent
+        val incoming = UnitOrder(
+            id = UUID.randomUUID(), contractId = contract, fundId = target.id, type = OrderType.SWITCH_IN,
+            amount = BigDecimal("50"), units = null, targetFundId = null, parentOrderId = parent.id,
+            status = OrderStatus.PENDING, placedAt = clock.instant(),
+        )
+        store.orders[incoming.id] = incoming
+        val nav = navs.calculate(
+            target.id,
+            NavCalculationRequest(LocalDate.parse("2026-10-09"), emptyList(), BigDecimal.ZERO, BigDecimal.ZERO),
+            "maker",
+        )
+        val navsBefore = store.navs.toMap()
+        val ordersBefore = store.orders.toMap()
+        val holdingsBefore = store.holdings.toMap()
+        val transactionsBefore = store.transactions.toMap()
+        later()
+        assertThatThrownBy { runBlocking { navs.publish(nav.id, "checker") } }
+            .isInstanceOf(IllegalStateException::class.java)
+        assertThat(store.navs).isEqualTo(navsBefore)
+        assertThat(store.orders).isEqualTo(ordersBefore)
+        assertThat(store.holdings).isEqualTo(holdingsBefore)
+        assertThat(store.transactions).isEqualTo(transactionsBefore)
+    }
+
+    @Test
+    fun `delayed prior day NAV settles eligible orders and leaves later orders pending`(): Unit = runBlocking {
+        val fund = admin.createFund(definition("CZ0000000128"))
+        clock.now = Instant.parse("2026-10-09T23:59:59Z")
+        val eligible = register.place(
+            PlaceOrderCommand(contract, fund.id, OrderType.SUBSCRIBE, BigDecimal("100"), null, null, key()),
+        )
+        clock.now = Instant.parse("2026-10-10T00:00:00Z")
+        val laterOrder = register.place(
+            PlaceOrderCommand(contract, fund.id, OrderType.SUBSCRIBE, BigDecimal("200"), null, null, key()),
+        )
+        val delayedNav = navs.calculate(
+            fund.id,
+            NavCalculationRequest(LocalDate.parse("2026-10-09"), emptyList(), BigDecimal.ZERO, BigDecimal.ZERO),
+            "maker",
+        )
+        later()
+        assertThat(navs.publish(delayedNav.id, "checker").settledOrders).isEqualTo(1)
+        assertThat(store.orders.getValue(eligible.id).status).isEqualTo(OrderStatus.SETTLED)
+        assertThat(store.orders.getValue(laterOrder.id).status).isEqualTo(OrderStatus.PENDING)
+        assertThat(register.valuation(contract).holdings.single().units).isEqualByComparingTo("100")
+        assertThat(store.transactions.values.map { it.orderId }).containsExactly(eligible.id)
+
+        publish(fund.id, "100", "2026-10-10")
+        assertThat(store.orders.getValue(laterOrder.id).status).isEqualTo(OrderStatus.SETTLED)
+        assertThat(register.valuation(contract).holdings.single().units).isEqualByComparingTo("300")
+        assertThat(store.transactions.values.map { it.orderId }).containsExactlyInAnyOrder(eligible.id, laterOrder.id)
     }
 
     @Test

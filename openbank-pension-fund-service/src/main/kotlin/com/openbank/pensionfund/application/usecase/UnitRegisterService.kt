@@ -8,6 +8,7 @@ import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.pensionfund.application.port.NotFoundException
 import com.openbank.pensionfund.application.port.PensionFundStore
 import com.openbank.pensionfund.application.port.StoreChanges
+import com.openbank.pensionfund.domain.model.Fund
 import com.openbank.pensionfund.domain.model.FundStatus
 import com.openbank.pensionfund.domain.model.OrderStatus
 import com.openbank.pensionfund.domain.model.OrderType
@@ -41,8 +42,13 @@ class UnitRegisterService(private val store: PensionFundStore, private val clock
         require(command.type != OrderType.SWITCH_IN) {
             "SWITCH_IN is created by a settled switch, never placed directly"
         }
-        requireActiveFund(command.fundId)
-        command.targetFundId?.let { requireActiveFund(it) }
+        val source = requireActiveFund(command.fundId)
+        command.targetFundId?.let {
+            val target = requireActiveFund(it)
+            require(source.currency == target.currency) {
+                "cross-currency switches are not supported: ${source.currency} to ${target.currency}"
+            }
+        }
         val order = UnitOrder(
             id = Ids.newId(),
             contractId = command.contractId,
@@ -62,15 +68,7 @@ class UnitRegisterService(private val store: PensionFundStore, private val clock
             check(existing.sameInstructionAs(order)) { "Idempotency-Key reused for a different order" }
             return existing
         }
-        if (order.isOutgoing) {
-            val held = store.holding(order.contractId, order.fundId)?.units ?: BigDecimal.ZERO
-            val queued = store.pendingOrdersForContract(order.contractId)
-                .filter { it.fundId == order.fundId && it.isOutgoing }
-                .fold(BigDecimal.ZERO) { acc, o -> acc + o.units!! }
-            check(held - queued >= order.units!!) {
-                "contract ${order.contractId} has ${held - queued} units of fund ${order.fundId} available, cannot sell ${order.units}"
-            }
-        }
+        if (order.isOutgoing) return store.reserveOutgoing(order)
         store.commit(StoreChanges(orders = listOf(order)))
         return order
     }
@@ -96,8 +94,9 @@ class UnitRegisterService(private val store: PensionFundStore, private val clock
         return ContractValuation(contractId, holdings, store.pendingOrdersForContract(contractId))
     }
 
-    private suspend fun requireActiveFund(fundId: UUID) {
+    private suspend fun requireActiveFund(fundId: UUID): Fund {
         val fund = store.fund(fundId) ?: throw NotFoundException("fund $fundId not found")
         check(fund.status == FundStatus.ACTIVE) { "fund $fundId is closed" }
+        return fund
     }
 }

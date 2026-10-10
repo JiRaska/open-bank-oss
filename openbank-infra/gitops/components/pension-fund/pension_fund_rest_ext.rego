@@ -8,7 +8,7 @@
 #   pension-fund.nav.read / .nav.calculate / .nav.approve    — FundResource, NavResource
 #   pension-fund.strategy.read / .strategy.manage            — StrategyResource
 #   pension-fund.strategy.change.submit / .approve / .apply  — StrategyResource, StrategyChangeResource
-#   pension-fund.order.place / .holding.read                 — ContractUnitResource
+#   pension-fund.order.place / .holding.inspect              — ContractUnitResource
 #
 # WHY NOT `rules.yaml: authz.role_action_matrix`: a matrix line is a grant to every MACHINE that
 # holds the role, and no policy can veto it (#3765/#3734). The Keycloak service-accounts are
@@ -19,12 +19,12 @@
 # Four-eyes (maker != checker) is enforced by the service itself, on the authenticated principal;
 # this policy only decides who may be a maker or a checker at all.
 #
-# Participant data (pension-fund.holding.read, pension-fund.order.place) is reachable by real
+# Participant data (pension-fund.holding.inspect, pension-fund.order.place) is reachable by real
 # staff and by pension-service's OWN client, service-account-openbank-pension (fleet naming
 # convention `openbank-<service>`; pension-service's FundAdministrationPort adapter, ADR-0334 §1),
-# and by nothing else. holding.read is also excluded from base `operator-read-any` via
-# rules.yaml: authz.operator_read_any_excluded_actions, which is what keeps the shared
-# service-account (ROLE_OPERATOR) and every other service out.
+# and by nothing else. The `holding.inspect` action deliberately has a non-read verb:
+# neither base `operator-read-any` nor `compliance-read-any` can grant it to a shared
+# service-account holding those roles. Only the scoped rules below may grant it.
 #
 # Do NOT gate on input.principal.type == "SERVICE": AuthorizeInterceptor never emits it (#266).
 
@@ -47,7 +47,7 @@ pension_fund_read_actions := {
 	"pension-fund.fund.read",
 	"pension-fund.nav.read",
 	"pension-fund.strategy.read",
-	"pension-fund.holding.read",
+	"pension-fund.holding.inspect",
 }
 
 pension_fund_staff if {
@@ -78,5 +78,5 @@ allowed_reasons contains "service-pension-unit-register" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == pension_service_account
 	"ROLE_API" in input.principal.roles
-	input.action in {"pension-fund.holding.read", "pension-fund.order.place", "pension-fund.fund.read", "pension-fund.strategy.read", "pension-fund.nav.read"}
+	input.action in {"pension-fund.holding.inspect", "pension-fund.order.place", "pension-fund.fund.read", "pension-fund.strategy.read", "pension-fund.nav.read"}
 }
