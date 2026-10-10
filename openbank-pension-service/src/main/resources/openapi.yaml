@@ -5,8 +5,9 @@ info:
   # 1.1.0: integration of slices S2 (onboarding, transfers), S3 (contributions, incentives) and S5
   #        (termination, payout, death) plus the S8 routes: contract list, simulation, payout
   #        account change, operator payout and death-claim lists, Idempotency-Key on every POST.
-  #        Bumped ONCE for all slices (ADR-0048). S1's unreleased /activate and /early-termination
-  #        were retired in the same change; no released client ever called them.
+  #        The removed /activate and /early-termination routes were published in
+  #        pension-service-v0.2.0 (API 1.0.0); their removal requires a major contract migration.
+  #        The current minor version is pending that migration and does not prove compatibility.
   version: 1.1.0
   description: |
     Participant-side pension contracts (ADR-0334). A contract is created under the jurisdiction
