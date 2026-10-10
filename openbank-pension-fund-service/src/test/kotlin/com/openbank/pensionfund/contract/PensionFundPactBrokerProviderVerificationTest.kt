@@ -28,7 +28,7 @@ import org.junit.jupiter.api.extension.ExtendWith
 /**
  * Broker-sourced twin of [PensionFundPactFolderProviderVerificationTest]: runs on main-push (the PR
  * lane has no broker, ADR-0056) and publishes the verification result `can-i-deploy` reads (#7621).
- * Same states via [PensionFundPactStates]; the missing-identity interaction runs with the test
+ * Same states via [PensionFundPactStates]; the missing-identity interaction (recorded 401) runs with the test
  * identity cleared.
  */
 @QuarkusTest
