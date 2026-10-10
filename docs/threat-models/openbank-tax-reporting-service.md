@@ -61,7 +61,7 @@ NetworkPolicy admits admin-ui and the platform scrapers only, no ingress); servi
 - There is no alert yet on the dead-letter topic's depth. One dead-lettered remittance means an
   understated return. That alert, and a replay procedure, belong with the first operational
   review after deploy.
-- Statutory-return slices (ADR-0336, PSP/PEF pension returns, #12428) add routes, including
+- Statutory-return slices (the PSP/PEF pension returns proposed in #12428) add routes, including
   approve and submit. Each needs `@Authorize` and an extension rule before this model's §3 holds
   for it: staff-only, no `service-account-*`, reads in `operator_read_any_excluded_actions`.
   Maker≠checker on approve stays in the domain, as it does for assemble/file here, because the

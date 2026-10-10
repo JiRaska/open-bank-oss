@@ -3,8 +3,8 @@
 ## Deployed since #5760 (owner decision)
 
 The service was a released component with no runtime for its whole life until #5760. The owner
-decided to deploy it, because it hosts the §38d withholding filing (ADR-0180) and the statutory
-returns of ADR-0336. Its workload lives in `openbank-infra/gitops/components/tax-reporting/`
+decided to deploy it, because it hosts the §38d withholding filing (ADR-0180) and the ČNB pension
+statutory returns proposed in #12428. Its workload lives in `openbank-infra/gitops/components/tax-reporting/`
 (namespace `tax-reporting`, Argo app `apps/tax-reporting.yaml`):
 
 - `tax-reporting-service` Deployment with an OPA sidecar. The service listens on HTTP 8152 and
