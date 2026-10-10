@@ -55,16 +55,23 @@ DOC_SPLIT = re.compile(r"^---\s*$", re.M)
 class Cred:
     def __init__(self, doc: str, file: Path, managed: dict[str, set[str]] | None = None):
         self.file = file
-        self.name = _field(doc, r"name:\s*([a-z0-9.-]+)") or "?"
-        self.namespace = _field(doc, r"namespace:\s*([a-z0-9.-]+)") or "?"
-        self.keys = re.findall(r"key:\s*([A-Za-z0-9_./-]+)", doc)
-        self.dynamic = any(DYNAMIC_KEY.search(k) for k in self.keys)
         resource = yaml.safe_load(doc) or {}
+        metadata = resource.get("metadata", {})
+        self.name = metadata.get("name", "?")
+        self.namespace = metadata.get("namespace", "?")
         spec = resource.get("spec", {})
+        self.keys = [item["remoteRef"]["key"] for item in spec.get("data", [])
+                     if "remoteRef" in item and "key" in item["remoteRef"]]
+        for item in spec.get("dataFrom", []):
+            if "extract" in item:
+                self.keys.append(item["extract"].get("key", "<unknown>"))
+            elif "find" in item:
+                self.keys.append(item["find"].get("path", "<unknown>"))
         store = spec.get("secretStoreRef", {})
-        if (store.get("kind") == "ClusterSecretStore" and self.keys
-                and set(self.keys) <= (managed or {}).get(store.get("name"), set())):
-            self.dynamic = True
+        managed_keys = ((managed or {}).get(store.get("name"), set())
+                        if store.get("kind") == "ClusterSecretStore" else set())
+        self.dynamic = bool(self.keys) and all(
+            DYNAMIC_KEY.search(k) or k in managed_keys for k in self.keys)
         ann_block = re.search(r"annotations:\n((?:\s{4,}[^\n]*\n?)*)", doc)
         self.annotations = ann_block.group(1) if ann_block else ""
         self.deadline = _field(self.annotations, re.escape(DEADLINE) + r':\s*"?([^"\n]+)"?')
@@ -273,6 +280,12 @@ def self_test() -> int:
     doc_dyn = doc_static.replace("key: account-service", "key: database/creds/foo-db-vault-role")
     if Cred(doc_dyn, Path("x.yaml")).static:
         print("self-test FAIL: dynamic path classified as static"); bad += 1
+    doc_mixed = doc_dyn + "  - remoteRef:\n      key: secret/data/oidc\n"
+    if not Cred(doc_mixed, Path("x.yaml")).static:
+        print("self-test FAIL: dynamic reference hid a static credential"); bad += 1
+    doc_quoted = doc_static.replace("key: account-service", 'key: "account-service"')
+    if not Cred(doc_quoted, Path("x.yaml")).static:
+        print("self-test FAIL: quoted static key escaped classification"); bad += 1
     doc_ok = doc_static.replace("metadata:\n",
                                 f'metadata:\n  annotations:\n    {DEADLINE}: "2027-01-01"\n')
     if validate_deadline(Cred(doc_ok, Path("x.yaml")), today) is not None:
@@ -304,6 +317,8 @@ def self_test() -> int:
             return Cred(yaml.safe_dump(projection), fixture, managed_certificate_keys(root)).dynamic
         cases = [(classify("foo"), True), (classify("bank-cluster-ca-cert"), True),
                  (classify("unowned"), False),
+                 (classify("foo", dataFrom=[{"extract": {"key": "foo"}},
+                                            {"extract": {"key": "unowned"}}]), False),
                  (classify("foo", secretStoreRef={"name": "other", "kind": "ClusterSecretStore"}), False)]
         user["spec"]["authentication"]["type"] = "tls-external"
         cases.append((classify("foo"), False))
