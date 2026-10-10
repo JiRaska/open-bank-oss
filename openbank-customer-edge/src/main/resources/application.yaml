@@ -139,7 +139,6 @@ openbank:
     # Pension lifecycle (ADR-0334 S6): participant side and unit register. Caller edges are
     # declared in the GitOps workload env; provider rollout remains gated by #12350.
     pension-service-url: ${PENSION_SERVICE_URL:http://pension-service.pension.svc:8171}
-    pension-fund-service-url: ${PENSION_FUND_SERVICE_URL:http://pension-fund-service.pension-fund.svc:8162}
     transaction-service-url: ${TRANSACTION_SERVICE_URL:http://transaction-service.payments.svc:8102}
     domestic-payment-service-url: ${DOMESTIC_PAYMENT_SERVICE_URL:http://domestic-payment.payments.svc:8116}
     sepa-payment-service-url: ${SEPA_PAYMENT_SERVICE_URL:http://sepa-payment.payments.svc:8115}

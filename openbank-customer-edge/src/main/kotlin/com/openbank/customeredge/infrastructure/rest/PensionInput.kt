@@ -68,8 +68,29 @@ internal object PensionInput {
             )
     }
 
+    /**
+     * The questionnaire (F7, pension-service 1.2.0): `answers` keyed by question id from the
+     * question set, plus the contradictions the participant confirmed and the language shown. The
+     * pre-F7 level fields are still accepted when no `answers` are sent.
+     */
     fun questionnaire(node: JsonNode?): Result<Map<String, Any?>> = runCatching {
         requireNotNull(node) { "body must be a JSON object" }
+        val language = node.text("language")?.also { require(LANGUAGE.matches(it)) { "language is malformed" } }
+        if (node.has("answers")) {
+            val confirm = node.path("confirmInconsistencies")
+            require(confirm.isMissingNode || confirm.isNull || confirm.isArray) {
+                "confirmInconsistencies must be a list"
+            }
+            return@runCatching mapOf(
+                "answers" to PensionChangeInput.answers(node),
+                "confirmInconsistencies" to confirm.takeIf { it.isArray }?.map { c ->
+                    requireNotNull(c.takeIf { it.isTextual }?.textValue()?.takeIf(CODE::matches)) {
+                        "confirmInconsistencies must list inconsistency codes"
+                    }
+                },
+                "language" to language,
+            )
+        }
         val stable = node.path("financialSituationStable")
         require(stable.isBoolean) { "financialSituationStable must be true or false" }
         mapOf(
@@ -81,6 +102,7 @@ internal object PensionInput {
             "esgPreference" to node.text("esgPreference")?.also {
                 require(it in ESG) { "esgPreference must be one of ${ESG.joinToString()}" }
             },
+            "language" to language,
         )
     }
 
@@ -102,15 +124,6 @@ internal object PensionInput {
     fun kidAcceptance(node: JsonNode?): Result<Map<String, Any?>> = runCatching {
         requireNotNull(node) { "body must be a JSON object" }
         mapOf("documentId" to bounded(node, "documentId", "documentId"))
-    }
-
-    fun strategy(node: JsonNode?): Result<Map<String, Any?>> = runCatching {
-        requireNotNull(node) { "body must be a JSON object" }
-        val effectiveFrom = node.text("effectiveFrom")?.let { date(it, "effectiveFrom") }
-        require(effectiveFrom == null || !effectiveFrom.isBefore(LocalDate.now())) {
-            "effectiveFrom must not be in the past"
-        }
-        mapOf("strategyCode" to matching(node, "strategyCode", CODE), "effectiveFrom" to effectiveFrom?.toString())
     }
 
     fun schedule(node: JsonNode?): Map<String, Any?> {
@@ -138,6 +151,9 @@ internal object PensionInput {
             "amount" to amount,
             "currency" to matching(node, "currency", CURRENCY),
             "firstCollection" to first.toString(),
+            "debtorName" to node.text("debtorName")?.trim()?.also {
+                require(it.length in 1..MAX_NAME) { "debtorName is at most $MAX_NAME characters" }
+            },
         )
     }
 
@@ -254,40 +270,6 @@ internal object PensionProjection {
         "startDate" to c.text("startDate"),
         "createdAt" to c.text("createdAt"),
         "updatedAt" to c.text("updatedAt"),
-    )
-
-    /** Holdings at the latest published NAV, summed per currency. A holding with no NAV yet is unvalued. */
-    fun valuation(v: JsonNode): Map<String, Any?> {
-        val holdings = v.path("holdings").filter { it.isObject }.map {
-            mapOf(
-                "fundId" to it.text("fundId"),
-                "units" to it.decimalString("units"),
-                "navPerUnit" to it.decimalString("navPerUnit"),
-                "navDate" to it.text("navDate"),
-                "value" to it.decimalString("value"),
-                "currency" to it.text("currency"),
-            )
-        }
-        val totals = holdings.filter { it["value"] != null && it["currency"] != null }
-            .groupBy { it["currency"] as String }
-            .mapValues { (_, rows) ->
-                rows.sumOf { BigDecimal(it["value"] as String) }.stripTrailingZeros().toPlainString()
-            }
-        return mapOf(
-            "holdings" to holdings,
-            "totals" to totals,
-            "pendingOrders" to v.path("pendingOrders").size(),
-            "complete" to holdings.all { it["value"] != null },
-        )
-    }
-
-    fun transaction(t: JsonNode): Map<String, Any?> = mapOf(
-        "type" to t.text("type"),
-        "fundId" to t.text("fundId"),
-        "units" to t.decimalString("units"),
-        "amount" to t.decimalString("amount"),
-        "navPerUnit" to t.decimalString("navPerUnit"),
-        "pricedAt" to t.text("pricedAt"),
     )
 
     /** One published retirement offering, from its catalog projection. Null when it is not a pension product. */

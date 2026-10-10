@@ -19,16 +19,15 @@ import org.junit.jupiter.api.Test
 import java.util.UUID
 
 /**
- * Customer pension routes (ADR-0334 S6) against pension-service API 1.1.0. pension-fund-service
- * serves holdings by contract id to any M2M caller and pension-service takes eligibility facts from
- * its caller, so every property asserted here is one only the edge provides.
+ * Customer pension routes (ADR-0334 S6) against pension-service API 1.2.0. pension-service takes
+ * eligibility facts from its caller, so every property asserted here is one only the edge
+ * provides. The edge never calls pension-fund-service (its holdings are pension-service's alone).
  */
 class CustomerPensionResourceTest {
     private val caller: UUID = UUID.randomUUID()
     private val stranger: UUID = UUID.randomUUID()
     private val contractId: UUID = UUID.randomUUID()
     private val pension = "http://pension.test"
-    private val fund = "http://fund.test"
     private val catalog = "http://catalog.test"
     private val sca = "http://sca.test"
     private val partySvc = "http://party.test"
@@ -39,7 +38,6 @@ class CustomerPensionResourceTest {
         CustomerPensionResource(upstream, mockk<CustomerPartyResolver> { every { resolve(null) } returns caller })
             .apply {
                 pensionServiceUrl = pension
-                fundServiceUrl = fund
                 catalogUrl = catalog
                 scaServiceUrl = sca
                 partyServiceUrl = partySvc
@@ -56,15 +54,6 @@ class CustomerPensionResourceTest {
          "currentStrategy":{"strategyCode":"BALANCED","effectiveFrom":"2026-01-01","electedAt":"2026-01-01T10:00:00Z"},
          "strategyHistory":[],"beneficiaries":[],"startDate":"2026-01-01",
          "createdAt":"2026-01-01T10:00:00Z","updatedAt":"2026-01-01T10:00:00Z"}
-    """.trimIndent()
-
-    private fun holdings(vararg values: String?) = """
-        {"contractId":"$contractId","pendingOrders":[],"holdings":[${
-        values.joinToString(",") { v ->
-            """{"fundId":"${UUID.randomUUID()}","units":10,"navPerUnit":${v?.let { "1.5" } ?: "null"},
-               "navDate":"2026-10-01","value":${v ?: "null"},"currency":"CZK"}"""
-        }
-    }]}
     """.trimIndent()
 
     private val validApplication = """
@@ -199,7 +188,7 @@ class CustomerPensionResourceTest {
         val response = resource(upstream).contract(contractId.toString())
 
         assertThat(response.status).isEqualTo(404)
-        verify(exactly = 0) { upstream.get(match { it.startsWith(fund) }, any()) }
+        verify(exactly = 0) { upstream.get(match { it.contains("pension-fund") }, any()) }
     }
 
     @Test
@@ -211,17 +200,17 @@ class CustomerPensionResourceTest {
     }
 
     @Test
-    fun `the overview carries holdings valued per currency`() {
+    fun `the overview drops the participant id and reads nothing but the contract`() {
         val upstream = mockk<UpstreamClient>()
         every { upstream.get("$pension/api/v1/pension/contracts/$contractId", caller.toString()) } returns
             ok(contract(caller))
-        every { upstream.get("$fund/api/v1/contracts/$contractId/holdings") } returns ok(holdings("15", "25.5"))
 
         val body = json(resource(upstream).contract(contractId.toString()))
 
-        assertThat(body["valuation"]["totals"]["CZK"].asText()).isEqualTo("40.5")
-        assertThat(body["valuation"]["complete"].asBoolean()).isTrue()
+        assertThat(body["contractId"].asText()).isEqualTo(contractId.toString())
         assertThat(body.has("participantPartyId")).isFalse()
+        verify(exactly = 1) { upstream.get(any(), any()) }
+        verify(exactly = 0) { upstream.get(any()) }
     }
 
     @Test
@@ -258,7 +247,7 @@ class CustomerPensionResourceTest {
         assertThat(signBody["payoutIban"].asText()).isEqualTo("CZ6508000000192000145399")
         assertThat(signBody["scaChallengeId"].asText()).isEqualTo(challenge.toString())
         assertThat(signBody.has("currentValue")).isFalse()
-        verify(exactly = 0) { upstream.get(match { it.startsWith(fund) }, any()) }
+        verify(exactly = 0) { upstream.get(match { it.contains("pension-fund") }, any()) }
     }
 
     @Test
@@ -300,11 +289,10 @@ class CustomerPensionResourceTest {
             ok(contract(caller))
         every { upstream.post(match { it.startsWith(sca) }, any(), any(), any()) } returns
             ok("""{"status":"COMPLETED"}""")
-        every { upstream.put(any(), any(), any()) } returns ok("""{"error":"pack CZ/DPS v1 internal detail"}""", 400)
+        every { upstream.post(match { it.startsWith(pension) }, any(), any(), any()) } returns
+            ok("""{"error":"pack CZ/DPS v1 internal detail"}""", 400)
 
-        val response = resource(
-            upstream,
-        ).strategy(contractId.toString(), """{"strategyCode":"DYNAMIC"}""", challenge.toString())
+        val response = resource(upstream).pause(contractId.toString(), "key-r", challenge.toString())
 
         assertThat(response.status).isEqualTo(400)
         assertThat(response.entity as String).doesNotContain("internal detail")
@@ -367,13 +355,13 @@ class CustomerPensionResourceTest {
         val upstream = mockk<UpstreamClient>()
         ownedContract(upstream)
 
-        val response = resource(upstream).strategy(contractId.toString(), """{"strategyCode":"DYNAMIC"}""", null)
+        val response = resource(upstream).pause(contractId.toString(), "key-p", null)
 
         assertThat(response.status).isEqualTo(403)
         val body = json(response)
         assertThat(body["code"].asText()).isEqualTo("SCA_REQUIRED")
         assertThat(body["scaLinking"]["purpose"].asText()).isEqualTo("APPROVAL")
-        assertThat(body["scaLinking"]["approvalRequestId"].asText()).isEqualTo("pension.strategy:$contractId")
+        assertThat(body["scaLinking"]["approvalRequestId"].asText()).isEqualTo("pension.suspend:$contractId")
         assertThat(body["scaLinking"]["payloadSha256"].asText()).matches("[0-9a-f]{64}")
         verify(exactly = 0) { upstream.put(any(), any(), any()) }
         verify(exactly = 0) { upstream.post(any(), any(), any(), any()) }
@@ -384,8 +372,8 @@ class CustomerPensionResourceTest {
         val upstream = mockk<UpstreamClient>()
         ownedContract(upstream)
         val consumed = mutableListOf<String>()
-        // sca-service compares payloadSha256 strictly; the challenge in this test signed CONSERVATIVE.
-        val signed = resource(upstream).strategy(contractId.toString(), """{"strategyCode":"CONSERVATIVE"}""", null)
+        // sca-service compares both fields strictly; the challenge in this test signed a RESUME.
+        val signed = resource(upstream).resume(contractId.toString(), "key-s", null)
             .let { json(it)["scaLinking"]["payloadSha256"].asText() }
         every {
             upstream.post(
@@ -401,24 +389,22 @@ class CustomerPensionResourceTest {
             if (sent["payloadSha256"].asText() == signed) ok("{}") else ok("""{"error":"mismatch"}""", 409)
         }
 
-        val response = resource(
-            upstream,
-        ).strategy(contractId.toString(), """{"strategyCode":"DYNAMIC"}""", challenge.toString())
+        val response = resource(upstream).pause(contractId.toString(), "key-t", challenge.toString())
 
         assertThat(response.status).isEqualTo(403)
         assertThat(json(response)["code"].asText()).isEqualTo("SCA_REJECTED")
         val sent = mapper.readTree(consumed.single())
         assertThat(sent["partyId"].asText()).isEqualTo(caller.toString())
-        assertThat(sent["approvalRequestId"].asText()).isEqualTo("pension.strategy:$contractId")
+        assertThat(sent["approvalRequestId"].asText()).isEqualTo("pension.suspend:$contractId")
         assertThat(sent["payloadSha256"].asText()).isNotEqualTo(signed)
-        verify(exactly = 0) { upstream.put(any(), any(), any()) }
+        verify(exactly = 0) { upstream.post(match { it.startsWith(pension) }, any(), any(), any()) }
     }
 
     @Test
     fun `a challenge signed for exactly this payload is consumed and the change goes upstream`() {
         val upstream = mockk<UpstreamClient>()
         ownedContract(upstream)
-        val signed = resource(upstream).strategy(contractId.toString(), """{"strategyCode":"DYNAMIC"}""", null)
+        val signed = resource(upstream).pause(contractId.toString(), "key-u", null)
             .let { json(it)["scaLinking"]["payloadSha256"].asText() }
         every {
             upstream.post("$sca/api/v1/sca/challenges/$challenge/consume", caller.toString(), any(), any())
@@ -427,16 +413,16 @@ class CustomerPensionResourceTest {
                 if (mapper.readTree(thirdArg<String>())["payloadSha256"].asText() == signed) ok("{}") else ok("{}", 409)
             }
         every {
-            upstream.put("$pension/api/v1/pension/contracts/$contractId/strategy", caller.toString(), any())
+            upstream.post("$pension/api/v1/pension/contracts/$contractId/suspend", caller.toString(), "{}", "key-u")
         } returns
-            ok(contract(caller))
+            ok(contract(caller, "SUSPENDED"))
 
-        val response = resource(
-            upstream,
-        ).strategy(contractId.toString(), """{"strategyCode":"DYNAMIC"}""", challenge.toString())
+        val response = resource(upstream).pause(contractId.toString(), "key-u", challenge.toString())
 
         assertThat(response.status).isEqualTo(200)
-        verify(exactly = 1) { upstream.put(any(), any(), any()) }
+        verify(exactly = 1) {
+            upstream.post("$pension/api/v1/pension/contracts/$contractId/suspend", any(), any(), any())
+        }
     }
 
     @Test
@@ -464,4 +450,82 @@ class CustomerPensionResourceTest {
         assertThat(listOf(paused, notice, confirmed).map { json(it)["code"].asText() }).containsOnly("SCA_REQUIRED")
         verify(exactly = 0) { upstream.post(any(), any(), any(), any()) }
     }
+
+    @Test
+    fun `a strategy change is document-bound with the exact pension-strategy-change id, then forwarded unspent`() {
+        val upstream = mockk<UpstreamClient>()
+        ownedContract(upstream)
+        val body =
+            """{"strategyCode":"DYNAMIC","effectiveFrom":"2999-01-01","acknowledgedWarnings":["STRATEGY_ABOVE_PROFILE"]}"""
+        val expected = sha("pension-strategy-change|$contractId|DYNAMIC|2999-01-01|STRATEGY_ABOVE_PROFILE")
+
+        val missing = resource(upstream).strategy(contractId.toString(), body, "key-s1", null)
+        val sent = slot<String>()
+        every {
+            upstream.put(
+                "$pension/api/v1/pension/contracts/$contractId/strategy",
+                caller.toString(),
+                capture(sent),
+                "key-s1",
+                emptyMap(),
+            )
+        } returns ok(contract(caller))
+        val changed = resource(upstream).strategy(contractId.toString(), body, "key-s1", challenge.toString())
+
+        assertThat(missing.status).isEqualTo(403)
+        assertThat(
+            json(missing)["scaLinking"]["approvalRequestId"].asText(),
+        ).isEqualTo("pension-strategy-change:$expected")
+        assertThat(json(missing)["scaLinking"]["payloadSha256"].asText()).isEqualTo(expected)
+        assertThat(changed.status).isEqualTo(200)
+        assertThat(mapper.readTree(sent.captured)["scaChallengeId"].asText()).isEqualTo(challenge.toString())
+        verify(exactly = 0) { upstream.post(match { it.startsWith(sca) }, any(), any(), any()) }
+    }
+
+    @Test
+    fun `a mandate set-up hands out pension-mandate-setup over the exact mandate and never consumes the challenge`() {
+        val upstream = mockk<UpstreamClient>()
+        ownedContract(upstream)
+        val body = """{"kind":"STANDING_ORDER","debtorIban":"cz65 0800 0000 1920 0014 5399","amount":"500.50",
+            "currency":"CZK","firstCollection":"2999-02-01"}"""
+        val expected =
+            sha("pension-mandate-setup|$contractId|STANDING_ORDER|CZ6508000000192000145399|500.5|CZK|2999-02-01")
+
+        val missing = resource(upstream).contributionMandate(contractId.toString(), body, "key-m", null)
+
+        assertThat(missing.status).isEqualTo(403)
+        assertThat(
+            json(missing)["scaLinking"]["approvalRequestId"].asText(),
+        ).isEqualTo("pension-mandate-setup:$expected")
+        verify(exactly = 0) { upstream.post(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `a reassessment conflict passes reason and application id, nothing else`() {
+        val upstream = mockk<UpstreamClient>()
+        ownedContract(upstream)
+        val app = UUID.randomUUID()
+        every { upstream.put(any(), any(), any(), any(), any()) } returns ok(
+            """{"error":"internal","code":"REASSESSMENT_REQUIRED","reason":"EXPIRED","applicationId":"$app","x":"y"}""",
+            409,
+        )
+
+        val response = resource(upstream).strategy(
+            contractId.toString(),
+            """{"strategyCode":"DYNAMIC"}""",
+            "key-ra",
+            challenge.toString(),
+        )
+
+        val body = json(response)
+        assertThat(response.status).isEqualTo(409)
+        assertThat(body["code"].asText()).isEqualTo("REASSESSMENT_REQUIRED")
+        assertThat(body["reason"].asText()).isEqualTo("EXPIRED")
+        assertThat(body["applicationId"].asText()).isEqualTo(app.toString())
+        assertThat(body.has("x")).isFalse()
+        assertThat(response.entity as String).doesNotContain("internal")
+    }
+
+    private fun sha(document: String): String = java.security.MessageDigest.getInstance("SHA-256")
+        .digest(document.toByteArray()).joinToString("") { "%02x".format(it) }
 }

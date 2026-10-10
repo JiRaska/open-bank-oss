@@ -28,8 +28,10 @@ import java.util.UUID
 /**
  * The customer's pension lifecycle (ADR-0334 S6): discover, simulate, onboard (S2 application
  * flow), transfer in, manage, terminate early and take a payout (S5 quote → SCA sign → confirm),
- * proxying `openbank-pension-service` API 1.1.0 (participant side) and reading
- * `openbank-pension-fund-service` (unit register) with the edge M2M token.
+ * proxying `openbank-pension-service` API 1.2.0 (participant side). The edge never calls
+ * `openbank-pension-fund-service`: participant holdings there are readable only by staff and
+ * pension-service's own client (pension_fund_rest_ext.rego), and its NetworkPolicy admits only the
+ * `pension` namespace for that surface.
  *
  * Security rules, each because an upstream does not or cannot enforce it for a customer:
  *
@@ -41,9 +43,8 @@ import java.util.UUID
  *     sending a null residency the jurisdiction pack would have to guess about.
  *  3. **Every by-id contract route proves ownership first** by reading the contract with the party
  *     header (pension-service answers 404 for another party's contract) and comparing
- *     `participantPartyId`. Unknown, malformed and foreign ids all answer the same 404, and
- *     pension-fund-service — which serves holdings by contract id to any M2M caller — is only
- *     reached after that check. Application routes are party-scoped by pension-service itself.
+ *     `participantPartyId`. Unknown, malformed and foreign ids all answer the same 404.
+ *     Application routes are party-scoped by pension-service itself.
  *  4. **Upstream error bodies are never forwarded** ([EdgeJson.upstreamFailure]); a 400 from a pack
  *     rule maps to a fixed code, a 409 to `INVALID_CONTRACT_STATE`.
  *  5. **Every state change needs SCA.** Where pension-service spends the challenge itself
@@ -61,9 +62,6 @@ import java.util.UUID
 class CustomerPensionResource(private val upstream: UpstreamClient, private val parties: CustomerPartyResolver) {
     @ConfigProperty(name = "openbank.edge.pension-service-url")
     lateinit var pensionServiceUrl: String
-
-    @ConfigProperty(name = "openbank.edge.pension-fund-service-url")
-    lateinit var fundServiceUrl: String
 
     @ConfigProperty(name = "openbank.edge.party-service-url")
     lateinit var partyServiceUrl: String
@@ -246,29 +244,13 @@ class CustomerPensionResource(private val upstream: UpstreamClient, private val 
         )
     }
 
-    /** Contract overview: the contract plus its unit holdings at the latest published NAV. */
+    /** Contract overview. */
     @GET
     @Path("/contracts/{contractId}")
     @Authorize(action = "customer.pension.contract.read", resource = "")
     @Blocking
-    fun contract(@PathParam("contractId") id: String?): Response = owned(id) { contract, _, contractId ->
-        val valuation = valuation(contractId)
-        EdgeJson.ok(
-            PensionProjection.contract(contract) + ("valuation" to valuation?.let(PensionProjection::valuation)),
-        )
-    }
-
-    /** Priced unit transactions of the contract, newest first. */
-    @GET
-    @Path("/contracts/{contractId}/transactions")
-    @Authorize(action = "customer.pension.contract.read", resource = "")
-    @Blocking
-    fun transactions(@PathParam("contractId") id: String?): Response = owned(id) { _, _, contractId ->
-        val response = upstream.get("${fund()}/contracts/$contractId/transactions")
-        if (response.status != OK) return@owned EdgeJson.upstreamFailure(response, FUND)
-        val node = EdgeJson.parse(response)?.takeIf { it.isArray } ?: return@owned badUpstream(FUND)
-        EdgeJson.ok(node.map(PensionProjection::transaction))
-    }
+    fun contract(@PathParam("contractId") id: String?): Response =
+        owned(id) { contract, _, _ -> EdgeJson.ok(PensionProjection.contract(contract)) }
 
     /** Pause contributions (ACTIVE -> SUSPENDED). */
     @POST
@@ -292,7 +274,12 @@ class CustomerPensionResource(private val upstream: UpstreamClient, private val 
         @HeaderParam(ScaConsume.HEADER) sca: String?,
     ): Response = transition(id, "resume", key, sca)
 
-    /** Change strategy; units switch at the next NAV. */
+    /**
+     * Change strategy; units switch at the next NAV. Document-bound (pension-service 1.2.0):
+     * pension-service runs the suitability gate (409 REASSESSMENT_REQUIRED / WARNINGS_REQUIRED) and
+     * then spends a challenge over `pension-strategy-change:<hash>`. The edge pins the effective
+     * date so the hash it hands out is the one pension-service recomputes.
+     */
     @PUT
     @Path("/contracts/{contractId}/strategy")
     @Authorize(action = "customer.pension.contract.manage", resource = "")
@@ -300,12 +287,26 @@ class CustomerPensionResource(private val upstream: UpstreamClient, private val 
     fun strategy(
         @PathParam("contractId") id: String?,
         body: String?,
+        @HeaderParam("Idempotency-Key") key: String?,
         @HeaderParam(ScaConsume.HEADER) sca: String?,
     ): Response {
-        val input = PensionInput.strategy(EdgeJson.parseObject(body)).getOrElse { return invalid(it) }
+        val input = PensionChangeInput.strategy(EdgeJson.parseObject(body), LocalDate.now())
+            .getOrElse { return invalid(it) }
+        val idempotencyKey = requiredKey(key) ?: return keyRequired()
         return owned(id) { _, party, contractId ->
-            scaGate(sca, party, "strategy", contractId, input)?.let { return@owned it }
-            val response = upstream.put("${api()}/contracts/$contractId/strategy", party.toString(), json(input))
+            val linking = PensionDocuments.linking(
+                "strategy-change",
+                PensionDocuments.strategyChange(contractId, input),
+            )!!
+            val challenge = ScaConsume.challengeId(sca)
+                ?: return@owned PensionDocuments.required(linking, mapOf("effectiveFrom" to input["effectiveFrom"]))
+            val response = upstream.put(
+                "${api()}/contracts/$contractId/strategy",
+                party.toString(),
+                json(input + ("scaChallengeId" to challenge.toString())),
+                idempotencyKey,
+                emptyMap(),
+            )
             if (response.status == OK) contractOf(response, OK) else failure(response)
         }
     }
@@ -320,7 +321,12 @@ class CustomerPensionResource(private val upstream: UpstreamClient, private val 
         if (response.status == OK) passThrough(response) else failure(response)
     }
 
-    /** Set up a contribution standing order or direct debit (S3 funding route). */
+    /**
+     * Set up a contribution standing order or direct debit (S3 funding route). Document-bound:
+     * pension-service spends a challenge over `pension-mandate-setup:<hash>` of the exact mandate
+     * and resolves the debit account from the IBAN itself (it must be the customer's own active
+     * account); the app never sends an account id.
+     */
     @POST
     @Path("/contracts/{contractId}/contribution-mandates")
     @Authorize(action = "customer.pension.contract.manage", resource = "")
@@ -334,11 +340,12 @@ class CustomerPensionResource(private val upstream: UpstreamClient, private val 
         val input = PensionInput.mandate(EdgeJson.parseObject(body)).getOrElse { return invalid(it) }
         val idempotencyKey = requiredKey(key) ?: return keyRequired()
         return owned(id) { _, party, contractId ->
-            scaGate(sca, party, "contribution-mandate", contractId, input)?.let { return@owned it }
+            val linking = PensionDocuments.linking("mandate-setup", PensionDocuments.mandateSetup(contractId, input))!!
+            val challenge = ScaConsume.challengeId(sca) ?: return@owned PensionDocuments.required(linking)
             val response = upstream.post(
                 "${api()}/funding/contracts/$contractId/mandates",
                 party.toString(),
-                json(input),
+                json(input + ("scaChallengeId" to challenge.toString())),
                 idempotencyKey,
             )
             if (response.status == CREATED || response.status == OK) passThrough(response) else failure(response)
@@ -584,12 +591,6 @@ class CustomerPensionResource(private val upstream: UpstreamClient, private val 
         return if (consumed.status == OK) null else ScaConsume.rejected()
     }
 
-    private fun valuation(contractId: UUID): JsonNode? {
-        val response = upstream.get("${fund()}/contracts/$contractId/holdings")
-        if (response.status != OK) return null
-        return EdgeJson.parse(response)?.takeIf { it.isObject }
-    }
-
     /**
      * Runs [action] only for a contract the caller holds; see rule 3. [action] receives the
      * CANONICAL id, never the raw path segment.
@@ -610,8 +611,6 @@ class CustomerPensionResource(private val upstream: UpstreamClient, private val 
 
     private fun api() = "${pensionServiceUrl.trimEnd('/')}/api/v1/pension"
 
-    private fun fund() = "${fundServiceUrl.trimEnd('/')}/api/v1"
-
     private fun json(value: Any) = EdgeJson.mapper.writeValueAsString(value)
 
     private fun contractOf(response: Response, status: Int): Response =
@@ -621,25 +620,10 @@ class CustomerPensionResource(private val upstream: UpstreamClient, private val 
     private fun passThrough(response: Response): Response =
         EdgeJson.parse(response)?.let { EdgeJson.ok(it, response.status) } ?: badUpstream(SERVICE)
 
-    private fun failure(response: Response): Response = when (response.status) {
-        BAD_REQUEST -> EdgeJson.error(
-            BAD_REQUEST,
-            "refused by the pension rules",
-            mapOf(
-                "code" to "PENSION_RULE_REFUSED",
-            ),
-        )
-        CONFLICT -> EdgeJson.error(
-            CONFLICT,
-            "the contract cannot do this in its current state",
-            mapOf("code" to "INVALID_CONTRACT_STATE"),
-        )
-        else -> EdgeJson.upstreamFailure(response, SERVICE)
-    }
+    private fun failure(response: Response): Response = PensionFailure.of(response)
 
     private companion object {
         const val SERVICE = "pension service"
-        const val FUND = "pension fund service"
         const val CATALOG = "product catalog"
         const val MAX_OFFERINGS = 50
         const val MAX_KEY = 256
@@ -648,7 +632,6 @@ class CustomerPensionResource(private val upstream: UpstreamClient, private val 
         const val BAD_REQUEST = 400
         const val FORBIDDEN = 403
         const val NOT_FOUND = 404
-        const val CONFLICT = 409
         const val UNPROCESSABLE = 422
         const val BAD_GATEWAY = 502
         val COUNTRY = Regex("^[A-Z]{2}$")

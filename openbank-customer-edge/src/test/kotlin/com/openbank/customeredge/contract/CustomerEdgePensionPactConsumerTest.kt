@@ -17,6 +17,7 @@ import au.com.dius.pact.core.model.PactSpecVersion
 import au.com.dius.pact.core.model.RequestResponsePact
 import au.com.dius.pact.core.model.annotations.Pact
 import com.openbank.customeredge.infrastructure.rest.CustomerPartyResolver
+import com.openbank.customeredge.infrastructure.rest.CustomerPensionChangeResource
 import com.openbank.customeredge.infrastructure.rest.CustomerPensionResource
 import com.openbank.customeredge.infrastructure.rest.UpstreamClient
 import com.sun.net.httpserver.HttpServer
@@ -33,7 +34,7 @@ import java.util.UUID
 
 /**
  * Consumer contract for the calls customer-edge makes to pension-service (ADR-0334 S6) against
- * its API 1.1.0 (the S8 integration). The real [CustomerPensionResource] and [UpstreamClient] drive
+ * its API 1.2.0 (the final integration). The real [CustomerPensionResource] and [UpstreamClient] drive
  * every interaction, and every expected path is a LITERAL. Every POST records the
  * `Idempotency-Key` pension-service requires, and the application records the residency the edge
  * derives from the party record (party-service is stubbed here; it is a separate provider).
@@ -136,18 +137,81 @@ class CustomerEdgePensionPactConsumerTest {
         .given(ACTIVE_STATE).readById("ACTIVE")
         .toPact()
 
+    /**
+     * A strategy change is document-bound in API 1.2.0: the edge forwards the challenge (never
+     * spends it) with the effective date it pinned. With no assessment on file pension-service's
+     * suitability gate refuses anything but the most conservative strategy before any SCA check —
+     * the edge must surface that code, not a generic refusal.
+     */
     @Pact(consumer = "openbank-customer-edge", provider = "openbank-pension-service")
     fun electStrategy(builder: PactDslWithProvider): RequestResponsePact = builder
         .given(ACTIVE_STATE).readById("ACTIVE")
         .given(ACTIVE_STATE)
-        .uponReceiving("PUT a new strategy election on the contract")
+        .uponReceiving("PUT a signed strategy change on a contract with no assessment on file")
         .path("/api/v1/pension/contracts/$CONTRACT_ID/strategy")
         .method("PUT")
         .headers(mapOf("Content-Type" to "application/json", "X-Customer-Party-Id" to PARTY_ID))
-        .body(newJsonBody { b -> b.stringValue("strategyCode", "DYNAMIC").nullValue("effectiveFrom") }.build())
+        .matchHeader("Idempotency-Key", ".+", "pact-key")
+        .body(
+            newJsonBody { b ->
+                b.stringValue("strategyCode", "DYNAMIC")
+                b.stringValue("effectiveFrom", FUTURE_DATE)
+                b.array("acknowledgedWarnings") { }
+                b.nullValue("language")
+                b.stringValue("scaChallengeId", CHALLENGE_ID)
+            }.build(),
+        )
+        .willRespondWith()
+        .status(STRATEGY_REFUSAL)
+        .body(newJsonBody { e -> e.stringValue("code", "STRATEGY_NOT_PERMITTED") }.build())
+        .toPact()
+
+    @Pact(consumer = "openbank-customer-edge", provider = "openbank-pension-service")
+    fun readSchedule(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(ACTIVE_STATE).readById("ACTIVE")
+        .given(ACTIVE_STATE)
+        .uponReceiving("GET the contribution schedule of the contract")
+        .path("/api/v1/pension/contracts/$CONTRACT_ID/contribution-schedule")
+        .method("GET")
+        .headers(mapOf("X-Customer-Party-Id" to PARTY_ID))
         .willRespondWith()
         .status(200)
-        .body(newJsonBody { c -> contract(c, "ACTIVE") }.build())
+        .toPact()
+
+    @Pact(consumer = "openbank-customer-edge", provider = "openbank-pension-service")
+    fun previewSchedule(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(ACTIVE_STATE).readById("ACTIVE")
+        .given(ACTIVE_STATE)
+        .uponReceiving("POST a contribution schedule preview, which issues the document SCA signs")
+        .path("/api/v1/pension/contracts/$CONTRACT_ID/contribution-schedule/preview")
+        .method("POST")
+        .headers(mapOf("Content-Type" to "application/json", "X-Customer-Party-Id" to PARTY_ID))
+        .matchHeader("Idempotency-Key", ".+", "pact-key")
+        .body(
+            newJsonBody { b ->
+                b.numberValue("amount", 1500)
+                b.stringValue("frequency", "MONTHLY")
+                b.numberValue("dayOfMonth", 15)
+                b.nullValue("startDate")
+                b.booleanValue("acknowledgeIncentiveReduction", false)
+            }.build(),
+        )
+        .willRespondWith()
+        .status(200)
+        .body(newJsonBody { v -> v.stringMatcher("documentSha256", "[0-9a-fA-F]{64}", "a".repeat(64)) }.build())
+        .toPact()
+
+    @Pact(consumer = "openbank-customer-edge", provider = "openbank-pension-service")
+    fun readBeneficiaries(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(ACTIVE_STATE).readById("ACTIVE")
+        .given(ACTIVE_STATE)
+        .uponReceiving("GET the beneficiary designation of the contract")
+        .path("/api/v1/pension/contracts/$CONTRACT_ID/beneficiaries")
+        .method("GET")
+        .headers(mapOf("X-Customer-Party-Id" to PARTY_ID))
+        .willRespondWith()
+        .status(200)
+        .body(newJsonBody { v -> v.array("current") { } }.build())
         .toPact()
 
     @Pact(consumer = "openbank-customer-edge", provider = "openbank-pension-service")
@@ -211,16 +275,45 @@ class CustomerEdgePensionPactConsumerTest {
     @Test
     @PactTestFor(pactMethod = "readContract")
     fun `reading an owned contract matches the provider`(mockServer: MockServer) {
-        // The unit register is a separate provider; unreachable here, so the overview omits valuation.
         assertThat(resource(mockServer).contract(CONTRACT_ID).status).isEqualTo(200)
     }
 
     @Test
     @PactTestFor(pactMethod = "electStrategy")
-    fun `electing a strategy matches the provider`(mockServer: MockServer) {
-        assertThat(
-            resource(mockServer).strategy(CONTRACT_ID, """{"strategyCode":"DYNAMIC"}""", CHALLENGE_ID).status,
-        ).isEqualTo(200)
+    fun `a signed strategy change matches the provider`(mockServer: MockServer) {
+        val response = resource(mockServer).strategy(
+            CONTRACT_ID,
+            """{"strategyCode":"DYNAMIC","effectiveFrom":"$FUTURE_DATE"}""",
+            "pact-key",
+            CHALLENGE_ID,
+        )
+
+        assertThat(response.status).isEqualTo(STRATEGY_REFUSAL)
+        assertThat(response.entity as String).contains("STRATEGY_NOT_PERMITTED")
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "readSchedule")
+    fun `reading the contribution schedule matches the provider`(mockServer: MockServer) {
+        assertThat(changes(mockServer).schedule(CONTRACT_ID).status).isEqualTo(200)
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "previewSchedule")
+    fun `a schedule preview matches the provider`(mockServer: MockServer) {
+        val response = changes(mockServer).previewSchedule(
+            CONTRACT_ID,
+            """{"amount":"1500","frequency":"MONTHLY","dayOfMonth":15}""",
+            "pact-key",
+        )
+
+        assertThat(response.status).isEqualTo(200)
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "readBeneficiaries")
+    fun `reading the beneficiaries matches the provider`(mockServer: MockServer) {
+        assertThat(changes(mockServer).beneficiaries(CONTRACT_ID).status).isEqualTo(200)
     }
 
     @Test
@@ -255,11 +348,21 @@ class CustomerEdgePensionPactConsumerTest {
         val parties = mockk<CustomerPartyResolver> { every { resolve(null) } returns UUID.fromString(PARTY_ID) }
         return CustomerPensionResource(upstream, parties).apply {
             pensionServiceUrl = mockServer.getUrl()
-            fundServiceUrl = "http://127.0.0.1:9"
             catalogUrl = "http://127.0.0.1:9"
             scaServiceUrl = "http://127.0.0.1:${tokenStub.address.port}"
             partyServiceUrl = "http://127.0.0.1:${tokenStub.address.port}"
         }
+    }
+
+    private fun changes(mockServer: MockServer): CustomerPensionChangeResource {
+        val upstream = UpstreamClient().apply {
+            tokenEndpointBase = "http://127.0.0.1:${tokenStub.address.port}"
+            clientId = "openbank-customer-edge"
+            clientSecret = "pact"
+            tlsTrustCertificateFile = Optional.empty()
+        }
+        val parties = mockk<CustomerPartyResolver> { every { resolve(null) } returns UUID.fromString(PARTY_ID) }
+        return CustomerPensionChangeResource(upstream, parties).apply { pensionServiceUrl = mockServer.getUrl() }
     }
 
     private fun PactDslWithState.readById(status: String) =
@@ -278,6 +381,10 @@ class CustomerEdgePensionPactConsumerTest {
         const val PROVIDER_ID = "55555555-5555-4555-8555-555555555555"
         const val UNKNOWN_ID = "99999999-9999-4999-8999-999999999999"
         const val CHALLENGE_ID = "77777777-7777-4777-8777-777777777777"
+        const val FUTURE_DATE = "2099-01-01"
+
+        /** pension-service's answer to a non-conservative strategy with no assessment on file. */
+        const val STRATEGY_REFUSAL = 403
         const val ACTIVE_STATE = "the customer party holds an active pension contract"
         const val NO_CONTRACT_STATE = "the customer party holds no pension contract"
         const val NEGATIVE_AUTH_STATE = "no valid M2M identity is presented"
