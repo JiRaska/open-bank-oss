@@ -34,6 +34,7 @@ dependencies {
     implementation(project(":openbank-libs-runtime"))
 
     testImplementation(libs.quarkus.junit5)
+    testImplementation(libs.pact.provider)
     testImplementation(libs.quarkus.test.security)
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)

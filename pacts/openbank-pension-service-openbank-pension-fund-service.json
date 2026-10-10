@@ -1,0 +1,240 @@
+{
+  "consumer": {
+    "name": "openbank-pension-service"
+  },
+  "interactions": [
+    {
+      "description": "GET pension holdings without a valid M2M identity",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/contracts/10000000-0000-4000-8000-000000000002/holdings"
+      },
+      "response": {
+        "status": 401
+      }
+    },
+    {
+      "description": "GET the active investment strategies pension-service can allocate against",
+      "providerStates": [
+        {
+          "name": "pension fund has an active fund and strategy for contract"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/strategies"
+      },
+      "response": {
+        "body": [
+          {
+            "allocations": [
+              {
+                "fundId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+                "weight": 1.0
+              }
+            ],
+            "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+            "name": "Pact strategy",
+            "status": "ACTIVE"
+          }
+        ],
+        "generators": {
+          "body": {
+            "$[*].allocations[*].fundId": {
+              "type": "Uuid"
+            },
+            "$[*].id": {
+              "type": "Uuid"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].allocations": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].allocations[*].fundId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$[*].allocations[*].weight": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$[*].id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$[*].name": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].status": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET the contract's valued pension fund holdings",
+      "providerStates": [
+        {
+          "name": "pension fund has an active fund and strategy for contract"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/contracts/10000000-0000-4000-8000-000000000002/holdings"
+      },
+      "response": {
+        "body": {
+          "contractId": "10000000-0000-4000-8000-000000000002",
+          "holdings": [
+            {
+              "currency": "CZK",
+              "fundId": "10000000-0000-4000-8000-000000000001",
+              "navPerUnit": 1.000000,
+              "units": 1000.000000,
+              "value": 1000.00
+            }
+          ]
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "POST a keyed SUBSCRIBE order for a pension contract",
+      "providerStates": [
+        {
+          "name": "pension fund has an active fund and strategy for contract"
+        }
+      ],
+      "request": {
+        "body": {
+          "amount": 250.00,
+          "fundId": "10000000-0000-4000-8000-000000000001",
+          "type": "SUBSCRIBE"
+        },
+        "headers": {
+          "Content-Type": "application/json",
+          "Idempotency-Key": "pension-pact-subscribe-001"
+        },
+        "method": "POST",
+        "path": "/api/v1/contracts/10000000-0000-4000-8000-000000000002/orders"
+      },
+      "response": {
+        "body": {
+          "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+          "status": "PENDING"
+        },
+        "generators": {
+          "body": {
+            "$.id": {
+              "type": "Uuid"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            }
+          }
+        },
+        "status": 202
+      }
+    },
+    {
+      "description": "POST a pension subscription without its required idempotency key",
+      "providerStates": [
+        {
+          "name": "pension fund has an active fund and strategy for contract"
+        }
+      ],
+      "request": {
+        "body": {
+          "amount": 250.00,
+          "fundId": "10000000-0000-4000-8000-000000000001",
+          "type": "SUBSCRIBE"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/contracts/10000000-0000-4000-8000-000000000002/orders"
+      },
+      "response": {
+        "status": 400
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-pension-fund-service"
+  }
+}
