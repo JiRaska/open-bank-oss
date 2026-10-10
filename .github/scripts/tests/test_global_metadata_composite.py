@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """Exercise the experimental collector composite boundary with real offline Gradle."""
-import errno, importlib.util, json, os, subprocess, tempfile, time, unittest
+import errno, hashlib, importlib.util, json, os, subprocess, tempfile, time, unittest
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 SPEC = importlib.util.spec_from_file_location('fixture_helpers', ROOT / '.github/scripts/tests/test_dependency_resolution_guard.py')
@@ -8,6 +8,38 @@ HELPERS = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(HELPERS)
 
 class CompositeCoverageTest(unittest.TestCase):
+
+    def test_streamed_artifact_hashes(self):
+        distribution = HELPERS.installed_distribution(os.environ.get('GRADLE_USER_HOME', Path.home() / '.gradle'))
+        self.assertIsNotNone(distribution, 'Provision the pinned Gradle distribution before running this test')
+        # Include the buffer boundary, empty input, and a partial final block.
+        payloads = [b'', b'x', bytes(range(256)) * 256,
+                    bytes(range(256)) * 257 + b'tail']
+        for collector in ('project', 'plugin'):
+            with self.subTest(collector=collector), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                home = root / 'gradle-home'
+                (home / 'wrapper').mkdir(parents=True)
+                (home / 'wrapper/dists').symlink_to(distribution, target_is_directory=True)
+                (root / 'settings.gradle').write_text("rootProject.name='hash-fixture'\n")
+                for index, payload in enumerate(payloads):
+                    (root / f'payload-{index}').write_bytes(payload)
+                source = (ROOT / f'.github/scripts/global-metadata-{collector}-model.init.gradle').read_text()
+                helper = source.split('def artifactSha256(File file) {', 1)[1].split('\ngradle.projectsEvaluated', 1)[0]
+                init = root / 'hash.init.gradle'
+                init.write_text("import java.security.MessageDigest\ndef artifactSha256(File file) {" + helper +
+                    "\ngradle.projectsEvaluated { rootProject.tasks.register('proveHashes') { doLast {\n" +
+                    "(0..3).each { i -> println('HASH=' + i + ':' + artifactSha256(new File(rootProject.projectDir, 'payload-' + i))) }\n" +
+                    "} } }\n")
+                result = subprocess.run([str(ROOT / 'gradlew'), '-p', str(root), '-I', str(init),
+                    'proveHashes', '--offline', '--dependency-verification', 'strict', '--no-daemon',
+                    '--max-workers=1', '-Dorg.gradle.jvmargs=-Xmx1g', '--console=plain'],
+                    env=dict(os.environ, GRADLE_USER_HOME=str(home)),
+                    text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=120)
+                self.assertEqual(result.returncode, 0, result.stdout)
+                observed = [line for line in result.stdout.splitlines() if line.startswith('HASH=')]
+                self.assertEqual(observed, [f'HASH={index}:{hashlib.sha256(payload).hexdigest()}'
+                    for index, payload in enumerate(payloads)])
 
     def test_composite_boundary(self):
         distribution = HELPERS.installed_distribution(os.environ.get('GRADLE_USER_HOME', Path.home() / '.gradle'))

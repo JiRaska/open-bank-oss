@@ -2,6 +2,19 @@ import groovy.json.JsonOutput
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier
 import java.security.MessageDigest
 
+// Bound transient allocations while hashing every resolved artifact independently.
+def artifactSha256(File file) {
+    def hasher = MessageDigest.getInstance('SHA-256')
+    file.withInputStream { stream ->
+        byte[] buffer = new byte[65536]
+        int count
+        while ((count = stream.read(buffer)) != -1) {
+            hasher.update(buffer, 0, count)
+        }
+    }
+    return hasher.digest().encodeHex().toString()
+}
+
 gradle.projectsEvaluated {
     def outputDir = System.getenv('OB_PLUGIN_MODEL_DIR')
     if (!outputDir) throw new GradleException('Plugin receipt output directory required')
@@ -15,7 +28,7 @@ gradle.projectsEvaluated {
                     receipts[scope + ':' + cfg.name] = view.artifacts.artifacts.collect { artifact ->
                         [component:artifact.id.componentIdentifier.displayName,
                          artifact:artifact.file.name,
-                         sha256:MessageDigest.getInstance('SHA-256').digest(artifact.file.bytes).encodeHex().toString()]
+                         sha256:artifactSha256(artifact.file)]
                     }.sort { a,b -> (a.component + ':' + a.artifact) <=> (b.component + ':' + b.artifact) }
                 }
             }

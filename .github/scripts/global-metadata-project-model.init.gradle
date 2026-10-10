@@ -7,6 +7,19 @@ import org.gradle.api.artifacts.component.ProjectComponentIdentifier
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier
 import java.security.MessageDigest
 
+// Bound transient allocations while hashing every resolved artifact independently.
+def artifactSha256(File file) {
+    def hasher = MessageDigest.getInstance('SHA-256')
+    file.withInputStream { stream ->
+        byte[] buffer = new byte[65536]
+        int count
+        while ((count = stream.read(buffer)) != -1) {
+            hasher.update(buffer, 0, count)
+        }
+    }
+    return hasher.digest().encodeHex().toString()
+}
+
 gradle.projectsEvaluated {
     if (rootProject.name != 'openbank') return
     def requested = System.getenv('OB_METADATA_PROJECTS')
@@ -33,7 +46,7 @@ gradle.projectsEvaluated {
                 }
                 def view = cfg.incoming.artifactView { componentFilter { it instanceof ModuleComponentIdentifier } }
                 receipts[scope + ':' + cfg.name] = view.artifacts.artifacts.collect { a ->
-                    def digest = MessageDigest.getInstance('SHA-256').digest(a.file.bytes).encodeHex().toString()
+                    def digest = artifactSha256(a.file)
                     [component:a.id.componentIdentifier.displayName, artifact:a.file.name, sha256:digest]
                 }.sort { a,b -> (a.component + ':' + a.artifact) <=> (b.component + ':' + b.artifact) }
             }
