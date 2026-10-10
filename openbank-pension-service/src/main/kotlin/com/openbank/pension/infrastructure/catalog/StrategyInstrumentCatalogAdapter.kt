@@ -9,7 +9,7 @@ import com.openbank.libs.web.SyntheticTaintClientFilter
 import com.openbank.pension.domain.model.ProductLine
 import com.openbank.pension.domain.questionnaire.StrategyInstrumentMapping
 import com.openbank.pension.domain.questionnaire.StrategyInstrumentMappingPort
-import io.quarkus.oidc.client.filter.OidcClientFilter
+import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.Path
@@ -28,9 +28,9 @@ import java.util.UUID
 
 @Path("/api/v2")
 @Produces(MediaType.APPLICATION_JSON)
-@OidcClientFilter
 @RegisterRestClient(configKey = "product-catalog")
 @RegisterProvider(SyntheticTaintClientFilter::class)
+@RegisterProvider(OidcClientRequestReactiveFilter::class)
 interface StrategyCatalogRestClient {
     @GET
     @Path("/offerings")

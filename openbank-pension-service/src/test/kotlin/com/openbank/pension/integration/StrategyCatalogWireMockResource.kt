@@ -26,7 +26,6 @@ class StrategyCatalogWireMockResource : QuarkusTestResourceLifecycleManager {
         val base = server.baseUrl()
         return mapOf(
             "quarkus.rest-client.product-catalog.url" to base,
-            "quarkus.oidc-client.enabled" to "true",
             "quarkus.oidc-client.auth-server-url" to base,
             "quarkus.oidc-client.discovery-enabled" to "false",
             "quarkus.oidc-client.token-path" to "/token",
