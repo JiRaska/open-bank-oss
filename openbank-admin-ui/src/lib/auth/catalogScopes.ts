@@ -7,6 +7,8 @@ export interface CatalogScopeConfig {
   read: string
   author: string
   publish: string
+  pensionLegalApprove: string
+  pensionProductApprove: string
 }
 
 export function catalogScopeConfig(environment: NodeJS.ProcessEnv = process.env): CatalogScopeConfig {
@@ -15,6 +17,8 @@ export function catalogScopeConfig(environment: NodeJS.ProcessEnv = process.env)
     read: environment.CATALOG_READ_SCOPE || 'catalog:read',
     author: environment.CATALOG_AUTHOR_SCOPE || 'catalog:author',
     publish: environment.CATALOG_PUBLISH_SCOPE || 'catalog:publish',
+    pensionLegalApprove: environment.PENSION_LEGAL_APPROVE_SCOPE || 'pension:legal-approve',
+    pensionProductApprove: environment.PENSION_PRODUCT_APPROVE_SCOPE || 'pension:product-approve',
   }
 }
 
@@ -30,5 +34,7 @@ export function extractCatalogScopeRoles(
     ...(scopes.includes(config.read) ? ['CATALOG_SCOPE_READ'] : []),
     ...(scopes.includes(config.author) ? ['CATALOG_SCOPE_AUTHOR'] : []),
     ...(scopes.includes(config.publish) ? ['CATALOG_SCOPE_PUBLISH'] : []),
+    ...(scopes.includes(config.pensionLegalApprove) ? ['PENSION_LEGAL_APPROVER'] : []),
+    ...(scopes.includes(config.pensionProductApprove) ? ['PENSION_PRODUCT_OWNER'] : []),
   ]
 }

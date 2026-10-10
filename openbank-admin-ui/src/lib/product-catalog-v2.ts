@@ -6,6 +6,7 @@ import { classifyBffFailure, svcUrl, type BffFailure } from '@/lib/services/bff'
 import type {
   CatalogSchema, MarketContext, Offering, OfferingRequest, ProductRevision, PublishRequest,
   RevisionContent, RevisionRequest, SchemaRef, Specification, SpecificationRequest, ValidateCatalogResponse,
+  PensionApprovalRequest, PensionApprovalResponse,
 } from '@/lib/generated/product-catalog-v2'
 import {
   catalogOperationPath, catalogOperations, type CatalogOperationHeaders, type CatalogOperationId,
@@ -16,6 +17,7 @@ import {
 export type {
   CatalogSchema, MarketContext, Offering, OfferingRequest, ProductRevision, PublishRequest,
   RevisionContent, RevisionRequest, SchemaRef, Specification, SpecificationRequest, ValidateCatalogResponse,
+  PensionApprovalRequest, PensionApprovalResponse,
 }
 
 export class CatalogV2Error extends Error {

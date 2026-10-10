@@ -19,12 +19,14 @@ import {
   type MarketContextInput,
 } from '@/lib/catalog-offer-composition'
 import { proposeBundleComponents } from '@/lib/catalog-bundle-proposals'
+import { pensionApprovalComplete } from '@/lib/pension-approval'
 import { explainOfferSelection, simulateBundleImpact } from '@/lib/catalog-offer-intelligence'
 import { selectOffersForMarket } from '@/lib/catalog-offer-selection'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import {
   catalogV2Operation, type CatalogSchema, type Offering, type OfferingRequest, type ProductRevision,
   type RevisionRequest, type Specification, type SpecificationRequest, type ValidateCatalogResponse,
+  type PensionApprovalResponse,
 } from '@/lib/product-catalog-v2'
 import styles from './page.module.css'
 
@@ -110,6 +112,10 @@ export default function ProductStudioPage() {
   const [relationshipTargetId, setRelationshipTargetId] = useState('')
   const [relationshipKind, setRelationshipKind] = useState<RelationshipKind>('BUNDLE')
   const [publishReason, setPublishReason] = useState('')
+  const [pensionApprovalReason, setPensionApprovalReason] = useState('')
+  const [pensionApprovals, setPensionApprovals] = useState<PensionApprovalResponse[] | null>(null)
+  const [pensionApprovalKeyLoaded, setPensionApprovalKeyLoaded] = useState('')
+  const [pensionApprovalError, setPensionApprovalError] = useState('')
   const [newSpecSchema, setNewSpecSchema] = useState('')
   const [newDraftClassSelection, setNewDraftClassSelection] = useState<{ key: string; classes: string[] }>({ key: '', classes: [] })
   const [review, setReview] = useState<CatalogReview | null>(null)
@@ -120,10 +126,19 @@ export default function ProductStudioPage() {
   const selectedSpec = specifications.find(item => item.id === specificationId)
   const selectedOffering = offerings.find(item => item.id === offeringId)
   const selectedRevision = revisions.find(item => item.id === revisionId)
+  const pensionRevision = selectedRevision?.schemaRef.id === 'org.openbank.retirement.pension-savings' &&
+    selectedRevision.schemaRef.version === 2
+  const pensionApprovalKey = selectedRevision ? `${selectedRevision.id}:${selectedRevision.revision}` : ''
+  const currentPensionApprovals = pensionApprovalKeyLoaded === pensionApprovalKey ? pensionApprovals : null
+  const currentPensionApprovalError = pensionApprovalKeyLoaded === pensionApprovalKey ? pensionApprovalError : ''
   const publishedRevision = revisions.find(item => item.state === 'PUBLISHED')
   const parsedDraft = useMemo(() => {
     try { return draftText ? JSON.parse(draftText) as Record<string, unknown> : null } catch { return null }
   }, [draftText])
+  const savedDraftMatchesEditor = Boolean(selectedRevision && parsedDraft &&
+    diffCatalogDocuments(catalogRevisionEditorDocument(selectedRevision), parsedDraft).length === 0)
+  const pensionApprovalsComplete = !currentPensionApprovalError &&
+    pensionApprovalComplete(currentPensionApprovals, savedDraftMatchesEditor)
   const draftRelationships = useMemo(
     () => Array.isArray(parsedDraft?.relationships) ? parsedDraft.relationships.filter(isDraftRelationship) : [],
     [parsedDraft],
@@ -209,7 +224,7 @@ export default function ProductStudioPage() {
       const rows = await catalogV2Operation(
         'listOfferingRevisionsV2', { pathParameters: { id } },
       )
-      setRevisions(rows); setRevisionId(rows[0]?.id ?? '')
+      setRevisions(rows); setRevisionId(current => rows.some(row => row.id === current) ? current : rows[0]?.id ?? '')
     } catch (error) { setMessage(error instanceof Error ? error.message : String(error)) }
   }, [])
 
@@ -236,6 +251,19 @@ export default function ProductStudioPage() {
     const task = window.setTimeout(() => setDraftText(nextDraft), 0)
     return () => window.clearTimeout(task)
   }, [selectedRevision])
+  useEffect(() => {
+    if (!selectedRevision || !pensionRevision) return
+    let active = true
+    const task = window.setTimeout(() => {
+      setPensionApprovals(null)
+      setPensionApprovalError('')
+      void catalogV2Operation('listPensionRevisionApprovalsV2', {
+        pathParameters: { offeringId: selectedRevision.offeringId, revisionId: selectedRevision.id },
+      }).then(rows => { if (active) { setPensionApprovals(rows); setPensionApprovalKeyLoaded(pensionApprovalKey) } })
+        .catch(error => { if (active) { setPensionApprovalError(error instanceof Error ? error.message : String(error)); setPensionApprovalKeyLoaded(pensionApprovalKey) } })
+    }, 0)
+    return () => { active = false; window.clearTimeout(task) }
+  }, [selectedRevision, pensionRevision, pensionApprovalKey])
 
   const updateGuidedField = (field: CatalogSchemaField, raw: string | boolean | string[]) => {
     if (!parsedDraft) return
@@ -378,12 +406,21 @@ export default function ProductStudioPage() {
   }
 
   const publish = () => {
-    if (!selectedRevision || !publishReason.trim()) return
+    if (!selectedRevision || !publishReason.trim() || (pensionRevision && !pensionApprovalsComplete)) return
     void run('revision:publish', () => catalogV2Operation('publishOfferingRevisionV2', {
       pathParameters: { offeringId: selectedRevision.offeringId, revisionId: selectedRevision.id },
       headers: { 'If-Match': `"${selectedRevision.revision}"` },
       body: { reason: publishReason.trim() },
     }), t('Revize publikována nezávislým schvalovatelem', 'Revision published by an independent checker'))
+  }
+
+  const approvePensionRevision = (role: 'LEGAL_COUNSEL' | 'PRODUCT_OWNER') => {
+    if (!selectedRevision || !pensionRevision || !savedDraftMatchesEditor || !pensionApprovalReason.trim()) return
+    void run(`pension:approve:${role}`, () => catalogV2Operation('approvePensionRevisionV2', {
+      pathParameters: { offeringId: selectedRevision.offeringId, revisionId: selectedRevision.id, role },
+      headers: { 'If-Match': `"${selectedRevision.revision}"` },
+      body: { reason: pensionApprovalReason.trim() },
+    }), t('Schválení aktuální revize zaznamenáno', 'Approval of the current revision recorded'))
   }
 
   const reviewDraft = async () => {
@@ -561,7 +598,32 @@ export default function ProductStudioPage() {
             </details>
             <div className={styles.actions}><button className="btn btn-secondary" disabled={!selectedRevision} onClick={() => void validateDraft()}><CheckCircle2 size={13} aria-hidden="true" />{t('Ověřit schéma', 'Validate schema')}</button><button className="btn btn-primary" type="button" disabled={!selectedRevision || selectedRevision.state !== 'DRAFT' || busy} aria-busy={flight.isRunning('revision:save')} onClick={saveDraft}><Send size={13} aria-hidden="true" />{flight.isRunning('revision:save') ? t('Ukládám…', 'Saving…') : t('Uložit draft', 'Save draft')}</button></div>
           </Can>
-          <Can permission="catalog:publish"><div className={styles.approvalPanel}><div className={styles.approvalHead}><ShieldCheck size={15} aria-hidden="true" /><span>{t('Nezávislé schválení', 'Independent approval')}</span></div><p>{t('Publikace je nevratné rozhodnutí. Služba ověří, že autor a schvalovatel jsou rozdílné identity — tento formulář to nemůže obejít.', 'Publication is an irreversible decision. The service verifies that maker and checker are different identities — this form cannot bypass it.')}</p><div className={styles.approvalMeta}><span>{t('Autor draftu', 'Draft maker')}: <b>{selectedRevision?.makerId ?? '—'}</b></span><span>{t('Stav ověření', 'Validation')}: <b>{validationState === 'valid' ? t('ověřeno', 'verified') : t('čeká na ověření', 'awaiting validation')}</b></span></div><div style={{ display: 'flex', gap: 7 }}><label className="sr-only" htmlFor="studio-publish-reason">{t('Důvod schválení', 'Approval reason')}</label><input id="studio-publish-reason" className="input" value={publishReason} onChange={e => setPublishReason(e.target.value)} placeholder={t('Důvod schválení', 'Approval reason')} /><button className="btn btn-primary" type="button" disabled={!selectedRevision || selectedRevision.state !== 'DRAFT' || !publishReason.trim() || busy} aria-busy={flight.isRunning('revision:publish')} onClick={publish}><ShieldCheck size={13} aria-hidden="true" />{flight.isRunning('revision:publish') ? t('Publikuji…', 'Publishing…') : t('Publikovat', 'Publish')}</button></div></div></Can>
+          {pensionRevision && selectedRevision && <div className={styles.approvalPanel} aria-label={t('Penzijní schválení revize', 'Pension revision approvals')}>
+            <div className={styles.approvalHead}><ShieldCheck size={15} aria-hidden="true" /><span>{t('Právní a produktové schválení', 'Legal and product approval')}</span></div>
+            <p>{t('Schválení se vztahují k uložené revizi a jejímu intervalu účinnosti. Po změně draftu je nutné nové schválení obou rolí.', 'Approvals bind to the saved revision and its effective interval. Editing the draft requires fresh approval by both roles.')}</p>
+            <div className={styles.approvalMeta}>
+              <span>{t('Revize', 'Revision')}: <b>#{selectedRevision.number} · {selectedRevision.revision}</b></span>
+              <span>{t('Účinnost od', 'Effective from')}: <b>{selectedRevision.effectiveFrom ?? '—'}</b></span>
+              <span>{t('Účinnost do', 'Effective to')}: <b>{selectedRevision.effectiveTo ?? '—'}</b></span>
+              <span>{t('Uložený obsah', 'Saved content')}: <b>{savedDraftMatchesEditor ? t('shodný', 'matches editor') : t('neuložené změny', 'unsaved changes')}</b></span>
+            </div>
+            {currentPensionApprovalError && <p role="alert">{t('Schválení se nepodařilo načíst:', 'Could not load approvals:')} {currentPensionApprovalError}</p>}
+            {!currentPensionApprovalError && currentPensionApprovals === null && <p>{t('Načítám schválení…', 'Loading approvals…')}</p>}
+            {(['LEGAL_COUNSEL', 'PRODUCT_OWNER'] as const).map(role => {
+              const approval = currentPensionApprovals?.find(item => item.role === role)
+              return <div key={role} className={styles.pensionApprovalRow}>
+                <span>{role === 'LEGAL_COUNSEL' ? t('Právník', 'Legal counsel') : t('Produktový vlastník', 'Product owner')}: <b>{approval && savedDraftMatchesEditor ? t('schváleno', 'approved') : t('čeká', 'pending')}</b></span>
+                {approval && savedDraftMatchesEditor && <small>{approval.approvedAt} · {t('Otisk', 'Digest')} {approval.digest.slice(0, 12)}…</small>}
+                {selectedRevision.state === 'DRAFT' && !approval && <Can permission={role === 'LEGAL_COUNSEL' ? 'catalog:pension:legal-approve' : 'catalog:pension:product-approve'}>
+                  <button className="btn btn-secondary" type="button" disabled={busy || !savedDraftMatchesEditor || currentPensionApprovals === null || Boolean(currentPensionApprovalError) || !pensionApprovalReason.trim() || !selectedRevision.effectiveFrom} onClick={() => approvePensionRevision(role)}>{t('Schválit uloženou revizi', 'Approve saved revision')}</button>
+                </Can>}
+              </div>
+            })}
+            <label className={styles.smallLabel} htmlFor="studio-pension-approval-reason">{t('Odůvodnění schválení', 'Approval reason')}</label>
+            <input id="studio-pension-approval-reason" className="input" maxLength={4096} value={pensionApprovalReason} onChange={event => setPensionApprovalReason(event.target.value)} />
+            {!pensionApprovalsComplete && <p role="status">{t('Publikace čeká na samostatné aktuální schválení právníkem i produktovým vlastníkem.', 'Publication awaits separate current approval by legal counsel and product owner.')}</p>}
+          </div>}
+          <Can permission="catalog:publish"><div className={styles.approvalPanel}><div className={styles.approvalHead}><ShieldCheck size={15} aria-hidden="true" /><span>{t('Nezávislé schválení', 'Independent approval')}</span></div><p>{t('Publikace je nevratné rozhodnutí. Služba ověří, že autor a schvalovatel jsou rozdílné identity — tento formulář to nemůže obejít.', 'Publication is an irreversible decision. The service verifies that maker and checker are different identities — this form cannot bypass it.')}</p><div className={styles.approvalMeta}><span>{t('Autor draftu', 'Draft maker')}: <b>{selectedRevision?.makerId ?? '—'}</b></span><span>{t('Stav ověření', 'Validation')}: <b>{validationState === 'valid' ? t('ověřeno', 'verified') : t('čeká na ověření', 'awaiting validation')}</b></span></div><div style={{ display: 'flex', gap: 7 }}><label className="sr-only" htmlFor="studio-publish-reason">{t('Důvod schválení', 'Approval reason')}</label><input id="studio-publish-reason" className="input" value={publishReason} onChange={e => setPublishReason(e.target.value)} placeholder={t('Důvod schválení', 'Approval reason')} /><button className="btn btn-primary" type="button" disabled={!selectedRevision || selectedRevision.state !== 'DRAFT' || !publishReason.trim() || busy || (pensionRevision && !pensionApprovalsComplete)} aria-busy={flight.isRunning('revision:publish')} onClick={publish}><ShieldCheck size={13} aria-hidden="true" />{flight.isRunning('revision:publish') ? t('Publikuji…', 'Publishing…') : t('Publikovat', 'Publish')}</button></div></div></Can>
         </div>
       </section>
     </div>

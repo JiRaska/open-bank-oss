@@ -11,8 +11,18 @@ describe('standalone Product Studio auth contract', () => {
   it('maps a provider-specific claim and scope vocabulary', () => {
     expect(extractCatalogScopeRoles(
       { permissions: ['products.read', 'products.approve'] },
-      { claim: 'permissions', read: 'products.read', author: 'products.write', publish: 'products.approve' },
+      { claim: 'permissions', read: 'products.read', author: 'products.write', publish: 'products.approve',
+        pensionLegalApprove: 'pension.legal', pensionProductApprove: 'pension.product' },
     )).toEqual(['CATALOG_SCOPE_READ', 'CATALOG_SCOPE_PUBLISH'])
+  })
+
+  it('separates pension legal and product approval scopes from catalog publishing', () => {
+    const roles = extractCatalogScopeRoles({ scope: 'pension:legal-approve pension:product-approve' })
+    expect(roles).toEqual([ROLES.PENSION_LEGAL_APPROVER, ROLES.PENSION_PRODUCT_OWNER])
+    expect(hasPermission(roles, 'catalog:read')).toBe(true)
+    expect(hasPermission(roles, 'catalog:publish')).toBe(false)
+    expect(hasPermission([ROLES.PENSION_LEGAL_APPROVER], 'catalog:pension:legal-approve')).toBe(true)
+    expect(hasPermission([ROLES.PENSION_LEGAL_APPROVER], 'catalog:pension:product-approve')).toBe(false)
   })
 
   it('keeps author and independent publisher capabilities separate', () => {
