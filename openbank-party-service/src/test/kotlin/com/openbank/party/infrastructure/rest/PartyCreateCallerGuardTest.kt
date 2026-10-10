@@ -50,9 +50,28 @@ class PartyCreateCallerGuardTest {
     }
 
     @Test
+    fun `staff role on an unrelated machine token cannot bypass client binding`() {
+        val machine = jwtIdentity(
+            "openbank-unrelated",
+            "service-account-openbank-unrelated",
+            "ROLE_OPERATOR",
+            "ROLE_API",
+        )
+        assertThatThrownBy { requireNamedPartyCreateCaller(machine) }.isInstanceOf(ForbiddenException::class.java)
+        assertThatThrownBy { requireNamedPartyCreateCaller(identity("u-staff", "ROLE_OPERATOR")) }
+            .isInstanceOf(ForbiddenException::class.java)
+    }
+
+    @Test
     fun `kyb's own principal with ROLE_API only may create a party`() {
         assertThatCode { requireNamedPartyCreateCaller(identity("service-account-openbank-kyb", "ROLE_API")) }
             .doesNotThrowAnyException()
+    }
+
+    @Test
+    fun `customer-edge own principal may create a party even when it has an operator role`() {
+        val edge = identity("service-account-openbank-edge", "ROLE_API", "ROLE_OPERATOR")
+        assertThatCode { requireNamedPartyCreateCaller(edge) }.doesNotThrowAnyException()
     }
 
     @Test
@@ -72,7 +91,7 @@ class PartyCreateCallerGuardTest {
     @Test
     fun `staff roles keep the pre-#10486 behaviour`() {
         listOf("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC").forEach { role ->
-            assertThatCode { requireNamedPartyCreateCaller(identity("u-staff", role)) }
+            assertThatCode { requireNamedPartyCreateCaller(jwtIdentity("openbank-admin-ui", "u-staff", role)) }
                 .describedAs(role)
                 .doesNotThrowAnyException()
         }
@@ -88,10 +107,13 @@ class PartyCreateCallerGuardTest {
     @Test
     fun `the Kotlin caller set and the rego identity rule list the same principals`() {
         val rego = File("../openbank-infra/gitops/components/party/party_rest_ext.rego").readText()
-        val rule = rego.substringAfter("allowed_reasons contains \"service-kyb-party-m2m\"")
-            .substringBefore("\n}")
-        val inRego = Regex("\"(service-account-[a-z0-9-]+)\"").findAll(rule).map { it.groupValues[1] }.toSet()
-        assertThat(rule).contains("\"party.create\"")
+        val rules = listOf("service-kyb-party-m2m", "service-edge-party-m2m").map { reason ->
+            rego.substringAfter("allowed_reasons contains \"$reason\"").substringBefore("\n}")
+        }
+        val inRego = rules.flatMap { rule ->
+            assertThat(rule).contains("\"party.create\"")
+            Regex("\"(service-account-[a-z0-9-]+)\"").findAll(rule).map { it.groupValues[1] }.toList()
+        }.toSet()
         assertThat(inRego).isEqualTo(PARTY_CREATE_CALLERS)
     }
 

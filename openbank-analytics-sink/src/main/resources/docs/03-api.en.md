@@ -53,3 +53,7 @@ Roles: `ROLE_COMPLIANCE`, `ROLE_ADMIN`.
 ## Idempotency / delivery
 
 - **Ingestion** (Kafka, not REST) is at-least-once; `eventId` is the dedupe key and ClickHouse `ReplacingMergeTree` collapses duplicates. There is no `Idempotency-Key` REST header here (unlike money-path services) — the operator verbs are either naturally idempotent reads or guarded by the maker-checker state machine.
+
+## Credit profile caller identity
+
+The credit-profile read admits only the copilot and lending service accounts when a verified JWT binds the client id (`azp`), subject and Keycloak service-account username. Staff roles require a verified interactive user session; a role-bearing machine token from another client cannot bypass the named caller check.

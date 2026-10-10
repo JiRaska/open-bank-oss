@@ -50,6 +50,19 @@ class OfferReadCallerGuardTest {
     }
 
     @Test
+    fun `staff role on an unrelated machine token cannot bypass client binding`() {
+        val machine = jwtIdentity(
+            "openbank-unrelated",
+            "service-account-openbank-unrelated",
+            "ROLE_OPERATOR",
+            "ROLE_API",
+        )
+        assertThatThrownBy { requireNamedOfferReader(machine) }.isInstanceOf(ForbiddenException::class.java)
+        assertThatThrownBy { requireNamedOfferReader(identity("u-staff", "ROLE_OPERATOR")) }
+            .isInstanceOf(ForbiddenException::class.java)
+    }
+
+    @Test
     fun `campaign's own principal with ROLE_API only may read an offer`() {
         assertThatCode { requireNamedOfferReader(identity("service-account-openbank-campaign", "ROLE_API")) }
             .doesNotThrowAnyException()
@@ -69,7 +82,7 @@ class OfferReadCallerGuardTest {
 
     @Test
     fun `an operator keeps the pre-#10486 behaviour`() {
-        assertThatCode { requireNamedOfferReader(identity("u-staff", "ROLE_OPERATOR")) }
+        assertThatCode { requireNamedOfferReader(jwtIdentity("openbank-admin-ui", "u-staff", "ROLE_OPERATOR")) }
             .doesNotThrowAnyException()
     }
 

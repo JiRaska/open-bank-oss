@@ -50,6 +50,19 @@ class AmlCaseCreateCallerGuardTest {
     }
 
     @Test
+    fun `staff role on an unrelated machine token cannot bypass client binding`() {
+        val machine = jwtIdentity(
+            "openbank-unrelated",
+            "service-account-openbank-unrelated",
+            "ROLE_OPERATOR",
+            "ROLE_API",
+        )
+        assertThatThrownBy { requireNamedMachineCaller(machine) }.isInstanceOf(ForbiddenException::class.java)
+        assertThatThrownBy { requireNamedMachineCaller(identity("u-staff", "ROLE_OPERATOR")) }
+            .isInstanceOf(ForbiddenException::class.java)
+    }
+
+    @Test
     fun `each named payment or FX principal with ROLE_API only may open a case`() {
         AML_CASE_CREATE_CALLERS.forEach { caller ->
             assertThatCode { requireNamedMachineCaller(identity(caller, "ROLE_API")) }
@@ -75,7 +88,7 @@ class AmlCaseCreateCallerGuardTest {
     @Test
     fun `staff roles keep the pre-#10486 behaviour`() {
         listOf("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE").forEach { role ->
-            assertThatCode { requireNamedMachineCaller(identity("u-staff", role)) }
+            assertThatCode { requireNamedMachineCaller(jwtIdentity("openbank-admin-ui", "u-staff", role)) }
                 .describedAs(role)
                 .doesNotThrowAnyException()
         }

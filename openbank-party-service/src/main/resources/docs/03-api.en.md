@@ -155,3 +155,7 @@ Incoming topics consumed (group `openbank-party-service`, `auto.offset.reset=ear
 - **API version in URL** (`/api/v1/...`); `openbank.api.version=1`. Breaking changes ⇒ `/api/v2`.
 - **OpenAPI contract axis** is independent of the release `version.txt` (ADR-0048).
 - **Events** are additive-only on `openbank.party.events`; breaking changes would use a new topic.
+
+## Party caller identity
+
+Party creation admits the named KYB and customer-edge service accounts through a verified JWT client id, subject and matching Keycloak service-account username; staff roles require a verified interactive user session. The customer AML declaration accepts only the configured customer-edge service account. A generic `ROLE_API` token, even when granted to another workload, cannot submit a declaration for a customer.

@@ -113,8 +113,7 @@ class PartyAmlProfileResource {
     /** Decided from the authenticated principal and configuration only — never from request data. */
     private fun callerMayDeclare(): Boolean {
         val edge = if (this::customerEdgePrincipal.isInitialized) customerEdgePrincipal else ""
-        return securityIdentity.hasRole("ROLE_API") ||
-            ServiceAccountIdentity.isPrincipal(securityIdentity, edge)
+        return ServiceAccountIdentity.isPrincipal(securityIdentity, edge)
     }
 }
 

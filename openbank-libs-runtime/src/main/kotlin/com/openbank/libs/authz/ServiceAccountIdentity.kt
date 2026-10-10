@@ -33,6 +33,21 @@ object ServiceAccountIdentity {
     private const val CLAIM_AZP = "azp"
     private const val CLAIM_PREFERRED_USERNAME = "preferred_username"
 
+    /** Interactive clients in the realm templates; none issues client-credentials tokens. */
+    private val HUMAN_CLIENT_IDS = setOf("openbank-admin-ui", "openbank-ops-cli", "admin-cli")
+
+    /** A staff role is usable only with an interactive, verified user JWT, never an M2M JWT. */
+    fun isHumanStaff(identity: SecurityIdentity?): Boolean {
+        val jwt = identity?.principal as? JsonWebToken ?: return false
+        val clientId = jwt.claimString(CLAIM_AZP) ?: return false
+        val username = jwt.claimString(CLAIM_PREFERRED_USERNAME) ?: return false
+        return clientId in HUMAN_CLIENT_IDS &&
+            !jwt.subject.isNullOrBlank() &&
+            username.isNotBlank() &&
+            !username.startsWith(PRINCIPAL_PREFIX) &&
+            jwt.name == username
+    }
+
     /** The client id whose OWN service-account issued this token, or `null` if it is not one. */
     fun verifiedClientId(identity: SecurityIdentity?): String? {
         val jwt = identity?.principal as? JsonWebToken ?: return null

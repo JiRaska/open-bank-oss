@@ -79,3 +79,7 @@ their bodies contain no proposer, checker or disburser identity. Status mapping 
 ## Versioning
 
 `/api/v1/...` URL path; `X-API-Version` / `X-Service-Version` headers and `/api/v1/info` are served by `openbank-libs`. The OpenAPI contract version (`info.version`) is the API-contract axis (ADR-0048), independent of the release `version.txt`.
+
+## Customer-edge caller identity
+
+Customer intake, quote, credit journey and financial-health routes bind their configured customer-edge workload to the verified JWT client id (`azp`), subject and matching Keycloak service-account username. A username or role alone cannot authorize an M2M request; missing caller configuration fails closed.

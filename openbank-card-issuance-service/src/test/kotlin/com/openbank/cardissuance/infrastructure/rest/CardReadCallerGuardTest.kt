@@ -49,6 +49,21 @@ class CardReadCallerGuardTest {
     }
 
     @Test
+    fun `staff role on an unrelated machine token cannot bypass client binding`() {
+        val machine = jwtIdentity(
+            "openbank-unrelated",
+            "service-account-openbank-unrelated",
+            "ROLE_OPERATOR",
+            "ROLE_API",
+        )
+        assertThatThrownBy { requireNamedCardReader(machine, CARD_READ_CALLERS) }
+            .isInstanceOf(ForbiddenException::class.java)
+        val plain = identity("u-staff", "ROLE_OPERATOR")
+        assertThatThrownBy { requireNamedCardReader(plain, CARD_READ_CALLERS) }
+            .isInstanceOf(ForbiddenException::class.java)
+    }
+
+    @Test
     fun `each named principal with ROLE_API only may make its own read and not the other`() {
         val delegation = identity("service-account-openbank-delegation", "ROLE_API")
         val party = identity("service-account-openbank-party", "ROLE_API")
@@ -74,7 +89,8 @@ class CardReadCallerGuardTest {
     @Test
     fun `staff roles keep the pre-#10486 behaviour`() {
         listOf("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN").forEach { role ->
-            assertThatCode { requireNamedCardReader(identity("u-staff", role), CARD_READ_CALLERS) }
+            val staff = jwtIdentity("openbank-admin-ui", "u-staff", role)
+            assertThatCode { requireNamedCardReader(staff, CARD_READ_CALLERS) }
                 .describedAs(role)
                 .doesNotThrowAnyException()
         }

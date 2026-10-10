@@ -50,6 +50,19 @@ class CreditProfileCallerGuardTest {
     }
 
     @Test
+    fun `staff role on an unrelated machine token cannot bypass client binding`() {
+        val machine = jwtIdentity(
+            "openbank-unrelated",
+            "service-account-openbank-unrelated",
+            "ROLE_OPERATOR",
+            "ROLE_API",
+        )
+        assertThatThrownBy { requireNamedCreditProfileCaller(machine) }.isInstanceOf(ForbiddenException::class.java)
+        assertThatThrownBy { requireNamedCreditProfileCaller(identity("u-staff", "ROLE_OPERATOR")) }
+            .isInstanceOf(ForbiddenException::class.java)
+    }
+
+    @Test
     fun `copilot's and lending's own principals with ROLE_API only may read a credit profile`() {
         listOf("service-account-openbank-copilot", "service-account-openbank-lending").forEach { name ->
             assertThatCode { requireNamedCreditProfileCaller(identity(name, "ROLE_API")) }
@@ -78,7 +91,7 @@ class CreditProfileCallerGuardTest {
     @Test
     fun `staff roles keep the pre-#10486 behaviour`() {
         listOf("ROLE_OPERATOR", "ROLE_AUDITOR", "ROLE_ADMIN").forEach { role ->
-            assertThatCode { requireNamedCreditProfileCaller(identity("u-staff", role)) }
+            assertThatCode { requireNamedCreditProfileCaller(jwtIdentity("openbank-admin-ui", "u-staff", role)) }
                 .describedAs(role)
                 .doesNotThrowAnyException()
         }

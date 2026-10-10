@@ -202,7 +202,7 @@ internal val AML_CASE_CREATE_CALLERS = setOf(
  * every service account in the realm — would let any of them open a case.
  */
 internal fun requireNamedMachineCaller(identity: SecurityIdentity) {
-    if (AML_CASE_CREATE_STAFF_ROLES.any(identity::hasRole)) return
+    if (AML_CASE_CREATE_STAFF_ROLES.any(identity::hasRole) && ServiceAccountIdentity.isHumanStaff(identity)) return
     if (!ServiceAccountIdentity.isOneOf(identity, AML_CASE_CREATE_CALLERS)) {
         throw ForbiddenException("caller is not a named AML case-open service")
     }

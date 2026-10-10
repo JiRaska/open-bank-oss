@@ -340,6 +340,13 @@ class PartyAmlProfileApiIT {
     @Test
     @Order(7)
     @TestSecurity(user = "staff-reader", roles = ["ROLE_VIEWER", "ROLE_ADMIN", "ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "7f6f43d0-1d55-4bc8-9c45-212b22b8e001"),
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "preferred_username", value = "staff-reader"),
+        ],
+    )
     fun `a PEP flag set by a screening before any declaration reads true, the rest stays unknown`() {
         val id = createParty("INDIVIDUAL")
         dataSource.connection.use { conn ->
@@ -359,7 +366,7 @@ class PartyAmlProfileApiIT {
     @Test
     @Order(8)
     @TestSecurity(user = "m2m", roles = ["ROLE_API"])
-    fun `a ROLE_API caller may declare`() {
-        put(requireNotNull(personId), CZ_ONLY, 200).body("version", equalTo(3))
+    fun `an unnamed ROLE_API caller cannot declare for a customer`() {
+        put(requireNotNull(personId), CZ_ONLY, 403)
     }
 }

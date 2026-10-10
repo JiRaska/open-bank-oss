@@ -4,6 +4,7 @@
 
 package com.openbank.libs.authz
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import io.mockk.every
 import io.mockk.mockk
 import io.quarkus.security.runtime.QuarkusPrincipal
@@ -11,6 +12,7 @@ import io.quarkus.security.runtime.QuarkusSecurityIdentity
 import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.jwt.JsonWebToken
 import org.junit.jupiter.api.Test
+import java.io.File
 
 /** #12448: the service-account test is bound to the CLIENT (`azp`), never to the principal name. */
 class ServiceAccountIdentityTest {
@@ -75,5 +77,29 @@ class ServiceAccountIdentityTest {
         val id = jwt("openbank-edge", edge)
         assertThat(ServiceAccountIdentity.isPrincipal(id, "")).isFalse()
         assertThat(ServiceAccountIdentity.isPrincipal(id, null)).isFalse()
+    }
+
+    @Test
+    fun `only an interactive user JWT can use a staff role`() {
+        assertThat(ServiceAccountIdentity.isHumanStaff(jwt("openbank-admin-ui", "alice"))).isTrue()
+        assertThat(ServiceAccountIdentity.isHumanStaff(jwt("openbank-ops-cli", "alice"))).isTrue()
+        assertThat(ServiceAccountIdentity.isHumanStaff(jwt("admin-cli", "alice"))).isTrue()
+        assertThat(ServiceAccountIdentity.isHumanStaff(jwt("openbank-edge", "alice"))).isFalse()
+        assertThat(ServiceAccountIdentity.isHumanStaff(jwt("openbank-admin-ui", "service-account-openbank-admin-ui")))
+            .isFalse()
+        assertThat(ServiceAccountIdentity.isHumanStaff(jwt("openbank-admin-ui", "alice", sub = null))).isFalse()
+        val named = QuarkusSecurityIdentity.builder().setPrincipal(QuarkusPrincipal("alice")).build()
+        assertThat(ServiceAccountIdentity.isHumanStaff(named)).isFalse()
+    }
+
+    @Test
+    fun `staff login clients in the deployed realm cannot mint service account tokens`() {
+        val realm = ObjectMapper().readTree(File("../openbank-infra/gitops/components/keycloak/realm-template.json"))
+        val clients = realm["clients"].associateBy { it["clientId"].asText() }
+        setOf("openbank-admin-ui", "openbank-ops-cli", "admin-cli").forEach { clientId ->
+            assertThat(clients[clientId]).describedAs(clientId).isNotNull()
+            assertThat(clients.getValue(clientId)["serviceAccountsEnabled"].asBoolean())
+                .describedAs(clientId).isFalse()
+        }
     }
 }
