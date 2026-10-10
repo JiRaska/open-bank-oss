@@ -15,6 +15,12 @@ trust-boundary change for service S is any changed file matching:
     when the DIFF HUNKS touch a boundary key (ports, serviceAccountName,
     securityContext, auth-shaped env) rather than generated churn — a
     policy-checksum restamp or an image tag is not a boundary change (#3431)
+    Attribution of a gitops document to S is by what it REFERENCES, not by a name token in
+    its path: a document is S's when it lives in S's namespace (and is not about another
+    identified service's workload) or names S's workload, and it concerns S when one of its
+    CHANGED lines names S's namespace, Service DNS/workload, or principal — all matched as
+    exact identifiers, so `pension` never matches `pension-fund` or `ledger-pension-co`.
+    Services with no resolvable workload keep the legacy token match (see gitops_hit).
 
 When any of those change for a money-path service (rules.yaml:
 money_path_services, parsed by check-threat-models.py's parser) and
@@ -43,6 +49,7 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import functools
 import importlib.util
 import pathlib
 import re
@@ -305,9 +312,21 @@ def adapter_is_client(rel: str) -> bool:
         return False
 
 
+_PREFETCHED: dict[tuple[str, str], str | None] = {}
+
+
+def prefetch(ref: str, rels: list[str]) -> None:
+    """Load many paths at `ref` with one git process; read_at_ref answers from it."""
+    for rel, text in zip(rels, _cat_files_raw(ref, rels), strict=True):
+        _PREFETCHED[(ref, rel)] = text
+
+
+@functools.cache
 def read_at_ref(ref: str, rel: str) -> str | None:
     """Content of `rel` at `ref`, or None when it cannot be read (path did not exist there,
     or `ref` cannot be resolved)."""
+    if (ref, rel) in _PREFETCHED:
+        return _PREFETCHED[(ref, rel)]
     res = subprocess.run(
         ["git", "show", f"{ref}:{rel}"], capture_output=True, text=True, cwd=REPO,
     )
@@ -316,10 +335,12 @@ def read_at_ref(ref: str, rel: str) -> str | None:
     return res.stdout
 
 
-def gitops_hit(
+def legacy_gitops_hit(
     service: str, comp: str, fname: str, base: str | None = None, head: str = "HEAD",
 ) -> str | None:
-    """Reason string if this gitops file is S's NetworkPolicy or Deployment/Rollout.
+    """NAME-TOKEN attribution — the fallback when S has no resolvable workload identity.
+
+    Reason string if this gitops file is S's NetworkPolicy or Deployment/Rollout.
 
     A NetworkPolicy is a boundary by construction — its entire content is reach — so any
     change to one counts. A Deployment/Rollout is not: see hunk_moves_boundary.
@@ -390,6 +411,284 @@ def gitops_hit(
                 return None
             return f"{rel} (Deployment/Rollout)"
     return None
+
+
+# ---------------------------------------------------------------------------------------------
+# Reference-based attribution (#12445 follow-up).
+#
+# The name-token match above is a PREFIX match in practice: `pension` (a token of
+# openbank-pension-service) matches the component `pension-fund` and `ledger-pension-co`, so
+# every pension-fund or pension-company-ledger manifest demanded pension-service's threat model.
+# #12445 fixed that by EXCLUDING directories, which was rightly closed as a gate bypass: a
+# pension-fund NetworkPolicy that starts admitting the `pension` namespace IS a pension boundary,
+# and an exclusion list cannot see that.
+#
+# So attribution is by what the changed DOCUMENT says, not by what the path is called:
+#   - OWNED: the document lives in a namespace S's workload runs in, and does not name a
+#     different identified service's workload as its subject; or it names S's workload exactly
+#     (metadata.name `<workload>` / `<workload>-…`, `app.kubernetes.io/name: <workload>`);
+#   - REFERENCED: the document names S's namespace (`namespace:`, `kubernetes.io/metadata.name:`,
+#     namespace selectors), S's Service DNS / workload name as an exact identifier, or S's principal
+#     (`service-account-openbank-<s>`). Identifiers are matched exactly — `pension` never
+#     matches `pension-fund`, `ledger-pension-co`, or `service-account-openbank-pension-fund`.
+# A NetworkPolicy document that is owned by or references S counts on any change (reach by
+# construction). A Deployment/Rollout counts when owned and its hunks move a boundary, or when a
+# CHANGED line references S (a new edge into S).
+# Services with no resolvable workload fall back to legacy_gitops_hit, never to silence.
+# ---------------------------------------------------------------------------------------------
+
+COMPONENTS_REL = "openbank-infra/gitops/components"
+_IDENT = r"[a-z0-9-]"
+
+
+def _git(*args: str) -> str | None:
+    res = subprocess.run(["git", *args], capture_output=True, text=True, cwd=REPO, check=False)
+    return res.stdout if res.returncode == 0 else None
+
+
+def doc_meta(doc: str) -> tuple[str | None, str | None, str | None]:
+    """(kind, metadata.name, metadata.namespace) of one YAML document, stdlib-only."""
+    kind = re.search(r"^kind:\s*(\S+)", doc, re.MULTILINE)
+    name = ns = None
+    in_md = False
+    indent = None
+    for line in doc.splitlines():
+        if not in_md:
+            in_md = line.rstrip() == "metadata:"
+            continue
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        cur = len(line) - len(line.lstrip())
+        if cur == 0:
+            break
+        if indent is None:
+            indent = cur
+        if cur != indent:
+            continue
+        m = re.match(r"\s*(name|namespace):\s*['\"]?([^'\"\s]+)", line)
+        if m and m.group(1) == "name":
+            name = m.group(2)
+        elif m:
+            ns = m.group(2)
+    return (kind.group(1) if kind else None), name, ns
+
+
+_WORKLOADS_CACHE: dict[str, list[tuple[str, str, str]]] = {}
+
+
+def _cat_files(ref: str, rels: list[str]) -> list[str]:
+    return [t or "" for t in _cat_files_raw(ref, rels)]
+
+
+def _cat_files_raw(ref: str, rels: list[str]) -> list[str | None]:
+    """Contents of many paths at `ref` in ONE `git cat-file --batch` (one process, not N);
+    None for a path missing at `ref`."""
+    if not rels:
+        return []
+    req = "".join(f"{ref}:{r}\n" for r in rels).encode()
+    res = subprocess.run(["git", "cat-file", "--batch"], input=req, capture_output=True, cwd=REPO, check=False)
+    data, out, i = res.stdout, [], 0
+    for _ in rels:
+        nl = data.index(b"\n", i)
+        header = data[i:nl].split()
+        i = nl + 1
+        if len(header) < 3 or header[1] == b"missing":
+            out.append(None)
+            continue
+        size = int(header[2])
+        out.append(data[i:i + size].decode("utf-8", errors="replace"))
+        i += size + 1
+    return out
+
+
+def workloads_at(ref: str | None) -> list[tuple[str, str, str]]:
+    """Every Deployment/Rollout (name, namespace, component dir) under gitops at `ref`
+    (working tree when ref is None)."""
+    key = ref or "<worktree>"
+    if key in _WORKLOADS_CACHE:
+        return _WORKLOADS_CACHE[key]
+    out: list[tuple[str, str, str]] = []
+    if ref is None:
+        files = sorted((REPO / COMPONENTS_REL).glob("*/*.y*ml"))
+        items = [(f"{COMPONENTS_REL}/{f.parent.name}/{f.name}",
+                  f.read_text(encoding="utf-8", errors="replace")) for f in files]
+    else:
+        listing = _git("grep", "-l", "-E", r"^kind:[[:space:]]*(Deployment|Rollout)[[:space:]]*$", ref, "--",
+                       f"{COMPONENTS_REL}/*/*.yaml", f"{COMPONENTS_REL}/*/*.yml") or ""
+        rels = [line.split(":", 1)[1] if line.startswith(f"{ref}:") else line
+                for line in listing.splitlines()]
+        items = list(zip(rels, _cat_files(ref, rels), strict=True))
+    for rel, text in items:
+        comp = rel.split("/")[3]
+        for doc in split_yaml_documents(text):
+            kind, name, ns = doc_meta(doc)
+            if kind in ("Deployment", "Rollout") and name:
+                out.append((name, ns or "", comp))
+    _WORKLOADS_CACHE[key] = out
+    return out
+
+
+def service_identity(service: str, refs: list[str | None]) -> dict | None:
+    """S's deployed identity: workload names, namespaces, components, principals.
+
+    Resolved from the manifests themselves at base and head (union), so a service deployed or
+    moved by the PR under review is still recognised. None when no workload matches — the
+    caller then falls back to the legacy token match rather than attributing nothing.
+    """
+    short = service.removeprefix("openbank-")
+    stem = short.removesuffix("-service")
+    cands = {short, stem, f"{stem}-service"}
+    names: set[str] = set()
+    nss: set[str] = set()
+    comps: set[str] = set()
+    for ref in refs:
+        for name, ns, comp in workloads_at(ref):
+            if name in cands:
+                names.add(name)
+                if ns:
+                    nss.add(ns)
+                comps.add(comp)
+    if not names:
+        return None
+    principals = {f"service-account-{service}", f"service-account-openbank-{short}",
+                  f"service-account-openbank-{stem}"}
+    return {"names": names, "namespaces": nss, "components": comps, "principals": principals}
+
+
+def _exact(ident: str) -> re.Pattern[str]:
+    return re.compile(rf"(?<!{_IDENT}){re.escape(ident)}(?!{_IDENT})")
+
+
+def _strip_comments(text: str) -> str:
+    return "\n".join(l for l in text.splitlines() if not l.lstrip().startswith("#"))
+
+
+def references(ident: dict, text: str) -> list[str]:
+    """What in `text` points at S — exact identifiers only, comments ignored."""
+    body = _strip_comments(text)
+    hits: list[str] = []
+    for ns in ident["namespaces"]:
+        pat = re.compile(
+            rf"(?:namespace:\s*['\"]?|kubernetes\.io/metadata\.name:\s*['\"]?){re.escape(ns)}"
+            rf"(?!{_IDENT})(?:['\"]|\s|$)", re.MULTILINE)
+        if pat.search(body):
+            hits.append(f"namespace {ns}")
+    for name in ident["names"]:
+        if _exact(name).search(body):
+            hits.append(f"workload {name}")
+    for p in ident["principals"]:
+        if _exact(p).search(body):
+            hits.append(f"principal {p}")
+    return hits
+
+
+def owns(ident: dict, doc: str, other_names: set[str]) -> bool:
+    """S owns a document in its own namespace unless the document is about another
+    identified service's workload; or anywhere when it names S's workload as its subject."""
+    _kind, name, ns = doc_meta(doc)
+    subj = re.findall(r"app\.kubernetes\.io/name:\s*['\"]?([a-z0-9-]+)", doc)
+    named = {n for n in ([name] if name else []) + subj}
+
+    def is_of(n: str, wl: str) -> bool:
+        return n == wl or n.startswith(f"{wl}-")
+
+    if any(is_of(n, wl) for n in named for wl in ident["names"]):
+        return True
+    if ns and ns in ident["namespaces"]:
+        # longest-match: a doc named for ANOTHER identified workload is that one's, not S's
+        others = {wl for wl in other_names if wl not in ident["names"]}
+        return not any(is_of(n, wl) for n in named for wl in others)
+    return False
+
+
+@functools.cache
+def _docs_by_key(text: str | None) -> dict[tuple, str]:
+    out: dict[tuple, str] = {}
+    if not text:
+        return out
+    for i, doc in enumerate(split_yaml_documents(text)):
+        kind, name, ns = doc_meta(doc)
+        if not kind:
+            continue
+        out[(kind, name or f"#{i}", ns)] = doc
+    return out
+
+
+@functools.cache
+def changed_boundary_docs(base: str, head: str, rel: str) -> tuple:
+    """(key, old, new, diff, changed-lines) for every boundary document of `rel` that differs
+    between base and head. Computed once per file, shared by every service's check."""
+    b, a = _docs_by_key(read_at_ref(base, rel)), _docs_by_key(read_at_ref(head, rel))
+    out = []
+    for key in sorted(set(b) | set(a), key=str):
+        if key[0] not in ("NetworkPolicy", "Deployment", "Rollout"):
+            continue
+        old, new = b.get(key, ""), a.get(key, "")
+        if old == new:
+            continue
+        diff = "\n".join(difflib.unified_diff(old.splitlines(), new.splitlines(), lineterm=""))
+        out.append((key, old, new, diff, "\n".join(changed_body_lines(diff))))
+    return tuple(out)
+
+
+def reference_hit(
+    ident: dict, other_names: set[str], rel: str, docs: tuple,
+) -> str | None:
+    """Reason string if a changed boundary document in `rel` is owned by S, or one of its
+    CHANGED lines references S (an edge into or out of S added or removed).
+
+    Only the changed lines count for a reference: the kafka/keycloak policies list every
+    namespace that talks to them, and a whole-document match would hand every service a finding
+    whenever one caller is added."""
+    for key, old, new, diff, changed in docs:
+        kind = key[0]
+        owned = owns(ident, old or new, other_names)
+        if kind == "NetworkPolicy" and owned:
+            return f"{rel} (ingress/egress: {key[1]})"
+        if kind != "NetworkPolicy" and owned and hunk_moves_boundary(diff):
+            return f"{rel} (Deployment/Rollout: {key[1]})"
+        refs = references(ident, changed)
+        if refs:
+            what = "ingress/egress" if kind == "NetworkPolicy" else "Deployment/Rollout"
+            return f"{rel} ({what}: {key[1]} changes a line naming {refs[0]})"
+    return None
+
+
+_IDENTITY_CACHE: dict[tuple, dict | None] = {}
+_OTHERS_CACHE: dict[tuple, set[str]] = {}
+
+
+def identified_workload_names(refs: list[str | None]) -> set[str]:
+    """Workload names of every money-path service that resolves to an identity. A document in a
+    shared namespace that names one of THESE belongs to that service; one that names an
+    unidentified workload (redis, a sidecar job) stays with every owner of the namespace."""
+    key = tuple(refs)
+    if key not in _OTHERS_CACHE:
+        names: set[str] = set()
+        for svc in load_money_path_services():
+            ident = service_identity(svc, refs)
+            if ident:
+                names |= ident["names"]
+        _OTHERS_CACHE[key] = names
+    return _OTHERS_CACHE[key]
+
+
+def gitops_hit(
+    service: str, comp: str, fname: str, base: str | None = None, head: str = "HEAD",
+) -> str | None:
+    """Reason string if a changed gitops file moves S's trust boundary — see the block above."""
+    rel = f"{COMPONENTS_REL}/{comp}/{fname}"
+    refs = [base, head] if base is not None else [None]
+    ck = (service, tuple(refs))
+    if ck not in _IDENTITY_CACHE:
+        _IDENTITY_CACHE[ck] = service_identity(service, refs)
+    ident = _IDENTITY_CACHE[ck]
+    if ident is None or base is None:
+        # No resolvable workload, or no git to read documents from: the legacy name match,
+        # which over-reports — the safe direction.
+        return legacy_gitops_hit(service, comp, fname, base, head)
+    others = identified_workload_names(refs)
+    return reference_hit(ident, others, rel, changed_boundary_docs(base, head, rel))
 
 
 def boundary_reasons(service: str, changed: list[str], base: str | None, head: str = "HEAD") -> list[str]:
@@ -506,6 +805,87 @@ def doc_scoped_flags(before: str, after: str) -> bool:
     return hunk_moves_boundary(diff_text)
 
 
+# Reference-attribution cases (#12445 follow-up). Each runs the real changed_boundary_docs ->
+# reference_hit path over synthetic before/after manifests against pension-service's identity.
+PENSION = {
+    "names": {"pension-service"}, "namespaces": {"pension"}, "components": {"pension"},
+    "principals": {"service-account-openbank-pension", "service-account-openbank-pension-service"},
+}
+OTHER_WORKLOADS = {"pension-service", "pension-fund-service", "ledger-service"}
+
+
+def _np(name: str, ns: str, app: str, froms: list[str]) -> str:
+    rules = "".join(
+        f"    - from:\n        - namespaceSelector:\n            matchLabels:\n"
+        f"              kubernetes.io/metadata.name: {f}\n" for f in froms)
+    return (f"apiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\nmetadata:\n  name: {name}\n"
+            f"  namespace: {ns}\nspec:\n  podSelector:\n    matchLabels:\n"
+            f"      app.kubernetes.io/name: {app}\n  ingress:\n{rules}")
+
+
+def _dep(name: str, ns: str, env: dict[str, str]) -> str:
+    e = "".join(f"            - name: {k}\n              value: {v}\n" for k, v in env.items())
+    return (f"apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: {name}\n  namespace: {ns}\n"
+            f"spec:\n  template:\n    spec:\n      containers:\n        - name: app\n          env:\n{e}")
+
+
+REF_SELF_TEST_CASES: list[tuple[str, str, str, bool]] = [
+    ("KNOWN-POSITIVE: a pension-fund NetworkPolicy that starts admitting `pension` needs pension's TM",
+     _np("pension-fund-service-ingress-allow-list", "pension-fund", "pension-fund-service", ["admin-ui"]),
+     _np("pension-fund-service-ingress-allow-list", "pension-fund", "pension-fund-service", ["admin-ui", "pension"]),
+     True),
+    ("KNOWN-NEGATIVE: a ledger-pension-co policy naming nothing of pension-service does not",
+     _np("ledger-service-ingress-allow-list", "ledger-pension-co", "ledger-service", ["admin-ui"]),
+     _np("ledger-service-ingress-allow-list", "ledger-pension-co", "ledger-service", ["admin-ui", "tax-reporting"]),
+     False),
+    ("KNOWN-NEGATIVE: a pension-fund policy admitting `pension-fund-ops` is not `pension`",
+     _np("pension-fund-service-ingress-allow-list", "pension-fund", "pension-fund-service", ["admin-ui"]),
+     _np("pension-fund-service-ingress-allow-list", "pension-fund", "pension-fund-service", ["admin-ui", "pension-fund-ops"]),
+     False),
+    ("a ledger-pension-co Deployment env naming the pension-fund principal is not pension's",
+     _dep("ledger-service", "ledger-pension-co", {"X": "a"}),
+     _dep("ledger-service", "ledger-pension-co", {"X": "a", "CALLER": "service-account-openbank-pension-fund"}),
+     False),
+    ("a caller Deployment that adds a URL to pension-service.pension.svc needs pension's TM",
+     _dep("tax-reporting-service", "tax-reporting", {"X": "a"}),
+     _dep("tax-reporting-service", "tax-reporting", {"X": "a", "PENSION_SERVICE_URL": "https://pension-service.pension.svc:8443"}),
+     True),
+    ("a sibling Service DNS in the same namespace is not pension-service's edge",
+     _dep("tax-reporting-service", "tax-reporting", {"X": "a"}),
+     _dep("tax-reporting-service", "tax-reporting", {"X": "a", "URL": "https://pension-fund-service.pension.svc:8443"}),
+     False),
+    ("removing a URL to pension-service still changes pension-service's boundary",
+     _dep("tax-reporting-service", "tax-reporting", {"X": "a", "URL": "https://pension-service.pension.svc:8443"}),
+     _dep("tax-reporting-service", "tax-reporting", {"X": "a"}),
+     True),
+    ("a caller Deployment that adds the pension principal needs pension's TM",
+     _dep("tax-reporting-service", "tax-reporting", {"X": "a"}),
+     _dep("tax-reporting-service", "tax-reporting", {"X": "a", "ALLOWED": "service-account-openbank-pension"}),
+     True),
+    ("a shared broker policy that already lists `pension` and adds another namespace does not",
+     _np("kafka-broker-ingress-allow-list", "kafka", "kafka", ["pension", "ledger"]),
+     _np("kafka-broker-ingress-allow-list", "kafka", "kafka", ["pension", "ledger", "tax-reporting"]),
+     False),
+    ("pension's OWN policy changing counts even when it names nothing new",
+     _np("pension-service-ingress-allow-list", "pension", "pension-service", ["admin-ui"]),
+     _np("pension-service-ingress-allow-list", "pension", "pension-service", ["admin-ui", "tax-reporting"]),
+     True),
+    ("a comment mentioning `namespace: pension` is not a reference",
+     _dep("ledger-service", "ledger-pension-co", {"X": "a"}),
+     _dep("ledger-service", "ledger-pension-co", {"X": "a"}) + "# namespace: pension\n",
+     False),
+]
+
+
+def ref_flags(before: str, after: str) -> bool:
+    changed_boundary_docs.cache_clear()
+    rel = "openbank-infra/gitops/components/x/test.yaml"
+    _PREFETCHED[("BASE", rel)] = before
+    _PREFETCHED[("HEAD", rel)] = after
+    read_at_ref.cache_clear()
+    return reference_hit(PENSION, OTHER_WORKLOADS, rel, changed_boundary_docs("BASE", "HEAD", rel)) is not None
+
+
 def self_test() -> int:
     """Feed the classifier diffs it MUST flag and diffs it MUST NOT.
 
@@ -522,6 +902,12 @@ def self_test() -> int:
         print(f"  [{mark}] {name}: flagged={got} expected={expected}")
     for name, before, after, expected in DOC_SELF_TEST_CASES:
         got = doc_scoped_flags(before, after)
+        mark = "ok" if got == expected else "FAIL"
+        if got != expected:
+            ok = False
+        print(f"  [{mark}] {name}: flagged={got} expected={expected}")
+    for name, before, after, expected in REF_SELF_TEST_CASES:
+        got = ref_flags(before, after)
         mark = "ok" if got == expected else "FAIL"
         if got != expected:
             ok = False
@@ -552,6 +938,11 @@ def main() -> int:
     else:
         changed = changed_files(args.base, args.head)
         base = args.base
+
+    if base is not None:
+        gitops = [r for r in changed if GITOPS_RE.match(r)]
+        prefetch(base, gitops)
+        prefetch(args.head, gitops)
 
     level = "error" if args.enforce else "warning"
     services = load_money_path_services()
