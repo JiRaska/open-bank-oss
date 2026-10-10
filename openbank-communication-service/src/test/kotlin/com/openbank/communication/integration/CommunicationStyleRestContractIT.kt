@@ -45,6 +45,48 @@ class CommunicationStyleRestContractIT {
     lateinit var dataSource: DataSource
 
     @Test
+    @TestSecurity(user = "copy-editor@openbank.test", roles = ["ROLE_COMMS_EDITOR"])
+    fun `mobile copy persists with a draft and is never published on save`() {
+        val id = Given {
+            contentType("application/json")
+            body(
+                """{"tone":"warm","formality":"informal","formOfAddress":"tykani",
+                    "uiMessages":{"cs.status.loading":"Hledám.","en.status.loading":"Checking."}}""",
+            )
+        } When {
+            post("/api/v1/personas/customer-copilot/style-versions")
+        } Then {
+            statusCode(201)
+            body("uiMessages.'cs.status.loading'", equalTo("Hledám."))
+        } Extract { path<String>("id") }
+        dataSource.connection.use { connection ->
+            connection.prepareStatement("select ui_messages, status from style_version where id = ?").use { ps ->
+                ps.setObject(1, UUID.fromString(id))
+                ps.executeQuery().use { row ->
+                    org.junit.jupiter.api.Assertions.assertTrue(row.next())
+                    org.junit.jupiter.api.Assertions.assertTrue(row.getString(1).contains("Hledám."))
+                    org.junit.jupiter.api.Assertions.assertEquals("DRAFT", row.getString(2))
+                }
+            }
+        }
+    }
+
+    @Test
+    @TestSecurity(user = "copy-editor@openbank.test", roles = ["ROLE_COMMS_EDITOR"])
+    fun `null UI message is a validation error`() {
+        Given {
+            contentType("application/json")
+            body(
+                """{"tone":"warm","formality":"informal","formOfAddress":"tykani","uiMessages":{"cs.status.loading":null}}""",
+            )
+        } When {
+            post("/api/v1/personas/customer-copilot/style-versions")
+        } Then {
+            statusCode(400)
+        }
+    }
+
+    @Test
     @TestSecurity(user = "editor-a@openbank.test", roles = ["ROLE_COMMS_EDITOR"])
     fun `a lint-rejected draft is refused with every violation, and never persisted`() {
         Given {

@@ -45,6 +45,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 
 /**
  * Customer-facing edge proxy (ADR-0065). All customer app → cluster traffic goes through
@@ -2857,6 +2858,14 @@ class CustomerEdgeResource(
         // (and weaker) question than the one this route has to ask.
         val amount = extractAmountField(objectMapper, body) ?: return badRequest("Missing amount")
         val currency = extractTextField(objectMapper, body, "currency") ?: "CZK"
+        // Refuse an unsupported rail before debit authority, a delegated spend reservation, or SCA
+        // consumes a one-use challenge. The domestic service enforces the same rule for direct callers.
+        if (currency.trim().uppercase() != "CZK") {
+            return Response.status(400)
+                .entity("""{"code":"CURRENCY_NOT_ALLOWED","error":"Domestic payments accept CZK only"}""")
+                .type(MediaType.APPLICATION_JSON)
+                .build()
+        }
         // Owner OR delegate (ADR-0232 D3/D5). `resolveDebitAuthority` returns the account JSON, the
         // party whose money is moving, and — when this is a delegated debit — the grant that
         // permitted it, or an audited refusal.
@@ -3583,16 +3592,39 @@ class CustomerEdgeResource(
         )
     }
 
+    /** A single inbox across the token holder and currently mandated entities. */
+    @GET
+    @Path("/notifications/unified")
+    @Authorize(action = "customer.notifications.read")
+    @Blocking
+    fun listUnifiedNotifications(
+        @QueryParam("limit") @DefaultValue("20") limit: Int,
+        @QueryParam("partyId") filterPartyId: UUID?,
+    ): Response {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(UNIFIED_NOTIFICATION_TIMEOUT_SECONDS)
+        val identity = customer()
+        val allowed = listOf(identity.human) + actingForResolver.profilesOfStrict(identity.human, deadline)
+            .map { it["partyId"] as UUID }
+        if (filterPartyId != null && filterPartyId !in allowed) {
+            return forbidden("Notification profile unavailable")
+        }
+        val parties = (filterPartyId?.let(::listOf) ?: allowed).distinct()
+        val remaining = deadline - System.nanoTime()
+        return UnifiedNotificationInbox(upstream, objectMapper, notificationServiceUrl, remaining)
+            .list(parties, limit.coerceIn(1, 100))
+    }
+
     /** Mark one notification read. partyId injected from the JWT — the service scopes by it (IDOR). */
     @PATCH
     @Path("/notifications/{id}/read")
     @Authorize(action = "customer.notifications.mark-read", resource = "#id")
     @Blocking
-    fun markNotificationRead(@PathParam("id") id: UUID): Response {
+    fun markNotificationRead(@PathParam("id") id: UUID, @QueryParam("partyId") originPartyId: UUID? = null): Response {
         val customer = customer()
+        val partyId = authorizedNotificationParty(customer, originPartyId)
         return upstream.patch(
-            "$notificationServiceUrl/api/v1/notifications/$id/read?partyId=${customer.partyId}",
-            customer.partyId.toString(),
+            "$notificationServiceUrl/api/v1/notifications/$id/read?partyId=$partyId",
+            partyId.toString(),
         )
     }
 
@@ -3622,20 +3654,26 @@ class CustomerEdgeResource(
     @Path("/notifications/{id}")
     @Authorize(action = "customer.notifications.read", resource = "#id")
     @Blocking
-    fun getNotification(@PathParam("id") id: UUID): Response {
+    fun getNotification(@PathParam("id") id: UUID, @QueryParam("partyId") originPartyId: UUID? = null): Response {
         val customer = customer()
+        val partyId = authorizedNotificationParty(customer, originPartyId)
         val resp = upstream.get(
-            "$notificationServiceUrl/api/v1/notifications/$id",
-            customer.partyId.toString(),
+            if (originPartyId == null) {
+                "$notificationServiceUrl/api/v1/notifications/$id"
+            } else {
+                "$notificationServiceUrl/api/v1/notifications/$id/self?partyId=$partyId"
+            },
+            partyId.toString(),
         )
         if (resp.status != 200) return forbidden("Notification not found")
         val node = runCatching { objectMapper.readTree(resp.entity?.toString() ?: "") }.getOrNull()
             ?: return forbidden("Notification not found")
-        if (node.get("partyId")?.asText() != customer.partyId.toString()) {
+        if (node.get("partyId")?.asText() != partyId.toString()) {
             return forbidden("Notification does not belong to caller")
         }
         val out = objectMapper.createObjectNode()
         out.put("id", node.get("id")?.asText())
+        if (originPartyId != null) out.put("partyId", partyId.toString())
         node.get("template")?.asText()?.let { out.put("template", it) }
         node.get("subject")?.asText()?.let { out.put("subject", it) }
         out.put("body", node.get("body")?.asText() ?: "")
@@ -3643,6 +3681,13 @@ class CustomerEdgeResource(
         node.get("readAt")?.asText()?.let { out.put("readAt", it) }
         node.get("createdAt")?.asText()?.let { out.put("createdAt", it) }
         return Response.ok(out).type(MediaType.APPLICATION_JSON).build()
+    }
+
+    private fun authorizedNotificationParty(customer: CustomerIdentity, requested: UUID?): UUID {
+        if (requested == null) return customer.partyId
+        if (requested == customer.human) return requested
+        if (actingForResolver.profilesOfStrict(customer.human).any { it["partyId"] == requested }) return requested
+        throw ForbiddenException("Notification profile unavailable")
     }
 
     /** The caller's push-notification preferences (#2). Party is taken from the JWT, never the client. */
