@@ -146,6 +146,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-2",job="kyc-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-1",job="ledger-pension-co-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-2",job="ledger-pension-co-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-2",job="ledger-db"}'
@@ -296,6 +300,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="statements",pod="statements-db-2",job="statements-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="tax-reporting",pod="tax-reporting-db-1",job="tax-reporting-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="tax-reporting",pod="tax-reporting-db-2",job="tax-reporting-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-1",job="temporal-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-2",job="temporal-db"}'
@@ -372,6 +380,8 @@ tests:
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="ledger"}'
         values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="ledger-pension-co"}'
+        values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="lending"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="loyalty"}'
@@ -417,6 +427,8 @@ tests:
       - series: 'kube_namespace_created{namespace="security-scanner"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="statements"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="tax-reporting"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="temporal"}'
         values: "1600000000+0x40"
@@ -586,6 +598,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-2",job="kyc-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-1",job="ledger-pension-co-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-2",job="ledger-pension-co-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-2",job="ledger-db"}'
@@ -736,6 +752,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="statements",pod="statements-db-2",job="statements-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="tax-reporting",pod="tax-reporting-db-1",job="tax-reporting-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="tax-reporting",pod="tax-reporting-db-2",job="tax-reporting-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-1",job="temporal-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-2",job="temporal-db"}'
@@ -812,6 +832,8 @@ tests:
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="ledger"}'
         values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="ledger-pension-co"}'
+        values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="lending"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="loyalty"}'
@@ -857,6 +879,8 @@ tests:
       - series: 'kube_namespace_created{namespace="security-scanner"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="statements"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="tax-reporting"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="temporal"}'
         values: "1600000000+0x40"
@@ -1003,6 +1027,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-2",job="kyc-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-1",job="ledger-pension-co-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-2",job="ledger-pension-co-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-2",job="ledger-db"}'
@@ -1153,6 +1181,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="statements",pod="statements-db-2",job="statements-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="tax-reporting",pod="tax-reporting-db-1",job="tax-reporting-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="tax-reporting",pod="tax-reporting-db-2",job="tax-reporting-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-1",job="temporal-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-2",job="temporal-db"}'
@@ -1231,6 +1263,8 @@ tests:
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="ledger"}'
         values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="ledger-pension-co"}'
+        values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="lending"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="loyalty"}'
@@ -1276,6 +1310,8 @@ tests:
       - series: 'kube_namespace_created{namespace="security-scanner"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="statements"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="tax-reporting"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="temporal"}'
         values: "1600000000+0x40"
@@ -1426,6 +1462,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-2",job="kyc-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-1",job="ledger-pension-co-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-2",job="ledger-pension-co-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-2",job="ledger-db"}'
@@ -1576,6 +1616,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="statements",pod="statements-db-2",job="statements-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="tax-reporting",pod="tax-reporting-db-1",job="tax-reporting-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="tax-reporting",pod="tax-reporting-db-2",job="tax-reporting-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-1",job="temporal-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-2",job="temporal-db"}'
@@ -1652,6 +1696,8 @@ tests:
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="ledger"}'
         values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="ledger-pension-co"}'
+        values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="lending"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="loyalty"}'
@@ -1697,6 +1743,8 @@ tests:
       - series: 'kube_namespace_created{namespace="security-scanner"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="statements"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="tax-reporting"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="temporal"}'
         values: "1600000000+0x40"
@@ -1852,6 +1900,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-2",job="kyc-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-1",job="ledger-pension-co-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-2",job="ledger-pension-co-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-2",job="ledger-db"}'
@@ -2002,6 +2054,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="statements",pod="statements-db-2",job="statements-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="tax-reporting",pod="tax-reporting-db-1",job="tax-reporting-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="tax-reporting",pod="tax-reporting-db-2",job="tax-reporting-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-1",job="temporal-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-2",job="temporal-db"}'
@@ -2076,6 +2132,8 @@ tests:
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="ledger"}'
         values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="ledger-pension-co"}'
+        values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="lending"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="loyalty"}'
@@ -2121,6 +2179,8 @@ tests:
       - series: 'kube_namespace_created{namespace="security-scanner"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="statements"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="tax-reporting"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="temporal"}'
         values: "1600000000+0x40"
@@ -2269,6 +2329,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-2",job="kyc-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-1",job="ledger-pension-co-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-2",job="ledger-pension-co-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-2",job="ledger-db"}'
@@ -2419,6 +2483,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="statements",pod="statements-db-2",job="statements-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="tax-reporting",pod="tax-reporting-db-1",job="tax-reporting-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="tax-reporting",pod="tax-reporting-db-2",job="tax-reporting-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-1",job="temporal-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-2",job="temporal-db"}'
@@ -2493,6 +2561,8 @@ tests:
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="ledger"}'
         values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="ledger-pension-co"}'
+        values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="lending"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="loyalty"}'
@@ -2538,6 +2608,8 @@ tests:
       - series: 'kube_namespace_created{namespace="security-scanner"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="statements"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="tax-reporting"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="temporal"}'
         values: "1600000000+0x40"

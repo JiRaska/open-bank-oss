@@ -4778,6 +4778,27 @@ gates:
     run: |
       python3 .github/scripts/check-kafka-dotted-keys.py --root .
 
+  # ADR-0337: a second ledger-service deployment (the pension company's books) runs the bank's
+  # image, so every scheduler and outbound edge in it is live by default. The switch list is
+  # derived from the ledger source; a new scheduler without a switch is red until the instance
+  # turns it off or declares it entity-local.
+  - id: ledger-instance-switches-off
+    name: "bank-only ledger schedulers/edges off on non-bank instances (ADR-0337, enforced)"
+    group: gitops
+    mode: enforced
+    budget_seconds: 15   # ~3.4s measured locally incl. self-test
+    rationale: >-
+      A second ledger-service deployment runs the bank's image, so its schedulers, outbox
+      dispatcher and Kafka channel act on the company's books by default; the switch list is
+      derived from source so a new bank-only job cannot reach the instance unswitched.
+    review_after: '2027-04-10'
+    min_subjects: 5   # 11 measured 2026-10-10 (7 @Scheduled, 2 *enabled* props, 1 channel, 1 REST client)
+    selftest: python3 .github/scripts/check-ledger-instance-switches.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-ledger-instance-switches.py"]
+    run: |
+      python3 .github/scripts/check-ledger-instance-switches.py --root .
+
   - id: quoted-sequence-name-ratchet
     name: "quoted mixed-case Hibernate sequence ratchet (issue #6480, enforced)"
     group: data

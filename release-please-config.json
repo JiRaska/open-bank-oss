@@ -408,7 +408,10 @@
       ]
     },
     "openbank-tax-reporting-service": {
-      "release-type": "simple"
+      "component": "tax-reporting-service",
+      "exclude-paths": [
+        "openbank-tax-reporting-service/src/test"
+      ]
     },
     "openbank-tpp-registry-service": {
       "component": "tpp-registry-service",

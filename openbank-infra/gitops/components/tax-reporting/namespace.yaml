@@ -1,0 +1,13 @@
+# Tax-reporting domain (ADR-0037: domain = namespace). App plane. Holds tax-reporting-service plus
+# its single-owner CNPG Postgres. tax-reporting-service assembles the §38d withholding return
+# (ADR-0180) from interest-service's withholding remittances. Deployed by owner decision #5760.
+# Not money-path: it moves no money and posts nothing to the ledger; it reports what was withheld.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tax-reporting
+  labels:
+    openbank.io/plane: app
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

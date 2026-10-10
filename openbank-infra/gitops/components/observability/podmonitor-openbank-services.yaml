@@ -82,6 +82,7 @@ spec:
       - incentive
       - kyc
       - ledger
+      - ledger-pension-co
       - lending
       - loyalty
       - kyb
@@ -101,6 +102,7 @@ spec:
       - sdd
       - security-scanner
       - statements
+      - tax-reporting
       - tpp-registry
       - treasury
       - wealth

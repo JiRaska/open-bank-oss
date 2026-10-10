@@ -1,0 +1,89 @@
+# Chart of accounts for the pension company (penzijní společnost) — ADR-0337, per-instance seed.
+#
+# MECHANISM. ledger-service seeds its chart of accounts with Flyway migrations baked into the
+# image (classpath:db/migration, V1/V5/V14/…/V30 INSERT INTO gl_accounts). That image is shared
+# with the bank, so a pension account added there would land in the BANK's ledger-db too. This
+# instance instead sets QUARKUS_FLYWAY_LOCATIONS=db/migration,filesystem:/flyway/pension-co and
+# mounts this ConfigMap at /flyway/pension-co. The file is a Flyway SQL CALLBACK
+# (afterMigrate__*.sql), not a versioned migration:
+#   - it runs after every migrate (every boot), so it re-asserts the chart idempotently;
+#   - it writes no flyway_schema_history row and owns no version number, so a future shared
+#     V<n> migration can never collide with it (a per-instance V9000 file would make every later
+#     shared V<n> an out-of-order "resolved migration not applied" failure);
+#   - it DISABLES every non-PS account the shared migrations seeded (the bank's deposits, FX
+#     positions, lombard, …) so nothing can be posted to a bank account in the company's books,
+#     including accounts a future shared migration adds — the next boot disables them.
+# Consequence: every account this entity uses MUST carry the `PS` prefix and be declared here.
+#
+# LEGAL-REVIEW: REQUIRED BEFORE GO-LIVE. Account set, names and statement-line mapping are a
+# modest, plausible engineering draft, NOT reviewed by an accountant or the company's auditor.
+# Codes are this repository's own (PS + 4 digits); they do not reproduce the numbering of any
+# official směrná účtová osnova. Each account names the balance-sheet / P&L line it is intended to
+# roll up into so a reviewer can check the mapping line by line.
+#
+# Public sources the draft is based on:
+#   - Zákon č. 563/1991 Sb., o účetnictví (accounting act; double entry, statements).
+#   - Vyhláška č. 501/2002 Sb., kterou se provádějí některá ustanovení zákona č. 563/1991 Sb.,
+#     o účetnictví, pro účetní jednotky, které jsou bankami a jinými finančními institucemi —
+#     rozvaha (příloha 1) and výkaz zisku a ztráty (příloha 2) line items used below.
+#   - Zákon č. 427/2011 Sb., o doplňkovém penzijním spoření — the company's revenue is the
+#     úplata za obhospodařování and úplata za zhodnocení charged to the funds it manages; the
+#     participants' assets are in the funds (pension-fund-service), never in these books.
+#   - Zákon č. 586/1992 Sb., o daních z příjmů (income tax line).
+# All accounts are CZK: tax-reporting's CompanyBooksCalculator refuses a trial balance carrying
+# any other currency (returns are filed in CZK).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ledger-pension-co-chart-of-accounts
+  namespace: ledger-pension-co
+  labels:
+    app.kubernetes.io/name: ledger-service
+    app.kubernetes.io/part-of: ledger-pension-co
+data:
+  afterMigrate__pension_co_chart_of_accounts.sql: |
+    -- LEGAL-REVIEW: draft chart of accounts for a CZ penzijní společnost; see the ConfigMap header
+    -- for sources. Idempotent: runs after every Flyway migrate on the ledger-pension-co instance.
+    -- Fixed ids b0000000-0000-0000-0000-00000000<digits> mirror the a0000000-… convention of V29.
+    INSERT INTO gl_accounts (id, code, name, type, currency_code, is_leaf, is_enabled) VALUES
+      -- Rozvaha — aktiva
+      ('b0000000-0000-0000-0000-000000001010', 'PS1010', 'Pokladní hotovost', 'ASSET', 'CZK', true, true),
+      ('b0000000-0000-0000-0000-000000001110', 'PS1110', 'Pohledávky za bankami - běžné účty', 'ASSET', 'CZK', true, true),
+      ('b0000000-0000-0000-0000-000000001120', 'PS1120', 'Pohledávky za bankami - termínované vklady', 'ASSET', 'CZK', true, true),
+      ('b0000000-0000-0000-0000-000000001210', 'PS1210', 'Dluhové cenné papíry - státní dluhopisy (vlastní portfolio)', 'ASSET', 'CZK', true, true),
+      ('b0000000-0000-0000-0000-000000001310', 'PS1310', 'Ostatní aktiva - pohledávka za fondy: úplata za obhospodařování', 'ASSET', 'CZK', true, true),
+      ('b0000000-0000-0000-0000-000000001320', 'PS1320', 'Ostatní aktiva - pohledávka za fondy: úplata za zhodnocení', 'ASSET', 'CZK', true, true),
+      ('b0000000-0000-0000-0000-000000001410', 'PS1410', 'Dlouhodobý nehmotný majetek', 'ASSET', 'CZK', true, true),
+      ('b0000000-0000-0000-0000-000000001420', 'PS1420', 'Dlouhodobý hmotný majetek', 'ASSET', 'CZK', true, true),
+      ('b0000000-0000-0000-0000-000000001510', 'PS1510', 'Náklady a příjmy příštích období', 'ASSET', 'CZK', true, true),
+      -- Rozvaha — pasiva (cizí zdroje)
+      ('b0000000-0000-0000-0000-000000002110', 'PS2110', 'Ostatní pasiva - závazky vůči dodavatelům', 'LIABILITY', 'CZK', true, true),
+      ('b0000000-0000-0000-0000-000000002120', 'PS2120', 'Ostatní pasiva - závazky vůči zaměstnancům a institucím SZ a ZP', 'LIABILITY', 'CZK', true, true),
+      ('b0000000-0000-0000-0000-000000002130', 'PS2130', 'Ostatní pasiva - daňové závazky', 'LIABILITY', 'CZK', true, true),
+      ('b0000000-0000-0000-0000-000000002210', 'PS2210', 'Výnosy a výdaje příštích období', 'LIABILITY', 'CZK', true, true),
+      ('b0000000-0000-0000-0000-000000002310', 'PS2310', 'Rezervy', 'LIABILITY', 'CZK', true, true),
+      -- Rozvaha — pasiva (vlastní kapitál)
+      ('b0000000-0000-0000-0000-000000003010', 'PS3010', 'Základní kapitál', 'EQUITY', 'CZK', true, true),
+      ('b0000000-0000-0000-0000-000000003110', 'PS3110', 'Kapitálové fondy', 'EQUITY', 'CZK', true, true),
+      ('b0000000-0000-0000-0000-000000003210', 'PS3210', 'Rezervní fondy a ostatní fondy ze zisku', 'EQUITY', 'CZK', true, true),
+      ('b0000000-0000-0000-0000-000000003310', 'PS3310', 'Nerozdělený zisk nebo neuhrazená ztráta z předchozích období', 'EQUITY', 'CZK', true, true),
+      -- Výkaz zisku a ztráty — výnosy
+      ('b0000000-0000-0000-0000-000000006010', 'PS6010', 'Výnosy z úroků a podobné výnosy', 'INCOME', 'CZK', true, true),
+      ('b0000000-0000-0000-0000-000000006110', 'PS6110', 'Výnosy z poplatků a provizí - úplata za obhospodařování fondů', 'INCOME', 'CZK', true, true),
+      ('b0000000-0000-0000-0000-000000006120', 'PS6120', 'Výnosy z poplatků a provizí - úplata za zhodnocení', 'INCOME', 'CZK', true, true),
+      ('b0000000-0000-0000-0000-000000006210', 'PS6210', 'Zisk nebo ztráta z finančních operací', 'INCOME', 'CZK', true, true),
+      ('b0000000-0000-0000-0000-000000006310', 'PS6310', 'Ostatní provozní výnosy', 'INCOME', 'CZK', true, true),
+      -- Výkaz zisku a ztráty — náklady
+      ('b0000000-0000-0000-0000-000000005010', 'PS5010', 'Náklady na úroky a podobné náklady', 'EXPENSE', 'CZK', true, true),
+      ('b0000000-0000-0000-0000-000000005110', 'PS5110', 'Náklady na poplatky a provize - zprostředkovatelé', 'EXPENSE', 'CZK', true, true),
+      ('b0000000-0000-0000-0000-000000005210', 'PS5210', 'Správní náklady - náklady na zaměstnance', 'EXPENSE', 'CZK', true, true),
+      ('b0000000-0000-0000-0000-000000005220', 'PS5220', 'Správní náklady - ostatní správní náklady', 'EXPENSE', 'CZK', true, true),
+      ('b0000000-0000-0000-0000-000000005310', 'PS5310', 'Odpisy dlouhodobého hmotného a nehmotného majetku', 'EXPENSE', 'CZK', true, true),
+      ('b0000000-0000-0000-0000-000000005410', 'PS5410', 'Ostatní provozní náklady', 'EXPENSE', 'CZK', true, true),
+      ('b0000000-0000-0000-0000-000000005910', 'PS5910', 'Daň z příjmů', 'EXPENSE', 'CZK', true, true)
+    ON CONFLICT (code) DO NOTHING;
+
+    -- The shared image's migrations also seeded the BANK's accounts into this database. They are
+    -- not the company's accounts: keep the rows (shared migrations reference some by id) but make
+    -- them unpostable — LedgerService rejects a disabled account ("GL account <code> is disabled").
+    UPDATE gl_accounts SET is_enabled = false WHERE code NOT LIKE 'PS%' AND is_enabled;
