@@ -199,18 +199,87 @@ class CustomerPensionResourceTest {
         verify(exactly = 0) { upstream.get(any(), any()) }
     }
 
+    private val valuationUrl get() = "$pension/api/v1/pension/contracts/$contractId/valuation"
+
+    private val valuation = """
+        {"contractId":"$contractId","currency":"CZK","status":"VALUED","totalValue":125.00,"asOf":"2026-10-01",
+         "holdings":[{"fundId":"${UUID.randomUUID()}","units":100,"navStatus":"PUBLISHED","navPerUnit":1.25,
+                      "navDate":"2026-10-01","value":125.00,"currency":"CZK"}],
+         "pendingOrders":[{"orderId":"${UUID.randomUUID()}","fundId":"${UUID.randomUUID()}","type":"SUBSCRIBE",
+                           "amount":500,"units":null,"placedAt":"2026-10-02T09:00:00Z"}]}
+    """.trimIndent()
+
     @Test
-    fun `the overview drops the participant id and reads nothing but the contract`() {
+    fun `the overview drops the participant id and adds pension-service's valuation, never the fund API`() {
         val upstream = mockk<UpstreamClient>()
         every { upstream.get("$pension/api/v1/pension/contracts/$contractId", caller.toString()) } returns
             ok(contract(caller))
+        every { upstream.get(valuationUrl, caller.toString()) } returns ok(valuation)
 
         val body = json(resource(upstream).contract(contractId.toString()))
 
         assertThat(body["contractId"].asText()).isEqualTo(contractId.toString())
         assertThat(body.has("participantPartyId")).isFalse()
-        verify(exactly = 1) { upstream.get(any(), any()) }
+        assertThat(body["valuation"]["status"].asText()).isEqualTo("VALUED")
+        assertThat(body["valuation"]["totalValue"].asText()).isEqualTo("125")
+        assertThat(body["valuation"]["holdings"][0]["units"].asText()).isEqualTo("100")
+        assertThat(body["valuation"]["pendingOrders"][0].has("orderId")).isFalse()
+        verify(exactly = 2) { upstream.get(any(), caller.toString()) }
         verify(exactly = 0) { upstream.get(any()) }
+        verify(exactly = 0) { upstream.get(match { it.contains("pension-fund") }, any()) }
+    }
+
+    @Test
+    fun `a valuation pension-service cannot give is null, and the overview is still served`() {
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get("$pension/api/v1/pension/contracts/$contractId", caller.toString()) } returns
+            ok(contract(caller))
+        every { upstream.get(valuationUrl, caller.toString()) } returns ok("""{"code":"UNAVAILABLE"}""", 503)
+
+        val response = resource(upstream).contract(contractId.toString())
+
+        assertThat(response.status).isEqualTo(200)
+        assertThat(json(response)["valuation"].isNull).isTrue()
+    }
+
+    @Test
+    fun `another party's contract never reaches the valuation or the transactions`() {
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get("$pension/api/v1/pension/contracts/$contractId", caller.toString()) } returns
+            ok(contract(stranger))
+
+        assertThat(resource(upstream).contract(contractId.toString()).status).isEqualTo(404)
+        assertThat(resource(upstream).transactions(contractId.toString(), null, null).status).isEqualTo(404)
+        verify(exactly = 0) { upstream.get(match { it.contains("/valuation") || it.contains("/transactions") }, any()) }
+    }
+
+    @Test
+    fun `transactions are pension-service's page, projected, with the paging forwarded`() {
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get("$pension/api/v1/pension/contracts/$contractId", caller.toString()) } returns
+            ok(contract(caller))
+        every {
+            upstream.get("$pension/api/v1/pension/contracts/$contractId/transactions?page=1&size=20", caller.toString())
+        } returns ok(
+            """{"items":[{"id":"${UUID.randomUUID()}","fundId":"${UUID.randomUUID()}","type":"SUBSCRIBE",
+               "units":10,"amount":12.50,"navPerUnit":1.25,"pricedAt":"2026-09-01T16:00:00Z"}],
+               "page":1,"size":20,"total":21}""",
+        )
+
+        val body = json(resource(upstream).transactions(contractId.toString(), 1, 20))
+
+        assertThat(body["total"].asInt()).isEqualTo(21)
+        assertThat(body["items"][0]["amount"].asText()).isEqualTo("12.5")
+        assertThat(body["items"][0].has("id")).isFalse()
+    }
+
+    @Test
+    fun `out-of-range paging is a 400 before anything goes upstream`() {
+        val upstream = mockk<UpstreamClient>()
+
+        assertThat(resource(upstream).transactions(contractId.toString(), -1, null).status).isEqualTo(400)
+        assertThat(resource(upstream).transactions(contractId.toString(), 0, 201).status).isEqualTo(400)
+        verify(exactly = 0) { upstream.get(any(), any()) }
     }
 
     @Test

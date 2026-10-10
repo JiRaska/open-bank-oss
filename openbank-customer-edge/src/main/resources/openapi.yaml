@@ -502,8 +502,9 @@ paths:
       operationId: getPensionContract
       summary: Contract overview
       description: >-
-        An unknown, malformed or another party's id is the same 404. Unit holdings are not served
-        here: the unit register is reachable only by pension-service.
+        An unknown, malformed or another party's id is the same 404. `valuation` is
+        pension-service's participant valuation (GET /contracts/{id}/valuation); the edge never
+        reads the unit register itself, and a valuation pension-service cannot give is null.
       security:
         - customerOidc: [pension:read]
       parameters:
@@ -514,6 +515,30 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/PensionContract'}
+        '401': {description: Missing or invalid bearer token}
+        '404': {description: No such contract for the caller}
+        '502': {description: Pension service unavailable}
+  /pension/contracts/{contractId}/transactions:
+    get:
+      tags: [Pension]
+      operationId: listPensionUnitTransactions
+      summary: The contract's priced unit transactions
+      description: >-
+        Proxies pension-service GET /contracts/{id}/transactions after the ownership read; an
+        unknown, malformed or another party's id is the same 404.
+      security:
+        - customerOidc: [pension:read]
+      parameters:
+        - $ref: '#/components/parameters/PensionContractId'
+        - {name: page, in: query, required: false, schema: {type: integer, minimum: 0, default: 0}}
+        - {name: size, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+      responses:
+        '200':
+          description: One page of unit transactions
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PensionUnitTransactionPage'}
+        '400': {description: page or size out of range}
         '401': {description: Missing or invalid bearer token}
         '404': {description: No such contract for the caller}
         '502': {description: Pension service unavailable}
@@ -6691,6 +6716,46 @@ components:
         startDate: {type: [string, 'null'], format: date}
         createdAt: {type: [string, 'null'], format: date-time}
         updatedAt: {type: [string, 'null'], format: date-time}
+        valuation:
+          oneOf:
+            - {$ref: '#/components/schemas/PensionValuation'}
+            - {type: 'null'}
+    PensionValuation:
+      type: object
+      properties:
+        status: {type: string, enum: [VALUED, NO_HOLDINGS, NAV_NOT_PUBLISHED, CURRENCY_MISMATCH]}
+        currency: {type: string}
+        totalValue: {type: [string, 'null'], description: Decimal string; set only for VALUED and NO_HOLDINGS}
+        asOf: {type: [string, 'null'], format: date}
+        holdings:
+          type: array
+          items:
+            type: object
+            properties:
+              fundId: {type: string, format: uuid}
+              units: {type: [string, 'null']}
+              navStatus: {type: string, enum: [PUBLISHED, NOT_PUBLISHED]}
+              navPerUnit: {type: [string, 'null']}
+              navDate: {type: [string, 'null'], format: date}
+              value: {type: [string, 'null']}
+              currency: {type: string}
+        pendingOrders:
+          type: array
+          items:
+            type: object
+            properties:
+              fundId: {type: string, format: uuid}
+              type: {type: string, enum: [SUBSCRIBE, REDEEM, SWITCH_OUT, SWITCH_IN]}
+              amount: {type: [string, 'null']}
+              units: {type: [string, 'null']}
+              placedAt: {type: [string, 'null'], format: date-time}
+    PensionUnitTransactionPage:
+      type: object
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/PensionUnitTransaction'}}
+        page: {type: integer}
+        size: {type: integer}
+        total: {type: integer}
     PensionUnitTransaction:
       type: object
       properties:

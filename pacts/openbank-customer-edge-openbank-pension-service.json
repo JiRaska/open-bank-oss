@@ -822,6 +822,481 @@
         },
         "status": 201
       }
+    },
+    {
+      "description": "GET the contract's unit transactions",
+      "providerStates": [
+        {
+          "name": "the customer party's active pension contract holds priced fund units"
+        }
+      ],
+      "request": {
+        "headers": {
+          "X-Customer-Party-Id": "11111111-1111-4111-8111-111111111111"
+        },
+        "method": "GET",
+        "path": "/api/v1/pension/contracts/44444444-4444-4444-8444-444444444444/transactions",
+        "query": {
+          "page": [
+            "0"
+          ],
+          "size": [
+            "20"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "items": [
+            {
+              "amount": 12.5,
+              "fundId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+              "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+              "navPerUnit": 1.25,
+              "pricedAt": "2026-09-01T16:00:00Z",
+              "type": "SUBSCRIBE",
+              "units": 10
+            }
+          ],
+          "page": 0,
+          "size": 20,
+          "total": 1
+        },
+        "generators": {
+          "body": {
+            "$.items[*].fundId": {
+              "type": "Uuid"
+            },
+            "$.items[*].id": {
+              "type": "Uuid"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json; charset=UTF-8"
+        },
+        "matchingRules": {
+          "body": {
+            "$.items": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 1
+                }
+              ]
+            },
+            "$.items[*].amount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.items[*].fundId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.items[*].id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.items[*].navPerUnit": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.items[*].pricedAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.items[*].type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "SUBSCRIBE|REDEEM|SWITCH_OUT|SWITCH_IN|FEE"
+                }
+              ]
+            },
+            "$.items[*].units": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.page": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$.size": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$.total": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json(;\\s?charset=[\\w\\-]+)?"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET the participant valuation of the contract",
+      "providerStates": [
+        {
+          "name": "the customer party's active pension contract holds priced fund units"
+        }
+      ],
+      "request": {
+        "headers": {
+          "X-Customer-Party-Id": "11111111-1111-4111-8111-111111111111"
+        },
+        "method": "GET",
+        "path": "/api/v1/pension/contracts/44444444-4444-4444-8444-444444444444/valuation"
+      },
+      "response": {
+        "body": {
+          "asOf": "2000-01-31",
+          "contractId": "44444444-4444-4444-8444-444444444444",
+          "currency": "CZK",
+          "holdings": [
+            {
+              "currency": "CZK",
+              "fundId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+              "navPerUnit": 1.25,
+              "navStatus": "PUBLISHED",
+              "units": 100,
+              "value": 125
+            }
+          ],
+          "pendingOrders": [
+
+          ],
+          "status": "VALUED",
+          "totalValue": 125
+        },
+        "generators": {
+          "body": {
+            "$.asOf": {
+              "format": "yyyy-MM-dd",
+              "type": "Date"
+            },
+            "$.holdings[*].fundId": {
+              "type": "Uuid"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json; charset=UTF-8"
+        },
+        "matchingRules": {
+          "body": {
+            "$.asOf": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "format": "yyyy-MM-dd",
+                  "match": "date"
+                }
+              ]
+            },
+            "$.currency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.holdings": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 1
+                }
+              ]
+            },
+            "$.holdings[*].currency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.holdings[*].fundId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.holdings[*].navPerUnit": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.holdings[*].navStatus": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "PUBLISHED|NOT_PUBLISHED"
+                }
+              ]
+            },
+            "$.holdings[*].units": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.holdings[*].value": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.status": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "VALUED|NO_HOLDINGS|NAV_NOT_PUBLISHED|CURRENCY_MISMATCH"
+                }
+              ]
+            },
+            "$.totalValue": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json(;\\s?charset=[\\w\\-]+)?"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET the pension contract to prove the customer holds it",
+      "providerStates": [
+        {
+          "name": "the customer party's active pension contract holds priced fund units"
+        }
+      ],
+      "request": {
+        "headers": {
+          "X-Customer-Party-Id": "11111111-1111-4111-8111-111111111111"
+        },
+        "method": "GET",
+        "path": "/api/v1/pension/contracts/44444444-4444-4444-8444-444444444444"
+      },
+      "response": {
+        "body": {
+          "contractId": "44444444-4444-4444-8444-444444444444",
+          "createdAt": "2026-10-01T10:00:00Z",
+          "jurisdiction": "CZ",
+          "packVersion": 1,
+          "participantPartyId": "11111111-1111-4111-8111-111111111111",
+          "productLine": "DPS",
+          "providerType": "PENSION_COMPANY",
+          "schedule": {
+            "amount": 1000,
+            "currency": "CZK",
+            "frequency": "MONTHLY"
+          },
+          "status": "ACTIVE",
+          "updatedAt": "2026-10-01T10:00:00Z"
+        },
+        "headers": {
+          "Content-Type": "application/json; charset=UTF-8"
+        },
+        "matchingRules": {
+          "body": {
+            "$.contractId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.createdAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.jurisdiction": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.packVersion": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$.participantPartyId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.productLine": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "DPS|DIP"
+                }
+              ]
+            },
+            "$.providerType": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.schedule.amount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.schedule.currency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[A-Z]{3}"
+                }
+              ]
+            },
+            "$.schedule.frequency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.status": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "DRAFT|PENDING_ACTIVATION|ACTIVE|SUSPENDED|TERMINATING|PAID_OUT|TRANSFERRED_OUT|CLOSED"
+                }
+              ]
+            },
+            "$.updatedAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json(;\\s?charset=[\\w\\-]+)?"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
     }
   ],
   "metadata": {

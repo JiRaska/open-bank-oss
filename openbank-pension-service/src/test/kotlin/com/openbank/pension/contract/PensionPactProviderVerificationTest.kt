@@ -12,16 +12,24 @@ import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactFilter
 import au.com.dius.pact.provider.junitsupport.loader.PactFolder
+import com.openbank.pension.application.port.out.FundHolding
+import com.openbank.pension.application.port.out.FundHoldings
+import com.openbank.pension.application.port.out.FundUnitTransaction
+import com.openbank.pension.infrastructure.fund.InMemoryFundAdministrationAdapter
 import com.openbank.pension.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import jakarta.inject.Inject
 import org.eclipse.microprofile.config.ConfigProvider
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.extension.ExtendWith
+import java.math.BigDecimal
 import java.sql.DriverManager
+import java.time.Instant
+import java.time.LocalDate
 import java.util.UUID
 
 /**
@@ -47,6 +55,8 @@ import java.util.UUID
 @PactFilter("^(?!" + NEGATIVE_AUTH_STATE + "\$).*\$")
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
 class PensionPactProviderVerificationTest {
+    @Inject
+    lateinit var register: InMemoryFundAdministrationAdapter
 
     @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
     lateinit var testPort: String
@@ -74,6 +84,14 @@ class PensionPactProviderVerificationTest {
     fun noContract() {
         PactContractSeed.reset()
     }
+
+    /** The overview's valuation and the transactions page read the in-memory unit register (%test). */
+    @State(PactContractSeed.UNITS_STATE)
+    fun contractWithUnits() {
+        PactContractSeed.reset()
+        PactContractSeed.insertActive()
+        PactContractSeed.seedUnits(register)
+    }
 }
 
 /**
@@ -84,6 +102,31 @@ class PensionPactProviderVerificationTest {
 internal object PactContractSeed {
     val CONTRACT: UUID = UUID.fromString("44444444-4444-4444-8444-444444444444")
     val PARTY: UUID = UUID.fromString("11111111-1111-4111-8111-111111111111")
+    const val UNITS_STATE = "the customer party's active pension contract holds priced fund units"
+    private val FUND: UUID = UUID.fromString("66666666-6666-4666-8666-666666666666")
+
+    /** One priced holding and one priced subscription, no pending order: status VALUED. */
+    fun seedUnits(register: InMemoryFundAdministrationAdapter) {
+        val holding = FundHolding(
+            FUND,
+            BigDecimal("100"),
+            BigDecimal("1.25"),
+            LocalDate.parse("2026-10-01"),
+            BigDecimal("125.00"),
+            "CZK",
+        )
+        val subscription = FundUnitTransaction(
+            UUID.randomUUID(),
+            FUND,
+            "SUBSCRIBE",
+            BigDecimal("100"),
+            BigDecimal("125.00"),
+            BigDecimal("1.25"),
+            UUID.randomUUID(),
+            Instant.parse("2026-10-01T16:00:00Z"),
+        )
+        register.setHoldings(CONTRACT, FundHoldings(listOf(holding), emptyList()), listOf(subscription))
+    }
 
     private fun <T> jdbc(block: (java.sql.Connection) -> T): T {
         val url = ConfigProvider.getConfig().getValue("quarkus.datasource.jdbc.url", String::class.java)

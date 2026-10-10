@@ -244,13 +244,48 @@ class CustomerPensionResource(private val upstream: UpstreamClient, private val 
         )
     }
 
-    /** Contract overview. */
+    /**
+     * Contract overview, with the participant valuation pension-service serves for it. The edge
+     * never reads the unit register itself; a valuation pension-service cannot give right now is
+     * `valuation: null`, never a failed overview.
+     */
     @GET
     @Path("/contracts/{contractId}")
     @Authorize(action = "customer.pension.contract.read", resource = "")
     @Blocking
-    fun contract(@PathParam("contractId") id: String?): Response =
-        owned(id) { contract, _, _ -> EdgeJson.ok(PensionProjection.contract(contract)) }
+    fun contract(@PathParam("contractId") id: String?): Response = owned(id) { contract, party, contractId ->
+        val valuation = upstream.get("${api()}/contracts/$contractId/valuation", party.toString())
+            .takeIf { it.status == OK }
+            ?.let { EdgeJson.parse(it)?.takeIf { node -> node.isObject } }
+            ?.let(PensionProjection::valuation)
+        EdgeJson.ok(PensionProjection.contract(contract) + ("valuation" to valuation))
+    }
+
+    /** The contract's priced unit transactions, newest first, from pension-service (never the fund API). */
+    @GET
+    @Path("/contracts/{contractId}/transactions")
+    @Authorize(action = "customer.pension.contract.read", resource = "")
+    @Blocking
+    fun transactions(
+        @PathParam("contractId") id: String?,
+        @QueryParam("page") page: Int?,
+        @QueryParam("size") size: Int?,
+    ): Response {
+        val pageNumber = page ?: 0
+        val pageSize = size ?: DEFAULT_PAGE_SIZE
+        if (pageNumber < 0 || pageSize !in 1..MAX_PAGE_SIZE) {
+            return EdgeJson.error(BAD_REQUEST, "page must be >= 0 and size 1..$MAX_PAGE_SIZE")
+        }
+        return owned(id) { _, party, contractId ->
+            val response = upstream.get(
+                "${api()}/contracts/$contractId/transactions?page=$pageNumber&size=$pageSize",
+                party.toString(),
+            )
+            if (response.status != OK) return@owned failure(response)
+            EdgeJson.parse(response)?.takeIf { it.isObject }?.let { EdgeJson.ok(PensionProjection.transactions(it)) }
+                ?: badUpstream(SERVICE)
+        }
+    }
 
     /** Pause contributions (ACTIVE -> SUSPENDED). */
     @POST
@@ -626,6 +661,8 @@ class CustomerPensionResource(private val upstream: UpstreamClient, private val 
         const val SERVICE = "pension service"
         const val CATALOG = "product catalog"
         const val MAX_OFFERINGS = 50
+        const val DEFAULT_PAGE_SIZE = 50
+        const val MAX_PAGE_SIZE = 200
         const val MAX_KEY = 256
         const val OK = 200
         const val CREATED = 201

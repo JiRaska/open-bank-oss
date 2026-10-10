@@ -11,6 +11,7 @@ import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactBroker
+import com.openbank.pension.infrastructure.fund.InMemoryFundAdministrationAdapter
 import com.openbank.pension.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
@@ -41,6 +42,8 @@ import org.junit.jupiter.api.extension.ExtendWith
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
 @EnabledIfSystemProperty(named = "pactbroker.url", matches = ".+")
 class PensionPactBrokerProviderVerificationTest {
+    @Inject
+    lateinit var register: InMemoryFundAdministrationAdapter
 
     @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
     lateinit var testPort: String
@@ -72,6 +75,14 @@ class PensionPactBrokerProviderVerificationTest {
     @State("the customer party holds no pension contract")
     fun noContract() {
         PactContractSeed.reset()
+    }
+
+    /** The overview's valuation and the transactions page read the in-memory unit register (%test). */
+    @State(PactContractSeed.UNITS_STATE)
+    fun contractWithUnits() {
+        PactContractSeed.reset()
+        PactContractSeed.insertActive()
+        PactContractSeed.seedUnits(register)
     }
 
     @State(NEGATIVE_AUTH_STATE)

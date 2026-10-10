@@ -293,6 +293,55 @@ internal object PensionProjection {
         )
     }
 
+    /**
+     * pension-service's participant valuation (`GET /contracts/{id}/valuation`). Amounts as decimal
+     * strings, like every other money field here; `totalValue` is null unless the status says it is
+     * known (VALUED, or NO_HOLDINGS = zero).
+     */
+    fun valuation(v: JsonNode): Map<String, Any?> = mapOf(
+        "status" to v.text("status"),
+        "currency" to v.text("currency"),
+        "totalValue" to v.decimalString("totalValue"),
+        "asOf" to v.text("asOf"),
+        "holdings" to v.path("holdings").filter { it.isObject }.map {
+            mapOf(
+                "fundId" to it.text("fundId"),
+                "units" to it.decimalString("units"),
+                "navStatus" to it.text("navStatus"),
+                "navPerUnit" to it.decimalString("navPerUnit"),
+                "navDate" to it.text("navDate"),
+                "value" to it.decimalString("value"),
+                "currency" to it.text("currency"),
+            )
+        },
+        "pendingOrders" to v.path("pendingOrders").filter { it.isObject }.map {
+            mapOf(
+                "fundId" to it.text("fundId"),
+                "type" to it.text("type"),
+                "amount" to it.decimalString("amount"),
+                "units" to it.decimalString("units"),
+                "placedAt" to it.text("placedAt"),
+            )
+        },
+    )
+
+    /** One page of pension-service's priced unit transactions (`GET /contracts/{id}/transactions`). */
+    fun transactions(page: JsonNode): Map<String, Any?> = mapOf(
+        "items" to page.path("items").filter { it.isObject }.map {
+            mapOf(
+                "type" to it.text("type"),
+                "fundId" to it.text("fundId"),
+                "units" to it.decimalString("units"),
+                "amount" to it.decimalString("amount"),
+                "navPerUnit" to it.decimalString("navPerUnit"),
+                "pricedAt" to it.text("pricedAt"),
+            )
+        },
+        "page" to page.int("page"),
+        "size" to page.int("size"),
+        "total" to page.int("total"),
+    )
+
     private fun objectOf(node: JsonNode): Map<*, *>? =
         node.takeIf { it.isObject }?.let { EdgeJson.mapper.convertValue(it, Map::class.java) }
 

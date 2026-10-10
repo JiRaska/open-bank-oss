@@ -132,9 +132,65 @@ class CustomerEdgePensionPactConsumerTest {
         .body(newJsonArrayMinLike(1) { a -> a.`object` { c -> contract(c, "ACTIVE") } }.build())
         .toPact()
 
+    /** The overview: ownership read, then the participant valuation pension-service serves. */
     @Pact(consumer = "openbank-customer-edge", provider = "openbank-pension-service")
     fun readContract(builder: PactDslWithProvider): RequestResponsePact = builder
-        .given(ACTIVE_STATE).readById("ACTIVE")
+        .given(UNITS_STATE).readById("ACTIVE")
+        .given(UNITS_STATE)
+        .uponReceiving("GET the participant valuation of the contract")
+        .path("/api/v1/pension/contracts/$CONTRACT_ID/valuation")
+        .method("GET")
+        .headers(mapOf("X-Customer-Party-Id" to PARTY_ID))
+        .willRespondWith()
+        .status(200)
+        .body(
+            newJsonBody { v ->
+                v.stringValue("contractId", CONTRACT_ID)
+                v.stringMatcher("status", "VALUED|NO_HOLDINGS|NAV_NOT_PUBLISHED|CURRENCY_MISMATCH", "VALUED")
+                v.stringType("currency", "CZK")
+                v.numberType("totalValue", 125)
+                v.date("asOf", "yyyy-MM-dd")
+                v.minArrayLike("holdings", 1) { h ->
+                    h.uuid("fundId")
+                    h.numberType("units", 100)
+                    h.stringMatcher("navStatus", "PUBLISHED|NOT_PUBLISHED", "PUBLISHED")
+                    h.numberType("navPerUnit", 1.25)
+                    h.numberType("value", 125)
+                    h.stringType("currency", "CZK")
+                }
+                v.array("pendingOrders") { }
+            }.build(),
+        )
+        .toPact()
+
+    /** Unit transactions: ownership read, then pension-service's priced transaction page. */
+    @Pact(consumer = "openbank-customer-edge", provider = "openbank-pension-service")
+    fun readTransactions(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(UNITS_STATE).readById("ACTIVE")
+        .given(UNITS_STATE)
+        .uponReceiving("GET the contract's unit transactions")
+        .path("/api/v1/pension/contracts/$CONTRACT_ID/transactions")
+        .query("page=0&size=20")
+        .method("GET")
+        .headers(mapOf("X-Customer-Party-Id" to PARTY_ID))
+        .willRespondWith()
+        .status(200)
+        .body(
+            newJsonBody { p ->
+                p.minArrayLike("items", 1) { t ->
+                    t.uuid("id")
+                    t.uuid("fundId")
+                    t.stringMatcher("type", "SUBSCRIBE|REDEEM|SWITCH_OUT|SWITCH_IN|FEE", "SUBSCRIBE")
+                    t.numberType("units", 10)
+                    t.numberType("amount", 12.5)
+                    t.numberType("navPerUnit", 1.25)
+                    t.stringType("pricedAt", "2026-09-01T16:00:00Z")
+                }
+                p.integerType("page", 0)
+                p.integerType("size", 20)
+                p.integerType("total", 1)
+            }.build(),
+        )
         .toPact()
 
     /**
@@ -275,7 +331,17 @@ class CustomerEdgePensionPactConsumerTest {
     @Test
     @PactTestFor(pactMethod = "readContract")
     fun `reading an owned contract matches the provider`(mockServer: MockServer) {
-        assertThat(resource(mockServer).contract(CONTRACT_ID).status).isEqualTo(200)
+        val response = resource(mockServer).contract(CONTRACT_ID)
+        assertThat(response.status).isEqualTo(200)
+        assertThat(response.entity as String).contains("\"valuation\":{").contains("\"status\":\"VALUED\"")
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "readTransactions")
+    fun `reading the unit transactions matches the provider`(mockServer: MockServer) {
+        val response = resource(mockServer).transactions(CONTRACT_ID, 0, 20)
+        assertThat(response.status).isEqualTo(200)
+        assertThat(response.entity as String).contains("\"type\":\"SUBSCRIBE\"")
     }
 
     @Test
@@ -386,6 +452,7 @@ class CustomerEdgePensionPactConsumerTest {
         /** pension-service's answer to a non-conservative strategy with no assessment on file. */
         const val STRATEGY_REFUSAL = 403
         const val ACTIVE_STATE = "the customer party holds an active pension contract"
+        const val UNITS_STATE = "the customer party's active pension contract holds priced fund units"
         const val NO_CONTRACT_STATE = "the customer party holds no pension contract"
         const val NEGATIVE_AUTH_STATE = "no valid M2M identity is presented"
         const val STATUSES =
