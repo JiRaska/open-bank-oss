@@ -69,6 +69,11 @@ spec:
               value: /mnt/internal-tls/tls.key
             - name: QUARKUS_HTTP_SSL_PORT
               value: "8443"
+            # Verify the caller's client certificate against openbank-ca. The image requires one on
+            # 8443 (%prod quarkus.http.ssl.client-auth, build-time); tax-reporting presents
+            # tax-reporting-internal-tls.
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_TRUST_STORE_FILES
+              value: /mnt/internal-tls/ca.crt
             - name: QUARKUS_HTTP_INSECURE_REQUESTS
               value: enabled
             - name: QUARKUS_HTTP_SSL_PROTOCOLS

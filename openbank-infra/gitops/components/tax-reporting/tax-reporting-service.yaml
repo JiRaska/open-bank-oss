@@ -133,12 +133,10 @@ spec:
               value: https://pension-service.pension.svc:8443
             - name: PENSION_FUND_SERVICE_URL
               value: https://pension-fund-service.pension-fund.svc:8443
-            # Default TLS bucket (quarkus.tls.trust-store.*): every rest-client that names no
-            # tls-configuration-name trusts the fleet's private CA and nothing else. Hostname
-            # verification stays at its default (ON) — the providers' certificates carry their
-            # Service DNS names. Kafka keeps its own truststore; Keycloak is not called over TLS.
-            - name: QUARKUS_TLS_TRUST_STORE_PEM_CERTS
-              value: /mnt/internal-tls/ca.crt
+            # TLS for both calls is the named `internal-authority` bucket in application.yaml's
+            # %prod block (client certificate + openbank-ca trust, hostname verification on) — the
+            # providers' 8443 listeners require a client certificate, so a trust-only default bucket
+            # would fail the handshake. No QUARKUS_TLS_* env here: one source for the TLS shape.
             # OPA sidecar enforced from the first rollout: tax_reporting_rest_ext.rego grants
             # reads to real staff and the two filing state changes to a real operator; no
             # service-account reaches either by any rule.

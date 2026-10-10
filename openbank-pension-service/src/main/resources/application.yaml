@@ -131,3 +131,28 @@ authz:
       enabled: false
   authz:
     enforce: "false"
+
+"%prod":
+  quarkus:
+    http:
+      # East-west mTLS on the 8443 listener: tax-reporting is its only caller and presents
+      # tax-reporting-internal-tls (ADR-0337 pattern, as treasury). `quarkus.http.ssl.client-auth`
+      # is BUILD-TIME, so it lives in the file the image is built from; %prod only, because with
+      # quarkus.http.ssl.* set and no certificate Quarkus refuses to start in dev and @QuarkusTest.
+      # The manifest supplies the server certificate and the openbank-ca trust store
+      # (QUARKUS_HTTP_SSL_CERTIFICATE_TRUST_STORE_FILES) in the same change.
+      ssl:
+        client-auth: required
+      # Keep the plain-HTTP port: with client-auth REQUIRED Quarkus otherwise drops it, and the
+      # probes and existing in-cluster callers use it until their own HTTPS cutover.
+      insecure-requests: enabled
+      # Listener parity: with client-auth on, Quarkus also registers its mTLS mechanism, which
+      # turns a trusted client certificate into a SecurityIdentity of its own. The certificate is
+      # transport authentication only — /api/* accepts the OIDC bearer OPA decides on, on both
+      # listeners. ListenerAuthParityIT holds both to 401 without a bearer.
+      auth:
+        permission:
+          bearer-only:
+            paths: /api/*
+            policy: permit
+            auth-mechanism: bearer
