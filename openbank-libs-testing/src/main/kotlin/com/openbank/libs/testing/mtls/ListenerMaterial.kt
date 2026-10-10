@@ -4,8 +4,8 @@
 
 package com.openbank.libs.testing.mtls
 
-import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import com.sun.net.httpserver.HttpServer
+import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.nio.file.Files
@@ -69,9 +69,19 @@ class ListenerMaterial : QuarkusTestResourceLifecycleManager {
         val http = HttpServer.create(InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0)
         val realm = "http://127.0.0.1:${http.address.port}/realms/listener-parity"
         val enc = Base64.getUrlEncoder().withoutPadding()
-        fun unsigned(n: java.math.BigInteger) = n.toByteArray().let { if (it[0].toInt() == 0) it.copyOfRange(1, it.size) else it }
+        fun unsigned(n: java.math.BigInteger) = n.toByteArray().let {
+            if (it[0].toInt() ==
+                0
+            ) {
+                it.copyOfRange(1, it.size)
+            } else {
+                it
+            }
+        }
         val jwks = """{"keys":[{"kty":"RSA","kid":"$KID","use":"sig","alg":"RS256",""" +
-            """"n":"${enc.encodeToString(unsigned(key.modulus))}","e":"${enc.encodeToString(unsigned(key.publicExponent))}"}]}"""
+            """"n":"${enc.encodeToString(
+                unsigned(key.modulus),
+            )}","e":"${enc.encodeToString(unsigned(key.publicExponent))}"}]}"""
         val discovery = """{"issuer":"$realm","jwks_uri":"$realm/protocol/openid-connect/certs",""" +
             """"token_endpoint":"$realm/protocol/openid-connect/token","authorization_endpoint":"$realm/protocol/openid-connect/auth"}"""
         fun serve(path: String, body: String) = http.createContext(path) { ex ->
@@ -132,7 +142,9 @@ class ListenerMaterial : QuarkusTestResourceLifecycleManager {
             val header = """{"alg":"RS256","typ":"JWT","kid":"$KID"}"""
             val rolesJson = roles.joinToString(",") { "\"$it\"" }
             val claims =
-                """{"iss":"${System.getProperty(ISSUER_PROPERTY)}","sub":"listener-parity-test","preferred_username":"listener-parity-test",""" +
+                """{"iss":"${System.getProperty(
+                    ISSUER_PROPERTY,
+                )}","sub":"listener-parity-test","preferred_username":"listener-parity-test",""" +
                     """"iat":$now,"exp":${now + TOKEN_TTL_SECONDS},"realm_access":{"roles":[$rolesJson]},"groups":[$rolesJson]}"""
             val enc = Base64.getUrlEncoder().withoutPadding()
             val signingInput = enc.encodeToString(header.toByteArray()) + "." + enc.encodeToString(claims.toByteArray())
