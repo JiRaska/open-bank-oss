@@ -48,6 +48,12 @@ quarkus:
       url: ${PENSION_FUND_SERVICE_URL:http://localhost:8162}
       connect-timeout: 2000
       read-timeout: 10000
+    # ADR-0337: the PENSION COMPANY's own ledger-service instance — never the bank's ledger. The
+    # configKey is the provider module's; the URL names the company's deployment.
+    ledger-service:
+      url: ${PENSION_COMPANY_LEDGER_URL:http://localhost:8099}
+      connect-timeout: 2000
+      read-timeout: 10000
 
 mp:
   messaging:
@@ -75,6 +81,9 @@ openbank:
     catalogues: statutory-returns/cz/pension-cnb.v1.json
     company-id: company
     deadline-check-every: 1h
+    # ADR-0337: the first day of the pension company's books. Unset = every company-books return
+    # is refused (503), because a balance summed from an unknown start cannot be shown complete.
+    # company-books.opened: 2025-01-01
   build:
     time: "${BUILD_TIME:unknown}"
   git:

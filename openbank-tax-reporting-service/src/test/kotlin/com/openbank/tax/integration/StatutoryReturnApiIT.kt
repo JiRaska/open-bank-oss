@@ -83,13 +83,13 @@ class StatutoryReturnApiIT {
     @Test
     @TestSecurity(user = "operator", roles = ["ROLE_OPERATOR"])
     fun `operator reaches assembly but unsourced or unreachable pension figures fail closed`() {
-        // The company's own balance sheet has no source system: refused by name, never zero-filled.
+        // The company's own books are not configured here (ADR-0337): refused by name, never zero-filled.
         Given {
             contentType("application/json")
             body(assembleBody)
         } When { post("$path/assemble") } Then {
             statusCode(503)
-            body("error", containsString("no source system"))
+            body("error", containsString("company-books.opened"))
         }
         // PSP 31-04 is sourced from pension-service, which is not running in this test: 503, not 500.
         Given {

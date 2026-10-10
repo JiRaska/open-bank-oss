@@ -18,3 +18,8 @@ internal object NoCorporateFacts : CorporateFactsPort {
         periodEnd: LocalDate,
     ): Map<CorporateFact, BigDecimal> = emptyMap()
 }
+
+/** No pact interaction reads the pension company's ledger. */
+internal val NoCompanyBooks = com.openbank.tax.infrastructure.returns.pension.CompanyBooksPort {
+    error("no pact interaction reads the pension company's books")
+}

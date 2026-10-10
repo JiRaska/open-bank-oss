@@ -65,6 +65,7 @@ class RestPensionReportingSources(
 class PensionReturnDataAdapter(
     private val sources: PensionReportingSources,
     private val corporate: CorporateFactsPort,
+    private val companyBooks: CompanyBooksPort,
 ) : ReturnDataPort {
     override val available: Boolean = true
 
@@ -83,6 +84,7 @@ class PensionReturnDataAdapter(
         val from = periodStart(period)
         val to = period.endDate
         if (definition.code == "PSP31-04") return companyFlows(sources.participants(from, to))
+        if (definition.code in COMPANY_BOOK_RETURNS) return companyBooks(definition.code, companyBooks.figures(to))
         CORPORATE_RETURNS[definition.code]?.let { needed ->
             return corporateReturn(definition.code, entityId, needed, from, to)
         }
@@ -145,6 +147,20 @@ class PensionReturnDataAdapter(
             }
             else -> throw ReturnDataUnavailableException("$code: no corporate-register mapping")
         }
+    }
+
+    /** The company's own balance sheet and P&L, from its ledger's frozen closes (ADR-0337). */
+    private fun companyBooks(code: String, b: CompanyBookFigures): Map<String, BigDecimal> = when (code) {
+        "PSP20-12-PS" -> mapOf(
+            "income_ytd" to b.incomeYtd,
+            "expenses_ytd" to b.expensesYtd,
+            "profit_loss_ytd" to b.incomeYtd - b.expensesYtd,
+        )
+        else -> mapOf(
+            "total_assets" to b.totalAssets,
+            "total_liabilities" to b.totalLiabilities,
+            "total_equity" to b.totalEquity,
+        )
     }
 
     private suspend fun fund(entityId: String, from: LocalDate, to: LocalDate): FundPeriodFiguresDto {
@@ -252,17 +268,17 @@ class PensionReturnDataAdapter(
         )
 
         /**
-         * Returns no service in this platform owns the figures for. The company's OWN balance
-         * sheet, P&L, own portfolio, capital, organisation and dividends live in its accounting
-         * system, not in either pension service (fund assets are segregated from the company's by
-         * law, ADR-0334 §1).
+         * Returns no service in this platform owns the figures for. The company's own balance
+         * sheet and P&L come from its own ledger (ADR-0337) and its capital, organisation and
+         * dividends from the corporate register; its own investment holdings have no source.
          */
         val UNSOURCED: Map<String, String> = mapOf(
-            "PSP10-12-PS" to "the pension company's own balance sheet has no source system in this platform",
-            "PSP20-12-PS" to "the pension company's own P&L has no source system in this platform",
-            "PSP34-12-PS" to "the pension company's own portfolio has no source system in this platform",
-            "PEF12-04-PS" to "the pension company's own balance sheet has no source system in this platform",
+            "PSP34-12-PS" to "the pension company's own holdings (instruments and their count) are not a ledger " +
+                "fact and no position source exists for the company's own investments (ADR-0337)",
         )
+
+        /** Company returns read from the pension company's own ledger (ADR-0337). */
+        private val COMPANY_BOOK_RETURNS = setOf("PSP10-12-PS", "PSP20-12-PS", "PEF12-04-PS")
 
         /** Company returns read from the corporate register: return code -> the facts it needs. */
         private val CORPORATE_RETURNS: Map<String, List<CorporateFact>> = mapOf(
