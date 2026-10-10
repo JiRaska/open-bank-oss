@@ -15,9 +15,11 @@ import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
+import jakarta.inject.Inject
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.util.UUID
+import javax.sql.DataSource
 
 /**
  * GDPR Art. 15 / Art. 20 must be reachable by the only channel a retail customer has (#8421).
@@ -54,36 +56,24 @@ class GdprSubjectAccessViaEdgeIT {
 
     private lateinit var subjectId: String
 
-    /**
-     * A real row, not a random UUID: `exportPartyData` throws `PartyNotFoundException` (404) before
-     * any of this matters, and a 404 would let a still-broken 403 pass as "not 200" in only one
-     * direction. kyc-service and card-issuance-service are absent here and
-     * `GdprAggregationAdapter` degrades an unreachable hop to null/empty, so the export itself is
-     * deterministic.
-     */
+    @Inject
+    lateinit var dataSource: DataSource
+
+    // Prepare a real row independently of the caller whose export permission is under test.
     @BeforeEach
-    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
     fun createSubject() {
-        val payload = """
-            {
-              "partyType": "INDIVIDUAL",
-              "legalName": "Art Fifteen",
-              "email": "art.fifteen.${UUID.randomUUID()}@openbank.test",
-              "phone": "+420777111333",
-              "dateOfBirth": "1985-06-15",
-              "nationality": "CZE"
+        val id = UUID.randomUUID()
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "INSERT INTO parties (id, party_id, party_type, legal_name, email) " +
+                    "VALUES (nextval('parties_seq'), ?, 'INDIVIDUAL', 'Art Fifteen', ?)",
+            ).use { statement ->
+                statement.setObject(1, id)
+                statement.setString(2, "art.fifteen.$id@openbank.test")
+                check(statement.executeUpdate() == 1)
             }
-        """.trimIndent()
-        val response = Given {
-            contentType("application/json")
-            header("Idempotency-Key", UUID.randomUUID().toString())
-            body(payload)
-        } When {
-            post("/api/v1/parties")
-        } Then {
-            statusCode(201)
         }
-        subjectId = response.extract().body().jsonPath().getString("id")
+        subjectId = id.toString()
     }
 
     @Test
