@@ -30,9 +30,11 @@ class AdminUiImageInputsTest(unittest.TestCase):
     def test_every_host_collector_output_is_allowlisted(self):
         root = Path(__file__).resolve().parents[2]
         producer = (root / "openbank-infra/scripts/build-push-admin-ui.sh").read_text()
+        dockerfile = (root / "openbank-admin-ui/Dockerfile").read_text()
         outputs = set(re.findall(r'^\w+_OUT="openbank-admin-ui/([\w-]+\.json)"', producer, re.M))
         self.assertGreaterEqual(len(outputs), 15)
         self.assertEqual(outputs - set(freeze_mod.GENERATED_ROOT_JSON), set())
+        self.assertIn("for f in /repo/admin-ui-sbom-inputs/openbank-*/bom.json", dockerfile)
 
     def test_frozen_context_and_digest_binding(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -48,8 +50,9 @@ class AdminUiImageInputsTest(unittest.TestCase):
             changelog.parent.mkdir()
             dockerfile.write_text("FROM scratch\n")
             changelog.write_text("old release\n")
+            (repo / ".gitignore").write_text("**/build/\n")
             subprocess.run(["git", "-C", str(repo), "add", "--", "openbank-admin-ui/Dockerfile",
-                            "openbank-notification-service/CHANGELOG.md"], check=True)
+                            "openbank-notification-service/CHANGELOG.md", ".gitignore"], check=True)
             subprocess.run(["git", "-C", str(repo), "-c", "commit.gpgsign=false", "commit", "-qm", "fixture"], check=True)
             source = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
                                     check=True, capture_output=True, text=True).stdout.strip()
@@ -58,6 +61,9 @@ class AdminUiImageInputsTest(unittest.TestCase):
             generated_evidence = repo / "openbank-admin-ui/client-test-evidence/run.json"
             generated_evidence.parent.mkdir()
             generated_evidence.write_text('{"completed":true}\n')
+            staged_sbom = repo / "openbank-notification-service/build/reports/bom.json"
+            staged_sbom.parent.mkdir(parents=True)
+            staged_sbom.write_text('{"bomFormat":"CycloneDX","version":1}\n')
             for name in ("governance.json", "cost-footprints.json", "cluster-topology.json"):
                 (repo / "openbank-admin-ui" / name).write_text('{"generated":true}\n')
             context = base / "context"
@@ -70,11 +76,21 @@ class AdminUiImageInputsTest(unittest.TestCase):
                              '{"completed":true}\n')
             self.assertTrue(any(item["path"] == "openbank-admin-ui/client-test-evidence/run.json"
                                 for item in inventory))
+            frozen_sbom = context / "admin-ui-sbom-inputs/openbank-notification-service/bom.json"
+            self.assertEqual(frozen_sbom.read_bytes(), staged_sbom.read_bytes())
+            sbom_entry = next(item for item in inventory if item["path"] ==
+                              "admin-ui-sbom-inputs/openbank-notification-service/bom.json")
+            self.assertEqual(sbom_entry["sha256"], hashlib.sha256(staged_sbom.read_bytes()).hexdigest())
+            self.assertEqual(subprocess.run(["git", "-C", str(repo), "ls-files", "--others",
+                                             "--exclude-standard", "--", str(staged_sbom.relative_to(repo))],
+                                            check=True, capture_output=True).stdout, b"")
             for name in ("governance.json", "cost-footprints.json", "cluster-topology.json"):
                 self.assertTrue(any(item["path"] == "openbank-admin-ui/" + name for item in inventory))
                 self.assertTrue((context / "openbank-admin-ui" / name).is_file())
             changelog.write_text("new release\n")
             self.assertEqual((context / "openbank-notification-service/CHANGELOG.md").read_text(), "old release\n")
+            staged_sbom.write_text('{"bomFormat":"CycloneDX","version":2}\n')
+            self.assertEqual(frozen_sbom.read_bytes(), b'{"bomFormat":"CycloneDX","version":1}\n')
             with self.assertRaisesRegex(ValueError, "tracked source input differs"):
                 freeze_mod.freeze(repo, base / "context2", base / "manifest2.json")
             blobs, object_format = freeze_mod.committed_blobs(repo)
@@ -83,6 +99,9 @@ class AdminUiImageInputsTest(unittest.TestCase):
                     Path("openbank-notification-service/CHANGELOG.md"), b"new release\n",
                     blobs, object_format)
             changelog.write_text("old release\n")
+            freeze_mod.freeze(repo, base / "context2", base / "manifest2.json")
+            self.assertNotEqual(manifest_path.read_bytes(), (base / "manifest2.json").read_bytes())
+            staged_sbom.write_text('{"bomFormat":"CycloneDX","version":1}\n')
 
             tag = "sandbox-" + source[:8]
             image = "example.invalid/openbank-admin-ui"
@@ -108,6 +127,11 @@ class AdminUiImageInputsTest(unittest.TestCase):
             (repo / "untracked-source.ts").write_text("unexpected\n")
             with self.assertRaisesRegex(ValueError, "unknown untracked"):
                 freeze_mod.freeze(repo, base / "context3", base / "manifest3.json")
+            (repo / "untracked-source.ts").unlink()
+            staged_sbom.unlink()
+            staged_sbom.symlink_to(changelog)
+            with self.assertRaisesRegex(ValueError, "staged SBOM must not be a symlink"):
+                freeze_mod.freeze(repo, base / "context4", base / "manifest4.json")
 
     def test_hostile_registry_is_refused_before_credentials_or_docker(self):
         with patch.dict("os.environ", {"ADMIN_UI_IMAGE_VERIFY_REGISTRY":

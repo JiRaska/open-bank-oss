@@ -23,6 +23,7 @@ GENERATED_DIRS = (
     "openbank-admin-ui/test-intelligence-history",
     "openbank-admin-ui/test-run-history",
 )
+FROZEN_SBOM_DIR = Path("admin-ui-sbom-inputs")
 GENERATED_ROOT_JSON = (
     "ai-governance-snapshot.json", "app-status.json", "card-capabilities.json",
     "catalog.json", "cluster-topology.json", "cost-footprints.json",
@@ -45,6 +46,13 @@ def paths(root: Path) -> set[Path]:
         directory = root / name
         if directory.exists():
             found.update(p.relative_to(root) for p in directory.rglob("*") if p.is_file())
+    # The deploy workflow stages these gitignored reports after checkout. The
+    # Dockerfile consumes them, so their exact bytes must enter the inventory.
+    for sbom in root.glob("openbank-*/build/reports/bom.json"):
+        if sbom.is_symlink() or not sbom.resolve().is_relative_to(root.resolve()):
+            raise ValueError("staged SBOM must not be a symlink")
+        if sbom.is_file():
+            found.add(sbom.relative_to(root))
     others = subprocess.run(["git", "ls-files", "--others", "--exclude-standard", "-z"],
                             cwd=root, check=True, capture_output=True)
     non_inputs = (".app-src/", "sbom-downloads/")
@@ -54,6 +62,12 @@ def paths(root: Path) -> set[Path]:
     if unknown:
         raise ValueError(f"{len(unknown)} unknown untracked build input(s)")
     return found
+
+
+def is_staged_sbom(relative: Path) -> bool:
+    parts = relative.parts
+    return (len(parts) == 4 and parts[0].startswith("openbank-")
+            and parts[1:] == ("build", "reports", "bom.json"))
 
 
 def require_clean_source_inputs(root: Path) -> None:
@@ -97,6 +111,8 @@ def require_committed_content(relative: Path, content: bytes, blobs: dict[Path, 
     if expected is None and any(relative.is_relative_to(Path(directory))
                                 and relative != Path(directory) for directory in GENERATED_DIRS):
         return
+    if expected is None and is_staged_sbom(relative):
+        return
     digest = hashlib.new(object_format, b"blob " + str(len(content)).encode() + b"\0" + content).hexdigest()
     if expected != digest:
         raise ValueError(f"frozen tracked input differs from source commit: {relative}")
@@ -107,31 +123,35 @@ def freeze(root: Path, output: Path, manifest: Path) -> dict:
         raise ValueError("output and manifest must not already exist")
     if output.is_relative_to(root) or manifest.is_relative_to(root):
         raise ValueError("frozen context and manifest must be outside the source tree")
+    if (root / FROZEN_SBOM_DIR).exists():
+        raise ValueError("reserved frozen SBOM input path exists in source tree")
     require_clean_source_inputs(root)
     blobs, object_format = committed_blobs(root)
     output.mkdir(parents=True)
     entries = []
     for relative in sorted(paths(root), key=str):
         source = root / relative
+        frozen_relative = (FROZEN_SBOM_DIR / relative.parts[0] / "bom.json"
+                           if is_staged_sbom(relative) else relative)
         if source.is_symlink():
             link = os.readlink(source)
             resolved = (source.parent / link).resolve()
             if not resolved.is_relative_to(root):
                 raise ValueError(f"external symlink in build context: {relative}")
             require_committed_content(relative, os.fsencode(link), blobs, object_format)
-            target = output / relative
+            target = output / frozen_relative
             target.parent.mkdir(parents=True, exist_ok=True)
             target.symlink_to(link)
-            entries.append({"path": relative.as_posix(), "symlink": link})
+            entries.append({"path": frozen_relative.as_posix(), "symlink": link})
             continue
         if not source.is_file():
             raise ValueError(f"missing tracked build input: {relative}")
-        target = output / relative
+        target = output / frozen_relative
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
         content = target.read_bytes()
         require_committed_content(relative, content, blobs, object_format)
-        entries.append({"path": relative.as_posix(), "sha256": hashlib.sha256(content).hexdigest(),
+        entries.append({"path": frozen_relative.as_posix(), "sha256": hashlib.sha256(content).hexdigest(),
                         "size": len(content), "executable": bool(target.stat().st_mode & 0o111)})
     require_clean_source_inputs(root)
     source_sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, check=True,
