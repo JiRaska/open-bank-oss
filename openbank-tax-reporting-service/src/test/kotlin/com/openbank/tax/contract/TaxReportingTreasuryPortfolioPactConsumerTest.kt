@@ -15,6 +15,7 @@ import au.com.dius.pact.core.model.annotations.Pact
 import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
+import com.openbank.tax.application.port.out.ReturnDataUnavailableException
 import com.openbank.tax.domain.returns.Periodicity
 import com.openbank.tax.domain.returns.ReportingPeriod
 import com.openbank.tax.infrastructure.returns.CatalogueParser
@@ -74,6 +75,18 @@ class TaxReportingTreasuryPortfolioPactConsumerTest {
         .toPact()
 
     @Pact(consumer = CONSUMER, provider = PROVIDER)
+    fun noSnapshotPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(NO_SNAPSHOT_STATE)
+        .uponReceiving("GET the pension company's portfolio for a year end with no custodian statement")
+        .path(EXPECTED_PATH)
+        .query("date=2026-12-31")
+        .method("GET")
+        .willRespondWith()
+        .status(409)
+        .body(newJsonBody { o -> o.stringValue("error", "PORTFOLIO_SNAPSHOT_MISSING") }.build())
+        .toPact()
+
+    @Pact(consumer = CONSUMER, provider = PROVIDER)
     fun unauthenticatedPact(builder: PactDslWithProvider): RequestResponsePact = builder
         .given(NEGATIVE_AUTH_STATE)
         .uponReceiving("GET the pension company's portfolio with no M2M identity is refused")
@@ -108,6 +121,20 @@ class TaxReportingTreasuryPortfolioPactConsumerTest {
     }
 
     @Test
+    @PactTestFor(pactMethod = "noSnapshotPact")
+    fun `no snapshot is a 409 that the adapter turns into a named 503 reason, never an empty return`(
+        mockServer: MockServer,
+    ) {
+        val response = given().baseUri(mockServer.getUrl()).queryParam("date", "2026-12-31")
+            .get(clientPath()).then().extract()
+        assertThat(response.statusCode()).isEqualTo(409)
+        assertThat(response.path<String>("error")).isEqualTo("PORTFOLIO_SNAPSHOT_MISSING")
+        val refusal = TreasuryCompanyPortfolio.unavailable(response.statusCode(), LocalDate.parse("2026-12-31"))
+        assertThat(refusal).isInstanceOf(ReturnDataUnavailableException::class.java)
+        assertThat(refusal.message).startsWith("no custodian statement for 2026-12-31")
+    }
+
+    @Test
     @PactTestFor(pactMethod = "unauthenticatedPact")
     fun `a read with no identity is refused with 401`(mockServer: MockServer) {
         given().baseUri(mockServer.getUrl()).queryParam("date", "2026-12-31")
@@ -126,6 +153,9 @@ class TaxReportingTreasuryPortfolioPactConsumerTest {
         const val CONSUMER = "openbank-tax-reporting-service"
         const val PROVIDER = "openbank-treasury-service"
         const val NEGATIVE_AUTH_STATE = "no valid M2M identity is presented"
+
+        /** Must match TreasuryPactStates.NO_SNAPSHOT_STATE (treasury-service, #12506). */
+        const val NO_SNAPSHOT_STATE = "no portfolio snapshot exists for 2026-12-31"
 
         /** Must match the treasury-service @PactFolder provider state (feat/treasury-pension-co-portfolio). */
         const val STATE = "the pension company holds investment positions at 2026-12-31"
