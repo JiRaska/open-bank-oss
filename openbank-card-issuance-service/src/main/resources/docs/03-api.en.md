@@ -193,3 +193,5 @@ Each Kafka record carries `ce-id` (= event id), `idempotency-key` (= event id) a
 ## Card read caller identity
 
 The single-card read admits the delegation service account, while the party-card list admits the party service account. Both require a verified JWT whose `azp` identifies the named client and whose subject and Keycloak service-account username agree. Staff read roles are accepted only for verified interactive user sessions. A different service holding a staff role cannot use that role to bypass the named caller check.
+
+Card-read HTTP test fixtures provide interactive staff JWT claims together with their roles, so tests exercise the same caller binding as the resource guard.
