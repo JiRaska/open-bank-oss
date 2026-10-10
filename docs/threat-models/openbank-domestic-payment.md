@@ -119,6 +119,8 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `domestic_payment_outbox` kept every SENT row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; its v1 repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`. PENDING, FAILED, DISPATCHING and DEAD rows are never touched. Information disclosure: shrinks the window in which a database read (replica, backup, operator query) exposes past event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now comes from the broker or audit-service, not this table.
+
 - **2026-09-30** — Fraud verdict mapping (#4403 prerequisite, PR #11614). `FraudScoringAdapter.mapVerdict`
   folded any verdict outside `ALLOW | CHALLENGE | REVIEW | DECLINE` — including a blank one — into
   a non-synthetic `ALLOW`, so an unreadable answer from fraud-service was indistinguishable from a
@@ -621,8 +623,11 @@ not change any existing request's outcome until explicitly flipped.
   the replay fingerprint, pinned byte-identical to the pre-Money digest; the settlement amount, which
   is now the Money amount itself (the removed `LEDGER_POSTING` rescale was a no-op for every amount
   Money can hold). Reads, events and the confirmation document serialise at the currency scale
-  (`100.50`, not `100.500000`), numerically equal. **Not changed here:** no CZK-only rule exists today;
-  any ISO 4217 currency with a minor unit is accepted — tracked in #12059. Rollback: revert the commit.
+  (`100.50`, not `100.500000`), numerically equal. **Follow-up #12059:**
+  `DomesticSchemeRules.requireSchemeCurrency` now refuses every valid non-CZK amount before the
+  Idempotency-Key is bound, including technical-account submissions. The rejected currency is not
+  echoed to the caller; a corrected CZK retry remains possible. Rollback: revert the rule and its
+  documented API contract together.
 
 ## 2026-10-04 — Staged Envoy Gateway public edge (ADR-0324 Phase 4)
 

@@ -30,8 +30,14 @@
       },
       "response": {
         "body": {
+          "amount": 500.0,
+          "currencyCode": "EUR",
           "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
-          "status": "COMPLETED"
+          "instructionType": "ONE_OFF",
+          "rail": "SEPA_INST",
+          "sourceAccountId": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+          "status": "COMPLETED",
+          "type": "DEBIT"
         },
         "generators": {
           "body": {
@@ -45,6 +51,14 @@
         },
         "matchingRules": {
           "body": {
+            "$.amount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
             "$.id": {
               "combine": "AND",
               "matchers": [
@@ -57,6 +71,35 @@
           }
         },
         "status": 201
+      }
+    },
+    {
+      "description": "POST initiate SCT Inst settlement with no credentials",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "body": {
+          "amount": 500.00,
+          "currencyCode": "EUR",
+          "description": "SCT Inst settlement pact-e2e-001",
+          "idempotencyKey": "sct-inst-settlement-pact-001",
+          "instructionType": "ONE_OFF",
+          "rail": "SEPA_INST",
+          "sourceAccountId": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+          "type": "DEBIT",
+          "valueDate": "2026-01-20"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/transactions"
+      },
+      "response": {
+        "status": 401
       }
     }
   ],
