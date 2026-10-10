@@ -2,7 +2,8 @@ openapi: 3.1.0
 info:
   title: OpenBank Pension Fund Service API
   # 1.0.0: first contract (ADR-0334 slice S4, issue #12350).
-  version: 1.0.0
+  # 1.1.0: period-end reporting read model for the ČNB returns (#12425) — additive.
+  version: 1.1.0
   description: |
     Provider side of the pension platform (ADR-0334 §1): segregated funds, fund strategies with
     lifecycle glide paths, the unit register and NAV.
@@ -20,6 +21,7 @@ tags:
   - name: NAV
   - name: Strategies
   - name: Unit register
+  - name: Reporting
 security:
   - bearerAuth: []
 
@@ -105,6 +107,27 @@ paths:
         '200':
           description: NAVs
           content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Nav' } } } }
+  /api/v1/reporting/funds/{fundId}/period-figures:
+    parameters: [ { $ref: '#/components/parameters/FundId' } ]
+    get:
+      tags: [Reporting]
+      operationId: getFundPeriodFigures
+      summary: Period-end fund aggregates for regulatory returns (#12425)
+      description: |
+        Balance sheet at the closing NAV, year-to-date P&L, unit roll-forward, portfolio at the
+        closing NAV, flows and participant COUNTS for one period. Aggregate only — no contract id
+        or participant attribute is returned. Derived from PUBLISHED NAVs and the transactions
+        priced at them, bucketed by valuation date, so a closed period answers the same way every
+        time; `fingerprint` changes only when the inputs do (e.g. a NAV correction).
+        Served to staff and to tax-reporting-service's own client only.
+      parameters:
+        - { name: periodStart, in: query, required: true, schema: { type: string, format: date } }
+        - { name: periodEnd, in: query, required: true, schema: { type: string, format: date } }
+      responses:
+        '200': { description: The period figures, content: { application/json: { schema: { $ref: '#/components/schemas/FundPeriodFigures' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: No published NAV backs the period — not reportable (never zeroes), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /api/v1/navs/{navId}:
     parameters: [ { $ref: '#/components/parameters/NavId' } ]
     get:
@@ -516,3 +539,70 @@ components:
         contractId: { type: string, format: uuid }
         holdings: { type: array, items: { $ref: '#/components/schemas/HoldingValuation' } }
         pendingOrders: { type: array, items: { $ref: '#/components/schemas/UnitOrder' } }
+    FundPeriodFigures:
+      type: object
+      required: [fundId, currency, periodStart, periodEnd, closingNavId, closingValuationDate, balanceSheet, profitAndLossYtd, units, portfolio, flows, entitlements, participants, basisNavIds, fingerprint]
+      properties:
+        fundId: { type: string, format: uuid }
+        currency: { type: string }
+        periodStart: { type: string, format: date }
+        periodEnd: { type: string, format: date }
+        closingNavId: { type: string, format: uuid }
+        closingValuationDate: { type: string, format: date }
+        balanceSheet:
+          type: object
+          required: [totalAssets, totalLiabilities, totalEquity]
+          properties:
+            totalAssets: { type: number }
+            totalLiabilities: { type: number, description: Accrued management fee plus other liabilities }
+            totalEquity: { type: number, description: Net assets attributable to participants }
+        profitAndLossYtd:
+          type: object
+          required: [income, expenses, profitLoss]
+          properties:
+            income: { type: number }
+            expenses: { type: number }
+            profitLoss: { type: number }
+        units:
+          type: object
+          required: [opening, issued, cancelled, closing, unitValue, unitValuePeriodMax]
+          properties:
+            opening: { type: number }
+            issued: { type: number }
+            cancelled: { type: number }
+            closing: { type: number }
+            unitValue: { type: number }
+            unitValuePeriodMax: { type: number }
+        portfolio:
+          type: object
+          description: Null figures mean the closing NAV predates position recording — unknown, not empty.
+          properties:
+            carryingValue: { type: [number, 'null'] }
+            holdingsCount: { type: [integer, 'null'] }
+            cash: { type: [number, 'null'] }
+        flows:
+          type: object
+          required: [subscriptions, redemptions, switchesIn, switchesOut, unitFees, managementFeesAccrued]
+          properties:
+            subscriptions: { type: number }
+            redemptions: { type: number }
+            switchesIn: { type: number }
+            switchesOut: { type: number }
+            unitFees: { type: number }
+            managementFeesAccrued: { type: number }
+        entitlements:
+          type: object
+          required: [opening, increase, decrease, closing]
+          properties:
+            opening: { type: number }
+            increase: { type: number }
+            decrease: { type: number }
+            closing: { type: number }
+        participants:
+          type: object
+          required: [holders, subscribing]
+          properties:
+            holders: { type: integer }
+            subscribing: { type: integer }
+        basisNavIds: { type: array, items: { type: string, format: uuid } }
+        fingerprint: { type: string }
