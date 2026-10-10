@@ -1868,9 +1868,10 @@ dependencies:
     # (dependabot-verification-metadata.yml); that path still needs end-to-end proof.
     mechanism: gradle-verification-metadata-sha256
     enforced: advisory
-    # Moved 2026-10-15 -> 2026-11-15 (#11686): the Dependabot refresh secret is absent, so no
-    # eligible Gradle PR has proved metadata regeneration before strict verification can ship.
-    target_enforce_date: "2026-11-15"   # ADR-0144
+    # Moved 2026-10-15 -> 2026-12-15 (#11686): the Dependabot refresh secret is absent, so no
+    # eligible Gradle PR has proved metadata regeneration before strict verification can ship;
+    # the strict flip also awaits the required independent PR review.
+    target_enforce_date: "2026-12-15"   # ADR-0144
     ci_producer: "gradle.properties org.gradle.dependency.verification=lenient + .github/workflows/dependabot-verification-metadata.yml"
 
 # ---------------------------------------------------------------------------------------
