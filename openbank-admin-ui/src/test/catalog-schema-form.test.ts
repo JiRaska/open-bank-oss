@@ -56,6 +56,7 @@ describe('catalog schema form', () => {
     const scheduled = withCatalogUtcEffective(draft, 'effectiveFrom', '2026-11-15T00:00')
     expect(scheduled).toEqual({ ...draft, effectiveFrom: '2026-11-15T00:00:00Z' })
     expect(catalogUtcEffectiveInput(scheduled.effectiveFrom)).toBe('2026-11-15T00:00:00')
+    expect(catalogUtcEffectiveInput('2026-11-15T00:00:00.123Z')).toBe('2026-11-15T00:00:00')
     expect(withCatalogUtcEffective(scheduled, 'effectiveTo', '')).toEqual(scheduled)
     expect(() => withCatalogUtcEffective(draft, 'effectiveFrom', '2026-02-30T00:00')).toThrow()
     expect(draft.effectiveFrom).toBeNull()

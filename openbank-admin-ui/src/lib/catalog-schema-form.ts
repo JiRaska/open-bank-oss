@@ -85,8 +85,8 @@ type EffectiveBoundary = 'effectiveFrom' | 'effectiveTo'
 
 /** The editor treats datetime-local input as UTC, never as the browser's local zone. */
 export function catalogUtcEffectiveInput(value: unknown): string {
-  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(value)
-    ? value.slice(0, -1) : ''
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(value)
+    ? value.slice(0, 19) : ''
 }
 
 export function withCatalogUtcEffective(
