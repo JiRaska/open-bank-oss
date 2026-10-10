@@ -18,6 +18,9 @@ import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxFailurePolicy
 import com.openbank.libs.persistence.outbox.OutboxRepository
 import com.openbank.libs.persistence.outbox.OutboxStatus
+import com.openbank.libs.persistence.outbox.OutboxTableShape
+import com.openbank.libs.persistence.outbox.PanacheOutboxRetention
+import com.openbank.libs.persistence.outbox.SentOutboxRetention
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.PanacheEntityBase
 import io.quarkus.hibernate.reactive.panache.PanacheQuery
@@ -123,7 +126,13 @@ class OutboxEntity : PanacheEntityBase() {
 @ApplicationScoped
 class OutboxEntities :
     PanacheRepository<OutboxEntity>,
-    OutboxRepository {
+    OutboxRepository,
+    // SENT-row retention (ADR-0329). The table predates the fleet shape: delivery time is
+    // `published_at`, ordering `occurred_at`. The durable record of each transition is
+    // incentive_audit_event (actor + time) and promo_reservation, not this buffer (#11902).
+    SentOutboxRetention by PanacheOutboxRetention(
+        OutboxTableShape("incentive_outbox", orderColumn = "occurred_at", sentAtColumn = "published_at"),
+    ) {
     override suspend fun listProcessable(limit: Int): List<OutboxEntry> = listProcessableUni(limit).awaitSuspending()
 
     fun listProcessableUni(limit: Int): Uni<List<OutboxEntry>> = Panache.getSession().flatMap { session ->

@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: sepa-instant
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "35c6fed0f4cea2a4"
+    openbank.tech/policy-checksum: "9943c14eb01b4d06"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1401,6 +1401,15 @@ data:
                                                 # stop card traffic, not add a second human; the sandbox acquirer is
                                                 # ROLE_ADMIN, off by default and 404 when off. No operator endpoint
                                                 # moves money by hand today — add a verb here when one ships.
+      - openbank-pension-service               # ADR-0334 S1 (#12350): participant-side pension contracts. Listed
+                                                # from the bootstrap, before any money moves: contributions, state
+                                                # incentive receipt/clawback and payouts land in this service in the
+                                                # next slices, and the threat model + two-approval rule must already
+                                                # hold when they do (docs/threat-models/openbank-pension-service.md).
+                                                # four-eyes assessed: S1 exposes no operator write that moves money —
+                                                # create/activate/strategy/suspend/resume/terminate are the
+                                                # participant's own intent through the edge; add a verb when payout
+                                                # or an operator-side correction ships.
       - openbank-pension-fund-service          # ADR-0334 S4 (#12350): the unit register of segregated pension funds —
 
     money_path_action_prefixes:

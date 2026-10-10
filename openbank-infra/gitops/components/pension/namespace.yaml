@@ -1,0 +1,11 @@
+# Pension domain (ADR-0037: domain = namespace). App plane. Holds pension-service plus its
+# single-owner CNPG Postgres. pension-service owns the participant-side PensionContract (ADR-0334).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: pension
+  labels:
+    openbank.io/plane: app
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

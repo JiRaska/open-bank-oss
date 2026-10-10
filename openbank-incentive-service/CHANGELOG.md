@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/incentive-service-v0.6.4...incentive-service-v0.7.0) (2026-10-09)
+
+
+### Features
+
+* **incentive:** purge delivered incentive_outbox rows like every other outbox ([#11916](https://github.com/JiRaska/open-bank-oss/issues/11916)) ([4c86c6f](https://github.com/JiRaska/open-bank-oss/commit/4c86c6f729c27fabcf5431d27ee5270116df06b2))
+
 ## [0.6.4](https://github.com/JiRaska/open-bank-oss/compare/incentive-service-v0.6.3...incentive-service-v0.6.4) (2026-10-04)
 
 

@@ -74,6 +74,9 @@ NO_OVERLAY_YET: dict[str, str] = {
     # gate reported it in the direction that matters -- a declaration outliving its subject --
     # which turned main red for every PR until this landed. That is the check working, not a
     # defect in it: the failure was leaving the baseline out of the PR that made it obsolete.
+    "pension-service": "#12350 - new service (ADR-0334 S1), deployed nowhere yet and moving no money "
+    "in S1; dispositions are written against its own resolved runtime classpath once it is built, "
+    "not copied from a sibling.",
     "pension-fund-service": "#12350 - new service (ADR-0334 S4), released by #12355 and not yet "
     "deployed, so nothing is exposed. No VEX overlay is written yet: dispositions must come from "
     "this service's own resolved runtime classpath, not be copied from a sibling. Delete this "
