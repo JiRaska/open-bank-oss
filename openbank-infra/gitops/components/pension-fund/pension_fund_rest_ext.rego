@@ -9,6 +9,7 @@
 #   pension-fund.strategy.read / .strategy.manage            — StrategyResource
 #   pension-fund.strategy.change.submit / .approve / .apply  — StrategyResource, StrategyChangeResource
 #   pension-fund.order.place / .holding.read                 — ContractUnitResource
+#   pension-fund.reporting.read                              — FundReportingResource (#12425)
 #
 # WHY NOT `rules.yaml: authz.role_action_matrix`: a matrix line is a grant to every MACHINE that
 # holds the role, and no policy can veto it (#3765/#3734). The Keycloak service-accounts are
@@ -48,6 +49,7 @@ pension_fund_read_actions := {
 	"pension-fund.nav.read",
 	"pension-fund.strategy.read",
 	"pension-fund.holding.read",
+	"pension-fund.reporting.read",
 }
 
 pension_fund_staff if {
@@ -79,4 +81,17 @@ allowed_reasons contains "service-pension-unit-register" if {
 	input.principal.id == pension_service_account
 	"ROLE_API" in input.principal.roles
 	input.action in {"pension-fund.holding.read", "pension-fund.order.place", "pension-fund.fund.read", "pension-fund.strategy.read", "pension-fund.nav.read"}
+}
+
+tax_reporting_service_account := "service-account-openbank-tax-reporting"
+
+# tax-reporting-service, and only it, reads the period-end fund aggregates it assembles the ČNB
+# returns from (#12425, ADR-0336 D4). Aggregate figures only — and nothing else on this service:
+# not holdings, not orders, not NAV writes. pension-fund.reporting.read is excluded from
+# operator-read-any (rules.yaml), so the shared service-account does not reach it either.
+allowed_reasons contains "service-tax-reporting-fund-aggregates" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == tax_reporting_service_account
+	"ROLE_API" in input.principal.roles
+	input.action == "pension-fund.reporting.read"
 }

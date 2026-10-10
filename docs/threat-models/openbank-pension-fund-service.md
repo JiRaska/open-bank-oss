@@ -2,7 +2,7 @@
 # Threat model — openbank-pension-fund-service
 
 - **Status:** bootstrap (ADR-0334 slice S4), sandbox only — no participant-facing caller yet
-- **Last reviewed:** 2026-10-09
+- **Last reviewed:** 2026-10-10 (#12425 reporting read model)
 - **Owner:** pension-fund-service CODEOWNERS
 - **Related ADRs:** ADR-0030, ADR-0034, ADR-0315, ADR-0334
 
@@ -37,6 +37,14 @@ contact data.
 3. Market prices enter through `MarketPricePort`. The shipped adapter (`StubMarketPriceAdapter`)
    knows no prices, so every position must be priced in the request by the calculating
    administrator; an unpriced position is refused, never valued at an invented number.
+4. `/api/v1/reporting/funds/{fundId}/period-figures` (#12425) is the period-end read model
+   tax-reporting-service assembles the ČNB returns from. Aggregate only — sums and counts, no
+   contract id. `pension-fund.reporting.read` is admitted for real staff and for
+   tax-reporting-service's OWN client (`service-account-openbank-tax-reporting`, ROLE_API) alone,
+   and is listed in `rules.yaml: authz.operator_read_any_excluded_actions` so the shared
+   service-account does not reach it. Proven by `opa test` (must-ALLOW/must-DENY) and by `opa eval`
+   on the materialised bundle, including the sabotage run with the exclusion removed (the shared
+   account is then admitted by `operator-read-any`).
 
 ## STRIDE analysis
 
@@ -53,6 +61,8 @@ contact data.
 | Tampering — fund assets reach the bank's books | No ledger or treasury client exists in this module; no GL account is referenced anywhere | A future integration must keep fund books on the provider entity's own GL (ADR-0334 §2) |
 | Repudiation | Maker and checker principal names and times are stored on every NAV and strategy change; transactions keep the NAV they were priced at and, after a correction, the NAV they were corrected from | No events are published yet, so nothing reaches the tamper-evident audit trail; the database rows are the only record |
 | Information disclosure — another service reads participants' holdings | ClusterIP only, generated NetworkPolicy allow-list, no participant PII; holdings readable only by staff and `service-account-openbank-pension` (declared exclusion from `operator-read-any`, must-deny tests for the shared and an unrelated service-account) | Every operator can read every contract's holdings; the pension-service Keycloak client is not registered yet, so until it is no machine can read holdings at all |
+| Information disclosure — the reporting read model leaks participants | The response carries counts and sums only; `PensionFundApiIT` asserts the seeded contract id is absent from the payload and the golden test asserts no contract id appears in the report | Small counts (one holder) are inferable; acceptable for a filing the regulator receives anyway |
+| Tampering — a filed figure silently restated | Period figures are derived only from PUBLISHED NAVs and the transactions priced at them, bucketed by valuation date; the response carries `basisNavIds` and a `fingerprint` that changes when, and only when, those inputs change (a NAV correction), so tax-reporting can file a revision rather than overwrite; every roll-forward's closing figure is computed independently of its movements (`FundReportingGoldenTest`, with a sabotage run that drops fee cancellations and fails 3 of 4 tests) | The read model is computed on request, not snapshotted; the fingerprint detects a restatement, it does not prevent one |
 | Denial of service | 1 MB body limit, rate limit, a NAV publication settles in one transaction | A fund with very many queued orders settles them all in one request |
 
 ## Invariants
@@ -63,6 +73,7 @@ contact data.
 3. At most one published NAV exists per fund and valuation date.
 4. Holdings never go negative.
 5. Nothing in this service posts to the bank ledger or treasury.
+6. A reporting period with no published NAV is not reportable (409), never a report of zeroes.
 
 ## Out of scope / follow-ups
 

@@ -47,14 +47,24 @@ PACTS = ROOT / "pacts"
 # Kept here rather than in rules.yaml on purpose: 25 of the 26 gen-*opa-bundle*.sh hash rules.yaml
 # into every service's OPA bundle checksum, so a line added or removed would restamp ~44 generated
 # files. The list belongs next to the code that reads it.
-KNOWN_UNCOVERED: set[str] = set()
+KNOWN_UNCOVERED: set[str] = {
+    # #12425: pension-service's reporting route (and the @PactFolder replay + negative-auth twin of
+    # this pact) live on feat/pension-reporting-aggregates, which stacks on the final pension
+    # integration (#12435); that line has not reached main, so main's pension-service cannot serve
+    # this pact yet. Verified green against that branch's provider locally. Remove this entry in the
+    # change that brings the replay classes onto main — the check fails on it from then on.
+    "pacts/openbank-tax-reporting-service-openbank-pension-service.json",
+}
 
 # Providers with committed pacts but no @PactBroker-sourced class, i.e. nothing publishes a
 # verification result and no provider version is ever created. EMPTY: #7738 and #7834 closed the last
 # three (case-coordinator-agent, flaky-test-hunter, incentive-service). Keep it that way — an entry
 # here is a deploy that can never be proven safe, and the checks below fail on a stale entry in
 # either direction, so it cannot outlive the problem.
-KNOWN_NO_BROKER_PUBLICATION: set[str] = set()
+KNOWN_NO_BROKER_PUBLICATION: set[str] = {
+    # #12425: same debt as the KNOWN_UNCOVERED entry above — the broker twin lands with the replay.
+    "openbank-pension-service",
+}
 
 # Annotations that can stop a test class from running. @EnabledIf* is the live one here; the others
 # are listed so a future "temporarily disabled" class cannot be read as coverage either.

@@ -1,0 +1,304 @@
+{
+  "consumer": {
+    "name": "openbank-tax-reporting-service"
+  },
+  "interactions": [
+    {
+      "description": "GET September 2026 period figures of a pension fund",
+      "providerStates": [
+        {
+          "name": "a pension fund with a published September 2026 NAV exists"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/reporting/funds/f0a7c1e2-0000-4000-8000-000000012425/period-figures",
+        "query": {
+          "periodEnd": [
+            "2026-09-30"
+          ],
+          "periodStart": [
+            "2026-09-01"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "balanceSheet": {
+            "totalAssets": 1000,
+            "totalEquity": 1000,
+            "totalLiabilities": 0
+          },
+          "closingValuationDate": "2026-09-30",
+          "currency": "CZK",
+          "entitlements": {
+            "closing": 1000,
+            "decrease": 0,
+            "increase": 1000,
+            "opening": 0
+          },
+          "fingerprint": "0f0e",
+          "fundId": "f0a7c1e2-0000-4000-8000-000000012425",
+          "participants": {
+            "holders": 1,
+            "subscribing": 1
+          },
+          "periodEnd": "2026-09-30",
+          "periodStart": "2026-09-01",
+          "portfolio": {
+            "carryingValue": 1000,
+            "cash": 0,
+            "holdingsCount": 1
+          },
+          "profitAndLossYtd": {
+            "expenses": 0,
+            "income": 0,
+            "profitLoss": 0
+          },
+          "units": {
+            "cancelled": 0,
+            "closing": 1000,
+            "issued": 1000,
+            "opening": 0,
+            "unitValue": 1,
+            "unitValuePeriodMax": 1
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.balanceSheet.totalAssets": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.balanceSheet.totalEquity": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.balanceSheet.totalLiabilities": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.closingValuationDate": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.currency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.entitlements.closing": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.entitlements.decrease": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.entitlements.increase": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.entitlements.opening": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.fingerprint": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.participants.holders": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$.participants.subscribing": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$.portfolio.carryingValue": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.portfolio.cash": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.portfolio.holdingsCount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$.profitAndLossYtd.expenses": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.profitAndLossYtd.income": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.profitAndLossYtd.profitLoss": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.units.cancelled": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.units.closing": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.units.issued": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.units.opening": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.units.unitValue": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.units.unitValuePeriodMax": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET fund period figures with no M2M identity is refused",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/reporting/funds/f0a7c1e2-0000-4000-8000-000000012425/period-figures",
+        "query": {
+          "periodEnd": [
+            "2026-09-30"
+          ],
+          "periodStart": [
+            "2026-09-01"
+          ]
+        }
+      },
+      "response": {
+        "status": 401
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-pension-fund-service"
+  }
+}
