@@ -4,12 +4,13 @@
 
 package com.openbank.pension.e2e
 
+import com.openbank.pension.application.ProviderBoundary
 import com.openbank.pension.e2e.support.StateAgencySimulator
 import com.openbank.pension.infrastructure.exit.stub.StubPayoutPaymentAdapter
 import com.openbank.pension.infrastructure.fund.InMemoryFundAdministrationAdapter
 import com.openbank.pension.it.PostgresTestResource
+import com.openbank.pension.testsupport.PensionDemoCompany
 import com.openbank.pension.testsupport.PensionTemporalTestEnvironment
-import com.openbank.pension.testsupport.ProviderFixtures
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
@@ -69,15 +70,19 @@ class PensionFullLifecycleJourneyE2E {
     class StubbedCollaborators : QuarkusTestProfile {
         override fun getConfigOverrides(): Map<String, String> = mapOf(
             "openbank.pension.stub-integrations.enabled" to "true",
+            "openbank.pension.provider-entity-id" to PensionDemoCompany.current().providerId.toString(),
             "openbank.pension.exit.stub.checks-accept" to "true",
             "openbank.pension.worker.enabled" to "false",
             // Workflow timers and the aggregates' date checks move together (WorkflowTimeClock).
             "pension.test.clock-follows-workflow-time" to "true",
             // Each workflow family on its own queue, exactly as deployed (S8).
-            "openbank.pension.onboarding.task-queue" to "e2e-pension-onboarding",
-            "openbank.pension.exit.task-queue" to "e2e-pension-exit",
+            "openbank.pension.onboarding.task-queue" to "e2e-pension-${PensionDemoCompany.current().slug}-onboarding",
+            "openbank.pension.exit.task-queue" to "e2e-pension-${PensionDemoCompany.current().slug}-exit",
         )
     }
+
+    @Inject
+    lateinit var providerBoundary: ProviderBoundary
 
     @Inject
     lateinit var temporal: PensionTemporalTestEnvironment
@@ -966,19 +971,19 @@ class PensionFullLifecycleJourneyE2E {
     // ---------------------------------------------------------------------------------------------
 
     private fun dpsStart(birthDate: String) = """
-        {"kind":"NEW_CONTRACT","productLine":"DPS","jurisdiction":"CZ","providerEntityId":"${ProviderFixtures.ID}",
+        {"kind":"NEW_CONTRACT","productLine":"DPS","jurisdiction":"CZ","providerEntityId":"${providerBoundary.providerEntityId}",
          "providerType":"PENSION_COMPANY","birthDate":"$birthDate","residencyCountry":"CZ",
          "schedule":{"amount":1700,"currency":"CZK","frequency":"MONTHLY"}}
     """.trimIndent()
 
     private fun dipStart() = """
-        {"kind":"NEW_CONTRACT","productLine":"DIP","jurisdiction":"CZ","providerEntityId":"${ProviderFixtures.ID}",
+        {"kind":"NEW_CONTRACT","productLine":"DIP","jurisdiction":"CZ","providerEntityId":"${providerBoundary.providerEntityId}",
          "providerType":"BANK","birthDate":"1979-03-14",
          "schedule":{"amount":4000,"currency":"CZK","frequency":"MONTHLY"}}
     """.trimIndent()
 
     private fun transferStart(key: String) = """
-        {"kind":"TRANSFER_IN","productLine":"DPS","jurisdiction":"CZ","providerEntityId":"${ProviderFixtures.ID}",
+        {"kind":"TRANSFER_IN","productLine":"DPS","jurisdiction":"CZ","providerEntityId":"${providerBoundary.providerEntityId}",
          "providerType":"PENSION_COMPANY","birthDate":"1960-02-02","residencyCountry":"CZ",
          "schedule":{"amount":1000,"currency":"CZK","frequency":"MONTHLY"},
          "transferIn":{"providerId":"ceding-ps","providerName":"Ceding Pension Company","contractNumber":"CED-$key"}}

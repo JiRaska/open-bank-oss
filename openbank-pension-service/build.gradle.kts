@@ -94,3 +94,11 @@ tasks.withType<Test>().configureEach {
     // and every class after it simply never reported. Same per-module override as account-service.
     maxHeapSize = "2g"
 }
+
+// The repeatable demo reuses the journey suite in a fresh test JVM/database per synthetic company.
+// No production setting or normal test default is changed.
+tasks.named<Test>("test") {
+    providers.gradleProperty("pensionDemoCompany").orNull?.let {
+        systemProperty("pension.demo.company", it)
+    }
+}
