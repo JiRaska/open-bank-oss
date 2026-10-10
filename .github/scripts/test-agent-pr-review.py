@@ -105,5 +105,110 @@ class ReviewTests(unittest.TestCase):
                 guard.owner_approval_allows(11585, ['.github/scripts/example.py'])
 
 
+# ---- approval carry-over across base merges ------------------------------------------------
+R = guard.REPO
+MAIN = 'f' * 40          # current tip of main
+M1 = 'e' * 40            # a main commit merged into the PR
+APPROVED = '1' * 40      # the head the owner approved
+OTHER = '2' * 40         # an unrelated, non-main commit
+HEAD = '3' * 40          # the current PR head
+N = 11740
+PATCH = [dict(filename='openbank-ledger-service/A.kt', status='modified', patch='@@ -1 +1 @@\n-a\n+b')]
+
+
+class FakeGitHub:
+    """Answers the GETs the owner route makes, from an explicit commit graph."""
+
+    def __init__(self, parents, patches, comments, main_has=(M1, MAIN)):
+        self.parents, self.patches, self.comments, self.main_has = parents, patches, comments, set(main_has)
+
+    def __call__(self, args):
+        url = args[1]
+        if url == f'repos/{R}/pulls/{N}':
+            return dict(head=dict(sha=HEAD), base=dict(ref='main'), state='open', draft=False)
+        if url == f'repos/{R}':
+            return dict(owner=dict(login='JiRaska'))
+        if url.startswith(f'repos/{R}/issues/{N}/comments'):
+            return [self.comments]
+        if url == f'repos/{R}/commits/main':
+            return dict(sha=MAIN)
+        if url.startswith(f'repos/{R}/commits/'):
+            sha = url.rsplit('/', 1)[1]
+            return dict(sha=sha, parents=[dict(sha=p) for p in self.parents.get(sha, [OTHER])],
+                        commit=dict(committer=dict(date='2026-10-10T09:00:00Z')))
+        if url.startswith(f'repos/{R}/compare/{MAIN}...'):
+            sha = url.rsplit('...', 1)[1]
+            if sha in self.main_has:
+                return dict(status='behind', files=[])
+            files = self.patches.get(sha, [])
+            if files == 'ERROR':
+                raise guard.Undetermined('simulated API failure')
+            return dict(status='diverged', files=files)
+        raise AssertionError(f'unexpected call {args}')
+
+
+def decision(i, action, sha, when='2026-10-10T10:00:00Z'):
+    return dict(id=i, user=dict(login='JiRaska', type='User'),
+                body=f'/agent-pr {action} {N} {sha}', created_at=when)
+
+
+class CarryOverTests(unittest.TestCase):
+    def allows(self, parents, patches, comments):
+        with patch.dict(guard.os.environ, {}, clear=True), \
+                patch.object(guard, '_gh', side_effect=FakeGitHub(parents, patches, comments)):
+            return guard.owner_approval_allows(N, ['openbank-ledger-service/A.kt'])
+
+    def test_a_pure_base_merge_keeps_the_approval(self):
+        self.assertTrue(self.allows({HEAD: [APPROVED, M1]}, {APPROVED: PATCH, HEAD: PATCH},
+                                    [decision(1, 'approve', APPROVED)]))
+
+    def test_b_merge_that_also_edits_a_pr_file_voids_it(self):
+        edited = [dict(PATCH[0], patch='@@ -1 +1 @@\n-a\n+EVIL')]
+        self.assertFalse(self.allows({HEAD: [APPROVED, M1]}, {APPROVED: PATCH, HEAD: edited},
+                                     [decision(1, 'approve', APPROVED)]))
+
+    def test_b2_merge_that_adds_a_file_voids_it(self):
+        extra = PATCH + [dict(filename='x.kt', status='added', patch='+x')]
+        self.assertFalse(self.allows({HEAD: [APPROVED, M1]}, {APPROVED: PATCH, HEAD: extra},
+                                     [decision(1, 'approve', APPROVED)]))
+
+    def test_c_normal_commit_voids_it_even_with_an_equal_patch(self):
+        self.assertFalse(self.allows({HEAD: [APPROVED]}, {APPROVED: PATCH, HEAD: PATCH},
+                                     [decision(1, 'approve', APPROVED)]))
+
+    def test_c2_merge_of_a_non_main_branch_voids_it(self):
+        self.assertFalse(self.allows({HEAD: [APPROVED, OTHER]}, {APPROVED: PATCH, HEAD: PATCH},
+                                     [decision(1, 'approve', APPROVED)]))
+
+    def test_d_approved_sha_not_an_ancestor_voids_it(self):
+        # force-push: HEAD's first-parent line never reaches APPROVED
+        self.assertFalse(self.allows({HEAD: [OTHER, M1], OTHER: [MAIN]}, {APPROVED: PATCH, HEAD: PATCH},
+                                     [decision(1, 'approve', APPROVED)]))
+
+    def test_e_truncated_or_failed_compare_is_undetermined(self):
+        capped = [dict(filename=f'f{i}', status='modified', patch='+') for i in range(guard.COMPARE_FILE_CAP)]
+        for bad in (capped, 'ERROR', [dict(filename='bin.png', status='modified')]):
+            with self.assertRaises(guard.Undetermined):
+                self.allows({HEAD: [APPROVED, M1]}, {APPROVED: PATCH, HEAD: bad},
+                            [decision(1, 'approve', APPROVED)])
+
+    def test_e2_too_long_merge_chain_is_undetermined(self):
+        chain = {HEAD: [HEAD, M1]}   # a cycle never reaches APPROVED
+        with self.assertRaises(guard.Undetermined):
+            self.allows(chain, {APPROVED: PATCH, HEAD: PATCH}, [decision(1, 'approve', APPROVED)])
+
+    def test_f_revoke_after_approval_voids_it(self):
+        for revoked in (APPROVED, HEAD):
+            self.assertFalse(self.allows({HEAD: [APPROVED, M1]}, {APPROVED: PATCH, HEAD: PATCH},
+                                         [decision(1, 'approve', APPROVED), decision(2, 'revoke', revoked)]))
+
+    def test_g_exact_head_approval_still_works(self):
+        self.assertTrue(self.allows({}, {}, [decision(1, 'approve', HEAD)]))
+
+    def test_approval_older_than_its_commit_does_not_carry(self):
+        self.assertFalse(self.allows({HEAD: [APPROVED, M1]}, {APPROVED: PATCH, HEAD: PATCH},
+                                     [decision(1, 'approve', APPROVED, when='2026-10-10T08:00:00Z')]))
+
+
 if __name__ == '__main__':
     unittest.main()
