@@ -27,10 +27,7 @@ object TreasuryPactStates {
     /** Must match TaxReportingTreasuryPortfolioPactConsumerTest (openbank-tax-reporting-service). */
     const val SNAPSHOT_STATE = "the pension company holds investment positions at 2026-12-31"
 
-    /**
-     * The 409 ("no statement, never an empty list") state proposed in #12498. Not yet recorded by the
-     * consumer; the handler is ready so adding that interaction needs no provider change.
-     */
+    /** The 409 ("no statement, never an empty list") state; recorded by the consumer since #12504. */
     const val NO_SNAPSHOT_STATE = "no portfolio snapshot exists for 2026-12-31"
 
     /** The state name every consumer of this provider uses for its missing-identity interaction. */
