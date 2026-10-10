@@ -15,12 +15,18 @@ import au.com.dius.pact.core.model.PactSpecVersion
 import au.com.dius.pact.core.model.RequestResponsePact
 import au.com.dius.pact.core.model.annotations.Pact
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.openbank.pension.domain.model.ProductLine
+import com.openbank.pension.infrastructure.catalog.StrategyCatalogRead
 import com.openbank.pension.infrastructure.catalog.StrategyCatalogRestClient
+import com.openbank.pension.infrastructure.catalog.StrategyInstrumentCatalogResolver
 import io.restassured.RestAssured.given
 import jakarta.ws.rs.Path
+import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
+import java.time.Instant
+import java.time.OffsetDateTime
 import java.util.UUID
 
 /** Published strategy evidence consumed by pension before accepting a DIP selection. */
@@ -57,7 +63,13 @@ class PensionCatalogPactConsumerTest {
                 revision.uuid("offeringId", UUID.fromString(OFFERING_ID))
                 revision.numberType("number", 1)
                 revision.stringValue("state", "PUBLISHED")
-                revision.stringValue("pensionApprovalDigest", DIGEST)
+                revision.stringMatcher("pensionApprovalDigest", "[0-9a-f]{64}", DIGEST)
+                revision.stringValue("makerId", "pact-pension-maker")
+                revision.stringValue("checkerId", "pact-pension-checker")
+                revision.stringType("reason", "independently reviewed DIP strategy fixture")
+                revision.stringMatcher("contentHash", "[0-9a-f]{64}", "a".repeat(64))
+                revision.stringType("effectiveFrom", "2026-10-01T00:00:00Z")
+                revision.stringType("effectiveTo", "2026-11-01T00:00:00Z")
                 revision.`object`("schemaRef") { schema ->
                     schema.stringValue("id", "org.openbank.retirement.pension-savings")
                     schema.numberType("version", 2)
@@ -65,6 +77,7 @@ class PensionCatalogPactConsumerTest {
                 revision.`object`("content") { content ->
                     content.`object`("attributes") { attributes ->
                         attributes.stringValue("productLine", "DIP")
+                        attributes.stringValue("jurisdictionPackId", "CZ/DIP")
                         attributes.stringValue("fundStrategy", "DYNAMIC")
                         attributes.stringValue("reviewStatus", "LEGAL_AND_COMMERCIAL_REVIEWED")
                         attributes.array("instrumentClasses") { classes ->
@@ -90,12 +103,12 @@ class PensionCatalogPactConsumerTest {
             newJsonArray { approvals ->
                 approvals.`object` { legal ->
                     legal.stringValue("role", "LEGAL_COUNSEL")
-                    legal.stringValue("digest", DIGEST)
+                    legal.stringMatcher("digest", "[0-9a-f]{64}", DIGEST)
                     legal.stringType("approvedAt", "2026-10-08T10:00:00Z")
                 }
                 approvals.`object` { product ->
                     product.stringValue("role", "PRODUCT_OWNER")
-                    product.stringValue("digest", DIGEST)
+                    product.stringMatcher("digest", "[0-9a-f]{64}", DIGEST)
                     product.stringType("approvedAt", "2026-10-08T11:00:00Z")
                 }
             }.build(),
@@ -122,6 +135,21 @@ class PensionCatalogPactConsumerTest {
         assertThat(revision.path("id").asText()).isEqualTo(REVISION_ID)
         assertThat(revision.path("pensionApprovalDigest").asText()).isEqualTo(DIGEST)
         assertThat(revision.path("content").path("attributes").path("instrumentClasses").size()).isEqualTo(2)
+        val legalApproval = """{"role":"LEGAL_COUNSEL","digest":"$DIGEST","approvedAt":"2026-10-08T10:00:00Z"}"""
+        val productApproval = """{"role":"PRODUCT_OWNER","digest":"$DIGEST","approvedAt":"2026-10-08T11:00:00Z"}"""
+        val resolver = StrategyInstrumentCatalogResolver(
+            object : StrategyCatalogRead {
+                override suspend fun offerings() = listOf(mapper.readTree("""{"id":"$OFFERING_ID"}"""))
+                override suspend fun published(offeringId: UUID, at: OffsetDateTime) = revision
+                override suspend fun pensionApprovals(offeringId: UUID, revisionId: UUID) = listOf(
+                    mapper.readTree(legalApproval),
+                    mapper.readTree(productApproval),
+                )
+            },
+        )
+        assertThat(
+            runBlocking { resolver.effectivePublished("CZ", ProductLine.DIP, "DYNAMIC", Instant.parse(AT)) },
+        ).hasSize(1)
     }
 
     @Test
