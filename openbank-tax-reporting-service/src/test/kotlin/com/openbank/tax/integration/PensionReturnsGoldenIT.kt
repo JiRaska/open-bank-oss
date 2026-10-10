@@ -13,6 +13,7 @@ import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
 import io.restassured.path.json.JsonPath
+import io.restassured.path.json.config.JsonPathConfig
 import org.assertj.core.api.Assertions.assertThat
 import org.hamcrest.Matchers.containsString
 import org.junit.jupiter.api.Test
@@ -52,7 +53,8 @@ class PensionReturnsGoldenIT {
 
     private fun assembled(code: String, entity: String, period: String): Map<String, BigDecimal> {
         val body = assemble(code, entity, period).then().log().ifValidationFails().statusCode(200).extract().asString()
-        val json = JsonPath(body)
+        // BIG_DECIMAL: RestAssured's default float parsing would round 1987.571714 to 1987.5717.
+        val json = JsonPath(body).using(JsonPathConfig(JsonPathConfig.NumberReturnType.BIG_DECIMAL))
         assertThat(json.getString("status")).isEqualTo("ASSEMBLED")
         return json.getMap<String, Any>("datapoints").mapValues { BigDecimal(it.value.toString()) }
     }

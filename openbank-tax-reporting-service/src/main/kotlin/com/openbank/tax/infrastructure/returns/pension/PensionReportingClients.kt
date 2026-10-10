@@ -74,10 +74,19 @@ data class UnitsDto(
 )
 
 @JsonIgnoreProperties(ignoreUnknown = true)
-data class PortfolioDto(val carryingValue: BigDecimal? = null, val holdingsCount: Int? = null, val cash: BigDecimal? = null)
+data class PortfolioDto(
+    val carryingValue: BigDecimal? = null,
+    val holdingsCount: Int? = null,
+    val cash: BigDecimal? = null,
+)
 
 @JsonIgnoreProperties(ignoreUnknown = true)
-data class EntitlementsDto(val opening: BigDecimal, val increase: BigDecimal, val decrease: BigDecimal, val closing: BigDecimal)
+data class EntitlementsDto(
+    val opening: BigDecimal,
+    val increase: BigDecimal,
+    val decrease: BigDecimal,
+    val closing: BigDecimal,
+)
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class FundParticipantsDto(val holders: Int, val subscribing: Int)

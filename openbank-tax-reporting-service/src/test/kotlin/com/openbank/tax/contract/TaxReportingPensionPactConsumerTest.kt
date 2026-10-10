@@ -107,7 +107,12 @@ class TaxReportingPensionPactConsumerTest {
         val definition = catalogue.definition("PSP31-04")!!
         val values = runBlocking {
             PensionReturnDataAdapter(FixedSources(aggregates))
-                .fetch(catalogue, definition, "company", ReportingPeriod(Periodicity.QUARTER, LocalDate.parse("2026-09-30")))
+                .fetch(
+                    catalogue,
+                    definition,
+                    "company",
+                    ReportingPeriod(Periodicity.QUARTER, LocalDate.parse("2026-09-30")),
+                )
         }
         assertThat(values.keys).containsExactlyInAnyOrderElementsOf(definition.datapoints)
         assertThat(definition.validate(values)).isEmpty()

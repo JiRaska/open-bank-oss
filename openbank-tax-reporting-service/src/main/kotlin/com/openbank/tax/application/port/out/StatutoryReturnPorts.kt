@@ -17,7 +17,7 @@ interface ReturnCatalogueSource {
 }
 
 /** The source system cannot (yet) supply a return's figures. Mapped to 503 — never to zeroes. */
-class ReturnDataUnavailableException(message: String) : RuntimeException(message)
+class ReturnDataUnavailableException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
 
 /**
  * Extraction seam for a return's datapoints (ADR-0336 D4).

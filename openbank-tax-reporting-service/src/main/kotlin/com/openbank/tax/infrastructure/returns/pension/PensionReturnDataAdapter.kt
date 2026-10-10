@@ -46,9 +46,9 @@ class RestPensionReportingSources(
     private suspend fun <T> sourced(source: String, call: suspend () -> T): T = try {
         call()
     } catch (e: WebApplicationException) {
-        throw ReturnDataUnavailableException("$source answered ${e.response.status}: ${e.message}")
+        throw ReturnDataUnavailableException("$source answered ${e.response.status}: ${e.message}", e)
     } catch (e: ProcessingException) {
-        throw ReturnDataUnavailableException("$source unreachable: ${e.message}")
+        throw ReturnDataUnavailableException("$source unreachable: ${e.message}", e)
     }
 }
 
@@ -77,14 +77,73 @@ class PensionReturnDataAdapter(private val sources: PensionReportingSources) : R
         }
         val from = periodStart(period)
         val to = period.endDate
-        return when (definition.code) {
-            "PSP10-12-FUND", "PEF12-04-FUND" -> fund(entityId, from, to).balanceSheet.let {
-                mapOf("total_assets" to it.totalAssets, "total_liabilities" to it.totalLiabilities, "total_equity" to it.totalEquity)
+        if (definition.code == "PSP31-04") return companyFlows(sources.participants(from, to))
+        val extract = FUND_RETURNS[definition.code]
+            ?: throw ReturnDataUnavailableException("${definition.code}: no mapping to a source read model")
+        return extract(definition.code, entityId, fund(entityId, from, to))
+    }
+
+    private fun companyFlows(a: ParticipantAggregatesDto): Map<String, BigDecimal> = mapOf(
+        "contributions_participant_ytd" to a.contributionsYtd.participant,
+        "contributions_employer_ytd" to a.contributionsYtd.employer,
+        "contributions_state_ytd" to a.contributionsYtd.state,
+        "contributions_total_ytd" to a.contributionsYtd.total,
+        "payouts_total_ytd" to a.payoutsYtd.total,
+        "payout_cases_ytd" to BigDecimal(a.payoutsYtd.cases),
+        "pensioners_count" to BigDecimal(a.participants.pensioners),
+    )
+
+    private suspend fun fund(entityId: String, from: LocalDate, to: LocalDate): FundPeriodFiguresDto {
+        val fundId = try {
+            UUID.fromString(entityId)
+        } catch (e: IllegalArgumentException) {
+            throw ReturnDataUnavailableException(
+                "fund entity '$entityId' is not a pension-fund-service fund id",
+                e,
+            )
+        }
+        return sources.fund(fundId, from, to)
+    }
+
+    companion object {
+        const val CATALOGUE_ID = "cz-pension-cnb"
+
+        private fun balanceSheet(f: FundPeriodFiguresDto) = mapOf(
+            "total_assets" to f.balanceSheet.totalAssets,
+            "total_liabilities" to f.balanceSheet.totalLiabilities,
+            "total_equity" to f.balanceSheet.totalEquity,
+        )
+
+        private fun portfolio(code: String, entityId: String, f: FundPeriodFiguresDto): Map<String, BigDecimal> {
+            val value = f.portfolio.carryingValue
+            val count = f.portfolio.holdingsCount
+            if (value == null || count == null) {
+                throw ReturnDataUnavailableException(
+                    "$code: the closing NAV for fund $entityId predates position recording — portfolio unknown",
+                )
             }
-            "PSP20-12-FUND" -> fund(entityId, from, to).profitAndLossYtd.let {
-                mapOf("income_ytd" to it.income, "expenses_ytd" to it.expenses, "profit_loss_ytd" to it.profitLoss)
-            }
-            "PSP30-12" -> fund(entityId, from, to).let { f ->
+            return mapOf("holdings_carrying_value" to value, "holdings_count" to BigDecimal(count))
+        }
+
+        /** Fund-scoped returns: return code -> datapoints taken from pension-fund-service's period figures. */
+        private val FUND_RETURNS: Map<
+            String,
+            (
+                String,
+                String,
+                FundPeriodFiguresDto,
+            ) -> Map<String, BigDecimal>,
+            > = mapOf(
+            "PSP10-12-FUND" to { _, _, f -> balanceSheet(f) },
+            "PEF12-04-FUND" to { _, _, f -> balanceSheet(f) },
+            "PSP20-12-FUND" to { _, _, f ->
+                mapOf(
+                    "income_ytd" to f.profitAndLossYtd.income,
+                    "expenses_ytd" to f.profitAndLossYtd.expenses,
+                    "profit_loss_ytd" to f.profitAndLossYtd.profitLoss,
+                )
+            },
+            "PSP30-12" to { _, _, f ->
                 mapOf(
                     "units_opening" to f.units.opening,
                     "units_issued" to f.units.issued,
@@ -94,57 +153,23 @@ class PensionReturnDataAdapter(private val sources: PensionReportingSources) : R
                     "unit_value_period_max" to f.units.unitValuePeriodMax,
                     "fund_equity" to f.balanceSheet.totalEquity,
                 )
-            }
-            "PSP34-12-FUND" -> fund(entityId, from, to).portfolio.let { p ->
-                val value = p.carryingValue
-                val count = p.holdingsCount
-                if (value == null || count == null) {
-                    throw ReturnDataUnavailableException(
-                        "PSP34-12-FUND: the closing NAV for fund $entityId predates position recording — portfolio unknown",
-                    )
-                }
-                mapOf("holdings_carrying_value" to value, "holdings_count" to BigDecimal(count))
-            }
-            "PEF14-04" -> fund(entityId, from, to).entitlements.let {
+            },
+            "PSP34-12-FUND" to ::portfolio,
+            "PEF14-04" to { _, _, f ->
                 mapOf(
-                    "pension_entitlements_opening" to it.opening,
-                    "entitlement_increase" to it.increase,
-                    "entitlement_decrease" to it.decrease,
-                    "pension_entitlements_closing" to it.closing,
+                    "pension_entitlements_opening" to f.entitlements.opening,
+                    "entitlement_increase" to f.entitlements.increase,
+                    "entitlement_decrease" to f.entitlements.decrease,
+                    "pension_entitlements_closing" to f.entitlements.closing,
                 )
-            }
-            "PEF15-01" -> fund(entityId, from, to).participants.let {
+            },
+            "PEF15-01" to { _, _, f ->
                 mapOf(
-                    "participants_count" to BigDecimal(it.holders),
-                    "participants_contributing_count" to BigDecimal(it.subscribing),
+                    "participants_count" to BigDecimal(f.participants.holders),
+                    "participants_contributing_count" to BigDecimal(f.participants.subscribing),
                 )
-            }
-            "PSP31-04" -> sources.participants(from, to).let { a ->
-                mapOf(
-                    "contributions_participant_ytd" to a.contributionsYtd.participant,
-                    "contributions_employer_ytd" to a.contributionsYtd.employer,
-                    "contributions_state_ytd" to a.contributionsYtd.state,
-                    "contributions_total_ytd" to a.contributionsYtd.total,
-                    "payouts_total_ytd" to a.payoutsYtd.total,
-                    "payout_cases_ytd" to BigDecimal(a.payoutsYtd.cases),
-                    "pensioners_count" to BigDecimal(a.participants.pensioners),
-                )
-            }
-            else -> throw ReturnDataUnavailableException("${definition.code}: no mapping to a source read model")
-        }
-    }
-
-    private suspend fun fund(entityId: String, from: LocalDate, to: LocalDate): FundPeriodFiguresDto {
-        val fundId = try {
-            UUID.fromString(entityId)
-        } catch (e: IllegalArgumentException) {
-            throw ReturnDataUnavailableException("fund entity '$entityId' is not a pension-fund-service fund id: ${e.message}")
-        }
-        return sources.fund(fundId, from, to)
-    }
-
-    companion object {
-        const val CATALOGUE_ID = "cz-pension-cnb"
+            },
+        )
 
         /**
          * Returns no service in this platform owns the figures for. The company's OWN balance

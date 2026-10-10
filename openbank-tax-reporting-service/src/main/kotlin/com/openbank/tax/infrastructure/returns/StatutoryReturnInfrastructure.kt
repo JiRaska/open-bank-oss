@@ -14,7 +14,6 @@ import com.openbank.tax.application.port.out.StatutoryReturnMetricsPort
 import com.openbank.tax.application.usecase.ReportingEntities
 import com.openbank.tax.application.usecase.StatutoryReturnService
 import com.openbank.tax.domain.returns.Periodicity
-import com.openbank.tax.domain.returns.ReportingPeriod
 import com.openbank.tax.domain.returns.ReturnCatalogue
 import com.openbank.tax.domain.returns.ReturnDefinition
 import com.openbank.tax.domain.returns.ReturnScope
@@ -31,7 +30,6 @@ import jakarta.enterprise.inject.Produces
 import jakarta.inject.Singleton
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
-import java.math.BigDecimal
 import java.time.Duration
 import java.time.LocalDate
 import java.util.Optional

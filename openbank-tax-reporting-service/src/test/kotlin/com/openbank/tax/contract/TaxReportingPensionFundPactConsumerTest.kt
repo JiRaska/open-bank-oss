@@ -129,7 +129,12 @@ class TaxReportingPensionFundPactConsumerTest {
         listOf("PSP10-12-FUND", "PSP20-12-FUND", "PSP30-12", "PSP34-12-FUND").forEach { code ->
             val definition = catalogue.definition(code)!!
             val values = runBlocking {
-                adapter.fetch(catalogue, definition, FUND_ID, ReportingPeriod(Periodicity.MONTH, LocalDate.parse("2026-09-30")))
+                adapter.fetch(
+                    catalogue,
+                    definition,
+                    FUND_ID,
+                    ReportingPeriod(Periodicity.MONTH, LocalDate.parse("2026-09-30")),
+                )
             }
             assertThat(values.keys).containsExactlyInAnyOrderElementsOf(definition.datapoints)
         }
