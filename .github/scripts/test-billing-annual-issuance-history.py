@@ -12,7 +12,6 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
-
 SCRIPT = Path(__file__).with_name("check-billing-annual-issuance-history.py")
 spec = importlib.util.spec_from_file_location("annual_issuance_preflight", SCRIPT)
 assert spec and spec.loader
@@ -34,6 +33,15 @@ class AnnualIssuanceHistoryTest(unittest.TestCase):
         path = self.root / name
         path.write_text(HEADER + "".join(row + "\n" for row in rows))
         return path
+
+    def cli(self, history: Path, issuance: Path, expected: int = 1) -> tuple[int, str]:
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with patch("sys.argv", ["preflight", "--historical-events", str(history),
+                                "--issuance-keys", str(issuance), "--year", "2025",
+                                "--expected-events", str(expected)]), \
+             redirect_stdout(stdout), redirect_stderr(stderr):
+            result = module.main()
+        return result, stdout.getvalue() + stderr.getvalue()
 
     def test_exact_historical_coverage(self) -> None:
         history = self.csv("history", f"synthetic-a,2025,{EVENT_A}",
@@ -67,16 +75,34 @@ class AnnualIssuanceHistoryTest(unittest.TestCase):
     def test_failure_output_contains_counts_but_no_identifiers(self) -> None:
         history = self.csv("history", f"synthetic-a,2025,{EVENT_A}")
         issuance = self.csv("issuance")
-        stdout, stderr = io.StringIO(), io.StringIO()
-        with patch("sys.argv", ["preflight", "--historical-events", str(history),
-                                "--issuance-keys", str(issuance), "--year", "2025",
-                                "--expected-events", "1"]), \
-             redirect_stdout(stdout), redirect_stderr(stderr):
-            self.assertEqual(module.main(), 1)
-        output = stdout.getvalue() + stderr.getvalue()
+        result, output = self.cli(history, issuance)
+        self.assertEqual(result, 1)
         self.assertIn("missing_keys=1", output)
         self.assertNotIn("synthetic-a", output)
         self.assertNotIn(EVENT_A, output)
+
+    def test_same_count_wrong_set_fails_without_identifiers(self) -> None:
+        history = self.csv("history", f"synthetic-a,2025,{EVENT_A}")
+        issuance = self.csv("issuance", f"synthetic-b,2025,{EVENT_B}")
+        result, output = self.cli(history, issuance)
+        self.assertEqual(result, 1)
+        self.assertIn("historical_events=1 issuance_keys=1", output)
+        self.assertIn("missing_keys=1 conflicting_or_unarchived=1", output)
+        for identity in ("synthetic-a", "synthetic-b", EVENT_A, EVENT_B):
+            self.assertNotIn(identity, output)
+
+    def test_malformed_and_duplicate_inputs_fail_without_identifiers(self) -> None:
+        history = self.csv("history", f"synthetic-a,2025,{EVENT_A}")
+        malformed = self.csv("malformed", "synthetic-b,2025,not-a-uuid")
+        duplicate = self.csv("duplicate", f"synthetic-a,2025,{EVENT_A}",
+                             f"synthetic-a,2025,{EVENT_A}")
+        for bad_file in (malformed, duplicate):
+            with self.subTest(input=bad_file.name):
+                result, output = self.cli(history, bad_file)
+                self.assertEqual(result, 2)
+                self.assertIn("preflight failed: invalid, incomplete, or unreadable input", output)
+                for identity in ("synthetic-a", "synthetic-b", EVENT_A):
+                    self.assertNotIn(identity, output)
 
 
 if __name__ == "__main__":
