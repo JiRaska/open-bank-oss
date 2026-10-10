@@ -245,6 +245,10 @@ class PensionFullLifecycleJourneyE2E {
                 StateAgencySimulator.parse(it["payload"].toString()).any { c -> c.contractReference == dpsReference }
             }
         claimBatch = batch["id"].toString()
+        // CZ files per calendar QUARTER (ZDPS § 16(2)), never per month: the batch is the quarter's.
+        val quarterStart = lastMonth.withMonth(((lastMonth.monthValue - 1) / 3) * 3 + 1)
+        assertThat(batch["claimFormat"]).isEqualTo("cz-mf-state-contribution-v1")
+        assertThat(batch["period"].toString()).describedAs("filed for the quarter").isEqualTo(quarterStart.toString())
         val filed = StateAgencySimulator.parse(batch["payload"].toString()).filter {
             it.contractReference ==
                 dpsReference
