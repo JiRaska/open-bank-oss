@@ -21,6 +21,7 @@
       },
       "response": {
         "body": {
+          "checkerId": "pact-pension-checker",
           "content": {
             "attributes": {
               "fundStrategy": "DYNAMIC",
@@ -28,14 +29,20 @@
                 "BOND_FUNDS",
                 "EQUITY_FUNDS"
               ],
+              "jurisdictionPackId": "CZ/DIP",
               "productLine": "DIP",
               "reviewStatus": "LEGAL_AND_COMMERCIAL_REVIEWED"
             }
           },
+          "contentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "effectiveFrom": "2026-10-01T00:00:00Z",
+          "effectiveTo": "2026-11-01T00:00:00Z",
           "id": "30000000-0000-0000-0000-000000000084",
+          "makerId": "pact-pension-maker",
           "number": 1,
           "offeringId": "20000000-0000-0000-0000-000000000084",
           "pensionApprovalDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "reason": "independently reviewed DIP strategy fixture",
           "schemaRef": {
             "id": "org.openbank.retirement.pension-savings",
             "version": 2
@@ -47,6 +54,31 @@
         },
         "matchingRules": {
           "body": {
+            "$.contentHash": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{64}"
+                }
+              ]
+            },
+            "$.effectiveFrom": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.effectiveTo": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
             "$.id": {
               "combine": "AND",
               "matchers": [
@@ -70,6 +102,23 @@
                 {
                   "match": "regex",
                   "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.pensionApprovalDigest": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{64}"
+                }
+              ]
+            },
+            "$.reason": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
                 }
               ]
             },
@@ -134,11 +183,29 @@
                 }
               ]
             },
+            "$[0].digest": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{64}"
+                }
+              ]
+            },
             "$[1].approvedAt": {
               "combine": "AND",
               "matchers": [
                 {
                   "match": "type"
+                }
+              ]
+            },
+            "$[1].digest": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{64}"
                 }
               ]
             }
