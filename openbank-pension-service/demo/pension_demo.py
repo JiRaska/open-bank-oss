@@ -26,7 +26,7 @@ STRATEGY = "com.openbank.pension.infrastructure.fund.PensionFundRestAdapterTest"
 LIMITS = [
     "Skutečné HTTP, PostgreSQL a implementace penzijních workflow; samostatný testovací JVM, databáze a Temporal server pro každou společnost.",
     "Alpha a Beta běží postupně. Identita volajícího je testovací; OIDC/relay/OPA napříč současně běžícími společnostmi tento běh neověřuje (#12472).",
-    "Platby, identita/SCA, dokumenty, státní agentura, anuitní partneři a účastnické ocenění používají testovací adaptéry/simulátory. Nejde o skutečné bankovní převody nebo regulatorní podání.",
+    "Platby, identita/SCA, katalog produktů včetně schválení, dokumenty, státní agentura, anuitní partneři a účastnické ocenění používají testovací adaptéry/simulátory. Nejde o skutečné bankovní převody nebo regulatorní podání.",
     "Fondový registr a NAV se ověřují samostatně přes HTTP/DB, propojení služeb pomocí Pact. Souvislý běh obou služeb se skutečnými adaptéry zůstává #12479.",
     "Migrační zkouška, trvalé opravy NAV/kompenzace, plná izolace poskytovatelů a odolnost produkčního provozu nejsou tímto demem potvrzené.",
 ]

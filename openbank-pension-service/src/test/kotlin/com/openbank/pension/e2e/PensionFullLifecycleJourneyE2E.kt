@@ -8,6 +8,7 @@ import com.openbank.pension.application.ProviderBoundary
 import com.openbank.pension.e2e.support.StateAgencySimulator
 import com.openbank.pension.infrastructure.exit.stub.StubPayoutPaymentAdapter
 import com.openbank.pension.infrastructure.fund.InMemoryFundAdministrationAdapter
+import com.openbank.pension.integration.StrategyCatalogWireMockResource
 import com.openbank.pension.it.PostgresTestResource
 import com.openbank.pension.testsupport.PensionDemoCompany
 import com.openbank.pension.testsupport.PensionTemporalTestEnvironment
@@ -68,8 +69,13 @@ class PensionFullLifecycleJourneyE2E {
 
     /** Turns on the slices' own fail-closed stubs, as their `%test` profiles intend. */
     class StubbedCollaborators : QuarkusTestProfile {
+        override fun testResources() =
+            listOf(QuarkusTestProfile.TestResourceEntry(StrategyCatalogWireMockResource::class.java))
+
         override fun getConfigOverrides(): Map<String, String> = mapOf(
             "openbank.pension.stub-integrations.enabled" to "true",
+            // Exercise the real catalog client against synthetic approvals, including its token request.
+            "quarkus.oidc-client.enabled" to "true",
             "openbank.pension.provider-entity-id" to PensionDemoCompany.current().providerId.toString(),
             "openbank.pension.exit.stub.checks-accept" to "true",
             "openbank.pension.worker.enabled" to "false",
@@ -333,6 +339,7 @@ class PensionFullLifecycleJourneyE2E {
         assertThat(
             ok(customerGet(dipCustomer, "/api/v2/pension/contracts/$dipContract")).getString("productLine"),
         ).isEqualTo("DIP")
+        StrategyCatalogWireMockResource.verifyCatalogRead()
     }
 
     @Test
