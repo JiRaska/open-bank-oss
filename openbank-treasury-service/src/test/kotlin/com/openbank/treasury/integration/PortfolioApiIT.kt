@@ -113,7 +113,11 @@ class PortfolioApiIT {
         val key = UUID.randomUUID().toString()
         val first: String = upload(xml, key).then().statusCode(201).extract().path("id")
         assertThat(upload(xml, key).then().statusCode(201).extract().path<String>("id")).isEqualTo(first)
-        assertThat(upload(xml).then().statusCode(201).extract().path<String>("id")).isEqualTo(first)
+        val alias = UUID.randomUUID().toString()
+        assertThat(upload(xml, alias).then().statusCode(201).extract().path<String>("id")).isEqualTo(first)
+        upload(fixture("pension-co-2026-12-31-corrected.xml", date), alias).then().statusCode(409)
+        assertThat(rows("select count(*) from portfolio_statement_keys where statement_uuid = '$first'"))
+            .isEqualTo(2)
         upload(fixture("pension-co-2026-12-31-corrected.xml", date), key).then().statusCode(409)
 
         val corrected: String = upload(fixture("pension-co-2026-12-31-corrected.xml", date)).then().statusCode(201)
@@ -121,6 +125,7 @@ class PortfolioApiIT {
             .body("supersedes", equalTo(first))
             .extract().path("id")
 
+        upload(xml, alias).then().statusCode(201).body("id", equalTo(first)).body("version", equalTo(1))
         periodEnd(date).then().statusCode(200)
             .body("statementUuid", equalTo(corrected))
             .body("version", equalTo(2))

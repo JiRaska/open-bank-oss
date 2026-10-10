@@ -17,6 +17,7 @@ import jakarta.enterprise.context.ApplicationScoped
 import org.hibernate.exception.ConstraintViolationException
 import java.sql.SQLException
 import java.time.LocalDate
+import java.util.UUID
 
 @ApplicationScoped
 class PortfolioHoldingPanacheRepository : PanacheRepository<PortfolioHoldingEntity>
@@ -26,8 +27,29 @@ open class PortfolioStatementRepositoryImpl(private val holdingRepo: PortfolioHo
     PortfolioStatementRepository,
     PanacheRepository<PortfolioStatementEntity> {
 
-    override suspend fun findByIdempotencyKey(key: String): StoredPortfolioStatement? =
-        Panache.withSession { find("idempotencyKey", key).firstResult() }.awaitSuspending()?.let { withHoldings(it) }
+    override suspend fun findByIdempotencyKey(key: String): StoredPortfolioStatement? = Panache.withSession {
+        Panache.getSession().flatMap { session ->
+            session.createNativeQuery(
+                "SELECT s.* FROM portfolio_statements s JOIN portfolio_statement_keys k " +
+                    "ON k.statement_uuid = s.statement_uuid WHERE k.idempotency_key = :key",
+                PortfolioStatementEntity::class.java,
+            ).setParameter("key", key).resultList
+        }
+    }.awaitSuspending().firstOrNull()?.let { withHoldings(it) }
+
+    override suspend fun bindIdempotencyKey(key: String, statementId: UUID): StoredPortfolioStatement {
+        Panache.withTransaction { insertKey(key, statementId, ignoreConflict = true) }.awaitSuspending()
+        return checkNotNull(findByIdempotencyKey(key)) { "accepted portfolio key has no stored statement" }
+    }
+
+    private fun insertKey(key: String, statementId: UUID, ignoreConflict: Boolean = false): Uni<Int> =
+        Panache.getSession().flatMap { session ->
+            val conflict = if (ignoreConflict) " ON CONFLICT (idempotency_key) DO NOTHING" else ""
+            session.createNativeQuery<Int>(
+                "INSERT INTO portfolio_statement_keys (idempotency_key, statement_uuid) " +
+                    "VALUES (:key, :statement)$conflict",
+            ).setParameter("key", key).setParameter("statement", statementId).executeUpdate()
+        }
 
     override suspend fun current(entity: String, date: LocalDate): StoredPortfolioStatement? = Panache.withSession {
         find("entity = ?1 and statementDate = ?2 and supersededBy is null", entity, date).firstResult()
@@ -73,7 +95,8 @@ open class PortfolioStatementRepositoryImpl(private val holdingRepo: PortfolioHo
                 // current row per (entity, date), and the superseded_by FK is deferred to commit.
                 supersede(stored).flatMap { persist(row) }.flatMap {
                     if (holdings.isEmpty()) Uni.createFrom().voidItem() else holdingRepo.persist(holdings)
-                }
+                }.flatMap { Panache.getSession().flatMap { it.flush() } }
+                    .flatMap { insertKey(stored.idempotencyKey, stored.id) }
             }.awaitSuspending()
         } catch (e: ConstraintViolationException) {
             if (isDuplicate(e)) throw DuplicatePortfolioStatementException(e)
@@ -147,6 +170,7 @@ open class PortfolioStatementRepositoryImpl(private val holdingRepo: PortfolioHo
         const val UNIQUE_VIOLATION = "23505"
         val DUPLICATE_CONSTRAINTS = listOf(
             "uq_portfolio_statement_idempotency_key",
+            "portfolio_statement_keys_pkey",
             "uq_portfolio_statement_version",
             "uq_portfolio_statement_current",
         )

@@ -45,6 +45,9 @@ class DuplicatePortfolioStatementException(cause: Throwable) :
 interface PortfolioStatementRepository {
     suspend fun findByIdempotencyKey(key: String): StoredPortfolioStatement?
 
+    /** Atomically bind an accepted replay key; return the existing winner if another request bound it first. */
+    suspend fun bindIdempotencyKey(key: String, statementId: UUID): StoredPortfolioStatement
+
     /** The current (not superseded) version for [entity] at [date], or null. */
     suspend fun current(entity: String, date: LocalDate): StoredPortfolioStatement?
 

@@ -46,3 +46,5 @@ Nastavte `openbank.treasury.portfolio.entity`, `safekeeping-accounts` a `cfi-cla
 Stejný klíč uloženého výpisu se stejnými bajty vrátí uloženou verzi; jiné bajty pod tímto klíčem vrátí 409. Nahrání bajtů aktuálního výpisu pod jiným klíčem vrátí jeho aktuální verzi. Jiné bajty pro stejnou právnickou osobu a datum vytvoří další verzi a nahradí předchozí; zůstává zachována její identita, SHA-256, nahrávající uživatel a historie nahrazení. Historie odlišuje korekci od původního snapshotu.
 
 Nasazení bez nakonfigurované právnické osoby portfolia odmítá nahrávání a nemá snapshot ke konci období. Účetní knihy penzijní společnosti a bankovního treasury musí zůstat oddělené; před použitím pro reporting nastavte právnickou osobu a povolené účty úschovy. Samotné uložené portfolio neprokazuje sestavení výkazu, sesouhlasení ani zákonné podání.
+
+Každý přijatý klíč, včetně nového klíče pro stejné bajty, je trvale navázán na vrácenou verzi. Po pozdější korekci dál vrací původně přijatou verzi; jiné bajty pod tímto klíčem vrátí 409. Migrace V16 zachovává původní klíče existujících výpisů a doplňuje tabulku těchto vazeb.

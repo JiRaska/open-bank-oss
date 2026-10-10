@@ -84,10 +84,13 @@ class PortfolioStatementService(
      */
     private suspend fun replay(owner: String, date: LocalDate, sha256: String, key: String): StoredPortfolioStatement? {
         statements.findByIdempotencyKey(key)?.let { prior ->
-            check(prior.sha256 == sha256) { "Idempotency-Key '$key' was used for a different statement" }
+            check(prior.sha256 == sha256) { "Idempotency-Key was used for a different statement" }
             return prior
         }
-        return statements.current(owner, date)?.takeIf { it.sha256 == sha256 }
+        val current = statements.current(owner, date)?.takeIf { it.sha256 == sha256 } ?: return null
+        val bound = statements.bindIdempotencyKey(key, current.id)
+        check(bound.sha256 == sha256) { "Idempotency-Key was used for a different statement" }
+        return bound
     }
 
     /**
