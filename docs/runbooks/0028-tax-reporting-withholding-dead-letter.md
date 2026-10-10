@@ -8,9 +8,9 @@ as drift.
 - `TaxWithholdingRemittanceDeadLettered` (critical): records arrived in the last hour.
 - `TaxWithholdingDeadLetterNotEmpty` (warning): records are still held on the topic.
 
-**What a record means.** tax-reporting-service could not record an
-`interest.withholding.remitted.v1` event even after its bounded retries, so it rethrew and the
-connector parked the record. Nothing consumes the DLQ. `assemble` totals only remittances the
+**What a record means.** tax-reporting-service could not decode an
+`interest.withholding.remitted.v1` event, or could not record a valid one after bounded retries,
+so it rethrew and the connector parked the original record. Nothing consumes the DLQ. `assemble` totals only remittances the
 service observed, so **the §38d return for that month understates the tax withheld** until the
 record is replayed. No other signal shows this. The source group uses `auto.offset.reset: latest`,
 so the DLQ copy is the one to recover from.
@@ -26,12 +26,16 @@ so the DLQ copy is the one to recover from.
      --bootstrap-server localhost:9092 --topic openbank.dlq.tax-reporting.withholding-remitted-in \
      --from-beginning --property print.headers=true --property print.key=true --timeout-ms 10000
    ```
-   Record each `remittanceId`, its `dueDate` (which picks the filing period) and the reason.
-3. **Fix the cause first.** It is almost always tax-reporting-db: unavailable, out of disk, or
-   failing over (`kubectl cnpg status tax-reporting-db -n tax-reporting`). Replaying into a
-   broken database only dead-letters the record again.
-4. **Replay** by re-publishing each record **verbatim** (same key, same payload, same `ce-type`
-   header) to `openbank.interest.accrual.event`. Both consumers of that topic deduplicate on the
+   Record each `remittanceId`, its `dueDate` (which picks the filing period) and the reason when
+   decodable. For malformed records whose period cannot be established, treat every potentially
+   affected unfiled period as unresolved and reconcile against the source before filing.
+3. **Fix the cause first.** For a valid record, repair the failed storage path before replay. For
+   malformed input, establish the correct source values and approve a corrected replacement;
+   verbatim replay of malformed bytes will dead-letter again. Do not discard the original DLQ
+   record before reconciliation.
+4. **Replay a valid record** by re-publishing it **verbatim** (same key, same payload, same `ce-type`
+   header) to `openbank.interest.accrual.event`. Reconcile any corrected replacement with its
+   original source and obtain money-path approval before publishing. Both consumers of that topic deduplicate on the
    remittance id:
    - tax-reporting's `observe` answers `duplicate` for a remittance it already holds.
    - interest-service's settlement consumer books with `idempotencyKey =

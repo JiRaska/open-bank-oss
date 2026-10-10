@@ -42,9 +42,11 @@ import java.util.UUID
  *
  * **Failure handling separates two things this consumer used to conflate (#5698/#5745).**
  *
- * A **malformed event** — unparseable JSON, an unparsable `totalTaxAmount`, a missing `dueDate` — is
- * unretryable: replaying it fails identically forever, so it is counted and acked. That is the
- * genuine poison pill and the only case that may be acked on failure.
+ * A **malformed target event** — unparseable JSON, an unparsable `totalTaxAmount`, a missing
+ * `dueDate` — is unretryable without correction. It is counted and nacked into the configured DLQ;
+ * acknowledging it would permanently omit its amount from the filing. The connector parks the
+ * original Kafka record, including its key, value and headers. Neither logs nor nack reasons carry
+ * its payload.
  *
  * A **failed write** ([TaxFilingService.observe] → `openIfAbsent` + `record`) is the opposite: the
  * event is fine, the database is not. Acking there was the worst variant of this bug class in the
@@ -79,7 +81,7 @@ class WithholdingRemittedConsumer(
     private val log = Logger.getLogger(WithholdingRemittedConsumer::class.java)
 
     @Incoming("withholding-remitted-in")
-    @Suppress("TooGenericExceptionCaught") // the two catches below mean opposite things; see the KDoc
+    @Suppress("TooGenericExceptionCaught") // decode and storage failures have separate counters
     suspend fun consume(record: ConsumerRecord<String, String>) {
         val eventType = record.headers().lastHeader(OutboxKafkaHeaders.HEADER_EVENT_TYPE)
             ?.let { String(it.value(), StandardCharsets.UTF_8) }
@@ -88,14 +90,14 @@ class WithholdingRemittedConsumer(
             return
         }
 
-        // Poison pill: an event this consumer cannot decode fails identically on every replay, so it
-        // is counted and acked rather than wedging the group and stalling every later filing period.
+        // A target event that cannot be decoded must remain recoverable. The connector parks the
+        // original record on nack; never copy its potentially sensitive value into the exception.
         val remittance = try {
             parse(objectMapper.readTree(record.value()))
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             count(OUTCOME_MALFORMED)
-            log.errorf(e, "[withholding-filing] unparseable remitted event, acking: %.300s", record.value())
-            return
+            log.error("[withholding-filing] malformed remitted event; sending original record to DLQ")
+            throw IllegalArgumentException("Malformed withholding remittance event")
         }
 
         try {
@@ -105,7 +107,7 @@ class WithholdingRemittedConsumer(
             count(if (recorded) OUTCOME_RECORDED else OUTCOME_DUPLICATE)
         } catch (e: Exception) {
             // Counted BEFORE the rethrow so the `failed` population survives whichever
-            // failure-strategy the channel is configured with — today, a halt (see the KDoc).
+            // failure-strategy the channel is configured with — today, the explicit DLQ.
             count(OUTCOME_FAILED)
             throw e
         }
@@ -128,7 +130,7 @@ class WithholdingRemittedConsumer(
     private fun decimalOf(node: JsonNode): BigDecimal {
         val raw = if (node.isTextual) node.asText() else node.toString()
         return runCatching { BigDecimal(raw) }.getOrElse {
-            throw IllegalArgumentException("Unparsable totalTaxAmount in remitted event: $raw")
+            throw IllegalArgumentException("Unparsable totalTaxAmount in remitted event")
         }
     }
 
