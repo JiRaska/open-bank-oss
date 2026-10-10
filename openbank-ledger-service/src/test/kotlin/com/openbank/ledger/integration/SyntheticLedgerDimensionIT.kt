@@ -168,7 +168,7 @@ class SyntheticLedgerDimensionIT {
               "entryDate": "$date",
               "valueDate": "$date",
               "description": "ADR-0252 dimension IT (tainted=$tainted)",
-              "createdBy": "$CANARY_PRINCIPAL",
+              "createdBy": "$CANARY_ACTOR_ID",
               "lines": [
                 {
                   "glAccountId": "$DEBIT_ACCOUNT",
@@ -244,6 +244,9 @@ class SyntheticLedgerDimensionIT {
     companion object {
         /** The canary service account. Trusted only because [TrustedCanaryProfile] names it. */
         const val CANARY_PRINCIPAL = "service-account-openbank-synthetic-canary"
+
+        // The journal author is a UUID; the authenticated service-account name is not.
+        const val CANARY_ACTOR_ID = "00000000-0000-0000-0000-000000000252"
 
         // Two single-currency USD leaf accounts no other IT in this module posts to. The deltas
         // below make that a convenience rather than a dependency.
