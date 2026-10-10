@@ -27,6 +27,34 @@ class AdmissionTest(unittest.TestCase):
     limit = 3
     cutoff = '2026-10-03T19:00:00Z'
 
+    def test_exception_is_identity_bound_expiring_and_does_not_create_capacity(self):
+        from datetime import datetime, timezone
+        entry = dict(pr=12480, repository='JiRaska/open-bank-oss',
+                     branch='codex/historical-provider-helper', expires_at='2026-10-17T00:00:00Z', reason='approved')
+        target = pr(12480, entry['branch'])
+        target['head']['repo'] = {'full_name': entry['repository']}
+        pages = [[pr(1), pr(2), pr(3), target]]
+        now = datetime(2026, 10, 10, tzinfo=timezone.utc)
+        self.assertEqual(admission.admit_current_pr(pages, self.prefixes, 3, 12480, self.cutoff, [entry], now), (True, 4))
+        self.assertEqual(admission.admit(pages, self.prefixes, 3), (False, 4))
+        for field, value in [('pr', 12481), ('branch', 'codex/other'), ('repository', 'fork/open-bank-oss')]:
+            wrong = dict(entry, **{field: value})
+            self.assertEqual(admission.admit_current_pr(pages, self.prefixes, 3, 12480, self.cutoff, [wrong], now), (False, 4))
+        expired = datetime(2026, 10, 17, tzinfo=timezone.utc)
+        self.assertEqual(admission.admit_current_pr(pages, self.prefixes, 3, 12480, self.cutoff, [entry], expired), (False, 4))
+        self.assertEqual(admission.admit_current_pr(pages, self.prefixes, 3, 12480, self.cutoff, [], now), (False, 4))
+
+    def test_malformed_exception_policy_fails_closed(self):
+        import tempfile
+        entries = [None, {}, [{'pr': True}], [dict(pr=12480, repository='x', branch='x',
+                   expires_at='bad', reason='approved')]]
+        for entry in entries:
+            with self.subTest(entry=entry), tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as rules:
+                yaml.safe_dump({'autonomous_agent_prs': {'one_time_wip_exceptions': entry}}, rules)
+                rules.flush()
+                with self.assertRaises(ValueError):
+                    admission.load_exceptions(rules.name)
+
     def test_review_events_use_the_same_ci_admission_as_pr_pushes(self):
         workflow = yaml.safe_load((Path(__file__).parents[1] / 'workflows/ci.yml').read_text())
         steps = workflow['jobs']['agent-admission']['steps']
