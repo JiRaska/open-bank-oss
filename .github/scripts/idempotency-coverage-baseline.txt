@@ -133,3 +133,12 @@ openbank-sca-service POST /api/v1/sca/challenges/{id}/consume  # lifecycle/actio
 # card-processing joined money_path_services with #11990's follow-up (its threat model always called it
 # money-path). Clearing and authorisation carry required keys; the reversal does not yet. Burn-down: #11995.
 openbank-card-processing-service POST /api/v1/card-authorizations/{id}/reversal  # lifecycle/action endpoint on an addressed resource — a sequential replay is refused by aggregate state (NOT_HOLDING_FUNDS, nothing released twice); a real DB-row key needs a Flyway version the card-processing namespace cannot take until #8864/#11990 land — burn-down #11995
+openbank-pension-fund-service POST /api/v1/funds  # natural-key 409 (funds.isin UNIQUE); creates no money movement — ADR-0334, burn-down #8351
+openbank-pension-fund-service POST /api/v1/funds/{fundId}/navs  # a second calculation for the same date is 409 while one awaits approval; publishes nothing — ADR-0334, burn-down #8351
+openbank-pension-fund-service POST /api/v1/navs/{navId}/approve  # lifecycle/action endpoint on an addressed resource — replay refused 409 by NavRecord state — ADR-0334
+openbank-pension-fund-service POST /api/v1/navs/{navId}/reject  # lifecycle/action endpoint on an addressed resource — replay refused 409 by NavRecord state — ADR-0334
+openbank-pension-fund-service POST /api/v1/strategies  # bare creation, moves no money (a duplicate strategy holds no units until changed by four-eyes) — ADR-0334, burn-down #8351
+openbank-pension-fund-service POST /api/v1/strategies/{strategyId}/changes  # bare creation of a PENDING change; nothing applies without a second approver — ADR-0334, burn-down #8351
+openbank-pension-fund-service POST /api/v1/strategy-changes/{changeId}/approve  # lifecycle/action endpoint on an addressed resource — replay refused 409 by StrategyChange state — ADR-0334
+openbank-pension-fund-service POST /api/v1/strategy-changes/{changeId}/reject  # lifecycle/action endpoint on an addressed resource — replay refused 409 by StrategyChange state — ADR-0334
+openbank-pension-fund-service POST /api/v1/strategy-changes/{changeId}/apply  # lifecycle/action endpoint on an addressed resource — replay refused 409 by StrategyChange state — ADR-0334

@@ -730,3 +730,30 @@ spec:
               including exhausted retries or abandoned claims. Check broker connectivity,
               certificates, topic ACLs and the dispatcher before replaying unchanged event IDs.
             runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/settlement-audit-recovery.md
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-sepa-instant-outbox-alerts
+  namespace: payments
+  labels:
+    app.kubernetes.io/part-of: openbank
+    app.kubernetes.io/name: sepa-instant-service
+spec:
+  groups:
+    - name: openbank.sepa-instant.outbox
+      rules:
+        # DEAD is excluded from the processable backlog; a zero backlog does not prove delivery.
+        - alert: SepaInstantOutboxDeadLettered
+          expr: openbank_outbox_dead_lettered{service="sepa-instant"} > 0
+          for: 15m
+          labels:
+            severity: critical
+            service: sepa-instant
+          annotations:
+            summary: "SEPA Instant payment event parked in terminal DEAD"
+            description: >-
+              A committed payment transition has an event that exhausted bounded outbox retries.
+              Inspect the event ID and transport evidence before any reviewed requeue; a broker
+              acknowledgement can precede a crash before the outbox row is marked SENT.
+            runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/sepa-instant-outbox-recovery.md

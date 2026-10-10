@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: Apache-2.0
+# Per-service governance manifest (ADR-0071). Declarative, curatorial facts only —
+# derived fields (Flyway/apiVersion) and runtime drift live elsewhere. Schema:
+# openbank-libs/governance/governance.schema.json
+dataDomain: open-banking
+primaryDatastore: PostgreSQL
+databaseName: openbank_pension
+dataLineageRole: producer
+dataClassification: confidential
+retentionPolicy: 10 years
+evidenceExported: false
+# No `lineage:` block yet: nothing calls this service and it calls nothing in slice S1 of
+# ADR-0334. The fund-administration port and the contribution flows add their edges in the
+# change that adds the code.
+databaseLineage:
+  ownedDatabases:
+    - openbank_pension
+  dependentDatabases: []

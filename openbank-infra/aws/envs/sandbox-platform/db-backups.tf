@@ -315,6 +315,10 @@ locals {
     # pension-fund-db (#12350): association lands and is applied BEFORE the cluster
     # that archives with it (#12355), so WAL archiving never runs without credentials.
     pension-fund = { namespace = "pension-fund", sa = "pension-fund-db" }
+    # tax-reporting-db (#5760): the owner decided to deploy tax-reporting-service. Association
+    # lands and is applied BEFORE the cluster that archives with it, so WAL archiving never runs
+    # without credentials.
+    tax-reporting = { namespace = "tax-reporting", sa = "tax-reporting-db" }
     # Added by #1444 (second wave). These 11 declared NO backup at all — they never even
     # attempted an archive, so nothing alerted, and they would have had no recovery point the
     # first time anyone needed one. The matching barmanObjectStore + ScheduledBackup + a bounded

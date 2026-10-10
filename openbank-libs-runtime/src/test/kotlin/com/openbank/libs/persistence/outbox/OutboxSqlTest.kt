@@ -104,4 +104,17 @@ class OutboxSqlTest {
         assertThatThrownBy { OutboxTableShape("ok_outbox", extraClaimAssignments = "x = 1; DELETE FROM ok_outbox") }
             .isInstanceOf(IllegalArgumentException::class.java)
     }
+
+    @Test
+    fun `the sent-at column is a knob for incentive's published_at and is validated like the others`() {
+        val incentive = OutboxTableShape("incentive_outbox", orderColumn = "occurred_at", sentAtColumn = "published_at")
+        assertThat(OutboxSql.purgeSent(incentive)).isEqualTo(
+            "DELETE FROM incentive_outbox WHERE id IN (SELECT id FROM incentive_outbox " +
+                "WHERE status = :sent AND published_at < :cut LIMIT :limit)",
+        )
+        assertThat(OutboxSql.markSentBatch(incentive)).contains("SET status = :sent, published_at = :now,")
+        assertThat(OutboxSql.purgeSent(ledger)).contains("sent_at < :cut")
+        assertThatThrownBy { OutboxTableShape("x_outbox", sentAtColumn = "sent_at; DROP TABLE x") }
+            .isInstanceOf(IllegalArgumentException::class.java)
+    }
 }
