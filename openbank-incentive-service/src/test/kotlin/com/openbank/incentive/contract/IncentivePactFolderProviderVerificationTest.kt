@@ -13,6 +13,8 @@ import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.smallrye.reactive.messaging.memory.InMemoryConnector
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
@@ -33,7 +35,15 @@ import javax.sql.DataSource
 @QuarkusTest
 @QuarkusTestResource(IncentivePostgresTestResource::class)
 @QuarkusTestResource(IncentivePactFolderProviderVerificationTest.InMemoryKafkaResource::class)
+// #12448: customer-incentive calls are admitted only from customer-edge's own service-account token.
 @TestSecurity(user = "maker@openbank.test", roles = ["ROLE_API"])
+@OidcSecurity(
+    claims = [
+        Claim(key = "sub", value = "5f0c2a8e-7d1b-4c3e-9a6f-2b8d4e1c7a90"),
+        Claim(key = "azp", value = "openbank-edge"),
+        Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+    ],
+)
 @Provider("openbank-incentive-service")
 @PactFolder("../pacts")
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")

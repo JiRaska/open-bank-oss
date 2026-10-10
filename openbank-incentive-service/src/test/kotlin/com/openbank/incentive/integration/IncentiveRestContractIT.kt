@@ -11,6 +11,8 @@ import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.quarkus.vertx.VertxContextSupport
 import io.restassured.module.kotlin.extensions.Extract
 import io.restassured.module.kotlin.extensions.Given
@@ -42,7 +44,15 @@ import javax.sql.DataSource
 @QuarkusTest
 @QuarkusTestResource(IncentivePostgresTestResource::class)
 @QuarkusTestResource(IncentiveRestContractIT.InMemoryKafkaResource::class)
+// #12448: customer-incentive calls are admitted only from customer-edge's own service-account token.
 @TestSecurity(user = "maker@openbank.test", roles = ["ROLE_OPERATOR", "ROLE_API"])
+@OidcSecurity(
+    claims = [
+        Claim(key = "sub", value = "5f0c2a8e-7d1b-4c3e-9a6f-2b8d4e1c7a90"),
+        Claim(key = "azp", value = "openbank-edge"),
+        Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+    ],
+)
 class IncentiveRestContractIT {
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> =
@@ -532,8 +542,28 @@ class IncentiveRestContractIT {
         String(metadata.headers.lastHeader(name).value(), StandardCharsets.UTF_8)
 
     @Test
-    @TestSecurity(user = "other-service", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-other", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "0b7e3c51-2f4a-4d8e-9c16-7a5b3e2d1f08"),
+            Claim(key = "azp", value = "openbank-other"),
+            Claim(key = "preferred_username", value = "service-account-openbank-other"),
+        ],
+    )
     fun `customer reservation refuses a different api workload principal`() {
+        customerReservationRequest(java.util.UUID.randomUUID().toString()).Then { statusCode(403) }
+    }
+
+    @Test
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "5f0c2a8e-7d1b-4c3e-9a6f-2b8d4e1c7a90"),
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
+    fun `customer reservation refuses the edge's name on a token issued to another client (#12448)`() {
         customerReservationRequest(java.util.UUID.randomUUID().toString()).Then { statusCode(403) }
     }
 

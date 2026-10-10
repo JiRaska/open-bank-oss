@@ -4,6 +4,7 @@
 
 package com.openbank.incentive.infrastructure.rest
 
+import com.openbank.libs.authz.ServiceAccountIdentity
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.ws.rs.ForbiddenException
 
@@ -28,7 +29,7 @@ internal val OFFER_READ_CALLERS = setOf(
  */
 internal fun requireNamedOfferReader(identity: SecurityIdentity) {
     if (identity.hasRole(OFFER_READ_STAFF_ROLE)) return
-    if (identity.principal?.name !in OFFER_READ_CALLERS) {
+    if (!ServiceAccountIdentity.isOneOf(identity, OFFER_READ_CALLERS)) {
         throw ForbiddenException("caller is not a named incentive-offer reader")
     }
 }
