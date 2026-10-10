@@ -54,10 +54,6 @@ KNOWN_UNCOVERED: set[str] = {
     # this pact yet. Verified green against that branch's provider locally. Remove this entry in the
     # change that brings the replay classes onto main — the check fails on it from then on.
     "pacts/openbank-tax-reporting-service-openbank-pension-service.json",
-    # ADR-0337 / PSP 34-12 PS: the pension company's portfolio route, its @PactFolder replay and its
-    # negative-auth twin are built on feat/treasury-pension-co-portfolio, not yet on main. Remove
-    # this entry in the change that lands that replay — the check fails on it from then on.
-    "pacts/openbank-tax-reporting-service-openbank-treasury-service.json",
 }
 
 # Providers with committed pacts but no @PactBroker-sourced class, i.e. nothing publishes a
@@ -68,8 +64,6 @@ KNOWN_UNCOVERED: set[str] = {
 KNOWN_NO_BROKER_PUBLICATION: set[str] = {
     # #12425: same debt as the KNOWN_UNCOVERED entry above — the broker twin lands with the replay.
     "openbank-pension-service",
-    # ADR-0337 / PSP 34-12 PS: same debt as the treasury KNOWN_UNCOVERED entry above.
-    "openbank-treasury-service",
 }
 
 # Annotations that can stop a test class from running. @EnabledIf* is the live one here; the others
