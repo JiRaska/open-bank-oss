@@ -348,6 +348,8 @@ Numbered 4h: #8874 took §4d, self-hosted merchant logos took §4e, and main has
 
 ## 6. Change log
 
+- **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `transaction_outbox` kept every SENT row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; its v1 repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`. PENDING, FAILED, DISPATCHING and DEAD rows are never touched. Information disclosure: shrinks the window in which a database read (replica, backup, operator query) exposes past event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now comes from the broker or audit-service, not this table.
+
 - **2026-10-03** — `transaction.sweep` gets an explicit human-only allow reason in
   `transaction_rest_ext.rego` (PR #11601). Shared M2M identities have `ROLE_OPERATOR`, so
   `@RolesAllowed` alone never excluded them; the enforced OPA rule now rejects their

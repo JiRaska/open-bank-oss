@@ -115,6 +115,8 @@ Request body varies by product:
 
 Each initiation validates consent (scope `PAYMENTS_INITIATE`, or `DOMESTIC_PAYMENT_INITIATE` / `SIPO_PAYMENT_INITIATE`) then forwards to `transaction-service`. A missing debtor/creditor IBAN ⇒ `InvalidPaymentProductException` → `400 PRODUCT_INVALID`.
 
+For `domestic-cz`, both the bespoke and Berlin PIS endpoints accept CZK only. A different currency returns `400 FORMAT_ERROR` before reserving `Idempotency-Key` / `X-Request-ID` or checking consent, so a corrected request can reuse the key. Missing TPP credentials return `401` before payment initiation.
+
 ```http
 GET /open-banking/v2/payments/{product}/{paymentId}/status
 # product ∈ sepa-credit-transfers | instant-sepa-credit-transfers | domestic-cz | sipo
