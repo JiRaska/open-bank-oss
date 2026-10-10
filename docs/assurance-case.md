@@ -1,8 +1,9 @@
 # OpenBank security assurance case
 
 This document is the project's **assurance case** (OpenSSF Best Practices, Silver
-`assurance_case`): a structured argument, with links to evidence, for why OpenBank's
-security requirements are met. It ties together the artifacts that already govern the
+`assurance_case`): a structured argument, with links to evidence, for how OpenBank's
+security controls support its requirements. This is not a certification of any particular
+deployment. It ties together the artifacts that already govern the
 platform — the STRIDE threat models, the machine-enforced rules in
 [`openbank-libs/governance/rules.yaml`](../openbank-libs/governance/rules.yaml), the
 architecture ADRs, and the CI gates — into one place.
@@ -49,7 +50,7 @@ The platform's trust boundaries, each with its enforcement mechanism:
 |---|----------|-------------|
 | B1 | Internet → edge | TLS everywhere; OIDC via Keycloak; PSD2 SCA flows (sca-service) |
 | B2 | Between principal types (USER / OPERATOR / AI_AGENT / SERVICE) | Central **deny-by-default OPA policy** for both REST and MCP surfaces ([ADR-0034](adr/0034-unified-opa-authz-mcp-and-rest.md)); per-service Rego with CI coverage reporting |
-| B3 | Service → service | Kubernetes NetworkPolicies generated from declared config (default-deny); mTLS in-cluster; per-service DB credentials (no shared schemas) |
+| B3 | Service → service | Kubernetes NetworkPolicies generated from declared config (default-deny); transport authentication must be evidenced per service/deployment; per-service DB credentials (no shared schemas). Network reachability controls do not prove mutual TLS |
 | B4 | Inbound clearing files → domain | Typed parsers with totality guarantees; **fuzzed continuously** (Jazzer targets for `Pacs008Reader`, identity parsers — `fuzz/ossfuzz/`, ClusterFuzzLite on PRs) |
 | B5 | Event bus | Outbox pattern (no dual writes), versioned backward-compatible schemas (rule #4 in [CONTRIBUTING.md](../CONTRIBUTING.md)) |
 | B6 | Source → production (supply chain) | Signed commits (ruleset-enforced), PR-only merges, SLSA provenance + cosign-signed SBOM per release, digest-pinned images |
@@ -83,7 +84,7 @@ The platform's trust boundaries, each with its enforcement mechanism:
 |---|---|
 | Injection, SSRF, deserialization, path traversal | CodeQL SAST on **all** commits (Scorecard SAST 10/10); Jazzer sanitizers (SQLi, LDAP, SSRF, deserialization hooks) run against the parser boundary in CI fuzzing |
 | Malformed-input crashes (XXE, entity expansion, stack overflow) | Continuous fuzzing of untrusted-input parsers (B4); parser totality is an asserted property, not an assumption |
-| Known-vulnerable dependencies | Dependabot (7 ecosystems, weekly) + dependency-review gate + Trivy image scans + OSV over the committed dependency graph (`gradle/verification-metadata.xml`) — 0 known vulnerabilities at last scan (Scorecard Vulnerabilities 10/10) |
+| Known-vulnerable dependencies | Dependabot (7 ecosystems, weekly) + dependency-review gate + Trivy image scans + OSV over the committed dependency graph (`gradle/verification-metadata.xml`). Assess the specific release using timestamped scan results, their scope and recorded exceptions; this document does not assert a current zero-vulnerability count |
 | Dependency tampering | Gradle dependency verification (SHA-256 checksums committed); digest-pinned container images; SHA-pinned GitHub Actions (Scorecard Pinned-Dependencies) |
 | Secret leakage | Gitleaks CI gate + GitHub push protection; secrets live in AWS Secrets Manager / OpenBao, never in the repo |
 | Weak cryptography | No home-grown crypto: OIDC/JWT via Keycloak (RS256), cosign/KMS (ECDSA P-256, SHA-256) for signing, GPG-signed commits; no SHA-1/CBC-mode dependence in project defaults |
@@ -102,6 +103,29 @@ Known, openly tracked gaps (honesty is part of the assurance argument):
   governance").
 - **Reproducible builds** are not yet bit-for-bit verified (jar timestamps); candidate
   follow-up tracked in the SSDLC audit backlog.
+
+## Pension buyer assurance
+
+The pension acceptance index is [#12350](https://github.com/JiRaska/open-bank-oss/issues/12350),
+with release and supplier acceptance in [#12479](https://github.com/JiRaska/open-bank-oss/issues/12479).
+Reuse this assurance case and the service threat models, but attach each customer-facing claim to
+an exact source/image/configuration, environment, test or independent review, limitations, owner
+and review date. Distinguish planned, implemented, locally tested, reviewed, deployed and accepted.
+An earlier green run does not establish a later revision's readiness.
+
+The [synthetic demo](../openbank-pension-service/demo/README.md) proves the scenarios it runs in
+disposable test contexts. It does not establish a connected production money path, real-token
+cross-provider isolation, statutory submission acceptance or the buyer's migration acceptance.
+The [pension TLS runbook](../openbank-pension-service/src/main/resources/docs/README.en.md)
+describes an additive server-authentication stage; that stage does not establish mutual TLS.
+
+Buyer acceptance additionally requires independent financial reconciliation, agreed legacy/product
+scope, migration and exit rehearsal, tested recovery and capacity, support and incident response,
+and applicable supplier/data-processing terms. Track these in #12475, #12477, #12478, #12472 and
+#12479 rather than treating a general platform control or certification badge as evidence of the
+whole pension service. Synthetic development remains independent of production legal-entity and
+ownership approvals. Restricted audit findings and contractual evidence do not belong in this
+public repository.
 
 ## Maintenance
 

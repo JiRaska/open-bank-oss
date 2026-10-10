@@ -2,26 +2,26 @@
 
 > **Document ID:** OB-BCP-001  
 > **Version:** 1.0  
-> **Last updated:** 2026-05-27  
-> **Status:** ACTIVE — operationally verified against live Docker stack  
+> **Last updated:** 2026-10-10
+> **Status:** Reference runbook — historical Docker exercise; current deployment recovery evidence required
 > **Owner:** Platform Engineering  
-> **Review cycle:** Quarterly (DORA Art. 11 mandate)
+> **Review cycle:** Quarterly internal review, and after material changes or incidents
 
 ---
 
 ## Regulatory Basis
 
-This BCP is mandated by and aligned to:
+Applicability depends on the legal entity, service and deployment. This historical Docker
+runbook is not an approved legal mapping or evidence of production compliance. For the pension
+buyer, record the applicable obligations and accountable owner in
+[#12475](https://github.com/JiRaska/open-bank-oss/issues/12475).
 
-| Regulation | Article | Requirement |
-|---|---|---|
-| **DORA** (EU) 2022/2554 | Art. 11 | ICT Business Continuity Policy — documented, tested, reviewed annually |
-| **DORA** | Art. 12 | ICT Response and Recovery Plans — RTO/RPO targets, prioritized recovery |
-| **DORA** | Art. 17 | Major ICT incident management — detection, classification, reporting |
-| **CNB Act 21/1992** | § 20d | IT systems BC plan — mandatory for licensed credit institutions |
-| **EBA ICT Risk Guidelines** | GL 7.4 | Business continuity management — service criticality classification |
-| **PCI DSS v4.0** | Req. 12.10 | Incident response plan — payment systems recovery procedures |
-| **GDPR** | Art. 32 | Availability and resilience of processing systems |
+Where applicable, [DORA](https://eur-lex.europa.eu/eli/reg/2022/2554/oj) covers continuity and
+response/recovery in Article 11, backup/restoration in Article 12, incident management in
+Article 17, classification in Article 18 and reporting in Article 19.
+[GDPR Article 32](https://eur-lex.europa.eu/eli/reg/2016/679/oj/) addresses security and resilience
+of personal-data processing. Banking, payment and card-specific obligations need their own
+applicability assessment; the presence of a service in this stack does not establish one.
 
 ---
 
@@ -42,31 +42,31 @@ This document covers the **OpenBank Docker stack** — all 39 containerized serv
 ### Tier 0 — Critical Infrastructure (Prerequisites)
 *Must be healthy before ANY application service starts. No business function is possible without these.*
 
-| Service | Container | Port | Regulatory Mandate |
+| Service | Container | Port | Control purpose (not a legal mapping) |
 |---|---|---|---|
 | PostgreSQL | `openbank-postgres` | 5432 | All services — data persistence |
-| Apache Kafka | `openbank-kafka` | 9092 | DORA Art. 12 — event durability |
-| Keycloak (IAM) | `openbank-keycloak` | 8080 | PSD2 Art. 97 — authentication |
-| HashiCorp Vault | `openbank-vault` | 8200 | PCI DSS Req. 3.5 — key management |
+| Apache Kafka | `openbank-kafka` | 9092 | event durability |
+| Keycloak (IAM) | `openbank-keycloak` | 8080 | authentication |
+| HashiCorp Vault | `openbank-vault` | 8200 | key management |
 | Valkey (Redis) | `openbank-valkey` | 6379 | Idempotency — PSD2 duplicate prevention |
 | Schema Registry | `openbank-schema-registry` | 8081 | Kafka schema validation |
 
-**Regulatory note:** DORA Art. 12(1)(a) requires that "ICT systems supporting critical functions are restored with priority." All Tier 0 services are prerequisites for critical payment functions.
+**Design note:** Tier 0 provides shared dependencies. Confirm the actual critical-function dependency graph and restoration order for the selected deployment.
 
 ---
 
 ### Tier 1 — Core Ledger & Identity
 *Double-entry accounting integrity and customer identity. No payment can be processed without these.*
 
-| Service | Container | Port | Depends on | Regulatory Mandate |
+| Service | Container | Port | Depends on | Control purpose (not a legal mapping) |
 |---|---|---|---|---|
 | Account Service | `openbank-account-service` | 8100 | Postgres, Kafka, Keycloak, Vault | CNB § 4 — account management |
 | Ledger Service | `openbank-ledger-service` | 8101 | Postgres, Kafka, Keycloak, Vault | CNB § 4 — double-entry ledger |
-| Transaction Service | `openbank-transaction-service` | 8102 | Postgres, Kafka, Keycloak, Vault, Valkey | PCI DSS Req. 10 — transaction logging |
-| Party Service | `openbank-party-service` | — | Postgres, Kafka, Keycloak | GDPR Art. 25 — customer data |
-| Audit Service | `openbank-audit-service` | — | Postgres, Kafka | DORA Art. 17 — immutable audit trail |
+| Transaction Service | `openbank-transaction-service` | 8102 | Postgres, Kafka, Keycloak, Vault, Valkey | transaction logging |
+| Party Service | `openbank-party-service` | — | Postgres, Kafka, Keycloak | customer data |
+| Audit Service | `openbank-audit-service` | — | Postgres, Kafka | immutable audit trail |
 
-**Regulatory note:** EBA ICT GL 7.4.2 — "institutions shall identify critical business functions and the ICT assets supporting them." Ledger integrity is the primary critical function. Audit service is co-located in Tier 1 because DORA Art. 17 requires audit trail availability during any incident.
+**Design note:** Tier 1 groups ledger integrity and incident evidence. Validate their dependencies and recovery order in the business-impact assessment.
 
 **Parallelism:** All 5 services start simultaneously — no inter-dependencies within this tier.
 
@@ -75,16 +75,16 @@ This document covers the **OpenBank Docker stack** — all 39 containerized serv
 ### Tier 2 — Balance, Compliance & Risk
 *Real-time balance projection and regulatory compliance screening. Required before any payment initiation.*
 
-| Service | Container | Port | Depends on | Regulatory Mandate |
+| Service | Container | Port | Depends on | Control purpose (not a legal mapping) |
 |---|---|---|---|---|
 | Balance Service | `openbank-balance-service` | 8103 | Postgres, Kafka, Keycloak, Valkey | CNB — real-time balance |
-| AML Service | `openbank-aml-service` | — | Postgres, Kafka, Keycloak, Valkey | 5AMLD Art. 18 — transaction monitoring |
-| Sanctions Service | `openbank-sanctions-service` | — | Postgres, Kafka, Keycloak, Valkey | 5AMLD Art. 13 — sanctions screening |
-| KYC Service | `openbank-kyc-service` | — | Postgres, Kafka, Keycloak | 5AMLD Art. 13-14 — customer due diligence |
-| Security Scanner | `openbank-security-scanner` | — | Keycloak | DORA Art. 8(2) — continuous security testing |
-| Notification Service | `openbank-notification-service` | — | Postgres, Kafka, Keycloak, Valkey | GDPR Art. 34 — breach notification |
+| AML Service | `openbank-aml-service` | — | Postgres, Kafka, Keycloak, Valkey | transaction monitoring |
+| Sanctions Service | `openbank-sanctions-service` | — | Postgres, Kafka, Keycloak, Valkey | sanctions screening |
+| KYC Service | `openbank-kyc-service` | — | Postgres, Kafka, Keycloak | customer due diligence |
+| Security Scanner | `openbank-security-scanner` | — | Keycloak | continuous security testing |
+| Notification Service | `openbank-notification-service` | — | Postgres, Kafka, Keycloak, Valkey | breach notification |
 
-**Regulatory note:** 5AMLD Art. 18 requires transaction monitoring to be active before any payment processing. AML and Sanctions services MUST be healthy before Tier 3 payment services start. This is a hard regulatory gate.
+**Design note:** This stack orders screening and monitoring before dependent payment flows. Validate the actual enforcement and approved degraded-mode policy; this ordering is not a general statutory startup gate.
 
 **Parallelism:** All 6 services start simultaneously.
 
@@ -93,15 +93,15 @@ This document covers the **OpenBank Docker stack** — all 39 containerized serv
 ### Tier 3 — PSD2 Open Banking & SCA
 *Strong Customer Authentication and Open Banking APIs. Required for any customer-initiated payment.*
 
-| Service | Container | Port | Depends on | Regulatory Mandate |
+| Service | Container | Port | Depends on | Control purpose (not a legal mapping) |
 |---|---|---|---|---|
-| SCA Service | `openbank-sca-service` | 8110 | Postgres, Kafka, Keycloak, Valkey | PSD2 Art. 97 — strong customer authentication |
-| Consent Service | `openbank-consent-service` | 8106 | Postgres, Kafka, Keycloak, Valkey | PSD2 Art. 65-67 — payment consent |
-| TPP Registry | `openbank-tpp-registry-service` | 8108 | Postgres, Keycloak, Valkey | PSD2 Art. 65 — third-party provider validation |
-| PSD2 Service | `openbank-psd2-service` | 8107 | Kafka, Keycloak, Valkey, Consent | PSD2 Art. 65-67 — AISP/PISP APIs |
+| SCA Service | `openbank-sca-service` | 8110 | Postgres, Kafka, Keycloak, Valkey | strong customer authentication |
+| Consent Service | `openbank-consent-service` | 8106 | Postgres, Kafka, Keycloak, Valkey | payment consent |
+| TPP Registry | `openbank-tpp-registry-service` | 8108 | Postgres, Keycloak, Valkey | third-party provider validation |
+| PSD2 Service | `openbank-psd2-service` | 8107 | Kafka, Keycloak, Valkey, Consent | AISP/PISP APIs |
 | PID Service | `openbank-pid-service` | — | Postgres, Keycloak | eIDAS 2.0 — payment instrument directory |
 
-**Regulatory note:** PSD2 RTS Art. 30 — SCA must be enforced before any payment initiation. SCA Service is the authentication gate for all payment flows. PSD2 Service depends on Consent Service (healthy check enforced in `docker-compose.yml`).
+**Design note:** Apply the authentication/consent requirements of the selected payment flow and its approved exemptions. Verify the deployed dependency checks; this Docker sequence does not prove that every payment requires or receives SCA.
 
 **Parallelism:** SCA, Consent, TPP Registry, PID start simultaneously. PSD2 Service starts after Consent Service is healthy.
 
@@ -110,7 +110,7 @@ This document covers the **OpenBank Docker stack** — all 39 containerized serv
 ### Tier 4 — Payment Processing
 *Actual payment execution. All compliance gates (AML, Sanctions, SCA, Consent) must be healthy first.*
 
-| Service | Container | Port | Depends on | Regulatory Mandate |
+| Service | Container | Port | Depends on | Control purpose (not a legal mapping) |
 |---|---|---|---|---|
 | Domestic Payment | `openbank-domestic-payment` | — | Postgres, Kafka, Keycloak, Valkey | CNB — domestic payment rails |
 | SEPA Payment | `openbank-sepa-payment` | — | Postgres, Kafka, Keycloak, Valkey | PSD2 — SEPA Credit Transfer |
@@ -119,9 +119,14 @@ This document covers the **OpenBank Docker stack** — all 39 containerized serv
 | FX Service | `openbank-fx-service` | — | Postgres, Kafka, Keycloak, Valkey | CNB — foreign exchange |
 | Clearing Service | `openbank-clearing-service` | — | Postgres, Kafka, Keycloak, Valkey | CNB — clearing & settlement |
 | Standing Order | `openbank-standing-order-service` | — | Postgres, Kafka, Keycloak, Valkey | PSD2 — recurring payments |
-| Card Issuance | `openbank-card-issuance-service` | — | Postgres (`openbank_cards`), Kafka, Keycloak, Valkey | PCI DSS Req. 3 — card data |
+| Card Issuance | `openbank-card-issuance-service` | — | Postgres (`openbank_cards`), Kafka, Keycloak, Valkey | card data |
 
-**Regulatory note:** 5AMLD Art. 18 — payment processing MUST NOT start if AML/Sanctions services are unavailable. This is enforced operationally (Tier 2 must be healthy before Tier 4 starts). DORA Art. 12 — RTO for payment services is 15-30 minutes.
+**Operational dependency policy:** this runbook places AML/Sanctions dependencies before payment
+services. Validate that dependency and its enforcement for the selected payment flow and approved
+risk policy; the startup sequence is not itself a general statutory requirement. Where DORA applies,
+Article 12(6) requires recovery objectives to reflect function criticality and agreed service levels;
+it does not set a universal 15–30 minute RTO for payment services.
+[Source: DORA Article 12](https://eur-lex.europa.eu/eli/reg/2022/2554/oj).
 
 **Parallelism:** All 8 services start simultaneously.
 
@@ -130,15 +135,15 @@ This document covers the **OpenBank Docker stack** — all 39 containerized serv
 ### Tier 5 — Customer Operations & Observability
 *Dispute management, interest calculation, and operator tooling. Non-blocking for payment processing.*
 
-| Service | Container | Port | Depends on | Regulatory Mandate |
+| Service | Container | Port | Depends on | Control purpose (not a legal mapping) |
 |---|---|---|---|---|
-| Dispute Service | `openbank-dispute-service` | — | Postgres, Kafka, Keycloak, Valkey | PCI DSS Req. 12 — chargeback handling |
+| Dispute Service | `openbank-dispute-service` | — | Postgres, Kafka, Keycloak, Valkey | chargeback handling |
 | Interest Service | `openbank-interest-service` | — | Postgres, Kafka, Keycloak, Valkey | CNB — interest accrual |
 | Admin UI | `openbank-admin-ui` | 3000 | Keycloak | Operator console |
-| Grafana | `openbank-grafana` | 3001 | Prometheus, Loki, Tempo | DORA Art. 8 — monitoring |
-| Prometheus | `openbank-prometheus` | 9090 | — | DORA Art. 8 — metrics |
-| Loki | `openbank-loki` | — | — | DORA Art. 17 — log retention |
-| Tempo | `openbank-tempo` | — | — | DORA Art. 8 — distributed tracing |
+| Grafana | `openbank-grafana` | 3001 | Prometheus, Loki, Tempo | monitoring |
+| Prometheus | `openbank-prometheus` | 9090 | — | metrics |
+| Loki | `openbank-loki` | — | — | log retention |
+| Tempo | `openbank-tempo` | — | — | distributed tracing |
 | Kafka UI | `openbank-kafka-ui` | 8090 | Kafka | Operational tooling |
 | Mailhog | `openbank-mailhog` | 8025 | — | Dev/test email capture |
 
@@ -200,6 +205,15 @@ TIER 5 (Operations — all parallel)                                      ▼
 ---
 
 ## 4. RTO / RPO Targets
+
+The table below records planning targets, not demonstrated or contractual recovery performance.
+Read it with [ADR-0186](../adr/0186-single-region-deployment-and-disaster-recovery-posture.md),
+which records the sandbox's single-region posture and aspirational recovery objectives. Reconcile
+the chosen service tier, business-impact assessment and tested deployment before agreeing an SLA;
+do not combine targets from different environments into a promise. Pension-specific measured
+restore, data reconciliation and buyer acceptance remain
+[#12479](https://github.com/JiRaska/open-bank-oss/issues/12479). A historical Docker exercise does
+not establish recovery of the current pension database, workflows or external payments.
 
 | Tier | Services | RTO | RPO | Recovery Priority |
 |---|---|---|---|---|
@@ -492,23 +506,27 @@ Do NOT start psd2-service before consent-service is healthy — it will fail to 
 
 ---
 
-## 7. Incident Classification (DORA Art. 17)
+## 7. Internal incident severity and regulatory classification
 
-| Severity | Criteria | Response Time | Reporting |
+These are internal response targets, not regulatory classification or reporting deadlines.
+
+| Severity | Criteria | Internal response target | Escalation |
 |---|---|---|---|
-| **P0 — Critical** | Tier 0 or Tier 1 down; payment processing halted | Immediate | CNB within 24h (DORA Art. 17) |
-| **P1 — High** | Tier 2 compliance gate down; AML/Sanctions unavailable | < 15 min | Internal escalation; CNB if > 4h |
-| **P2 — Medium** | Tier 3-4 partial degradation; some payment types unavailable | < 30 min | Internal tracking |
-| **P3 — Low** | Tier 5 operational tools down; no customer impact | < 2h | Internal tracking |
+| **P0 — Critical** | Critical business processing unavailable or integrity at risk | Immediate | Incident commander and compliance |
+| **P1 — High** | Required control unavailable or material degradation | < 15 min | Operations and compliance assessment |
+| **P2 — Medium** | Partial degradation | < 30 min | Operations; assess business impact |
+| **P3 — Low** | Tooling issue without identified customer impact | < 2h | Internal tracking; reassess if impact changes |
 
-**DORA Art. 17 reporting thresholds:**
-- Major incident: > 4h downtime OR > 10% of transactions affected OR > EUR 1M impact
-- Report to CNB within **24 hours** of classification as major incident
-- Final report within **1 month**
+Assess reportability separately using the applicable entity-specific policy. For DORA, classification
+criteria are in [Delegated Regulation 2024/1772](https://eur-lex.europa.eu/eli/reg_del/2024/1772/oj)
+and reporting content/time limits in [Delegated Regulation 2025/301](https://eur-lex.europa.eu/eli/reg_del/2025/301/oj).
+Record awareness and classification times, the relevant notification/update deadlines, recipient,
+responsible person and acknowledgement. Do not use a blanket 24-hour timer from this runbook.
+Pension incident exercises and the approved reporting policy are acceptance evidence under #12479.
 
 ---
 
-## 8. BCP Test Schedule (DORA Art. 11)
+## 8. Internal BCP test schedule
 
 | Test Type | Frequency | Scope | Owner |
 |---|---|---|---|
@@ -516,9 +534,13 @@ Do NOT start psd2-service before consent-service is healthy — it will fail to 
 | Tier 0 failover | **Quarterly** | Postgres/Kafka restart with data | Platform Engineering |
 | Payment service recovery | **Quarterly** | Tier 4 restart with active transactions | Payments Team |
 | Full DR simulation | **Semi-annually** | Complete environment rebuild | All teams |
-| TLPT (Threat-Led Penetration Test) | **Annually** | External red team | Security |
+| Independent security exercise | **Annually proposed** | Agreed test scope | Security |
 
-**Test evidence must be retained for 5 years** (DORA Art. 11(6)).
+This is a proposed internal schedule, not a universal statutory cadence. Determine whether formal
+TLPT applies and agree its scope/frequency under DORA Article 26 and the competent authority's
+requirements. Evidence retention follows the approved legal/contractual retention schedule; this
+runbook does not derive a universal five-year period from Article 11(6). Record completed drills
+and findings separately from planned dates.
 
 ---
 
@@ -561,4 +583,4 @@ Vault:       http://localhost:8200  (token: see .env VAULT_DEV_ROOT_TOKEN)
 
 ---
 
-*This document is a living operational artifact. Update after every incident, every infrastructure change, and every quarterly drill. DORA Art. 11 requires annual review at minimum.*
+*Review this reference after material incidents, infrastructure changes and drills. Keep the applicable legal review/testing obligations and measured deployment evidence in the approved control register.*

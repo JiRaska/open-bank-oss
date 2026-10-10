@@ -58,6 +58,11 @@ these scenes; client/operator screens and an interactive exception workbench are
 | Effective strategy | Today uses the current election; a future election starts on its business date; missing effective election refuses allocation | `PensionFundRestAdapterTest` (unit proof with fake REST client) |
 | Service contract | Pension consumer expectations verified against fund provider; negative authorization contract | Folder Pact + negative-auth verification |
 
+The DIP journey uses the real catalog HTTP client with the existing WireMock catalog/token resource.
+Its product/legal approvals are synthetic fixtures, not actual human approvals or proof of reviewer
+expertise. The journey verifies that the catalog and approval endpoints were read; production approval
+controls remain unchanged.
+
 The same lifecycle runs for both companies. Different commercial product configurations are not
 claimed by this first slice. Check exact passing test names in the generated report before presenting
 an individual capability; the report is evidence for that source revision, not a permanent certification.
@@ -67,7 +72,7 @@ an individual capability; the report is evidence for that source revision, not a
 | Status | Scope |
 | --- | --- |
 | Real in this demo | Pension HTTP handlers, PostgreSQL persistence and production workflow implementations in an in-process Temporal test server; separate fund HTTP/DB and Pact suites |
-| Simulated | Identity/SCA, payment execution, documents, state agency, annuity partners and the pension journey's fund collaborator/valuation |
+| Simulated | Identity/SCA, approved product-catalog projections and reviewer evidence, payment execution, documents, state agency, annuity partners and the pension journey's fund collaborator/valuation |
 | Planned | Simultaneously running company deployments with genuine OIDC/relay/OPA identities and A-to-B/B-to-A rejection plus positive controls |
 | Planned | One connected pension-to-fund-to-payment journey, durable retry/compensation and an operator exception queue |
 | Planned | Portfolio migration rehearsal, NAV corrections, failure recovery/load proof, browser presenter flow and production readiness evidence |
