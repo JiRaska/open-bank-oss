@@ -172,7 +172,7 @@ jobs_query() { # jobs_query <jq>
 # Return 10 for a stale/previously rerun PR (a completed decision), 1 for unreadable evidence.
 guarded_rerun() { # guarded_rerun [--failed]
   local detail event run_sha current_sha pr_count pr_number pr_detail pr_state attempt
-  local head_owner head_branch branch_prs branch_pr_count
+  local head_owner head_branch open_prs open_pr_count
   case "${RUN_EVENT:-}" in
     pull_request|pull_request_target)
       detail="$(with_retry "run metadata API" gh_ api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}")" || return 1
@@ -181,20 +181,22 @@ guarded_rerun() { # guarded_rerun [--failed]
       pr_count="$(jq -r '(.pull_requests // []) | length' <<< "${detail}")" || return 1
       pr_number="$(jq -r '(.pull_requests // [])[0].number // 0' <<< "${detail}")" || return 1
       attempt="$(jq -r '.run_attempt // 0' <<< "${detail}")" || return 1
-      # GitHub drops pull_requests from old run metadata after a PR is merged and its
-      # branch is deleted. Check the original head identity before escalating: a
-      # closed-only match has no current PR run to reanimate. Ambiguous/open matches
-      # remain red, and none of these fallback paths authorizes a rerun.
-      if [ "${pr_count}" -eq 0 ] && [ "${event}" = "${RUN_EVENT}" ]; then
+      # GitHub drops pull_requests from old run metadata after merge. A release-please
+      # branch can have more than 100 historical CLOSED PRs, so a single state=all page
+      # cannot establish that every match is closed (#12437). Ask for OPEN matches only:
+      # an empty, successful response proves this old PR run has no current branch PR.
+      # Any open match, malformed response or API failure remains undecidable here and
+      # NEVER authorizes a rerun of an unassociated run.
+      if [ "${pr_count}" -eq 0 ] && [ "${event}" = "${RUN_EVENT}" ] &&
+         [[ "${run_sha}" =~ ^[0-9a-f]{40}$ ]] && [[ "${attempt}" =~ ^[1-9][0-9]*$ ]]; then
         head_owner="$(jq -r '.head_repository.owner.login // ""' <<< "${detail}")" || return 1
         head_branch="$(jq -r '.head_branch // ""' <<< "${detail}")" || return 1
         if [ -n "${head_owner}" ] && [ -n "${head_branch}" ]; then
-          branch_prs="$(with_retry "PR branch lookup API" gh_ api -X GET "repos/${GITHUB_REPOSITORY}/pulls" -f state=all -f "head=${head_owner}:${head_branch}" -f per_page=100)" || return 1
-          branch_pr_count="$(jq -r 'if type == "array" then length else -1 end' <<< "${branch_prs}")" || return 1
-          if [ "${branch_pr_count}" -gt 0 ] && [ "${branch_pr_count}" -lt 100 ] &&
-             jq -e 'all(.[]; .state == "closed")' <<< "${branch_prs}" >/dev/null; then
-            echo "::notice title=spot-kill auto-retry::NOT re-running ${RUN_URL:-${RUN_ID}} — its original PR branch now belongs only to closed PRs."
-            decide skipped-closed-pr-no-association "GitHub omitted the old run's PR association; the branch lookup found no open PR"
+          open_prs="$(with_retry "open PR branch lookup API" gh_ api -X GET "repos/${GITHUB_REPOSITORY}/pulls" -f state=open -f "head=${head_owner}:${head_branch}" -f per_page=2)" || return 1
+          open_pr_count="$(jq -r 'if type == "array" and all(.[]; type == "object" and .state == "open") then length else -1 end' <<< "${open_prs}")" || return 1
+          if [ "${open_pr_count}" -eq 0 ]; then
+            echo "::notice title=spot-kill auto-retry::NOT re-running ${RUN_URL:-${RUN_ID}} — its original PR branch has no open PR."
+            decide skipped-closed-pr-no-association "GitHub omitted the old run's PR association; a successful open-PR branch lookup found none"
             return 10
           fi
         fi
@@ -470,11 +472,16 @@ FIX
  "head_branch":"refactor/sepa-payment-kernel-invalid-money-75463",
  "head_repository":{"owner":{"login":"owner"}},"pull_requests":[]}
 FIX
-  cat > "${tmp}/closed-branch-prs.json" <<'FIX'
-[{"number":11870,"state":"closed","head":{"sha":"16d65d792afda6caad8e6315b8bef17ba7822e79"}}]
+  # #12437: 100+ historical release-please PRs exist, but the exact head branch
+  # currently has zero OPEN PRs. The API response to state=open is therefore [].
+  cat > "${tmp}/no-open-branch-prs.json" <<'FIX'
+[]
 FIX
   cat > "${tmp}/open-branch-prs.json" <<'FIX'
 [{"number":11870,"state":"open","head":{"sha":"16d65d792afda6caad8e6315b8bef17ba7822e79"}}]
+FIX
+  cat > "${tmp}/malformed-branch-prs.json" <<'FIX'
+{"message":"unexpected response"}
 FIX
   cat > "${tmp}/stale-pr-head.json" <<'FIX'
 {"state":"open","head":{"sha":"a01b680e0be85051435023b0adc2cce8830d23e8"}}
@@ -566,8 +573,18 @@ FIX
   case_ "stale PR head cannot cancel current CI" cancelled 0 0 "0|@reclaim" "0|@raw:stale-pr" "0|@raw:stale-pr-head"
   case_ "current PR head may retry a genuine reclaim" cancelled 0 1 "0|@reclaim" "0|@raw:current-pr" "0|@raw:stale-pr-head" "0|ok"
   case_ "missing PR association never authorizes a rerun" cancelled 1 0 "0|@reclaim" "0|@raw:unknown-pr"
-  case_ "merged PR with omitted run association is skipped" cancelled 0 0 "0|@reclaim" "0|@raw:merged-pr-unassociated" "0|@raw:closed-branch-prs"
+  case_ "merged PR with omitted run association is skipped" cancelled 0 0 "0|@reclaim" "0|@raw:merged-pr-unassociated" "0|@raw:no-open-branch-prs"
+  # The fallback must ask the complete OPEN subset, never infer it from one
+  # 100-result page of state=all; release-please has exceeded that page size.
+  subjects=$(( subjects + 1 ))
+  if grep -q 'state=open' "${CALL_LOG}" && ! grep -q 'state=all' "${CALL_LOG}"; then
+    echo "PASS  missing PR association queries only open branch PRs"; pass=$(( pass + 1 ))
+  else
+    echo "FAIL  missing PR association did not query the open branch subset"; fail=$(( fail + 1 ))
+  fi
   case_ "open PR with omitted run association remains red" cancelled 1 0 "0|@reclaim" "0|@raw:merged-pr-unassociated" "0|@raw:open-branch-prs"
+  case_ "malformed branch lookup remains red" cancelled 1 0 "0|@reclaim" "0|@raw:merged-pr-unassociated" "0|@raw:malformed-branch-prs"
+  case_ "unreadable branch lookup remains red" cancelled 1 0 "0|@reclaim" "0|@raw:merged-pr-unassociated" "1|HTTP 404: Not Found"
   case_ "closed PR cannot be reanimated by a spot retry" cancelled 0 0 "0|@reclaim" "0|@raw:current-pr" "0|@raw:closed-pr-head"
   RUN_EVENT=push
 
