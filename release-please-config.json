@@ -463,6 +463,12 @@
       "exclude-paths": [
         "openbank-treasury-service/src/test"
       ]
+    },
+    "openbank-pension-service": {
+      "component": "pension-service",
+      "exclude-paths": [
+        "openbank-pension-service/src/test"
+      ]
     }
   }
 }
