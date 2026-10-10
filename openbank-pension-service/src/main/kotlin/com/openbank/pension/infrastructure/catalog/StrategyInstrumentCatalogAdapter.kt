@@ -121,6 +121,14 @@ class StrategyInstrumentCatalogResolver(private val catalog: StrategyCatalogRead
             check(revision.requiredText("offeringId") == id.toString()) {
                 "catalog revision belongs to another offering"
             }
+            // The attribute is maker-authored. Require the catalog's independent,
+            // immutable publication evidence; this does not establish reviewer expertise.
+            val makerId = revision.requiredText("makerId")
+            val checkerId = revision.requiredText("checkerId")
+            check(makerId != checkerId) { "retirement mapping lacks independent approval" }
+            revision.requiredText("reason")
+            val contentHash = revision.requiredText("contentHash")
+            check(CONTENT_HASH.matches(contentHash)) { "retirement mapping lacks publication hash" }
             check(attributes.requiredText("reviewStatus") == "LEGAL_AND_COMMERCIAL_REVIEWED") {
                 "retirement mapping is not reviewed"
             }
@@ -157,5 +165,6 @@ class StrategyInstrumentCatalogResolver(private val catalog: StrategyCatalogRead
     private companion object {
         const val HTTP_NOT_FOUND = 404
         const val RETIREMENT_SCHEMA = "org.openbank.retirement.pension-savings"
+        val CONTENT_HASH = Regex("^[0-9a-f]{64}$")
     }
 }

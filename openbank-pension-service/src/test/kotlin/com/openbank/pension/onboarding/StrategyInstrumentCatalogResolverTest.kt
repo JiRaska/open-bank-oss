@@ -29,7 +29,8 @@ class StrategyInstrumentCatalogResolverTest {
     private fun revision(attributes: String, schemaVersion: Int = 2, state: String = "PUBLISHED") = json(
         """{"id":"$revisionId","offeringId":"$offeringId","number":7,
            "schemaRef":{"id":"org.openbank.retirement.pension-savings","version":$schemaVersion},
-           "state":"$state","content":{"attributes":$attributes}}""",
+           "state":"$state","makerId":"maker","checkerId":"checker","reason":"reviewed revision",
+           "contentHash":"${"a".repeat(64)}","content":{"attributes":$attributes}}""",
     )
 
     private val validAttributes = """{"productLine":"DIP","jurisdictionPackId":"CZ/DIP",
@@ -85,6 +86,26 @@ class StrategyInstrumentCatalogResolverTest {
             .hasMessageContaining("no instrument classes")
         assertThatThrownBy { lookup(resolver(ids = listOf(offeringId, offeringId))) }
             .hasMessageContaining("duplicate offerings")
+    }
+
+    @Test
+    fun `maker authored review flag without catalog publication evidence fails closed`() {
+        val approved = revision(validAttributes)
+        listOf("checkerId", "reason", "contentHash").forEach { field ->
+            val missing = approved.deepCopy<com.fasterxml.jackson.databind.node.ObjectNode>().apply { remove(field) }
+            assertThatThrownBy { lookup(resolver(read = { _, _ -> missing })) }
+                .hasMessageContaining("catalog field $field")
+        }
+        val sameActor = approved.deepCopy<com.fasterxml.jackson.databind.node.ObjectNode>().apply {
+            put("checkerId", "maker")
+        }
+        assertThatThrownBy { lookup(resolver(read = { _, _ -> sameActor })) }
+            .hasMessageContaining("independent approval")
+        val malformedHash = approved.deepCopy<com.fasterxml.jackson.databind.node.ObjectNode>().apply {
+            put("contentHash", "not-a-publication-hash")
+        }
+        assertThatThrownBy { lookup(resolver(read = { _, _ -> malformedHash })) }
+            .hasMessageContaining("publication hash")
     }
 
     @Test
