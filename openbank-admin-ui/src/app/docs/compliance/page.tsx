@@ -12,14 +12,22 @@ import { PrintDocumentButton } from '@/components/docs/PrintDocumentButton'
 type Bilingual = [string, string]
 
 type ComplianceItem = { req: Bilingual; status: string; note: Bilingual }
-type ComplianceArea = { id: string; title: Bilingual; authority: Bilingual; status: string; items: ComplianceItem[] }
+type ComplianceArea = { id: string; title: Bilingual; authority: Bilingual; items: ComplianceItem[] }
+
+// The area-level verdict is DERIVED from its own line items, never typed beside them: FATCA/CRS
+// and EBA ICT were hand-labelled "Compliant" while every / several of their items were warnings.
+// (The per-item ok/warn/fail verdicts are editorial assessments of code and legal state and have
+// no machine source - the ADR index records decision/delivery status, not control coverage.)
+function areaStatus(items: readonly ComplianceItem[]): 'compliant' | 'partial' | 'gap' {
+  if (items.some(i => i.status === 'fail')) return 'gap'
+  return items.every(i => i.status === 'ok') ? 'compliant' : 'partial'
+}
 
 const COMPLIANCE_AREAS: ComplianceArea[] = [
   {
     id: 'psd2',
     title: ['PSD2 / RTS on SCA', 'PSD2 / RTS on SCA'],
     authority: ['EBA + ECB', 'EBA + ECB'],
-    status: 'compliant',
     items: [
       { req: ['SCA pro platby nad 30 EUR', 'SCA for payments over 30 EUR'], status: 'ok', note: ['sca-service implementuje OTP + FIDO2', 'sca-service implements OTP + FIDO2'] },
       { req: ['Správa souhlasů (AIS/PIS/CBPII)', 'Consent management (AIS/PIS/CBPII)'], status: 'ok', note: ['consent-service s limitem frequency_per_day', 'consent-service with frequency_per_day limit'] },
@@ -34,7 +42,6 @@ const COMPLIANCE_AREAS: ComplianceArea[] = [
     id: 'aml',
     title: ['AML / 5AMLD / 6AMLD', 'AML / 5AMLD / 6AMLD'],
     authority: ['EBA + FAÚ (CZ)', 'EBA + FAÚ (CZ)'],
-    status: 'compliant',
     items: [
       { req: ['PEP screening zákazníků', 'PEP screening of customers'], status: 'warn', note: ['pep_category — sloupec bez čtenáře v kódu, issue #2370', 'pep_category — column has no code reader, issue #2370'] },
       { req: ['Screening sankčních seznamů', 'Sanctions list screening'], status: 'warn', note: ['matched_list — sloupec bez čtenáře v kódu, issue #2370', 'matched_list — column has no code reader, issue #2370'] },
@@ -49,7 +56,6 @@ const COMPLIANCE_AREAS: ComplianceArea[] = [
     id: 'kyc',
     title: ['KYC / CDD / EDD', 'KYC / CDD / EDD'],
     authority: ['EBA AML Guidelines + FATF', 'EBA AML Guidelines + FATF'],
-    status: 'compliant',
     items: [
       { req: ['Úroveň due diligence (SDD/CDD/EDD)', 'Due diligence level (SDD/CDD/EDD)'], status: 'warn', note: ['due_diligence_level — sloupec bez čtenáře v kódu, issue #2370', 'due_diligence_level — column has no code reader, issue #2370'] },
       { req: ['Prohlášení o původu prostředků', 'Source of funds declaration'], status: 'ok', note: ['source_of_funds + source_of_wealth V2', 'source_of_funds + source_of_wealth V2'] },
@@ -64,7 +70,6 @@ const COMPLIANCE_AREAS: ComplianceArea[] = [
     id: 'gdpr',
     title: ['GDPR', 'GDPR'],
     authority: ['ÚOOÚ (CZ) + EDPB', 'ÚOOÚ (CZ) + EDPB'],
-    status: 'partial',
     items: [
       { req: ['Časové razítko explicitního souhlasu', 'Explicit consent timestamp'], status: 'warn', note: ['gdpr_consent_at/_version (party-service V2) — sloupec bez čtenáře v kódu, issue #2370', 'gdpr_consent_at/_version (party-service V2) — column has no code reader, issue #2370'] },
       { req: ['Marketingový souhlas', 'Marketing consent'], status: 'warn', note: ['Souhlas vlastní consent-service jako per-kanálové scopes (ADR-0198/0205, grantee party-service:marketing-comms); party-service jen forwarduje a projektuje z Kafka eventů. Send-path zatím fail-closed, ne skutečná kontrola consentu — issue #2369', 'consent-service owns the consent as per-channel scopes (ADR-0198/0205, grantee party-service:marketing-comms); party-service only forwards and projects from Kafka events. Send path is fail-closed for now, not a real consent check — issue #2369'] },
@@ -80,7 +85,6 @@ const COMPLIANCE_AREAS: ComplianceArea[] = [
     id: 'eba-ict',
     title: ['EBA ICT Risk Guidelines', 'EBA ICT Risk Guidelines'],
     authority: ['EBA', 'EBA'],
-    status: 'compliant',
     items: [
       { req: ['Neměnný audit log', 'Immutable audit log'], status: 'ok', note: ['no_update_audit + no_delete_audit RULE v DB V2', 'no_update_audit + no_delete_audit RULE in DB V2'] },
       { req: ['10letá retence auditu', '10-year audit retention'], status: 'warn', note: ['retention_until — sloupec bez čtenáře v kódu, issue #2370', 'retention_until — column has no code reader, issue #2370'] },
@@ -95,7 +99,6 @@ const COMPLIANCE_AREAS: ComplianceArea[] = [
     id: 'cnb',
     title: ['Regulace ČNB (CZ)', 'CNB Regulation (CZ)'],
     authority: ['Česká národní banka', 'Czech National Bank'],
-    status: 'partial',
     items: [
       { req: ['Konstantní symbol (platební styk)', 'Constant symbol (payment system)'], status: 'ok', note: ['constant_symbol s regex constraint V2', 'constant_symbol with regex constraint V2'] },
       { req: ['Specifický symbol', 'Specific symbol'], status: 'ok', note: ['specific_symbol v domestic_payments V2', 'specific_symbol in domestic_payments V2'] },
@@ -110,7 +113,6 @@ const COMPLIANCE_AREAS: ComplianceArea[] = [
     id: 'fatca-crs',
     title: ['FATCA / CRS', 'FATCA / CRS'],
     authority: ['IRS + OECD', 'IRS + OECD'],
-    status: 'compliant',
     items: [
       { req: ['FATCA status zákazníka', 'Customer FATCA status'], status: 'warn', note: ['fatca_status — sloupec bez čtenáře v kódu, issue #2370', 'fatca_status — column has no code reader, issue #2370'] },
       { req: ['CRS status zákazníka', 'Customer CRS status'], status: 'warn', note: ['crs_status — sloupec bez čtenáře v kódu, issue #2370', 'crs_status — column has no code reader, issue #2370'] },
@@ -187,7 +189,7 @@ export default function CompliancePage() {
       {/* Compliance areas */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
         {COMPLIANCE_AREAS.map(area => {
-          const cfg = STATUS_CONFIG[area.status as keyof typeof STATUS_CONFIG]
+          const cfg = STATUS_CONFIG[areaStatus(area.items)]
           return (
             <div key={area.id} className="card" style={{ overflow: 'hidden' }}>
               {/* Header */}

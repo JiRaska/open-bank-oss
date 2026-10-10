@@ -71,6 +71,24 @@ function readOpenapi(serviceDir) {
   }
 }
 
+// Listener ports, read from the service's own application.yaml (the single place a
+// port is declared). `${ENV:8101}` expressions yield their default; anything that is
+// not a plain port yields null — never a guess.
+function readPorts(serviceDir) {
+  const raw = readText(path.join(serviceDir, 'src', 'main', 'resources', 'application.yaml'))
+  if (raw == null) return { port: null, mgmtPort: null }
+  try {
+    const y = parseYaml(raw)
+    const toPort = v => {
+      const m = /^(?:\$\{[^:}]+:)?(\d{2,5})\}?$/.exec(String(v ?? '').trim())
+      return m ? Number(m[1]) : null
+    }
+    return { port: toPort(y?.quarkus?.http?.port), mgmtPort: toPort(y?.quarkus?.management?.port) }
+  } catch {
+    return { port: null, mgmtPort: null }
+  }
+}
+
 const gov = loadGovernance()
 
 // Discover service modules: every top-level openbank-* dir that is a Gradle
@@ -94,8 +112,12 @@ for (const name of entries) {
   // The convention plugin identifies a runnable Quarkus module more reliably
   // than its name: risk-engine and product-catalog have no -service suffix.
   const buildScript = readText(path.join(dir, 'build.gradle.kts')) ?? ''
-  const runnable = /^\s*(?:plugins\s*\{\s*)?id\(["']openbank\.quarkus-service["']\)/m.test(buildScript)
-    && (buildScript.includes('project(":openbank-libs-runtime")') || buildScript.includes('project(":openbank-libs")'))
+  const runnable = (/^\s*(?:plugins\s*\{\s*)?id\(["']openbank\.quarkus-service["']\)/m.test(buildScript)
+    && (buildScript.includes('project(":openbank-libs-runtime")') || buildScript.includes('project(":openbank-libs")')))
+    // analytics-sink applies the Quarkus Gradle plugin directly (no convention plugin) but is a
+    // deployable service with its own port, so it belongs to the fleet too.
+    || /^\s*alias\(libs\.plugins\.quarkus\)/m.test(buildScript)
+  const { port, mgmtPort } = readPorts(dir)
   const moneyPath = gov.moneyPath.has(name)
 
   // Genuine gaps (NOT version drift, which ADR-0048 makes legitimate):
@@ -108,6 +130,8 @@ for (const name of entries) {
     short: name.replace(/^openbank-/, ''),
     kind: name === 'openbank-admin-ui' ? 'ui' : name === 'openbank-libs' ? 'library' : isService ? 'service' : 'component',
     runnable,
+    port,
+    mgmtPort,
     releaseVersion,
     apiVersion,
     apiTitle,

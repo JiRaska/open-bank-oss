@@ -3,13 +3,14 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 'use client'
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Network, RefreshCw, CheckCircle2, XCircle, HelpCircle, Database, ArrowRight, ArrowLeft, Layers, BookOpen, Play, Pause, KeyRound, ShieldCheck, Boxes, Cloud, Send, Server } from 'lucide-react'
 import type { GovernanceManifestEntry } from '@/lib/governance/manifest'
 import { classifyBffFailure, svcUrl, type BffFailure } from '@/lib/services/bff'
 import { CatalogDriftBanner } from '@/components/governance/CatalogDriftBanner'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
+import { buildRegistry, k8sNameOf, type CatalogFleetModule, type ServiceEntry } from '@/lib/services/registry'
 import { edgeGeometry, pathId, type Pt, type Half } from '@/components/topology/geometry'
 import { FlowParticle } from '@/components/topology/FlowParticle'
 import { useFlowAnimation } from '@/components/topology/useFlowAnimation'
@@ -17,97 +18,73 @@ import { NodeShadow, ArrowMarker } from '@/components/topology/TopologyDefs'
 import { layoutBand } from '@/components/topology/layout'
 import {
   parseMapGovernance, parseMapHealth, parseServiceMapGraph,
+  type MapHealthEntry as MapHealthEntryT,
   type MapExternalEdge as ExternalEdgeT, type MapExternalNode as ExternalNodeT,
   type MapInfraEdge as InfraEdgeT, type MapInfraNode as InfraNodeT,
 } from '@/lib/governance/service-map-evidence'
 
-// Service definitions with positions for the map
-const SERVICES = [
-  // Core Banking
-  { id: 'account',     name: 'Account Service',      port: 8100, group: 'core',    x: 125, y: 100,  color: 'var(--map-core)', desc: 'Account lifecycle management, IBAN assignment' },
-  { id: 'ledger',      name: 'Ledger Service',       port: 8101, group: 'core',    x: 250, y: 100,  color: 'var(--map-core)', desc: 'Double-entry bookkeeping, GL accounts, journal entries' },
-  { id: 'transaction', name: 'Transaction Service',  port: 8102, group: 'core',    x: 375, y: 100,  color: 'var(--map-core)', desc: 'Transaction processing, partitioned by booking_date' },
-  { id: 'catalog',     name: 'Product Catalog',      port: 8104, group: 'core',    x: 500, y: 100,  color: 'var(--map-core)', desc: 'Banking products, pricing, limits' },
-  { id: 'balance',     name: 'Balance Service',      port: 8103, group: 'core',    x: 125, y: 220,  color: 'var(--map-core)', desc: 'Real-time balance tracking, holds management' },
-  { id: 'interest',    name: 'Interest Service',     port: 8125, group: 'core',    x: 250, y: 220,  color: 'var(--map-core)', desc: 'Interest calculation and accrual' },
-  { id: 'fx',          name: 'FX Service',           port: 8119, group: 'core',    x: 375, y: 220,  color: 'var(--map-core)', desc: 'Foreign exchange rates and conversion' },
-  // Identity
-  { id: 'pid',         name: 'PID Service',          port: 8105, group: 'identity', x: 650, y: 100,  color: 'var(--map-identity)', desc: 'Party identity documents, external IDs' },
-  { id: 'party',       name: 'Party Service',        port: 8111, group: 'identity', x: 750, y: 100,  color: 'var(--map-identity)', desc: 'Customer/company master data, PEP/sanctions flags' },
-  // Platform
-  { id: 'agent',       name: 'Agent Service',        port: 8109, group: 'platform', x: 900, y: 100,  color: 'var(--map-platform)', desc: 'AI agent MCP server, OpenBank tools for LLMs' },
-  { id: 'notification',name: 'Notification Service', port: 8112, group: 'platform', x: 1000,y: 100,  color: 'var(--map-platform)', desc: 'Email/SMS/Push notifications, template engine' },
-  { id: 'security-scanner',name: 'Security Scanner', port: 8120, group: 'platform', x: 1100,y: 100,  color: 'var(--map-platform)', desc: 'Continuous vulnerability scanning' },
-  // Cards
-  { id: 'card-issuance',name: 'Card Issuance',       port: 8118, group: 'cards',    x: 650, y: 260,  color: 'var(--map-cards)', desc: 'Card issuance and lifecycle management' },
-  { id: 'dispute',     name: 'Dispute Service',      port: 8135, group: 'cards',    x: 750, y: 260,  color: 'var(--map-cards)', desc: 'Card disputes and chargebacks' },
-  // Compliance
-  { id: 'audit',       name: 'Audit Service',        port: 8113, group: 'compliance', x: 920, y: 260,  color: 'var(--map-compliance)', desc: 'Immutable audit trail, EBA ICT Risk compliance' },
-  { id: 'kyc',         name: 'KYC Service',          port: 8114, group: 'compliance', x: 1080,y: 260,  color: 'var(--map-compliance)', desc: 'KYC/CDD/EDD case management, document verification' },
-  { id: 'aml',         name: 'AML Service',          port: 8117, group: 'compliance', x: 920, y: 380,  color: 'var(--map-compliance)', desc: 'AML screening, SAR filing' },
-  { id: 'sanctions',   name: 'Sanctions Service',    port: 8123, group: 'compliance', x: 1080,y: 380,  color: 'var(--map-compliance)', desc: 'Real-time sanctions list screening' },
-  { id: 'fraud',       name: 'Fraud Service',        port: 8115, group: 'compliance', x: 920, y: 500,  color: 'var(--map-compliance)', desc: 'Real-time fraud detection & transaction monitoring (ADR-0084)' },
-  // Payments
-  { id: 'sepa',        name: 'SEPA Payment',         port: 8115, group: 'payment', x: 125, y: 380,  color: 'var(--map-payment)', desc: 'SEPA Credit Transfer, SCT Inst, SEPA Direct Debit' },
-  { id: 'sepa-instant',name: 'SEPA Instant',         port: 8127, group: 'payment', x: 250, y: 380,  color: 'var(--map-payment)', desc: 'Real-time EUR payment processing' },
-  { id: 'domestic',    name: 'Domestic Payment',     port: 8116, group: 'payment', x: 375, y: 380,  color: 'var(--map-payment)', desc: 'Czech domestic payments' },
-  { id: 'standing-order',name:'Standing Order',      port: 8121, group: 'payment', x: 500, y: 380,  color: 'var(--map-payment)', desc: 'Recurring payments and scheduled transfers' },
-  { id: 'swift',       name: 'SWIFT Service',        port: 8122, group: 'payment', x: 125, y: 500,  color: 'var(--map-payment)', desc: 'SWIFT MT/MX messaging' },
-  { id: 'clearing',    name: 'Clearing Service',     port: 8124, group: 'payment', x: 250, y: 500,  color: 'var(--map-payment)', desc: 'Interbank clearing and settlement' },
-  // PSD2
-  { id: 'consent',     name: 'Consent Service',      port: 8106, group: 'psd2',   x: 125, y: 660,  color: 'var(--map-psd2)', desc: 'PSD2 consent management' },
-  { id: 'sca',         name: 'SCA Service',          port: 8110, group: 'psd2',   x: 250, y: 660,  color: 'var(--map-psd2)', desc: 'Strong Customer Authentication' },
-  { id: 'psd2',        name: 'PSD2 Service',         port: 8107, group: 'psd2',   x: 375, y: 660,  color: 'var(--map-psd2)', desc: 'PSD2 API gateway' },
-  { id: 'tpp',         name: 'TPP Registry',         port: 8108, group: 'psd2',   x: 500, y: 660,  color: 'var(--map-psd2)', desc: 'Third Party Provider registry' },
-  // Extended / reporting — were silently missing from the map before ADR-0071.
-  { id: 'lending',     name: 'Lending Service',      port: 8128, group: 'core',    x: 500, y: 220,  color: 'var(--map-core)', desc: 'Loan products and origination' },
-  { id: 'statement',   name: 'Statement Service',    port: 8136, group: 'core',    x: 625, y: 220,  color: 'var(--map-core)', desc: 'Account statement generation (EoM)' },
-  { id: 'onboarding',  name: 'Onboarding Service',   port: 8130, group: 'identity', x: 750, y: 220,  color: 'var(--map-identity)', desc: 'Customer onboarding journey (ADR-0069)' },
-  { id: 'anacredit',   name: 'AnaCredit Service',    port: 8137, group: 'compliance', x: 1080, y: 500, color: 'var(--map-compliance)', desc: 'AnaCredit regulatory reporting (ECB)' },
-  { id: 'sdd',         name: 'SEPA Direct Debit',    port: 8129, group: 'payment', x: 375, y: 500,  color: 'var(--map-payment)', desc: 'SEPA Direct Debit mandates and collections' },
-]
-
-// Service dependencies (edges)
-const SERVICE_ID_TO_NAME: Record<string, string> = {
-  'account': 'account-service',
-  'ledger': 'ledger-service',
-  'transaction': 'transaction-service',
-  'catalog': 'product-catalog',
-  'balance': 'balance-service',
-  'interest': 'interest-service',
-  'fx': 'fx-service',
-  'pid': 'pid-service',
-  'party': 'party-service',
-  'agent': 'agent-service',
-  'notification': 'notification-service',
-  'security-scanner': 'security-scanner',
-  'card-issuance': 'card-issuance-service',
-  'dispute': 'dispute-service',
-  'audit': 'audit-service',
-  'kyc': 'kyc-service',
-  'aml': 'aml-service',
-  'sanctions': 'sanctions-service',
-  'fraud': 'fraud-service',
-  'sepa': 'sepa-payment',
-  'sepa-instant': 'sepa-instant',
-  'domestic': 'domestic-payment',
-  'standing-order': 'standing-order-service',
-  'swift': 'swift-service',
-  'clearing': 'clearing-service',
-  'consent': 'consent-service',
-  'sca': 'sca-service',
-  'psd2': 'psd2-service',
-  'tpp': 'tpp-registry-service',
-  'lending': 'lending-service',
-  'statement': 'statement-service',
-  'onboarding': 'onboarding-service',
-  'anacredit': 'anacredit-service',
-  'sdd': 'sdd-service',
+// Editorial PROSE per node (display name, map group, one-line description), keyed by registry id.
+// This is NOT the service list: the nodes are one per runnable catalog module (see buildServices),
+// so a module with no entry here still appears - with its registry label, a group derived from the
+// registry group, and the OpenAPI title as description.
+const EDITORIAL: Record<string, { name: string; group: string; desc: string }> = {
+  'account': { name: 'Account Service', group: 'core', desc: 'Account lifecycle management, IBAN assignment' },
+  'ledger': { name: 'Ledger Service', group: 'core', desc: 'Double-entry bookkeeping, GL accounts, journal entries' },
+  'transaction': { name: 'Transaction Service', group: 'core', desc: 'Transaction processing, partitioned by booking_date' },
+  'product-catalog': { name: 'Product Catalog', group: 'core', desc: 'Banking products, pricing, limits' },
+  'balance': { name: 'Balance Service', group: 'core', desc: 'Real-time balance tracking, holds management' },
+  'interest': { name: 'Interest Service', group: 'core', desc: 'Interest calculation and accrual' },
+  'fx': { name: 'FX Service', group: 'core', desc: 'Foreign exchange rates and conversion' },
+  'pid': { name: 'PID Service', group: 'identity', desc: 'Party identity documents, external IDs' },
+  'party': { name: 'Party Service', group: 'identity', desc: 'Customer/company master data, PEP/sanctions flags' },
+  'agent': { name: 'Agent Service', group: 'platform', desc: 'AI agent MCP server, OpenBank tools for LLMs' },
+  'notification': { name: 'Notification Service', group: 'platform', desc: 'Email/SMS/Push notifications, template engine' },
+  'security-scanner': { name: 'Security Scanner', group: 'platform', desc: 'Continuous vulnerability scanning' },
+  'card-issuance': { name: 'Card Issuance', group: 'cards', desc: 'Card issuance and lifecycle management' },
+  'dispute': { name: 'Dispute Service', group: 'cards', desc: 'Card disputes and chargebacks' },
+  'audit': { name: 'Audit Service', group: 'compliance', desc: 'Immutable audit trail, EBA ICT Risk compliance' },
+  'kyc': { name: 'KYC Service', group: 'compliance', desc: 'KYC/CDD/EDD case management, document verification' },
+  'aml': { name: 'AML Service', group: 'compliance', desc: 'AML screening, SAR filing' },
+  'sanctions': { name: 'Sanctions Service', group: 'compliance', desc: 'Real-time sanctions list screening' },
+  'fraud': { name: 'Fraud Service', group: 'compliance', desc: 'Real-time fraud detection & transaction monitoring (ADR-0084)' },
+  'sepa-payment': { name: 'SEPA Payment', group: 'payment', desc: 'SEPA Credit Transfer, SCT Inst, SEPA Direct Debit' },
+  'sepa-instant': { name: 'SEPA Instant', group: 'payment', desc: 'Real-time EUR payment processing' },
+  'domestic-payment': { name: 'Domestic Payment', group: 'payment', desc: 'Czech domestic payments' },
+  'standing-order': { name: 'Standing Order', group: 'payment', desc: 'Recurring payments and scheduled transfers' },
+  'swift': { name: 'SWIFT Service', group: 'payment', desc: 'SWIFT MT/MX messaging' },
+  'clearing': { name: 'Clearing Service', group: 'payment', desc: 'Interbank clearing and settlement' },
+  'consent': { name: 'Consent Service', group: 'psd2', desc: 'PSD2 consent management' },
+  'sca': { name: 'SCA Service', group: 'psd2', desc: 'Strong Customer Authentication' },
+  'psd2': { name: 'PSD2 Service', group: 'psd2', desc: 'PSD2 API gateway' },
+  'tpp-registry': { name: 'TPP Registry', group: 'psd2', desc: 'Third Party Provider registry' },
+  'lending': { name: 'Lending Service', group: 'core', desc: 'Loan products and origination' },
+  'statement': { name: 'Statement Service', group: 'core', desc: 'Account statement generation (EoM)' },
+  'onboarding': { name: 'Onboarding Service', group: 'identity', desc: 'Customer onboarding journey (ADR-0069)' },
+  'anacredit': { name: 'AnaCredit Service', group: 'compliance', desc: 'AnaCredit regulatory reporting (ECB)' },
+  'sdd': { name: 'SEPA Direct Debit', group: 'payment', desc: 'SEPA Direct Debit mandates and collections' },
 }
 
-const SERVICE_NAME_TO_ID = Object.fromEntries(Object.entries(SERVICE_ID_TO_NAME).map(([k, v]) => [v, k]))
-// Stable reference for the drift banner (avoids re-fetch on every render).
-const CATALOG_PRESENT = Object.values(SERVICE_ID_TO_NAME)
+const MAP_GROUP: Record<string, string> = { payments: 'payment', 'open-banking': 'psd2' }
+
+type MapService = { id: string; name: string; group: string; color: string; desc: string; container: string; port: number; k8s: string }
+
+/** One node per registry entry (itself derived from catalog.json - see @/lib/services/registry). */
+function buildServices(registry: readonly ServiceEntry[], apiTitles: Record<string, string>): MapService[] {
+  return registry.map(r => {
+    const e = EDITORIAL[r.id]
+    const group = e?.group ?? MAP_GROUP[r.group] ?? r.group
+    return {
+      id: r.id,
+      name: e?.name ?? r.label,
+      group,
+      color: `var(--map-${group})`,
+      desc: e?.desc ?? apiTitles[r.container] ?? '',
+      container: r.container,
+      port: r.port,
+      k8s: k8sNameOf(r),
+    }
+  })
+}
 
 const GROUP_LABELS: Record<string, { label: string; color: string }> = {
   core:       { label: 'Core Banking',    color: 'var(--map-core)' },
@@ -140,8 +117,8 @@ async function fetchEvidence<T>(url: string, parse: (value: unknown) => T | null
 
 // ---------------------------------------------------------------------------
 // Auto-layout — a clean, deterministic grid per group so nodes never overlap
-// and every group box fits its contents. Positions are computed once (SERVICES
-// is static), not hand-placed, so adding a service never collides.
+// and every group box fits its contents. Positions are computed from the derived
+// node list, not hand-placed, so adding a service never collides.
 // ---------------------------------------------------------------------------
 const CELL_W = 138
 const CELL_H = 116
@@ -159,14 +136,16 @@ const GROUP_COLUMNS: string[][] = [
   ['platform'],
 ]
 const GROUP_GRID_COLS: Record<string, number> = {
-  core: 4, payment: 4, psd2: 4, identity: 3, cards: 2, compliance: 3, platform: 3,
+  core: 4, payment: 4, psd2: 4, identity: 3, cards: 2, compliance: 3, platform: 6,
 }
 
 type GroupBox = { key: string; label: string; color: string; x: number; y: number; w: number; h: number }
 
-const LAYOUT: { nodes: Record<string, Pt>; groups: GroupBox[]; width: number; height: number } = (() => {
-  const byGroup: Record<string, typeof SERVICES> = {}
-  for (const s of SERVICES) (byGroup[s.group] ||= []).push(s)
+type Layout = { nodes: Record<string, Pt>; groups: GroupBox[]; width: number; height: number }
+
+function computeLayout(services: readonly MapService[]): Layout {
+  const byGroup: Record<string, MapService[]> = {}
+  for (const s of services) (byGroup[s.group] ||= []).push(s)
 
   const nodes: Record<string, Pt> = {}
   const groups: GroupBox[] = []
@@ -208,7 +187,7 @@ const LAYOUT: { nodes: Record<string, Pt>; groups: GroupBox[]; width: number; he
     width: colX[colX.length - 1] + colWidth[colWidth.length - 1] + CANVAS_PAD,
     height: maxY - GROUP_GAP + CANVAS_PAD,
   }
-})()
+}
 
 // edgeGeometry / mixHex / pathId / Pt / Half — shared topology engine (@/components/topology).
 
@@ -333,7 +312,7 @@ const chipWidth = (label: string) => Math.max(96, 30 + label.length * 6.6 + 14)
 type TierPos = { cx: number; cy: number; w: number }
 type BandBox = { key: 'infra' | 'external'; x: number; y: number; w: number; h: number }
 // Deterministic flow-layout: centre chips per row, wrapping to the canvas width.
-const BAND_CFG = { width: LAYOUT.width, pad: CANVAS_PAD, pillH: CHIP_H, bandHead: BAND_HEAD, bandPadY: BAND_PAD_Y, bandGap: BAND_GAP, pillGap: CHIP_GAP, measure: chipWidth }
+const bandCfg = (width: number) => ({ width, pad: CANVAS_PAD, pillH: CHIP_H, bandHead: BAND_HEAD, bandPadY: BAND_PAD_Y, bandGap: BAND_GAP, pillGap: CHIP_GAP, measure: chipWidth })
 
 // A rounded "pill" node for an infra/external tier — visually distinct from the
 // LEGO-brick services so the three tiers read apart at a glance.
@@ -365,16 +344,40 @@ const initialGovData: Record<string, GovernanceManifestEntry> = {}
 
 export default function ServiceMapPage() {
   const { t } = useLanguage()
+  // The node set is DERIVED: every runnable module in the code-generated catalog (the same
+  // /api/catalog/services artifact the other service views use), never a list typed into this page.
+  const [registry, setRegistry] = useState<ServiceEntry[]>([])
+  const [apiTitles, setApiTitles] = useState<Record<string, string>>({})
+  useEffect(() => {
+    let alive = true
+    fetch('/api/catalog/services', { cache: 'no-store' })
+      .then(r => (r.ok ? r.json() : null))
+      .then((data: { services?: (CatalogFleetModule & { apiTitle?: string | null })[] } | null) => {
+        if (!alive || !Array.isArray(data?.services)) return
+        setRegistry(buildRegistry(data.services))
+        setApiTitles(Object.fromEntries(data.services.filter(m => m.apiTitle).map(m => [m.name, String(m.apiTitle)])))
+      })
+      .catch(() => { /* catalog snapshot absent - the map renders empty rather than a guessed fleet */ })
+    return () => { alive = false }
+  }, [])
+  const SERVICES = useMemo(() => buildServices(registry, apiTitles), [registry, apiTitles])
+  const LAYOUT = useMemo(() => computeLayout(SERVICES), [SERVICES])
+  // Graph/governance name (catalog `short`) <-> node id, derived from the same registry.
+  const SERVICE_NAME_TO_ID = useMemo(
+    () => Object.fromEntries(registry.map(r => [r.container.replace(/^openbank-/, ''), r.id])) as Record<string, string>,
+    [registry],
+  )
+  const CATALOG_PRESENT = useMemo(() => registry.map(r => r.container.replace(/^openbank-/, '')), [registry])
   const [selected, setSelected] = useState<string | null>(null)
   const [hovered, setHovered] = useState<string | null>(null)
   const [filter, setFilter] = useState<string>('all')
-  const [healthStatuses, setHealthStatuses] = useState<Record<string, HealthStatus>>({})
+  const [healthEntries, setHealthEntries] = useState<MapHealthEntryT[]>([])
   const [governanceData, setGovernanceData] = useState<Record<string, GovernanceManifestEntry>>(initialGovData)
   // Inter-service edges come from the code-derived dependency graph (ADR-0029 D1),
   // not the sparse curatorial governance lineage. Seed empty; the fetch fills it.
   const [graphEdges, setGraphEdges] = useState<{ from: string; to: string; via: string; type: 'rest' | 'kafka' }[]>([])
   // Per-service degree (upstream + downstream) from the graph → drives brick size.
-  const [degrees, setDegrees] = useState<Record<string, number>>({})
+  const [graphNodes, setGraphNodes] = useState<{ name: string; dependsOn?: number; dependedOnBy?: number }[]>([])
   const [isChecking, setIsChecking] = useState(true)
   // Data-flow tiers (infra substrate + external 3rd parties), from the same graph fetch.
   const [infraNodes, setInfraNodes] = useState<InfraNodeT[]>([])
@@ -411,10 +414,10 @@ export default function ServiceMapPage() {
 
     if ([healthResult, governanceResult, graphResult].some(result => !result.ok && result.state === 'unauthorized')) {
       requestGeneration.current += 1
-      setHealthStatuses({})
+      setHealthEntries([])
       setGovernanceData({})
       setGraphEdges([])
-      setDegrees({})
+      setGraphNodes([])
       setInfraNodes([])
       setExternalNodes([])
       setInfraEdges([])
@@ -432,23 +435,13 @@ export default function ServiceMapPage() {
       topology: graphResult.ok ? (graphResult.value.available ? 'ok' : 'not_deployed') : graphResult.state,
     }
     if (healthResult.ok) {
-      const newStatuses: Record<string, HealthStatus> = {}
-      for (const svc of SERVICES) {
-        const entry = healthResult.value.find(service => service.port === svc.port)
-        newStatuses[svc.id] = entry?.status ?? 'UNKNOWN'
-      }
-      setHealthStatuses(newStatuses)
+      setHealthEntries(healthResult.value)
     }
     if (governanceResult.ok && governanceResult.value.available) setGovernanceData(governanceResult.value.byService)
     if (graphResult.ok && graphResult.value.available) {
       const graph = graphResult.value.graph
-      const deg: Record<string, number> = {}
-      for (const node of graph.nodes) {
-        const id = SERVICE_NAME_TO_ID[node.name.replace(/^openbank-/, '')]
-        if (id) deg[id] = (node.dependsOn ?? 0) + (node.dependedOnBy ?? 0)
-      }
       setGraphEdges(graph.edges)
-      setDegrees(deg)
+      setGraphNodes(graph.nodes)
       setInfraNodes(graph.infraNodes)
       setExternalNodes(graph.externalNodes)
       setInfraEdges(graph.infraEdges)
@@ -468,11 +461,30 @@ export default function ServiceMapPage() {
     return () => { requestGeneration.current += 1 }
   }, [checkHealth])
 
+  const degrees = useMemo(() => {
+    const deg: Record<string, number> = {}
+    for (const node of graphNodes) {
+      const id = SERVICE_NAME_TO_ID[node.name.replace(/^openbank-/, '')]
+      if (id) deg[id] = (node.dependsOn ?? 0) + (node.dependedOnBy ?? 0)
+    }
+    return deg
+  }, [graphNodes, SERVICE_NAME_TO_ID])
+  // Health matches a node by workload identity (container / k8s name), never by port: ports are not
+  // unique across the fleet and an in-cluster inventory is keyed by workload.
+  const healthStatuses = useMemo(() => {
+    const out: Record<string, HealthStatus> = {}
+    if (healthEntries.length === 0) return out
+    for (const svc of SERVICES) {
+      const entry = healthEntries.find(h => h.container === svc.container || h.container === svc.k8s || h.name === svc.k8s)
+      out[svc.id] = entry?.status ?? 'UNKNOWN'
+    }
+    return out
+  }, [healthEntries, SERVICES])
   const selectedSvc = SERVICES.find(s => s.id === selected)
   const selectedTier: InfraNodeT | ExternalNodeT | undefined = [...infraNodes, ...externalNodes].find(n => n.id === selected)
   // Deterministically resolve the manifest service-name from the UI node id
   // This prevents mismatches where the UI human-readable name doesn't match the internal serviceName.
-  const govEntry = selectedSvc ? governanceData[SERVICE_ID_TO_NAME[selectedSvc.id]] : null;
+  const govEntry = selectedSvc ? governanceData[selectedSvc.container.replace(/^openbank-/, '')] : null;
   const visibleServices = filter === 'all' ? SERVICES : SERVICES.filter(s => s.group === filter)
   const visibleIds = new Set(visibleServices.map(s => s.id))
   
@@ -525,7 +537,7 @@ export default function ServiceMapPage() {
     let y = LAYOUT.height
     const place = (key: 'infra' | 'external', nodes: (InfraNodeT | ExternalNodeT)[]) => {
       y += BAND_GAP
-      const b = layoutBand(nodes.map(n => ({ id: n.id, label: chipLabel(n.id, n.label) })), y, BAND_CFG)
+      const b = layoutBand(nodes.map(n => ({ id: n.id, label: chipLabel(n.id, n.label) })), y, bandCfg(LAYOUT.width))
       Object.assign(tierPos, b.pos)
       bandBoxes.push({ key, x: CANVAS_PAD - 12, y, w: LAYOUT.width - (CANVAS_PAD - 12) * 2, h: b.height, count: nodes.length })
       y += b.height
@@ -548,7 +560,7 @@ export default function ServiceMapPage() {
   // Services (drawn on this map) that connect to the selected tier node.
   const tierConsumers = selectedTier
     ? tierEdges.filter(e => e.to === selectedTier.id).map(e => ({
-        svc: svcMap[e.fromId] as (typeof SERVICES)[number] | undefined,
+        svc: svcMap[e.fromId] as MapService | undefined,
         type: e.type,
         enabled: 'enabled' in e ? e.enabled : true,
       })).filter(c => c.svc)
@@ -570,7 +582,7 @@ export default function ServiceMapPage() {
     account: 'Správa životního cyklu účtu, přidělování IBAN',
     ledger: 'Podvojné účetnictví, GL účty, účetní zápisy',
     transaction: 'Zpracování transakcí, partiční dělení podle booking_date',
-    catalog: 'Bankovní produkty, cenotvorba, limity',
+    'product-catalog': 'Bankovní produkty, cenotvorba, limity',
     balance: 'Sledování zůstatku v reálném čase, správa blokací',
     interest: 'Výpočet a časové rozlišení úroků',
     fx: 'Kurzy a převody cizích měn',
@@ -585,16 +597,16 @@ export default function ServiceMapPage() {
     kyc: 'Správa KYC/CDD/EDD případů, ověřování dokladů',
     aml: 'AML screening, podávání SAR',
     sanctions: 'Screening sankčních seznamů v reálném čase',
-    sepa: 'SEPA Credit Transfer, SCT Inst, SEPA Direct Debit',
+    'sepa-payment': 'SEPA Credit Transfer, SCT Inst, SEPA Direct Debit',
     'sepa-instant': 'Zpracování okamžitých EUR plateb',
-    domestic: 'Tuzemské české platby',
+    'domestic-payment': 'Tuzemské české platby',
     'standing-order': 'Opakované platby a naplánované převody',
     swift: 'SWIFT MT/MX zprávy',
     clearing: 'Mezibankovní clearing a zúčtování',
     consent: 'Správa souhlasů PSD2',
     sca: 'Silné ověření klienta',
     psd2: 'API brána PSD2',
-    tpp: 'Registr poskytovatelů třetích stran',
+    'tpp-registry': 'Registr poskytovatelů třetích stran',
     lending: 'Úvěrové produkty a jejich poskytování',
     statement: 'Generování výpisů z účtu (EoM)',
     onboarding: 'Onboardingová cesta klienta (ADR-0069)',
@@ -1093,11 +1105,11 @@ export default function ServiceMapPage() {
 
               {/* Same-origin BFF only (ADR-0056) — never http://localhost:<port>. */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '4px' }}>
-                <a href={svcUrl(SERVICE_ID_TO_NAME[selectedSvc.id], '/q/openapi', { format: 'json' })} target="_blank" rel="noreferrer"
+                <a href={svcUrl(selectedSvc.k8s, '/q/openapi', { format: 'json' })} target="_blank" rel="noreferrer"
                   className="btn btn-primary" style={{ textAlign: 'center', textDecoration: 'none', fontSize: '12px' }}>
                   {t('OpenAPI specifikace', 'OpenAPI Spec')} →
                 </a>
-                <a href={svcUrl(SERVICE_ID_TO_NAME[selectedSvc.id], '/q/health')} target="_blank" rel="noreferrer"
+                <a href={svcUrl(selectedSvc.k8s, '/q/health')} target="_blank" rel="noreferrer"
                   className="btn btn-secondary" style={{ textAlign: 'center', textDecoration: 'none', fontSize: '12px' }}>
                   {t('Kontrola zdraví', 'Health Check')} →
                 </a>

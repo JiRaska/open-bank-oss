@@ -5,6 +5,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { inCluster, discoverServices } from '@/lib/discovery'
 import { auth } from '@/auth'
+import { getProxyAllowlist } from '@/lib/services/fleet'
 
 // Off-cluster (local dev / docker-compose) fallback only — in-cluster the proxy
 // resolves via ADR-0051 discovery instead. The KEY is therefore not free-form:
@@ -14,62 +15,10 @@ import { auth } from '@/auth'
 // (`Unknown service`) in the sandbox — which is exactly how `sepa-instant-service`
 // left the payments SCT-Inst panel stuck on `not_deployed`. Keys are checked
 // against openbank-infra/gitops by src/test/service-registry.guard.test.ts.
-const SERVICE_MAP: Record<string, { container: string; port: number }> = {
-  'account-service':        { container: 'openbank-account-service',        port: 8100 },
-  'ledger-service':         { container: 'openbank-ledger-service',         port: 8101 },
-  'transaction-service':    { container: 'openbank-transaction-service',    port: 8102 },
-  'balance-service':        { container: 'openbank-balance-service',        port: 8103 },
-  'product-catalog':        { container: 'openbank-product-catalog',        port: 8104 },
-  'pid-service':            { container: 'openbank-pid-service',            port: 8105 },
-  'consent-service':        { container: 'openbank-consent-service',        port: 8106 },
-  'psd2-service':           { container: 'openbank-psd2-service',           port: 8107 },
-  'tpp-registry-service':   { container: 'openbank-tpp-registry-service',   port: 8108 },
-  'agent-service':          { container: 'openbank-agent-service',          port: 8109 },
-  'sca-service':            { container: 'openbank-sca-service',            port: 8110 },
-  'party-service':          { container: 'openbank-party-service',          port: 8111 },
-  'notification-service':   { container: 'openbank-notification-service',   port: 8112 },
-  'audit-service':          { container: 'openbank-audit-service',          port: 8113 },
-  'kyc-service':            { container: 'openbank-kyc-service',            port: 8114 },
-  'sepa-payment':           { container: 'openbank-sepa-payment',           port: 8115 },
-  'domestic-payment':       { container: 'openbank-domestic-payment',       port: 8116 },
-  'aml-service':            { container: 'openbank-aml-service',            port: 8117 },
-  'card-issuance-service':  { container: 'openbank-card-issuance-service',  port: 8118 },
-  // ADR-0283 phase 3: the Card Center's token and dispute desks read this service. Without the
-  // entry the browser cannot reach it at all and the screens can only show mock data.
-  'card-processing-service': { container: 'openbank-card-processing-service', port: 8157 },
-  'fx-service':             { container: 'openbank-fx-service',             port: 8119 },
-  'security-scanner-service': { container: 'openbank-security-scanner',     port: 8120 },
-  'standing-order-service': { container: 'openbank-standing-order-service', port: 8121 },
-  'swift-service':          { container: 'openbank-swift-service',          port: 8122 },
-  'sanctions-service':      { container: 'openbank-sanctions-service',      port: 8123 },
-  'clearing-service':       { container: 'openbank-clearing-service',       port: 8124 },
-  'interest-service':       { container: 'openbank-interest-service',       port: 8125 },
-  'lending-service':        { container: 'openbank-lending-service',        port: 8126 },
-  'risk-engine':            { container: 'openbank-risk-engine',            port: 8159 },
-  // ADR-0315: money-market deals for the treasury desk (#10618). Not in gitops yet — the
-  // service-registry guard lists it in SERVICE_MAP_NOT_YET_DEPLOYED until its workload lands.
-  'treasury-service':       { container: 'openbank-treasury-service',       port: 8160 },
-  'campaign-service':       { container: 'openbank-campaign-service',       port: 8128 },
-  'sdd-service':            { container: 'openbank-sdd-service',            port: 8129 },
-  'fraud-service':          { container: 'openbank-fraud-service',          port: 8133 },
-  'dispute-service':        { container: 'openbank-dispute-service',        port: 8135 },
-  'sepa-instant':           { container: 'openbank-sepa-instant',           port: 8127 },
-  'document-service':       { container: 'openbank-document-service',       port: 8143 },
-  'engagement-service':     { container: 'openbank-engagement-service',     port: 8153 },
-  // ADR-0097: the regulatory console reads the implemented FINREP/COREP templates
-  // through this same operator-token BFF path. Without this entry, a healthy
-  // finrep-service is invisible to the browser and the page can only show mock data.
-  'finrep-service':         { container: 'openbank-finrep-service',         port: 8140 },
-  'vop-service':            { container: 'openbank-vop-service',            port: 8149 },
-  // ADR-0285 phase 2: style-version draft/submit/publish/retire + the commstyle.publish
-  // four-eyes queue. replicas: 0 until activated (openbank-communication-service PR) — routed
-  // here regardless, same as every other entry; a scaled-to-zero backend surfaces as a normal
-  // upstream connection failure, not a special case this map needs to know about.
-  'communication-service':  { container: 'openbank-communication-service',  port: 8158 },
-  // ADR-0284: legal-entity onboarding. The operator console reads the manual-review queue and
-  // writes the per-IČO representation attestation (#9711) through this same operator-token path.
-  'kyb-service':            { container: 'openbank-kyb-service',            port: 8157 },
-}
+// The allowlist is DERIVED from the code-generated catalog (every runnable openbank-* module,
+// keyed by Kubernetes workload name) — see getProxyAllowlist(). It stays an allowlist: a key that
+// is not a catalog module resolves to nothing, and the upstream host is the module's own container
+// name / SERVICES_HOST, never anything the caller supplies.
 
 // In-cluster, the upstream address must be the real Service DNS
 // (`<name>.<namespace>.svc:<port>`). The legacy static map only knew compose
@@ -114,7 +63,8 @@ async function serviceBaseUrl(svcKey: string): Promise<ResolvedService | null> {
     return resolveInCluster(svcKey)
   }
   // Off-cluster (local dev / docker-compose): legacy localhost/container map.
-  const svc = SERVICE_MAP[svcKey]
+  const allowlist = getProxyAllowlist()
+  const svc = Object.hasOwn(allowlist, svcKey) ? allowlist[svcKey] : undefined
   if (!svc) return null
   const host =
     process.env.SERVICES_HOST === 'container'
