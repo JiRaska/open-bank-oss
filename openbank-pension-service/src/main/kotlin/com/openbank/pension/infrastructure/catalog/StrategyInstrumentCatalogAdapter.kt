@@ -31,6 +31,7 @@ import java.util.UUID
 @RegisterRestClient(configKey = "product-catalog")
 @RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
+@RegisterProvider(ProductCatalogHostHeaderFilter::class)
 interface StrategyCatalogRestClient {
     @GET
     @Path("/offerings")

@@ -31,7 +31,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-pension-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "12983ce348db52c7"
+        openbank.tech/policy-checksum: "7789c9bf91bbf769"
       labels:
         app.kubernetes.io/name: pension-service
         app.kubernetes.io/part-of: pension
@@ -130,6 +130,10 @@ spec:
                   optional: false
             - name: PENSION_FUND_SERVICE_URL
               value: http://pension-fund-service.pension-fund.svc:8162
+            - name: PRODUCT_CATALOG_SERVICE_URL
+              value: http://keda-add-ons-http-interceptor-proxy.keda:8080
+            - name: PRODUCT_CATALOG_HOST_OVERRIDE
+              value: product-catalog.accounts.svc
             # #12378 payment adapters (pension-service's own OIDC client).
             - name: STANDING_ORDER_SERVICE_URL
               value: http://standing-order-service.payments.svc:8121
