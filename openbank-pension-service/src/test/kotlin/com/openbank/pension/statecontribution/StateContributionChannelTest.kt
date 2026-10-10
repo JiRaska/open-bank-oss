@@ -4,8 +4,10 @@
 
 package com.openbank.pension.statecontribution
 
+import com.openbank.pension.application.port.out.PensionMetrics
 import com.openbank.pension.application.port.out.ReturnReport
 import com.openbank.pension.application.port.out.StateContributionReturnRepository
+import com.openbank.pension.application.port.out.StateReturnEvent
 import com.openbank.pension.application.usecase.StateContributionReturnService
 import com.openbank.pension.domain.contribution.ContributionChannel
 import com.openbank.pension.domain.contribution.IncomingPayment
@@ -62,6 +64,43 @@ class StateContributionChannelTest {
 
     private fun at(date: String) {
         f.now = Instant.parse("${date}T10:00:00Z")
+    }
+
+    @Test
+    fun `R mixed-currency DUE returns fail before filing transmission or reporting metrics`(): Unit = runBlocking {
+        val crownContract = f.contract()
+        val otherContract = f.contract()
+        val crown = requireNotNull(
+            returns.registerTermination(crownContract.contractId, BigDecimal("100"), LocalDate.of(2026, 3, 15), "czk"),
+        )
+        val other = requireNotNull(
+            returns.registerTermination(otherContract.contractId, BigDecimal("20"), LocalDate.of(2026, 3, 15), "eur"),
+        )
+        store.rows[other.id] = other.copy(currency = "EUR")
+        var reportedMetrics = 0
+        val withMetrics = StateContributionReturnService(
+            store, f.claims, f.directory, f.references, f.incentiveService, f.agency,
+            CzReturnChannel(Optional.of("12345678")), f.clock,
+            object : PensionMetrics {
+                override fun stateContributionReturns(
+                    event: StateReturnEvent,
+                    count: Int,
+                    amount: BigDecimal?,
+                    currency: String?,
+                ) {
+                    reportedMetrics++
+                }
+            },
+        )
+
+        assertThatThrownBy { runBlocking { withMetrics.fileReturnReport(YearMonth.of(2026, 6)) } }
+            .isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("outside CZK")
+        assertThat(store.rows.getValue(crown.id).status).isEqualTo(ReturnStatus.DUE)
+        assertThat(store.rows.getValue(other.id).status).isEqualTo(ReturnStatus.DUE)
+        assertThat(store.reports()).isEmpty()
+        assertThat(f.agency.sent).isEmpty()
+        assertThat(reportedMetrics).isZero()
     }
 
     @Test

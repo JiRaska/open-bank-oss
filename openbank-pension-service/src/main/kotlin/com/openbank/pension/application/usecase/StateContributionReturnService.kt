@@ -159,6 +159,12 @@ class StateContributionReturnService(
     suspend fun fileReturnReport(month: YearMonth): ReturnReport? {
         val due = returns.byStatus(ReturnStatus.DUE)
         if (due.isEmpty()) return null
+        // The CZ agency format has no currency field. Refuse the whole batch before persisting or
+        // transmitting it when an obligation is not in crowns; neither its lines nor its metric
+        // may silently describe a mixed-currency sum as CZK.
+        check(due.all { it.currency == "CZK" }) {
+            "CZ state-contribution return report contains an obligation outside CZK"
+        }
         val lines = due.map { r ->
             ReturnReportLine(
                 r.id,
@@ -187,7 +193,7 @@ class StateContributionReturnService(
             StateReturnEvent.REPORTED,
             due.size,
             due.fold(java.math.BigDecimal.ZERO) { sum, r -> sum + r.amount },
-            due.first().currency,
+            "CZK",
         )
         return report.copy(channelReference = receipt.channelReference)
     }
