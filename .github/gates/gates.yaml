@@ -4778,6 +4778,27 @@ gates:
     run: |
       python3 .github/scripts/check-kafka-dotted-keys.py --root .
 
+  # ADR-0337 amendment: a second treasury-service deployment (the pension company's portfolio)
+  # runs the bank's image, so every scheduler and outbound edge in it is live by default. The
+  # switch list is derived from the treasury source; a new bank-only job without a switch is red.
+  - id: treasury-instance-switches-off
+    name: "bank-only treasury schedulers/edges off on non-bank instances (ADR-0337, enforced)"
+    group: gitops
+    mode: enforced
+    min_subjects: 10   # 19 measured 2026-10-10 (4 @Scheduled, 6 *enabled* @ConfigProperty, 7 yaml *.enabled, 1 channel, 2 REST clients x1 instance, minus overlap)
+    budget_seconds: 15   # <1s measured locally incl. self-test
+    rationale: >-
+      A second treasury-service deployment runs the bank's image, so its outbox dispatcher,
+      simulated market, interest accrual and nostro sweep would publish to the bank's topic and
+      post to the bank's ledger by default; the switch list is derived from source so a new
+      bank-only job cannot reach the instance unswitched.
+    review_after: '2027-04-10'
+    selftest: python3 .github/scripts/check-treasury-instance-switches.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-treasury-instance-switches.py"]
+    run: |
+      python3 .github/scripts/check-treasury-instance-switches.py --root .
+
   - id: quoted-sequence-name-ratchet
     name: "quoted mixed-case Hibernate sequence ratchet (issue #6480, enforced)"
     group: data

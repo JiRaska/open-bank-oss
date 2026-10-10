@@ -108,6 +108,17 @@ spec:
             # No OIDC client secret, deliberately: this service validates bearer tokens against the
             # realm's JWKS and calls nobody, so it needs no client credential at all. Projecting
             # the shared openbank-services secret would hand it a credential it never uses.
+            # ADR-0337 amendment: the PENSION COMPANY's own treasury-service instance
+            # (treasury-pension-co), the source of PSP 34-12 PS — never the bank's `treasury`. Maps to
+            # quarkus.rest-client.treasury-service.url (${PENSION_COMPANY_TREASURY_URL}). Its private-CA
+            # mTLS listener on 8443, not plaintext 8160: the call carries a bearer token, there is
+            # no mesh, and ASVS V9.1 (asvs-l3-mechanical-subset, enforced) refuses a new http:// edge.
+            # Server identity is verified against openbank-ca with hostname verification (the
+            # treasury-service-internal-tls dnsNames carry this host); the client certificate is
+            # tax-reporting-internal-tls below. Declared HERE because gen-network-policies.py
+            # derives treasury-pension-co's ingress allow-list from this env URL.
+            - name: PENSION_COMPANY_TREASURY_URL
+              value: https://treasury-service.treasury-pension-co.svc:8443
             # OPA sidecar enforced from the first rollout: tax_reporting_rest_ext.rego grants
             # reads to real staff and the two filing state changes to a real operator; no
             # service-account reaches either by any rule.
@@ -146,6 +157,11 @@ spec:
               readOnly: true
             - name: kafka-truststore
               mountPath: /mnt/kafka-truststore
+              readOnly: true
+            # Private-CA client certificate + openbank-ca for the east-west mTLS edges
+            # (%prod TLS buckets in application.yaml).
+            - name: internal-tls
+              mountPath: /mnt/internal-tls
               readOnly: true
         # OPA policy decision point (ADR-0034). Co-located sidecar the app reaches on
         # localhost:8181 (AuthorizeInterceptor default). Bundle mounted read-only from the
@@ -223,6 +239,10 @@ spec:
             - name: opa-tmp
               mountPath: /tmp
       volumes:
+        - name: internal-tls
+          secret:
+            secretName: tax-reporting-internal-tls
+            optional: false
         - name: tmp
           emptyDir: {}
         - name: kafka-keystore

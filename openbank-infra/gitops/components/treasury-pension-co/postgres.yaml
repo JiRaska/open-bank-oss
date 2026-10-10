@@ -1,0 +1,113 @@
+# Single-owner Postgres for the PENSION COMPANY's treasury-service instance (ADR-0337 amendment:
+# the company's own portfolio). Same shape as treasury/postgres.yaml — the bank's treasury-db — and
+# deliberately a SEPARATE cluster: the company's holdings never share a database with the bank's.
+# CNPG generates `treasury-pension-co-db-app` and the `treasury-pension-co-db-rw` Service.
+#
+# BACKUP DEPENDENCY: the barmanObjectStore below needs the EKS Pod Identity association for the
+# treasury-pension-co-db ServiceAccount, added by the separate infra PR `infra/db-backups-pension-co`.
+# That PR must be merged AND applied BEFORE this one merges (openbank-infra/CLAUDE.md: the
+# association is admission-time; a pod admitted first archives nothing). db-backup-association-gate
+# enforces the order.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: treasury-pension-co-db
+  namespace: treasury-pension-co
+spec:
+  # DB-layer observability (Dynatrace-parity #0): CNPG runs its built-in
+  # Prometheus exporter on :9187 and creates a PodMonitor the operator owns.
+  # kube-prometheus-stack selects PodMonitors cluster-wide (NilUsesHelmValues
+  # =false), so this lights up cnpg_* metrics (connections, replication lag,
+  # deadlocks, xid age, WAL archiving) with zero app changes.
+  monitoring:
+    enablePodMonitor: true
+    # FinOps/observability: cnpg_pg_settings_setting is one series per Postgres GUC per
+    # instance — 24 963 series on 2026-09-12, the largest metric name in a 645 k-series
+    # Prometheus (12 h retention, no long-term store). Exactly ONE of those GUCs is read
+    # by anything here: `max_connections`, by the PostgresConnectionsSaturated alert
+    # (prometheus-rules-db.yaml) and by dashboard-openbank-postgres. Everything else is
+    # static configuration whose authoritative copy is this manifest, so it is dropped at
+    # scrape. RE2 has no negative lookahead, hence mark-then-drop rather than one regex.
+    podMonitorMetricRelabelings:
+      - sourceLabels: [__name__, name]
+        regex: cnpg_pg_settings_setting;max_connections
+        targetLabel: __tmp_cnpg_keep
+        replacement: "1"
+      - sourceLabels: [__name__, __tmp_cnpg_keep]
+        regex: cnpg_pg_settings_setting;
+        action: drop
+      - regex: __tmp_cnpg_keep
+        action: labeldrop
+  # HA (ADR-0159): primary + hot standby with async streaming replication and
+  # CNPG-managed automated failover. `enablePodAntiAffinity` + required
+  # `kubernetes.io/hostname` keeps the two pods on DIFFERENT NODES — that is both
+  # the HA guarantee and the fix for the single-instance un-drainable-PDB node-roll
+  # block (issue #809): with a standby present the PDB permits one disruption, so
+  # Karpenter drains/rolls a DB-hosting node without the manual delete-primary dance.
+  # The topologySpreadConstraint softly spreads the pair across AZs when capacity
+  # allows. Async replication (no minSyncReplicas) keeps the write path independent
+  # of standby health; synchronous is deferred to a production decision (ADR-0159).
+  instances: 2
+  # ADR-0325: an update (image bump, config change) promotes the already-updated
+  # standby first and only then restarts the old primary. CNPG's default,
+  # `restart`, restarts the primary IN PLACE; on a single-instance cluster the
+  # operator has no standby and restarts either way, so this is free there.
+  primaryUpdateMethod: switchover
+  primaryUpdateStrategy: unsupervised
+  affinity:
+    enablePodAntiAffinity: true
+    topologyKey: kubernetes.io/hostname
+    podAntiAffinityType: required
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          cnpg.io/cluster: treasury-pension-co-db
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.6
+  storage:
+    storageClass: gp3
+    size: 2Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  postgresql:
+    parameters:
+      wal_keep_size: "64MB"
+  bootstrap:
+    initdb:
+      database: openbank_treasury
+      owner: openbank
+  # WAL archiving + daily base backups to S3 (ADR-0035, #863 pattern). Credentials via EKS Pod
+  # Identity on the treasury-pension-co-db ServiceAccount (db-backups.tf, infra/db-backups-pension-co) — barman reads the SDK chain,
+  # no secret. Sandbox S3 lifecycle expires after 35d; prod needs compliance retention.
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://openbank-sandbox-db-backups/treasury-pension-co-db
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: treasury-pension-co-db-daily
+  namespace: treasury-pension-co
+spec:
+  # CNPG reads this only at creation: without it the cluster has no recovery
+  # point until the first scheduled run, while Ready and ContinuousArchiving
+  # both read True. Adding it to a cluster that already exists is inert.
+  immediate: true
+  schedule: "0 10 2 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: treasury-pension-co-db
