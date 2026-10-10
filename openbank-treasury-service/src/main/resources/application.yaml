@@ -265,8 +265,9 @@ authz:
       # built from. Under `%prod` only: with `quarkus.http.ssl.*` set and no certificate Quarkus
       # refuses to start, which would break every dev run and @QuarkusTest. In the cluster BOTH
       # deployments supply the certificate files (treasury-pension-co: treasury-service-internal-tls;
-      # the bank's treasury: treasury-internal-tls, server usage added for exactly this) — the gitops
-      # change (#12508) must be live before an image built from this file deploys.
+      # the bank's treasury: treasury-internal-tls, server usage added for exactly this). The bank
+      # treasury's certificate wiring ships in the SAME change as this setting, so no deploy order
+      # can leave an image requiring a certificate its manifest does not supply.
       ssl:
         client-auth: required
       # Keep the plain-HTTP port (8160): with client-auth REQUIRED Quarkus otherwise drops the HTTP
