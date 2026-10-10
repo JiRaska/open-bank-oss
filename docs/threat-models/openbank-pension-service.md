@@ -89,6 +89,22 @@ base `operator-read-any`, so the shared M2M account (`ROLE_OPERATOR`) is denied.
 - No mTLS client identity between the two services; caller identity rests on the OIDC client
   credential alone.
 
+## 4b. Trust boundary — tax-reporting-service → pension-service (participant aggregates)
+
+tax-reporting-service reads the participant-aggregates endpoint (added by #12465) to assemble the ČNB
+pension returns (#12425, #12468). The edge is a real cross-namespace boundary: NetworkPolicy in
+`pension` admits the `tax-reporting` namespace (derived from tax-reporting's
+`PENSION_SERVICE_URL`). The call goes to the private-CA TLS listener (8443, cert-manager
+`pension-service-internal-tls`, TLSv1.3) added for it; the caller trusts only the fleet CA and
+verifies the hostname. Plain 8171 stays open for the existing callers until their cutover.
+
+| STRIDE | Threat | Mitigation |
+|---|---|---|
+| S | Another workload in `tax-reporting`, or any service reusing the shared client, reads the aggregates | The grant that ships with the aggregates endpoint (#12465) keys on principal id service-account-openbank-tax-reporting + ROLE_API; its action is a dedicated aggregate verb, deliberately not a read verb, so `operator-read-any` does not grant it to the shared ROLE_OPERATOR account |
+| T / I | Bearer token or figures read or altered in-cluster | TLS 1.3 to 8443, server cert for `pension-service.pension.svc` from `openbank-ca`, hostname verification on at the caller; the `peer-url-tls` gate fails any new plaintext URL to a TLS-capable provider. Residual: no client-auth yet, so the token, not the transport, authenticates the caller |
+| I | Participant-level data leaks to the tax side | The surface returns counts and sums only — no contract ids, party ids or balances per participant |
+| E | The caller widens to writes | No write action is granted to this principal; every other rule excludes `service-account-*` |
+
 ## 5. Residual risks / assumptions
 
 - **Surrender preview inputs are caller-supplied.** Until pension-fund-service owns the unit
@@ -106,5 +122,6 @@ base `operator-read-any`, so the shared M2M account (`ROLE_OPERATOR`) is denied.
 
 ## 6. Change log
 
+- 2026-10-10 — §4b: tax-reporting → pension trust boundary (ČNB returns read edge over a new private-CA TLS listener on 8443, NetworkPolicy ingress from `tax-reporting`).
 - 2026-10-10 — §4a: pension → pension-fund trust boundary (fund-administration port, #12355).
 - 2026-10-09 — initial model with the S1 bootstrap (ADR-0334, #12350).

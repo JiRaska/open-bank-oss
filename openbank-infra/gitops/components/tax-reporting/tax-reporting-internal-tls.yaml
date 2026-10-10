@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Private-CA certificate for tax-reporting-service's outbound reads. ca.crt is the trust anchor
+# for the pension-service / pension-fund-service internal-TLS listeners (8443); tls.crt/tls.key
+# are this service's client identity for any upstream that later requires client auth.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: tax-reporting-internal-tls
+  namespace: tax-reporting
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  secretName: tax-reporting-internal-tls
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  commonName: tax-reporting-service.tax-reporting.svc
+  issuerRef:
+    name: openbank-ca
+    kind: ClusterIssuer
+    group: cert-manager.io

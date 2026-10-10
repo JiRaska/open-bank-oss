@@ -2863,6 +2863,23 @@ gates:
       python3 .github/scripts/check-mtls-keeps-http-port.py --self-test
     run: |
       python3 .github/scripts/check-mtls-keeps-http-port.py --enforce
+  - id: peer-url-tls
+    name: "service URLs use the provider's TLS listener when it has one (ratchet, enforced)"
+    group: security
+    mode: enforced
+    rationale: >-
+      Every in-cluster REST call carries a bearer token and the sandbox runs no mesh, so an
+      http://<svc>.<ns>.svc URL sends it in cleartext. Where the provider's Service already exposes
+      a TLS port the plaintext call is avoidable and decidable from the manifests alone. Today's
+      74 occurrences are baselined; a new one fails and the baseline can only shrink.
+    review_after: '2027-04-10'
+    min_subjects: 40
+    budget_seconds: 15
+    selftest_inputs: [".github/scripts/check-peer-url-tls.py"]
+    selftest: |
+      python3 .github/scripts/check-peer-url-tls.py --self-test
+    run: |
+      python3 .github/scripts/check-peer-url-tls.py --enforce
 
   - id: restclient-url-supplied
     name: "a localhost rest-client URL fallback is supplied by the service's gitops env (enforced, baseline-ratcheted)"

@@ -124,6 +124,21 @@ spec:
             # the oidc-client's own key so the deployed client never falls back to localhost.
             - name: QUARKUS_OIDC_CLIENT_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank
+            # The two pension read models the ČNB returns are assembled from (#12468). Without
+            # these the rest-clients fall back to application.yaml's localhost defaults inside this
+            # pod. Both calls carry this service's bearer token, so they go to the providers'
+            # private-CA TLS listeners (8443), never the plain HTTP ports. gen-network-policies.py
+            # derives the ingress edges into `pension` / `pension-fund` from these URLs.
+            - name: PENSION_SERVICE_URL
+              value: https://pension-service.pension.svc:8443
+            - name: PENSION_FUND_SERVICE_URL
+              value: https://pension-fund-service.pension-fund.svc:8443
+            # Default TLS bucket (quarkus.tls.trust-store.*): every rest-client that names no
+            # tls-configuration-name trusts the fleet's private CA and nothing else. Hostname
+            # verification stays at its default (ON) — the providers' certificates carry their
+            # Service DNS names. Kafka keeps its own truststore; Keycloak is not called over TLS.
+            - name: QUARKUS_TLS_TRUST_STORE_PEM_CERTS
+              value: /mnt/internal-tls/ca.crt
             # OPA sidecar enforced from the first rollout: tax_reporting_rest_ext.rego grants
             # reads to real staff and the two filing state changes to a real operator; no
             # service-account reaches either by any rule.
@@ -155,6 +170,9 @@ spec:
               drop:
                 - ALL
           volumeMounts:
+            - name: internal-tls
+              mountPath: /mnt/internal-tls
+              readOnly: true
             - name: tmp
               mountPath: /tmp
             - name: kafka-keystore
@@ -239,6 +257,9 @@ spec:
             - name: opa-tmp
               mountPath: /tmp
       volumes:
+        - name: internal-tls
+          secret:
+            secretName: tax-reporting-internal-tls
         - name: tmp
           emptyDir: {}
         - name: kafka-keystore

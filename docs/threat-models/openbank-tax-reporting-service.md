@@ -26,6 +26,14 @@ and its own consumer group, Write only on its own dead-letter topic); staff → 
 NetworkPolicy admits admin-ui and the platform scrapers only, no ingress); service → database
 (single-owner CNPG cluster, backed up to S3 via Pod Identity).
 
+Outbound reads for the ČNB pension returns (#12468): tax-reporting-service ──(own client
+`service-account-openbank-tax-reporting`, ROLE_API)──▶ pension-service (`pension`, participant
+aggregates) and pension-fund-service (`pension-fund`, fund period figures), over the providers'
+private-CA TLS listeners (8443). The default TLS bucket trusts only the fleet CA
+(`tax-reporting-internal-tls` ca.crt) with hostname verification on, so the bearer token never
+crosses the cluster network in cleartext. The providers' NetworkPolicies admit the `tax-reporting` namespace; each side's
+grant and STRIDE rows live in the provider's own model (pension §4b, pension-fund boundary 4).
+
 ## 3. Authn/Authz
 
 - Every route is behind Keycloak OIDC (`@RolesAllowed`); there is no anonymous surface. The service

@@ -37,6 +37,17 @@ contact data.
 3. Market prices enter through `MarketPricePort`. The shipped adapter (`StubMarketPriceAdapter`)
    knows no prices, so every position must be priced in the request by the calculating
    administrator; an unpriced position is refused, never valued at an invented number.
+4. tax-reporting-service reads the period-end fund figures
+   (`/api/v1/reporting/funds/{fundId}/period-figures`) for the ČNB returns (#12425, #12468).
+   NetworkPolicy in `pension-fund` admits the `tax-reporting` namespace, derived from
+   tax-reporting's `PENSION_FUND_SERVICE_URL`, which targets the private-CA TLS listener (8443,
+   TLSv1.3; the caller trusts only `openbank-ca` and verifies the hostname). Spoofing: only
+   `service-account-openbank-tax-reporting` with ROLE_API gets `pension-fund.reporting.read`
+   (rule `service-tax-reporting-fund-aggregates`), and that action is excluded from
+   `operator-read-any`, so neither the shared account nor another workload in the namespace
+   reaches it. Disclosure: aggregate fund figures only, no holdings or participant data.
+   Elevation: the principal holds no other grant here — not holdings, orders or NAV writes.
+   Residual: no client-auth on 8443 yet, so the bearer token authenticates the caller.
 
 ## STRIDE analysis
 
