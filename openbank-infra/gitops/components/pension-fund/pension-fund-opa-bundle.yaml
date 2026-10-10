@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: pension-fund-service
     app.kubernetes.io/part-of: pension-fund
   annotations:
-    openbank.tech/policy-checksum: "247147933f89296b"
+    openbank.tech/policy-checksum: "4d947be0aba3e031"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -609,7 +609,7 @@ data:
     #   pension-fund.nav.read / .nav.calculate / .nav.approve    — FundResource, NavResource
     #   pension-fund.strategy.read / .strategy.manage            — StrategyResource
     #   pension-fund.strategy.change.submit / .approve / .apply  — StrategyResource, StrategyChangeResource
-    #   pension-fund.order.place / .holding.read                 — ContractUnitResource
+    #   pension-fund.order.place / .holding.inspect              — ContractUnitResource
     #
     # WHY NOT `rules.yaml: authz.role_action_matrix`: a matrix line is a grant to every MACHINE that
     # holds the role, and no policy can veto it (#3765/#3734). The Keycloak service-accounts are
@@ -620,12 +620,17 @@ data:
     # Four-eyes (maker != checker) is enforced by the service itself, on the authenticated principal;
     # this policy only decides who may be a maker or a checker at all.
     #
-    # Participant data (pension-fund.holding.read, pension-fund.order.place) is reachable by real
+    # Participant data (pension-fund.holding.inspect, pension-fund.order.place) is reachable by real
     # staff and by pension-service's OWN client, service-account-openbank-pension (fleet naming
     # convention `openbank-<service>`; pension-service's FundAdministrationPort adapter, ADR-0334 §1),
-    # and by nothing else. holding.read is also excluded from base `operator-read-any` via
-    # rules.yaml: authz.operator_read_any_excluded_actions, which is what keeps the shared
-    # service-account (ROLE_OPERATOR) and every other service out.
+    # and by nothing else. The action deliberately does NOT end in `.read`/`.list`: base rest.rego's
+    # `operator-read-any` (ROLE_OPERATOR/ROLE_ADMIN) and `compliance-read-any` (ROLE_COMPLIANCE) grant
+    # every such action to any HUMAN principal, and the shared service-account
+    # (service-account-openbank-services) is classified HUMAN and holds ROLE_OPERATOR and
+    # ROLE_COMPLIANCE in at least one realm. `operator_read_any_excluded_actions` only vetoes the
+    # first of those two rules, so a `.read` name stayed reachable through the second. A non-read
+    # verb is reachable only through the identity-scoped reasons below (same remedy as
+    # `audit.evidence.reconstruct`).
     #
     # Do NOT gate on input.principal.type == "SERVICE": AuthorizeInterceptor never emits it (#266).
 
@@ -648,7 +653,7 @@ data:
     	"pension-fund.fund.read",
     	"pension-fund.nav.read",
     	"pension-fund.strategy.read",
-    	"pension-fund.holding.read",
+    	"pension-fund.holding.inspect",
     }
 
     pension_fund_staff if {
@@ -679,7 +684,7 @@ data:
     	input.principal.type == "HUMAN"
     	input.principal.id == pension_service_account
     	"ROLE_API" in input.principal.roles
-    	input.action in {"pension-fund.holding.read", "pension-fund.order.place", "pension-fund.fund.read", "pension-fund.strategy.read", "pension-fund.nav.read"}
+    	input.action in {"pension-fund.holding.inspect", "pension-fund.order.place", "pension-fund.fund.read", "pension-fund.strategy.read", "pension-fund.nav.read"}
     }
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1419,6 +1424,15 @@ data:
                                                 # stop card traffic, not add a second human; the sandbox acquirer is
                                                 # ROLE_ADMIN, off by default and 404 when off. No operator endpoint
                                                 # moves money by hand today — add a verb here when one ships.
+      - openbank-pension-service               # ADR-0334 S1 (#12350): participant-side pension contracts. Listed
+                                                # from the bootstrap, before any money moves: contributions, state
+                                                # incentive receipt/clawback and payouts land in this service in the
+                                                # next slices, and the threat model + two-approval rule must already
+                                                # hold when they do (docs/threat-models/openbank-pension-service.md).
+                                                # four-eyes assessed: S1 exposes no operator write that moves money —
+                                                # create/activate/strategy/suspend/resume/terminate are the
+                                                # participant's own intent through the edge; add a verb when payout
+                                                # or an operator-side correction ships.
       - openbank-pension-fund-service          # ADR-0334 S4 (#12350): the unit register of segregated pension funds —
 
     money_path_action_prefixes:
@@ -1626,9 +1640,16 @@ data:
       # ROLE_OPERATOR, so without an entry here the action is readable by every backend service.
       # An action listed here is served ONLY by its service's identity-scoped rules (staff, and the
       # one named machine caller). Tested must-deny/must-allow in that service's rest_ext test.
+      #
+      # This list vetoes operator-read-any ONLY; compliance-read-any (ROLE_COMPLIANCE, every `.read`)
+      # has no such list, and the shared service-account holds ROLE_COMPLIANCE in the CI realm. So an
+      # entry here does NOT keep the shared account out on its own. For a read that must be closed to
+      # it, name the action with a non-read verb (`.inspect`, `.reconstruct`) instead, as
+      # pension-fund.holding.inspect does (#12481).
       operator_read_any_excluded_actions:
-        - pension-fund.holding.read   # participants' unit holdings and orders (ADR-0334 S4, #12350):
-                                      # staff + service-account-openbank-pension only
+        - tax.filing.read             # §38d withholding returns and the per-remittance audit trail behind
+                                      # them (#5760): real staff only via tax_reporting_rest_ext.rego; no
+                                      # service-account reads them through operator-read-any
       role_action_matrix:
         ROLE_OPERATOR:
           grant:

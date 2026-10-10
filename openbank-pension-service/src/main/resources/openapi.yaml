@@ -1,0 +1,394 @@
+openapi: 3.1.0
+info:
+  title: OpenBank Pension Service API
+  # 1.0.0: first contract (ADR-0334 slice S1, issue #12350).
+  version: 1.0.0
+  description: |
+    Participant-side pension contracts (ADR-0334). A contract is created under the jurisdiction
+    pack in force on its creation date and PINS that pack version for life; incentive evaluation
+    and the early-termination preview always use the pinned version. Pack values are reference
+    data pending legal review, not advice.
+servers:
+  - url: http://localhost:8171
+tags:
+  - name: Pension
+security:
+  - bearerAuth: []
+
+paths:
+  /api/v1/pension/contracts:
+    post:
+      tags: [Pension]
+      operationId: createContract
+      summary: Create a DRAFT contract under the jurisdiction pack in force today
+      description: |
+        Refused with 400 when no pack is in force for the jurisdiction and product line, when the
+        provider type is not permitted by the pack, when the currency differs from the pack's, or
+        when the participant fails the pack's eligibility rules.
+      parameters:
+        - $ref: '#/components/parameters/CustomerPartyId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateContractRequest'
+      responses:
+        '201':
+          description: Draft contract created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Contract'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/pension/contracts/{id}:
+    get:
+      tags: [Pension]
+      operationId: getContract
+      summary: Read one contract with its strategy history
+      parameters:
+        - $ref: '#/components/parameters/ContractId'
+        - $ref: '#/components/parameters/CustomerPartyIdOptional'
+      responses:
+        '200': { $ref: '#/components/responses/Contract' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/pension/contracts/{id}/submit:
+    post:
+      tags: [Pension]
+      operationId: submitContract
+      summary: DRAFT -> PENDING_ACTIVATION
+      parameters:
+        - $ref: '#/components/parameters/ContractId'
+        - $ref: '#/components/parameters/CustomerPartyIdOptional'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200': { $ref: '#/components/responses/Contract' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/contracts/{id}/activate:
+    post:
+      tags: [Pension]
+      operationId: activateContract
+      summary: PENDING_ACTIVATION -> ACTIVE; the start date is set today
+      parameters:
+        - $ref: '#/components/parameters/ContractId'
+        - $ref: '#/components/parameters/CustomerPartyIdOptional'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200': { $ref: '#/components/responses/Contract' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/contracts/{id}/suspend:
+    post:
+      tags: [Pension]
+      operationId: suspendContributions
+      summary: "Pause contributions: ACTIVE -> SUSPENDED"
+      parameters:
+        - $ref: '#/components/parameters/ContractId'
+        - $ref: '#/components/parameters/CustomerPartyIdOptional'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200': { $ref: '#/components/responses/Contract' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/contracts/{id}/resume:
+    post:
+      tags: [Pension]
+      operationId: resumeContributions
+      summary: "Resume contributions: SUSPENDED -> ACTIVE"
+      parameters:
+        - $ref: '#/components/parameters/ContractId'
+        - $ref: '#/components/parameters/CustomerPartyIdOptional'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200': { $ref: '#/components/responses/Contract' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/contracts/{id}/strategy:
+    put:
+      tags: [Pension]
+      operationId: electStrategy
+      summary: Elect or change the investment strategy; earlier elections stay as history
+      parameters:
+        - $ref: '#/components/parameters/ContractId'
+        - $ref: '#/components/parameters/CustomerPartyIdOptional'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ElectStrategyRequest'
+      responses:
+        '200': { $ref: '#/components/responses/Contract' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/pension/contracts/{id}/incentive-evaluation:
+    post:
+      tags: [Pension]
+      operationId: evaluateIncentives
+      summary: Evaluate the pinned pack's incentives for one contribution amount
+      parameters:
+        - $ref: '#/components/parameters/ContractId'
+        - $ref: '#/components/parameters/CustomerPartyIdOptional'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IncentiveEvaluationRequest'
+      responses:
+        '200':
+          description: One result per incentive rule of the pinned pack
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/IncentiveResult'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/pension/contracts/{id}/early-termination:
+    post:
+      tags: [Pension]
+      operationId: requestEarlyTermination
+      summary: "Surrender preview; with confirm=true the contract moves to TERMINATING"
+      description: |
+        The unit register is not built yet (ADR-0334 pension-fund-service), so the current value
+        and the incentive history are supplied by the caller; the preview is arithmetic over the
+        pinned pack, not a valuation.
+      parameters:
+        - $ref: '#/components/parameters/ContractId'
+        - $ref: '#/components/parameters/CustomerPartyIdOptional'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EarlyTerminationRequest'
+      responses:
+        '200':
+          description: Surrender preview, and the contract after the optional transition
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EarlyTermination'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    CustomerPartyId:
+      name: X-Customer-Party-Id
+      in: header
+      required: true
+      description: The participant party, stamped by the customer edge from the token it validated.
+      schema:
+        type: string
+        format: uuid
+    CustomerPartyIdOptional:
+      name: X-Customer-Party-Id
+      in: header
+      required: false
+      description: |
+        The participant party, stamped by the customer edge. Required for every caller without a
+        staff role; a contract belonging to another party answers 404, exactly as an unknown id.
+        Staff may omit it to read; every change acts for the participant.
+      schema:
+        type: string
+        format: uuid
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        Required on every POST. On create, a retry with the same key for the same participant
+        returns the contract the first attempt created. Lifecycle actions are idempotent by state:
+        a retry that finds the contract already in the target state returns it unchanged.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 256
+    ContractId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    Contract:
+      description: The contract
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Contract'
+    BadRequest:
+      description: Malformed request, a missing required field, or a pack rule refused it
+    Unauthorized:
+      description: Missing or invalid bearer token
+    NotFound:
+      description: No such contract
+    Conflict:
+      description: The contract's current state forbids this transition
+
+  schemas:
+    ProductLine:
+      type: string
+      enum: [DPS, DIP]
+    ProviderType:
+      type: string
+      enum: [PENSION_COMPANY, BANK, INVESTMENT_FIRM, MANAGEMENT_COMPANY, INSURANCE_COMPANY]
+    ContractStatus:
+      type: string
+      enum: [DRAFT, PENDING_ACTIVATION, ACTIVE, SUSPENDED, TERMINATING, PAID_OUT, TRANSFERRED_OUT, CLOSED]
+    ContributionFrequency:
+      type: string
+      enum: [MONTHLY, QUARTERLY, ANNUALLY]
+    IncentivePeriod:
+      type: string
+      enum: [MONTH, QUARTER, YEAR]
+    Schedule:
+      type: object
+      required: [amount, currency, frequency]
+      properties:
+        amount: { type: number, minimum: 0, maximum: 1000000000 }
+        currency: { type: string, minLength: 3, maxLength: 3 }
+        frequency: { $ref: '#/components/schemas/ContributionFrequency' }
+        employerAmount: { type: number, minimum: 0, maximum: 1000000000 }
+    Beneficiary:
+      type: object
+      required: [name, sharePercent]
+      properties:
+        name: { type: string, minLength: 1 }
+        partyId: { type: string, format: uuid }
+        sharePercent: { type: number, exclusiveMinimum: 0, maximum: 100 }
+    CreateContractRequest:
+      type: object
+      required: [productLine, jurisdiction, providerEntityId, providerType, birthDate, schedule, strategyCode]
+      properties:
+        productLine: { $ref: '#/components/schemas/ProductLine' }
+        jurisdiction: { type: string, description: Jurisdiction code selecting the pack }
+        providerEntityId: { type: string, format: uuid }
+        providerType: { $ref: '#/components/schemas/ProviderType' }
+        birthDate: { type: string, format: date }
+        residencyCountry: { type: string }
+        residencyEvidence:
+          type: array
+          items: { type: string }
+        hasGuardian: { type: boolean }
+        schedule: { $ref: '#/components/schemas/Schedule' }
+        strategyCode: { type: string, minLength: 1 }
+        beneficiaries:
+          type: array
+          description: Shares must total 100 when any are given.
+          items: { $ref: '#/components/schemas/Beneficiary' }
+    ElectStrategyRequest:
+      type: object
+      required: [strategyCode]
+      properties:
+        strategyCode: { type: string, minLength: 1 }
+        effectiveFrom: { type: string, format: date, description: Defaults to today; never in the past }
+    IncentiveEvaluationRequest:
+      type: object
+      required: [contribution, period]
+      properties:
+        contribution: { type: number, minimum: 0, maximum: 1000000000 }
+        period: { $ref: '#/components/schemas/IncentivePeriod' }
+        employerContributionAnnual: { type: number, minimum: 0, maximum: 1000000000 }
+        sharedCapUsed:
+          type: object
+          description: Annual cap already consumed by other products, per shared-cap group.
+          additionalProperties: { type: number, minimum: 0, maximum: 1000000000 }
+    EarlyTerminationRequest:
+      type: object
+      required: [currentValue]
+      properties:
+        currentValue: { type: number, minimum: 0, maximum: 1000000000 }
+        incentivesReceived:
+          type: object
+          description: Incentive id -> (calendar year -> amount received).
+          additionalProperties:
+            type: object
+            additionalProperties: { type: number }
+        confirm: { type: boolean, description: When true the contract moves to TERMINATING }
+    StrategyElection:
+      type: object
+      properties:
+        strategyCode: { type: string }
+        effectiveFrom: { type: string, format: date }
+        electedAt: { type: string, format: date-time }
+    Contract:
+      type: object
+      properties:
+        contractId: { type: string, format: uuid }
+        participantPartyId: { type: string, format: uuid }
+        productLine: { $ref: '#/components/schemas/ProductLine' }
+        jurisdiction: { type: string }
+        packVersion: { type: integer }
+        providerEntityId: { type: string, format: uuid }
+        providerType: { $ref: '#/components/schemas/ProviderType' }
+        status: { $ref: '#/components/schemas/ContractStatus' }
+        schedule: { $ref: '#/components/schemas/Schedule' }
+        currentStrategy: { $ref: '#/components/schemas/StrategyElection' }
+        strategyHistory:
+          type: array
+          items: { $ref: '#/components/schemas/StrategyElection' }
+        beneficiaries:
+          type: array
+          items: { $ref: '#/components/schemas/Beneficiary' }
+        startDate: { type: [string, 'null'], format: date }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    IncentiveResult:
+      type: object
+      properties:
+        incentiveId: { type: string }
+        type: { type: string, enum: [MATCHING, FLAT, TAX_RELIEF, EMPLOYER_EXEMPTION] }
+        period: { $ref: '#/components/schemas/IncentivePeriod' }
+        amount: { type: number }
+        indicativeSaving: { type: [number, 'null'] }
+        claimChannel: { type: string, enum: [STATE_AGENCY_BATCH, TAX_RETURN, PAYROLL, NONE] }
+        explanation: { type: string }
+    EarlyTermination:
+      type: object
+      properties:
+        contract: { $ref: '#/components/schemas/Contract' }
+        payoutConditionsMet: { type: boolean }
+        ageAtExit: { type: integer }
+        durationMonths: { type: integer }
+        earlyWithdrawalAllowed: { type: boolean }
+        currentValue: { type: number }
+        fee: { type: number }
+        clawbacks:
+          type: array
+          items:
+            type: object
+            properties:
+              incentiveId: { type: string }
+              mode: { type: string, enum: [RETURN_ALL, RECAPTURE_YEARS] }
+              amount: { type: number }
+        estimatedNetPayout: { type: number }
+        notes:
+          type: array
+          items: { type: string }

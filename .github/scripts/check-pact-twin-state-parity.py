@@ -132,8 +132,10 @@ def classify(path: pathlib.Path) -> str | None:
     text = strip_comments(path.read_text(encoding="utf-8", errors="replace"))
     if "@Provider(" not in text:
         return None
-    has_folder = "@PactFolder(" in text
-    has_broker = "@PactBroker(" in text
+    # Word boundary, not "(": a bare `@PactBroker` (all defaults) is a legal loader, and matching
+    # on the paren silently dropped sca-service's whole twin pair from the gate.
+    has_folder = re.search(r"@PactFolder\b", text) is not None
+    has_broker = re.search(r"@PactBroker\b", text) is not None
     if has_folder and not has_broker:
         return "folder"
     if has_broker and not has_folder:
@@ -272,8 +274,17 @@ class DemoBrokerExtraTest {
 '''
     broker_src_unresolved = broker_src_ok.replace("@State(SHARED_STATE)", "@State(Someone.ELSEWHERE)")
 
+    # Bare annotation, no parens: must still be classified as a broker twin. The clean case is the
+    # known-positive (exit 0 needs the pair to be FOUND — unpaired, the empty-corpus guard exits 1),
+    # the drift case proves the pair is then actually compared.
+    bare = '@PactBroker(enablePendingPacts = "true")'
+    broker_src_bare_ok = broker_src_ok.replace(bare, "@PactBroker")
+    broker_src_bare_drift = broker_src_drift.replace(bare, "@PactBroker")
+
     cases = [
         ("identical twins", broker_src_ok, 0),
+        ("identical twins, bare @PactBroker", broker_src_bare_ok, 0),
+        ("handler missing from a bare @PactBroker twin", broker_src_bare_drift, 1),
         ("handler missing from the broker twin", broker_src_drift, 1),
         ("handler only the broker twin has (warn, not fail)", broker_src_extra, 0),
         ("state argument that cannot be resolved", broker_src_unresolved, 1),

@@ -89,6 +89,7 @@ spec:
       - onboarding
       - party
       - payments
+      - pension
       - pid
       - platform
       - psd2
@@ -100,6 +101,7 @@ spec:
       - sdd
       - security-scanner
       - statements
+      - tax-reporting
       - tpp-registry
       - treasury
       - wealth

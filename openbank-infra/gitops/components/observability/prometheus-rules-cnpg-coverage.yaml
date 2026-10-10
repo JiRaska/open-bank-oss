@@ -349,6 +349,12 @@ spec:
         - record: openbank:cnpg_cluster_expected
           expr: vector(1)
           labels:
+            namespace: pension
+            cluster: pension-db
+            origin: manifest
+        - record: openbank:cnpg_cluster_expected
+          expr: vector(1)
+          labels:
             namespace: pid
             cluster: pid-db
             origin: manifest
@@ -435,6 +441,12 @@ spec:
           labels:
             namespace: statements
             cluster: statements-db
+            origin: manifest
+        - record: openbank:cnpg_cluster_expected
+          expr: vector(1)
+          labels:
+            namespace: tax-reporting
+            cluster: tax-reporting-db
             origin: manifest
         - record: openbank:cnpg_cluster_expected
           expr: vector(1)
@@ -726,6 +738,11 @@ spec:
         - record: openbank:cnpg_cluster_instances_declared
           expr: vector(2)
           labels:
+            namespace: pension
+            cluster: pension-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
             namespace: pid
             cluster: pid-db
         - record: openbank:cnpg_cluster_instances_declared
@@ -798,6 +815,11 @@ spec:
           labels:
             namespace: statements
             cluster: statements-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: tax-reporting
+            cluster: tax-reporting-db
         - record: openbank:cnpg_cluster_instances_declared
           expr: vector(2)
           labels:
