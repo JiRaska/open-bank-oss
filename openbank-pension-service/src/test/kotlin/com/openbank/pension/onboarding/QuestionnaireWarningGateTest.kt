@@ -115,7 +115,7 @@ class QuestionnaireWarningGateTest {
     }
 
     @Test
-    fun `legacy boolean cannot acknowledge an unseen warning but explicit acknowledgement can`(): Unit = runBlocking {
+    fun `DPS legacy choice acknowledges pinned warning wording atomically`(): Unit = runBlocking {
         val application = submitted()
         stub(application)
         assertThatThrownBy {
@@ -124,12 +124,18 @@ class QuestionnaireWarningGateTest {
             }
         }.hasMessageContaining("STRATEGY_ABOVE_PROFILE")
 
-        assertThatThrownBy {
-            runBlocking {
-                service.chooseStrategy(application.id, party, ChooseStrategyCommand("DYNAMIC", true, "en"))
-            }
-        }.hasMessageContaining("STRATEGY_ABOVE_PROFILE")
         coVerify(exactly = 0) { documents.generate(any()) }
+        coEvery { documents.generate(any()) } returns GeneratedDocument("doc-1", "sha-doc")
+        coEvery { applications.save(any()) } answers { firstArg() }
+        val legacyIssued = service.chooseStrategy(application.id, party, ChooseStrategyCommand("DYNAMIC", true, "en"))
+        val legacyAck = legacyIssued.warningAcknowledgements.single()
+        assertThat(legacyAck.code).isEqualTo(WarningCode.STRATEGY_ABOVE_PROFILE)
+        assertThat(legacyAck.language).isEqualTo("en")
+        val legacyText = questionSets.questionSet("CZ", ProductLine.DPS)
+            .warning(WarningCode.STRATEGY_ABOVE_PROFILE).text.en
+        assertThat(legacyAck.textSha256).isEqualTo(WarningPolicy.sha256(legacyText))
+        assertThat(legacyIssued.kid?.strategyCode).isEqualTo("DYNAMIC")
+        coVerify(exactly = 1) { applications.save(any()) }
 
         val saved = slot<OnboardingApplication>()
         coEvery { applications.save(capture(saved)) } answers { saved.captured }
@@ -300,7 +306,7 @@ class QuestionnaireWarningGateTest {
             productLine = ProductLine.DIP,
             appropriate = true,
             questionnaire = QuestionnaireRecord(
-                "cz-dip", 1, emptyMap(), 3, emptyList(),
+                "cz-dip-questionnaire", 1, emptyMap(), 3, emptyList(),
                 listOf(InstrumentCompetence("EQUITY", 0, 0)),
                 SustainabilityPreference.NONE, null, null, null, emptyList(),
             ),
@@ -327,6 +333,10 @@ class QuestionnaireWarningGateTest {
             "en",
         )
         assertThat(profile.appropriate).isNull()
+        assertThatThrownBy {
+            runBlocking { mappedService.chooseStrategy(dip.id, party, ChooseStrategyCommand("BALANCED", true, "en")) }
+        }.hasMessageContaining("PRODUCT_NOT_APPROPRIATE")
+        coVerify(exactly = 0) { documents.generate(any()) }
     }
 
     @Test

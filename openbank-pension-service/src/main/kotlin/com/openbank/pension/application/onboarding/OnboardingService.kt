@@ -465,7 +465,21 @@ class OnboardingService(
             }
         }
         val missing = missingWarnings(application, required, assessment, code, command.language ?: "cs")
-        require(missing.isEmpty()) { "the choice needs acknowledged warnings: ${missing.joinToString()}" }
+        var acknowledged = application
+        if (missing.isNotEmpty() && command.acknowledgeUnsuitable && application.productLine == ProductLine.DPS) {
+            // Keep the v1 DPS choice contract: its boolean confirms the warning on this request.
+            // Never silently upgrade an earlier acknowledgement of different wording.
+            val stale = application.warningAcknowledgements.any {
+                it.assessmentId == assessment.id && it.strategyCode == code && it.code in missing
+            }
+            check(!stale) { "the choice needs acknowledged warnings: ${missing.joinToString()}" }
+            acknowledged = application.acknowledge(
+                warningAcks(application, missing, assessment, code, command.language),
+                now(),
+            )
+        }
+        val stillMissing = missingWarnings(acknowledged, required, assessment, code, command.language ?: "cs")
+        require(stillMissing.isEmpty()) { "the choice needs acknowledged warnings: ${stillMissing.joinToString()}" }
         val document = documents.generate(
             KidRequest(
                 applicationId = id,
@@ -478,7 +492,7 @@ class OnboardingService(
             ),
         )
         val kid = IssuedKid(document.documentId, document.sha256, code, now())
-        return applications.save(application.issueKid(code, required.isNotEmpty(), kid, now(), decision))
+        return applications.save(acknowledged.issueKid(code, required.isNotEmpty(), kid, now(), decision))
     }
 
     suspend fun acceptKid(id: UUID, partyId: UUID, documentId: String): OnboardingApplication =
