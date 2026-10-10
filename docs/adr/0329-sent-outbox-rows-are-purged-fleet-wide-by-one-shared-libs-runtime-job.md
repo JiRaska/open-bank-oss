@@ -8,7 +8,7 @@ superseded-by: []
 delivery-repos: []
 tags: [libs, database, privacy-gdpr]
 summary: "SENT outbox rows are deleted after 7 days by one shared libs-runtime job over every SentOutboxRetention bean, v1 and v2 outboxes alike; an enforced gate makes opting out a reasoned exemption."
-followup: "#11896, #11901 — case-coordinator and risk-engine outboxes are exempt pending durable evidence or replay decisions; incentive left the exemptions in #11902 and lending in #11900"
+followup: "#11896 — the case-coordinator outbox is exempt pending a durable evidence source; incentive left the exemptions in #11902, risk-engine in #11901 and lending in #11900"
 ---
 
 # ADR-0329 — SENT outbox rows are purged fleet-wide by one shared libs-runtime job
@@ -68,13 +68,15 @@ We will purge SENT outbox rows with **one** `@ApplicationScoped` job in `openban
   exemption in `check-outbox-sent-retention.py`; the exemption set may only shrink after this
   decision is merged. A kernel
   repository whose rows are still a read model sets `sentRetentionExempt=true`; the shared job
-  skips it and the gate requires a reason. Today the exemptions are billing, case-coordinator
-  and risk-engine, for the reasons in Context item 5 and billing issue #12187. incentive has left them
-  (#11902): its rows are not evidence (`incentive_audit_event` is, with the actor), and
-  `OutboxTableShape.sentAtColumn` covers its `published_at` column without a migration. lending has
-  left them too (#11900): its evidence bundle reads the audit chain (ADR-0214 D3), so nothing reads
-  a SENT `lending_outbox` row; the purge is switched on per environment once the outbox↔chain
-  parity check in lending's operations runbook passes.
+  skips it and the gate requires a reason. Today the exemptions are billing and case-coordinator,
+  for the reasons in Context item 5 and billing issue #12187. incentive has left them (#11902): its
+  rows are not evidence (`incentive_audit_event` is, with the actor), and
+  `OutboxTableShape.sentAtColumn` covers its `published_at` column without a migration. risk-engine
+  has left them (#11901): the dedup claim moved to a permanent `risk_limit_event_dedup` table, so
+  `risk_outbox` purges like every other outbox. lending has left them too (#11900): its evidence
+  bundle reads the audit chain (ADR-0214 D3), so nothing reads a SENT `lending_outbox` row; the
+  purge is switched on per environment once the outbox↔chain parity check in lending's operations
+  runbook passes.
 - DEAD rows are out of scope here: they are the producer-side DLQ (ADR-0327 D4) and keep their own
   window (notification's janitor today, `purgeDead` when ADR-0327 Phase 4 wires it).
 

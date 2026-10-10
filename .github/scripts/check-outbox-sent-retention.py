@@ -45,10 +45,6 @@ EXEMPT: dict[str, str] = {
         "Annual fee-summary reruns still use SENT billing_outbox rows as the issuance guard; "
         "keep retention off until the durable account/year key in #12311 is merged and deployed (#12187)"
     ),
-    "openbank-risk-engine": (
-        "risk_outbox.dedup_key UNIQUE is the replay guard for limit events (PgRiskOutbox); purging SENT "
-        "rows would let a replayed run re-emit them. Payload is bank limit data, no personal data (#11901)"
-    ),
     "openbank-case-coordinator-agent": (
         "GET /cases/{caseId} projects proposal evidence directly from SENT case_outbox rows; "
         "purge only after that evidence has an independent durable source (#11896)"
