@@ -9,7 +9,7 @@ This documentation is published by the service at the management endpoint `/q/op
 - **Tech stack:** Kotlin / Quarkus 3.x / Hibernate Reactive Panache / PostgreSQL (`pension-fund-db`, CNPG)
 - **Ports:** 8162 (app), 8090 (management)
 - **Events:** none yet
-- **Auth:** fund administration is staff only (`ROLE_OPERATOR`/`ROLE_ADMIN`, never a service-account). Reads are also open to `ROLE_AUDITOR` and `ROLE_API`.
+- **Auth:** fund administration is staff only (`ROLE_OPERATOR`/`ROLE_ADMIN`, never a service-account). Reads are also open to `ROLE_AUDITOR` and `ROLE_API`. Participant holdings, orders and transactions use the action `pension-fund.holding.inspect` (not a `.read`), so the fleet-wide operator/compliance read grants never reach them: only staff and pension-service's own client may.
 - **Four-eyes:** the person who calculates a NAV or submits a strategy change cannot publish or approve it (403). This is enforced in the domain and by a DB CHECK.
 - **Forward pricing:** an order is accepted unpriced (202). It settles at the fund's NEXT published NAV.
 
