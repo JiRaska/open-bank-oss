@@ -9,7 +9,7 @@ import { useSingleFlight, wasSkipped } from '@/lib/mutations/singleFlight'
 import { Bot, Boxes, CheckCircle2, CircleAlert, Eye, FileJson, Link2, ListChecks, LockKeyhole, Plus, RefreshCw, Send, ShieldCheck, Sparkles, X } from 'lucide-react'
 import { AuthGuard, Can } from '@/components/auth/AuthGuard'
 import { canReviewPrivateCatalogDraft, type AgentModelDescriptor } from '@/lib/catalog-review-capability'
-import { catalogFieldValue, catalogSchemaFields, type CatalogSchemaField, withCatalogFieldValue } from '@/lib/catalog-schema-form'
+import { catalogFieldValue, catalogSchemaFields, catalogUtcEffectiveInput, type CatalogSchemaField, withCatalogFieldValue, withCatalogUtcEffective } from '@/lib/catalog-schema-form'
 import { catalogRevisionEditorDocument, diffCatalogDocuments } from '@/lib/catalog-structural-diff'
 import {
   addOfferingRelationship,
@@ -244,6 +244,15 @@ export default function ProductStudioPage() {
     setDraftText(JSON.stringify(withCatalogFieldValue(parsedDraft, field.path, value), null, 2))
     setValidationState('idle')
     setReview(null)
+  }
+
+  const updateEffectiveBoundary = (boundary: 'effectiveFrom' | 'effectiveTo', input: string) => {
+    if (!parsedDraft) return
+    try {
+      setDraftText(JSON.stringify(withCatalogUtcEffective(parsedDraft, boundary, input), null, 2))
+      setValidationState('idle')
+      setReview(null)
+    } catch (error) { setMessage(error instanceof Error ? error.message : String(error)) }
   }
 
   // Every Product Studio remote mutation already funnelled through `run`, but `busy`
@@ -555,6 +564,15 @@ export default function ProductStudioPage() {
                   {field.description && <small>{field.description}</small>}
                 </div>
               })}</div>
+            </div>}
+            {parsedDraft && selectedRevision?.state === 'DRAFT' && <div className={styles.guidedForm}>
+              <div className={styles.guidedHead}><span>{t('Účinnost revize (UTC)', 'Revision effective time (UTC)')}</span><small>{t('Nové složení strategie platí až od začátku účinnosti. Prázdný začátek znamená okamžik schválení.', 'New strategy composition applies from its effective start. A blank start means approval time.')}</small></div>
+              <div className={styles.fieldGrid}>{(['effectiveFrom', 'effectiveTo'] as const).map(boundary => <div key={boundary} className={styles.field}>
+                <label htmlFor={`catalog-${boundary}`}>{boundary === 'effectiveFrom' ? t('Platí od (UTC)', 'Effective from (UTC)') : t('Platí do (UTC)', 'Effective to (UTC)')}</label>
+                <input id={`catalog-${boundary}`} className="input" type="datetime-local" step="1"
+                  value={catalogUtcEffectiveInput(parsedDraft[boundary])}
+                  onChange={event => updateEffectiveBoundary(boundary, event.target.value)} />
+              </div>)}</div>
             </div>}
             <details className={styles.expertDetails}><summary>{t('Expert režim · úplný dokument', 'Expert mode · full document')}</summary>
               <textarea className={`input ${styles.editor}`} value={draftText} onChange={e => { setDraftText(e.target.value); setValidationState('idle'); setReview(null) }} disabled={!selectedRevision || selectedRevision.state !== 'DRAFT'} />

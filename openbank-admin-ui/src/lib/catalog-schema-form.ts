@@ -81,6 +81,27 @@ export function withCatalogFieldValue(
   return { ...document, attributes: nextAttributes }
 }
 
+type EffectiveBoundary = 'effectiveFrom' | 'effectiveTo'
+
+/** The editor treats datetime-local input as UTC, never as the browser's local zone. */
+export function catalogUtcEffectiveInput(value: unknown): string {
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(value)
+    ? value.slice(0, -1) : ''
+}
+
+export function withCatalogUtcEffective(
+  document: Record<string, unknown>, boundary: EffectiveBoundary, input: string,
+): Record<string, unknown> {
+  if (!input) return { ...document, [boundary]: null }
+  const seconds = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(input) ? `${input}:00` : input
+  const exact = `${seconds}Z`
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(exact) ||
+      Number.isNaN(Date.parse(exact)) || new Date(exact).toISOString().slice(0, 19) !== seconds) {
+    throw new Error('Effective instant must be a valid UTC date and time')
+  }
+  return { ...document, [boundary]: exact }
+}
+
 function setAtPath(source: Record<string, unknown>, [head, ...tail]: string[], value: unknown): Record<string, unknown> {
   if (!head) return source
   if (tail.length === 0) return { ...source, [head]: value }

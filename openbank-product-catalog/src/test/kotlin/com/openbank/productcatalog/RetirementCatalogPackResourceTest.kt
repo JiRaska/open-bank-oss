@@ -21,6 +21,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.hasItem
 import org.junit.jupiter.api.Test
+import java.time.Instant
 import java.util.UUID
 import javax.sql.DataSource
 
@@ -184,6 +185,58 @@ class RetirementCatalogPackResourceTest {
     }
 
     @Test
+    fun `approved strategy instrument classes change by effective revision without rewriting history`() {
+        val offering = fixtureOfferings().first { it["attributes"]["productLine"].asText() == "DIP" }
+        val specificationId = createSpecification("CZ_DIP_CLASSES_HISTORY", version = 2)
+        val offeringId = createOffering(specificationId, "CZ_DIP_CLASSES_HISTORY")
+        val firstStart = Instant.now().minusSeconds(172800)
+        val nextStart = firstStart.plusSeconds(86400)
+        val firstAttributes = (offering["attributes"].deepCopy<JsonNode>() as ObjectNode).apply {
+            putArray("instrumentClasses").add("BOND_FUNDS")
+        }
+        val firstId = createRevision(
+            offeringId,
+            offering,
+            version = 2,
+            attributes = firstAttributes,
+            effectiveFrom = firstStart.toString(),
+        )
+        setMaker(firstId, "independent-retirement-maker")
+        publish(offeringId, firstId)
+
+        val nextAttributes = (offering["attributes"].deepCopy<JsonNode>() as ObjectNode).apply {
+            putArray("instrumentClasses").add("EQUITY_FUNDS")
+        }
+        val nextId = createRevision(
+            offeringId,
+            offering,
+            version = 2,
+            attributes = nextAttributes,
+            effectiveFrom = nextStart.toString(),
+        )
+        setMaker(nextId, "independent-retirement-maker")
+        publish(offeringId, nextId)
+
+        Given { this } When { get("/api/v2/products/$offeringId") } Then {
+            statusCode(200)
+            body("id", equalTo(nextId.toString()))
+            body("content.attributes.instrumentClasses", equalTo(listOf("EQUITY_FUNDS")))
+        }
+        Given { queryParam("effectiveAt", firstStart.plusSeconds(60).toString()) } When {
+            get("/api/v2/products/$offeringId")
+        } Then {
+            statusCode(200)
+            body("id", equalTo(firstId.toString()))
+            body("content.attributes.instrumentClasses", equalTo(listOf("BOND_FUNDS")))
+        }
+        Given { this } When { get("/api/v2/revisions/$firstId") } Then {
+            statusCode(200)
+            body("state", equalTo("SUPERSEDED"))
+            body("content.attributes.instrumentClasses", equalTo(listOf("BOND_FUNDS")))
+        }
+    }
+
+    @Test
     fun `inconsistent or out-of-range retirement attributes are rejected`() {
         val base = fixtureOfferings().first { it["attributes"]["productLine"].asText() == "DPS" }["attributes"]
         validate(base.toString(), expectedValid = true)
@@ -253,6 +306,7 @@ class RetirementCatalogPackResourceTest {
         offering: JsonNode,
         version: Int = 1,
         attributes: JsonNode = offering["attributes"],
+        effectiveFrom: String? = null,
     ): UUID = UUID.fromString(
         Given {
             contentType("application/json")
@@ -262,6 +316,7 @@ class RetirementCatalogPackResourceTest {
                         "schemaRef" to mapOf("id" to SCHEMA_ID, "version" to version),
                         "name" to mapOf("en" to offering["name"].asText()),
                         "attributes" to attributes,
+                        "effectiveFrom" to effectiveFrom,
                     ),
                 ),
             )
@@ -274,6 +329,19 @@ class RetirementCatalogPackResourceTest {
             path<String>("id")
         },
     )
+
+    private fun publish(offeringId: UUID, revisionId: UUID) {
+        Given {
+            contentType("application/json")
+            body("""{"reason":"approved strategy class coverage"}""")
+            header("If-Match", "\"0\"")
+        } When {
+            post("/api/v2/offerings/$offeringId/revisions/$revisionId/publish")
+        } Then {
+            statusCode(200)
+            body("state", equalTo("PUBLISHED"))
+        }
+    }
 
     private fun setMaker(revisionId: UUID, maker: String) {
         dataSource.connection.use { connection ->
