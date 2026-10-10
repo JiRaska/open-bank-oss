@@ -1,0 +1,189 @@
+{
+  "consumer": {
+    "name": "openbank-tax-reporting-service"
+  },
+  "interactions": [
+    {
+      "description": "GET participant aggregates with no M2M identity is refused",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/pension/reporting/participant-aggregates",
+        "query": {
+          "periodEnd": [
+            "2026-09-30"
+          ],
+          "periodStart": [
+            "2026-07-01"
+          ]
+        }
+      },
+      "response": {
+        "status": 401
+      }
+    },
+    {
+      "description": "GET participant aggregates for the third quarter of 2026",
+      "providerStates": [
+        {
+          "name": "pension participant activity may exist for the third quarter of 2026"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/pension/reporting/participant-aggregates",
+        "query": {
+          "periodEnd": [
+            "2026-09-30"
+          ],
+          "periodStart": [
+            "2026-07-01"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "contributionsYtd": {
+            "employer": 0,
+            "participant": 0,
+            "state": 0,
+            "total": 0,
+            "transferIn": 0
+          },
+          "currency": "CZK",
+          "participants": {
+            "contributing": 0,
+            "inForce": 0,
+            "pensioners": 0
+          },
+          "payoutsYtd": {
+            "cases": 0,
+            "taxWithheld": 0,
+            "total": 0
+          },
+          "periodEnd": "2026-09-30",
+          "periodStart": "2026-07-01"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.contributionsYtd.employer": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.contributionsYtd.participant": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.contributionsYtd.state": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.contributionsYtd.total": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.contributionsYtd.transferIn": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.currency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.participants.contributing": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$.participants.inForce": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$.participants.pensioners": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$.payoutsYtd.cases": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$.payoutsYtd.taxWithheld": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.payoutsYtd.total": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-pension-service"
+  }
+}

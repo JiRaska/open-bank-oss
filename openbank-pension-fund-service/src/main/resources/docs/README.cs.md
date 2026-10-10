@@ -53,3 +53,24 @@ neposkytuje vzájemné TLS.
 `ServerTlsIT` ověřuje načtení PEM, vyjednání TLS 1.3, odmítnutí nedůvěryhodného
 certifikátu a zachování HTTP s dočasnými testovacími klíči. Deklarace ani tento
 test nedokazují připravenost certifikátu v clusteru.
+
+
+### Výsledovka a klasifikace pozic pro reporting
+
+Čtecí model period-figures zahrnuje kumulované zisky a ztráty z přecenění, ostatní
+investiční výsledek a poplatky za správu od začátku roku. Před použitím jednotlivých
+řádků zkontrolujte `profitAndLossYtd.linesUnavailableReason`; nedostupné členění
+neznamená naměřenou nulu.
+
+Zaznamenané pozice NAV nesou třídu instrumentu. Historické pozice a vstupy bez
+klasifikace zůstávají `UNCLASSIFIED`. Návrh opravy vytvoří
+`POST /api/v1/position-classification-corrections` (`positionId`, `toClass`, `reason`).
+Jiný schvalovatel jej rozhodne přes `/{correctionId}/approve` nebo
+`/{correctionId}/reject`. Návrh vyžaduje `pension-fund.nav.calculate`, rozhodnutí
+`pension-fund.nav.approve`; autor návrhu vlastní opravu rozhodnout nesmí. Tyto
+podklady slouží čtecímu modelu reportingu, nepodávají zákonný výkaz.
+
+
+### Opakování požadavků na korekci klasifikace
+
+POST operace návrhu, schválení a zamítnutí vyžadují neprázdný `Idempotency-Key` o nejvýše 128 znacích. Klíč je oddělen podle přihlášeného uživatele a operace. Opakování stejného pokynu vrátí původní odpověď i poté, co korekce změnila stav; změněný obsah se stejným klíčem vrátí 409. Původní odpověď a změna korekce se ukládají v jedné databázové transakci. Ze souběžného schválení a zamítnutí může být zapsáno jen jedno rozhodnutí.
