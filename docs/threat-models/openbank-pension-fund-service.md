@@ -1,8 +1,8 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Threat model — openbank-pension-fund-service
 
-- **Status:** bootstrap (ADR-0334 slice S4), sandbox only — no participant-facing caller yet
-- **Last reviewed:** 2026-10-09
+- **Status:** integration (ADR-0334 slices S4/S8), sandbox only — pension-service machine caller
+- **Last reviewed:** 2026-10-10
 - **Owner:** pension-fund-service CODEOWNERS
 - **Related ADRs:** ADR-0030, ADR-0034, ADR-0315, ADR-0334
 
@@ -34,7 +34,14 @@ contact data.
    is listed in `rules.yaml: authz.operator_read_any_excluded_actions`, so base rest.rego's
    `operator-read-any` no longer admits the shared service-account (which holds ROLE_OPERATOR) or
    any other service. Proven both ways by `opa test` and by `opa eval` on the materialised bundle.
-3. Market prices enter through `MarketPricePort`. The shipped adapter (`StubMarketPriceAdapter`)
+3. The integration admits the `pension` namespace in pension-fund's ingress NetworkPolicy.
+   This is network reachability, not authorization: the provider still checks the bearer identity,
+   RBAC and OPA for each request. `PensionFundRestClient` uses `@OidcClientFilter` and the
+   `openbank-pension` client-credentials identity to read holdings, place orders with an
+   `Idempotency-Key`, and read strategies. A caller compromised inside the admitted namespace
+   must not acquire fund-administrator NAV or strategy-change permissions. The exact machine
+   principal grant is a trust boundary; it does not establish participant ownership by itself.
+4. Market prices enter through `MarketPricePort`. The shipped adapter (`StubMarketPriceAdapter`)
    knows no prices, so every position must be priced in the request by the calculating
    administrator; an unpriced position is refused, never valued at an invented number.
 
@@ -52,7 +59,7 @@ contact data.
 | Tampering — a wrong NAV stays wrong | A correction is a NEW NAV for the same date that the original's units are re-valued with; its publication (four-eyes) supersedes the original, re-prices every transaction priced at it and adjusts holdings by the unit difference; the partial unique index `uq_fund_navs_published` allows one published NAV per fund and day | The cash difference on redemptions (`amountDelta`) is reported, not paid — compensation payment is a pension-service follow-up; a switch-out correction does not cascade into its already-settled switch-in leg |
 | Tampering — fund assets reach the bank's books | No ledger or treasury client exists in this module; no GL account is referenced anywhere | A future integration must keep fund books on the provider entity's own GL (ADR-0334 §2) |
 | Repudiation | Maker and checker principal names and times are stored on every NAV and strategy change; transactions keep the NAV they were priced at and, after a correction, the NAV they were corrected from | No events are published yet, so nothing reaches the tamper-evident audit trail; the database rows are the only record |
-| Information disclosure — another service reads participants' holdings | ClusterIP only, generated NetworkPolicy allow-list, no participant PII; holdings readable only by staff and `service-account-openbank-pension` (declared exclusion from `operator-read-any`, must-deny tests for the shared and an unrelated service-account) | Every operator can read every contract's holdings; the pension-service Keycloak client is not registered yet, so until it is no machine can read holdings at all |
+| Information disclosure — another service reads participants' holdings | ClusterIP only, generated NetworkPolicy allow-list, no participant PII; holdings readable only by staff and `service-account-openbank-pension` (declared exclusion from `operator-read-any`, must-deny tests for the shared and an unrelated service-account) | Every operator can read every contract's holdings; the integration registers the pension-service client; compromise of that client exposes its permitted contract holdings and order surface. Caller-side contract ownership checks remain necessary |
 | Denial of service | 1 MB body limit, rate limit, a NAV publication settles in one transaction | A fund with very many queued orders settles them all in one request |
 
 ## Invariants
@@ -66,7 +73,7 @@ contact data.
 
 ## Out of scope / follow-ups
 
-Domain events and the audit subscription, the pension-service FundAdministrationPort adapter and
-its machine grant, a real market-data adapter, investment orders and depositary reconciliation,
+Domain events and the audit subscription, consumer/provider Pact verification of the new
+pension-service FundAdministrationPort adapter, a real market-data adapter, investment orders and depositary reconciliation,
 limit/concentration checks, scheduled NAV and strategy application, participant notification
 delivery, compensation payments for NAV corrections, fund close/merge with unit migration.
