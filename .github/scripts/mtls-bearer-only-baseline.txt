@@ -10,5 +10,4 @@ openbank-ledger-service
 openbank-lending-service
 openbank-party-service
 openbank-product-catalog
-openbank-risk-engine
 openbank-sca-service
