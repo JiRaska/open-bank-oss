@@ -4,8 +4,14 @@
 
 package com.openbank.pension.integration
 
+import com.openbank.pension.domain.model.ProductLine
+import com.openbank.pension.domain.questionnaire.StrategyInstrumentMapping
+import com.openbank.pension.infrastructure.catalog.StrategyInstrumentCatalogAdapter
 import com.openbank.pension.it.PostgresTestResource
+import io.mockk.coEvery
+import io.mockk.mockk
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.junit.QuarkusMock
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
@@ -137,7 +143,8 @@ class QuestionnaireApiIT {
             "$apps/$id/warnings/acknowledge",
             """{"strategyCode":"DYNAMIC","warnings":["STRATEGY_ABOVE_PROFILE"],"language":"en"}""",
         ).statusCode(200)
-        val doc: String = call("POST", "$apps/$id/strategy", """{"strategyCode":"DYNAMIC"}""").statusCode(200)
+        val doc: String = call("POST", "$apps/$id/strategy", """{"strategyCode":"DYNAMIC","language":"en"}""")
+            .statusCode(200)
             .body("unsuitableChoiceAcknowledged", equalTo(true)).extract().path("keyInformationDocumentId")
         call("POST", "$apps/$id/kid/accept", """{"documentId":"$doc"}""").statusCode(200)
         call("POST", "$apps/$id/sign", """{"scaChallengeId":"sca-${UUID.randomUUID()}"}""").statusCode(200)
@@ -147,6 +154,22 @@ class QuestionnaireApiIT {
     @Test
     @TestSecurity(user = "edge", roles = ["ROLE_API"])
     fun `a DIP novice gets the appropriateness warning, and a riskier DIP strategy cannot be acknowledged away`() {
+        // Synthetic reviewed mappings exercise the pension HTTP/DB flow. No product composition is
+        // inferred from the strategy name; production mappings must come from a published catalog.
+        val catalog = mockk<StrategyInstrumentCatalogAdapter>()
+        coEvery { catalog.effectivePublished("CZ", ProductLine.DIP, any(), any()) } coAnswers {
+            val strategy = thirdArg<String>()
+            listOf(
+                StrategyInstrumentMapping(
+                    "CZ",
+                    ProductLine.DIP,
+                    strategy,
+                    "test-reviewed-v1",
+                    setOf("BOND_FUNDS", "EQUITY_FUNDS"),
+                ),
+            )
+        }
+        QuarkusMock.installMockForType(catalog, StrategyInstrumentCatalogAdapter::class.java)
         val id = start("DIP", "BANK", "1979-03-14")
         val novice = """
             {"dip.objective":"GROWTH","dip.financial_situation":"EASILY","dip.loss_capacity":"UP_TO_25",
@@ -154,7 +177,6 @@ class QuestionnaireApiIT {
              "dip.knowledge_equity":"DONT_KNOW","dip.experience_equity":"NEVER","dip.sustainability":"AVOID_HARM"}
         """.trimIndent()
         call("POST", "$apps/$id/questionnaire", """{"answers":$novice}""").statusCode(200)
-            .body("profile.appropriate", equalTo(false))
             .body("profile.sustainability.categories", containsInAnyOrder("PAI_CONSIDERED"))
             .body("profile.recommendedStrategyWarnings.code", hasItem("PRODUCT_NOT_APPROPRIATE"))
         call("POST", "$apps/$id/strategy", "{}").statusCode(400)

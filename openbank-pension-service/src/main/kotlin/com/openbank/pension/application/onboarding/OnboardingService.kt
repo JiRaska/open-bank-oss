@@ -84,7 +84,8 @@ interface TransactionRunner {
  * Every participant-facing method takes the caller's party id and answers "not found" for an
  * application of another party — a foreign id must read as absent, never as someone else's data.
  */
-@Suppress("TooManyFunctions", "LongParameterList")
+// Existing onboarding, reassessment and contract gates share state.
+@Suppress("TooManyFunctions", "LongParameterList", "LargeClass")
 class OnboardingService(
     private val applications: OnboardingApplicationRepository,
     private val assessments: SuitabilityAssessmentRepository,
@@ -219,13 +220,29 @@ class OnboardingService(
     ): Pair<OnboardingApplication, StrategyRecommendation> {
         val application = live(id, partyId)
         val onboarding = rulesFor(application)
-        val built = build(application, onboarding)
+        val assessment = pinInstrumentMappings(application, onboarding, build(application, onboarding))
+        val recommendation = recommend(application, assessment)
+        val saved = tx.inTransaction {
+            application.assessmentId?.let { previous ->
+                assessments.findById(previous)?.let { assessments.save(it.supersede()) }
+            }
+            assessments.save(assessment)
+            applications.save(application.submitQuestionnaire(assessment.id, recommendation.recommended, now()))
+        }
+        return saved to recommendation
+    }
+
+    private suspend fun pinInstrumentMappings(
+        application: OnboardingApplication,
+        onboarding: OnboardingRules,
+        built: SuitabilityAssessment,
+    ): SuitabilityAssessment {
         if (onboarding.questionnaire.appropriatenessTest) {
             check(built.questionnaire != null) {
                 "the versioned questionnaire is required to assess instrument-class appropriateness"
             }
         }
-        val assessment = if (onboarding.questionnaire.appropriatenessTest) {
+        return if (onboarding.questionnaire.appropriatenessTest) {
             val catalog = checkNotNull(instrumentMappings) { "instrument mapping catalog is unavailable" }
             built.copy(
                 strategyInstrumentMappings = onboarding.strategies.map { strategy ->
@@ -250,15 +267,6 @@ class OnboardingService(
         } else {
             built
         }
-        val recommendation = recommend(application, assessment)
-        val saved = tx.inTransaction {
-            application.assessmentId?.let { previous ->
-                assessments.findById(previous)?.let { assessments.save(it.supersede()) }
-            }
-            assessments.save(assessment)
-            applications.save(application.submitQuestionnaire(assessment.id, recommendation.recommended, now()))
-        }
-        return saved to recommendation
     }
 
     /**
@@ -271,7 +279,8 @@ class OnboardingService(
         build: (OnboardingApplication, OnboardingRules) -> SuitabilityAssessment,
     ): Pair<OnboardingApplication, StrategyRecommendation> {
         val application = get(id, partyId)
-        val assessment = build(application, rulesFor(application))
+        val onboarding = rulesFor(application)
+        val assessment = pinInstrumentMappings(application, onboarding, build(application, onboarding))
         val recommendation = recommend(application, assessment)
         val saved = tx.inTransaction {
             application.assessmentId?.let { previous ->
@@ -300,11 +309,15 @@ class OnboardingService(
         val application = request.contractId?.let { applications.findByContract(it) }
             ?: return conservativeOnly(onboarding, option.riskClass, request)
         val assessment = assessmentInForce(application)
-        val required = WarningPolicy.required(request.strategyCode, assessment, recommend(application, assessment))
+        val required = WarningPolicy.required(
+            request.strategyCode,
+            assessmentForChoice(application, assessment, request.strategyCode),
+            recommend(application, assessment),
+        )
         requireAllowedAndAcknowledged(onboarding, required, request)
         return StrategyApproval(
             application.id,
-            warningAcks(application, required, assessment.id, request.strategyCode, request.language),
+            warningAcks(application, required, assessment, request.strategyCode, request.language),
         )
     }
 
@@ -314,6 +327,11 @@ class OnboardingService(
         riskClass: Int,
         request: StrategySuitabilityRequest,
     ): StrategyApproval {
+        if (request.productLine == ProductLine.DIP) {
+            throw StrategyNotPermittedException(
+                "DIP strategy requires an approved instrument mapping and a completed questionnaire",
+            )
+        }
         if (riskClass > onboarding.strategies.minOf { it.riskClass } || request.acknowledged.isNotEmpty()) {
             throw StrategyNotPermittedException(
                 "without a suitability assessment only the most conservative strategy may be held; " +

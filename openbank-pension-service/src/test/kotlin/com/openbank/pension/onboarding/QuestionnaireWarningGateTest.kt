@@ -13,6 +13,10 @@ import com.openbank.pension.application.onboarding.ProfileView
 import com.openbank.pension.application.onboarding.QuestionnaireService
 import com.openbank.pension.application.onboarding.SignatureVerificationPort
 import com.openbank.pension.application.onboarding.SuitabilityAssessmentRepository
+import com.openbank.pension.application.onboarding.TransactionRunner
+import com.openbank.pension.application.port.out.StrategyNotPermittedException
+import com.openbank.pension.application.port.out.StrategySuitabilityRequest
+import com.openbank.pension.application.port.out.StrategyWarningsRequiredException
 import com.openbank.pension.domain.model.ContributionFrequency
 import com.openbank.pension.domain.model.ContributionSchedule
 import com.openbank.pension.domain.model.ProductLine
@@ -323,5 +327,97 @@ class QuestionnaireWarningGateTest {
             "en",
         )
         assertThat(profile.appropriate).isNull()
+    }
+
+    @Test
+    fun `contract DIP choice uses classes and rejects missing mapping`(): Unit = runBlocking {
+        val contractId = UUID.randomUUID()
+        val mapping = StrategyInstrumentMapping(
+            "CZ",
+            ProductLine.DIP,
+            "BALANCED",
+            "revision-7",
+            setOf("BOND_FUNDS", "EQUITY_FUNDS"),
+        )
+        val dip = submitted().copy(productLine = ProductLine.DIP)
+        val assessed = assessment.copy(
+            productLine = ProductLine.DIP,
+            appropriate = true,
+            questionnaire = QuestionnaireRecord(
+                "cz-dip-q1", 1, emptyMap(), 3, emptyList(),
+                listOf(
+                    InstrumentCompetence("BOND_FUNDS", 3, 3),
+                    InstrumentCompetence("EQUITY_FUNDS", 0, 0),
+                ),
+                SustainabilityPreference.NONE, null, null, null, emptyList(),
+            ),
+            strategyInstrumentMappings = listOf(mapping),
+        )
+        val catalog = mockk<StrategyInstrumentMappingPort>()
+        coEvery { catalog.effectivePublished("CZ", ProductLine.DIP, "BALANCED", any()) } returns listOf(mapping)
+        coEvery { applications.findByContract(contractId) } returns dip
+        coEvery { assessments.findById(assessed.id) } returns assessed
+        val mappedService = OnboardingService(
+            applications, assessments, mockk(), mockk(), packs, rules, mockk(), mockk(), documents, signatures,
+            mockk(), mockk(), clock, questionSets, catalog,
+        )
+        val request = StrategySuitabilityRequest(contractId, "CZ", ProductLine.DIP, 1, "BALANCED", emptySet(), "en")
+        assertThatThrownBy { runBlocking { mappedService.authorizeStrategy(request) } }
+            .isInstanceOf(StrategyWarningsRequiredException::class.java)
+            .hasMessageContaining("PRODUCT_NOT_APPROPRIATE")
+        coEvery { catalog.effectivePublished("CZ", ProductLine.DIP, "BALANCED", any()) } returns emptyList()
+        assertThatThrownBy { runBlocking { mappedService.authorizeStrategy(request) } }
+            .hasMessageContaining("missing or ambiguous")
+    }
+
+    @Test
+    fun `DIP draft cannot start without reviewed mapping and per-class assessment`(): Unit = runBlocking {
+        val request = StrategySuitabilityRequest(null, "CZ", ProductLine.DIP, 1, "BALANCED", emptySet(), "en")
+        assertThatThrownBy { runBlocking { service.authorizeStrategy(request) } }
+            .isInstanceOf(StrategyNotPermittedException::class.java)
+            .hasMessageContaining("approved instrument mapping")
+    }
+
+    @Test
+    fun `activated DIP reassessment pins reviewed classes for every offered strategy`(): Unit = runBlocking {
+        val active = submitted().copy(
+            productLine = ProductLine.DIP,
+            status = com.openbank.pension.domain.onboarding.OnboardingStatus.ACTIVATED,
+            contractId = UUID.randomUUID(),
+        )
+        val fresh = assessment.copy(
+            id = UUID.randomUUID(),
+            productLine = ProductLine.DIP,
+            questionnaire = QuestionnaireRecord(
+                "cz-dip-q1", 1, emptyMap(), 3, emptyList(),
+                listOf(InstrumentCompetence("BOND_FUNDS", 3, 3)),
+                SustainabilityPreference.NONE, null, null, null, emptyList(),
+            ),
+        )
+        val catalog = mockk<StrategyInstrumentMappingPort>()
+        coEvery { catalog.effectivePublished("CZ", ProductLine.DIP, any(), any()) } answers {
+            listOf(StrategyInstrumentMapping("CZ", ProductLine.DIP, thirdArg(), "revision-7", setOf("BOND_FUNDS")))
+        }
+        coEvery { applications.findById(active.id) } returns active
+        coEvery { assessments.findById(assessment.id) } returns assessment
+        coEvery { assessments.save(any()) } answers { firstArg() }
+        coEvery { applications.save(any()) } answers { firstArg() }
+        val transaction = object : TransactionRunner {
+            override suspend fun <T> inTransaction(block: suspend () -> T): T = block()
+        }
+        val mappedService = OnboardingService(
+            applications, assessments, mockk(), mockk(), packs, rules, mockk(), mockk(), documents, signatures,
+            mockk(), transaction, clock, questionSets, catalog,
+        )
+        val saved = mappedService.reassess(active.id, party) { _, _ -> fresh }
+        assertThat(saved.first.assessmentId).isEqualTo(fresh.id)
+        coVerify(exactly = 1) {
+            assessments.save(
+                match {
+                    it.id == fresh.id &&
+                        it.strategyInstrumentMappings?.size == rules.rules("CZ", ProductLine.DIP, 1).strategies.size
+                },
+            )
+        }
     }
 }
