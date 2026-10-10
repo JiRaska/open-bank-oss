@@ -136,3 +136,11 @@ sequenceDiagram
 3. **No remote calls in TX** — everything synchronous within request-response, async via outbox + Kafka.
 4. **Idempotence at edge** — mandatory `Idempotency-Key` on all POST/PUT, deduplication in Redis.
 5. **PII minimisation** — IBAN is PII (GDPR), masked in logs (`libs.security.PiiMask.maskIban`).
+
+## Ownership-verification projection (ADR-0335 D2)
+
+`POST /api/v1/accounts/ownership-verifications` (action `account.verifyOwnership`) takes
+`{iban, partyId}` in the body and answers only `{owned, active}`, plus `accountId` when `owned` is
+true. An unknown IBAN and another party's IBAN both answer `owned=false`, so the endpoint is not an
+existence oracle. Its declared callers are pension-service and sdd-service; neither holds
+`account.read`.
