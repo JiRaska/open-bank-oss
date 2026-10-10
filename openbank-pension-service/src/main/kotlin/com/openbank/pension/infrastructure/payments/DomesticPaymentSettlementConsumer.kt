@@ -56,6 +56,7 @@ class DomesticPaymentSettlementConsumer(
                 decoded.settlement,
                 decoded.occurredAt,
                 decoded.settledAt,
+                decoded.aggregateRevision,
             )
         }
         if (
@@ -97,7 +98,10 @@ class DomesticPaymentSettlementConsumer(
         } else {
             null
         }
-        return DecodedSettlement(paymentId, settlement, occurredAt, settledAt)
+        val aggregateRevision = node.path("aggregateRevision").takeUnless { it.isMissingNode || it.isNull }
+            ?.takeIf { it.isIntegralNumber && it.canConvertToLong() }
+            ?.longValue()?.takeIf { it > 0 }
+        return DecodedSettlement(paymentId, settlement, occurredAt, settledAt, aggregateRevision)
     }
 
     internal data class DecodedSettlement(
@@ -105,6 +109,7 @@ class DomesticPaymentSettlementConsumer(
         val settlement: RailSettlement,
         val occurredAt: Instant,
         val settledAt: Instant?,
+        val aggregateRevision: Long?,
     )
 
     companion object {

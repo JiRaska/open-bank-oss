@@ -219,6 +219,7 @@ class PaymentMandateAndSettlementTest {
             "pay-1",
         )
         var settledAt: Instant? = null
+        var settlementEventRevision: Long? = null
 
         override suspend fun findByPaymentRef(paymentRef: String) = row.takeIf { it.paymentRef == paymentRef }
 
@@ -228,14 +229,29 @@ class PaymentMandateAndSettlementTest {
             to: InstructionStatus,
             occurredAt: Instant,
             settledAt: Instant?,
+            aggregateRevision: Long?,
         ): Boolean {
-            if (row.paymentRef != paymentRef || row.status !in from) return false
+            if (row.paymentRef != paymentRef) return false
+            if (row.status !in from) {
+                val unknownSameTransition = row.status == InstructionStatus.SETTLED &&
+                    to == InstructionStatus.SETTLED &&
+                    this.settledAt == null
+                val sourceMatched = settledAt != null &&
+                    aggregateRevision != null &&
+                    settlementEventRevision == aggregateRevision
+                if (unknownSameTransition && sourceMatched) {
+                    this.settledAt = settledAt
+                    return true
+                }
+                return false
+            }
             val staleReturn = this.settledAt?.isAfter(occurredAt) == true
             if (row.status == InstructionStatus.SETTLED && to == InstructionStatus.REJECTED && staleReturn) {
                 return false
             }
             row = row.copy(status = to)
             this.settledAt = settledAt.takeIf { to == InstructionStatus.SETTLED }
+            settlementEventRevision = aggregateRevision.takeIf { to == InstructionStatus.SETTLED }
             return true
         }
     }
@@ -298,11 +314,11 @@ class PaymentMandateAndSettlementTest {
             """{"paymentId":"$id","previousStatus":"SENT_TO_CLEARING","newStatus":"$status","occurredAt":"$railTime","settledAt":"$railTime"}"""
 
         assertThat(consumer.decode(body("SETTLED"))).isEqualTo(
-            DomesticPaymentSettlementConsumer.DecodedSettlement(id, RailSettlement.SETTLED, railTime, railTime),
+            DomesticPaymentSettlementConsumer.DecodedSettlement(id, RailSettlement.SETTLED, railTime, railTime, null),
         )
         listOf("REJECTED", "RETURNED", "CANCELLED").forEach {
             assertThat(consumer.decode(body(it))).isEqualTo(
-                DomesticPaymentSettlementConsumer.DecodedSettlement(id, RailSettlement.REJECTED, railTime, null),
+                DomesticPaymentSettlementConsumer.DecodedSettlement(id, RailSettlement.REJECTED, railTime, null, null),
             )
         }
         listOf("RECEIVED", "VALIDATED", "SENT_TO_CLEARING").forEach { assertThat(consumer.decode(body(it))).isNull() }
@@ -310,6 +326,14 @@ class PaymentMandateAndSettlementTest {
         assertThat(consumer.decode("""{"paymentId":"nope","newStatus":"SETTLED"}""")).isNull()
         assertThat(consumer.decode("""{"paymentId":"$id","newStatus":"SETTLED"}""")).isNull()
         assertThat(consumer.decode("""{"paymentId":"$id","newStatus":"SETTLED","occurredAt":"$railTime"}"""))
-            .isEqualTo(DomesticPaymentSettlementConsumer.DecodedSettlement(id, RailSettlement.SETTLED, railTime, null))
+            .isEqualTo(
+                DomesticPaymentSettlementConsumer.DecodedSettlement(
+                    id,
+                    RailSettlement.SETTLED,
+                    railTime,
+                    null,
+                    null,
+                ),
+            )
     }
 }

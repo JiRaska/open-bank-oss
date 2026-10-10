@@ -25,6 +25,7 @@ interface PayoutSettlementRepository {
         to: InstructionStatus,
         occurredAt: Instant,
         settledAt: Instant?,
+        aggregateRevision: Long?,
     ): Boolean
 }
 
@@ -57,6 +58,7 @@ class PayoutSettlementService(
         settlement: RailSettlement,
         occurredAt: Instant,
         settledAt: Instant? = null,
+        aggregateRevision: Long? = null,
     ): SettlementOutcome {
         val instruction = instructions.findByPaymentRef(paymentRef) ?: return SettlementOutcome.NOT_OURS
         val (from, to) = when (settlement) {
@@ -66,7 +68,7 @@ class PayoutSettlementService(
         }
         // The source payment's persisted transition time can precede status-event creation.
         // A legacy SETTLED event without it still records SETTLED/null so reporting fails closed.
-        val changed = instructions.markSettlement(paymentRef, from, to, occurredAt, settledAt)
+        val changed = instructions.markSettlement(paymentRef, from, to, occurredAt, settledAt, aggregateRevision)
         val outcome = when {
             !changed -> SettlementOutcome.UNCHANGED
             to == InstructionStatus.SETTLED -> SettlementOutcome.SETTLED

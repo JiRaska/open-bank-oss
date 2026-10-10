@@ -48,25 +48,36 @@ class PgPayoutSettlements(private val client: Pool, private val clock: Clock) : 
         to: InstructionStatus,
         occurredAt: Instant,
         settledAt: Instant?,
+        aggregateRevision: Long?,
     ): Boolean = client.preparedQuery(
         """
             UPDATE pension_payment_instructions
-               SET status = $1, updated_at = $2,
-                   settled_at = CASE WHEN $1 = 'SETTLED' THEN $3::timestamptz ELSE NULL END
-             WHERE payment_ref = $5 AND status = ANY($6)
-               AND (status <> 'SETTLED' OR $1 <> 'REJECTED' OR settled_at IS NULL
-                    OR $4::timestamptz >= settled_at)
+               SET status = $1,
+                   updated_at = CASE WHEN status = 'SETTLED' AND $1 = 'SETTLED' THEN updated_at ELSE $2 END,
+                   settled_at = CASE WHEN $1 = 'SETTLED' THEN $3::timestamptz ELSE NULL END,
+                   settlement_event_revision = CASE WHEN $1 = 'SETTLED' THEN $4::bigint ELSE NULL END
+             WHERE payment_ref = $6 AND (
+                   (status = ANY($7)
+                    AND (status <> 'SETTLED' OR $1 <> 'REJECTED' OR settled_at IS NULL
+                         OR $5::timestamptz >= settled_at))
+                   OR ($1 = 'SETTLED' AND status = 'SETTLED' AND settled_at IS NULL
+                       AND $3::timestamptz IS NOT NULL AND $4::bigint IS NOT NULL
+                       AND settlement_event_revision = $4::bigint)
+               )
         """.trimIndent(),
     ).execute(
-        Tuple.of(
-            to.name,
-            clock.instant().atOffset(ZoneOffset.UTC),
-            settledAt?.atOffset(ZoneOffset.UTC),
-            occurredAt.atOffset(ZoneOffset.UTC),
-            paymentRef,
-            from.map {
-                it.name
-            }.toTypedArray(),
+        Tuple.from(
+            listOf(
+                to.name,
+                clock.instant().atOffset(ZoneOffset.UTC),
+                settledAt?.atOffset(ZoneOffset.UTC),
+                aggregateRevision,
+                occurredAt.atOffset(ZoneOffset.UTC),
+                paymentRef,
+                from.map {
+                    it.name
+                }.toTypedArray(),
+            ),
         ),
     ).awaitSuspending().rowCount() > 0
 }

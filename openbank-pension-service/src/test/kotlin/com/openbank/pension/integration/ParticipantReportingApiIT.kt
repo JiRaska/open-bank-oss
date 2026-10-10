@@ -244,6 +244,7 @@ class ParticipantReportingApiIT {
 
     @Test
     @TestSecurity(user = "service-account-openbank-tax-reporting", roles = ["ROLE_API"])
+    @Suppress("LongMethod") // One database row through failure, mismatched replay, repair, and duplicate replay.
     fun `legacy settled event stays durably uncertain after handler failure`() {
         val key = "rep-${UUID.randomUUID()}"
         val ref = UUID.randomUUID()
@@ -267,27 +268,51 @@ class ParticipantReportingApiIT {
                     ),
                 ),
             )
-            val body = """{"paymentId":"$ref","newStatus":"SETTLED","occurredAt":"2009-07-01T00:30:00Z"}"""
-            val record = ConsumerRecord(
-                "openbank.domestic.payment.events", 0, 0L, 0L, TimestampType.CREATE_TIME, -1, -1,
-                ref.toString(), body, headers, Optional.empty(),
-            )
-            assertThatThrownBy { runBlocking { settlementConsumer.consume(record) } }
+            fun record(revision: Int, settledAt: String? = null): ConsumerRecord<String, String> {
+                val time = settledAt?.let { ",\"settledAt\":\"$it\"" } ?: ""
+                val body = """{"paymentId":"$ref","newStatus":"SETTLED","aggregateRevision":$revision,""" +
+                    """"occurredAt":"2009-07-01T00:30:00Z"$time}"""
+                return ConsumerRecord(
+                    "openbank.domestic.payment.events", 0, 0L, 0L, TimestampType.CREATE_TIME, -1, -1,
+                    ref.toString(), body, headers, Optional.empty(),
+                )
+            }
+            assertThatThrownBy { runBlocking { settlementConsumer.consume(record(7)) } }
                 .isInstanceOf(IllegalStateException::class.java)
             jdbc { c ->
                 c.prepareStatement(
-                    "SELECT status, settled_at FROM pension_payment_instructions WHERE idempotency_key = ?",
+                    "SELECT status, settled_at, settlement_event_revision FROM pension_payment_instructions " +
+                        "WHERE idempotency_key = ?",
                 ).use { statement ->
                     statement.setString(1, key)
                     statement.executeQuery().use { result ->
                         assertThat(result.next()).isTrue()
                         assertThat(result.getString(1)).isEqualTo("SETTLED")
                         assertThat(result.getObject(2)).isNull()
+                        assertThat(result.getLong(3)).isEqualTo(7)
                     }
                 }
             }
             given().queryParam("periodStart", "2009-07-01").queryParam("periodEnd", "2009-07-31")
                 .`when`().get(PATH).then().statusCode(409)
+            runBlocking { settlementConsumer.consume(record(8, "2009-07-01T00:29:00Z")) }
+            given().queryParam("periodStart", "2009-07-01").queryParam("periodEnd", "2009-07-31")
+                .`when`().get(PATH).then().statusCode(409)
+            runBlocking { settlementConsumer.consume(record(7, "2009-07-01T00:29:00Z")) }
+            given().queryParam("periodStart", "2009-07-01").queryParam("periodEnd", "2009-07-31")
+                .`when`().get(PATH).then().statusCode(200).body("payouts.total", equalTo(350.0f))
+            runBlocking { settlementConsumer.consume(record(7, "2009-08-01T00:29:00Z")) }
+            jdbc { c ->
+                c.prepareStatement("SELECT settled_at FROM pension_payment_instructions WHERE idempotency_key = ?")
+                    .use { statement ->
+                        statement.setString(1, key)
+                        statement.executeQuery().use { result ->
+                            assertThat(result.next()).isTrue()
+                            assertThat(result.getTimestamp(1).toInstant())
+                                .isEqualTo(Instant.parse("2009-07-01T00:29:00Z"))
+                        }
+                    }
+            }
         } finally {
             jdbc { c -> c.exec("DELETE FROM pension_payment_instructions WHERE idempotency_key = ?", key) }
         }

@@ -9,6 +9,10 @@
 -- Rollout order: publish the additive domestic event field first, then upgrade pension consumers.
 -- Older SETTLED events without settledAt are retained by the pension consumer's configured DLQ;
 -- reconcile their source times before using the statutory aggregate response.
--- Rollback: ALTER TABLE pension_payment_instructions DROP COLUMN settled_at;
+-- Keep the source aggregate revision beside an unknown time. A corrected replay may fill
+-- settled_at only for that same payment and revision; an unrelated event cannot repair it.
+-- Rollback: ALTER TABLE pension_payment_instructions DROP COLUMN settled_at,
+--           DROP COLUMN settlement_event_revision;
 -- Rollback loses recorded settlement instants; take a backup first if a rollback is needed.
 ALTER TABLE pension_payment_instructions ADD COLUMN settled_at TIMESTAMPTZ;
+ALTER TABLE pension_payment_instructions ADD COLUMN settlement_event_revision BIGINT;
