@@ -8,7 +8,7 @@
 #   pension-fund.nav.read / .nav.calculate / .nav.approve    — FundResource, NavResource
 #   pension-fund.strategy.read / .strategy.manage            — StrategyResource
 #   pension-fund.strategy.change.submit / .approve / .apply  — StrategyResource, StrategyChangeResource
-#   pension-fund.order.place / .holding.read                 — ContractUnitResource
+#   pension-fund.order.place / .holding.inspect              — ContractUnitResource
 #
 # WHY NOT `rules.yaml: authz.role_action_matrix`: a matrix line is a grant to every MACHINE that
 # holds the role, and no policy can veto it (#3765/#3734). The Keycloak service-accounts are

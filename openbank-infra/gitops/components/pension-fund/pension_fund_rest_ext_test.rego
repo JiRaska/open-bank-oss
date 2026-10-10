@@ -25,6 +25,13 @@ test_auditor_may_read_holdings if {
 	}
 }
 
+test_compliance_staff_may_inspect_holdings if {
+	rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "carol-compliance", "roles": ["ROLE_COMPLIANCE"]},
+		"action": "pension-fund.holding.inspect",
+	}
+}
+
 # The point of the narrowing: no backend service may publish a fund's price, even holding
 # ROLE_OPERATOR as the shared client does in some realms.
 test_service_account_may_not_approve_nav if {
