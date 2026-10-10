@@ -103,9 +103,11 @@ openbank:
     # not an option (ASVS V9.1). Client certificate tax-reporting-internal-tls, mounted at
     # /mnt/internal-tls in the cluster only (gitops); the server is verified against openbank-ca
     # with HTTPS hostname verification (the default — never set to NONE). %prod only: the files
-    # exist only in the cluster, and the TLS registry loads them at boot.
+    # exist only in the cluster, and the TLS registry loads them at boot. The bucket is the shared
+    # `internal-authority` that #12500 (ledger), #12507 (pension, pension-fund) also name: ONE `tls:`
+    # and ONE `rest-client:` map under %prod (SnakeYAML keeps only the last of a repeated key).
     tls:
-      treasury-authority:
+      internal-authority:
         key-store:
           pem:
             client:
@@ -117,7 +119,7 @@ openbank:
         protocols: TLSv1.3
     rest-client:
       treasury-service:
-        tls-configuration-name: treasury-authority
+        tls-configuration-name: internal-authority
 
 "%test":
   quarkus:
