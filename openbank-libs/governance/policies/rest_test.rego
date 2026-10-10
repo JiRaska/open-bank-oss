@@ -1495,3 +1495,94 @@ test_commstyle_publish_denies_human_without_approver_role if {
 	}
 		with data.rules as rules_real
 }
+
+# ---------------------------------------------------------------------------------------
+# compliance-read-any is a STAFF grant (#3765, ADR-0223): a Keycloak service-account is
+# classified HUMAN, so the rule must exclude `service-account-*` by id or any machine holding
+# ROLE_COMPLIANCE reads every `*.read` fleet-wide — including reads operator-read-any withholds.
+# ---------------------------------------------------------------------------------------
+test_deny_service_account_compliance_generic_read if {
+	not rest.allow with input as {
+		"principal": {"id": "service-account-openbank-services", "type": "HUMAN", "roles": ["ROLE_COMPLIANCE"]},
+		"action": "x.y.read",
+		"resource": {"type": "y", "id": "y-1"},
+	}
+		with data.openbank.bundle as bundle
+}
+
+test_deny_any_service_account_compliance_generic_read if {
+	not rest.allow with input as {
+		"principal": {"id": "service-account-openbank-kyc", "type": "HUMAN", "roles": ["ROLE_API", "ROLE_COMPLIANCE"]},
+		"action": "x.y.read",
+		"resource": {"type": "y", "id": "y-1"},
+	}
+		with data.openbank.bundle as bundle
+}
+
+# The exact defect: the CI realm's shared account holds ROLE_OPERATOR + ROLE_COMPLIANCE.
+# operator-read-any withholds an excluded read, and compliance-read-any used to hand it back.
+test_deny_service_account_compliance_reopening_operator_excluded_read if {
+	not rest.allow with input as {
+		"principal": {"id": "service-account-openbank-services", "type": "HUMAN", "roles": ["ROLE_OPERATOR", "ROLE_COMPLIANCE"]},
+		"action": "x.secret.read",
+		"resource": {"type": "secret", "id": "s-1"},
+	}
+		with data.rules.authz.operator_read_any_excluded_actions as ["x.secret.read"]
+		with data.openbank.bundle as bundle
+}
+
+test_service_account_compliance_reason_absent if {
+	reasons := rest.allowed_reasons with input as {
+		"principal": {"id": "service-account-openbank-services", "type": "HUMAN", "roles": ["ROLE_OPERATOR", "ROLE_COMPLIANCE", "ROLE_ADMIN"]},
+		"action": "x.y.read",
+		"resource": {"type": "y", "id": "y-1"},
+	}
+	not "compliance-read-any" in reasons
+}
+
+test_allow_human_compliance_generic_read if {
+	decision := rest.allow with input as {
+		"principal": {"id": "user-c", "type": "HUMAN", "roles": ["ROLE_COMPLIANCE"]},
+		"action": "x.y.read",
+		"resource": {"type": "y", "id": "y-1"},
+	}
+		with data.openbank.bundle as bundle
+	decision.allow == true
+	decision.reason == "compliance-read-any"
+}
+
+test_allow_human_operator_generic_read if {
+	decision := rest.allow with input as {
+		"principal": {"id": "user-o", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"action": "x.y.read",
+		"resource": {"type": "y", "id": "y-1"},
+	}
+		with data.openbank.bundle as bundle
+	decision.allow == true
+	decision.reason == "operator-read-any"
+}
+
+test_allow_human_admin_generic_read if {
+	decision := rest.allow with input as {
+		"principal": {"id": "user-a", "type": "HUMAN", "roles": ["ROLE_ADMIN"]},
+		"action": "x.y.read",
+		"resource": {"type": "y", "id": "y-1"},
+	}
+		with data.openbank.bundle as bundle
+	decision.allow == true
+	decision.reason == "operator-read-any"
+}
+
+# NOT YET CLOSED, pinned so the change is deliberate: operator-read-any still admits a
+# service-account holding ROLE_OPERATOR/ROLE_ADMIN. The deployed realm gives
+# service-account-openbank-edge ROLE_OPERATOR and customer-edge reads ~20 services through it,
+# several with no edge-named rule — retiring this grant for machines needs that inventory first
+# (#12486). When it is retired, flip this to a deny.
+test_operator_read_any_still_admits_service_account_pending_edge_inventory if {
+	reasons := rest.allowed_reasons with input as {
+		"principal": {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"action": "x.y.read",
+		"resource": {"type": "y", "id": "y-1"},
+	}
+	"operator-read-any" in reasons
+}
