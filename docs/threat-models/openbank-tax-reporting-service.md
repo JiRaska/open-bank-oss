@@ -28,12 +28,16 @@ NetworkPolicy admits admin-ui and the platform scrapers only, no ingress); servi
 
 ## 3. Authn/Authz
 
-- Every route is behind Keycloak OIDC (`@RolesAllowed`); there is no anonymous surface.
+- Every route is behind Keycloak OIDC (`@RolesAllowed`); there is no anonymous surface. The service
+  validates bearer tokens against the realm JWKS and holds **no client secret**: it calls nobody,
+  so no credential is projected into its namespace.
 - `@Authorize` on every route of `TaxFilingResource` asks the OPA sidecar.
   `tax_reporting_rest_ext.rego` grants `tax.filing.read` to real staff (operator, admin, auditor,
   viewer, compliance) and `tax.filing.assemble` / `tax.filing.file` to a real operator. Both rules
   exclude `service-account-*`, so the shared M2M account holding `ROLE_OPERATOR` cannot freeze or
-  file a return. No action sits in `rules.yaml: authz.role_action_matrix` (#3765/#3734).
+  file a return. `tax.filing.read` is also listed in `rules.yaml:
+  authz.operator_read_any_excluded_actions`, so no service-account reads a return or its
+  per-remittance trail through base `operator-read-any` either. No action sits in `rules.yaml: authz.role_action_matrix` (#3765/#3734).
 - `AUTHZ_ENFORCE=true` from the first rollout. Every allow test has a matching must-deny.
 
 ## 4. STRIDE
@@ -45,7 +49,7 @@ NetworkPolicy admits admin-ui and the platform scrapers only, no ingress); servi
 | **Tampering** | A redelivered or retried remittance is counted twice | `observe` is idempotent on the remittance id (the `duplicate` outcome) |
 | **Tampering** | A period's totals change after it was frozen | `ASSEMBLED` freezes the totals. An illegal transition is a 409 (`TaxConflictException`) |
 | **Repudiation** | Dispute over who froze or filed a return | `assembledBy` / `filedBy` hold the authenticated subject, with timestamps, on the filing row |
-| **Information disclosure** | Withholding amounts leak | Confidential classification. No ingress. Reads go to staff only. Service-accounts are excluded by the extension (a service-account with `ROLE_OPERATOR` can still read through base `rest.rego`'s operator read rule; that is fleet policy, not this service's) |
+| **Information disclosure** | Withholding amounts leak | Confidential classification. No ingress. Reads go to staff only. Service-accounts are excluded by the extension and from base `operator-read-any` (`operator_read_any_excluded_actions`), checked with `opa eval` against the generated bundle |
 | **Denial of service / loss** | A database outage while remittances arrive | A failed write is retried, then rethrown. The channel's dead-letter strategy parks the record on its own DLQ topic. Acking it would silently understate the return. A dead-lettered record is still missing from that period's return until it is replayed, so it needs an operator |
 | **Elevation of privilege** | A backend service-account holding `ROLE_OPERATOR` assembles or files | Both lifecycle rules require a principal id outside `service-account-*`. Tested with that exact principal |
 
@@ -57,5 +61,8 @@ NetworkPolicy admits admin-ui and the platform scrapers only, no ingress); servi
 - There is no alert yet on the dead-letter topic's depth. One dead-lettered remittance means an
   understated return. That alert, and a replay procedure, belong with the first operational
   review after deploy.
-- Statutory-return slices (ADR-0336, PSP/PEF pension returns) add routes. Each new route needs
-  `@Authorize` and an extension rule before this model's §3 holds for it.
+- Statutory-return slices (ADR-0336, PSP/PEF pension returns, #12428) add routes, including
+  approve and submit. Each needs `@Authorize` and an extension rule before this model's §3 holds
+  for it: staff-only, no `service-account-*`, reads in `operator_read_any_excluded_actions`.
+  Maker≠checker on approve stays in the domain, as it does for assemble/file here, because the
+  policy does not see who assembled a return.

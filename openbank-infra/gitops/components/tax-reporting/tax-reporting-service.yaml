@@ -33,7 +33,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-tax-reporting-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "4fff83d34c972221"
+        openbank.tech/policy-checksum: "e5ccb6826b8f4546"
       labels:
         app.kubernetes.io/name: tax-reporting-service
         app.kubernetes.io/part-of: tax-reporting
@@ -105,11 +105,9 @@ spec:
             # fail later with `Name does not resolve`.
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank
-            - name: OIDC_CLIENT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: tax-reporting-service-oidc
-                  key: OIDC_CLIENT_SECRET
+            # No OIDC client secret, deliberately: this service validates bearer tokens against the
+            # realm's JWKS and calls nobody, so it needs no client credential at all. Projecting
+            # the shared openbank-services secret would hand it a credential it never uses.
             # OPA sidecar enforced from the first rollout: tax_reporting_rest_ext.rego grants
             # reads to real staff and the two filing state changes to a real operator; no
             # service-account reaches either by any rule.

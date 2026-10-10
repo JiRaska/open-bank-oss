@@ -25,13 +25,12 @@ quarkus:
     baseline-on-migrate: true
     connect-retries: 10
     connect-retries-interval: 2S
-  # Bearer validation only: this service calls nobody. The fleet has exactly one confidential
-  # client, `openbank-services` (rules.yaml: oidc_secret_convention), so no realm change is needed.
+  # Bearer validation only (JWKS): this service calls nobody, so it holds NO client secret and
+  # needs no Keycloak client of its own. A credential belongs here the day it makes an outbound
+  # call, and then as a dedicated client (rules.yaml: oidc_secret_convention).
   oidc:
     auth-server-url: http://localhost:8080/realms/openbank
-    client-id: openbank-services
-    credentials:
-      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    client-id: openbank-tax-reporting-service
   # Health and metrics on the fleet-common management port, scraped by the fleet PodMonitor
   # (port name `management`) and probed by the kubelet.
   management:

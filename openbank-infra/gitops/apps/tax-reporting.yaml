@@ -1,4 +1,4 @@
-# Tax-reporting domain: tax-reporting-service + its single-owner CNPG Postgres + OIDC and Kafka
+# Tax-reporting domain: tax-reporting-service + its single-owner CNPG Postgres + Kafka
 # mTLS ExternalSecrets + KafkaUser + OPA bundle. tax-reporting-service assembles the §38d
 # withholding return (ADR-0180) and is deployed by owner decision #5760.
 apiVersion: argoproj.io/v1alpha1
