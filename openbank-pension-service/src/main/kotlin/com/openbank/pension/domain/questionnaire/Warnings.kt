@@ -77,8 +77,16 @@ object WarningPolicy {
         acknowledgements: List<WarningAcknowledgement>,
         assessmentId: UUID,
         strategyCode: String,
+        textFor: (WarningCode, String) -> String,
+        language: String? = null,
     ): Set<WarningCode> = required - acknowledgements
-        .filter { it.assessmentId == assessmentId && it.strategyCode == strategyCode }
+        .filter {
+            it.assessmentId == assessmentId &&
+                it.strategyCode == strategyCode &&
+                it.language in setOf("cs", "en") &&
+                (language == null || it.language == language) &&
+                it.textSha256 == sha256(textFor(it.code, it.language))
+        }
         .map { it.code }
         .toSet()
 
