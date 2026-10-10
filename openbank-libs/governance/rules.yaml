@@ -3749,6 +3749,14 @@ agent_case_capability_matrix:
 autonomous_agent_prs:
   max_open_prs: 3
   grandfather_created_before: '2026-10-03T20:00:00Z'
+  # Owner-authorized on 2026-10-10; only active after this policy is reviewed and merged.
+  # The immutable PR identity cannot authorize a replacement PR or extra autonomous work.
+  one_time_wip_exceptions:
+    - pr: 12480
+      repository: JiRaska/open-bank-oss
+      branch: codex/historical-provider-helper
+      expires_at: '2026-10-17T00:00:00Z'
+      reason: 'Owner-authorized delivery of prepared Test Intelligence repairs; admission only, all review and CI gates remain required.'
   detect:
     - 'any pull_request whose author is a declared agent account, or whose head branch carries a declared agent prefix'
   require:
