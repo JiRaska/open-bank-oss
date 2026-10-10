@@ -112,6 +112,16 @@ class PortfolioStatementServiceTest {
     }
 
     @Test
+    fun `a new key accepted for identical bytes is bound to the original version`() {
+        val first = runBlocking { service.upload(statement(), "sha-a", "k1", actor) }
+        assertThat(runBlocking { service.upload(statement(), "sha-a", "alias", actor) }.id).isEqualTo(first.id)
+        assertThatThrownBy {
+            runBlocking { service.upload(statement("pension-co-2026-12-31-corrected.xml"), "sha-c", "alias", actor) }
+        }.isInstanceOf(IllegalStateException::class.java).hasMessageContaining("Idempotency-Key")
+        assertThat(repo.rows).hasSize(1)
+    }
+
+    @Test
     fun `the key reused for other bytes is a conflict`() {
         runBlocking { service.upload(statement(), "sha-a", "k1", actor) }
         assertThatThrownBy { runBlocking { service.upload(statement(), "sha-b", "k1", actor) } }
@@ -228,8 +238,14 @@ class PortfolioStatementServiceTest {
     private class InMemoryPortfolioRepository : PortfolioStatementRepository {
         val rows = mutableListOf<StoredPortfolioStatement>()
         var failNextSaveWith: Throwable? = null
+        val keys = mutableMapOf<String, java.util.UUID>()
 
-        override suspend fun findByIdempotencyKey(key: String) = rows.firstOrNull { it.idempotencyKey == key }
+        override suspend fun findByIdempotencyKey(key: String) = rows.firstOrNull { it.id == keys[key] }
+
+        override suspend fun bindIdempotencyKey(key: String, statementId: java.util.UUID): StoredPortfolioStatement {
+            keys.putIfAbsent(key, statementId)
+            return checkNotNull(findByIdempotencyKey(key))
+        }
 
         override suspend fun current(entity: String, date: LocalDate) = rows.firstOrNull {
             it.snapshot.entity == entity &&
@@ -251,6 +267,7 @@ class PortfolioStatementServiceTest {
                 rows[i] = rows[i].copy(supersededBy = stored.id, supersededAt = stored.uploadedAt)
             }
             rows += stored
+            keys[stored.idempotencyKey] = stored.id
             return stored
         }
     }
