@@ -185,6 +185,9 @@ class PensionFundApiIT {
         // A period before any NAV: not reportable (409), never a report of zeroes.
         given().queryParam("periodStart", "2001-01-01").queryParam("periodEnd", "2001-01-31")
             .`when`().get(path).then().statusCode(409)
+        // A NAV at today's date must not be silently reused for tomorrow's period close.
+        given().queryParam("periodStart", "$start").queryParam("periodEnd", "${today.plusDays(1)}")
+            .`when`().get(path).then().statusCode(409)
         given().queryParam("periodStart", "$start").queryParam("periodEnd", "$today")
             .`when`().get("/api/v1/reporting/funds/${UUID.randomUUID()}/period-figures").then().statusCode(404)
     }

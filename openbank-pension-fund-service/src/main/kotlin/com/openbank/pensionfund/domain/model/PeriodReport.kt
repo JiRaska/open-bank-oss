@@ -14,7 +14,7 @@ data class NavPosition(val navId: UUID, val instrumentId: String, val quantity: 
     val marketValue: BigDecimal get() = Precision.money(quantity.multiply(price))
 }
 
-/** No published NAV backs the requested period, so there is nothing to report — never zeroes. */
+/** No published NAV backs the exact period close, so there is nothing to report — never zeroes. */
 class PeriodNotReportableException(message: String) : RuntimeException(message)
 
 data class FundBalanceSheet(val totalAssets: BigDecimal, val totalLiabilities: BigDecimal, val totalEquity: BigDecimal)
@@ -110,7 +110,12 @@ object FundPeriodCalculator {
                 "fund ${fund.id} has no published NAV between $periodStart and $periodEnd",
             )
         }
-        val closing = inPeriod.last()
+        // A statutory close cannot silently use an earlier valuation. Any permitted stale-NAV
+        // window needs an explicit, approved rule; until then only the exact as-of date is valid.
+        val closing = inPeriod.lastOrNull { it.valuationDate == periodEnd }
+            ?: throw PeriodNotReportableException(
+                "fund ${fund.id} has no published NAV at period close $periodEnd",
+            )
         val navDate = navs.associate { it.id to it.valuationDate }
         val ctx = Window(
             navs = navs,

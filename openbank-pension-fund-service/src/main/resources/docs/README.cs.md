@@ -63,8 +63,12 @@ rozvahu, výsledek hospodaření od začátku roku, pohyb jednotek, portfolio a 
 Přístup vyžaduje povolenou roli a autorizační politiku `pension-fund.reporting.inspect`.
 
 Výpočet používá zveřejněné NAV a transakce oceněné těmito NAV podle data ocenění.
-Období bez zveřejněné NAV není vykazatelné; nejde o nulovou aktivitu. S nově
-vypočtenou NAV se ukládají její pozice. U starších NAV bez zaznamenaných pozic
+Období bez zveřejněné NAV přesně k datu konce období není vykazatelné;
+nejde o nulovou aktivitu. S nově vypočtenou NAV se ukládají její pozice.
+U starších NAV bez zaznamenaných pozic
 jsou údaje portfolia neznámé, nikoli prázdné. Identifikátory podkladových NAV
 a fingerprint určují vstupy výkazu. Tento model poskytuje údaje; nepodává
 regulátorovi statutární výkaz.
+
+Pokud konec období není dnem ocenění, endpoint vrátí 409, dokud schválené pravidlo
+as-of/aktuálnosti neurčí, která zveřejněná NAV smí reprezentovat uzávěrku.

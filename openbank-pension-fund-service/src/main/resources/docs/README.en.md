@@ -64,9 +64,11 @@ roll-forward, portfolio and flows. The endpoint requires an allowed reporting
 role and the `pension-fund.reporting.inspect` authorization policy.
 
 The calculation uses published NAVs and transactions priced at those NAVs,
-bucketed by valuation date. A period without a published NAV is not reportable;
+bucketed by valuation date. A period without a published NAV on its exact end date is not reportable;
 it must not be presented as zero activity. Positions are stored with newly
 calculated NAVs. For older NAVs without recorded positions, portfolio figures
 are unknown rather than an empty portfolio. Basis NAV identifiers and a
 fingerprint identify the report inputs. This read model supplies figures;
 it does not submit a statutory return to the regulator.
+For a non-valuation-day period end, the endpoint returns 409 until an approved
+as-of/freshness rule defines which published NAV can represent the close.

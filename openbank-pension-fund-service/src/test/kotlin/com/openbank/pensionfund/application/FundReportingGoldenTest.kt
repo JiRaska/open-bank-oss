@@ -185,8 +185,18 @@ class FundReportingGoldenTest {
     @Test
     fun `the quarter and the year-to-date P&L see the September inflows as capital, not profit`(): Unit = runBlocking {
         val (fund, _) = seedMonth()
+        strike(
+            fund,
+            "2026-12-31",
+            "943.75",
+            listOf(
+                PositionLine("CZ-BOND-1", BigDecimal("100"), BigDecimal("152")),
+                PositionLine("CZ-EQ-1", BigDecimal("10"), BigDecimal("110")),
+            ),
+        )
         val q4 = reporting.periodReport(fund, LocalDate.parse("2026-10-01"), LocalDate.parse("2026-12-31"))
         assertReconciles(q4)
+        assertThat(q4.closingValuationDate).isEqualTo(LocalDate.parse("2026-12-31"))
         // Year to date: equity went 0 -> closing; the 15 000 subscribed in September is capital.
         val ytd = q4.profitAndLossYtd
         val closingEquity = q4.balanceSheet.totalEquity
@@ -233,5 +243,14 @@ class FundReportingGoldenTest {
         assertThatThrownBy {
             runBlocking { reporting.periodReport(fund, LocalDate.parse("2026-11-01"), LocalDate.parse("2026-11-30")) }
         }.isInstanceOf(PeriodNotReportableException::class.java)
+    }
+
+    @Test
+    fun `December quarter close rejects an October NAV without a published December 31 close`(): Unit = runBlocking {
+        val (fund, _) = seedMonth()
+        assertThatThrownBy {
+            runBlocking { reporting.periodReport(fund, LocalDate.parse("2026-10-01"), LocalDate.parse("2026-12-31")) }
+        }.isInstanceOf(PeriodNotReportableException::class.java)
+            .hasMessageContaining("period close 2026-12-31")
     }
 }

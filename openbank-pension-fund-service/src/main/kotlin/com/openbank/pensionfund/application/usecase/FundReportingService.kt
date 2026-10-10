@@ -23,7 +23,7 @@ class FundReportingService(private val store: PensionFundStore) {
         require(!periodEnd.isBefore(periodStart)) { "periodEnd must not be before periodStart" }
         val navs = store.publishedNavsUpTo(fundId, periodEnd)
         val transactions = store.transactionsPricedAtAny(navs.map { it.id })
-        val closing = navs.lastOrNull { !it.valuationDate.isBefore(periodStart) }
+        val closing = navs.lastOrNull { it.valuationDate == periodEnd }
         val positions = closing?.takeIf { it.positionsRecorded }?.let { store.navPositions(it.id) }
         return FundPeriodCalculator.calculate(fund, periodStart, periodEnd, navs, transactions, positions)
     }

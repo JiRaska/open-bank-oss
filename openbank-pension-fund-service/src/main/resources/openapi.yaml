@@ -3,7 +3,8 @@ info:
   title: OpenBank Pension Fund Service API
   # 1.0.0: first contract (ADR-0334 slice S4, issue #12350).
   # 1.1.0: period-end reporting read model for the ČNB returns (#12425) — additive.
-  version: 1.1.0
+  # 1.1.1: require a published NAV on the exact period close, never silently reuse an earlier NAV.
+  version: 1.1.1
   description: |
     Provider side of the pension platform (ADR-0334 §1): segregated funds, fund strategies with
     lifecycle glide paths, the unit register and NAV.
@@ -117,8 +118,11 @@ paths:
         Balance sheet at the closing NAV, year-to-date P&L, unit roll-forward, portfolio at the
         closing NAV, flows and participant COUNTS for one period. Aggregate only — no contract id
         or participant attribute is returned. Derived from PUBLISHED NAVs and the transactions
-        priced at them, bucketed by valuation date, so a closed period answers the same way every
-        time; `fingerprint` changes only when the inputs do (e.g. a NAV correction).
+        priced at them, bucketed by valuation date. A four-eyes PUBLISHED NAV on the exact periodEnd
+        date is required; an earlier NAV cannot stand in for the close. A closed period answers the
+        same way every time; `fingerprint` changes only when the inputs do (e.g. a NAV correction).
+        If periodEnd is not a valuation day, the provider returns 409 until an explicit approved
+        as-of/freshness rule defines which published NAV may represent that close.
         Served to staff and to tax-reporting-service's own client only.
       parameters:
         - { name: periodStart, in: query, required: true, schema: { type: string, format: date } }
@@ -127,7 +131,7 @@ paths:
         '200': { description: The period figures, content: { application/json: { schema: { $ref: '#/components/schemas/FundPeriodFigures' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
-        '409': { description: No published NAV backs the period — not reportable (never zeroes), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: No published NAV exists on the exact period end — not reportable (never zeroes), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /api/v1/navs/{navId}:
     parameters: [ { $ref: '#/components/parameters/NavId' } ]
     get:
