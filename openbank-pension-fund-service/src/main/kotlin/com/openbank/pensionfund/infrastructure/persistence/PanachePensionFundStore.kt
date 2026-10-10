@@ -6,6 +6,7 @@ package com.openbank.pensionfund.infrastructure.persistence
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.pensionfund.application.port.PensionFundStore
 import com.openbank.pensionfund.application.port.StoreChanges
 import com.openbank.pensionfund.domain.model.AllocationTarget
@@ -275,7 +276,7 @@ class PanachePensionFundStore(
 
     private fun NavPosition.toEntity() = FundNavPositionEntity().also {
         // Written only inside the NAV's own (atomic) calculation commit, so a fresh id cannot duplicate.
-        it.id = UUID.randomUUID()
+        it.id = Ids.newId()
         it.navId = navId
         it.instrumentId = instrumentId
         it.quantity = quantity
