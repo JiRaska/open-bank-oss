@@ -29,8 +29,8 @@ import org.junit.jupiter.api.extension.ExtendWith
  * mock server answers whatever it is asked.
  *
  * Replayed as pension-service's own principal (`service-account-openbank-pension`, ROLE_API), the
- * identity this service admits for holdings and orders. The missing-identity interactions are
- * filtered out to [PensionFundNegativeAuthProviderVerificationTest], which boots without
+ * identity this service admits for holdings and orders. The two missing-identity HTTP 401
+ * interactions are replayed by [PensionFundNegativeAuthProviderVerificationTest], which boots without
  * `@TestSecurity`. Counterpart: [PensionFundPactBrokerProviderVerificationTest] (main-push,
  * publishes the result `can-i-deploy` reads). Every `@State` here exists there too.
  */

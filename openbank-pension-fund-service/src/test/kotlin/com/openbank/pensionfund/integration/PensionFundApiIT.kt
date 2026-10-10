@@ -41,9 +41,9 @@ class PensionFundApiIT {
         lateinit var nav: String
     }
 
-    private fun fundBody(isin: String) = """
+    private fun fundBody(isin: String, currency: String = "CZK") = """
         {"name":"Fund $isin","isin":"$isin","lei":"315700ABCDEF12345678","depositaryReference":"DEP-1",
-         "custodyAccountReference":"CUST-$isin","currency":"CZK","riskClass":3,"mandatoryConservative":false,
+         "custodyAccountReference":"CUST-$isin","currency":"$currency","riskClass":3,"mandatoryConservative":false,
          "managementFeeRate":0.008,"launchNavPerUnit":1}
     """.trimIndent()
 
@@ -108,6 +108,22 @@ class PensionFundApiIT {
             .body("participantNotificationDate", equalTo(LocalDate.now(ZoneOffset.UTC).toString()))
         // Not before the effective date.
         post("/api/v1/strategy-changes/$change/apply").then().statusCode(409)
+    }
+
+    @Test
+    @Order(4)
+    @TestSecurity(user = "maker", roles = ["ROLE_OPERATOR"])
+    fun `cross currency switch is a bad request and leaves the register unchanged`() {
+        val euroFund = post("/api/v1/funds", fundBody("CZ0008474079", "EUR"))
+            .then().statusCode(201).extract().path<String>("id")
+        given().contentType("application/json").header("Idempotency-Key", "cross-currency-switch")
+            .body("""{"fundId":"$fundA","type":"SWITCH_OUT","units":100,"targetFundId":"$euroFund"}""")
+            .`when`().post("/api/v1/contracts/$contract/orders").then().statusCode(400)
+        given().`when`().get("/api/v1/contracts/$contract/orders").then().statusCode(200)
+            .body("size()", equalTo(1))
+        given().`when`().get("/api/v1/contracts/$contract/holdings").then().statusCode(200)
+            .body("holdings[0].units", equalTo(1000.0f))
+            .body("pendingOrders.size()", equalTo(0))
     }
 
     @Test
