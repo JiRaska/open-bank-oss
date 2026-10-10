@@ -126,6 +126,18 @@ class LedgerTrialBalancePactConsumerTest {
         )
         .toPact()
 
+    /** Ledger must not disclose a frozen reporting balance to a caller without a valid M2M identity. */
+    @Pact(consumer = "openbank-finrep-service", provider = "openbank-ledger-service")
+    fun frozenClosingBalanceMissingTokenPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("no valid M2M identity is presented")
+        .uponReceiving("GET the frozen FINREP closing balance without a valid identity")
+        .path("$LEDGER_MONTH_TRIAL_BALANCE_PATH/$REPORTING_DATE/frozen-closing-balance")
+        .method("GET")
+        .headers(mapOf("Accept" to "application/json"))
+        .willRespondWith()
+        .status(401)
+        .toPact()
+
     @Pact(consumer = "openbank-finrep-service", provider = "openbank-ledger-service")
     fun livePreviewTrialBalancePact(builder: PactDslWithProvider): RequestResponsePact = builder
         .given("ledger has frozen monthly trial balance for the reporting date")
@@ -302,6 +314,17 @@ class LedgerTrialBalancePactConsumerTest {
         // cross-check of issue #6011 is exercised against contract data rather than a fixture.
         assertThat(response.balanced).isTrue()
         assertThat(template.balanceVerdict).isEqualTo(BalanceVerdict.SOURCES_DISAGREE)
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "frozenClosingBalanceMissingTokenPact")
+    fun `frozen reporting balance refuses a missing identity with 401`(mockServer: MockServer) {
+        given()
+            .baseUri(mockServer.getUrl())
+            .accept("application/json")
+            .get(ledgerTrialBalancePath.replace("{asOf}", REPORTING_DATE))
+            .then()
+            .statusCode(401)
     }
 
     @Test

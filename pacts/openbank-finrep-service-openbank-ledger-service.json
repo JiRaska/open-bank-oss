@@ -653,6 +653,24 @@
         },
         "status": 200
       }
+    },
+    {
+      "description": "GET the frozen FINREP closing balance without a valid identity",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v1/ledger/periods/MONTH/2000-06-30/frozen-closing-balance"
+      },
+      "response": {
+        "status": 401
+      }
     }
   ],
   "metadata": {
