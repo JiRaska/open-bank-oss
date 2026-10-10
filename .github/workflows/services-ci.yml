@@ -183,7 +183,7 @@ jobs:
                 echo "Decision: shared domain build script changes only its raised coverage floor."
                 FILES_GLOBAL=$(grep -vFx 'openbank-libs-domain/build.gradle.kts' <<< "$FILES_GLOBAL" || true)
               fi
-              if grep -qE '^(openbank-libs/|openbank-libs-domain/|openbank-libs-runtime/|openbank-libs-testing/|gradle/|settings\.gradle\.kts|build\.gradle\.kts|gradle\.properties|build-logic/)' <<< "$FILES_GLOBAL"; then
+              if grep -qE '^(openbank-libs[^/]*/|gradle/|settings\.gradle\.kts|build\.gradle\.kts|gradle\.properties|build-logic/)' <<< "$FILES_GLOBAL"; then
                 echo "Decision: code-global change -> full-fleet."
                 CHANGED="$ALL"
               else
@@ -303,7 +303,7 @@ jobs:
               echo "Decision: shared domain build script changes only its raised coverage floor."
               FILES_GLOBAL=$(grep -vFx 'openbank-libs-domain/build.gradle.kts' <<< "$FILES_GLOBAL" || true)
             fi
-            if grep -qE '^(openbank-libs/|openbank-libs-domain/|openbank-libs-runtime/|openbank-libs-testing/|gradle/|settings\.gradle\.kts|build\.gradle\.kts|gradle\.properties|build-logic/)' <<< "$FILES_GLOBAL"; then
+            if grep -qE '^(openbank-libs[^/]*/|gradle/|settings\.gradle\.kts|build\.gradle\.kts|gradle\.properties|build-logic/)' <<< "$FILES_GLOBAL"; then
               echo "Decision: code-global change -> build all modules."
               CHANGED="$ALL"
             else
