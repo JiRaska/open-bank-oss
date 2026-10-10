@@ -4,14 +4,8 @@
 
 package com.openbank.pension.integration
 
-import com.openbank.pension.domain.model.ProductLine
-import com.openbank.pension.domain.questionnaire.StrategyInstrumentMapping
-import com.openbank.pension.infrastructure.catalog.StrategyInstrumentCatalogAdapter
 import com.openbank.pension.it.PostgresTestResource
-import io.mockk.coEvery
-import io.mockk.mockk
 import io.quarkus.test.common.QuarkusTestResource
-import io.quarkus.test.junit.QuarkusMock
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
@@ -35,6 +29,7 @@ import java.util.UUID
  */
 @QuarkusTest
 @QuarkusTestResource(PostgresTestResource::class)
+@QuarkusTestResource(StrategyCatalogWireMockResource::class, restrictToAnnotatedClass = true)
 class QuestionnaireApiIT {
 
     private val apps = "/api/v1/pension/onboarding/applications"
@@ -154,31 +149,17 @@ class QuestionnaireApiIT {
     @Test
     @TestSecurity(user = "edge", roles = ["ROLE_API"])
     fun `a DIP novice gets the appropriateness warning, and a riskier DIP strategy cannot be acknowledged away`() {
-        // Synthetic reviewed mappings exercise the pension HTTP/DB flow. No product composition is
-        // inferred from the strategy name; production mappings must come from a published catalog.
-        val catalog = mockk<StrategyInstrumentCatalogAdapter>()
-        coEvery { catalog.effectivePublished("CZ", ProductLine.DIP, any(), any()) } coAnswers {
-            val strategy = thirdArg<String>()
-            listOf(
-                StrategyInstrumentMapping(
-                    "CZ",
-                    ProductLine.DIP,
-                    strategy,
-                    "test-reviewed-v1",
-                    setOf("BOND_FUNDS", "EQUITY_FUNDS"),
-                ),
-            )
-        }
-        QuarkusMock.installMockForType(catalog, StrategyInstrumentCatalogAdapter::class.java)
+        StrategyCatalogWireMockResource.stubApproved()
         val id = start("DIP", "BANK", "1979-03-14")
         val novice = """
             {"dip.objective":"GROWTH","dip.financial_situation":"EASILY","dip.loss_capacity":"UP_TO_25",
-             "dip.risk_reaction":"HOLD","dip.knowledge_bonds":"DONT_KNOW","dip.experience_bonds":"NEVER",
+             "dip.risk_reaction":"HOLD","dip.knowledge_bonds":"CORRECT","dip.experience_bonds":"REGULARLY",
              "dip.knowledge_equity":"DONT_KNOW","dip.experience_equity":"NEVER","dip.sustainability":"AVOID_HARM"}
         """.trimIndent()
         call("POST", "$apps/$id/questionnaire", """{"answers":$novice}""").statusCode(200)
             .body("profile.sustainability.categories", containsInAnyOrder("PAI_CONSIDERED"))
             .body("profile.recommendedStrategyWarnings.code", hasItem("PRODUCT_NOT_APPROPRIATE"))
+        StrategyCatalogWireMockResource.verifyCatalogRead()
         call("POST", "$apps/$id/strategy", "{}").statusCode(400)
         call(
             "POST",
@@ -192,6 +173,13 @@ class QuestionnaireApiIT {
             "$apps/$id/warnings/acknowledge",
             """{"strategyCode":"$recommended","warnings":["PRODUCT_NOT_APPROPRIATE"]}""",
         ).statusCode(200)
+        StrategyCatalogWireMockResource.stubNoApprovedMapping()
+        call("POST", "$apps/$id/strategy", "{}").statusCode(not(equalTo(200)))
+        // The assessment and acknowledgement pin revision 7. A newly effective approved revision
+        // requires re-assessment; neither the old warning nor a guessed class allocation carries over.
+        StrategyCatalogWireMockResource.stubApproved(revision = 8)
+        call("POST", "$apps/$id/strategy", "{}").statusCode(not(equalTo(200)))
+        StrategyCatalogWireMockResource.stubApproved()
         call("POST", "$apps/$id/strategy", "{}").statusCode(200).body("status", equalTo("KID_ISSUED"))
     }
 
