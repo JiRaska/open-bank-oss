@@ -591,6 +591,29 @@ jobs:
         id: ecr
         uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
 
+      - name: Check image repositories before compilation
+        id: registry
+        env:
+          SERVICES_JSON: ${{ needs.changes.outputs.services }}
+        run: |
+          set -euo pipefail
+          jq -e 'type == "array" and all(.[]; type == "string")' <<< "$SERVICES_JSON" >/dev/null
+          READY=(); BLOCKED=()
+          while IFS= read -r svc; do
+            if bash "${GITHUB_WORKSPACE}/.github/scripts/ensure-ecr-repository.sh" "$svc"; then
+              READY+=("$svc")
+            else
+              BLOCKED+=("$svc")
+              echo "::warning::${svc} repository unavailable; skipping compilation and publication"
+            fi
+          done < <(jq -r '.[]' <<< "$SERVICES_JSON")
+          {
+            printf 'services='
+            printf '%s\n' ${READY[@]+"${READY[@]}"} | jq -Rsc 'split("\n")|map(select(length>0))'
+            printf 'failed='
+            printf '%s\n' ${BLOCKED[@]+"${BLOCKED[@]}"} | jq -Rsc 'split("\n")|map(select(length>0))'
+          } >> "$GITHUB_OUTPUT"
+
       - name: Build fast-jars (parallel)
         id: build
         # analytics-sink selects its AnalyticsSink binding with @IfBuildProperty, which Quarkus
@@ -607,7 +630,7 @@ jobs:
           AGENT_SVID_NONCE_STORE: redis
         run: |
           set -euo pipefail
-          SERVICES='${{ needs.changes.outputs.services }}'
+          SERVICES='${{ steps.registry.outputs.services }}'
           SHA="${GITHUB_SHA::8}"
           TAG="sandbox-${SHA}"
           FAILED=0
@@ -647,10 +670,13 @@ jobs:
         id: push
         run: |
           set -euo pipefail
-          SERVICES='${{ needs.changes.outputs.services }}'
+          SERVICES='${{ steps.registry.outputs.services }}'
           TAG="${{ steps.build.outputs.tag }}"
           FAILED=0
           PUSHED=(); FAILED_SVCS=()
+          while IFS= read -r svc; do
+            FAILED_SVCS+=("$svc"); FAILED=1
+          done < <(jq -r '.[]' <<< '${{ steps.registry.outputs.failed }}')
 
           docker buildx create --use --name ob-deploy-builder \
             --driver docker-container >/dev/null 2>&1 || \
