@@ -4,6 +4,7 @@
 
 package com.openbank.pension.application.onboarding
 
+import com.openbank.pension.application.ProviderBoundary
 import com.openbank.pension.application.port.out.ActivationOutcome
 import com.openbank.pension.application.port.out.PensionContractRepository
 import com.openbank.pension.application.port.out.ReassessmentRequiredException
@@ -97,6 +98,7 @@ class OnboardingService(
     private val tx: TransactionRunner,
     private val clock: Clock,
     private val questionSets: QuestionSetRegistry,
+    private val providerBoundary: ProviderBoundary,
 ) {
 
     private fun today(): LocalDate = LocalDate.now(clock)
@@ -105,6 +107,7 @@ class OnboardingService(
     // --- client flow ---------------------------------------------------------------------------
 
     suspend fun start(command: StartOnboardingCommand): OnboardingApplication {
+        providerBoundary.requireProvider(command.providerEntityId)
         val pack = packs.resolve(command.jurisdiction, command.productLine, today())
         val onboarding = rules.rules(pack.jurisdiction, pack.productLine, pack.version)
         require(command.providerType in pack.permittedProviderTypes) {

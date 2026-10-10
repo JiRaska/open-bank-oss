@@ -18,12 +18,9 @@ import com.openbank.pension.domain.model.PensionContract
 import com.openbank.pension.infrastructure.exit.rest.ExitExceptionMappers
 import com.openbank.pension.infrastructure.pack.JurisdictionPackLoader
 import com.openbank.pension.testsupport.ContractFixtures
+import com.openbank.pension.testsupport.ProviderFixtures
 import io.mockk.coEvery
 import io.mockk.mockk
-import kotlinx.coroutines.runBlocking
-import org.assertj.core.api.Assertions.assertThat
-import org.assertj.core.api.Assertions.assertThatThrownBy
-import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.time.Clock
 import java.time.Instant
@@ -32,6 +29,10 @@ import java.time.ZoneOffset
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
+import kotlinx.coroutines.runBlocking
+import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.junit.jupiter.api.Test
 
 /**
  * The production race behind the flaky `PensionIntegrationRoutesIT` account-change test, made
@@ -118,6 +119,7 @@ class PayoutAccountChangeRaceTest {
                 com.openbank.pension.infrastructure.notification.RecordingParticipantNotifier(),
                 com.openbank.pension.testsupport.RecordingSuitability(),
                 com.openbank.pension.testsupport.RecordingSca(),
+                ProviderFixtures.boundary,
             )
         val id = ContractFixtures.activeContract(
             useCase,

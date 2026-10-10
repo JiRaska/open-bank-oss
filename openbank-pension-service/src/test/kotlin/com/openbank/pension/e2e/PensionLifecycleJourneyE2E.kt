@@ -7,6 +7,7 @@ package com.openbank.pension.e2e
 import com.openbank.pension.application.port.out.PensionContractRepository
 import com.openbank.pension.infrastructure.fund.InMemoryFundAdministrationAdapter
 import com.openbank.pension.it.PostgresTestResource
+import com.openbank.pension.testsupport.ProviderFixtures
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
@@ -16,15 +17,15 @@ import io.restassured.path.json.JsonPath
 import io.restassured.response.Response
 import io.smallrye.mutiny.coroutines.asUni
 import jakarta.inject.Inject
+import java.math.BigDecimal
+import java.time.Instant
+import java.time.LocalDate
+import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
-import java.math.BigDecimal
-import java.time.Instant
-import java.time.LocalDate
-import java.util.UUID
 
 /**
  * Participant-side end-to-end journeys for the pension lifecycle (ADR-0334, issue #12350 slice S7).
@@ -240,14 +241,14 @@ class PensionLifecycleJourneyE2E {
         providerType: String = "PENSION_COMPANY",
         beneficiaries: String = """[{"name":"Jane Doe","sharePercent":100}]""",
     ) = """
-        {"productLine":"DPS","jurisdiction":"CZ","providerEntityId":"${UUID.randomUUID()}",
+        {"productLine":"DPS","jurisdiction":"CZ","providerEntityId":"${ProviderFixtures.ID}",
          "providerType":"$providerType","birthDate":"1985-05-05","residencyCountry":"CZ",
          "schedule":{"amount":$monthly,"currency":"CZK","frequency":"MONTHLY"},
          "strategyCode":"CONSERVATIVE","beneficiaries":$beneficiaries}
     """.trimIndent()
 
     private fun dip(providerType: String) = """
-        {"productLine":"DIP","jurisdiction":"CZ","providerEntityId":"${UUID.randomUUID()}",
+        {"productLine":"DIP","jurisdiction":"CZ","providerEntityId":"${ProviderFixtures.ID}",
          "providerType":"$providerType","birthDate":"1979-03-14",
          "schedule":{"amount":4000,"currency":"CZK","frequency":"MONTHLY"},
          "strategyCode":"CONSERVATIVE","beneficiaries":[]}

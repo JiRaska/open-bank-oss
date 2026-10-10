@@ -8,19 +8,20 @@ import com.openbank.pension.application.port.out.ActivationOutcome
 import com.openbank.pension.application.port.out.OnboardingActivationPort
 import com.openbank.pension.infrastructure.onboarding.temporal.onWorker
 import com.openbank.pension.it.PostgresTestResource
+import com.openbank.pension.testsupport.ProviderFixtures
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
 import io.restassured.response.ValidatableResponse
 import jakarta.inject.Inject
+import java.sql.DriverManager
+import java.util.UUID
 import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.config.ConfigProvider
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.notNullValue
 import org.junit.jupiter.api.Test
-import java.sql.DriverManager
-import java.util.UUID
 
 /**
  * Onboarding and transfers over real HTTP against real Postgres, with the real workflows running
@@ -40,7 +41,7 @@ class OnboardingApiIT {
           "kind": "$kind",
           "productLine": "DPS",
           "jurisdiction": "CZ",
-          "providerEntityId": "${UUID.randomUUID()}",
+          "providerEntityId": "${ProviderFixtures.ID}",
           "providerType": "PENSION_COMPANY",
           "birthDate": "1990-05-05",
           "residencyCountry": "CZ",
@@ -80,6 +81,16 @@ class OnboardingApiIT {
             """{"documentId":"$doc"}""",
         ).statusCode(200).body("status", equalTo("KID_ACCEPTED"))
         return id
+    }
+
+    @Test
+    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    fun `creation for another provider is a bad request`() {
+        val body = startBody().replace(
+            ProviderFixtures.ID.toString(),
+            UUID.randomUUID().toString(),
+        )
+        call("POST", apps, body).statusCode(400)
     }
 
     @Test

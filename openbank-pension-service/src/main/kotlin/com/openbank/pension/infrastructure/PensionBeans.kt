@@ -4,6 +4,7 @@
 
 package com.openbank.pension.infrastructure
 
+import com.openbank.pension.application.ProviderBoundary
 import com.openbank.pension.application.port.`in`.PensionContractUseCase
 import com.openbank.pension.application.port.out.ParticipantNotifier
 import com.openbank.pension.application.port.out.PensionContractRepository
@@ -13,7 +14,9 @@ import com.openbank.pension.infrastructure.pack.JurisdictionPackLoader
 import io.quarkus.runtime.Startup
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Produces
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.time.Clock
+import java.util.UUID
 
 /**
  * CDI wiring for the framework-free application and domain layers.
@@ -24,6 +27,14 @@ import java.time.Clock
 @ApplicationScoped
 class PensionBeans {
 
+    /** No default: an unassigned deployment must fail at startup, including local development. */
+    @Produces
+    @Startup
+    @ApplicationScoped
+    fun providerBoundary(
+        @ConfigProperty(name = "openbank.pension.provider-entity-id") providerEntityId: UUID,
+    ): ProviderBoundary = ProviderBoundary(providerEntityId)
+
     @Produces
     @Startup
     @ApplicationScoped
@@ -31,6 +42,8 @@ class PensionBeans {
 
     @Produces
     @ApplicationScoped
+    // CDI assembly names each application dependency explicitly; no service-locator fallback.
+    @Suppress("LongParameterList")
     fun contractUseCase(
         repository: PensionContractRepository,
         registry: JurisdictionPackRegistry,
@@ -38,6 +51,7 @@ class PensionBeans {
         notifier: ParticipantNotifier,
         onboarding: jakarta.enterprise.inject.Instance<com.openbank.pension.application.onboarding.OnboardingService>,
         sca: com.openbank.pension.application.exit.ScaVerificationPort,
+        providerBoundary: ProviderBoundary,
     ): PensionContractUseCase = PensionContractService(
         repository,
         registry,
@@ -53,5 +67,6 @@ class PensionBeans {
                 onboarding.get().recordStrategyApproval(approval)
         },
         sca,
+        providerBoundary,
     )
 }

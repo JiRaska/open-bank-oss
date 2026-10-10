@@ -6,6 +6,7 @@ package com.openbank.pension.integration
 
 import com.openbank.pension.application.port.out.PensionContractRepository
 import com.openbank.pension.it.PostgresTestResource
+import com.openbank.pension.testsupport.ProviderFixtures
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
@@ -13,6 +14,10 @@ import io.quarkus.vertx.VertxContextSupport
 import io.restassured.RestAssured.given
 import io.smallrye.mutiny.coroutines.asUni
 import jakarta.inject.Inject
+import java.sql.DriverManager
+import java.time.Instant
+import java.time.LocalDate
+import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -23,10 +28,6 @@ import org.hamcrest.Matchers.everyItem
 import org.hamcrest.Matchers.hasItem
 import org.hamcrest.Matchers.not
 import org.junit.jupiter.api.Test
-import java.sql.DriverManager
-import java.time.Instant
-import java.time.LocalDate
-import java.util.UUID
 
 /**
  * Drives the real HTTP routes against a real Postgres. Only this shape proves the routes are
@@ -44,7 +45,7 @@ class PensionContractApiIT {
         {
           "productLine": "DPS",
           "jurisdiction": "CZ",
-          "providerEntityId": "${UUID.randomUUID()}",
+          "providerEntityId": "${ProviderFixtures.ID}",
           "providerType": "$providerType",
           "birthDate": "1985-05-05",
           "residencyCountry": "CZ",
@@ -85,6 +86,16 @@ class PensionContractApiIT {
     private fun activateDirectly(id: String) = onVertx {
         val pending = requireNotNull(contracts.findById(UUID.fromString(id)))
         contracts.save(pending.activate(LocalDate.now(), Instant.now()))
+    }
+
+    @Test
+    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    fun `creation for another provider is a bad request`() {
+        val body = createBody().replace(
+            ProviderFixtures.ID.toString(),
+            UUID.randomUUID().toString(),
+        )
+        post(base, body).statusCode(400)
     }
 
     @Test

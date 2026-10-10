@@ -10,6 +10,7 @@ import com.openbank.pension.application.onboarding.KeyInformationDocumentPort
 import com.openbank.pension.application.onboarding.OnboardingApplicationRepository
 import com.openbank.pension.application.onboarding.OnboardingService
 import com.openbank.pension.application.onboarding.SignatureVerificationPort
+import com.openbank.pension.application.onboarding.StartOnboardingCommand
 import com.openbank.pension.application.onboarding.SuitabilityAssessmentRepository
 import com.openbank.pension.domain.model.ContributionFrequency
 import com.openbank.pension.domain.model.ContributionSchedule
@@ -28,20 +29,21 @@ import com.openbank.pension.infrastructure.onboarding.pack.QuestionSetLoader
 import com.openbank.pension.infrastructure.onboarding.pack.StaticOnboardingRulesRegistry
 import com.openbank.pension.infrastructure.onboarding.pack.StaticQuestionSetRegistry
 import com.openbank.pension.infrastructure.pack.JurisdictionPackLoader
+import com.openbank.pension.testsupport.ProviderFixtures
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
 import io.mockk.slot
-import kotlinx.coroutines.runBlocking
-import org.assertj.core.api.Assertions.assertThat
-import org.assertj.core.api.Assertions.assertThatThrownBy
-import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
 import java.util.UUID
+import kotlinx.coroutines.runBlocking
+import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.junit.jupiter.api.Test
 
 /**
  * The warning-acknowledgement gate (issue #12384) through the real [OnboardingService]: a riskier
@@ -65,8 +67,31 @@ class QuestionnaireWarningGateTest {
 
     private val service = OnboardingService(
         applications, assessments, mockk(), mockk(), packs, rules, mockk(), mockk(), documents, signatures,
-        mockk(), mockk(), clock, questionSets,
+        mockk(), mockk(), clock, questionSets, ProviderFixtures.boundary,
     )
+
+    @Test
+    fun `another provider is refused before KYC or persistence`(): Unit = runBlocking {
+        val command = StartOnboardingCommand(
+            actingPartyId = party,
+            onBehalfOfPartyId = null,
+            kind = OnboardingKind.NEW_CONTRACT,
+            productLine = ProductLine.DPS,
+            jurisdiction = "CZ",
+            providerEntityId = UUID.randomUUID(),
+            providerType = ProviderType.PENSION_COMPANY,
+            schedule = ContributionSchedule(BigDecimal("1000"), "CZK", ContributionFrequency.MONTHLY),
+            declaredBirthDate = LocalDate.parse("1990-01-01"),
+            declaredResidencyCountry = "CZ",
+            residencyEvidence = emptySet(),
+            ceding = null,
+        )
+        // All collaborator mocks are strict: reaching KYC or a repository would fail this assertion.
+        assertThatThrownBy { runBlocking { service.start(command) } }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("configured pension provider")
+        coVerify(exactly = 0) { applications.save(any()) }
+    }
 
     /** A cautious DPS profile (class 3): DYNAMIC (class 5) is above it. */
     private val assessment = SuitabilityAssessment.assess(
@@ -85,7 +110,7 @@ class QuestionnaireWarningGateTest {
         productLine = ProductLine.DPS,
         jurisdiction = "CZ",
         packVersion = 1,
-        providerEntityId = UUID.randomUUID(),
+        providerEntityId = ProviderFixtures.ID,
         providerType = ProviderType.PENSION_COMPANY,
         schedule = ContributionSchedule(BigDecimal("1000"), "CZK", ContributionFrequency.MONTHLY),
         applicant = ApplicantFacts(LocalDate.parse("1990-01-01"), "CZ", emptySet(), true, null),

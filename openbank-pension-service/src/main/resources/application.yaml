@@ -140,6 +140,9 @@ openbank:
     server-url: ${OPENBANK_TEMPORAL_SERVER_URL:localhost:7233}
     namespace: ${OPENBANK_TEMPORAL_NAMESPACE:openbank-pension}
   pension:
+    # Required in production AND development; no provider is assigned implicitly.
+    # This only constrains creation, not authorization or existing-data isolation.
+    provider-entity-id: ${OPENBANK_PENSION_PROVIDER_ENTITY_ID}
     worker:
       enabled: ${OPENBANK_PENSION_WORKER_ENABLED:true}
     onboarding:
@@ -280,6 +283,7 @@ authz:
 "%test":
   openbank:
     pension:
+      provider-entity-id: "00000000-0000-4000-8000-000000000001"
       # No Temporal frontend in @QuarkusTest: the tests register their own in-process worker.
       worker:
         enabled: false

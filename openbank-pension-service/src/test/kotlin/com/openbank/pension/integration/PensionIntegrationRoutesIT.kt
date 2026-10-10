@@ -10,6 +10,7 @@ import com.openbank.pension.infrastructure.exit.stub.StubParticipantNotification
 import com.openbank.pension.infrastructure.fund.InMemoryFundAdministrationAdapter
 import com.openbank.pension.it.PostgresTestResource
 import com.openbank.pension.testsupport.ContractFixtures
+import com.openbank.pension.testsupport.ProviderFixtures
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
@@ -20,6 +21,9 @@ import io.restassured.RestAssured.given
 import io.restassured.specification.RequestSpecification
 import io.smallrye.mutiny.coroutines.asUni
 import jakarta.inject.Inject
+import java.math.BigDecimal
+import java.time.LocalDate
+import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -28,9 +32,6 @@ import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.hasItem
 import org.hamcrest.Matchers.notNullValue
 import org.junit.jupiter.api.Test
-import java.math.BigDecimal
-import java.time.LocalDate
-import java.util.UUID
 
 /**
  * The routes ADR-0334 S8 adds for customer-edge and the admin UI, plus the replay protection every
@@ -79,7 +80,7 @@ class PensionIntegrationRoutesIT {
             .apply { if (key != null) header("Idempotency-Key", key) }
 
     private val startBody = """
-        {"kind":"NEW_CONTRACT","productLine":"DPS","jurisdiction":"CZ","providerEntityId":"${UUID.randomUUID()}",
+        {"kind":"NEW_CONTRACT","productLine":"DPS","jurisdiction":"CZ","providerEntityId":"${ProviderFixtures.ID}",
          "providerType":"PENSION_COMPANY","birthDate":"1990-05-05","residencyCountry":"CZ",
          "schedule":{"amount":1000,"currency":"CZK","frequency":"MONTHLY"}}
     """.trimIndent()

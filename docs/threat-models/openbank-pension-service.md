@@ -139,3 +139,16 @@ not reversed automatically.
 - 2026-10-09 — S5 exits: termination, payout, death claims (§4a).
 - 2026-10-09 — S8 integration: fund REST client identity, onboarding-only activation, account-bound SCA, held account change, optimistic locking, POST replay (§4b).
 - 2026-10-09 — annuity partner integration: registry with four-eyes activation, adapter SPI, SCA-bound selection, premium/compensation flow (§4c, #12383).
+
+## Creation and strategy decision controls
+
+- Draft and onboarding creation require the configured provider legal-entity UUID before
+  application work. A draft idempotency replay must also match that provider. Configuration is
+  mandatory at startup; the test fixture is not a deployment default. This invariant does not
+  establish tenant authorization or ownership of existing data. Full deployment isolation and
+  its release evidence are tracked in #12472.
+- Fund contribution routing selects a strategy effective at the date supplied by the injected
+  clock; no effective strategy refuses placement. Domain and actual-adapter tests cover the
+  effective-date boundary. Durable decision snapshots across retries remain tracked in #12474.
+- Changing a configured provider requires a separately approved ownership/migration process;
+  a configuration edit cannot relabel a database or enable another provider.

@@ -4,6 +4,7 @@
 
 package com.openbank.pension.infrastructure.onboarding
 
+import com.openbank.pension.application.ProviderBoundary
 import com.openbank.pension.application.onboarding.KeyInformationDocumentPort
 import com.openbank.pension.application.onboarding.OnboardingApplicationRepository
 import com.openbank.pension.application.onboarding.OnboardingRulesRegistry
@@ -64,9 +65,10 @@ class OnboardingBeans {
         tx: TransactionRunner,
         clock: Clock,
         questionSets: QuestionSetRegistry,
+        providerBoundary: ProviderBoundary,
     ): OnboardingService = OnboardingService(
         applications, assessments, transfers, contracts, packs, rules, kyc, relations, documents, signatures,
-        orchestrator, tx, clock, questionSets,
+        orchestrator, tx, clock, questionSets, providerBoundary,
     )
 
     /** The port slice S3 calls on a first contribution; backed by the real onboarding workflow. */

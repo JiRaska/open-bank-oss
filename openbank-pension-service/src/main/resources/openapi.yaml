@@ -20,6 +20,9 @@ info:
     pack in force on its creation date and PINS that pack version for life; incentive evaluation
     and every exit quote always use the pinned version. Pack values are reference
     data pending legal review, not advice.
+    Contract and onboarding creation accept only the deployment's configured providerEntityId;
+    a different providerEntityId is a bad request. This creation constraint does not provide
+    multi-provider authorization or isolation of existing data.
 servers:
   - url: http://localhost:8171
 tags:
@@ -2673,7 +2676,10 @@ components:
       properties:
         productLine: { $ref: '#/components/schemas/ProductLine' }
         jurisdiction: { type: string, description: Jurisdiction code selecting the pack }
-        providerEntityId: { type: string, format: uuid }
+        providerEntityId:
+          type: string
+          format: uuid
+          description: Provider legal entity. Creation requires the deployment's configured providerEntityId.
         providerType: { $ref: '#/components/schemas/ProviderType' }
         birthDate: { type: string, format: date }
         residencyCountry: { type: string }
@@ -2723,7 +2729,10 @@ components:
         productLine: { $ref: '#/components/schemas/ProductLine' }
         jurisdiction: { type: string }
         packVersion: { type: integer }
-        providerEntityId: { type: string, format: uuid }
+        providerEntityId:
+          type: string
+          format: uuid
+          description: Provider legal entity. Creation requires the deployment's configured providerEntityId.
         providerType: { $ref: '#/components/schemas/ProviderType' }
         status: { $ref: '#/components/schemas/ContractStatus' }
         schedule: { $ref: '#/components/schemas/Schedule' }
@@ -2766,7 +2775,10 @@ components:
         kind: { $ref: '#/components/schemas/OnboardingKind' }
         productLine: { $ref: '#/components/schemas/ProductLine' }
         jurisdiction: { type: string }
-        providerEntityId: { type: string, format: uuid }
+        providerEntityId:
+          type: string
+          format: uuid
+          description: Provider legal entity. Creation requires the deployment's configured providerEntityId.
         providerType: { $ref: '#/components/schemas/ProviderType' }
         schedule:
           type: object

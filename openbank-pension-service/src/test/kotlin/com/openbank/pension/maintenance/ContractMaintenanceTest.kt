@@ -35,16 +35,17 @@ import com.openbank.pension.domain.pack.JurisdictionPack
 import com.openbank.pension.domain.pack.ProviderType
 import com.openbank.pension.infrastructure.notification.RecordingParticipantNotifier
 import com.openbank.pension.infrastructure.pack.JurisdictionPackLoader
-import kotlinx.coroutines.runBlocking
-import org.assertj.core.api.Assertions.assertThat
-import org.assertj.core.api.Assertions.assertThatThrownBy
-import org.junit.jupiter.api.Test
+import com.openbank.pension.testsupport.ProviderFixtures
 import java.math.BigDecimal
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
 import java.util.UUID
+import kotlinx.coroutines.runBlocking
+import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.junit.jupiter.api.Test
 
 class ContractMaintenanceTest {
 
@@ -291,6 +292,7 @@ class ContractMaintenanceTest {
             RecordingParticipantNotifier(),
             com.openbank.pension.testsupport.RecordingSuitability(),
             com.openbank.pension.testsupport.RecordingSca(),
+            ProviderFixtures.boundary,
         ),
         store,
         deaths,

@@ -5,11 +5,14 @@
 package com.openbank.pension.integration
 
 import com.openbank.pension.it.PostgresTestResource
+import com.openbank.pension.testsupport.ProviderFixtures
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
 import io.restassured.response.ValidatableResponse
+import java.sql.DriverManager
+import java.util.UUID
 import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.config.ConfigProvider
 import org.hamcrest.Matchers.containsInAnyOrder
@@ -19,8 +22,6 @@ import org.hamcrest.Matchers.greaterThan
 import org.hamcrest.Matchers.hasItem
 import org.hamcrest.Matchers.not
 import org.junit.jupiter.api.Test
-import java.sql.DriverManager
-import java.util.UUID
 
 /**
  * The data-driven questionnaire (issue #12384) over real HTTP and Postgres: question set with
@@ -49,7 +50,7 @@ class QuestionnaireApiIT {
         "POST",
         apps,
         """{"kind":"NEW_CONTRACT","productLine":"$productLine","jurisdiction":"CZ",
-               "providerEntityId":"${UUID.randomUUID()}","providerType":"$providerType","birthDate":"$birth",
+               "providerEntityId":"${ProviderFixtures.ID}","providerType":"$providerType","birthDate":"$birth",
                "residencyCountry":"CZ","schedule":{"amount":1000,"currency":"CZK","frequency":"MONTHLY"}}""",
     ).statusCode(201).extract().path<String>("applicationId")
 

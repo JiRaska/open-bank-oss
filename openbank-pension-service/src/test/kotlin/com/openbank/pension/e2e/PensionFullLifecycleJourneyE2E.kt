@@ -9,6 +9,7 @@ import com.openbank.pension.infrastructure.exit.stub.StubPayoutPaymentAdapter
 import com.openbank.pension.infrastructure.fund.InMemoryFundAdministrationAdapter
 import com.openbank.pension.it.PostgresTestResource
 import com.openbank.pension.testsupport.PensionTemporalTestEnvironment
+import com.openbank.pension.testsupport.ProviderFixtures
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
@@ -19,11 +20,6 @@ import io.restassured.path.json.JsonPath
 import io.restassured.path.json.config.JsonPathConfig
 import io.restassured.response.Response
 import jakarta.inject.Inject
-import org.assertj.core.api.Assertions.assertThat
-import org.junit.jupiter.api.MethodOrderer
-import org.junit.jupiter.api.Order
-import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.TestMethodOrder
 import java.math.BigDecimal
 import java.time.Clock
 import java.time.Duration
@@ -31,6 +27,11 @@ import java.time.LocalDate
 import java.time.YearMonth
 import java.time.temporal.ChronoUnit
 import java.util.UUID
+import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.MethodOrderer
+import org.junit.jupiter.api.Order
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.TestMethodOrder
 
 /**
  * The whole participant lifecycle of ADR-0334 over real HTTP (issue #12350 slice S7): digital
@@ -965,19 +966,19 @@ class PensionFullLifecycleJourneyE2E {
     // ---------------------------------------------------------------------------------------------
 
     private fun dpsStart(birthDate: String) = """
-        {"kind":"NEW_CONTRACT","productLine":"DPS","jurisdiction":"CZ","providerEntityId":"${UUID.randomUUID()}",
+        {"kind":"NEW_CONTRACT","productLine":"DPS","jurisdiction":"CZ","providerEntityId":"${ProviderFixtures.ID}",
          "providerType":"PENSION_COMPANY","birthDate":"$birthDate","residencyCountry":"CZ",
          "schedule":{"amount":1700,"currency":"CZK","frequency":"MONTHLY"}}
     """.trimIndent()
 
     private fun dipStart() = """
-        {"kind":"NEW_CONTRACT","productLine":"DIP","jurisdiction":"CZ","providerEntityId":"${UUID.randomUUID()}",
+        {"kind":"NEW_CONTRACT","productLine":"DIP","jurisdiction":"CZ","providerEntityId":"${ProviderFixtures.ID}",
          "providerType":"BANK","birthDate":"1979-03-14",
          "schedule":{"amount":4000,"currency":"CZK","frequency":"MONTHLY"}}
     """.trimIndent()
 
     private fun transferStart(key: String) = """
-        {"kind":"TRANSFER_IN","productLine":"DPS","jurisdiction":"CZ","providerEntityId":"${UUID.randomUUID()}",
+        {"kind":"TRANSFER_IN","productLine":"DPS","jurisdiction":"CZ","providerEntityId":"${ProviderFixtures.ID}",
          "providerType":"PENSION_COMPANY","birthDate":"1960-02-02","residencyCountry":"CZ",
          "schedule":{"amount":1000,"currency":"CZK","frequency":"MONTHLY"},
          "transferIn":{"providerId":"ceding-ps","providerName":"Ceding Pension Company","contractNumber":"CED-$key"}}

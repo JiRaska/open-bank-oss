@@ -42,11 +42,7 @@ import com.openbank.pension.domain.model.ProductLine
 import com.openbank.pension.domain.pack.JurisdictionPackRegistry
 import com.openbank.pension.infrastructure.pack.JurisdictionPackLoader
 import com.openbank.pension.testsupport.ContractFixtures
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.runBlocking
-import org.assertj.core.api.Assertions.assertThat
-import org.assertj.core.api.Assertions.assertThatThrownBy
-import org.junit.jupiter.api.Test
+import com.openbank.pension.testsupport.ProviderFixtures
 import java.math.BigDecimal
 import java.time.Clock
 import java.time.Duration
@@ -56,6 +52,11 @@ import java.time.ZoneOffset
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
+import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.junit.jupiter.api.Test
 
 class AnnuityMarketplaceServiceTest {
 
@@ -383,6 +384,7 @@ class AnnuityMarketplaceServiceTest {
                     com.openbank.pension.infrastructure.notification.RecordingParticipantNotifier(),
                     com.openbank.pension.testsupport.RecordingSuitability(),
                     com.openbank.pension.testsupport.RecordingSca(),
+                    ProviderFixtures.boundary,
                 )
             val id = ContractFixtures.activeContract(
                 contracts,
