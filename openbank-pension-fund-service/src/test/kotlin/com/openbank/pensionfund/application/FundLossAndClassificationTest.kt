@@ -161,11 +161,12 @@ class FundLossAndClassificationTest {
             val proposed = classification.propose(
                 ClassificationCorrectionRequest(loan.id, InstrumentClass.LOAN, "depositary confirmation 2026-04-02"),
                 "maker",
+                "proposal",
             )
             // Proposed is not effective.
             assertThat(reporting.periodReport(fund, from, to).portfolio.loansOutstanding).isNull()
             // The proposer cannot approve their own correction.
-            assertThatThrownBy { runBlocking { classification.approve(proposed.id, "maker") } }
+            assertThatThrownBy { runBlocking { classification.approve(proposed.id, "maker", "decision") } }
                 .isInstanceOf(FourEyesViolationException::class.java)
             // Only one correction may await approval per position.
             assertThatThrownBy {
@@ -173,11 +174,12 @@ class FundLossAndClassificationTest {
                     classification.propose(
                         ClassificationCorrectionRequest(loan.id, InstrumentClass.OTHER, "second opinion"),
                         "other-maker",
+                        "other-proposal",
                     )
                 }
             }.isInstanceOf(IllegalStateException::class.java)
 
-            val approved = classification.approve(proposed.id, "checker")
+            val approved = classification.approve(proposed.id, "checker", "decision")
             assertThat(approved.status).isEqualTo(ClassificationCorrectionStatus.APPROVED)
 
             val after = reporting.periodReport(fund, from, to)
@@ -198,13 +200,21 @@ class FundLossAndClassificationTest {
         val nav = reporting.periodReport(fund, LocalDate.parse("2026-01-01"), LocalDate.parse("2026-03-31"))
             .closingNavId
         val loan = classification.positions(nav).single { it.instrumentId == "LOAN-1" }
-        val first = classification.propose(ClassificationCorrectionRequest(loan.id, InstrumentClass.LOAN, "r1"), "m1")
-        classification.approve(first.id, "c1")
-        val second = classification.propose(ClassificationCorrectionRequest(loan.id, InstrumentClass.OTHER, "r2"), "m2")
+        val first = classification.propose(
+            ClassificationCorrectionRequest(loan.id, InstrumentClass.LOAN, "r1"),
+            "m1",
+            "proposal",
+        )
+        classification.approve(first.id, "c1", "decision")
+        val second = classification.propose(
+            ClassificationCorrectionRequest(loan.id, InstrumentClass.OTHER, "r2"),
+            "m2",
+            "proposal",
+        )
         assertThat(second.fromClass).isEqualTo(InstrumentClass.LOAN)
         // Simulate a stale proposal: its fromClass no longer matches the effective class.
         store.commit(StoreChanges(classificationCorrections = listOf(second.copy(fromClass = InstrumentClass.EQUITY))))
-        assertThatThrownBy { runBlocking { classification.approve(second.id, "c2") } }
+        assertThatThrownBy { runBlocking { classification.approve(second.id, "c2", "decision") } }
             .isInstanceOf(IllegalStateException::class.java)
             .hasMessageContaining("propose again")
     }
