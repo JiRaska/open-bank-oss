@@ -104,8 +104,9 @@
       "code": "PSP50-04", "name": "PSP (ČNB) 50-04 Hlášení o organizační struktuře",
       "scope": "COMPANY", "periodicity": "QUARTER", "deadlineDaysAfterPeriodEnd": 30,
       "legalBasis": "vyhl. 425/2012 Sb. §3(1)(b)(1)",
-      "datapoints": ["share_capital", "employees_count", "qualifying_shareholders_count"],
-      "rules": [{"type": "NON_NEGATIVE", "id": "structure-non-negative", "datapoints": ["share_capital", "employees_count", "qualifying_shareholders_count"]}]
+      "_comment": "Sourced from the operator-maintained corporate register (#12425): no system produces these figures.",
+      "datapoints": ["share_capital", "employees_count", "qualifying_shareholders_count", "board_of_directors_members", "supervisory_board_members"],
+      "rules": [{"type": "NON_NEGATIVE", "id": "structure-non-negative", "datapoints": ["share_capital", "employees_count", "qualifying_shareholders_count", "board_of_directors_members", "supervisory_board_members"]}]
     },
     {
       "code": "PSP40-01", "name": "PSP (ČNB) 40-01 Doplňující informace pro vyhodnocování rizikovosti",
