@@ -62,6 +62,7 @@ import java.util.UUID
  */
 @QuarkusTest
 @QuarkusTestResource(PostgresTestResource::class)
+@QuarkusTestResource(StrategyCatalogWireMockResource::class, restrictToAnnotatedClass = true)
 @TestProfile(PensionFullLifecycleJourneyE2E.StubbedCollaborators::class)
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 @Suppress("LargeClass", "TooManyFunctions")
@@ -73,6 +74,7 @@ class PensionFullLifecycleJourneyE2E {
             listOf(QuarkusTestProfile.TestResourceEntry(StrategyCatalogWireMockResource::class.java))
 
         override fun getConfigOverrides(): Map<String, String> = mapOf(
+            "quarkus.oidc-client.enabled" to "true",
             "openbank.pension.stub-integrations.enabled" to "true",
             // Exercise the real catalog client against synthetic approvals, including its token request.
             "quarkus.oidc-client.enabled" to "true",

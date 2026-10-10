@@ -68,7 +68,6 @@ class PensionRevisionApprovalResource(
             PensionApprovalRole.PRODUCT_OWNER -> CatalogRoles.PENSION_PRODUCT_OWNER
         }
         if (!identity.hasRole(requiredRole)) throw CatalogForbiddenException("approval role is required")
-        requireOwner(offeringId, revisionId)
         val token = identity.principal as? JsonWebToken
             ?: throw CatalogForbiddenException("a verified JWT principal is required")
         if (
@@ -78,6 +77,7 @@ class PensionRevisionApprovalResource(
         ) {
             throw CatalogForbiddenException("a human pension approver is required")
         }
+        requireOwner(offeringId, revisionId)
         val issuer = token.issuer?.takeIf(String::isNotBlank)
             ?: throw CatalogForbiddenException("token issuer is required")
         val subject = token.subject?.takeIf(String::isNotBlank)
