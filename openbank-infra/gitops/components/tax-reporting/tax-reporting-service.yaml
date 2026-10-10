@@ -105,9 +105,25 @@ spec:
             # fail later with `Name does not resolve`.
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank
-            # No OIDC client secret, deliberately: this service validates bearer tokens against the
-            # realm's JWKS and calls nobody, so it needs no client credential at all. Projecting
-            # the shared openbank-services secret would hand it a credential it never uses.
+            # Its OWN machine identity, Keycloak client `openbank-tax-reporting` (ROLE_API only),
+            # for the outbound reads of the pension returns (#12425, ADR-0337): pension-service's
+            # reporting aggregates, pension-fund-service's reporting read model, and the frozen
+            # trial balance of the pension company's ledger (ledger.close.inspect, nothing else).
+            # application.yaml's default `quarkus.oidc-client` mints those tokens. Never the shared
+            # openbank-services secret: every upstream admits this caller by principal id alone.
+            # optional: false — seed Vault (runbook 0009) BEFORE this syncs, or the pod sits in
+            # CreateContainerConfigError, which is the loud failure we want over an
+            # unauthenticated 401 at the first filing.
+            - name: OIDC_TAX_REPORTING_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: tax-reporting-service-m2m-oidc
+                  key: OIDC_TAX_REPORTING_CLIENT_SECRET
+                  optional: false
+            # application.yaml reads the token endpoint from ${OIDC_AUTH_SERVER_URL:localhost}; set
+            # the oidc-client's own key so the deployed client never falls back to localhost.
+            - name: QUARKUS_OIDC_CLIENT_AUTH_SERVER_URL
+              value: http://keycloak.iam.svc:8080/realms/openbank
             # OPA sidecar enforced from the first rollout: tax_reporting_rest_ext.rego grants
             # reads to real staff and the two filing state changes to a real operator; no
             # service-account reaches either by any rule.
