@@ -9,6 +9,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 
 from metadata_scope import archive_source, plan, source_identity, tracked_projects
 
@@ -28,7 +29,9 @@ def build_profile_matches(root):
 
 def collect(root, selected, known, output):
     receipts = {}
-    pending = set(selected) | {':openbank-libs'}
+    # Seed the previously proven closure in one owning-task batch. Still expand
+    # every newly resolved edge; these seeds never replace model validation.
+    pending = set(selected) | {':' + p for p in PILOT_PROJECTS if ':' + p in known}
     while pending:
         if not pending <= known:
             raise ValueError('unknown project dependency')
@@ -104,24 +107,33 @@ def main():
             output = workspace / 'model'
             output.mkdir()
             selected = [':openbank-account-service']
+            started = time.monotonic()
             receipts = collect(root, selected, known, output)
+            print(f'metadata scope: model collection {time.monotonic() - started:.2f}s', flush=True)
             result = plan(receipts, selected, known, [':openbank-libs'], commit,
                           source_identity(root), source_identity(root) == commit)
             if result['mode'] != 'scoped':
                 raise ValueError(result['reason'])
             inputs = workspace / 'inputs'
             inputs.mkdir()
+            started = time.monotonic()
             if not declared_inputs_fit(root, result['projects'], known, inputs):
                 raise ValueError('gate task inputs reach an omitted project')
+            print(f'metadata scope: task input verification {time.monotonic() - started:.2f}s', flush=True)
+            started = time.monotonic()
             checkout = workspace / 'checkout'
             checkout.mkdir()
             archive_source(root, commit, result['projects'], checkout)
+            print(f'metadata scope: source archive {time.monotonic() - started:.2f}s', flush=True)
         except (OSError, ValueError, subprocess.SubprocessError) as error:
             print(f'metadata scope: {error}; using full gate', flush=True)
             return run_gate(root, args.modules, args.enforce)
         print('metadata scope: isolated projects ' + ','.join(result['projects']), flush=True)
         # Preserve the real gate's gap (1) and undetermined (2) outcomes verbatim.
-        return run_gate(checkout, args.modules, args.enforce, commit)
+        started = time.monotonic()
+        verdict = run_gate(checkout, args.modules, args.enforce, commit)
+        print(f'metadata scope: unchanged gate {time.monotonic() - started:.2f}s', flush=True)
+        return verdict
 
 
 if __name__ == '__main__':

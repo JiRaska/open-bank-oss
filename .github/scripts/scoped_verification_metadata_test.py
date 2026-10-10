@@ -76,6 +76,25 @@ class IntegrationTest(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         gate.collect(Path.cwd(), [':openbank-account-service'], PROJECTS, output)
 
+    def test_batched_seed_still_discovers_new_project_edges(self):
+        extra = ':openbank-extra-service'
+        known = {':' + p for p in gate.PILOT_PROJECTS} | {extra}
+        batches = []
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp)
+            def emit(command, cwd, env, check):
+                batch = set(env['OB_METADATA_PROJECTS'].split(','))
+                batches.append(batch)
+                for project in batch:
+                    closure = [project, extra] if project == ':openbank-account-service' else [project]
+                    (output/(project[1:] + '.json')).write_text(json.dumps({'closure': closure, 'receipts': {}}))
+            with patch.object(gate.subprocess, 'run', side_effect=emit):
+                models = gate.collect(Path.cwd(), [':openbank-account-service'], known, output)
+            self.assertEqual(batches, [known - {extra}, {extra}])
+            self.assertEqual(set(models), known)
+            self.assertEqual(gate.plan(models, [':openbank-account-service'], known,
+                                      [':openbank-libs'], COMMIT, COMMIT, True)['mode'], 'scoped')
+
     def test_malformed_and_omitted_input_receipts_decline_scope(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(gate.subprocess, 'run'):
             directory = Path(tmp)
