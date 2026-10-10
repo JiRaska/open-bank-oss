@@ -1,0 +1,58 @@
+{
+  "consumer": {
+    "name": "openbank-pension-service"
+  },
+  "interactions": [
+    {
+      "description": "GET a KYC-approved natural person for the pension KYC reuse",
+      "providerStates": [
+        {
+          "name": "an active company and natural person exist for a joint KYB mandate"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/parties/d1d1d1d1-e2e2-4f4f-8a8a-b1b1b1b1b1b1"
+      },
+      "response": {
+        "body": {
+          "id": "d1d1d1d1-e2e2-4f4f-8a8a-b1b1b1b1b1b1",
+          "kycStatus": "APPROVED",
+          "legalName": "Pact Joint Signatory",
+          "partyType": "INDIVIDUAL",
+          "status": "ACTIVE"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET a party the bank does not hold, for the pension KYC reuse",
+      "providerStates": [
+        {
+          "name": "no party exists for the id"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/parties/0e0e0e0e-1f1f-4a2a-8b3b-4c4c4c4c4c4c"
+      },
+      "response": {
+        "status": 404
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-party-service"
+  }
+}

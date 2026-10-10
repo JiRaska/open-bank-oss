@@ -31,7 +31,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-pension-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "645d68f4e59f32ae"
+        openbank.tech/policy-checksum: "12983ce348db52c7"
       labels:
         app.kubernetes.io/name: pension-service
         app.kubernetes.io/part-of: pension
@@ -55,11 +55,46 @@ spec:
             # fleet-common 8085 here; probes below target 8090 deliberately.
             - name: http
               containerPort: 8171
+            - name: https
+              containerPort: 8443
             - name: management
               containerPort: 8090
           env:
+            # DEV-ONLY synthetic legal entity for this sandbox deployment; not production ownership evidence.
+            # Production must supply its assigned provider identity before real-money launch.
+            - name: OPENBANK_PENSION_PROVIDER_ENTITY_ID
+              value: "00000000-0000-4000-8000-000000000001"
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
+              value: /mnt/internal-tls/tls.crt
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
+              value: /mnt/internal-tls/tls.key
+            - name: QUARKUS_HTTP_SSL_PORT
+              value: "8443"
+            # Keep old callers working until the separately verified HTTPS cutover.
+            - name: QUARKUS_HTTP_INSECURE_REQUESTS
+              value: enabled
+            - name: QUARKUS_HTTP_SSL_PROTOCOLS
+              value: TLSv1.3
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_RELOAD_PERIOD
+              value: 1h
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://tempo.observability.svc:4317"
+            # Onboarding/transfer (S2) and exit (S5) workflows on the shared Temporal cluster. The
+            # namespace is registered by the temporal-namespace-registration Job and paired with the
+            # `pension` entry in temporal-platform-ingress (without it the worker's gRPC is dropped).
+            # Each workflow family polls its own task queue (ADR-0334 S8).
+            - name: OPENBANK_TEMPORAL_ENABLED
+              value: "true"
+            - name: OPENBANK_TEMPORAL_SERVER_URL
+              value: temporal-frontend.temporal.svc.cluster.local:7233
+            - name: OPENBANK_TEMPORAL_NAMESPACE
+              value: openbank-pension
+            - name: OPENBANK_PENSION_ONBOARDING_TASK_QUEUE
+              value: pension-onboarding
+            - name: OPENBANK_PENSION_EXIT_TASK_QUEUE
+              value: pension-exit
+            - name: OPENBANK_PENSION_WORKER_ENABLED
+              value: "true"
             - name: OTEL_TRACES_SAMPLER_ARG
               value: "0.1"
             # Reactive + JDBC (Flyway) legs onto the same CNPG primary. The service's
@@ -84,6 +119,61 @@ spec:
                 secretKeyRef:
                   name: pension-service-oidc
                   key: OIDC_CLIENT_SECRET
+            # ADR-0334 S8: pension-service's OWN client (openbank-pension, ROLE_API only) for the
+            # FundAdministrationPort REST adapter to pension-fund-service. optional: false so an
+            # unseeded Vault entry is a loud CreateContainerConfigError, never an empty credential.
+            - name: OIDC_PENSION_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: pension-service-m2m-oidc
+                  key: OIDC_PENSION_CLIENT_SECRET
+                  optional: false
+            - name: PENSION_FUND_SERVICE_URL
+              value: http://pension-fund-service.pension-fund.svc:8162
+            # #12378 payment adapters (pension-service's own OIDC client).
+            - name: STANDING_ORDER_SERVICE_URL
+              value: http://standing-order-service.payments.svc:8121
+            - name: SDD_SERVICE_URL
+              value: http://sdd-service.sdd.svc:8129
+            - name: DOMESTIC_PAYMENT_URL
+              value: http://domestic-payment.payments.svc:8116
+            # Kafka mTLS (ADR-0137, kafka-pension-mtls.yaml) — consumes domestic-payment status
+            # changes only, and writes only its own dead-letter topic.
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+            - name: QUARKUS_SMALLRYE_REACTIVE_MESSAGING_KAFKA_BOOTSTRAP_SERVERS
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+            - name: KAFKA_SECURITY_PROTOCOL
+              value: SSL
+            - name: KAFKA_SSL_KEYSTORE_LOCATION
+              value: /mnt/kafka-keystore/user.p12
+            - name: KAFKA_SSL_KEYSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: pension-service-kafka-keystore
+                  key: user.password
+            - name: KAFKA_SSL_TRUSTSTORE_LOCATION
+              value: /mnt/kafka-truststore/ca.p12
+            - name: KAFKA_SSL_TRUSTSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_TRUSTSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-cluster-ca-truststore
+                  key: ca.password
+            # issue #686: group.id / auto.offset.reset come from the pension-service-msg-override
+            # ConfigMap (a properties file), never dotted YAML keys or env vars.
+            - name: QUARKUS_CONFIG_LOCATIONS
+              value: /mnt/msg-config/override.properties
+            # Identity and SCA checks (#12377), authenticated as openbank-pension.
+            - name: SCA_SERVICE_URL
+              value: http://sca-service.sca.svc:8110
+            - name: PARTY_SERVICE_URL
+              value: http://party-service.party.svc:8111
+            - name: ACCOUNT_SERVICE_URL
+              value: http://account-service.accounts.svc:8100
             # OPA sidecar enforced from the first rollout: pension_rest_ext.rego grants the
             # participant actions to the edge principal only, and no service-account reaches a
             # write by any rule.
@@ -115,8 +205,20 @@ spec:
               drop:
                 - ALL
           volumeMounts:
+            - name: internal-tls
+              mountPath: /mnt/internal-tls
+              readOnly: true
             - name: tmp
               mountPath: /tmp
+            - name: kafka-keystore
+              mountPath: /mnt/kafka-keystore
+              readOnly: true
+            - name: kafka-truststore
+              mountPath: /mnt/kafka-truststore
+              readOnly: true
+            - name: msg-override
+              mountPath: /mnt/msg-config
+              readOnly: true
         # OPA policy decision point (ADR-0034). Co-located sidecar the app reaches on
         # localhost:8181 (AuthorizeInterceptor default). Bundle mounted read-only from the
         # pension-opa-bundle ConfigMap generated by gen-pension-opa-bundle.sh.
@@ -193,6 +295,9 @@ spec:
             - name: opa-tmp
               mountPath: /tmp
       volumes:
+        - name: internal-tls
+          secret:
+            secretName: pension-service-internal-tls
         - name: tmp
           emptyDir: {}
         - name: opa-tmp
@@ -200,6 +305,15 @@ spec:
         - name: opa-bundle
           configMap:
             name: pension-opa-bundle
+        - name: kafka-keystore
+          secret:
+            secretName: pension-service-kafka-keystore
+        - name: kafka-truststore
+          secret:
+            secretName: kafka-cluster-ca-truststore
+        - name: msg-override
+          configMap:
+            name: pension-service-msg-override
 ---
 apiVersion: v1
 kind: Service
@@ -217,6 +331,9 @@ spec:
     - name: http
       port: 8171
       targetPort: http
+    - name: https
+      port: 8443
+      targetPort: https
     - name: management
       port: 8090
       targetPort: management

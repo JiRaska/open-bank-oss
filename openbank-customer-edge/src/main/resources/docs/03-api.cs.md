@@ -155,3 +155,19 @@ Edge vrací malé JSON chybové obálky tvaru `{"error":"…"}`, které sám gen
 Anonymní `GET /customer/v1/app-copy` vrací pouze `{version, messages}` ze zveřejněného komunikačního stylu pro klienty. Neobsahuje osobní údaje ani interní instrukce persony. Zveřejněné odpovědi lze ukládat do cache na 60 sekund. Chybějící nebo vyřazená publikace vrací verzi nula a prázdnou mapu, což výslovně ruší klientské přepisy.
 
 Adresa komunikační služby se dodává při běhu přes `COMMUNICATION_SERVICE_URL`. Chybějící konfigurace nebo nedostupná služba vrací 503; neplatný dokument vrací 502. Klient v obou případech zachová ověřené uložené nebo vestavěné texty a tímto volitelným požadavkem neblokuje spuštění. Volání používá identitu služby bez hlavičky klientské party.
+
+## Zákaznické penzijní API (ADR-0334 S6)
+
+`CustomerPensionResource` obsluhuje `/customer/v1/pension` a vyžaduje `ROLE_CUSTOMER` i příslušnou autorizační akci. Pension-service dostává identitu přihlášeného účastníka. Operace nad smlouvou nejprve ověřují `participantPartyId`; chybějící i cizí smlouva vrací 404. Čtení žádosti také převádí upstream 403 na 404.
+
+- `GET /products` promítá penzijní nabídky katalogu; `POST /simulations` vrací ilustrativní projekci bez uzavření smlouvy. Simulace používá nový upstream klíč.
+- `POST /applications` a `POST /transfers-in` zahajují onboarding. Datum narození a rezidence pocházejí ze záznamu party; neúplný profil vrací 422 `PARTY_PROFILE_INCOMPLETE`.
+- Žádosti nabízejí detail, doporučení, dotazník, volbu strategie, přijetí KID, podpis a odstoupení. Podpis předává challenge pension-service, která ji spotřebuje vůči podkladům žádosti.
+- Smlouvy nabízejí detail, pozastavení/obnovení, volbu strategie, platební referenci, příspěvkové mandáty a daňový přehled.
+- `CustomerPensionChangeResource` doplňuje navazující toky z `docs/ux/pension-client-flows.md` (pension-service API 1.2.0): dotazník (sada otázek, rozpracované odpovědi, profil, upozornění a jejich potvrzení), náhled a změnu pravidelných příspěvků a obmyšlených, roční výpis a výpis výplaty, nárok na výplatu a nabídky, výběr a zrušení renty. Zrušení trvalého příkazu či inkasa je na `POST /contracts/{contractId}/contribution-mandates/{mandateId}/cancel`; stav státního příspěvku nese daňový přehled.
+- Operace vázané na dokument (podpis žádosti, ukončení a výplata, změna strategie, zřízení a zrušení mandátu, změna příspěvků a obmyšlených, výběr a zrušení renty) edge challenge nespotřebovává; spotřebuje ji pension-service. Bez challenge odpoví 403 `SCA_REQUIRED` s přesným `pension-<operace>:<hash>`.
+- Ukončení a výplaty nabízejí nabídky, stav a podpis či potvrzení. `PUT /contracts/{contractId}/payouts/{payoutId}/account` předává SCA challenge pro odloženou změnu účtu; okamžik účinnosti určuje pension-service.
+
+Penzijní změny s parametrem `Idempotency-Key` vyžadují neprázdný klíč volajícího: chybějící klíč odmítají a nenahrazují jej novým. Routy chráněné SCA vyžadují challenge header uvedený v OpenAPI. Podpis ukončení, potvrzení výplaty a změna výplatního účtu předávají challenge bez spotřebování v edge; upstream ověřuje podepsané podklady. Pozastavení/obnovení a odstoupení spotřebují challenge v edge (jmenný prostor `pension.<operace>:`).
+
+Jde o implementované routy, nikoli důkaz nasazení upstream služeb. Předpoklady rolloutů pension-service a pension-fund-service i zbývající stuby sleduje #12350 a příslušné PR; ilustrativní projekce není zárukou investičního výnosu.

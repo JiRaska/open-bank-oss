@@ -5335,18 +5335,15 @@ class CustomerEdgeResource(
                 .type(MediaType.APPLICATION_JSON)
                 .build()
         }
-        val consumeBody = objectMapper.createObjectNode().apply {
-            // The challenge was raised and decided by the human (SCA is theirs, not the entity's).
-            put("partyId", customer.human.toString())
-            // Null only for an SDD mandate (#10281): it has no amount, and its challenge links none.
-            amount?.let { put("amount", it) }
-            currency?.let { put("currency", it) }
-            creditor?.let { put("creditor", it) }
-        }
-        val consume = upstream.post(
-            "$scaServiceUrl/api/v1/sca/challenges/$challengeId/consume",
+        // The challenge was raised and decided by the human (SCA is theirs, not the entity's).
+        // amount is null only for an SDD mandate (#10281): it has no amount, and its challenge links none.
+        val consume = ScaConsume.consume(
+            upstream,
+            scaServiceUrl,
+            challengeId,
             customer.partyId.toString(),
-            objectMapper.writeValueAsString(consumeBody),
+            customer.human,
+            mapOf("amount" to amount, "currency" to currency, "creditor" to creditor),
         )
         if (consume.statusInfo.family != Response.Status.Family.SUCCESSFUL) {
             audit.emit(

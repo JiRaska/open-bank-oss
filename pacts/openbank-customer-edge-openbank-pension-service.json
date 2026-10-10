@@ -1,0 +1,1313 @@
+{
+  "consumer": {
+    "name": "openbank-customer-edge"
+  },
+  "interactions": [
+    {
+      "description": "GET a pension contract with no M2M identity",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "headers": {
+          "X-Customer-Party-Id": "11111111-1111-4111-8111-111111111111"
+        },
+        "method": "GET",
+        "path": "/api/v2/pension/contracts/44444444-4444-4444-8444-444444444444"
+      },
+      "response": {
+        "status": 401
+      }
+    },
+    {
+      "description": "GET the beneficiary designation of the contract",
+      "providerStates": [
+        {
+          "name": "the customer party holds an active pension contract"
+        }
+      ],
+      "request": {
+        "headers": {
+          "X-Customer-Party-Id": "11111111-1111-4111-8111-111111111111"
+        },
+        "method": "GET",
+        "path": "/api/v2/pension/contracts/44444444-4444-4444-8444-444444444444/beneficiaries"
+      },
+      "response": {
+        "body": {
+          "current": [
+
+          ]
+        },
+        "headers": {
+          "Content-Type": "application/json; charset=UTF-8"
+        },
+        "matchingRules": {
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json(;\\s?charset=[\\w\\-]+)?"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET the contribution schedule of the contract",
+      "providerStates": [
+        {
+          "name": "the customer party holds an active pension contract"
+        }
+      ],
+      "request": {
+        "headers": {
+          "X-Customer-Party-Id": "11111111-1111-4111-8111-111111111111"
+        },
+        "method": "GET",
+        "path": "/api/v2/pension/contracts/44444444-4444-4444-8444-444444444444/contribution-schedule"
+      },
+      "response": {
+        "status": 200
+      }
+    },
+    {
+      "description": "GET the customer party's own pension contracts",
+      "providerStates": [
+        {
+          "name": "the customer party holds an active pension contract"
+        }
+      ],
+      "request": {
+        "headers": {
+          "X-Customer-Party-Id": "11111111-1111-4111-8111-111111111111"
+        },
+        "method": "GET",
+        "path": "/api/v2/pension/contracts"
+      },
+      "response": {
+        "body": [
+          {
+            "contractId": "44444444-4444-4444-8444-444444444444",
+            "createdAt": "2026-10-01T10:00:00Z",
+            "jurisdiction": "CZ",
+            "packVersion": 1,
+            "participantPartyId": "11111111-1111-4111-8111-111111111111",
+            "productLine": "DPS",
+            "providerType": "PENSION_COMPANY",
+            "schedule": {
+              "amount": 1000,
+              "currency": "CZK",
+              "frequency": "MONTHLY"
+            },
+            "status": "ACTIVE",
+            "updatedAt": "2026-10-01T10:00:00Z"
+          }
+        ],
+        "headers": {
+          "Content-Type": "application/json; charset=UTF-8"
+        },
+        "matchingRules": {
+          "body": {
+            "$": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 1
+                }
+              ]
+            },
+            "$[*].contractId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$[*].createdAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].jurisdiction": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].packVersion": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$[*].participantPartyId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$[*].productLine": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "DPS|DIP"
+                }
+              ]
+            },
+            "$[*].providerType": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].schedule.amount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$[*].schedule.currency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[A-Z]{3}"
+                }
+              ]
+            },
+            "$[*].schedule.frequency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].status": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "DRAFT|PENDING_ACTIVATION|ACTIVE|SUSPENDED|TERMINATING|PAID_OUT|TRANSFERRED_OUT|CLOSED"
+                }
+              ]
+            },
+            "$[*].updatedAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json(;\\s?charset=[\\w\\-]+)?"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET the pension contract to prove the customer holds it",
+      "providerStates": [
+        {
+          "name": "the customer party holds an active pension contract"
+        }
+      ],
+      "request": {
+        "headers": {
+          "X-Customer-Party-Id": "11111111-1111-4111-8111-111111111111"
+        },
+        "method": "GET",
+        "path": "/api/v2/pension/contracts/44444444-4444-4444-8444-444444444444"
+      },
+      "response": {
+        "body": {
+          "contractId": "44444444-4444-4444-8444-444444444444",
+          "createdAt": "2026-10-01T10:00:00Z",
+          "jurisdiction": "CZ",
+          "packVersion": 1,
+          "participantPartyId": "11111111-1111-4111-8111-111111111111",
+          "productLine": "DPS",
+          "providerType": "PENSION_COMPANY",
+          "schedule": {
+            "amount": 1000,
+            "currency": "CZK",
+            "frequency": "MONTHLY"
+          },
+          "status": "ACTIVE",
+          "updatedAt": "2026-10-01T10:00:00Z"
+        },
+        "headers": {
+          "Content-Type": "application/json; charset=UTF-8"
+        },
+        "matchingRules": {
+          "body": {
+            "$.contractId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.createdAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.jurisdiction": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.packVersion": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$.participantPartyId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.productLine": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "DPS|DIP"
+                }
+              ]
+            },
+            "$.providerType": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.schedule.amount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.schedule.currency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[A-Z]{3}"
+                }
+              ]
+            },
+            "$.schedule.frequency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.status": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "DRAFT|PENDING_ACTIVATION|ACTIVE|SUSPENDED|TERMINATING|PAID_OUT|TRANSFERRED_OUT|CLOSED"
+                }
+              ]
+            },
+            "$.updatedAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json(;\\s?charset=[\\w\\-]+)?"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "POST a contribution schedule preview, which issues the document SCA signs",
+      "providerStates": [
+        {
+          "name": "the customer party holds an active pension contract"
+        }
+      ],
+      "request": {
+        "body": {
+          "acknowledgeIncentiveReduction": false,
+          "amount": 1500,
+          "dayOfMonth": 15,
+          "frequency": "MONTHLY",
+          "startDate": null
+        },
+        "headers": {
+          "Content-Type": "application/json",
+          "Idempotency-Key": "pact-key",
+          "X-Customer-Party-Id": "11111111-1111-4111-8111-111111111111"
+        },
+        "matchingRules": {
+          "header": {
+            "Idempotency-Key": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": ".+"
+                }
+              ]
+            }
+          }
+        },
+        "method": "POST",
+        "path": "/api/v2/pension/contracts/44444444-4444-4444-8444-444444444444/contribution-schedule/preview"
+      },
+      "response": {
+        "body": {
+          "documentSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "headers": {
+          "Content-Type": "application/json; charset=UTF-8"
+        },
+        "matchingRules": {
+          "body": {
+            "$.documentSha256": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-fA-F]{64}"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json(;\\s?charset=[\\w\\-]+)?"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "POST suspend contributions on the contract",
+      "providerStates": [
+        {
+          "name": "the customer party holds an active pension contract"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Idempotency-Key": "pact-key",
+          "X-Customer-Party-Id": "11111111-1111-4111-8111-111111111111"
+        },
+        "matchingRules": {
+          "header": {
+            "Idempotency-Key": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": ".+"
+                }
+              ]
+            }
+          }
+        },
+        "method": "POST",
+        "path": "/api/v2/pension/contracts/44444444-4444-4444-8444-444444444444/suspend"
+      },
+      "response": {
+        "body": {
+          "contractId": "44444444-4444-4444-8444-444444444444",
+          "createdAt": "2026-10-01T10:00:00Z",
+          "jurisdiction": "CZ",
+          "packVersion": 1,
+          "participantPartyId": "11111111-1111-4111-8111-111111111111",
+          "productLine": "DPS",
+          "providerType": "PENSION_COMPANY",
+          "schedule": {
+            "amount": 1000,
+            "currency": "CZK",
+            "frequency": "MONTHLY"
+          },
+          "status": "SUSPENDED",
+          "updatedAt": "2026-10-01T10:00:00Z"
+        },
+        "headers": {
+          "Content-Type": "application/json; charset=UTF-8"
+        },
+        "matchingRules": {
+          "body": {
+            "$.contractId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.createdAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.jurisdiction": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.packVersion": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$.participantPartyId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.productLine": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "DPS|DIP"
+                }
+              ]
+            },
+            "$.providerType": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.schedule.amount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.schedule.currency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[A-Z]{3}"
+                }
+              ]
+            },
+            "$.schedule.frequency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.status": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "DRAFT|PENDING_ACTIVATION|ACTIVE|SUSPENDED|TERMINATING|PAID_OUT|TRANSFERRED_OUT|CLOSED"
+                }
+              ]
+            },
+            "$.updatedAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json(;\\s?charset=[\\w\\-]+)?"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "PUT a signed strategy change on a contract with no assessment on file",
+      "providerStates": [
+        {
+          "name": "the customer party holds an active pension contract"
+        }
+      ],
+      "request": {
+        "body": {
+          "acknowledgedWarnings": [
+
+          ],
+          "effectiveFrom": "2099-01-01",
+          "language": null,
+          "scaChallengeId": "77777777-7777-4777-8777-777777777777",
+          "strategyCode": "DYNAMIC"
+        },
+        "headers": {
+          "Content-Type": "application/json",
+          "Idempotency-Key": "pact-key",
+          "X-Customer-Party-Id": "11111111-1111-4111-8111-111111111111"
+        },
+        "matchingRules": {
+          "header": {
+            "Idempotency-Key": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": ".+"
+                }
+              ]
+            }
+          }
+        },
+        "method": "PUT",
+        "path": "/api/v2/pension/contracts/44444444-4444-4444-8444-444444444444/strategy"
+      },
+      "response": {
+        "body": {
+          "code": "STRATEGY_NOT_PERMITTED"
+        },
+        "headers": {
+          "Content-Type": "application/json; charset=UTF-8"
+        },
+        "matchingRules": {
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json(;\\s?charset=[\\w\\-]+)?"
+                }
+              ]
+            }
+          }
+        },
+        "status": 403
+      }
+    },
+    {
+      "description": "GET a pension contract the customer party does not hold",
+      "providerStates": [
+        {
+          "name": "the customer party holds no pension contract"
+        }
+      ],
+      "request": {
+        "headers": {
+          "X-Customer-Party-Id": "11111111-1111-4111-8111-111111111111"
+        },
+        "method": "GET",
+        "path": "/api/v2/pension/contracts/99999999-9999-4999-8999-999999999999"
+      },
+      "response": {
+        "status": 404
+      }
+    },
+    {
+      "description": "POST an onboarding application with the party's birth date and residency",
+      "providerStates": [
+        {
+          "name": "the customer party holds no pension contract"
+        }
+      ],
+      "request": {
+        "body": {
+          "birthDate": "1985-05-05",
+          "jurisdiction": "CZ",
+          "productLine": "DPS",
+          "providerEntityId": "00000000-0000-4000-8000-000000000001",
+          "providerType": "PENSION_COMPANY",
+          "residencyCountry": "CZ",
+          "schedule": {
+            "amount": 1000,
+            "currency": "CZK",
+            "employerAmount": null,
+            "frequency": "MONTHLY"
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json",
+          "Idempotency-Key": "pact-key",
+          "X-Customer-Party-Id": "11111111-1111-4111-8111-111111111111"
+        },
+        "matchingRules": {
+          "header": {
+            "Idempotency-Key": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": ".+"
+                }
+              ]
+            }
+          }
+        },
+        "method": "POST",
+        "path": "/api/v2/pension/onboarding/applications"
+      },
+      "response": {
+        "body": {
+          "applicationId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+          "kind": "NEW_CONTRACT",
+          "productLine": "DPS",
+          "status": "STARTED"
+        },
+        "generators": {
+          "body": {
+            "$.applicationId": {
+              "type": "Uuid"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json; charset=UTF-8"
+        },
+        "matchingRules": {
+          "body": {
+            "$.applicationId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.kind": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.productLine": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "DPS|DIP"
+                }
+              ]
+            },
+            "$.status": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json(;\\s?charset=[\\w\\-]+)?"
+                }
+              ]
+            }
+          }
+        },
+        "status": 201
+      }
+    },
+    {
+      "description": "GET the contract's unit transactions",
+      "providerStates": [
+        {
+          "name": "the customer party's active pension contract holds priced fund units"
+        }
+      ],
+      "request": {
+        "headers": {
+          "X-Customer-Party-Id": "11111111-1111-4111-8111-111111111111"
+        },
+        "method": "GET",
+        "path": "/api/v2/pension/contracts/44444444-4444-4444-8444-444444444444/transactions",
+        "query": {
+          "page": [
+            "0"
+          ],
+          "size": [
+            "20"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "items": [
+            {
+              "amount": 12.5,
+              "fundId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+              "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+              "navPerUnit": 1.25,
+              "pricedAt": "2026-09-01T16:00:00Z",
+              "type": "SUBSCRIBE",
+              "units": 10
+            }
+          ],
+          "page": 0,
+          "size": 20,
+          "total": 1
+        },
+        "generators": {
+          "body": {
+            "$.items[*].fundId": {
+              "type": "Uuid"
+            },
+            "$.items[*].id": {
+              "type": "Uuid"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json; charset=UTF-8"
+        },
+        "matchingRules": {
+          "body": {
+            "$.items": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 1
+                }
+              ]
+            },
+            "$.items[*].amount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.items[*].fundId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.items[*].id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.items[*].navPerUnit": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.items[*].pricedAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.items[*].type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "SUBSCRIBE|REDEEM|SWITCH_OUT|SWITCH_IN|FEE"
+                }
+              ]
+            },
+            "$.items[*].units": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.page": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$.size": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$.total": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json(;\\s?charset=[\\w\\-]+)?"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET the participant valuation of the contract",
+      "providerStates": [
+        {
+          "name": "the customer party's active pension contract holds priced fund units"
+        }
+      ],
+      "request": {
+        "headers": {
+          "X-Customer-Party-Id": "11111111-1111-4111-8111-111111111111"
+        },
+        "method": "GET",
+        "path": "/api/v2/pension/contracts/44444444-4444-4444-8444-444444444444/valuation"
+      },
+      "response": {
+        "body": {
+          "asOf": "2000-01-31",
+          "contractId": "44444444-4444-4444-8444-444444444444",
+          "currency": "CZK",
+          "holdings": [
+            {
+              "currency": "CZK",
+              "fundId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+              "navPerUnit": 1.25,
+              "navStatus": "PUBLISHED",
+              "units": 100,
+              "value": 125
+            }
+          ],
+          "pendingOrders": [
+
+          ],
+          "status": "VALUED",
+          "totalValue": 125
+        },
+        "generators": {
+          "body": {
+            "$.asOf": {
+              "format": "yyyy-MM-dd",
+              "type": "Date"
+            },
+            "$.holdings[*].fundId": {
+              "type": "Uuid"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json; charset=UTF-8"
+        },
+        "matchingRules": {
+          "body": {
+            "$.asOf": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "format": "yyyy-MM-dd",
+                  "match": "date"
+                }
+              ]
+            },
+            "$.currency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.holdings": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 1
+                }
+              ]
+            },
+            "$.holdings[*].currency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.holdings[*].fundId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.holdings[*].navPerUnit": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.holdings[*].navStatus": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "PUBLISHED|NOT_PUBLISHED"
+                }
+              ]
+            },
+            "$.holdings[*].units": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.holdings[*].value": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.status": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "VALUED|NO_HOLDINGS|NAV_NOT_PUBLISHED|CURRENCY_MISMATCH"
+                }
+              ]
+            },
+            "$.totalValue": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json(;\\s?charset=[\\w\\-]+)?"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET the pension contract to prove the customer holds it",
+      "providerStates": [
+        {
+          "name": "the customer party's active pension contract holds priced fund units"
+        }
+      ],
+      "request": {
+        "headers": {
+          "X-Customer-Party-Id": "11111111-1111-4111-8111-111111111111"
+        },
+        "method": "GET",
+        "path": "/api/v2/pension/contracts/44444444-4444-4444-8444-444444444444"
+      },
+      "response": {
+        "body": {
+          "contractId": "44444444-4444-4444-8444-444444444444",
+          "createdAt": "2026-10-01T10:00:00Z",
+          "jurisdiction": "CZ",
+          "packVersion": 1,
+          "participantPartyId": "11111111-1111-4111-8111-111111111111",
+          "productLine": "DPS",
+          "providerType": "PENSION_COMPANY",
+          "schedule": {
+            "amount": 1000,
+            "currency": "CZK",
+            "frequency": "MONTHLY"
+          },
+          "status": "ACTIVE",
+          "updatedAt": "2026-10-01T10:00:00Z"
+        },
+        "headers": {
+          "Content-Type": "application/json; charset=UTF-8"
+        },
+        "matchingRules": {
+          "body": {
+            "$.contractId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.createdAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.jurisdiction": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.packVersion": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$.participantPartyId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.productLine": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "DPS|DIP"
+                }
+              ]
+            },
+            "$.providerType": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.schedule.amount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.schedule.currency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[A-Z]{3}"
+                }
+              ]
+            },
+            "$.schedule.frequency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.status": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "DRAFT|PENDING_ACTIVATION|ACTIVE|SUSPENDED|TERMINATING|PAID_OUT|TRANSFERRED_OUT|CLOSED"
+                }
+              ]
+            },
+            "$.updatedAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json(;\\s?charset=[\\w\\-]+)?"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-pension-service"
+  }
+}

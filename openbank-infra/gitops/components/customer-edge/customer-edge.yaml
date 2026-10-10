@@ -76,7 +76,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-customer-edge-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "45043bf077fa5b95"
+        openbank.tech/policy-checksum: "91069c972ea50796"
     spec:
       # Dedicated SA so EKS Pod Identity can hand the edge (and ONLY the edge) the
       # feedback-screenshots S3 role — ADR-0192, openbank-infra/aws/envs/sandbox-platform/
@@ -183,6 +183,11 @@ spec:
               value: http://keycloak.iam.svc:8080/realms/openbank-customers
             - name: OIDC_CLIENT_ID
               value: openbank-edge
+            # Declare these callers for derived NetworkPolicies; defaults alone are invisible to the generator.
+            - name: AUDIT_SERVICE_URL
+              value: http://audit-service.audit.svc:8113
+            - name: PENSION_SERVICE_URL
+              value: http://pension-service.pension.svc:8171
             - name: ACCOUNT_SERVICE_URL
               value: http://account-service.accounts.svc:8100
             # ADR-0104 P2 currency pockets: the edge queries product-catalog (accounts ns,

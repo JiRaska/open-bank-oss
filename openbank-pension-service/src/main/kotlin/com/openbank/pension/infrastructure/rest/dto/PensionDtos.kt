@@ -8,11 +8,9 @@ import com.openbank.pension.domain.model.Beneficiary
 import com.openbank.pension.domain.model.ContributionFrequency
 import com.openbank.pension.domain.model.PensionContract
 import com.openbank.pension.domain.model.ProductLine
-import com.openbank.pension.domain.pack.Clawback
 import com.openbank.pension.domain.pack.IncentivePeriod
 import com.openbank.pension.domain.pack.IncentiveResult
 import com.openbank.pension.domain.pack.ProviderType
-import com.openbank.pension.domain.pack.SurrenderPreview
 import java.math.BigDecimal
 import java.time.Instant
 import java.time.LocalDate
@@ -55,20 +53,22 @@ data class CreateContractRequest(
     val beneficiaries: List<BeneficiaryDto?>? = null,
 )
 
-data class ElectStrategyRequest(val strategyCode: String? = null, val effectiveFrom: LocalDate? = null)
+data class ElectStrategyRequest(
+    val strategyCode: String? = null,
+    val effectiveFrom: LocalDate? = null,
+    /** Single-use challenge signed over `pension-strategy-change:<StrategyChangeDocument.hash>`. */
+    val scaChallengeId: String? = null,
+    /** Warnings shown and acknowledged for this change (see 409 WARNINGS_REQUIRED). */
+    val acknowledgedWarnings: List<com.openbank.pension.domain.questionnaire.WarningCode?>? = null,
+    /** Language the warnings were shown in (cs / en): the acknowledgement binds that wording. */
+    val language: String? = null,
+)
 
 data class IncentiveEvaluationRequest(
     val contribution: BigDecimal? = null,
     val period: IncentivePeriod? = null,
     val employerContributionAnnual: BigDecimal? = null,
     val sharedCapUsed: Map<String, BigDecimal?>? = null,
-)
-
-data class EarlyTerminationRequest(
-    val currentValue: BigDecimal? = null,
-    /** incentive id -> (calendar year -> amount received). */
-    val incentivesReceived: Map<String, Map<Int, BigDecimal?>?>? = null,
-    val confirm: Boolean? = null,
 )
 
 data class StrategyElectionDto(val strategyCode: String, val effectiveFrom: LocalDate, val electedAt: Instant)
@@ -138,33 +138,6 @@ data class IncentiveResultResponse(
             r.indicativeSaving,
             r.claimChannel.name,
             r.explanation,
-        )
-    }
-}
-
-data class ClawbackDto(val incentiveId: String, val mode: String, val amount: BigDecimal) {
-    companion object {
-        fun from(c: Clawback) = ClawbackDto(c.incentiveId, c.mode.name, c.amount)
-    }
-}
-
-data class EarlyTerminationResponse(
-    val contract: ContractResponse,
-    val payoutConditionsMet: Boolean,
-    val ageAtExit: Int,
-    val durationMonths: Long,
-    val earlyWithdrawalAllowed: Boolean,
-    val currentValue: BigDecimal,
-    val fee: BigDecimal,
-    val clawbacks: List<ClawbackDto>,
-    val estimatedNetPayout: BigDecimal,
-    val notes: List<String>,
-) {
-    companion object {
-        fun from(contract: PensionContract, p: SurrenderPreview) = EarlyTerminationResponse(
-            ContractResponse.from(contract), p.payoutConditionsMet, p.ageAtExit, p.durationMonths,
-            p.earlyWithdrawalAllowed, p.currentValue, p.fee, p.clawbacks.map(ClawbackDto::from),
-            p.estimatedNetPayout, p.notes,
         )
     }
 }

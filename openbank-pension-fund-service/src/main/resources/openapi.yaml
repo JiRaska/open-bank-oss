@@ -2,7 +2,8 @@ openapi: 3.1.0
 info:
   title: OpenBank Pension Fund Service API
   # 1.0.0: first contract (ADR-0334 slice S4, issue #12350).
-  version: 1.0.0
+  # 1.0.1: editorial — OrderRequest documents the same-currency rule for a switch (400 otherwise).
+  version: 1.0.1
   description: |
     Provider side of the pension platform (ADR-0334 §1): segregated funds, fund strategies with
     lifecycle glide paths, the unit register and NAV.
@@ -461,7 +462,7 @@ components:
     OrderRequest:
       type: object
       required: [fundId, type]
-      description: SUBSCRIBE takes `amount`; REDEEM and SWITCH_OUT take `units`; SWITCH_OUT also names `targetFundId`.
+      description: SUBSCRIBE takes `amount`; REDEEM and SWITCH_OUT take `units`; SWITCH_OUT also names `targetFundId`. Source and target funds must use the same currency; a cross-currency switch is refused (400).
       properties:
         fundId: { type: string, format: uuid }
         type:

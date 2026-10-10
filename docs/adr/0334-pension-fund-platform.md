@@ -69,7 +69,11 @@ reusing existing services wherever the concern is not pension-specific.
 - `PensionContract` (product, participant, provider entity, jurisdiction pack version, status
   lifecycle `DRAFT → PENDING_ACTIVATION → ACTIVE → SUSPENDED (contributions paused) →
   TERMINATING → PAID_OUT | TRANSFERRED_OUT | CLOSED`);
-- `StrategyElection` (chosen strategy or lifecycle strategy, history, effective dates);
+- `StrategyElection` (chosen strategy or lifecycle strategy, history, effective dates). A lifecycle
+  strategy is an *offered* strategy, never a statutory default: in CZ the lifecycle default is only
+  proposed by the government bill "Lepší penzijko" (approved by the government 2026-08-24, proposed
+  effect 2027-01-01, not law as of 2026-10), so a pack may mark it as recommended but must not apply
+  it as a default until a pack version effective from the enacted date says so;
 - `ContributionSchedule` and `Contribution` (source: `PARTICIPANT | EMPLOYER | STATE | TRANSFER_IN`);
 - `Beneficiary` designations; `PayoutRequest` (form: lump sum, annuity, phased withdrawal,
   early withdrawal, surrender); `TransferRequest` (in and out);
@@ -126,7 +130,11 @@ credit, one per `(country, product type)`; the first two are `CZ/DPS` and `CZ/DI
 - eligibility (age, residency, legal capacity, minors with guardian);
 - incentive rules as a generic model — `matching` (rate, band, cap per period), `flat`, `tax-relief`
   (deduction cap, shared caps across products), `employer-exemption` — plus the claim channel
-  (batch to a state agency, tax return, none) and clawback rules on early exit;
+  (batch to a state agency, tax return, none) with its filing cadence, and clawback rules on early
+  exit. The CZ state contribution is computed per month but claimed **quarterly**: the company
+  files one application to MF in the calendar month after each calendar quarter, and MF's returns
+  are reported and settled separately (ZDPS 427/2011 §§ 14, 16, 18; see
+  `docs/research/cz-state-pension-contribution.md`). It is not a monthly filing;
 - payout conditions (minimum age, minimum duration, allowed forms, early-withdrawal penalties
   and tax recapture), transfer rules (deadlines, fees, what moves with the transfer);
 - required disclosures and their templates, cooling-off period, regulatory report set.

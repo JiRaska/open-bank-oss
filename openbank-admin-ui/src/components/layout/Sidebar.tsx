@@ -119,6 +119,21 @@ const balanceSheetNav: NavItem[] = [
   { nameCs: 'Storno doúčtování', nameEn: 'Backfill void',         href: '/balance-sheet/ledger-backfill/voids', icon: Undo2, permission: 'ledger-backfill:view' },
 ]
 
+// ADR-0334 / #12350: the pension back office — participant contracts and their queues
+// (openbank-pension-service) and fund administration (openbank-pension-fund-service).
+const pensionNav: NavItem[] = [
+  { nameCs: 'Penzijní smlouvy',     nameEn: 'Pension contracts',    href: '/pension',               icon: PiggyBank,  permission: 'pension:view' },
+  { nameCs: 'Sjednání a převody',   nameEn: 'Onboarding & transfers', href: '/pension/queues',      icon: Inbox,      permission: 'pension:view' },
+  { nameCs: 'Nespárované příspěvky', nameEn: 'Unmatched contributions', href: '/pension/contributions', icon: FileSearch, permission: 'pension:view' },
+  { nameCs: 'Státní příspěvky',     nameEn: 'State incentives',     href: '/pension/incentives',    icon: Gift,       permission: 'pension:view' },
+  { nameCs: 'Příkazy k úhradě',     nameEn: 'Contribution mandates', href: '/pension/mandates',    icon: Repeat,     permission: 'pension:view' },
+  { nameCs: 'Výplaty a úmrtí',      nameEn: 'Payouts & death claims', href: '/pension/payouts',     icon: Wallet,     permission: 'pension:view' },
+  { nameCs: 'Anuitní partneři',     nameEn: 'Annuity partners',     href: '/pension/annuity',       icon: Handshake,  permission: 'pension:view' },
+  { nameCs: 'Fondy a NAV',          nameEn: 'Funds & NAV',          href: '/pension/funds',         icon: Landmark,   permission: 'pension:view' },
+  { nameCs: 'Strategie',            nameEn: 'Strategies',           href: '/pension/strategies',    icon: Scale,      permission: 'pension:view' },
+  { nameCs: 'Podílové jednotky',    nameEn: 'Unit holdings',        href: '/pension/holdings',      icon: Layers,     permission: 'pension:view' },
+]
+
 // ADR-0315 / #10618: the treasury desk (openbank-treasury-service). Each entry carries the
 // permission of the page it opens (roles.ts): a dealer sees no approval inbox, an approver no form.
 const treasuryNav: NavItem[] = [
@@ -248,7 +263,7 @@ const sysNav: NavItem[] = [
 const SCROLL_KEY = 'ob.sidebar.scroll'
 
 const ALL_NAV: NavItem[] = [
-  ...coreNav, ...revenueNav, ...balanceSheetNav, ...treasuryNav, ...customerNav, ...paymentsNav,
+  ...coreNav, ...revenueNav, ...balanceSheetNav, ...treasuryNav, ...pensionNav, ...customerNav, ...paymentsNav,
   ...complianceNav, ...opsNav, ...docsNav, ...platformNav, ...toolsNav, ...sysNav,
 ]
 
@@ -396,6 +411,12 @@ export function Sidebar({ mobileOpen, onClose }: { mobileOpen?: boolean; onClose
           <>
             <SectionLabel>{t('Treasury', 'Treasury')}</SectionLabel>
             <NavSection items={filter(treasuryNav)} currentHref={currentHref} />
+          </>
+        )}
+        {filter(pensionNav).length > 0 && (
+          <>
+            <SectionLabel>{t('Penze', 'Pensions')}</SectionLabel>
+            <NavSection items={filter(pensionNav)} currentHref={currentHref} />
           </>
         )}
         <SectionLabel>{t('Klienti', 'Customers')}</SectionLabel>

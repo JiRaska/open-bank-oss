@@ -14,7 +14,7 @@ import java.util.UUID
 /** The two product lines ADR-0334 §2a ships from the start; the difference between them is pack data. */
 enum class ProductLine { DPS, DIP }
 
-enum class PayoutForm { LUMP_SUM, ANNUITY, PHASED_WITHDRAWAL, EARLY_WITHDRAWAL, SURRENDER }
+enum class PayoutForm { LUMP_SUM, ANNUITY, PHASED_WITHDRAWAL, FIXED_PERIOD_PENSION, EARLY_WITHDRAWAL, SURRENDER }
 
 enum class ContributionFrequency { MONTHLY, QUARTERLY, ANNUALLY }
 
@@ -73,7 +73,8 @@ enum class ContractStatus {
             PENDING_ACTIVATION to setOf(ACTIVE, CLOSED),
             ACTIVE to setOf(SUSPENDED, TERMINATING),
             SUSPENDED to setOf(ACTIVE, TERMINATING),
-            TERMINATING to setOf(PAID_OUT, TRANSFERRED_OUT, CLOSED),
+            // ACTIVE: an annuity purchase whose premium came back to the contract (#12383).
+            TERMINATING to setOf(PAID_OUT, TRANSFERRED_OUT, CLOSED, ACTIVE),
             PAID_OUT to emptySet(),
             TRANSFERRED_OUT to emptySet(),
             CLOSED to emptySet(),
@@ -125,6 +126,7 @@ data class Beneficiary(val name: String, val partyId: UUID? = null, val sharePer
  * The jurisdiction pack is PINNED by `(jurisdiction, productLine, packVersion)` at creation and
  * never re-resolved: a contract is judged by the law it was sold under (ADR-0212 D3).
  */
+@Suppress("TooManyFunctions") // one function per lifecycle edge of the transition table
 data class PensionContract(
     val id: UUID,
     val participantPartyId: UUID,
@@ -143,6 +145,8 @@ data class PensionContract(
     val idempotencyKey: String? = null,
     val createdAt: Instant,
     val updatedAt: Instant,
+    /** Optimistic-lock version of the stored row (set on load, checked on save; ADR-0334 S8). */
+    val version: Int = 0,
 ) {
     init {
         require(strategyHistory.isNotEmpty()) { "a contract always carries an elected strategy" }
@@ -156,14 +160,24 @@ data class PensionContract(
         require(beneficiaries.isEmpty() || total.compareTo(Beneficiary.HUNDRED) == 0) {
             "beneficiary shares must total 100"
         }
-        require(status == ContractStatus.DRAFT || status == ContractStatus.PENDING_ACTIVATION || startDate != null) {
+        // CLOSED is reachable from DRAFT / PENDING_ACTIVATION (withdrawn or never funded, ADR-0334
+        // S2), so a closed contract may never have started.
+        require(status in NEVER_STARTED_ALLOWED || startDate != null) {
             "an activated contract carries its start date"
         }
     }
 
-    /** The election in force today: the newest by effective date, then by election time. */
+    /**
+     * Latest recorded election, including scheduled changes. Kept for the contract response and
+     * election replay compatibility; money movement must use [strategyOn] with its business date.
+     */
     val currentStrategy: StrategyElection
         get() = strategyHistory.maxWith(compareBy<StrategyElection>({ it.effectiveFrom }, { it.electedAt }))
+
+    /** The election in force on [asOf], or null before the first election takes effect. */
+    fun strategyOn(asOf: LocalDate): StrategyElection? = strategyHistory
+        .filter { !it.effectiveFrom.isAfter(asOf) }
+        .maxWithOrNull(compareBy<StrategyElection>({ it.effectiveFrom }, { it.electedAt }))
 
     fun submit(now: Instant): PensionContract = moveTo(ContractStatus.PENDING_ACTIVATION, now)
 
@@ -185,6 +199,20 @@ data class PensionContract(
 
     fun close(now: Instant): PensionContract = moveTo(ContractStatus.CLOSED, now)
 
+    /** TERMINATING -> TRANSFERRED_OUT once a transfer-out settled (ADR-0334 slice S2). */
+    fun markTransferredOut(now: Instant): PensionContract = moveTo(ContractStatus.TRANSFERRED_OUT, now)
+
+    fun markPaidOut(now: Instant): PensionContract = moveTo(ContractStatus.PAID_OUT, now)
+
+    /**
+     * TERMINATING -> ACTIVE: the annuity payout failed and the pack returns the premium to the
+     * contract (#12383), so the participant holds units again and may choose another payout.
+     */
+    fun reopenAfterReversedPayout(now: Instant): PensionContract {
+        check(status == ContractStatus.TERMINATING) { "only a TERMINATING contract can reopen, was $status" }
+        return moveTo(ContractStatus.ACTIVE, now)
+    }
+
     /** Strategy can change in any non-terminal state; the previous elections stay as history. */
     fun electStrategy(strategyCode: String, effectiveFrom: LocalDate, now: Instant): PensionContract {
         check(!status.terminal && status != ContractStatus.TERMINATING) {
@@ -205,6 +233,9 @@ data class PensionContract(
     }
 
     companion object {
+        private val NEVER_STARTED_ALLOWED =
+            setOf(ContractStatus.DRAFT, ContractStatus.PENDING_ACTIVATION, ContractStatus.CLOSED)
+
         @Suppress("LongParameterList")
         fun draft(
             participantPartyId: UUID,

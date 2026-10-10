@@ -44,7 +44,10 @@ info:
   # 1.74.0 -> 1.75.0 (#10016): additive — GET /capabilities (ADR-0310 D5).
   # 1.75.0 -> 1.76.0 (#11966): additive — /holdings, the customer write side of the declared
   # holdings that GET /net-worth reads (ADR-0301 D1).
-  version: 1.79.1
+  # 1.79.1 -> 1.80.0 (#12350): additive — /pension/*, the customer pension lifecycle (ADR-0334 S6),
+  # following pension-service API 1.2.0 and docs/ux/pension-client-flows.md (questionnaire, schedule,
+  # beneficiaries, mandates, statements, annuity).
+  version: 1.80.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -80,6 +83,7 @@ tags:
   - name: Cards
   - name: Lending
   - name: Wealth
+  - name: Pension
   - name: Delegation
   - name: External disclosures
   - name: Pockets
@@ -193,6 +197,1121 @@ paths:
           description: The net-worth tree, possibly partial
         '401':
           description: Missing or invalid bearer token
+  /pension/products:
+    get:
+      tags: [Pension]
+      operationId: listPensionProducts
+      summary: Published DPS and DIP offerings from the product catalog retirement pack
+      description: >-
+        ADR-0334 S6. Values in the illustrative pack carry reviewStatus
+        ILLUSTRATIVE_REQUIRES_LEGAL_AND_COMMERCIAL_REVIEW and are not an offer.
+      security:
+        - customerOidc: [pension:read]
+      responses:
+        '200':
+          description: Offerings
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/PensionProduct'}
+        '401': {description: Missing or invalid bearer token}
+        '502': {description: Product catalog unavailable}
+  /pension/simulations:
+    post:
+      tags: [Pension]
+      operationId: simulatePension
+      summary: 'Illustrative retirement projection per strategy'
+      description: >-
+        Proxies pension-service POST /api/v2/pension/simulations. The answer is always illustrative
+        (illustrative: true with a disclaimer) and binds nothing, so no Idempotency-Key is required.
+      security:
+        - customerOidc: [pension:read]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PensionSimulationRequest'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        '400': {description: 'Invalid input, missing Idempotency-Key, or PENSION_RULE_REFUSED'}
+        '401': {description: Missing or invalid bearer token}
+        '502': {description: Pension service unavailable}
+  /pension/contracts:
+    get:
+      tags: [Pension]
+      operationId: listPensionContracts
+      summary: The caller's pension contracts
+      description: >-
+        Proxies pension-service GET /api/v2/pension/contracts. The participant is always the token's
+        own party; X-Acting-For is not honoured on pension routes.
+      security:
+        - customerOidc: [pension:read]
+      responses:
+        '200':
+          description: Contracts
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/PensionContract'}
+        '401': {description: Missing or invalid bearer token}
+        '502': {description: Pension service unavailable}
+  /pension/applications:
+    post:
+      tags: [Pension]
+      operationId: startPensionApplication
+      summary: 'Onboarding: open an application; eligibility and KYC are checked at once'
+      description: >-
+        Proxies pension-service POST /api/v2/pension/onboarding/applications (S2). Birth date and
+        residency country are read from the caller's party record, never from the request.
+      security:
+        - customerOidc: [pension:write]
+      parameters:
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 256}, description: 'Forwarded to pension-service, which answers a retry with the first response; missing -> 400'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PensionApplicationRequest'}
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PensionApplication'}
+        '400': {description: 'Invalid input, missing Idempotency-Key, or PENSION_RULE_REFUSED'}
+        '422': {description: 'PARTY_PROFILE_INCOMPLETE: the party record has no birth date or residency country'}
+        '401': {description: Missing or invalid bearer token}
+        '502': {description: Pension service unavailable}
+  /pension/transfers-in:
+    post:
+      tags: [Pension]
+      operationId: startPensionTransferIn
+      summary: 'Onboarding by transfer-in: an application of kind TRANSFER_IN'
+      description: >-
+        Proxies pension-service POST /api/v2/pension/contracts/transfers-in.
+      security:
+        - customerOidc: [pension:write]
+      parameters:
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 256}, description: 'Forwarded to pension-service, which answers a retry with the first response; missing -> 400'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PensionTransferInRequest'}
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PensionApplication'}
+        '400': {description: 'Invalid input, missing Idempotency-Key, or PENSION_RULE_REFUSED'}
+        '422': {description: 'PARTY_PROFILE_INCOMPLETE'}
+        '401': {description: Missing or invalid bearer token}
+        '502': {description: Pension service unavailable}
+  /pension/applications/{applicationId}:
+    get:
+      tags: [Pension]
+      operationId: getPensionApplication
+      summary: 'Status of an application of the caller'
+      security:
+        - customerOidc: [pension:read]
+      parameters:
+        - {name: applicationId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PensionApplication'}
+        '404': {description: No such application for the caller}
+        '401': {description: Missing or invalid bearer token}
+        '502': {description: Pension service unavailable}
+  /pension/applications/{applicationId}/recommendation:
+    get:
+      tags: [Pension]
+      operationId: getPensionRecommendation
+      summary: 'Strategy recommendation from the questionnaire and years to retirement'
+      security:
+        - customerOidc: [pension:read]
+      parameters:
+        - {name: applicationId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        '404': {description: No such application for the caller}
+        '409': {description: 'INVALID_CONTRACT_STATE: the questionnaire is not answered yet'}
+        '401': {description: Missing or invalid bearer token}
+        '502': {description: Pension service unavailable}
+  /pension/applications/{applicationId}/questionnaire:
+    get:
+      tags: [Pension]
+      operationId: getPensionQuestionnaire
+      summary: 'The question set with saved answers, progress and prefill'
+      description: 'Proxies pension-service GET .../questionnaire (F7). Texts come from the versioned, legally reviewed question set.'
+      security:
+        - customerOidc: [pension:read]
+      parameters:
+        - {name: applicationId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: lang, in: query, required: false, schema: {type: string, enum: [cs, en]}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        '404': {description: No such application for the caller}
+        '409': {description: 'INVALID_CONTRACT_STATE'}
+        '401': {description: Missing or invalid bearer token}
+        '502': {description: Pension service unavailable}
+    post:
+      tags: [Pension]
+      operationId: answerPensionQuestionnaire
+      summary: 'Answer the suitability, appropriateness and ESG questionnaire'
+      security:
+        - customerOidc: [pension:write]
+      parameters:
+        - {name: applicationId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 256}, description: 'Forwarded to pension-service, which answers a retry with the first response; missing -> 400'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PensionQuestionnaire'}
+      responses:
+        '200':
+          description: OK (pension-service 1.2.0 answers application, recommendation and profile)
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        '400': {description: 'Invalid input, missing Idempotency-Key, or PENSION_RULE_REFUSED'}
+        '404': {description: No such application for the caller}
+        '409': {description: INVALID_CONTRACT_STATE}
+        '422': {description: 'INCONSISTENT_ANSWERS with inconsistencies [{code, questions}]: show both answers; resubmit with confirmInconsistencies'}
+        '401': {description: Missing or invalid bearer token}
+        '502': {description: Pension service unavailable}
+  /pension/applications/{applicationId}/strategy:
+    post:
+      tags: [Pension]
+      operationId: choosePensionStrategy
+      summary: 'Choose the strategy (omitted means the recommendation) and issue its key-information document'
+      security:
+        - customerOidc: [pension:write]
+      parameters:
+        - {name: applicationId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 256}, description: 'Forwarded to pension-service, which answers a retry with the first response; missing -> 400'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, properties: {strategyCode: {type: string, pattern: '^[A-Z0-9_]{1,64}$'}, acknowledgeWarning: {type: boolean}, language: {type: string, pattern: '^[a-z]{2}$'}}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PensionApplication'}
+        '400': {description: 'Invalid input, missing Idempotency-Key, or PENSION_RULE_REFUSED'}
+        '404': {description: No such application for the caller}
+        '409': {description: INVALID_CONTRACT_STATE}
+        '401': {description: Missing or invalid bearer token}
+        '502': {description: Pension service unavailable}
+  /pension/applications/{applicationId}/kid/accept:
+    post:
+      tags: [Pension]
+      operationId: acceptPensionKid
+      summary: 'Accept the issued key-information document'
+      security:
+        - customerOidc: [pension:write]
+      parameters:
+        - {name: applicationId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 256}, description: 'Forwarded to pension-service, which answers a retry with the first response; missing -> 400'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [documentId], properties: {documentId: {type: string, maxLength: 200}}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PensionApplication'}
+        '400': {description: 'Invalid input, missing Idempotency-Key, or PENSION_RULE_REFUSED'}
+        '404': {description: No such application for the caller}
+        '409': {description: INVALID_CONTRACT_STATE}
+        '401': {description: Missing or invalid bearer token}
+        '502': {description: Pension service unavailable}
+  /pension/applications/{applicationId}/sign:
+    post:
+      tags: [Pension]
+      operationId: signPensionApplication
+      summary: 'SCA-sign the application; activation follows the cooling-off period'
+      security:
+        - customerOidc: [pension:write]
+      parameters:
+        - {name: applicationId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: X-SCA-Challenge-Id, in: header, required: true, schema: {type: string, format: uuid}, description: 'An approved SCA challenge bound to the quote or document pension-service issued; forwarded to and consumed by pension-service, single use'}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 256}, description: 'Forwarded to pension-service, which answers a retry with the first response; missing -> 400'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PensionApplication'}
+        '400': {description: 'Invalid input, missing Idempotency-Key, or PENSION_RULE_REFUSED'}
+        '403': {description: 'SCA_REQUIRED (no challenge), or the challenge was refused by pension-service'}
+        '404': {description: No such application for the caller}
+        '409': {description: INVALID_CONTRACT_STATE}
+        '401': {description: Missing or invalid bearer token}
+        '502': {description: Pension service unavailable}
+  /pension/applications/{applicationId}/withdraw:
+    post:
+      tags: [Pension]
+      operationId: withdrawPensionApplication
+      summary: 'Withdraw a signed application within the cooling-off period'
+      security:
+        - customerOidc: [pension:write]
+      parameters:
+        - {name: applicationId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: X-SCA-Challenge-Id, in: header, required: true, schema: {type: string, format: uuid}, description: 'An approved SCA challenge bound to this operation (see SCA_REQUIRED.scaLinking); single use'}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 256}, description: 'Forwarded to pension-service, which answers a retry with the first response; missing -> 400'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PensionApplication'}
+        '400': {description: 'Invalid input, missing Idempotency-Key, or PENSION_RULE_REFUSED'}
+        '403': {description: 'SCA_REQUIRED (no challenge; the body carries scaLinking — purpose APPROVAL, approvalRequestId, payloadSha256 — to raise one for) or SCA_REJECTED (challenge not approved, spent, or signed for another operation or payload)'}
+        '404': {description: No such application for the caller}
+        '409': {description: INVALID_CONTRACT_STATE}
+        '401': {description: Missing or invalid bearer token}
+        '502': {description: Pension service unavailable}
+  /pension/contracts/{contractId}:
+    get:
+      tags: [Pension]
+      operationId: getPensionContract
+      summary: Contract overview
+      description: >-
+        An unknown, malformed or another party's id is the same 404. `valuation` is
+        pension-service's participant valuation (GET /contracts/{id}/valuation); the edge never
+        reads the unit register itself, and a valuation pension-service cannot give is null.
+      security:
+        - customerOidc: [pension:read]
+      parameters:
+        - $ref: '#/components/parameters/PensionContractId'
+      responses:
+        '200':
+          description: Contract
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PensionContract'}
+        '401': {description: Missing or invalid bearer token}
+        '404': {description: No such contract for the caller}
+        '502': {description: Pension service unavailable}
+  /pension/contracts/{contractId}/transactions:
+    get:
+      tags: [Pension]
+      operationId: listPensionUnitTransactions
+      summary: The contract's priced unit transactions
+      description: >-
+        Proxies pension-service GET /contracts/{id}/transactions after the ownership read; an
+        unknown, malformed or another party's id is the same 404.
+      security:
+        - customerOidc: [pension:read]
+      parameters:
+        - $ref: '#/components/parameters/PensionContractId'
+        - {name: page, in: query, required: false, schema: {type: integer, minimum: 0, default: 0}}
+        - {name: size, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+      responses:
+        '200':
+          description: One page of unit transactions
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PensionUnitTransactionPage'}
+        '400': {description: page or size out of range}
+        '401': {description: Missing or invalid bearer token}
+        '404': {description: No such contract for the caller}
+        '502': {description: Pension service unavailable}
+  /pension/contracts/{contractId}/pause:
+    post:
+      tags: [Pension]
+      operationId: pausePensionContributions
+      summary: Pause contributions (ACTIVE -> SUSPENDED)
+      security:
+        - customerOidc: [pension:write]
+      parameters:
+        - $ref: '#/components/parameters/PensionContractId'
+        - {name: X-SCA-Challenge-Id, in: header, required: true, schema: {type: string, format: uuid}, description: 'An approved SCA challenge bound to this operation (see SCA_REQUIRED.scaLinking); single use'}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 256}, description: 'Forwarded to pension-service, which answers a retry with the first response; missing -> 400'}
+      responses:
+        '200': {$ref: '#/components/responses/PensionContract'}
+        '403': {description: 'SCA_REQUIRED (no challenge; the body carries scaLinking — purpose APPROVAL, approvalRequestId, payloadSha256 — to raise one for) or SCA_REJECTED (challenge not approved, spent, or signed for another operation or payload)'}
+        '401': {description: Missing or invalid bearer token}
+        '404': {description: No such contract for the caller}
+        '409': {description: 'INVALID_CONTRACT_STATE'}
+        '502': {description: Pension service unavailable}
+  /pension/contracts/{contractId}/resume:
+    post:
+      tags: [Pension]
+      operationId: resumePensionContributions
+      summary: Resume contributions (SUSPENDED -> ACTIVE)
+      security:
+        - customerOidc: [pension:write]
+      parameters:
+        - $ref: '#/components/parameters/PensionContractId'
+        - {name: X-SCA-Challenge-Id, in: header, required: true, schema: {type: string, format: uuid}, description: 'An approved SCA challenge bound to this operation (see SCA_REQUIRED.scaLinking); single use'}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 256}, description: 'Forwarded to pension-service, which answers a retry with the first response; missing -> 400'}
+      responses:
+        '200': {$ref: '#/components/responses/PensionContract'}
+        '403': {description: 'SCA_REQUIRED (no challenge; the body carries scaLinking — purpose APPROVAL, approvalRequestId, payloadSha256 — to raise one for) or SCA_REJECTED (challenge not approved, spent, or signed for another operation or payload)'}
+        '401': {description: Missing or invalid bearer token}
+        '404': {description: No such contract for the caller}
+        '409': {description: 'INVALID_CONTRACT_STATE'}
+        '502': {description: Pension service unavailable}
+  /pension/contracts/{contractId}/strategy:
+    put:
+      tags: [Pension]
+      operationId: changePensionStrategy
+      summary: Change the investment strategy; units switch at the next NAV
+      description: >-
+        Document-bound SCA (pension-service 1.2.0): pension-strategy-change:<sha256(pension-strategy-change|contractId|strategyCode|effectiveFrom|SORTED,ACKS)>.
+        Without a challenge the edge answers 403 SCA_REQUIRED with that linking and the effectiveFrom it pinned; resend the
+        identical body (with that effectiveFrom) and the challenge. pension-service judges suitability first:
+        409 REASSESSMENT_REQUIRED (reason, applicationId) or 409 WARNINGS_REQUIRED (warnings).
+      security:
+        - customerOidc: [pension:write]
+      parameters:
+        - $ref: '#/components/parameters/PensionContractId'
+        - {name: X-SCA-Challenge-Id, in: header, required: false, schema: {type: string, format: uuid}, description: 'An approved APPROVAL challenge raised with the scaLinking a request without one returns (approvalRequestId pension-<op>:<hash>, docs/ux/pension-client-flows.md); forwarded to and spent by pension-service, never by the edge'}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 256}, description: 'Forwarded to pension-service, which answers a retry with the first response; missing -> 400'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [strategyCode]
+              properties:
+                strategyCode: {type: string, pattern: '^[A-Z0-9_]{1,64}$'}
+                effectiveFrom: {type: string, format: date, description: Defaults to today; never in the past}
+                acknowledgedWarnings: {type: array, items: {type: string, enum: [STRATEGY_ABOVE_PROFILE, PRODUCT_NOT_APPROPRIATE, SUSTAINABILITY_PREFERENCE_NOT_MET]}}
+                language: {type: string, pattern: '^[a-z]{2}$'}
+      responses:
+        '200': {$ref: '#/components/responses/PensionContract'}
+        '400': {description: 'Invalid input, missing Idempotency-Key, or PENSION_RULE_REFUSED'}
+        '403': {description: 'SCA_REQUIRED (no challenge; body carries scaLinking {purpose APPROVAL, approvalRequestId pension-<op>:<hash>, payloadSha256}), SCA_REJECTED, STRATEGY_NOT_PERMITTED, or PENSION_CHANGE_REFUSED (challenge not accepted, or the account is not the customer''s own)'}
+        '401': {description: Missing or invalid bearer token}
+        '404': {description: No such contract for the caller}
+        '409': {description: 'REASSESSMENT_REQUIRED (reason, applicationId), WARNINGS_REQUIRED (warnings), or INVALID_CONTRACT_STATE'}
+        '502': {description: Pension service unavailable}
+  /pension/contracts/{contractId}/payment-reference:
+    get:
+      tags: [Pension]
+      operationId: getPensionPaymentReference
+      summary: 'The reference to quote on a one-off contribution payment'
+      security:
+        - customerOidc: [pension:read]
+      parameters:
+        - $ref: '#/components/parameters/PensionContractId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        '404': {description: No such contract for the caller}
+        '401': {description: Missing or invalid bearer token}
+        '502': {description: Pension service unavailable}
+  /pension/contracts/{contractId}/contribution-mandates:
+    post:
+      tags: [Pension]
+      operationId: createPensionContributionMandate
+      summary: 'Set up a contribution standing order or direct debit'
+      description: 'Document-bound SCA pension-mandate-setup:<sha256(pension-mandate-setup|contractId|kind|IBAN|amount|CURRENCY|firstCollection)>, spent by pension-service. The debit account is resolved from the IBAN and must be the customer''s own active account.'
+      security:
+        - customerOidc: [pension:write]
+      parameters:
+        - $ref: '#/components/parameters/PensionContractId'
+        - {name: X-SCA-Challenge-Id, in: header, required: false, schema: {type: string, format: uuid}, description: 'An approved APPROVAL challenge raised with the scaLinking a request without one returns (approvalRequestId pension-<op>:<hash>, docs/ux/pension-client-flows.md); forwarded to and spent by pension-service, never by the edge'}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 256}, description: 'Forwarded to pension-service, which answers a retry with the first response; missing -> 400'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PensionMandateRequest'}
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        '400': {description: 'Invalid input, missing Idempotency-Key, or PENSION_RULE_REFUSED'}
+        '403': {description: 'SCA_REQUIRED (no challenge; body carries scaLinking {purpose APPROVAL, approvalRequestId pension-<op>:<hash>, payloadSha256}), SCA_REJECTED, or PENSION_CHANGE_REFUSED (challenge not accepted, or the account is not the customer''s own)'}
+        '404': {description: No such contract for the caller}
+        '409': {description: INVALID_CONTRACT_STATE}
+        '401': {description: Missing or invalid bearer token}
+        '502': {description: Pension service unavailable}
+  /pension/contracts/{contractId}/tax-summary:
+    get:
+      tags: [Pension]
+      operationId: getPensionTaxSummary
+      summary: Contributions, incentives and deductible amount for a tax year
+      description: Proxies pension-service GET /api/v2/pension/funding/contracts/{id}/tax-years/{year} (S3).
+      security:
+        - customerOidc: [pension:read]
+      parameters:
+        - $ref: '#/components/parameters/PensionContractId'
+        - {name: year, in: query, required: true, schema: {type: integer, minimum: 2000}}
+      responses:
+        '200':
+          description: Tax-year summary
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        '400': {description: year missing, malformed or in the future}
+        '401': {description: Missing or invalid bearer token}
+        '404': {description: No such contract for the caller}
+        '502': {description: Pension service unavailable}
+  /pension/applications/{applicationId}/questionnaire/draft:
+    put:
+      tags: [Pension]
+      operationId: savePensionQuestionnaireDraft
+      summary: 'Save the questionnaire answers so far (resume at progress.nextStep)'
+      description: 'Proxies pension-service PUT .../questionnaire/draft (F7).'
+      security:
+        - customerOidc: [pension:write]
+      parameters:
+        - {name: applicationId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 256}, description: 'Forwarded to pension-service, which answers a retry with the first response; missing -> 400'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PensionQuestionnaireDraft'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        '400': {description: 'Invalid input, missing Idempotency-Key, or PENSION_RULE_REFUSED'}
+        '404': {description: No such application for the caller}
+        '409': {description: 'INVALID_CONTRACT_STATE'}
+        '401': {description: Missing or invalid bearer token}
+        '502': {description: Pension service unavailable}
+  /pension/applications/{applicationId}/profile:
+    get:
+      tags: [Pension]
+      operationId: getPensionRiskProfile
+      summary: 'Risk class, the answers that set it, horizon and recommendation'
+      description: 'Proxies pension-service GET .../profile (F7). 409 once the assessment has expired: restart the questionnaire.'
+      security:
+        - customerOidc: [pension:read]
+      parameters:
+        - {name: applicationId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: lang, in: query, required: false, schema: {type: string, enum: [cs, en]}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        '404': {description: No such application for the caller}
+        '409': {description: 'INVALID_CONTRACT_STATE'}
+        '401': {description: Missing or invalid bearer token}
+        '502': {description: Pension service unavailable}
+  /pension/applications/{applicationId}/warnings:
+    get:
+      tags: [Pension]
+      operationId: getPensionStrategyWarnings
+      summary: 'Warnings a strategy needs acknowledged before it can be chosen'
+      description: 'Proxies pension-service GET .../warnings (F7).'
+      security:
+        - customerOidc: [pension:read]
+      parameters:
+        - {name: applicationId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: strategyCode, in: query, required: true, schema: {type: string, pattern: '^[A-Z0-9_]{1,64}$'}}
+        - {name: lang, in: query, required: false, schema: {type: string, enum: [cs, en]}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        '400': {description: strategyCode missing or malformed}
+        '404': {description: No such application for the caller}
+        '409': {description: 'INVALID_CONTRACT_STATE'}
+        '401': {description: Missing or invalid bearer token}
+        '502': {description: Pension service unavailable}
+  /pension/applications/{applicationId}/warnings/acknowledge:
+    post:
+      tags: [Pension]
+      operationId: acknowledgePensionWarnings
+      summary: 'Record that the warnings were shown and understood'
+      description: 'Proxies pension-service POST .../warnings/acknowledge (F7). The server stores the hash of the exact text shown.'
+      security:
+        - customerOidc: [pension:write]
+      parameters:
+        - {name: applicationId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 256}, description: 'Forwarded to pension-service, which answers a retry with the first response; missing -> 400'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PensionWarningAcknowledgement'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        '400': {description: 'Invalid input, missing Idempotency-Key, or PENSION_RULE_REFUSED'}
+        '404': {description: No such application for the caller}
+        '409': {description: 'INVALID_CONTRACT_STATE'}
+        '422': {description: 'INCONSISTENT_ANSWERS with inconsistencies [{code, questions}]'}
+        '401': {description: Missing or invalid bearer token}
+        '502': {description: Pension service unavailable}
+  /pension/contracts/{contractId}/contribution-schedule:
+    get:
+      tags: [Pension]
+      operationId: getPensionContributionSchedule
+      summary: 'The schedule in force, a pending change and the history'
+      description: 'Proxies pension-service GET .../contribution-schedule (F1).'
+      security:
+        - customerOidc: [pension:read]
+      parameters:
+        - $ref: '#/components/parameters/PensionContractId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        '404': {description: No such contract for the caller}
+        '401': {description: Missing or invalid bearer token}
+        '502': {description: Pension service unavailable}
+  /pension/contracts/{contractId}/contribution-schedule/preview:
+    post:
+      tags: [Pension]
+      operationId: previewPensionScheduleChange
+      summary: 'What a schedule change would do, and the documentSha256 its SCA signs'
+      description: 'Proxies pension-service POST .../contribution-schedule/preview (F1); changes nothing.'
+      security:
+        - customerOidc: [pension:read]
+      parameters:
+        - $ref: '#/components/parameters/PensionContractId'
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 256}, description: 'Forwarded to pension-service, which answers a retry with the first response; missing -> 400'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PensionScheduleChange'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        '400': {description: 'Invalid input, missing Idempotency-Key, or PENSION_RULE_REFUSED'}
+        '404': {description: No such contract for the caller}
+        '409': {description: 'INVALID_CONTRACT_STATE'}
+        '401': {description: Missing or invalid bearer token}
+        '502': {description: Pension service unavailable}
+  /pension/contracts/{contractId}/contribution-schedule/changes:
+    post:
+      tags: [Pension]
+      operationId: changePensionSchedule
+      summary: 'Change the contribution schedule from the next collection cycle'
+      description: 'Document-bound SCA pension-schedule-change:<documentSha256>. Without a challenge the edge previews and answers 403 SCA_REQUIRED with that linking and the preview.'
+      security:
+        - customerOidc: [pension:write]
+      parameters:
+        - $ref: '#/components/parameters/PensionContractId'
+        - {name: X-SCA-Challenge-Id, in: header, required: false, schema: {type: string, format: uuid}, description: 'An approved APPROVAL challenge raised with the scaLinking a request without one returns (approvalRequestId pension-<op>:<hash>, docs/ux/pension-client-flows.md); forwarded to and spent by pension-service, never by the edge'}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 256}, description: 'Forwarded to pension-service, which answers a retry with the first response; missing -> 400'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PensionScheduleChange'}
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        '400': {description: 'Invalid input, missing Idempotency-Key, or PENSION_RULE_REFUSED'}
+        '403': {description: 'SCA_REQUIRED (no challenge; body carries scaLinking {purpose APPROVAL, approvalRequestId pension-<op>:<hash>, payloadSha256}), SCA_REJECTED, or PENSION_CHANGE_REFUSED (challenge not accepted, or the account is not the customer''s own)'}
+        '404': {description: No such contract for the caller}
+        '409': {description: 'INVALID_CONTRACT_STATE'}
+        '401': {description: Missing or invalid bearer token}
+        '502': {description: Pension service unavailable}
+  /pension/contracts/{contractId}/beneficiaries:
+    get:
+      tags: [Pension]
+      operationId: getPensionBeneficiaries
+      summary: 'The current beneficiary designation and its history'
+      description: 'Proxies pension-service GET .../beneficiaries (F1).'
+      security:
+        - customerOidc: [pension:read]
+      parameters:
+        - $ref: '#/components/parameters/PensionContractId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        '404': {description: No such contract for the caller}
+        '401': {description: Missing or invalid bearer token}
+        '502': {description: Pension service unavailable}
+  /pension/contracts/{contractId}/beneficiaries/preview:
+    post:
+      tags: [Pension]
+      operationId: previewPensionBeneficiaryChange
+      summary: 'Preview a beneficiary designation and the documentSha256 its SCA signs'
+      description: 'Proxies pension-service POST .../beneficiaries/preview (F1); changes nothing.'
+      security:
+        - customerOidc: [pension:read]
+      parameters:
+        - $ref: '#/components/parameters/PensionContractId'
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 256}, description: 'Forwarded to pension-service, which answers a retry with the first response; missing -> 400'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PensionBeneficiaryChange'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        '400': {description: 'Invalid input, missing Idempotency-Key, or PENSION_RULE_REFUSED'}
+        '404': {description: No such contract for the caller}
+        '409': {description: 'INVALID_CONTRACT_STATE'}
+        '401': {description: Missing or invalid bearer token}
+        '502': {description: Pension service unavailable}
+  /pension/contracts/{contractId}/beneficiaries/changes:
+    post:
+      tags: [Pension]
+      operationId: changePensionBeneficiaries
+      summary: 'Replace the beneficiary designation (shares total exactly 100)'
+      description: 'Document-bound SCA pension-beneficiary-change:<documentSha256>; a registered death claim freezes the designation (409).'
+      security:
+        - customerOidc: [pension:write]
+      parameters:
+        - $ref: '#/components/parameters/PensionContractId'
+        - {name: X-SCA-Challenge-Id, in: header, required: false, schema: {type: string, format: uuid}, description: 'An approved APPROVAL challenge raised with the scaLinking a request without one returns (approvalRequestId pension-<op>:<hash>, docs/ux/pension-client-flows.md); forwarded to and spent by pension-service, never by the edge'}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 256}, description: 'Forwarded to pension-service, which answers a retry with the first response; missing -> 400'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PensionBeneficiaryChange'}
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        '400': {description: 'Invalid input, missing Idempotency-Key, or PENSION_RULE_REFUSED'}
+        '403': {description: 'SCA_REQUIRED (no challenge; body carries scaLinking {purpose APPROVAL, approvalRequestId pension-<op>:<hash>, payloadSha256}), SCA_REJECTED, or PENSION_CHANGE_REFUSED (challenge not accepted, or the account is not the customer''s own)'}
+        '404': {description: No such contract for the caller}
+        '409': {description: 'INVALID_CONTRACT_STATE'}
+        '401': {description: Missing or invalid bearer token}
+        '502': {description: Pension service unavailable}
+  /pension/contracts/{contractId}/contribution-mandates/{mandateId}/cancel:
+    post:
+      tags: [Pension]
+      operationId: cancelPensionContributionMandate
+      summary: 'Cancel a contribution standing order or direct debit'
+      description: 'Document-bound SCA pension-mandate-cancellation:<sha256(pension-mandate-cancel|contractId|mandateId)> (F3).'
+      security:
+        - customerOidc: [pension:write]
+      parameters:
+        - $ref: '#/components/parameters/PensionContractId'
+        - {name: mandateId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: X-SCA-Challenge-Id, in: header, required: false, schema: {type: string, format: uuid}, description: 'An approved APPROVAL challenge raised with the scaLinking a request without one returns (approvalRequestId pension-<op>:<hash>, docs/ux/pension-client-flows.md); forwarded to and spent by pension-service, never by the edge'}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 256}, description: 'Forwarded to pension-service, which answers a retry with the first response; missing -> 400'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        '400': {description: 'Invalid input, missing Idempotency-Key, or PENSION_RULE_REFUSED'}
+        '403': {description: 'SCA_REQUIRED (no challenge; body carries scaLinking {purpose APPROVAL, approvalRequestId pension-<op>:<hash>, payloadSha256}), SCA_REJECTED, or PENSION_CHANGE_REFUSED (challenge not accepted, or the account is not the customer''s own)'}
+        '404': {description: No such contract for the caller}
+        '409': {description: 'INVALID_CONTRACT_STATE'}
+        '401': {description: Missing or invalid bearer token}
+        '502': {description: Pension service unavailable}
+  /pension/contracts/{contractId}/annual-statements/{year}:
+    get:
+      tags: [Pension]
+      operationId: getPensionAnnualStatement
+      summary: 'The annual statement of a past or current year'
+      description: 'Proxies pension-service GET /contracts/{id}/annual-statements/{year} (F4).'
+      security:
+        - customerOidc: [pension:read]
+      parameters:
+        - $ref: '#/components/parameters/PensionContractId'
+        - {name: year, in: path, required: true, schema: {type: integer, minimum: 2000}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        '400': {description: year malformed or in the future}
+        '404': {description: No such contract for the caller}
+        '401': {description: Missing or invalid bearer token}
+        '502': {description: Pension service unavailable}
+  /pension/contracts/{contractId}/payout-eligibility:
+    get:
+      tags: [Pension]
+      operationId: getPensionPayoutEligibility
+      summary: 'Which payout forms the pack allows today'
+      description: 'Proxies pension-service GET .../exit/payout-eligibility.'
+      security:
+        - customerOidc: [pension:read]
+      parameters:
+        - $ref: '#/components/parameters/PensionContractId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        '404': {description: No such contract for the caller}
+        '401': {description: Missing or invalid bearer token}
+        '502': {description: Pension service unavailable}
+  /pension/contracts/{contractId}/payouts/{payoutId}/statement:
+    get:
+      tags: [Pension]
+      operationId: getPensionPayoutStatement
+      summary: 'The payout statement'
+      description: 'Proxies pension-service GET .../exit/payouts/{payoutId}/statement (F4).'
+      security:
+        - customerOidc: [pension:read]
+      parameters:
+        - $ref: '#/components/parameters/PensionContractId'
+        - {name: payoutId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        '404': {description: No such contract for the caller}
+        '401': {description: Missing or invalid bearer token}
+        '502': {description: Pension service unavailable}
+  /pension/contracts/{contractId}/payouts/{payoutId}/annuity:
+    get:
+      tags: [Pension]
+      operationId: getPensionAnnuity
+      summary: 'The annuity purchase: every partner offer side by side, status, cooling-off'
+      description: 'Proxies pension-service GET .../annuity (F6). Offers carry selectionHash; an active purchase carries cancellationHash.'
+      security:
+        - customerOidc: [pension:read]
+      parameters:
+        - $ref: '#/components/parameters/PensionContractId'
+        - {name: payoutId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        '404': {description: No such contract for the caller}
+        '401': {description: Missing or invalid bearer token}
+        '502': {description: Pension service unavailable}
+  /pension/contracts/{contractId}/payouts/{payoutId}/annuity/offers:
+    post:
+      tags: [Pension]
+      operationId: requestPensionAnnuityOffers
+      summary: 'Ask every active annuity partner for an offer'
+      description: 'Proxies pension-service POST .../annuity/offers (F6). No offer is pre-selected.'
+      security:
+        - customerOidc: [pension:write]
+      parameters:
+        - $ref: '#/components/parameters/PensionContractId'
+        - {name: payoutId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 256}, description: 'Forwarded to pension-service, which answers a retry with the first response; missing -> 400'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PensionAnnuityOffersRequest'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        '400': {description: 'Invalid input, missing Idempotency-Key, or PENSION_RULE_REFUSED'}
+        '404': {description: No such contract for the caller}
+        '409': {description: 'INVALID_CONTRACT_STATE'}
+        '401': {description: Missing or invalid bearer token}
+        '502': {description: Pension service unavailable}
+  /pension/contracts/{contractId}/payouts/{payoutId}/annuity/selection:
+    post:
+      tags: [Pension]
+      operationId: selectPensionAnnuity
+      summary: 'Select one annuity offer'
+      description: 'Document-bound SCA pension-annuity-selection:<the offer''s selectionHash>. Without a challenge the edge reads the purchase and answers 403 SCA_REQUIRED with that linking.'
+      security:
+        - customerOidc: [pension:write]
+      parameters:
+        - $ref: '#/components/parameters/PensionContractId'
+        - {name: payoutId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: X-SCA-Challenge-Id, in: header, required: false, schema: {type: string, format: uuid}, description: 'An approved APPROVAL challenge raised with the scaLinking a request without one returns (approvalRequestId pension-<op>:<hash>, docs/ux/pension-client-flows.md); forwarded to and spent by pension-service, never by the edge'}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 256}, description: 'Forwarded to pension-service, which answers a retry with the first response; missing -> 400'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [partnerId, offerId], properties: {partnerId: {type: string}, offerId: {type: string}}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        '400': {description: 'Invalid input, missing Idempotency-Key, or PENSION_RULE_REFUSED'}
+        '403': {description: 'SCA_REQUIRED (no challenge; body carries scaLinking {purpose APPROVAL, approvalRequestId pension-<op>:<hash>, payloadSha256}), SCA_REJECTED, or PENSION_CHANGE_REFUSED (challenge not accepted, or the account is not the customer''s own)'}
+        '404': {description: No such contract for the caller}
+        '409': {description: 'INVALID_CONTRACT_STATE (no such offer, or nothing to sign)'}
+        '401': {description: Missing or invalid bearer token}
+        '502': {description: Pension service unavailable}
+  /pension/contracts/{contractId}/payouts/{payoutId}/annuity/cancellation:
+    post:
+      tags: [Pension]
+      operationId: cancelPensionAnnuity
+      summary: 'Cancel the annuity purchase within the partner''s cooling-off'
+      description: 'Document-bound SCA pension-annuity-cancellation:<cancellationHash>.'
+      security:
+        - customerOidc: [pension:write]
+      parameters:
+        - $ref: '#/components/parameters/PensionContractId'
+        - {name: payoutId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: X-SCA-Challenge-Id, in: header, required: false, schema: {type: string, format: uuid}, description: 'An approved APPROVAL challenge raised with the scaLinking a request without one returns (approvalRequestId pension-<op>:<hash>, docs/ux/pension-client-flows.md); forwarded to and spent by pension-service, never by the edge'}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 256}, description: 'Forwarded to pension-service, which answers a retry with the first response; missing -> 400'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        '400': {description: 'Invalid input, missing Idempotency-Key, or PENSION_RULE_REFUSED'}
+        '403': {description: 'SCA_REQUIRED (no challenge; body carries scaLinking {purpose APPROVAL, approvalRequestId pension-<op>:<hash>, payloadSha256}), SCA_REJECTED, or PENSION_CHANGE_REFUSED (challenge not accepted, or the account is not the customer''s own)'}
+        '404': {description: No such contract for the caller}
+        '409': {description: 'INVALID_CONTRACT_STATE'}
+        '401': {description: Missing or invalid bearer token}
+        '502': {description: Pension service unavailable}
+  /pension/contracts/{contractId}/termination/quote:
+    post:
+      tags: [Pension]
+      operationId: quotePensionTermination
+      summary: 'Binding early-termination quote, valued by pension-service from the unit register'
+      security:
+        - customerOidc: [pension:read]
+      parameters:
+        - $ref: '#/components/parameters/PensionContractId'
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 256}, description: 'Forwarded to pension-service, which answers a retry with the first response; missing -> 400'}
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PensionTerminationNotice'}
+        '400': {description: 'Invalid input, missing Idempotency-Key, or PENSION_RULE_REFUSED'}
+        '404': {description: No such contract for the caller}
+        '409': {description: INVALID_CONTRACT_STATE}
+        '401': {description: Missing or invalid bearer token}
+        '502': {description: Pension service unavailable}
+  /pension/contracts/{contractId}/termination/{noticeId}:
+    get:
+      tags: [Pension]
+      operationId: getPensionTermination
+      summary: 'The termination notice and its quote'
+      security:
+        - customerOidc: [pension:read]
+      parameters:
+        - $ref: '#/components/parameters/PensionContractId'
+        - {name: noticeId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PensionTerminationNotice'}
+        '404': {description: No such contract for the caller}
+        '401': {description: Missing or invalid bearer token}
+        '502': {description: Pension service unavailable}
+  /pension/contracts/{contractId}/termination/{noticeId}/sign:
+    post:
+      tags: [Pension]
+      operationId: signPensionTermination
+      summary: 'Sign the quoted notice under SCA; the quoted net is paid to the signed account after the notice period'
+      security:
+        - customerOidc: [pension:write]
+      parameters:
+        - $ref: '#/components/parameters/PensionContractId'
+        - {name: noticeId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: X-SCA-Challenge-Id, in: header, required: true, schema: {type: string, format: uuid}, description: 'An approved SCA challenge bound to the quote or document pension-service issued; forwarded to and consumed by pension-service, single use'}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 256}, description: 'Forwarded to pension-service, which answers a retry with the first response; missing -> 400'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PensionPayoutAccount'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PensionTerminationNotice'}
+        '400': {description: 'Invalid input, missing Idempotency-Key, or PENSION_RULE_REFUSED'}
+        '403': {description: 'SCA_REQUIRED (no challenge), or the challenge was refused by pension-service'}
+        '404': {description: No such contract for the caller}
+        '409': {description: INVALID_CONTRACT_STATE}
+        '401': {description: Missing or invalid bearer token}
+        '502': {description: Pension service unavailable}
+  /pension/contracts/{contractId}/payouts:
+    post:
+      tags: [Pension]
+      operationId: requestPensionPayout
+      summary: Binding payout quote for a payout form
+      description: >-
+        Proxies pension-service POST /api/v2/pension/contracts/{id}/exit/payouts/quote (S5). The
+        quote is confirmed by the separate /confirm route under SCA.
+      security:
+        - customerOidc: [pension:write]
+      parameters:
+        - $ref: '#/components/parameters/PensionContractId'
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 256}, description: 'Forwarded to pension-service, which answers a retry with the first response; missing -> 400'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [form]
+              properties:
+                form: {type: string, enum: [LUMP_SUM, ANNUITY, PHASED_WITHDRAWAL, FIXED_PERIOD_PENSION]}
+                amount: {type: string, description: Decimal string; a partial amount where the pack allows it}
+                months: {type: integer, minimum: 1, maximum: 600, description: Duration for a fixed-period or phased payout}
+      responses:
+        '201':
+          description: Payout quoted
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        '400': {description: 'Invalid input, or PENSION_RULE_REFUSED (payout conditions not met)'}
+        '401': {description: Missing or invalid bearer token}
+        '404': {description: No such contract for the caller}
+        '409': {description: 'INVALID_CONTRACT_STATE'}
+        '502': {description: Pension service unavailable}
+  /pension/contracts/{contractId}/payouts/{payoutId}/confirm:
+    post:
+      tags: [Pension]
+      operationId: confirmPensionPayout
+      summary: Confirm a quoted payout to the signed account under SCA
+      description: >-
+        Proxies pension-service POST /api/v2/pension/contracts/{id}/exit/payouts/{payoutId}/confirm
+        (S5/S8). The challenge in X-SCA-Challenge-Id is forwarded and
+        consumed by pension-service against the payout it quoted; the edge refuses a confirmation
+        without one.
+      security:
+        - customerOidc: [pension:write]
+      parameters:
+        - $ref: '#/components/parameters/PensionContractId'
+        - {name: X-SCA-Challenge-Id, in: header, required: true, schema: {type: string, format: uuid}, description: 'An approved SCA challenge bound to the quote hash and the account; forwarded to and consumed by pension-service, single use'}
+        - {name: payoutId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 256}, description: 'Forwarded to pension-service, which answers a retry with the first response; missing -> 400'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [payoutIban]
+              properties:
+                payoutIban: {type: string}
+      responses:
+        '200':
+          description: Payout confirmed
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        '400': {description: 'Invalid input, or PENSION_RULE_REFUSED'}
+        '403': {description: 'SCA_REQUIRED (no challenge), or the challenge was refused by pension-service'}
+        '401': {description: Missing or invalid bearer token}
+        '404': {description: No such contract or payout for the caller}
+        '409': {description: 'INVALID_CONTRACT_STATE'}
+        '502': {description: Pension service unavailable}
+  /pension/contracts/{contractId}/payouts/{payoutId}:
+    get:
+      tags: [Pension]
+      operationId: getPensionPayout
+      summary: 'A payout, its instalments and the last four characters of its account'
+      security:
+        - customerOidc: [pension:read]
+      parameters:
+        - $ref: '#/components/parameters/PensionContractId'
+        - {name: payoutId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        '404': {description: No such contract for the caller}
+        '401': {description: Missing or invalid bearer token}
+        '502': {description: Pension service unavailable}
+  /pension/contracts/{contractId}/payouts/{payoutId}/account:
+    put:
+      tags: [Pension]
+      operationId: changePensionPayoutAccount
+      summary: 'Move the remaining payments of a running scheduled payout to another own account'
+      description: >-
+        Proxies pension-service PUT .../exit/payouts/{payoutId}/account (S8). The change is held:
+        it applies only after the customer was notified and the hold elapsed, to instalments due after
+        it; a single payment or an unsigned payout cannot change account. No Idempotency-Key: a PUT.
+      security:
+        - customerOidc: [pension:write]
+      parameters:
+        - $ref: '#/components/parameters/PensionContractId'
+        - {name: payoutId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: X-SCA-Challenge-Id, in: header, required: true, schema: {type: string, format: uuid}, description: 'An approved SCA challenge bound to the quote or document pension-service issued; forwarded to and consumed by pension-service, single use'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PensionPayoutAccount'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        '400': {description: 'Invalid input, missing Idempotency-Key, or PENSION_RULE_REFUSED'}
+        '403': {description: 'SCA_REQUIRED (no challenge), or the challenge was refused by pension-service'}
+        '404': {description: No such contract for the caller}
+        '409': {description: INVALID_CONTRACT_STATE}
+        '401': {description: Missing or invalid bearer token}
+        '502': {description: Pension service unavailable}
   /holdings:
     get:
       tags: [Wealth]
@@ -5409,7 +6528,243 @@ components:
       type: openIdConnect
       openIdConnectUrl: https://kc.open-bank.tech/realms/openbank-customers/.well-known/openid-configuration
 
+  parameters:
+    PensionContractId:
+      name: contractId
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+  responses:
+    PensionContract:
+      description: The contract after the change
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/PensionContract'}
+
   schemas:
+    PensionProduct:
+      type: object
+      properties:
+        offeringId: {type: string}
+        name: {type: [string, 'null']}
+        productLine: {type: string, enum: [DPS, DIP]}
+        jurisdictionPackId: {type: [string, 'null']}
+        fundStrategy: {type: [string, 'null']}
+        currency: {type: [string, 'null']}
+        riskClass: {type: [integer, 'null']}
+        permittedProviderTypes: {type: array, items: {type: string}}
+        feeSchedule: {type: [object, 'null'], additionalProperties: true}
+        contributionLimits: {type: [object, 'null'], additionalProperties: true}
+        sfdrArticle: {type: [string, 'null']}
+        requiredDocuments: {type: array, items: {type: string}}
+        reviewStatus: {type: [string, 'null']}
+    PensionSimulationRequest:
+      type: object
+      required: [productLine, jurisdiction, monthlyContribution, horizonYears]
+      properties:
+        productLine: {type: string, enum: [DPS, DIP]}
+        jurisdiction: {type: string, pattern: '^[A-Z]{2}$'}
+        strategyCode: {type: string, pattern: '^[A-Z0-9_]{1,64}$', description: Marked as requested; every offered strategy is projected}
+        monthlyContribution: {type: string, description: 'Decimal string, > 0'}
+        employerMonthlyContribution: {type: string, description: Decimal string}
+        horizonYears: {type: integer, minimum: 1, maximum: 60}
+    PensionSchedule:
+      type: object
+      required: [amount, currency, frequency]
+      properties:
+        amount: {type: string, description: Decimal string, 0 to 1e9}
+        currency: {type: string, pattern: '^[A-Z]{3}$'}
+        frequency: {type: string, enum: [MONTHLY, QUARTERLY, ANNUALLY]}
+        employerAmount: {type: [string, 'null'], description: Decimal string}
+    PensionApplicationRequest:
+      type: object
+      description: Birth date and residency are not accepted here; the edge reads them from the party record.
+      required: [productLine, jurisdiction, providerEntityId, providerType, schedule]
+      properties:
+        productLine: {type: string, enum: [DPS, DIP]}
+        jurisdiction: {type: string, pattern: '^[A-Z]{2}$'}
+        providerEntityId: {type: string, format: uuid}
+        providerType: {type: string, enum: [PENSION_COMPANY, BANK, INVESTMENT_FIRM, MANAGEMENT_COMPANY, INSURANCE_COMPANY]}
+        schedule: {$ref: '#/components/schemas/PensionSchedule'}
+    PensionTransferInRequest:
+      allOf:
+        - {$ref: '#/components/schemas/PensionApplicationRequest'}
+        - type: object
+          required: [transferIn]
+          properties:
+            transferIn:
+              type: object
+              required: [providerId, providerName, contractNumber]
+              properties:
+                providerId: {type: string, maxLength: 200}
+                providerName: {type: string, maxLength: 200}
+                contractNumber: {type: string, maxLength: 200}
+    PensionApplication:
+      type: object
+      description: pension-service's OnboardingApplication (API 1.1.0), passed through.
+      additionalProperties: true
+      properties:
+        applicationId: {type: string, format: uuid}
+        kind: {type: string, enum: [NEW_CONTRACT, TRANSFER_IN]}
+        status: {type: string}
+        recommendedStrategy: {type: [string, 'null']}
+        chosenStrategy: {type: [string, 'null']}
+        keyInformationDocumentId: {type: [string, 'null']}
+        contractId: {type: [string, 'null'], format: uuid}
+        coolingOffEndsOn: {type: [string, 'null'], format: date}
+    PensionQuestionnaire:
+      type: object
+      description: 'F7: answers keyed by question id from GET .../questionnaire. The level fields are the pre-F7 form, used only when answers is absent.'
+      properties:
+        answers: {type: object, additionalProperties: {type: string, pattern: '^[A-Za-z0-9_.-]{1,64}$'}}
+        confirmInconsistencies: {type: array, items: {type: string}}
+        language: {type: string, pattern: '^[a-z]{2}$'}
+        knowledgeLevel: {type: integer, minimum: 0, maximum: 3}
+        experienceLevel: {type: integer, minimum: 0, maximum: 3}
+        riskAppetite: {type: integer, minimum: 0, maximum: 3}
+        lossTolerance: {type: integer, minimum: 0, maximum: 3}
+        financialSituationStable: {type: boolean}
+        esgPreference: {type: string, enum: [NONE, CONSIDER, REQUIRED]}
+    PensionMandateRequest:
+      type: object
+      required: [kind, debtorIban, amount, currency, firstCollection]
+      properties:
+        kind: {type: string, enum: [STANDING_ORDER, DIRECT_DEBIT]}
+        debtorIban: {type: string}
+        amount: {type: string, description: 'Decimal string, > 0, at most two decimals'}
+        currency: {type: string, pattern: '^[A-Z]{3}$'}
+        firstCollection: {type: string, format: date, description: Today or later}
+        debtorName: {type: string, maxLength: 200, description: Account holder name; required by pension-service for DIRECT_DEBIT}
+    PensionQuestionnaireDraft:
+      type: object
+      required: [answers]
+      properties:
+        answers: {type: object, additionalProperties: {type: string, pattern: '^[A-Za-z0-9_.-]{1,64}$'}}
+    PensionWarningAcknowledgement:
+      type: object
+      required: [strategyCode, warnings]
+      properties:
+        strategyCode: {type: string, pattern: '^[A-Z0-9_]{1,64}$'}
+        warnings: {type: array, minItems: 1, items: {type: string, enum: [STRATEGY_ABOVE_PROFILE, PRODUCT_NOT_APPROPRIATE, SUSTAINABILITY_PREFERENCE_NOT_MET]}}
+        language: {type: string, pattern: '^[a-z]{2}$'}
+    PensionScheduleChange:
+      type: object
+      required: [amount, frequency, dayOfMonth]
+      properties:
+        amount: {type: string, description: 'Decimal string, >= 0, at most two decimals'}
+        frequency: {type: string, enum: [MONTHLY, QUARTERLY, ANNUALLY]}
+        dayOfMonth: {type: integer, minimum: 1, maximum: 28}
+        startDate: {type: string, format: date}
+        acknowledgeIncentiveReduction: {type: boolean, description: Required to go below the state-contribution threshold}
+    PensionBeneficiaryChange:
+      type: object
+      required: [beneficiaries]
+      properties:
+        beneficiaries:
+          type: array
+          minItems: 1
+          maxItems: 10
+          description: Shares total exactly 100
+          items:
+            type: object
+            required: [name, sharePercent]
+            properties:
+              name: {type: string, maxLength: 200}
+              partyId: {type: string, format: uuid}
+              sharePercent: {type: string, description: 'Decimal string, > 0, <= 100'}
+    PensionAnnuityOffersRequest:
+      type: object
+      properties:
+        annuityTypes: {type: array, items: {type: string, enum: [LIFELONG, FIXED_TERM, GUARANTEE_PERIOD, JOINT_LIFE, INDEXED]}}
+        guaranteeMonths: {type: [integer, 'null'], minimum: 0, maximum: 600}
+        termMonths: {type: [integer, 'null'], minimum: 1, maximum: 600}
+        jointLifeBirthDate: {type: [string, 'null'], format: date}
+        survivorShare: {type: [string, 'null'], description: 'Decimal string between 0 and 1'}
+    PensionPayoutAccount:
+      type: object
+      required: [payoutIban]
+      properties:
+        payoutIban: {type: string, description: An own account; spaces are ignored}
+    PensionTerminationNotice:
+      type: object
+      description: pension-service's TerminationNotice (API 1.1.0), passed through; quoteHash is what the SCA challenge signs.
+      additionalProperties: true
+      properties:
+        noticeId: {type: string, format: uuid}
+        status: {type: string}
+        quote: {type: object, additionalProperties: true}
+        quoteHash: {type: string}
+        quoteExpiresAt: {type: string, format: date-time}
+    PensionContract:
+      type: object
+      properties:
+        contractId: {type: string, format: uuid}
+        productLine: {type: string, enum: [DPS, DIP]}
+        jurisdiction: {type: string}
+        packVersion: {type: [integer, 'null']}
+        providerType: {type: [string, 'null']}
+        status: {type: string, enum: [DRAFT, PENDING_ACTIVATION, ACTIVE, SUSPENDED, TERMINATING, PAID_OUT, TRANSFERRED_OUT, CLOSED]}
+        schedule: {$ref: '#/components/schemas/PensionSchedule'}
+        currentStrategy:
+          type: [object, 'null']
+          properties:
+            strategyCode: {type: string}
+            effectiveFrom: {type: string, format: date}
+            electedAt: {type: string, format: date-time}
+        strategyHistory: {type: array, items: {type: object}}
+        beneficiaries: {type: array, items: {type: object}}
+        startDate: {type: [string, 'null'], format: date}
+        createdAt: {type: [string, 'null'], format: date-time}
+        updatedAt: {type: [string, 'null'], format: date-time}
+        valuation:
+          oneOf:
+            - {$ref: '#/components/schemas/PensionValuation'}
+            - {type: 'null'}
+    PensionValuation:
+      type: object
+      properties:
+        status: {type: string, enum: [VALUED, NO_HOLDINGS, NAV_NOT_PUBLISHED, CURRENCY_MISMATCH]}
+        currency: {type: string}
+        totalValue: {type: [string, 'null'], description: Decimal string; set only for VALUED and NO_HOLDINGS}
+        asOf: {type: [string, 'null'], format: date}
+        holdings:
+          type: array
+          items:
+            type: object
+            properties:
+              fundId: {type: string, format: uuid}
+              units: {type: [string, 'null']}
+              navStatus: {type: string, enum: [PUBLISHED, NOT_PUBLISHED]}
+              navPerUnit: {type: [string, 'null']}
+              navDate: {type: [string, 'null'], format: date}
+              value: {type: [string, 'null']}
+              currency: {type: string}
+        pendingOrders:
+          type: array
+          items:
+            type: object
+            properties:
+              fundId: {type: string, format: uuid}
+              type: {type: string, enum: [SUBSCRIBE, REDEEM, SWITCH_OUT, SWITCH_IN]}
+              amount: {type: [string, 'null']}
+              units: {type: [string, 'null']}
+              placedAt: {type: [string, 'null'], format: date-time}
+    PensionUnitTransactionPage:
+      type: object
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/PensionUnitTransaction'}}
+        page: {type: integer}
+        size: {type: integer}
+        total: {type: integer}
+    PensionUnitTransaction:
+      type: object
+      properties:
+        type: {type: string, enum: [SUBSCRIBE, REDEEM, SWITCH_OUT, SWITCH_IN, FEE]}
+        fundId: {type: string, format: uuid}
+        units: {type: [string, 'null']}
+        amount: {type: [string, 'null']}
+        navPerUnit: {type: [string, 'null']}
+        pricedAt: {type: [string, 'null'], format: date-time}
     CapabilityId:
       type: string
       description: >-

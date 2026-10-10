@@ -115,6 +115,12 @@ export const PERMISSIONS = {
   // admitted (mirrored in ADMIN_EXCLUDED_BY_SERVICE, roles.test.ts).
   "treasury:nostro:read":   [ROLES.ADMIN, ROLES.TREASURY_DEALER, ROLES.TREASURY_APPROVER, ROLES.TREASURY_SENIOR_APPROVER],
   "treasury:nostro:upload": [ROLES.TREASURY_APPROVER],
+  // Pension back office (ADR-0334, #12350): exactly the two pension services' @RolesAllowed.
+  // Reads admit OPERATOR, ADMIN and AUDITOR; every write (activate, NAV calculate/publish, strategy
+  // change submit/decide/apply) admits OPERATOR and ADMIN. Four-eyes between maker and checker is
+  // pension-fund-service's own check between two PEOPLE, not a role split.
+  "pension:view":    [ROLES.ADMIN, ROLES.OPERATOR, ROLES.AUDITOR],
+  "pension:operate": [ROLES.ADMIN, ROLES.OPERATOR],
   "lending:compliance:propose": [ROLES.ADMIN, ROLES.COMPLIANCE],
   "lending:compliance:decide":  [ROLES.ADMIN, ROLES.COMPLIANCE],
   // Campaign-service audience endpoints use campaign.read for catalogue/preview, while
@@ -363,6 +369,7 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = 
   ['balance-sheet:view', ['/balance-sheet']],
   ['ledger-backfill:view', ['/balance-sheet/ledger-backfill']],
   ['treasury:view', ['/treasury']],
+  ['pension:view', ['/pension']],
   ['treasury:deal:create', ['/treasury/deals/new']],
   ['treasury:deal:approve', ['/treasury/approvals']],
   ['treasury:nostro:read', ['/treasury/nostro']],

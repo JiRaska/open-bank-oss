@@ -136,6 +136,9 @@ openbank:
     kyc-service-url: ${KYC_SERVICE_URL:http://kyc-service.kyc.svc:8114}
     lending-service-url: ${LENDING_SERVICE_URL:http://lending-service.lending.svc:8126}
     wealth-service-url: ${WEALTH_SERVICE_URL:http://wealth-service.wealth.svc:8154}
+    # Pension lifecycle (ADR-0334 S6): participant side and unit register. Caller edges are
+    # declared in the GitOps workload env; provider rollout remains gated by #12350.
+    pension-service-url: ${PENSION_SERVICE_URL:http://pension-service.pension.svc:8171}
     transaction-service-url: ${TRANSACTION_SERVICE_URL:http://transaction-service.payments.svc:8102}
     domestic-payment-service-url: ${DOMESTIC_PAYMENT_SERVICE_URL:http://domestic-payment.payments.svc:8116}
     sepa-payment-service-url: ${SEPA_PAYMENT_SERVICE_URL:http://sepa-payment.payments.svc:8115}

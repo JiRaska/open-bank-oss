@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: pension-service
     app.kubernetes.io/part-of: pension
   annotations:
-    openbank.tech/policy-checksum: "645d68f4e59f32ae"
+    openbank.tech/policy-checksum: "12983ce348db52c7"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -108,6 +108,10 @@ data:
     	input.principal.type == "HUMAN"
     	"ROLE_COMPLIANCE" in input.principal.roles
     	endswith(input.action, ".read")
+
+    	# Same exclusion as operator-read-any: the CI realm gives the shared backend client
+    	# ROLE_COMPLIANCE as well, so without it an excluded read stayed reachable by every service.
+    	not operator_read_any_excluded(input.action)
     }
 
     # AI agents go through this same query when the agent's tool wraps a REST call
@@ -605,14 +609,28 @@ data:
     # Mounted alongside rest.rego in the same OPA bundle — OPA merges same-package rules.
     #
     # Actions gated (PensionContractResource):
-    #   pension.contract.read       — GET /contracts/{id}, POST /contracts/{id}/incentive-evaluation
+    #   pension.contract.inspect       — GET /contracts (own list / staff by status), GET /contracts/{id},
+    #                                 POST /contracts/{id}/incentive-evaluation
     #   pension.contract.create     — POST /contracts
     #   pension.contract.submit     — POST /contracts/{id}/submit
-    #   pension.contract.activate   — POST /contracts/{id}/activate
     #   pension.contract.strategy   — PUT  /contracts/{id}/strategy
     #   pension.contract.suspend    — POST /contracts/{id}/suspend
     #   pension.contract.resume     — POST /contracts/{id}/resume
-    #   pension.contract.terminate  — POST /contracts/{id}/early-termination
+    #   pension.exit.inspect           — GET  /contracts/{id}/exit/... (eligibility, notice, payout, statement)
+    #   pension.exit.terminate      — POST /contracts/{id}/exit/termination/quote, /{noticeId}/sign   (S5)
+    #   pension.exit.payout         — POST /contracts/{id}/exit/payouts/quote, /{payoutId}/confirm    (S5)
+    #                                 PUT  /contracts/{id}/exit/payouts/{payoutId}/account (SCA)      (S8)
+    #   pension.simulation.run      — POST /simulations (illustrative projection)                    (S8)
+    #   pension.operator.exit-read  — GET  /operator/payouts (staff payout queue)                     (S8)
+    #   pension.death.inspect          — GET  /death-claims, /death-claims/{id}                          (S5/S8)
+    #   pension.contract.schedule   — POST /contracts/{id}/contribution-schedule/{preview,changes}    (#12376)
+    #   pension.contract.beneficiaries — POST /contracts/{id}/beneficiaries/{preview,changes}         (#12376)
+    #
+    # Retired at integration (S8): pension.contract.activate (activation is the onboarding workflow's
+    # alone) and pension.contract.terminate (S1's preview; S5's pension.exit.terminate replaces it).
+    #   pension.death.notify        — POST /death-claims                                              (S5)
+    #   pension.death.verify        — PUT  /death-claims/{id}/claimants, POST .../verification        (S5)
+    #   pension.death.approve       — POST /death-claims/{id}/approve (four-eyes in the aggregate)    (S5)
     #
     # Narrow rules here, NOT `rules.yaml: authz.role_action_matrix`: a matrix line is a grant to a
     # MACHINE no policy can veto, because Keycloak service-accounts are classified HUMAN and hold
@@ -632,7 +650,22 @@ data:
     	not startswith(input.principal.id, "service-account-")
     	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE"}
     	role in input.principal.roles
-    	input.action == "pension.contract.read"
+    	input.action in {"pension.contract.inspect", "pension.exit.inspect", "pension.operator.exit-read", "pension.simulation.run"}
+    }
+
+    # Death claims are operator work on evidence: real human staff only, never a service-account, and
+    # never the customer edge. Four-eyes (registrar != approver) is enforced in the DeathClaim aggregate.
+    allowed_reasons contains "operator-pension-death-claim" if {
+    	input.principal.type == "HUMAN"
+    	not startswith(input.principal.id, "service-account-")
+    	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+    	role in input.principal.roles
+    	input.action in {
+    		"pension.death.inspect",
+    		"pension.death.notify",
+    		"pension.death.verify",
+    		"pension.death.approve",
+    	}
     }
 
     # The customer edge carrying the participant's own intent. Enumerated rather than a `pension.`
@@ -641,15 +674,216 @@ data:
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-edge"
     	input.action in {
-    		"pension.contract.read",
+    		"pension.contract.inspect",
     		"pension.contract.create",
     		"pension.contract.submit",
-    		"pension.contract.activate",
     		"pension.contract.strategy",
     		"pension.contract.suspend",
     		"pension.contract.resume",
-    		"pension.contract.terminate",
+    		"pension.exit.inspect",
+    		"pension.simulation.run",
+    		"pension.exit.terminate",
+    		"pension.exit.payout",
     	}
+    }
+
+    # --- ADR-0334 slice S2: onboarding and transfers ------------------------------------------------
+    #
+    #   pension.onboarding.{start,read,questionnaire,strategy,kid,sign,withdraw}  OnboardingResource
+    #   pension.transfer.{request-out,consent,read}                               PensionTransferResource
+    #   pension.transfer.provider-request                                         ReceivingProviderResource
+    #   pension.operator.{read,contribution,transfer}                             PensionOperatorResource
+
+    # The customer edge carrying the participant's own intent (party from the edge-stamped header).
+    allowed_reasons contains "edge-service-pension-onboarding" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-edge"
+    	input.action in {
+    		"pension.onboarding.start",
+    		"pension.onboarding.inspect",
+    		"pension.onboarding.questionnaire",
+    		"pension.onboarding.strategy",
+    		"pension.onboarding.kid",
+    		"pension.onboarding.sign",
+    		"pension.onboarding.withdraw",
+    		"pension.transfer.request-out",
+    		"pension.transfer.consent",
+    		"pension.transfer.inspect",
+    	}
+    }
+
+    # A receiving provider's own client, and ONLY the provider-request action. The resource further
+    # requires the principal to equal `service-account-pension-provider-<receivingProviderId>`.
+    allowed_reasons contains "receiving-provider-transfer-request" if {
+    	input.principal.type == "HUMAN"
+    	startswith(input.principal.id, "service-account-pension-provider-")
+    	input.action == "pension.transfer.provider-request"
+    }
+
+    # Real staff only. `service-account-` is excluded outright: a backend holding ROLE_OPERATOR must
+    # not relay a ceding provider's answer or a contribution (#3765/#3734).
+    allowed_reasons contains "operator-pension-onboarding" if {
+    	input.principal.type == "HUMAN"
+    	not startswith(input.principal.id, "service-account-")
+    	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+    	role in input.principal.roles
+    	input.action in {"pension.operator.inspect", "pension.operator.contribution", "pension.operator.transfer"}
+    }
+
+    # Compliance reads the operator views, never acts.
+    allowed_reasons contains "compliance-pension-onboarding-read" if {
+    	input.principal.type == "HUMAN"
+    	not startswith(input.principal.id, "service-account-")
+    	"ROLE_COMPLIANCE" in input.principal.roles
+    	input.action == "pension.operator.inspect"
+    }
+
+    # ---------------------------------------------------------------------------------------------
+    # ADR-0334 S3 — contributions & state incentives (ContractFundingResource,
+    # FundingOperationsResource).
+    #   pension.funding.inspect     — GET payment-reference, contributions, incentives, tax-years/{y}
+    #   pension.funding.mandate  — POST mandates, PUT employers/{employerPartyId}
+    #   pension.funding.declare  — PUT tax-years/{y}/external-cap-usage
+    #   pension.funding.ingest   — POST operations/payments, operations/employer-batches
+    #   pension.funding.operate  — unmatched queue, claim runs/batches/receipts, returns, clawback
+    #                              preview, tax certificate
+    # Contract OWNERSHIP is enforced in the service (ContractAccessGuard), not here.
+    # ---------------------------------------------------------------------------------------------
+
+    # Participant intent via the edge: read own funding, set up mandates / enrol an employer, declare
+    # cap usage elsewhere. Never ingest or operate.
+    allowed_reasons contains "edge-service-pension-funding" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-edge"
+    	input.action in {
+    		"pension.funding.inspect",
+    		"pension.funding.mandate",
+    		"pension.funding.declare",
+    	}
+    }
+
+    # Real staff read any contract's funding.
+    allowed_reasons contains "operator-pension-funding-read" if {
+    	input.principal.type == "HUMAN"
+    	not startswith(input.principal.id, "service-account-")
+    	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE"}
+    	role in input.principal.roles
+    	input.action == "pension.funding.inspect"
+    }
+
+    # Back-office queue and claim-batch operations: real staff only — a service account holding
+    # ROLE_OPERATOR (#3765) must not drive the unmatched queue or file claims.
+    allowed_reasons contains "operator-pension-funding-operate" if {
+    	input.principal.type == "HUMAN"
+    	not startswith(input.principal.id, "service-account-")
+    	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+    	role in input.principal.roles
+    	input.action == "pension.funding.operate"
+    }
+
+    # Payment intake: real payments/operations staff. Automated intake (a payment-received consumer)
+    # is a follow-up and will get its own named service-account rule, not a role grant.
+    allowed_reasons contains "operator-pension-funding-ingest" if {
+    	input.principal.type == "HUMAN"
+    	not startswith(input.principal.id, "service-account-")
+    	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS"}
+    	role in input.principal.roles
+    	input.action == "pension.funding.ingest"
+    }
+
+    # ---------------------------------------------------------------------------------------------
+    # #12376 — contribution-schedule and beneficiary changes (ContractMaintenanceResource).
+    # Participant intent only, through the edge; SCA and ownership are enforced in the service.
+    # Reads reuse pension.contract.inspect (edge) and pension.operator.inspect (staff,
+    # OperatorContractChangesResource). No staff principal may write either.
+    # ---------------------------------------------------------------------------------------------
+    allowed_reasons contains "edge-service-pension-contract-changes" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-edge"
+    	input.action in {"pension.contract.schedule", "pension.contract.beneficiaries"}
+    }
+
+    # ---------------------------------------------------------------------------------------------
+    # #12383 — partner-agnostic annuity integration (PensionAnnuityResource,
+    # PensionAnnuityProviderResource, PensionAnnuityPurchaseResource).
+    #   pension.annuity.inspect              — GET  /contracts/{id}/exit/payouts/{pid}/annuity
+    #   pension.annuity.quote             — POST .../annuity/offers
+    #   pension.annuity.select            — POST .../annuity/selection     (SCA)
+    #   pension.annuity.cancel            — POST .../annuity/cancellation  (SCA, cooling-off)
+    #   pension.operator.annuity-read     — GET  /operator/annuity-providers[/{p}], /operator/annuity-purchases
+    #   pension.operator.annuity-write    — POST/PUT /operator/annuity-providers, activation-request, disable
+    #   pension.operator.annuity-approve  — POST /operator/annuity-providers/{p}/activation-approval (four-eyes
+    #                                       in the AnnuityProvider aggregate)
+    #   pension.operator.annuity-purchase — POST /operator/annuity-purchases/{id}/sync
+    # ---------------------------------------------------------------------------------------------
+
+    # The participant's own intent, relayed by the customer edge. Enumerated, as above.
+    allowed_reasons contains "edge-service-pension-annuity" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-edge"
+    	input.action in {
+    		"pension.annuity.inspect",
+    		"pension.annuity.quote",
+    		"pension.annuity.select",
+    		"pension.annuity.cancel",
+    	}
+    }
+
+    # Real staff read the marketplace; compliance included (comparison-fairness review).
+    allowed_reasons contains "operator-pension-annuity-read" if {
+    	input.principal.type == "HUMAN"
+    	not startswith(input.principal.id, "service-account-")
+    	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE"}
+    	role in input.principal.roles
+    	input.action in {"pension.annuity.inspect", "pension.operator.annuity-read"}
+    }
+
+    # The partner registry and purchase sync are real-staff work: never a service account holding
+    # ROLE_OPERATOR (#3765/#3734), never the edge.
+    allowed_reasons contains "operator-pension-annuity-manage" if {
+    	input.principal.type == "HUMAN"
+    	not startswith(input.principal.id, "service-account-")
+    	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+    	role in input.principal.roles
+    	input.action in {
+    		"pension.operator.annuity-write",
+    		"pension.operator.annuity-approve",
+    		"pension.operator.annuity-purchase",
+    	}
+    }
+
+    # ---------------------------------------------------------------------------------------------
+    # Participant valuation + operator mandates list (#12350, ADR-0334 final integration).
+    #   pension.contract.inspect          — GET /contracts/{id}/valuation, /contracts/{id}/transactions
+    #                                    (edge for the participant, staff as readers; rules above)
+    #   pension.operator.mandate-read  — GET /operator/mandates (admin-ui mandates list)
+    # Real human staff only: never a service-account holding ROLE_OPERATOR (#3765/#3734), never the
+    # edge. The resource additionally refuses a request carrying a participant header.
+    # ---------------------------------------------------------------------------------------------
+    allowed_reasons contains "operator-pension-mandate-read" if {
+    	input.principal.type == "HUMAN"
+    	not startswith(input.principal.id, "service-account-")
+    	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE"}
+    	role in input.principal.roles
+    	input.action == "pension.operator.mandate-read"
+    }
+
+    # ---------------------------------------------------------------------------------------------
+    # Participant-data reads use the verb `.inspect`, never `.read`: base rest.rego's
+    # operator-read-any / compliance-read-any admit every `*.read` to any HUMAN holding
+    # ROLE_OPERATOR/ADMIN/COMPLIANCE, and the shared backend client (service-account-openbank-services)
+    # is classified HUMAN and holds those roles in some realms. A per-service rule cannot veto a base
+    # allow, so the only sound fix is that no generic rule matches: every pension read is granted here,
+    # by name, to real staff (never a service-account-*) and, for the participant's own data, to the
+    # customer edge through its edge-service-* rules above.
+    # Staff read onboarding, transfers and death claims (compliance included: it never acts).
+    # ---------------------------------------------------------------------------------------------
+    allowed_reasons contains "operator-pension-participant-inspect" if {
+    	input.principal.type == "HUMAN"
+    	not startswith(input.principal.id, "service-account-")
+    	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE"}
+    	role in input.principal.roles
+    	input.action in {"pension.onboarding.inspect", "pension.transfer.inspect", "pension.death.inspect"}
     }
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1599,7 +1833,8 @@ data:
         - lending-disbursement-enabled
 
     authz:
-      # Actions the generic `operator-read-any` rule in rest.rego must NOT grant. That rule admits
+      # Actions the generic `operator-read-any` and `compliance-read-any` rules in rest.rego must NOT
+      # grant (the CI realm also gives the shared client ROLE_COMPLIANCE). That rule admits
       # any HUMAN principal holding ROLE_OPERATOR/ROLE_ADMIN to every `*.read`/`*.list`, and the
       # shared service-account (service-account-openbank-services) is classified HUMAN and holds
       # ROLE_OPERATOR, so without an entry here the action is readable by every backend service.

@@ -84,6 +84,25 @@ class PensionContractTest {
     }
 
     @Test
+    fun `strategy in force excludes future elections and starts inclusively on the effective date`() {
+        val effective = today.plusMonths(1)
+        val contract = active().electStrategy("DYNAMIC", effective, now.plusSeconds(1))
+        assertThat(contract.strategyOn(today)?.strategyCode).isEqualTo("BALANCED")
+        assertThat(contract.strategyOn(effective.minusDays(1))?.strategyCode).isEqualTo("BALANCED")
+        assertThat(contract.strategyOn(effective)?.strategyCode).isEqualTo("DYNAMIC")
+        assertThat(contract.strategyOn(today.minusDays(1))).isNull()
+    }
+
+    @Test
+    fun `same effective date uses the last election without depending on history order`() {
+        val contract = active()
+            .electStrategy("DYNAMIC", today, now.plusSeconds(1))
+            .electStrategy("CONSERVATIVE", today, now.plusSeconds(2))
+        assertThat(contract.copy(strategyHistory = contract.strategyHistory.reversed()).strategyOn(today)?.strategyCode)
+            .isEqualTo("CONSERVATIVE")
+    }
+
+    @Test
     fun `strategy cannot change once termination was requested`() {
         val terminating = active().requestTermination(now)
         assertThatThrownBy { terminating.electStrategy("DYNAMIC", today, now) }
