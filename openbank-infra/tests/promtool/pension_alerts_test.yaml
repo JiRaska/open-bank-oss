@@ -198,6 +198,30 @@ tests:
         exp_alerts: []
 
   - interval: 1m
+    name: "a one-scrape pension DLQ offset skew does NOT fire PensionPaymentEventDeadLettered"
+    input_series:
+      - series: 'kafka_topic_partition_current_offset{topic="openbank.dlq.pension.domestic-payment-events-in",partition="0"}'
+        values: "0 0 1 0 0 0 0 0"
+      - series: 'kafka_topic_partition_oldest_offset{topic="openbank.dlq.pension.domestic-payment-events-in",partition="0"}'
+        values: "0+0x8"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: PensionPaymentEventDeadLettered
+        exp_alerts: []
+
+  - interval: 1m
+    name: "a retained record stops alerting when its oldest offset catches up"
+    input_series:
+      - series: 'kafka_topic_partition_current_offset{topic="openbank.dlq.pension.domestic-payment-events-in",partition="0"}'
+        values: "1+0x15"
+      - series: 'kafka_topic_partition_oldest_offset{topic="openbank.dlq.pension.domestic-payment-events-in",partition="0"}'
+        values: "0 0 0 0 0 0 0 0 1 1 1 1 1 1 1 1"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: PensionPaymentEventDeadLettered
+        exp_alerts: []
+
+  - interval: 1m
     name: "a retained pension DLQ record still alerts after the one-hour append window"
     input_series:
       - series: 'kafka_topic_partition_current_offset{topic="openbank.dlq.pension.domestic-payment-events-in",partition="0"}'
