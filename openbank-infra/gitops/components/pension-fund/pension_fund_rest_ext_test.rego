@@ -140,3 +140,19 @@ test_without_the_exclusion_the_base_rule_reopens_holdings if {
 	}
 		with data.rules as {}
 }
+
+# The REST adapter reads strategy allocations as well as the unit register.
+test_pension_service_reads_strategies_without_admin_permissions if {
+	rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "service-account-openbank-pension", "roles": ["ROLE_API"]},
+		"action": "pension-fund.strategy.read",
+	}
+	not rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "service-account-openbank-pension", "roles": ["ROLE_API"]},
+		"action": "pension-fund.strategy.manage",
+	}
+	not rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "service-account-openbank-unrelated", "roles": ["ROLE_API"]},
+		"action": "pension-fund.strategy.read",
+	}
+}
