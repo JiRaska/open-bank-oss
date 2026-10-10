@@ -364,6 +364,12 @@ authz:
       # readiness probe and every in-cluster plaintext caller get `connection refused`.
       # mTLS applies to the 8443 listener only. Runtime property; see #10441.
       insecure-requests: enabled
+      auth:
+        permission:
+          bearer-only:
+            paths: /api/*
+            policy: permit
+            auth-mechanism: bearer
     # SavingsProposalService's SCA approval calls sca-service. Production uses a named TLS bucket
     # over sca-service's private-CA mTLS listener (8443, client auth REQUIRED). Local/test fixtures
     # speak plain HTTP, so this stays under %prod: the client certificate only exists in the cluster.
