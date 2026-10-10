@@ -555,6 +555,9 @@ metadata:
   name: customer-edge
   namespace: customer-edge
   annotations:
+    # DNS moved to the Envoy Gateway route (httproute.yaml). This makes external-dns ignore
+    # this Ingress; it stays as the rollback until a later change deletes it.
+    external-dns.kubernetes.io/controller: gateway-api-cutover-pending
     cert-manager.io/cluster-issuer: letsencrypt-prod
     # Mobile TLS pinning (ADR-0066 S3): the app pins this host's SPKI hash, so the
     # private key MUST survive certificate renewals. cert-manager >=1.18 defaults
