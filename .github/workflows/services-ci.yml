@@ -226,7 +226,6 @@ jobs:
                      && ! grep -qE '(^| )openbank-client-product-catalog( |$)' <<< " $CHANGED "; then
                     CHANGED="$CHANGED openbank-client-product-catalog"
                   fi
-                  # Preserve cross-module test readers on main as well as on PRs.
                   CHANGED="$CHANGED $(python3 .github/scripts/derive-fleet-scanning-test-modules.py \
                     --expand "$CHANGED" --input-paths-stdin <<< "$FILES_GLOBAL")"
                   # Recipe-only change -> one canary (same as the PR path).
@@ -393,25 +392,13 @@ jobs:
             fi
           fi
 
-          # PRs must retain the same conservative unknown-path fallback as main.
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            while IFS= read -r f; do
-              [ -z "$f" ] && continue
-              is_inert_service_path "$f" && continue
-              case "$f" in
-                openbank-libs/governance/*|pacts/*.json|.github/workflows/services-ci.yml|.github/workflows/_service-ci.yml|.github/scripts/service-ci-pact-modules.sh|.github/scripts/service-ci-library-dependents.py|.github/scripts/await-admin-ui-pact-publication.py|.github/scripts/test-await-admin-ui-pact-publication.py) continue ;;
-                openbank-*/*)
-                  m="${f%%/*}"
-                  if grep -qE "(^| )${m}( |$)" <<< " $ALL "; then continue; fi ;;
-              esac
-              CHANGED="$ALL"
-              echo "Decision: unowned PR input -> full-fleet."
-              break
-            done <<< "$FILES"
+          if [ "${{ github.event_name }}" = "pull_request" ] \
+             && service_ci_has_unowned_input "$ALL" <<< "$FILES"; then
+            CHANGED="$ALL"
+            echo "Decision: unowned PR input -> full-fleet."
           fi
 
-          # grep -v exits 1 when CHANGED is empty (PR touched no service module);
-          # `|| true` stops `set -e` from aborting — empty is valid (build nothing).
+          # Empty selection is valid; tolerate grep exit 1.
           CHANGED=$(echo "$CHANGED" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ' || true)
           # Emit both module-plan formats from the same validated changed-file set.
           printf '%s\n' "${FILES:-}" | python3 .github/scripts/derive-verification-modules.py >> "$GITHUB_OUTPUT"

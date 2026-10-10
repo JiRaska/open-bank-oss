@@ -114,3 +114,21 @@ pact_build_modules_self_test() {
   ! admin_ui_pact_changed 'openbank-admin-ui/src/app/page.tsx' \
     || { echo "selector self-test: UI source alone needs no publication wait" >&2; return 1; }
 }
+
+# Unknown relevant PR inputs must not silently select an empty service matrix.
+# Takes the discovered JVM module roster, with changed paths on stdin.
+service_ci_has_unowned_input() {
+  local all="$1" f m
+  while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    is_inert_service_path "$f" && continue
+    case "$f" in
+      openbank-libs/governance/*|pacts/*.json|.github/workflows/services-ci.yml|.github/workflows/_service-ci.yml|.github/scripts/service-ci-pact-modules.sh|.github/scripts/service-ci-library-dependents.py|.github/scripts/await-admin-ui-pact-publication.py|.github/scripts/test-await-admin-ui-pact-publication.py) continue ;;
+      openbank-*/*)
+        m="${f%%/*}"
+        if grep -qE "(^| )${m}( |$)" <<< " $all "; then continue; fi ;;
+    esac
+    return 0
+  done
+  return 1
+}
