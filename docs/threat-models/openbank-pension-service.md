@@ -65,10 +65,11 @@ order mis-states a participant's savings.
 
 **Authorization on the fund side:** `pension_fund_rest_ext.rego` (reason
 `service-pension-unit-register`) admits that one principal id, and only with `ROLE_API`, to
-`pension-fund.holding.read`, `pension-fund.order.place` and the reference reads `fund.read`,
+`pension-fund.holding.inspect`, `pension-fund.order.place` and the reference reads `fund.read`,
 `strategy.read`, `nav.read` — never NAV calculation/approval, fund or strategy administration.
-Every staff write excludes `service-account-*` principals, and `holding.read` is excluded from
-base `operator-read-any`, so the shared M2M account (`ROLE_OPERATOR`) is denied. Policy tests:
+Every staff write excludes `service-account-*` principals. The non-read `holding.inspect` action
+matches neither base `operator-read-any` nor `compliance-read-any`, so the shared M2M account
+(`ROLE_OPERATOR` and `ROLE_COMPLIANCE`) is denied. Policy tests:
 `pension_fund_rest_ext_test.rego` (`test_pension_service_places_orders_but_cannot_administer`).
 
 | Threat | Vector | Mitigation |
@@ -77,7 +78,7 @@ base `operator-read-any`, so the shared M2M account (`ROLE_OPERATOR`) is denied.
 | **Spoofing / IDOR** | A request carries a `contractId` the participant does not own | The fund side cannot judge ownership — it trusts pension-service for it. pension-service must only send a `contractId` it has resolved for the authenticated participant (the 404-confinement in §4, `PensionContractApiIT`); the port must never forward a client-supplied id unchecked |
 | **Tampering / replay** | A retried or replayed order is executed twice | `Idempotency-Key` is required on `POST /api/v1/contracts/{contractId}/orders` (`ContractUnitResource`); `uq_unit_orders_idempotency UNIQUE (contract_id, idempotency_key)` (`V1__init_pension_fund.sql`); reusing a key for a different instruction is rejected (`UnitRegisterService`). The adapter must derive the key deterministically from the pension-side operation, not mint one per attempt |
 | **Tampering** | Order amount or fund altered or out of range | Amounts normalised to money precision server-side (`Precision::money`); `fundId`/`type` required; prices come from the fund side's own published NAV, never from the caller |
-| **Information disclosure** | Holdings read beyond the participant's contract | Same ownership dependency as IDOR above; holdings excluded from `operator-read-any` |
+| **Information disclosure** | Holdings read beyond the participant's contract | Same ownership dependency as IDOR above; the non-read holdings action avoids both generic staff-read grants |
 | **Denial of service** | pension-service floods the fund API, or a slow fund API stalls pension-service | Fund side: 1 MB body limit and 100-concurrent rate limit (`application.yaml`). Client side: the adapter must carry timeouts and must not retry an order without the same idempotency key |
 | **Elevation of privilege** | The pension client is used to approve a NAV or administer a fund | Those actions are outside the reason's action set and are staff-only with `service-account-*` excluded |
 

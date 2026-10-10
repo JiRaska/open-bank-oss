@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: pension-fund-service
     app.kubernetes.io/part-of: pension-fund
   annotations:
-    openbank.tech/policy-checksum: "322d99d2fc3e5361"
+    openbank.tech/policy-checksum: "76d025e9f77fd40a"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -620,12 +620,12 @@ data:
     # Four-eyes (maker != checker) is enforced by the service itself, on the authenticated principal;
     # this policy only decides who may be a maker or a checker at all.
     #
-    # Participant data (pension-fund.holding.read, pension-fund.order.place) is reachable by real
+    # Participant data (pension-fund.holding.inspect, pension-fund.order.place) is reachable by real
     # staff and by pension-service's OWN client, service-account-openbank-pension (fleet naming
     # convention `openbank-<service>`; pension-service's FundAdministrationPort adapter, ADR-0334 §1),
-    # and by nothing else. holding.read is also excluded from base `operator-read-any` via
-    # rules.yaml: authz.operator_read_any_excluded_actions, which is what keeps the shared
-    # service-account (ROLE_OPERATOR) and every other service out.
+    # and by nothing else. The `holding.inspect` action deliberately has a non-read verb:
+    # neither base `operator-read-any` nor `compliance-read-any` can grant it to a shared
+    # service-account holding those roles. Only the scoped rules below may grant it.
     #
     # Do NOT gate on input.principal.type == "SERVICE": AuthorizeInterceptor never emits it (#266).
 
@@ -648,7 +648,7 @@ data:
     	"pension-fund.fund.read",
     	"pension-fund.nav.read",
     	"pension-fund.strategy.read",
-    	"pension-fund.holding.read",
+    	"pension-fund.holding.inspect",
     }
 
     pension_fund_staff if {
@@ -679,7 +679,7 @@ data:
     	input.principal.type == "HUMAN"
     	input.principal.id == pension_service_account
     	"ROLE_API" in input.principal.roles
-    	input.action in {"pension-fund.holding.read", "pension-fund.order.place", "pension-fund.fund.read", "pension-fund.strategy.read", "pension-fund.nav.read"}
+    	input.action in {"pension-fund.holding.inspect", "pension-fund.order.place", "pension-fund.fund.read", "pension-fund.strategy.read", "pension-fund.nav.read"}
     }
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
