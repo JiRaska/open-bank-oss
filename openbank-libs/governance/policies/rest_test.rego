@@ -1573,9 +1573,34 @@ test_pension_catalog_named_m2m_can_read_mappings_and_approval_evidence if {
 		"principal": principal,
 		"action": "catalog.pensionApproval.read",
 		"resource": {"type": "catalog", "id": "offering-1"},
+		"attributes": {
+			"azp": "openbank-pension",
+			"preferred_username": "service-account-openbank-pension",
+			"subject": "verified-service-subject",
+		},
 	} with data.openbank.bundle as bundle
 	approval.allow == true
 	approval.reason == "pension-catalog-m2m-read-approval"
+}
+
+test_pension_catalog_approval_read_rejects_missing_or_wrong_verified_client_binding if {
+	principal := {"id": "service-account-openbank-pension", "type": "HUMAN", "roles": ["ROLE_API", "CATALOG_SCOPE_READ"]}
+	base := {
+		"principal": principal,
+		"action": "catalog.pensionApproval.read",
+		"resource": {"type": "catalog", "id": "offering-1"},
+	}
+	not rest.allow with input as base
+	not rest.allow with input as object.union(base, {"attributes": {
+		"azp": "other-client",
+		"preferred_username": "service-account-openbank-pension",
+		"subject": "verified-service-subject",
+	}})
+	not rest.allow with input as object.union(base, {"attributes": {
+		"azp": "openbank-pension",
+		"preferred_username": "service-account-openbank-pension",
+		"subject": "",
+	}})
 }
 
 test_pension_catalog_m2m_grant_denies_other_identity_missing_scope_and_writes if {

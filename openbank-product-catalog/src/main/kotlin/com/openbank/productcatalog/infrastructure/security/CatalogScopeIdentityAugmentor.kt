@@ -19,6 +19,8 @@ object CatalogRoles {
     const val PUBLISH = "CATALOG_SCOPE_PUBLISH"
     const val PENSION_LEGAL_APPROVER = "PENSION_LEGAL_APPROVER"
     const val PENSION_PRODUCT_OWNER = "PENSION_PRODUCT_OWNER"
+    const val PENSION_LEGAL_REALM_ROLE = "ROLE_PENSION_LEGAL_COUNSEL"
+    const val PENSION_PRODUCT_REALM_ROLE = "ROLE_PENSION_PRODUCT_OWNER"
 }
 
 /** Maps provider-neutral OAuth scopes to stable internal roles without trusting a tenant claim or OPA. */
@@ -30,8 +32,12 @@ class CatalogScopeRoleMapper(
     private val authorScope: String,
     @ConfigProperty(name = "openbank.catalog.security.publish-scope", defaultValue = "catalog:publish")
     private val publishScope: String,
+    @ConfigProperty(name = "openbank.catalog.security.pension-legal-scope", defaultValue = "pension:legal-approve")
+    private val pensionLegalScope: String,
+    @ConfigProperty(name = "openbank.catalog.security.pension-product-scope", defaultValue = "pension:product-approve")
+    private val pensionProductScope: String,
 ) {
-    fun roles(scopeClaim: Any?): Set<String> {
+    fun roles(scopeClaim: Any?, realmRoles: Set<String> = emptySet()): Set<String> {
         val scopes = when (scopeClaim) {
             is String -> scopeClaim.split(' ').filter(String::isNotBlank).toSet()
             is Collection<*> -> scopeClaim.filterIsInstance<String>().toSet()
@@ -41,6 +47,12 @@ class CatalogScopeRoleMapper(
             if (readScope in scopes) add(CatalogRoles.READ)
             if (authorScope in scopes) add(CatalogRoles.AUTHOR)
             if (publishScope in scopes) add(CatalogRoles.PUBLISH)
+            if (pensionLegalScope in scopes && CatalogRoles.PENSION_LEGAL_REALM_ROLE in realmRoles) {
+                add(CatalogRoles.PENSION_LEGAL_APPROVER)
+            }
+            if (pensionProductScope in scopes && CatalogRoles.PENSION_PRODUCT_REALM_ROLE in realmRoles) {
+                add(CatalogRoles.PENSION_PRODUCT_OWNER)
+            }
         }
     }
 }
@@ -53,14 +65,14 @@ class CatalogScopeIdentityAugmentor(
 ) : SecurityIdentityAugmentor {
     override fun augment(identity: SecurityIdentity, context: AuthenticationRequestContext): Uni<SecurityIdentity> {
         val token = identity.principal as? JsonWebToken ?: return Uni.createFrom().item(identity)
-        val roles = mapper.roles(token.getClaim<Any?>(scopeClaim)).toMutableSet()
+        val roles = mapper.roles(token.getClaim<Any?>(scopeClaim), identity.roles).toMutableSet()
         val name = token.name
         val humanApprover =
             name.isNotBlank() &&
                 !name.startsWith("service-account-") &&
                 !name.startsWith("agent:") &&
                 token.subject?.startsWith("agent:") != true &&
-                identity.roles.any {
+                roles.any {
                     it == CatalogRoles.PENSION_LEGAL_APPROVER || it == CatalogRoles.PENSION_PRODUCT_OWNER
                 }
         if (humanApprover) roles.add(CatalogRoles.READ)

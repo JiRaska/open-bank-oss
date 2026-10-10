@@ -315,12 +315,12 @@ class RetirementCatalogPackResourceTest {
     @Order(1)
     @TestSecurity(
         user = "legal-reviewer",
-        roles = ["ROLE_OPERATOR", "PENSION_LEGAL_APPROVER"],
+        roles = ["ROLE_OPERATOR", "ROLE_PENSION_LEGAL_COUNSEL"],
         augmentors = [com.openbank.productcatalog.infrastructure.security.CatalogScopeIdentityAugmentor::class],
     )
     @OidcSecurity(
         claims = [
-            Claim(key = "scope", value = "openid"),
+            Claim(key = "scope", value = "pension:legal-approve"),
             Claim(key = "iss", value = "https://example.invalid/legal-issuer"),
             Claim(key = "sub", value = "legal-reviewer"),
         ],
@@ -366,12 +366,12 @@ class RetirementCatalogPackResourceTest {
     @Order(2)
     @TestSecurity(
         user = "product-reviewer",
-        roles = ["ROLE_OPERATOR", "PENSION_PRODUCT_OWNER"],
+        roles = ["ROLE_OPERATOR", "ROLE_PENSION_PRODUCT_OWNER"],
         augmentors = [com.openbank.productcatalog.infrastructure.security.CatalogScopeIdentityAugmentor::class],
     )
     @OidcSecurity(
         claims = [
-            Claim(key = "scope", value = "openid"),
+            Claim(key = "scope", value = "pension:product-approve"),
             Claim(key = "iss", value = "https://example.invalid/product-issuer"),
             Claim(key = "sub", value = "product-reviewer"),
         ],

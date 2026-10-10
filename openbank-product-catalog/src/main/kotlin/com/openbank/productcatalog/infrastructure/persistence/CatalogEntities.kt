@@ -115,6 +115,9 @@ class CatalogRevisionEntity {
     @Column(name = "pension_approval_digest")
     var pensionApprovalDigest: String? = null
 
+    @Column(name = "pension_approved_effective_to")
+    var pensionApprovedEffectiveTo: Instant? = null
+
     @Column(name = "created_at")
     lateinit var createdAt: Instant
 

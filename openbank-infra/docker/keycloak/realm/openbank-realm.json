@@ -51,6 +51,14 @@
       {
         "name": "ROLE_DEMO",
         "description": "Demo account — full access except Settings"
+      },
+      {
+        "name": "ROLE_PENSION_LEGAL_COUNSEL",
+        "description": "Individually assigned pension catalog legal reviewer; requires a separate approval scope"
+      },
+      {
+        "name": "ROLE_PENSION_PRODUCT_OWNER",
+        "description": "Individually assigned pension catalog product reviewer; requires a separate approval scope"
       }
     ]
   },
@@ -688,6 +696,24 @@
     {
       "name": "catalog:read",
       "description": "Product Catalog read (issue #7324). product-catalog's CatalogScopeRoleMapper maps this scope to CATALOG_SCOPE_READ. Not a realm default: only a client that lists it receives it.",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      }
+    },
+    {
+      "name": "pension:legal-approve",
+      "description": "Pension catalog legal approval; requires separately assigned legal realm role",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      }
+    },
+    {
+      "name": "pension:product-approve",
+      "description": "Pension catalog product approval; requires separately assigned product realm role",
       "protocol": "openid-connect",
       "attributes": {
         "include.in.token.scope": "true",

@@ -24,11 +24,29 @@ class CatalogScopeAuthorizationTest {
     @Test
     @TestSecurity(
         user = "pension-legal",
-        roles = ["PENSION_LEGAL_APPROVER"],
+        roles = ["ROLE_PENSION_LEGAL_COUNSEL"],
         augmentors = [CatalogScopeIdentityAugmentor::class],
     )
     @OidcSecurity(claims = [Claim(key = "scope", value = "openid")])
-    fun pensionLegalScopeCannotImpersonateProductOwner() {
+    fun pensionLegalRealmRoleWithoutApprovalScopeCannotApprove() {
+        val base = "/api/v2/offerings/00000000-0000-0000-0000-000000000001" +
+            "/revisions/00000000-0000-0000-0000-000000000002/pension-approvals"
+        given().contentType("application/json").header("If-Match", "\"0\"")
+            .body("""{"reason":"review"}""")
+            .post("$base/PRODUCT_OWNER").then().statusCode(403)
+        given().contentType("application/json").header("If-Match", "\"0\"")
+            .body("""{"reason":"review"}""")
+            .post("$base/LEGAL_COUNSEL").then().statusCode(403)
+    }
+
+    @Test
+    @TestSecurity(
+        user = "pension-legal",
+        roles = ["ROLE_PENSION_LEGAL_COUNSEL"],
+        augmentors = [CatalogScopeIdentityAugmentor::class],
+    )
+    @OidcSecurity(claims = [Claim(key = "scope", value = "pension:legal-approve")])
+    fun pensionLegalRoleAndScopeAllowOnlyLegalApproval() {
         val base = "/api/v2/offerings/00000000-0000-0000-0000-000000000001" +
             "/revisions/00000000-0000-0000-0000-000000000002/pension-approvals"
         given().contentType("application/json").header("If-Match", "\"0\"")
@@ -41,12 +59,28 @@ class CatalogScopeAuthorizationTest {
 
     @Test
     @TestSecurity(
-        user = "pension-legal",
+        user = "pension-unverified-internal-role",
         roles = ["PENSION_LEGAL_APPROVER"],
         augmentors = [CatalogScopeIdentityAugmentor::class],
     )
-    @OidcSecurity(claims = [Claim(key = "scope", value = "openid")])
-    fun namedHumanLegalRealmRoleDerivesCatalogReadWithoutCatalogScope() {
+    @OidcSecurity(claims = [Claim(key = "scope", value = "pension:legal-approve")])
+    fun rawInternalRoleWithoutNamedRealmAssignmentCannotApprove() {
+        given().contentType("application/json").header("If-Match", "\"0\"")
+            .body("""{"reason":"review"}""")
+            .post(
+                "/api/v2/offerings/00000000-0000-0000-0000-000000000001" +
+                    "/revisions/00000000-0000-0000-0000-000000000002/pension-approvals/LEGAL_COUNSEL",
+            ).then().statusCode(403)
+    }
+
+    @Test
+    @TestSecurity(
+        user = "pension-legal",
+        roles = ["ROLE_PENSION_LEGAL_COUNSEL"],
+        augmentors = [CatalogScopeIdentityAugmentor::class],
+    )
+    @OidcSecurity(claims = [Claim(key = "scope", value = "pension:legal-approve")])
+    fun namedHumanLegalRoleAndScopeDeriveCatalogRead() {
         given().get("/api/v2/offerings").then().statusCode(200)
         given().get(
             "/api/v2/offerings/00000000-0000-0000-0000-000000000001" +
@@ -69,7 +103,7 @@ class CatalogScopeAuthorizationTest {
     @Test
     @TestSecurity(
         user = "service-account-other",
-        roles = ["PENSION_LEGAL_APPROVER"],
+        roles = ["ROLE_PENSION_LEGAL_COUNSEL"],
         augmentors = [CatalogScopeIdentityAugmentor::class],
     )
     @OidcSecurity(claims = [Claim(key = "scope", value = "openid")])

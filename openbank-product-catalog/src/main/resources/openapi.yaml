@@ -1012,6 +1012,7 @@ components:
         reason: { type: [string, 'null'] }
         contentHash: { type: [string, 'null'], pattern: '^[0-9a-f]{64}$' }
         pensionApprovalDigest: { type: [string, 'null'], pattern: '^[0-9a-f]{64}$' }
+        pensionApprovedEffectiveTo: { type: [string, 'null'], format: date-time }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
         revision: { type: integer, format: int64, minimum: 0 }
