@@ -129,6 +129,7 @@ jobs:
           source .github/scripts/service-ci-pact-modules.sh
           pact_build_modules_self_test
           python3 .github/scripts/test-service-ci-job-roster.py
+          python3 .github/scripts/test-service-ci-path-selection.py
           # Validate the shared image-preparation logic once before matrix fan-out.
           python3 .github/scripts/tests/test_prewarm_ci_postgres.py
           python3 .github/scripts/coverage-floor-only-diff.py --self-test
@@ -225,6 +226,9 @@ jobs:
                      && ! grep -qE '(^| )openbank-client-product-catalog( |$)' <<< " $CHANGED "; then
                     CHANGED="$CHANGED openbank-client-product-catalog"
                   fi
+                  # Preserve cross-module test readers on main as well as on PRs.
+                  CHANGED="$CHANGED $(python3 .github/scripts/derive-fleet-scanning-test-modules.py \
+                    --expand "$CHANGED" --input-paths-stdin <<< "$FILES_GLOBAL")"
                   # Recipe-only change -> one canary (same as the PR path).
                   if [ -z "${CHANGED// /}" ] \
                      && grep -qE '^(\.github/workflows/(services-ci|_service-ci)\.yml|\.github/scripts/(service-ci-pact-modules\.sh|service-ci-library-dependents\.py|(test-)?await-admin-ui-pact-publication\.py))$' <<< "$FILES"; then
@@ -387,6 +391,23 @@ jobs:
                 CHANGED="openbank-libs"
               fi
             fi
+          fi
+
+          # PRs must retain the same conservative unknown-path fallback as main.
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            while IFS= read -r f; do
+              [ -z "$f" ] && continue
+              is_inert_service_path "$f" && continue
+              case "$f" in
+                openbank-libs/governance/*|pacts/*.json|.github/workflows/services-ci.yml|.github/workflows/_service-ci.yml|.github/scripts/service-ci-pact-modules.sh|.github/scripts/service-ci-library-dependents.py|.github/scripts/await-admin-ui-pact-publication.py|.github/scripts/test-await-admin-ui-pact-publication.py) continue ;;
+                openbank-*/*)
+                  m="${f%%/*}"
+                  if grep -qE "(^| )${m}( |$)" <<< " $ALL "; then continue; fi ;;
+              esac
+              CHANGED="$ALL"
+              echo "Decision: unowned PR input -> full-fleet."
+              break
+            done <<< "$FILES"
           fi
 
           # grep -v exits 1 when CHANGED is empty (PR touched no service module);
