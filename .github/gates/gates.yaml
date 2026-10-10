@@ -2880,6 +2880,27 @@ gates:
     run: |
       python3 .github/scripts/check-mtls-keeps-http-port.py --enforce
 
+  # #12511: client certificates on required/request listeners are transport credentials,
+  # not API identities. The eleven existing services without a bearer-only permission
+  # are being measured and fixed individually; keep this advisory until their real
+  # no-cert / cert-only / cert+bearer listener proofs pass, then promote to enforced.
+  - id: client-auth-bearer-paths
+    name: "client-auth listeners require bearer-only API path permissions (#12511, advisory)"
+    group: kotlin
+    mode: advisory
+    rationale: >-
+      Quarkus registers an mTLS authentication mechanism when client-auth is required or
+      requested; a trusted certificate alone can then become a SecurityIdentity. Every
+      class-level API root needs a bearer-only permission covering its descendants.
+    review_after: '2026-11-10'
+    min_subjects: 10
+    budget_seconds: 20
+    selftest_inputs: [".github/scripts/check-client-auth-bearer-paths.py"]
+    selftest: |
+      python3 .github/scripts/check-client-auth-bearer-paths.py --self-test
+    run: |
+      python3 .github/scripts/check-client-auth-bearer-paths.py --enforce
+
   - id: restclient-url-supplied
     name: "a localhost rest-client URL fallback is supplied by the service's gitops env (enforced, baseline-ratcheted)"
     group: kotlin
