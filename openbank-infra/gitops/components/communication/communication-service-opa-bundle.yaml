@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: communication-service
     app.kubernetes.io/part-of: communication
   annotations:
-    openbank.tech/policy-checksum: "93dcf3d0e4cc5fb7"
+    openbank.tech/policy-checksum: "3441a448299fc56c"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1191,6 +1191,9 @@ data:
       operator_read_any_excluded_actions:
         - pension-fund.holding.read   # participants' unit holdings and orders (ADR-0334 S4, #12350):
                                       # staff + service-account-openbank-pension only
+        - pension-fund.reporting.read # period-end fund aggregates for the ČNB returns (#12425, ADR-0336 D4):
+                                      # staff + service-account-openbank-tax-reporting only. Aggregates,
+                                      # but they are a supervisory filing's figures before it is filed.
         - treasury.portfolio.read     # the pension company's own holdings, custodian semt.002 (ADR-0337
                                       # amendment, PSP 34-12 PS): treasury staff +
                                       # service-account-openbank-tax-reporting only. Also excluded
