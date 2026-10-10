@@ -5,6 +5,7 @@
 package com.openbank.pension.integration
 
 import com.github.tomakehurst.wiremock.WireMockServer
+import com.github.tomakehurst.wiremock.client.WireMock.equalTo
 import com.github.tomakehurst.wiremock.client.WireMock.get
 import com.github.tomakehurst.wiremock.client.WireMock.getRequestedFor
 import com.github.tomakehurst.wiremock.client.WireMock.matching
@@ -79,10 +80,14 @@ class StrategyCatalogWireMockResource : QuarkusTestResourceLifecycleManager {
         }
 
         fun verifyCatalogRead() {
-            server.verify(getRequestedFor(urlEqualTo("/api/v2/offerings")))
+            server.verify(
+                getRequestedFor(urlEqualTo("/api/v2/offerings"))
+                    .withHeader("Authorization", equalTo("Bearer test-token")),
+            )
             server.verify(
                 getRequestedFor(urlPathEqualTo("/api/v2/products/${offeringId(1)}"))
-                    .withQueryParam("effectiveAt", matching(".+")),
+                    .withQueryParam("effectiveAt", matching(".+"))
+                    .withHeader("Authorization", equalTo("Bearer test-token")),
             )
         }
 

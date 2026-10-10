@@ -59,6 +59,12 @@ class QuestionnaireApiIT {
          "dps.experience":"OCCASIONALLY","dps.savings":"50K_250K","dps.loss_capacity":"$capacity"}
     """.trimIndent()
 
+    private fun dipBondCompetentEquityNovice() = """
+        {"dip.objective":"GROWTH","dip.financial_situation":"EASILY","dip.loss_capacity":"UP_TO_25",
+         "dip.risk_reaction":"HOLD","dip.knowledge_bonds":"CORRECT","dip.experience_bonds":"REGULARLY",
+         "dip.knowledge_equity":"DONT_KNOW","dip.experience_equity":"NEVER","dip.sustainability":"AVOID_HARM"}
+    """.trimIndent()
+
     @Test
     @TestSecurity(user = "edge", roles = ["ROLE_API"])
     @Suppress("LongMethod") // one journey, read top to bottom
@@ -151,12 +157,7 @@ class QuestionnaireApiIT {
     fun `a DIP novice gets the appropriateness warning, and a riskier DIP strategy cannot be acknowledged away`() {
         StrategyCatalogWireMockResource.stubApproved()
         val id = start("DIP", "BANK", "1979-03-14")
-        val novice = """
-            {"dip.objective":"GROWTH","dip.financial_situation":"EASILY","dip.loss_capacity":"UP_TO_25",
-             "dip.risk_reaction":"HOLD","dip.knowledge_bonds":"CORRECT","dip.experience_bonds":"REGULARLY",
-             "dip.knowledge_equity":"DONT_KNOW","dip.experience_equity":"NEVER","dip.sustainability":"AVOID_HARM"}
-        """.trimIndent()
-        call("POST", "$apps/$id/questionnaire", """{"answers":$novice}""").statusCode(200)
+        call("POST", "$apps/$id/questionnaire", """{"answers":${dipBondCompetentEquityNovice()}}""").statusCode(200)
             .body("profile.sustainability.categories", containsInAnyOrder("PAI_CONSIDERED"))
             .body("profile.recommendedStrategyWarnings.code", hasItem("PRODUCT_NOT_APPROPRIATE"))
         StrategyCatalogWireMockResource.verifyCatalogRead()
@@ -168,18 +169,47 @@ class QuestionnaireApiIT {
         ).statusCode(400)
         val recommended: String = call("GET", "$apps/$id/recommendation").statusCode(200)
             .extract().path("recommendedStrategy")
+        call("GET", "$apps/$id/warnings?strategyCode=$recommended").statusCode(200)
+            .body("code", hasItem("PRODUCT_NOT_APPROPRIATE"))
         call(
             "POST",
             "$apps/$id/warnings/acknowledge",
             """{"strategyCode":"$recommended","warnings":["PRODUCT_NOT_APPROPRIATE"]}""",
         ).statusCode(200)
+        val storedVersion = count("select version from pension_onboarding_applications where application_id = ?", id)
         StrategyCatalogWireMockResource.stubNoApprovedMapping()
-        call("POST", "$apps/$id/strategy", "{}").statusCode(not(equalTo(200)))
+        call("POST", "$apps/$id/strategy", "{}").statusCode(409)
+        assertThat(count("select version from pension_onboarding_applications where application_id = ?", id))
+            .isEqualTo(storedVersion)
+        assertThat(
+            count(
+                "select count(*) from pension_onboarding_applications " +
+                    "where application_id = ? and status = 'QUESTIONNAIRE_SUBMITTED'",
+                id,
+            ),
+        ).isEqualTo(1)
         // The assessment and acknowledgement pin revision 7. A newly effective approved revision
         // requires re-assessment; neither the old warning nor a guessed class allocation carries over.
         StrategyCatalogWireMockResource.stubApproved(revision = 8)
-        call("POST", "$apps/$id/strategy", "{}").statusCode(not(equalTo(200)))
+        call("POST", "$apps/$id/strategy", "{}").statusCode(409)
+        assertThat(count("select version from pension_onboarding_applications where application_id = ?", id))
+            .isEqualTo(storedVersion)
         StrategyCatalogWireMockResource.stubApproved()
+        call("POST", "$apps/$id/strategy", "{}").statusCode(200).body("status", equalTo("KID_ISSUED"))
+    }
+
+    @Test
+    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    fun `bond-only approved strategy needs no equity competence acknowledgement`() {
+        StrategyCatalogWireMockResource.stubApproved(classes = listOf("BOND_FUNDS"))
+        val id = start("DIP", "BANK", "1979-03-14")
+        call("POST", "$apps/$id/questionnaire", """{"answers":${dipBondCompetentEquityNovice()}}""")
+            .statusCode(200)
+        val recommended: String = call("GET", "$apps/$id/recommendation").statusCode(200)
+            .extract().path("recommendedStrategy")
+        call("GET", "$apps/$id/warnings?strategyCode=$recommended").statusCode(200)
+            .body("code", not(hasItem("PRODUCT_NOT_APPROPRIATE")))
+        StrategyCatalogWireMockResource.verifyCatalogRead()
         call("POST", "$apps/$id/strategy", "{}").statusCode(200).body("status", equalTo("KID_ISSUED"))
     }
 
