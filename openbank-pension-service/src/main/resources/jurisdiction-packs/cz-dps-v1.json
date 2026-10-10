@@ -1,0 +1,63 @@
+{
+  "jurisdiction": "CZ",
+  "productLine": "DPS",
+  "version": 1,
+  "effectiveFrom": "2024-07-01",
+  "currency": "CZK",
+  "legalReview": {
+    "status": "REQUIRES_LEGAL_REVIEW",
+    "note": "Reference values modelled on Act 427/2011 Coll. as amended from 2024 and the Income Tax Act; every value must be confirmed by legal review before any production use."
+  },
+  "eligibility": {
+    "minAge": 18,
+    "minorsWithGuardian": true,
+    "residency": {
+      "required": true,
+      "allowedCountries": ["CZ"],
+      "alternativeEvidence": ["PUBLIC_HEALTH_INSURANCE_CZ"]
+    }
+  },
+  "permittedProviderTypes": ["PENSION_COMPANY"],
+  "incentives": [
+    {
+      "id": "state-contribution",
+      "type": "MATCHING",
+      "period": "MONTH",
+      "rate": 0.20,
+      "minContribution": 500,
+      "amountCap": 340,
+      "claimChannel": "STATE_AGENCY_BATCH",
+      "clawback": { "mode": "RETURN_ALL" }
+    },
+    {
+      "id": "income-tax-deduction",
+      "type": "TAX_RELIEF",
+      "threshold": 20400,
+      "annualCap": 48000,
+      "sharedCapGroup": "retirement-products-deduction",
+      "indicativeTaxRate": 0.15,
+      "claimChannel": "TAX_RETURN",
+      "clawback": { "mode": "RECAPTURE_YEARS", "recaptureYears": 10 }
+    },
+    {
+      "id": "employer-contribution-exemption",
+      "type": "EMPLOYER_EXEMPTION",
+      "annualCap": 50000,
+      "sharedCapGroup": "employer-retirement-exemption",
+      "claimChannel": "PAYROLL"
+    }
+  ],
+  "payout": {
+    "minAge": 60,
+    "minDurationMonths": 120,
+    "allowedForms": ["LUMP_SUM", "ANNUITY", "PHASED_WITHDRAWAL", "EARLY_WITHDRAWAL", "SURRENDER"],
+    "earlyWithdrawalAllowed": true
+  },
+  "transfer": {
+    "allowed": true,
+    "freeAfterMonths": 60,
+    "maxFee": 800,
+    "deadlineDays": 30,
+    "carriesIncentiveHistory": true
+  }
+}
