@@ -135,7 +135,7 @@ class AccountOwnershipPactConsumerTest {
         const val OWNED_IBAN = "CZ6508000000192000145399"
         const val OWNER_PARTY_ID = "66666666-7777-4888-8999-aaaaaaaaaaaa"
         const val ACCOUNT_ID = "11111111-2222-4333-8444-555555555555"
-        const val UNKNOWN_IBAN = "CZ0708000000000000000099"
+        const val UNKNOWN_IBAN = "CZ6508000000192000145981"
 
         /** LITERAL, retyped from account-service's AccountOwnershipResource @Path. */
         const val EXPECTED_PATH = "/api/v1/accounts/ownership-verifications"
