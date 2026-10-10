@@ -3958,6 +3958,7 @@ security_sensitive_paths:
     cardholder: []
   openbank-domestic-payment:
     auth_crypto_payment:
+      - "src/main/kotlin/**/BusinessPaymentBatchDraftResource.kt"
       - "src/main/kotlin/**/ApprovalResource.kt"
       - "src/main/kotlin/**/approval/**"
       - "src/main/kotlin/**/security/**"

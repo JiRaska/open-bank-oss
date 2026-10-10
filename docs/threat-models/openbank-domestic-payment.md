@@ -660,3 +660,26 @@ its Ingress and NetworkPolicy peer remain until Phase 5.
   Rollout verification must exercise this caller against 8443 with valid and invalid
   client certificates and check that failures do not reroute to HTTP. Rollback restores
   the previous client URL/configuration while the AML listener remains available.
+
+## Business payment draft API (slice 6, draft storage only)
+
+The new company batch API stores unsubmitted domestic CZK instructions. Customer-edge derives the
+company from a verified human `X-Acting-For` mandate and forwards it under its own service token.
+The domestic service accepts this route only from that edge service identity; it uses the company
+scope in every read and update query and stores the human actor for audit attribution. A guessed
+batch UUID under another company returns 404. The company and actor are never accepted from the
+request body. At most 100 items and 20 returned items per detail page bound resource use. Unique
+company-scoped idempotency keys and a durable request hash prevent altered replay after restart;
+revisions prevent a concurrent replacement from silently overwriting another edit.
+
+This route cannot submit, sign, release, or call a payment rail. The later money-moving slice must
+freeze the ordered snapshot, check debtor-account ownership and the live mandate at submit and
+release, bind SCA and co-signatures to that hash, persist an outbox dispatch key per item, and
+reconcile ambiguous rail responses. Those controls are not implied by the draft state.
+
+Rollback: remove the edge route, then the domestic route. Keep the table while draft retention is
+resolved; do not drop customer drafts during code rollback.
+
+Draft item replacement records the verified editing human alongside the company and revision. A
+replayed creation key is checked against its persisted fingerprint before item validation, so an
+altered parseable body cannot change a conflict into an unrelated validation response.

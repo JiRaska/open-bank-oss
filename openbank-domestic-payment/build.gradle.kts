@@ -47,6 +47,7 @@ dependencies {
     testImplementation("io.grpc:grpc-inprocess:1.68.1")
     // @TestSecurity for the ADR-0034 Phase 5 advisory-mode authz regression test.
     testImplementation(libs.quarkus.test.security)
+    testImplementation(libs.quarkus.test.security.oidc)
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     // Test-only (#4221): FraudScoringMetricsTest asserts the alert expressions in

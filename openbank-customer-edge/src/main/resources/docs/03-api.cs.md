@@ -126,6 +126,23 @@ limity vkladu, podmínky předčasného výběru a odkazy na podmínky. Pro zalo
 i autoritativní jméno jako u založení účtu. Založení účtu je oddělené od jeho financování: aplikace
 pak použije běžný tok financování účtu.
 
+### Koncepty firemních hromadných plateb
+
+`/business/payment-batches` vypisuje a zakládá koncepty, `/{id}` vrací detail a
+`/{id}/items` nahrazuje položky. Endpointy jsou ve výchozím stavu vypnuté pomocí
+`openbank.edge.business-payment-batches.enabled=false` a do zapnutí vracejí 404.
+Vyžadují zákaznický token a `X-Acting-For` s firmou, pro kterou má volající člověk
+aktivní oprávnění. Edge odvodí člověka i firmu z tokenu a oprávnění; tělo požadavku je
+neurčuje. Identitu obou stran předá službě domestic-payment se služebním tokenem.
+Koncept platbu neodesílá ani neprovádí.
+
+Založení vyžaduje `Idempotency-Key` (1–128 znaků). Přesné opakování vrací 200 se
+stejným konceptem, jiné tělo pod stejným klíčem 409. Stránka seznamu má nejvýše 20
+konceptů a stránka detailu nejvýše 20 položek. Nahrazení položek vyžaduje `If-Match`
+s aktuální revizí; zastaralá revize vrací 409. Úspěšné odpovědi obsahují serverem
+vypočtený počet položek, součet v nejmenších jednotkách, revizi a časová razítka podle
+`openapi.yaml`.
+
 ## Chybový model
 
 Edge vrací malé JSON chybové obálky tvaru `{"error":"…"}`, které sám generuje, jinak **propouští status a tělo upstreamu beze změny**.

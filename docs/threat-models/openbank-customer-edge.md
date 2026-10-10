@@ -295,3 +295,29 @@ Trust boundaries:
   chain; the grantor is the token party, and the optional filters can only narrow a set already
   scoped to the caller. Rollback: revert the `resolveDebitAuthority` call site — the route returns
   to owner-only.
+
+## Company payment drafts (slice 6)
+
+The customer routes are **off by default** under
+`openbank.edge.business-payment-batches.enabled=false`
+(`BUSINESS_PAYMENT_BATCHES_ENABLED=false`). Every method returns 404 before mandate resolution or
+backend access while disabled. This is a server-side gate; hiding the app entry alone is not an
+activation control. The HTTP tests exercise all four disabled methods and prove no draft request
+reaches domestic-payment.
+
+The edge requires a human customer token and `X-Acting-For` on every draft route, resolves the
+human's live representation mandate, and forwards only the verified company and human to the
+persisted domestic draft aggregate. A missing, invalid, foreign, or expired mandate fails closed.
+Batch IDs cannot switch company by changing the header because the owning service scopes reads
+and writes by company. The API has no submit or rail dispatch route in this slice.
+
+For item replacement, the edge forwards the human token identity as the editing actor; the
+backend persists it with the new revision. An unverified client header cannot name that actor.
+
+**Enablement:** deploy the schema and draft-owning service first, then the edge with the flag off.
+Keep it off until the money-moving follow-up has passed the independent money-path reviews,
+ADR-0312 signing, per-item idempotency and recovery tests, and a verified sandbox rollout. A
+separate reviewed GitOps change may then set `BUSINESS_PAYMENT_BATCHES_ENABLED=true` in sandbox;
+verify the enabled HTTP contract, company isolation, 404 for foreign IDs, and the app's business
+entry. Production enablement requires its own reviewed config change and observed rollout. On
+failure, set the flag back to false; retain stored drafts for reconciliation and retention review.
