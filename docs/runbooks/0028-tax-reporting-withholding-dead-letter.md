@@ -10,10 +10,10 @@ as drift.
 
 **What a record means.** tax-reporting-service could not decode an
 `interest.withholding.remitted.v1` event, or could not record a valid one after bounded retries,
-so it rethrew and the connector parked the original record. Nothing consumes the DLQ. `assemble` totals only remittances the
-service observed, so **the §38d return for that month understates the tax withheld** until the
-record is replayed. No other signal shows this. The source group uses `auto.offset.reset: latest`,
-so the DLQ copy is the one to recover from.
+so it rethrew and the connector parked the original record. Nothing consumes the DLQ. `assemble`
+totals only remittances the service observed. A missing remittance can understate the §38d return;
+the period and amount of a malformed record may be unknown until source reconciliation. The source
+group uses `auto.offset.reset: latest`, so the DLQ copy must be preserved for recovery.
 
 1. **Freeze the affected period.** Do not assemble or file a period while its remittances are on
    the DLQ. If the period is already `ASSEMBLED`, it has to be redone after the replay. If it is
@@ -45,13 +45,13 @@ so the DLQ copy is the one to recover from.
    write to a money-path topic: two people, attributable, through the approved change process.
    Never re-publish without the `ce-type` header, because both consumers ignore a record without
    it, and the replay then does nothing while looking as if it worked.
-5. **Verify, then delete.** Confirm each `remittanceId` is now listed under
-   `GET /api/v1/tax/filings/{period}/remittances`. Then delete the replayed records so the warning
-   clears:
-   `bin/kafka-delete-records.sh --bootstrap-server localhost:9092 --offset-json-file <file>`,
-   with the offset set to one past the last replayed record. Records that were not replayed must
-   stay on the topic.
+5. **Verify and retain the evidence.** Confirm each recovered `remittanceId` is listed under
+   `GET /api/v1/tax/filings/{period}/remittances`, reconcile the source totals, and record the
+   result through the approved tax process. Do not run `kafka-delete-records.sh` to clear this
+   alert: it truncates an offset prefix and can erase unresolved records interleaved with recovered
+   ones. Retain the original DLQ records while investigating. Treat the retained-record warning as
+   an operational signal, not proof that a reconciled period remains incorrect.
 
-The critical alert clears an hour after arrivals stop. The warning clears only when the topic is
-empty, or after its 30-day retention. **Retention is not a resolution:** an expired record is a
-remittance permanently missing from a return.
+The critical alert clears an hour after arrivals stop. The warning reflects retained records and
+may remain after reconciliation; it can also clear on 30-day expiry without resolution. **Retention
+and alert clearance are not proof of reconciliation.** Escalate any unresolved record before expiry.
