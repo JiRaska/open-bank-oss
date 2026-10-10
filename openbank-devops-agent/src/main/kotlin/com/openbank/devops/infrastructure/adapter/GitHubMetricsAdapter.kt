@@ -8,16 +8,17 @@ package com.openbank.devops.infrastructure.adapter
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.devops.application.port.out.GitHubMetricsPort
 import com.openbank.devops.infrastructure.config.DevOpsConfig
+import com.openbank.libs.security.EgressPolicy
+import com.openbank.libs.security.EgressRequest
+import com.openbank.libs.security.EgressResolver
+import com.openbank.libs.security.SafeHttpClient
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.eclipse.microprofile.config.ConfigProvider
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
-import java.net.URI
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
 import java.time.Duration
 
 /**
@@ -42,8 +43,23 @@ class GitHubMetricsAdapter(private val config: DevOpsConfig) : GitHubMetricsPort
         get() = ConfigProvider.getConfig()
             .getOptionalValue("devops.github.token", String::class.java).orElse("")
 
-    private val http: HttpClient by lazy {
-        HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(CONNECT_TIMEOUT_S)).build()
+    /**
+     * ADR-0320 P1: the GitHub API URL is configurable, so egress is allow-listed. Default
+     * `api.github.com`; a GitHub Enterprise host must be added to `openbank.egress.allowed-hosts`.
+     */
+    @ConfigProperty(name = "openbank.egress.allowed-hosts", defaultValue = "api.github.com")
+    lateinit var allowedHosts: List<String>
+
+    /** Visible for testing: lets a unit test pin a stub host to loopback. */
+    internal var resolver: EgressResolver = EgressResolver.SYSTEM
+
+    private val http: SafeHttpClient by lazy {
+        SafeHttpClient(
+            EgressPolicy.fromConfig(allowedHosts),
+            resolver = resolver,
+            connectTimeout = Duration.ofSeconds(CONNECT_TIMEOUT_S),
+            callTimeout = Duration.ofSeconds(REQUEST_TIMEOUT_S),
+        )
     }
 
     @Suppress("TooGenericExceptionCaught")
@@ -74,21 +90,24 @@ class GitHubMetricsAdapter(private val config: DevOpsConfig) : GitHubMetricsPort
         }
     }
 
-    private suspend fun get(path: String): String? = withContext(Dispatchers.IO) {
+    internal suspend fun get(path: String): String? = withContext(Dispatchers.IO) {
         val url = "${config.githubApiUrl().trimEnd('/')}/repos/${config.githubOwner()}/${config.githubRepo()}$path"
-        val request = HttpRequest.newBuilder(URI.create(url))
-            .timeout(Duration.ofSeconds(REQUEST_TIMEOUT_S))
-            .header("Authorization", "Bearer $token")
-            .header("Accept", "application/vnd.github+json")
-            .header("X-GitHub-Api-Version", "2022-11-28")
-            .GET()
-            .build()
-        val resp = http.send(request, HttpResponse.BodyHandlers.ofString())
-        if (resp.statusCode() !in OK_RANGE) {
-            log.warnf("GitHub API %s returned HTTP %d", path, resp.statusCode())
+        val request = EgressRequest(
+            method = "GET",
+            url = url,
+            headers = mapOf(
+                "Authorization" to "Bearer $token",
+                "Accept" to "application/vnd.github+json",
+                "X-GitHub-Api-Version" to "2022-11-28",
+            ),
+            body = null,
+        )
+        val resp = http.send(request)
+        if (resp.status !in OK_RANGE) {
+            log.warnf("GitHub API %s returned HTTP %d", path, resp.status)
             null
         } else {
-            resp.body()
+            resp.bodyAsString()
         }
     }
 

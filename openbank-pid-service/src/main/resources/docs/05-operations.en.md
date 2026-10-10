@@ -43,8 +43,11 @@ The image is assembled by `.github/workflows/Dockerfile.deploy` from a host-side
 | `AUTHZ_ENFORCE` | `false` | `@Authorize` enforce vs advisory |
 | `BUILD_TIME` / `GIT_COMMIT` | `unknown` | build metadata for `/api/v1/info` |
 | `QUARKUS_LOG_LEVEL` | `INFO` | log level |
+| `openbank.pid.eudi.trusted-list.allowed-hosts` | unset (empty allowlist) | HTTPS hosts permitted for the signed trusted-list URL pull |
 
 Security headers (CSP, HSTS, X-Frame-Options DENY, nosniff, Referrer-Policy, Permissions-Policy) are set globally in `application.yaml`.
+
+When `openbank.pid.eudi.trusted-list.url` is configured, list its external hostname in `openbank.pid.eudi.trusted-list.allowed-hosts`; setting the URL alone does not enable fetching. The pull uses `SafeHttpClient`, which checks public DNS addresses, pins the connection, verifies TLS for the original hostname, refuses redirects and caps the response body. A failed fetch or signature check leaves the current trust store unchanged. The inline signed-list source does not use network egress.
 
 ## Health checks
 

@@ -10,15 +10,17 @@ import com.openbank.flakytest.application.port.out.GitHubProposalPort
 import com.openbank.flakytest.domain.model.FlakyTestCheckType
 import com.openbank.flakytest.domain.model.FlakyTestFinding
 import com.openbank.flakytest.infrastructure.config.FlakyTestHunterConfig
+import com.openbank.libs.security.EgressPolicy
+import com.openbank.libs.security.EgressRequest
+import com.openbank.libs.security.EgressResolver
+import com.openbank.libs.security.EgressResponse
+import com.openbank.libs.security.SafeHttpClient
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
-import java.net.URI
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
 import java.time.Duration
 import java.util.Base64
 
@@ -36,8 +38,23 @@ class GitHubProposalAdapter(private val config: FlakyTestHunterConfig) : GitHubP
 
     private val log = Logger.getLogger(GitHubProposalAdapter::class.java)
 
-    private val http: HttpClient by lazy {
-        HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(CONNECT_TIMEOUT_SECONDS)).build()
+    /**
+     * ADR-0320 P1: the GitHub API URL is configurable, so egress is allow-listed. Default
+     * `api.github.com`; a GitHub Enterprise host must be added to `openbank.egress.allowed-hosts`.
+     */
+    @ConfigProperty(name = "openbank.egress.allowed-hosts", defaultValue = "api.github.com")
+    lateinit var allowedHosts: List<String>
+
+    /** Visible for testing: lets a unit test pin a stub host to loopback. */
+    internal var resolver: EgressResolver = EgressResolver.SYSTEM
+
+    private val http: SafeHttpClient by lazy {
+        SafeHttpClient(
+            EgressPolicy.fromConfig(allowedHosts),
+            resolver = resolver,
+            connectTimeout = Duration.ofSeconds(CONNECT_TIMEOUT_SECONDS),
+            callTimeout = Duration.ofSeconds(REQUEST_TIMEOUT_SECONDS),
+        )
     }
 
     @Suppress("TooGenericExceptionCaught")
@@ -82,14 +99,16 @@ class GitHubProposalAdapter(private val config: FlakyTestHunterConfig) : GitHubP
 
     private fun getMainSha(): String? {
         val response = send("GET", "/git/ref/heads/main", null) ?: return null
-        if (response.statusCode() !in OK_RANGE) return null
-        return objectMapper.readTree(response.body()).path("object").path("sha").asText().takeIf { it.isNotBlank() }
+        if (response.status !in OK_RANGE) return null
+        return objectMapper.readTree(response.bodyAsString()).path("object").path("sha").asText().takeIf {
+            it.isNotBlank()
+        }
     }
 
     private fun getFile(path: String): SourceFile? {
         val response = send("GET", "/contents/$path?ref=main", null) ?: return null
-        if (response.statusCode() !in OK_RANGE) return null
-        val body = objectMapper.readTree(response.body())
+        if (response.status !in OK_RANGE) return null
+        val body = objectMapper.readTree(response.bodyAsString())
         val sha = body.path("sha").asText()
         val encoded = body.path("content").asText().replace("\\n", "")
         if (sha.isBlank() || encoded.isBlank()) return null
@@ -102,7 +121,7 @@ class GitHubProposalAdapter(private val config: FlakyTestHunterConfig) : GitHubP
     private fun createBranch(branch: String, sha: String): Boolean {
         val request = objectMapper.writeValueAsString(mapOf("ref" to "refs/heads/$branch", "sha" to sha))
         val response = send("POST", "/git/refs", request)
-        return response != null && response.statusCode() in OK_RANGE
+        return response != null && response.status in OK_RANGE
     }
 
     private fun commitFile(path: String, branch: String, message: String, content: String, sha: String): Boolean {
@@ -115,7 +134,7 @@ class GitHubProposalAdapter(private val config: FlakyTestHunterConfig) : GitHubP
             ),
         )
         val response = send("PUT", "/contents/$path", request)
-        return response != null && response.statusCode() in OK_RANGE
+        return response != null && response.status in OK_RANGE
     }
 
     private fun openPr(branch: String, title: String, finding: FlakyTestFinding): String? {
@@ -137,29 +156,23 @@ class GitHubProposalAdapter(private val config: FlakyTestHunterConfig) : GitHubP
             ),
         )
         val response = send("POST", "/pulls", request) ?: return null
-        if (response.statusCode() !in OK_RANGE) return null
-        return objectMapper.readTree(response.body()).path("html_url").asText().takeIf { it.isNotBlank() }
+        if (response.status !in OK_RANGE) return null
+        return objectMapper.readTree(response.bodyAsString()).path("html_url").asText().takeIf { it.isNotBlank() }
     }
 
-    private fun send(method: String, path: String, body: String?): HttpResponse<String>? {
-        val publisher = if (body ==
-            null
-        ) {
-            HttpRequest.BodyPublishers.noBody()
-        } else {
-            HttpRequest.BodyPublishers.ofString(body)
-        }
-        val request = HttpRequest.newBuilder(
-            URI.create("${config.githubApiUrl().trimEnd('/')}/repos/${config.githubRepo()}$path"),
+    private fun send(method: String, path: String, body: String?): EgressResponse? {
+        val request = EgressRequest(
+            method = method,
+            url = "${config.githubApiUrl().trimEnd('/')}/repos/${config.githubRepo()}$path",
+            headers = mapOf(
+                "Authorization" to "Bearer ${config.githubToken().orElse("")}",
+                "Accept" to "application/vnd.github+json",
+                "X-GitHub-Api-Version" to "2022-11-28",
+                "Content-Type" to "application/json",
+            ),
+            body = body?.toByteArray(Charsets.UTF_8),
         )
-            .timeout(Duration.ofSeconds(REQUEST_TIMEOUT_SECONDS))
-            .header("Authorization", "Bearer ${config.githubToken().orElse("")}")
-            .header("Accept", "application/vnd.github+json")
-            .header("X-GitHub-Api-Version", "2022-11-28")
-            .header("Content-Type", "application/json")
-            .method(method, publisher)
-            .build()
-        return http.send(request, HttpResponse.BodyHandlers.ofString())
+        return http.send(request)
     }
 
     private data class SourceFile(val content: String, val sha: String)

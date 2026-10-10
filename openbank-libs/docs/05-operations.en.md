@@ -36,3 +36,5 @@ Config: `openbank.warmup.enabled` (default true, off in `%test`), `openbank.warm
 Parse untrusted XML through `SecureXml` in `openbank-libs-domain`. Its DOM, SAX, StAX, schema and transformer factories disable external entities and DTD access; DOM and SAX reject a DOCTYPE entirely. Production parsers must not instantiate their own JAXP factories. `SecureXmlTest` and `XxeRejectionTest` cover external entity and DTD rejection.
 
 For HTTPS, `SafeHttpClient` in `openbank-libs-runtime` uses JVM certificate chain validation and hostname verification. Test-only trust anchors still pass through the platform PKIX trust manager; callers cannot supply a custom trust manager or TLS context.
+
+Internal clients that retain an injected JDK `HttpClient` (the LLM gateway, content guard, embeddings, flagd and OPA sidecar) use `BoundedBodyHandlers.ofString()` instead of unbounded `BodyHandlers.ofString()`. The default response cap is 4 MiB; exceeding it cancels the response subscription and fails the call with `IOException`. Use `SafeHttpClient` for external egress, where the response cap and destination-host policy are enforced together.
