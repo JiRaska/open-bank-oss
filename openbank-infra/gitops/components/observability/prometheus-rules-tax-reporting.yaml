@@ -32,6 +32,8 @@ spec:
             severity: critical
             team: platform
           annotations:
+            # Driven by real remittance traffic, not a schedule: no period to fit the window to.
+            subject_period: continuous
             summary: "§38d withholding remittance dead-lettered (tax-reporting)"
             description: "tax-reporting-service could not record a withholding remittance even after retries and parked it on {{ $labels.topic }}. Until it is replayed, that month's §38d return understates the tax withheld. Do not assemble or file the affected period before replaying."
             runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0028-tax-reporting-withholding-dead-letter.md"

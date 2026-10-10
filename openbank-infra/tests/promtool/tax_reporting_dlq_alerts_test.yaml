@@ -37,6 +37,7 @@ tests:
               team: platform
               topic: openbank.dlq.tax-reporting.withholding-remitted-in
             exp_annotations:
+              subject_period: continuous
               summary: "§38d withholding remittance dead-lettered (tax-reporting)"
               description: "tax-reporting-service could not record a withholding remittance even after retries and parked it on openbank.dlq.tax-reporting.withholding-remitted-in. Until it is replayed, that month's §38d return understates the tax withheld. Do not assemble or file the affected period before replaying."
               runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0028-tax-reporting-withholding-dead-letter.md"
