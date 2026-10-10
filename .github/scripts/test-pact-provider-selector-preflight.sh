@@ -29,6 +29,12 @@ case "$TEST_SCENARIO" in
     printf 503 > "$6"
     exit 1
     ;;
+  redirect_no_type)
+    printf '{"error":"private-response-body"}' > "$3"
+    printf 'HTTP/1.1 302 Found\r\nLocation: https://private-hostname.invalid/private-path\r\n' > "$5"
+    printf 302 > "$6"
+    exit 1
+    ;;
   bad_type)
     printf '{"_links":{}}' > "$3"
     printf 'HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n' > "$5"
@@ -70,7 +76,7 @@ if grep -Eq 'private[.-]|secret-token|pb:|Set-Cookie|request.json|response.json'
   exit 1
 fi
 
-for TEST_SCENARIO in no_type bad_type secret_type missing_pacts wrong_type; do
+for TEST_SCENARIO in no_type redirect_no_type bad_type secret_type missing_pacts wrong_type; do
   if TEST_SCENARIO="$TEST_SCENARIO" bash "$here/pact-provider-selector-preflight.sh" openbank-case-coordinator-agent main > "$tmp_dir/out" 2>&1; then
     echo "FAIL: $TEST_SCENARIO was accepted" >&2
     exit 1
@@ -81,6 +87,9 @@ for TEST_SCENARIO in no_type bad_type secret_type missing_pacts wrong_type; do
   fi
   if [[ "$TEST_SCENARIO" == bad_type ]]; then
     grep -q 'HTTP 200; Content-Type text/html' "$tmp_dir/out"
+  fi
+  if [[ "$TEST_SCENARIO" == redirect_no_type ]]; then
+    grep -q 'HTTP 302; Content-Type missing' "$tmp_dir/out"
   fi
   if [[ "$TEST_SCENARIO" == secret_type ]]; then
     grep -q 'HTTP 200; Content-Type other' "$tmp_dir/out"
