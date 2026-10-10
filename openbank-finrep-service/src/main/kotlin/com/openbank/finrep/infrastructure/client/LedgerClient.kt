@@ -29,12 +29,12 @@ import java.time.LocalDate
 /**
  * Outbound client for openbank-ledger-service's GL trial balance.
  *
- * FINREP/COREP reads only the statutory MONTH frozen CLOSING BALANCE: the cumulative sum of every
+ * F01/COREP reads the statutory MONTH frozen CLOSING BALANCE: the cumulative sum of every
  * frozen month up to the reporting date. Ledger rejects DRAFT, missing and legacy HASH_ONLY periods,
- * and any gap in the frozen chain: a report must never silently fall back to a live aggregate.
+ * and any omitted booked movement: a report must never silently fall back to a live aggregate.
  *
- * Not `frozen-trial-balance` (#12499): that is ONE month's movements, and reading it as balances
- * understated every stock cell (F 01.01 balance sheet, C 01.00 own funds) by every earlier month.
+ * F02 P&L separately reads `frozen-trial-balance`, which is ONE month's movements. Using the
+ * closing balance for F02 would include income and expenses from earlier months and years.
  *
  * The path is pinned by the consumer-driven pact in
  * [com.openbank.finrep.contract.LedgerTrialBalancePactConsumerTest] (git-pact, ADR-0063), which
@@ -58,6 +58,14 @@ interface LedgerRestClient {
     @GET
     @Path("/MONTH/{asOf}/closing-balance")
     fun getLiveTrialBalance(@PathParam("asOf") asOf: String): Uni<ClosedPeriodTrialBalanceResponse>
+
+    @GET
+    @Path("/MONTH/{asOf}/frozen-trial-balance")
+    fun getFrozenPeriodMovements(@PathParam("asOf") asOf: String): Uni<ClosedPeriodTrialBalanceResponse>
+
+    @GET
+    @Path("/MONTH/{asOf}/trial-balance")
+    fun getLivePeriodMovements(@PathParam("asOf") asOf: String): Uni<ClosedPeriodTrialBalanceResponse>
 
     @GET
     fun listClosedPeriods(
@@ -110,6 +118,12 @@ class LedgerAdapter(@RestClient private val client: LedgerRestClient) : LedgerPo
         val response = client.getLiveTrialBalance(asOf.toString()).awaitSuspending()
         return response.toSnapshot()
     }
+
+    override suspend fun getFrozenPeriodMovements(asOf: LocalDate): TrialBalanceSnapshot =
+        client.getFrozenPeriodMovements(asOf.toString()).awaitSuspending().toSnapshot()
+
+    override suspend fun getLivePeriodMovements(asOf: LocalDate): TrialBalanceSnapshot =
+        client.getLivePeriodMovements(asOf.toString()).awaitSuspending().toSnapshot()
 
     private fun ClosedPeriodTrialBalanceResponse.toSnapshot(): TrialBalanceSnapshot = TrialBalanceSnapshot(
         lines = lines.map { line ->
