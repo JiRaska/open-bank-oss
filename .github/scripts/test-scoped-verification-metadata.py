@@ -65,6 +65,17 @@ class IntegrationTest(unittest.TestCase):
             collect.assert_not_called()
             run.assert_called_once_with(Path.cwd(), 'all', True)
 
+    def test_collector_rejects_malformed_model_shape(self):
+        for value in (None, [], {'closure': None}):
+            with self.subTest(value=value), tempfile.TemporaryDirectory() as tmp:
+                output = Path(tmp)
+                def emit(command, cwd, env, check):
+                    for project in env['OB_METADATA_PROJECTS'].split(','):
+                        (output/(project[1:] + '.json')).write_text(json.dumps(value))
+                with patch.object(gate.subprocess, 'run', side_effect=emit):
+                    with self.assertRaises(ValueError):
+                        gate.collect(Path.cwd(), [':openbank-account-service'], PROJECTS, output)
+
     def test_malformed_and_omitted_input_receipts_decline_scope(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(gate.subprocess, 'run'):
             directory = Path(tmp)

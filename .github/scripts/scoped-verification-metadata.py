@@ -41,6 +41,8 @@ def collect(root, selected, known, output):
             receipts[project] = json.loads((output / (project[1:] + '.json')).read_text())
         edges = set()
         for receipt in receipts.values():
+            if not isinstance(receipt, dict):
+                raise ValueError('malformed project model')
             closure = receipt.get('closure')
             if not isinstance(closure, list) or any(not isinstance(p, str) for p in closure):
                 raise ValueError('malformed project model')
