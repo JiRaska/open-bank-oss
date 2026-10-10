@@ -56,3 +56,17 @@ neposkytuje vzájemné TLS.
 `ServerTlsIT` ověřuje načtení PEM, vyjednání TLS 1.3, odmítnutí nedůvěryhodného
 certifikátu a zachování HTTP s dočasnými testovacími klíči. Deklarace ani tento
 test nedokazují připravenost certifikátu v clusteru.
+
+## Opakovatelné syntetické demo
+
+Z kořene repozitáře spusťte `python3 openbank-pension-service/demo/pension_demo.py run`.
+Návod `openbank-pension-service/demo/README.md` popisuje průběh prezentace, reset a důkazy.
+Spouštěč vytvoří oddělené dočasné testovací kontexty penzijní služby Alpha/Beta, následně
+samostatně ověří fondovou službu a uloží HTML/JSON report do `build/pension-demo/`.
+Selhání, přeskočené testy ani staré výsledky nemohou vytvořit úspěšný report.
+
+Volba Gradlu `-PpensionDemoCompany=alpha|beta` vybírá pouze testovací data; běžné testy a běhové
+výchozí hodnoty se nemění. Demo nepotřebuje skutečnou identitu společnosti ani produkční
+schválení vlastnictví dat. Používá syntetická data a simulované externí služby. Neprokazuje
+izolaci současně běžících nasazení se skutečnými OIDC/OPA tokeny, skutečné vypořádání plateb
+ani kompletně propojený produkční tok peněz. Tyto schopnosti zůstávají v #12472 a #12479.

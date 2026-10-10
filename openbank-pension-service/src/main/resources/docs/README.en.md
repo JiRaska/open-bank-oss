@@ -56,3 +56,17 @@ This stage provides server authentication; it does not establish mutual TLS.
 `ServerTlsIT` proves PEM loading, TLS 1.3 negotiation, rejection of an untrusted
 certificate, and continued HTTP service with ephemeral test keys. Deployment
 declarations and this test do not prove that a cluster Certificate is ready.
+
+## Repeatable synthetic demonstration
+
+Run `python3 openbank-pension-service/demo/pension_demo.py run` from the repository root.
+The runbook at `openbank-pension-service/demo/README.md` describes the presenter sequence,
+reset and evidence. The runner creates separate disposable Alpha/Beta pension-service test
+contexts, then verifies the fund service independently, and writes an HTML/JSON report under
+`build/pension-demo/`. Failed, skipped or stale test results cannot produce a passed report.
+
+The Gradle property `-PpensionDemoCompany=alpha|beta` selects only test fixtures; ordinary test
+and runtime defaults remain unchanged. This demonstration needs no real provider identity or
+production ownership approval. It uses synthetic data and simulated external collaborators.
+It does not prove simultaneous deployment isolation with real OIDC/OPA tokens, real settlement
+or a fully connected production money path. Those capabilities remain in #12472 and #12479.
