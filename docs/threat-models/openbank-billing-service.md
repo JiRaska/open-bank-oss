@@ -53,7 +53,9 @@ money (debits the customer, credits fee income), so it is a money-path service.
    (`postedFeesForAccount`, POSTED-only, in-year) to build an `AnnualFeeSummary`. Appends a
    `billing_outbox` row (`billing.annual-fee-summary.ready`) with a durable
    `(accountId, year)` issuance key (`billing_annual_fee_summary_issuance`) reserved in the same
-   database transaction (`appendAnnualFeeSummaryEvent`), dispatched by the SAME `BillingOutboxDispatcher` →
+   database transaction (`appendAnnualFeeSummaryEvent`). This repository stays exempt from SENT
+   outbox purge until that key is deployed and historical coverage is confirmed. The event is
+   dispatched by the SAME `BillingOutboxDispatcher` →
    `LedgerOutboxEventPublisher`, which routes this `eventType` to a **new Kafka producer**
    (`billing-events-out` → topic `openbank.billing.fee.event`) instead of the ledger REST call —
    billing-service's first Kafka publisher; document-service consumes it to render the PAD Art. 5
@@ -227,6 +229,8 @@ first departure from "every trust boundary here is OIDC+mTLS REST".
     (`partyId`) read off an already-trusted response.
 
 ## 6. Change log
+
+- **2026-10-03** — **Fleet SENT retention excludes billing pending #12311** (ADR-0329, #12187). The shared `OutboxSentRetentionJob` can purge other services, but `BillingOutboxRepositoryImpl.sentRetentionExempt=true` preserves billing's annual-summary rerun guard. `billing_outbox` SENT payloads therefore remain until a durable account/year issuance key is deployed. The exemption is paired with a reason in the enforced fleet gate; remove both only after the migration and real-DB purge/rerun tests in #12311 are merged. No billing endpoint, caller or privilege changes in this phase.
 
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
   #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;

@@ -42,7 +42,7 @@ spec:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-transaction-opa-bundle.sh via the trailing marker comment
         # (do not hand-edit, do not drop the marker).
-        openbank.tech/policy-checksum: "e09e20bbff0ed5e5" # transaction-opa-bundle
+        openbank.tech/policy-checksum: "c2085eeae5ce91ad" # transaction-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -53,7 +53,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: transaction-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-transaction-service:sandbox-631a1f05
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-transaction-service:sandbox-4c86c6f7
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -437,7 +437,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-sepa-payment-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "89652eb5d146b2f0"
+        openbank.tech/policy-checksum: "954f88baa89ccb54"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -464,7 +464,7 @@ spec:
         - name: sepa-payment
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-payment:sandbox-631a1f05
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-payment:sandbox-4c86c6f7
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -838,7 +838,7 @@ spec:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-domestic-payment-opa-bundle.sh via the trailing marker
         # comment (do not hand-edit, do not drop the marker).
-        openbank.tech/policy-checksum: "2d7e344d5bba7f81" # domestic-payment-opa-bundle
+        openbank.tech/policy-checksum: "11d02e035c9a220d" # domestic-payment-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -851,7 +851,7 @@ spec:
         - name: domestic-payment
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-domestic-payment:sandbox-674e4d5a
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-domestic-payment:sandbox-aedabc07
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -1207,7 +1207,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-sepa-instant-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "b6a1fd1a49e13eed"
+        openbank.tech/policy-checksum: "9943c14eb01b4d06"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -1220,7 +1220,7 @@ spec:
         - name: sepa-instant
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-instant:sandbox-631a1f05
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-instant:sandbox-f85d4c59
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -1309,8 +1309,9 @@ spec:
               value: http://clearing-simulator.payments.svc:8139
             - name: QUARKUS_REDIS_HOSTS
               value: redis://redis.payments.svc:6379
-            - name: SEPA_INSTANT_SCHEME_SUBMISSION_ENABLED
-              value: "true"
+            # Keep settlement opt-in disabled until the outbox and reconciliation rollout is approved.
+            - name: SCT_INST_SCHEME_SUBMISSION_ENABLED
+              value: "false"
             - name: TRANSACTION_SERVICE_URL
               value: http://transaction-service.payments.svc:8102
             # OPA sidecar is deployed (ADR-0034 Phase 5, issue #266). AUTHZ_ENFORCE=true
@@ -1547,7 +1548,7 @@ spec:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-clearing-opa-bundle.sh via the trailing marker comment
         # (do not hand-edit, do not drop the marker).
-        openbank.tech/policy-checksum: "310a256a7c806274" # clearing-opa-bundle
+        openbank.tech/policy-checksum: "5f4babbc5b5b573e" # clearing-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -1558,7 +1559,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: clearing-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-service:sandbox-a5b43740
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-service:sandbox-4c86c6f7
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -1871,7 +1872,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes (ADR-0034). Value is stamped by
         # gen-standing-order-opa-bundle.sh — do not hand-edit.
-        openbank.tech/policy-checksum: "b1aaff836b8e6799" # standing-order-opa-bundle
+        openbank.tech/policy-checksum: "a2b9df0c9515b742" # standing-order-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -1882,7 +1883,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: standing-order-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-standing-order-service:sandbox-ed58c115
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-standing-order-service:sandbox-4c86c6f7
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -2163,7 +2164,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-card-issuance-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "1752b7f6a6e89abe"
+        openbank.tech/policy-checksum: "908a49f7c6b7a445"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -2174,7 +2175,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: card-issuance-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-issuance-service:sandbox-2f607bb9
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-issuance-service:sandbox-4c86c6f7
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -2457,7 +2458,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-card-processing-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "d849b116569de337"
+        openbank.tech/policy-checksum: "132b193e0458156e"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -2473,7 +2474,7 @@ spec:
           # is UNVERIFIABLE forever rather than merely stale. No image carries this tag yet; the
           # first auto-deploy run rewrites the line, and until then the Deployment does not admit,
           # which is the honest state for a service whose image has never been built.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-processing-service:sandbox-a5b43740
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-processing-service:sandbox-4c86c6f7
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -2720,7 +2721,7 @@ spec:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-settlement-opa-bundle.sh via the trailing marker comment
         # (do not hand-edit, do not drop the marker).
-        openbank.tech/policy-checksum: "b6a349706076baf8" # settlement-opa-bundle
+        openbank.tech/policy-checksum: "451c67413b87a083" # settlement-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -2731,7 +2732,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: settlement-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-settlement-service:sandbox-631a1f05
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-settlement-service:sandbox-4c86c6f7
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -3078,7 +3079,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: clearing-simulator
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-simulator:sandbox-92997073
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-simulator:sandbox-e94ac8ee
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -3184,7 +3185,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-swift-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "79a1a3052d735b2a"
+        openbank.tech/policy-checksum: "f49867ea38df2bb6"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -3197,7 +3198,7 @@ spec:
         - name: swift-service
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-swift-service:sandbox-631a1f05
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-swift-service:sandbox-4c86c6f7
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -3508,7 +3509,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-vop-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "c3b5327e3e49eb88"
+        openbank.tech/policy-checksum: "6b3622cf22e983ea"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -3520,7 +3521,7 @@ spec:
       containers:
         - name: vop-service
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-vop-service:sandbox-ed58c115
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-vop-service:sandbox-4c86c6f7
 
           imagePullPolicy: IfNotPresent
           ports:

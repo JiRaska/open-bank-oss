@@ -10,6 +10,9 @@ import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxFailurePolicy
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.persistence.outbox.OutboxStatus
+import com.openbank.libs.persistence.outbox.OutboxTableShape
+import com.openbank.libs.persistence.outbox.PanacheOutboxRetention
+import com.openbank.libs.persistence.outbox.SentOutboxRetention
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -28,6 +31,7 @@ import java.util.UUID
 @ApplicationScoped
 class FraudOutboxRepositoryImpl(private val clock: Clock) :
     FraudOutboxRepository,
+    SentOutboxRetention by PanacheOutboxRetention(OutboxTableShape("fraud_outbox")),
     PanacheRepository<FraudOutboxEntity> {
 
     fun persistInTransaction(message: OutboxMessage) = persist(message.toEntity())

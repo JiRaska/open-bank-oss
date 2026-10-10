@@ -180,3 +180,10 @@ State is an append-only, versioned desired-state log (`dispatch_control_log`); e
 3. **Off-by-default egress** — push adapters and the oversight webhook are disabled unless explicitly enabled; a disabled adapter is a successful no-op.
 4. **Privacy by construction** — oversight egress is built from a positive allow-list schema plus a scrubber.
 5. **No money path** — at-least-once delivery, redelivery re-persists; no inbound idempotency layer.
+
+## Template copy catalog
+
+`NotificationCopyCatalog` maps every `NotificationTemplate` to its cs/en copy in one exhaustive `when`
+with no `else`, so a template without copy fails to compile. The six `PENSION_*` templates render
+through `PensionCopy`: subjects are constant per template and language, values are HTML-escaped, and
+`PENSION_PAYOUT_ACCOUNT_CHANGED` is a SECURITY notice that cannot be muted.

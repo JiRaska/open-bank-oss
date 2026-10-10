@@ -19,7 +19,6 @@ import com.openbank.sepainstant.application.port.out.SanctionsScreeningPort
 import com.openbank.sepainstant.application.port.out.SchemeGatewayPort
 import com.openbank.sepainstant.application.port.out.SchemeGatewayUnavailableException
 import com.openbank.sepainstant.application.port.out.ScreeningUnavailableException
-import com.openbank.sepainstant.application.port.out.SctInstEventPublisher
 import com.openbank.sepainstant.application.port.out.SctInstPaymentRepository
 import com.openbank.sepainstant.application.port.out.SettlementPort
 import com.openbank.sepainstant.application.port.out.SettlementUnavailableException
@@ -48,7 +47,6 @@ import java.util.UUID
 @ApplicationScoped
 class SctInstPaymentService(
     private val repo: SctInstPaymentRepository,
-    private val publisher: SctInstEventPublisher,
     private val screeningPort: SanctionsScreeningPort,
     private val amlCasePort: AmlCasePort,
     private val fraudScoringPort: FraudScoringPort,
@@ -67,7 +65,6 @@ class SctInstPaymentService(
     @Inject
     constructor(
         repo: SctInstPaymentRepository,
-        publisher: SctInstEventPublisher,
         screeningPort: SanctionsScreeningPort,
         amlCasePort: AmlCasePort,
         fraudScoringPort: FraudScoringPort,
@@ -80,7 +77,6 @@ class SctInstPaymentService(
         schemeSubmissionEnabled: Boolean,
     ) : this(
         repo,
-        publisher,
         screeningPort,
         amlCasePort,
         fraudScoringPort,
@@ -267,14 +263,15 @@ class SctInstPaymentService(
             rejectReason = code,
             rejectDetail = "scheme reject (pacs.002): $code",
         )
-        return repo.save(rejected).flatMap { saved ->
-            publisher.publish(
-                SctInstPaymentRejected(
-                    paymentId = saved.paymentId,
-                    reason = code,
-                    occurredAt = OffsetDateTime.now(clock),
-                ),
-            )
+        return repo.saveWithEvent(
+            rejected,
+            SctInstPaymentRejected(
+                paymentId = rejected.paymentId,
+                reason = code,
+                occurredAt = OffsetDateTime.now(clock),
+            ),
+        ).flatMap { saved ->
+            Uni.createFrom().item(saved)
                 .invoke { _ ->
                     metrics.paymentCompleted("sepa_instant", saved.currency, "rejected")
                     metrics.paymentProcessingDuration(
@@ -283,7 +280,6 @@ class SctInstPaymentService(
                         Duration.between(saved.createdAt, OffsetDateTime.now(clock)),
                     )
                 }
-                .replaceWith(saved)
         }
     }
 
@@ -293,27 +289,30 @@ class SctInstPaymentService(
             status = SctInstStatus.PROCESSING,
             executionTimeoutAt = OffsetDateTime.now(clock).plusSeconds(timeoutSeconds),
         )
-        return repo.save(processing).flatMap { saved ->
-            publisher.publish(
-                SctInstPaymentSubmitted(
-                    paymentId = saved.paymentId,
-                    debtorIban = saved.debtorIban,
-                    creditorIban = saved.creditorIban,
-                    amount = saved.amount.amount,
-                    currency = saved.currency,
-                    endToEndId = saved.endToEndId,
-                    occurredAt = OffsetDateTime.now(clock),
-                ),
-            ).map { saved }
-        }
+        return repo.saveWithEvent(
+            processing,
+            SctInstPaymentSubmitted(
+                paymentId = processing.paymentId,
+                debtorIban = processing.debtorIban,
+                creditorIban = processing.creditorIban,
+                amount = processing.amount.amount,
+                currency = processing.currency,
+                endToEndId = processing.endToEndId,
+                occurredAt = OffsetDateTime.now(clock),
+            ),
+        )
     }
 
     /** ADR-0108: funds booked — transition from PROCESSING to SETTLED and emit Settled. */
     private fun complete(processing: SctInstPayment): Uni<SctInstPayment> {
         val now = OffsetDateTime.now(clock)
         val settled = processing.copy(status = SctInstStatus.SETTLED, settledAt = now)
-        return repo.save(settled).flatMap { saved ->
-            publisher.publish(SctInstPaymentSettled(paymentId = saved.paymentId, settledAt = now, occurredAt = now))
+        return repo.updateWithEvent(
+            settled,
+            SctInstStatus.PROCESSING,
+            SctInstPaymentSettled(paymentId = settled.paymentId, settledAt = now, occurredAt = now),
+        ).flatMap { saved ->
+            Uni.createFrom().item(saved)
                 .invoke { _ ->
                     metrics.paymentCompleted("sepa_instant", saved.currency, "settled")
                     metrics.paymentProcessingDuration(
@@ -333,17 +332,15 @@ class SctInstPaymentService(
             rejectReason = ALERT_SANCTIONS_HIT,
             rejectDetail = detail,
         )
-        return repo.save(rejected).flatMap { saved ->
+        return repo.saveWithEvent(
+            rejected,
+            SctInstPaymentRejected(
+                paymentId = rejected.paymentId,
+                reason = ALERT_SANCTIONS_HIT,
+                occurredAt = OffsetDateTime.now(clock),
+            ),
+        ).flatMap { saved ->
             openCaseQuietly(saved, AmlCaseRiskLevel.CRITICAL, ALERT_SANCTIONS_HIT, detail, matched)
-                .flatMap {
-                    publisher.publish(
-                        SctInstPaymentRejected(
-                            paymentId = saved.paymentId,
-                            reason = ALERT_SANCTIONS_HIT,
-                            occurredAt = OffsetDateTime.now(clock),
-                        ),
-                    )
-                }
                 .invoke { _ ->
                     metrics.paymentCompleted("sepa_instant", saved.currency, "rejected")
                     metrics.paymentProcessingDuration(
@@ -417,22 +414,10 @@ class SctInstPaymentService(
                 throw jakarta.ws.rs.BadRequestException("Only SETTLED payments can be recalled")
             }
             val recalledAt = OffsetDateTime.now(clock)
-            repo.updateStatus(paymentId, SctInstStatus.RECALLED)
-                .flatMap {
-                    publisher.publish(
-                        SctInstPaymentRecalled(
-                            paymentId = paymentId,
-                            recallReason = reason,
-                            occurredAt = recalledAt,
-                        ),
-                    )
-                }
-                .map {
-                    p.copy(
-                        status = SctInstStatus.RECALLED,
-                        recalledAt = recalledAt,
-                        recallReason = reason,
-                    )
-                }
+            repo.updateWithEvent(
+                p.copy(status = SctInstStatus.RECALLED, recalledAt = recalledAt, recallReason = reason),
+                SctInstStatus.SETTLED,
+                SctInstPaymentRecalled(paymentId = paymentId, recallReason = reason, occurredAt = recalledAt),
+            )
         }
 }
