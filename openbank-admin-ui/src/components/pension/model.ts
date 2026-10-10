@@ -5,7 +5,7 @@
 // Pure presentation and four-eyes logic for the pension console (ADR-0334). The four-eyes checks
 // here are a courtesy that hides a button the service would refuse: pension-fund-service answers
 // 409/422 on a self-approval whatever the UI shows, and the page renders that refusal readably.
-import type { Allocation, Nav, PensionContract, StrategyChange } from './contracts'
+import type { Allocation, AnnuityProvider, Nav, PensionContract, StrategyChange } from './contracts'
 import type { WriteResult } from './api'
 
 type T = (cs: string, en: string) => string
@@ -26,6 +26,16 @@ const STATUS_LABELS: Record<string, [string, string]> = {
   PENDING_APPROVAL: ['Čeká na schválení', 'Pending approval'],
   APPROVED: ['Schváleno', 'Approved'],
   APPLIED: ['Účinné', 'Applied'],
+  DISABLED: ['Vypnuto', 'Disabled'],
+  OFFERED: ['Nabídnuto', 'Offered'],
+  SELECTED: ['Vybráno', 'Selected'],
+  PREMIUM_SENT: ['Pojistné odesláno', 'Premium sent'],
+  CANCELLED: ['Zrušeno', 'Cancelled'],
+  FAILED: ['Selhalo', 'Failed'],
+  DUE: ['K vrácení', 'Due'],
+  REPORTED: ['Nahlášeno', 'Reported'],
+  CONFIRMED: ['Potvrzeno', 'Confirmed'],
+  SETTLED: ['Vypořádáno', 'Settled'],
 }
 
 /** A status the console does not know yet renders verbatim, never as an error. */
@@ -104,4 +114,18 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 /** Contract and fund ids are UUIDs; anything else is rejected before a call is made. */
 export function isUuid(value: string): boolean {
   return UUID.test(value.trim())
+}
+
+/**
+ * Activation approval is offered only on a partner pending activation that somebody ELSE both
+ * edited and asked to activate. The service refuses a self-approval (403) whatever the UI shows.
+ */
+export function canApproveAnnuityProvider(p: AnnuityProvider, actor: string | null): boolean {
+  return p.status === 'PENDING_ACTIVATION' && actor !== null
+    && p.proposedBy !== actor && p.activationRequestedBy !== actor
+}
+
+/** Activation can be requested on a DRAFT with proposed terms. */
+export function canRequestAnnuityActivation(p: AnnuityProvider): boolean {
+  return p.status === 'DRAFT' && p.proposedTerms != null
 }

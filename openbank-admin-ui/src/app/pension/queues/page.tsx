@@ -13,6 +13,7 @@ import { Inbox } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { PageHeader } from '@/components/ui'
 import { PENSION, pensionUrl } from '@/components/pension/api'
+import { fieldOf } from '@/components/pension/contracts'
 import { PAGE_SIZE, PensionQueue } from '@/components/pension/PensionQueue'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 
@@ -40,6 +41,10 @@ function Queues() {
         service={PENSION}
         feature={t('žádosti o sjednání', 'onboarding applications')}
         statusPath="application.status"
+        hrefOf={row => {
+          const id = fieldOf(row, 'application.applicationId')
+          return typeof id === 'string' ? `/pension/applications/${encodeURIComponent(id)}` : null
+        }}
         columns={[
           { key: 'application.kind', cs: 'Druh', en: 'Kind' },
           { key: 'application.productLine', cs: 'Produkt', en: 'Product' },

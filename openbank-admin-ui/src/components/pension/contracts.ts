@@ -163,3 +163,42 @@ export function rowIdOf(row: QueueRow): string | null {
   }
   return null
 }
+
+/**
+ * An annuity partner in pension-service's registry (API 1.2.0, #12383). Terms are an open record:
+ * the console shows them, the service validates them. `proposedBy` edited the pending terms and
+ * `activationRequestedBy` asked for activation; the approver must be neither (four-eyes).
+ */
+export const annuityProviderSchema = z.object({
+  partnerId: z.string(),
+  status: z.string(),
+  liveVersion: z.number().nullable().optional(),
+  liveTerms: z.record(z.string(), z.unknown()).nullable().optional(),
+  approvedBy: z.string().nullable().optional(),
+  approvedAt: z.string().nullable().optional(),
+  proposedVersion: z.number().nullable().optional(),
+  proposedTerms: z.record(z.string(), z.unknown()).nullable().optional(),
+  proposedBy: z.string().nullable().optional(),
+  activationRequestedBy: z.string().nullable().optional(),
+  updatedAt: z.string().nullable().optional(),
+})
+export type AnnuityProvider = z.infer<typeof annuityProviderSchema>
+export const annuityProviderListSchema = z.array(annuityProviderSchema)
+
+/** State-contribution deadline counters (ZDPS §16/§18): what is late right now. */
+export const stateContributionDeadlinesSchema = z.object({
+  claimsPastFilingDeadline: z.number(),
+  claimsPastExpectedPayment: z.number(),
+  returnsOverdue: z.number(),
+})
+export type StateContributionDeadlines = z.infer<typeof stateContributionDeadlinesSchema>
+
+/** The operator view of one onboarding application (GET /operator/onboarding/applications/{id}). */
+export const operatorApplicationSchema = z.object({
+  partyId: z.string().nullable().optional(),
+  application: z.record(z.string(), z.unknown()),
+})
+export type OperatorApplication = z.infer<typeof operatorApplicationSchema>
+
+/** Staff read of a contract's schedule or beneficiary designation (open record, rendered per field). */
+export const openRecordSchema = z.record(z.string(), z.unknown())

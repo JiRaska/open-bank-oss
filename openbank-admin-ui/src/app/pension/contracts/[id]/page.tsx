@@ -22,6 +22,7 @@ import {
   type ContractValuation, type PensionContract, type UnitTransaction,
 } from '@/components/pension/contracts'
 import { contractTimeline, isUuid, statusLabel } from '@/components/pension/model'
+import { ContractChanges } from '@/components/pension/ContractChanges'
 import { FundRef } from '@/components/pension/FundRef'
 import { PAGE_SIZE } from '@/components/pension/PensionQueue'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
@@ -117,6 +118,8 @@ function ContractDetail({ id }: { id: string }) {
               {contractTimeline(contract, t).map(e => <li key={`${e.at}-${e.label}`}><code>{e.at}</code> — {e.label}</li>)}
             </ol>
           </section>
+
+          <ContractChanges contractId={id} />
 
           <section className="card" style={{ marginBottom: 16, overflowX: 'auto' }}>
             <h2 style={{ fontSize: 15, marginTop: 0 }}>{t('Podílové jednotky', 'Unit holdings')}</h2>

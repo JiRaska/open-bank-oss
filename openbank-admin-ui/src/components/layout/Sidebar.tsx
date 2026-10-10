@@ -127,6 +127,7 @@ const pensionNav: NavItem[] = [
   { nameCs: 'Nespárované příspěvky', nameEn: 'Unmatched contributions', href: '/pension/contributions', icon: FileSearch, permission: 'pension:view' },
   { nameCs: 'Státní příspěvky',     nameEn: 'State incentives',     href: '/pension/incentives',    icon: Gift,       permission: 'pension:view' },
   { nameCs: 'Výplaty a úmrtí',      nameEn: 'Payouts & death claims', href: '/pension/payouts',     icon: Wallet,     permission: 'pension:view' },
+  { nameCs: 'Anuitní partneři',     nameEn: 'Annuity partners',     href: '/pension/annuity',       icon: Handshake,  permission: 'pension:view' },
   { nameCs: 'Fondy a NAV',          nameEn: 'Funds & NAV',          href: '/pension/funds',         icon: Landmark,   permission: 'pension:view' },
   { nameCs: 'Strategie',            nameEn: 'Strategies',           href: '/pension/strategies',    icon: Scale,      permission: 'pension:view' },
   { nameCs: 'Podílové jednotky',    nameEn: 'Unit holdings',        href: '/pension/holdings',      icon: Layers,     permission: 'pension:view' },
