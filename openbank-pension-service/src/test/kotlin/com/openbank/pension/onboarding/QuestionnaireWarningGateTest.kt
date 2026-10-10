@@ -9,6 +9,7 @@ import com.openbank.pension.application.onboarding.GeneratedDocument
 import com.openbank.pension.application.onboarding.KeyInformationDocumentPort
 import com.openbank.pension.application.onboarding.OnboardingApplicationRepository
 import com.openbank.pension.application.onboarding.OnboardingService
+import com.openbank.pension.application.onboarding.QuestionnaireService
 import com.openbank.pension.application.onboarding.SignatureVerificationPort
 import com.openbank.pension.application.onboarding.SuitabilityAssessmentRepository
 import com.openbank.pension.domain.model.ContributionFrequency
@@ -21,6 +22,9 @@ import com.openbank.pension.domain.onboarding.OnboardingKind
 import com.openbank.pension.domain.onboarding.QuestionnaireAnswers
 import com.openbank.pension.domain.onboarding.SuitabilityAssessment
 import com.openbank.pension.domain.pack.ProviderType
+import com.openbank.pension.domain.questionnaire.LocalizedText
+import com.openbank.pension.domain.questionnaire.QuestionnaireRecord
+import com.openbank.pension.domain.questionnaire.SustainabilityPreference
 import com.openbank.pension.domain.questionnaire.WarningCode
 import com.openbank.pension.domain.questionnaire.WarningPolicy
 import com.openbank.pension.infrastructure.onboarding.pack.OnboardingRulesLoader
@@ -166,7 +170,7 @@ class QuestionnaireWarningGateTest {
             service.warningAcks(
                 application,
                 setOf(WarningCode.STRATEGY_ABOVE_PROFILE),
-                assessment.id,
+                assessment,
                 "DYNAMIC",
                 "en",
             ).map { it.copy(textSha256 = WarningPolicy.sha256("previous wording")) },
@@ -177,5 +181,62 @@ class QuestionnaireWarningGateTest {
             runBlocking { service.chooseStrategy(application.id, party, ChooseStrategyCommand("DYNAMIC", true, "en")) }
         }.hasMessageContaining("STRATEGY_ABOVE_PROFILE")
         coVerify(exactly = 0) { documents.generate(any()) }
+    }
+
+    @Test
+    fun `a newer question set cannot replace wording shown for an existing assessment`(): Unit = runBlocking {
+        val older = questionSets.questionSet("CZ", ProductLine.DPS)
+        val warning = older.warning(WarningCode.STRATEGY_ABOVE_PROFILE)
+        val newer = older.copy(
+            version = older.version + 1,
+            warnings = older.warnings.map {
+                if (it.code == warning.code) {
+                    it.copy(text = LocalizedText(it.text.cs + " updated", it.text.en + " updated"))
+                } else {
+                    it
+                }
+            },
+        )
+        val registry = StaticQuestionSetRegistry(QuestionSetLoader.loadAll() + newer, OnboardingRulesLoader.loadAll())
+        val pinned = assessment.copy(
+            questionnaire = QuestionnaireRecord(
+                older.id, older.version, emptyMap(), 3, emptyList(), emptyList(),
+                SustainabilityPreference.NONE, null, null, null, emptyList(),
+            ),
+        )
+        val versionedService = OnboardingService(
+            applications, assessments, mockk(), mockk(), packs, rules, mockk(), mockk(), documents, signatures,
+            mockk(), mockk(), clock, registry,
+        )
+        val application = submitted()
+        stub(application)
+        coEvery { assessments.findById(assessment.id) } returns pinned
+        val displayed = QuestionnaireService(versionedService, registry, packs, clock)
+            .requiredWarnings(application.id, party, "DYNAMIC").first
+        assertThat(displayed.version).isEqualTo(older.version)
+        assertThat(displayed.warning(warning.code).text.en).isEqualTo(warning.text.en)
+
+        coEvery { applications.save(any()) } answers { firstArg() }
+        val acknowledged = versionedService.acknowledgeWarnings(
+            application.id,
+            party,
+            "DYNAMIC",
+            setOf(warning.code),
+            "en",
+        )
+        val ack = acknowledged.warningAcknowledgements.single()
+        assertThat(ack.textSha256).isEqualTo(WarningPolicy.sha256(warning.text.en))
+        assertThat(ack.textSha256).isNotEqualTo(WarningPolicy.sha256(newer.warning(warning.code).text.en))
+
+        stub(acknowledged)
+        coEvery { assessments.findById(assessment.id) } returns pinned
+        coEvery { applications.save(any()) } answers { firstArg() }
+        coEvery { documents.generate(any()) } returns GeneratedDocument("doc-1", "sha-doc")
+        val issued = versionedService.chooseStrategy(
+            application.id,
+            party,
+            ChooseStrategyCommand("DYNAMIC", false, "en"),
+        )
+        assertThat(issued.chosenStrategy).isEqualTo("DYNAMIC")
     }
 }

@@ -363,7 +363,7 @@ class OnboardingService(
                 "warning $code cannot be overridden under the ${onboarding.questionnaire.regime} regime"
             }
         }
-        val acks = warningAcks(application, codes, assessment.id, strategyCode, language)
+        val acks = warningAcks(application, codes, assessment, strategyCode, language)
         return applications.save(application.acknowledge(acks, now()))
     }
 
@@ -390,7 +390,7 @@ class OnboardingService(
                 "strategy $code is above the suitable risk class ${recommendation.maxRiskClass}"
             }
         }
-        val missing = missingWarnings(application, required, assessment.id, code, command.language ?: "cs")
+        val missing = missingWarnings(application, required, assessment, code, command.language ?: "cs")
         require(missing.isEmpty()) { "the choice needs acknowledged warnings: ${missing.joinToString()}" }
         val document = documents.generate(
             KidRequest(
@@ -640,16 +640,16 @@ class OnboardingService(
     internal fun warningAcks(
         application: OnboardingApplication,
         codes: Set<WarningCode>,
-        assessmentId: UUID,
+        assessment: SuitabilityAssessment,
         strategyCode: String,
         language: String?,
     ): List<WarningAcknowledgement> {
-        val set = questionSets.questionSet(application.jurisdiction, application.productLine)
+        val set = questionSetFor(application, assessment)
         val lang = if (language?.lowercase()?.startsWith("en") == true) "en" else "cs"
         return codes.map { code ->
             WarningAcknowledgement(
                 code = code,
-                assessmentId = assessmentId,
+                assessmentId = assessment.id,
                 strategyCode = strategyCode,
                 textSha256 = WarningPolicy.sha256(set.warning(code).text.text(lang)),
                 language = lang,
@@ -666,28 +666,32 @@ class OnboardingService(
         val assessment = currentAssessment(application)
         val strategy = checkNotNull(application.chosenStrategy) { "no strategy has been chosen" }
         val required = WarningPolicy.required(strategy, assessment, recommend(application, assessment))
-        val missing = missingWarnings(application, required, assessment.id, strategy)
+        val missing = missingWarnings(application, required, assessment, strategy)
         check(missing.isEmpty()) { "warnings must be acknowledged before signing: ${missing.joinToString()}" }
     }
 
     private fun missingWarnings(
         application: OnboardingApplication,
         required: Set<WarningCode>,
-        assessmentId: UUID,
+        assessment: SuitabilityAssessment,
         strategyCode: String,
         language: String? = null,
     ): Set<WarningCode> {
-        val set = questionSets.questionSet(application.jurisdiction, application.productLine)
+        val set = questionSetFor(application, assessment)
         val selectedLanguage = language?.let { if (it.lowercase().startsWith("en")) "en" else "cs" }
         return WarningPolicy.missing(
             required,
             application.warningAcknowledgements,
-            assessmentId,
+            assessment.id,
             strategyCode,
             { code, lang -> set.warning(code).text.text(lang) },
             selectedLanguage,
         )
     }
+
+    private fun questionSetFor(application: OnboardingApplication, assessment: SuitabilityAssessment) =
+        assessment.questionnaire?.let { questionSets.questionSet(it.questionSetId, it.questionSetVersion) }
+            ?: questionSets.questionSet(application.jurisdiction, application.productLine)
 
     private fun rulesFor(application: OnboardingApplication) =
         rules.rules(application.jurisdiction, application.productLine, application.packVersion)

@@ -280,20 +280,19 @@ class QuestionnaireEngineTest {
     private fun assess(
         profile: com.openbank.pension.domain.questionnaire.QuestionnaireProfile,
         rules: QuestionnaireRules = dipRules.questionnaire,
-    ) =
-        SuitabilityAssessment.fromQuestionnaire(
-            UUID.randomUUID(),
-            UUID.randomUUID(),
-            ProductLine.DIP,
-            rules,
-            profile,
-            QuestionnaireRecord(
-                dip.id, dip.version, emptyMap(), profile.riskClass, profile.bindingReasons, profile.competence,
-                profile.sustainability, null, null, null, emptyList(),
-            ),
-            today,
-            now,
-        )
+    ) = SuitabilityAssessment.fromQuestionnaire(
+        UUID.randomUUID(),
+        UUID.randomUUID(),
+        ProductLine.DIP,
+        rules,
+        profile,
+        QuestionnaireRecord(
+            dip.id, dip.version, emptyMap(), profile.riskClass, profile.bindingReasons, profile.competence,
+            profile.sustainability, null, null, null, emptyList(),
+        ),
+        today,
+        now,
+    )
 
     private val recommendation =
         StrategyRecommendation("BALANCED", listOf("CONSERVATIVE", "BALANCED"), 3, 25, emptyList())
