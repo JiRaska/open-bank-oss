@@ -4,6 +4,7 @@
 
 package com.openbank.cardissuance.infrastructure.rest
 
+import com.openbank.libs.authz.ServiceAccountIdentity
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.ws.rs.ForbiddenException
 
@@ -36,7 +37,7 @@ internal val CARD_PARTY_LIST_CALLERS = setOf(
  */
 internal fun requireNamedCardReader(identity: SecurityIdentity, allowed: Set<String>) {
     if (CARD_READ_STAFF_ROLES.any(identity::hasRole)) return
-    if (identity.principal?.name !in allowed) {
+    if (!ServiceAccountIdentity.isOneOf(identity, allowed)) {
         throw ForbiddenException("caller is not a named card reader")
     }
 }
