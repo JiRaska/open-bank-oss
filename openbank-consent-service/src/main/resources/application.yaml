@@ -195,3 +195,11 @@ authz:
       # readiness probe and every in-cluster plaintext caller get `connection refused`.
       # mTLS applies to the 8443 listener only. Runtime property; see #10441.
       insecure-requests: enabled
+      # The TLS client certificate authenticates the workload transport, not its API identity.
+      # Require OIDC bearer authentication for every business API path as well.
+      auth:
+        permission:
+          bearer-only:
+            paths: /api/*
+            policy: permit
+            auth-mechanism: bearer
