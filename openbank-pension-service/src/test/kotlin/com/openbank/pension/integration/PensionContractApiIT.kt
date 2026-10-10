@@ -14,10 +14,6 @@ import io.quarkus.vertx.VertxContextSupport
 import io.restassured.RestAssured.given
 import io.smallrye.mutiny.coroutines.asUni
 import jakarta.inject.Inject
-import java.sql.DriverManager
-import java.time.Instant
-import java.time.LocalDate
-import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -28,6 +24,10 @@ import org.hamcrest.Matchers.everyItem
 import org.hamcrest.Matchers.hasItem
 import org.hamcrest.Matchers.not
 import org.junit.jupiter.api.Test
+import java.sql.DriverManager
+import java.time.Instant
+import java.time.LocalDate
+import java.util.UUID
 
 /**
  * Drives the real HTTP routes against a real Postgres. Only this shape proves the routes are

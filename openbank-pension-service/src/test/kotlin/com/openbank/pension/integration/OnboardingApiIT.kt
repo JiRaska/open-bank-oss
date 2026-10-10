@@ -15,13 +15,13 @@ import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
 import io.restassured.response.ValidatableResponse
 import jakarta.inject.Inject
-import java.sql.DriverManager
-import java.util.UUID
 import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.config.ConfigProvider
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.notNullValue
 import org.junit.jupiter.api.Test
+import java.sql.DriverManager
+import java.util.UUID
 
 /**
  * Onboarding and transfers over real HTTP against real Postgres, with the real workflows running

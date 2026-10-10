@@ -250,7 +250,7 @@ authz:
   openbank:
     pension:
       # Synthetic development identity, shared with test and sandbox fixtures.
-      provider-entity-id: "00000000-0000-4000-8000-000000000001"
+      provider-entity-id: ${OPENBANK_PENSION_PROVIDER_ENTITY_ID:00000000-0000-4000-8000-000000000001}
       stub-integrations:
         enabled: true
       worker:

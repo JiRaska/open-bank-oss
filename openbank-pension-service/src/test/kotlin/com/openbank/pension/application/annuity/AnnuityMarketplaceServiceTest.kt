@@ -43,6 +43,11 @@ import com.openbank.pension.domain.pack.JurisdictionPackRegistry
 import com.openbank.pension.infrastructure.pack.JurisdictionPackLoader
 import com.openbank.pension.testsupport.ContractFixtures
 import com.openbank.pension.testsupport.ProviderFixtures
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
+import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.time.Clock
 import java.time.Duration
@@ -52,11 +57,6 @@ import java.time.ZoneOffset
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.runBlocking
-import org.assertj.core.api.Assertions.assertThat
-import org.assertj.core.api.Assertions.assertThatThrownBy
-import org.junit.jupiter.api.Test
 
 class AnnuityMarketplaceServiceTest {
 

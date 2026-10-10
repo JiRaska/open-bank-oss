@@ -11,8 +11,6 @@ import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
 import io.restassured.response.ValidatableResponse
-import java.sql.DriverManager
-import java.util.UUID
 import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.config.ConfigProvider
 import org.hamcrest.Matchers.containsInAnyOrder
@@ -22,6 +20,8 @@ import org.hamcrest.Matchers.greaterThan
 import org.hamcrest.Matchers.hasItem
 import org.hamcrest.Matchers.not
 import org.junit.jupiter.api.Test
+import java.sql.DriverManager
+import java.util.UUID
 
 /**
  * The data-driven questionnaire (issue #12384) over real HTTP and Postgres: question set with

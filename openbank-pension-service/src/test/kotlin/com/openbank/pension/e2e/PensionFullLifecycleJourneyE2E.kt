@@ -20,6 +20,11 @@ import io.restassured.path.json.JsonPath
 import io.restassured.path.json.config.JsonPathConfig
 import io.restassured.response.Response
 import jakarta.inject.Inject
+import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.MethodOrderer
+import org.junit.jupiter.api.Order
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.TestMethodOrder
 import java.math.BigDecimal
 import java.time.Clock
 import java.time.Duration
@@ -27,11 +32,6 @@ import java.time.LocalDate
 import java.time.YearMonth
 import java.time.temporal.ChronoUnit
 import java.util.UUID
-import org.assertj.core.api.Assertions.assertThat
-import org.junit.jupiter.api.MethodOrderer
-import org.junit.jupiter.api.Order
-import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.TestMethodOrder
 
 /**
  * The whole participant lifecycle of ADR-0334 over real HTTP (issue #12350 slice S7): digital

@@ -17,15 +17,15 @@ import io.restassured.path.json.JsonPath
 import io.restassured.response.Response
 import io.smallrye.mutiny.coroutines.asUni
 import jakarta.inject.Inject
-import java.math.BigDecimal
-import java.time.Instant
-import java.time.LocalDate
-import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import java.math.BigDecimal
+import java.time.Instant
+import java.time.LocalDate
+import java.util.UUID
 
 /**
  * Participant-side end-to-end journeys for the pension lifecycle (ADR-0334, issue #12350 slice S7).

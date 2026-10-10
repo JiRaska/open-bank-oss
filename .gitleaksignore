@@ -6,3 +6,11 @@
 # already removed from the file by 62616af1ef; this entry only clears the historical commit that
 # the per-PR BASE..HEAD scan still walks. It disappears from main on squash-merge.
 ecae95d1bbbc0ec02206c8450f0e4e86b48ed541:openbank-libs-domain/src/main/kotlin/com/openbank/libs/security/EgressPolicy.kt:rod-cislo:162
+
+# FALSE POSITIVES: Pact Idempotency-Key examples are non-authentication deduplication hashes,
+# SHA-256 of fixed public contribution:pact / redeem:pact and synthetic fund UUID fixtures.
+# New Pact examples use low-entropy synthetic hex; these exact fingerprints cover only the
+# original historical commit still scanned in this PR, not other keys or future findings.
+cae11688fbd8ab870c3f60da4ff8beb3b5679fc0:pacts/openbank-pension-service-openbank-pension-fund-service.json:generic-api-key:528
+cae11688fbd8ab870c3f60da4ff8beb3b5679fc0:pacts/openbank-pension-service-openbank-pension-fund-service.json:generic-api-key:612
+cae11688fbd8ab870c3f60da4ff8beb3b5679fc0:pacts/openbank-pension-service-openbank-pension-fund-service.json:generic-api-key:711

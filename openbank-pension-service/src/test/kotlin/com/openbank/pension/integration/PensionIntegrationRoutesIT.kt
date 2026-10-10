@@ -21,9 +21,6 @@ import io.restassured.RestAssured.given
 import io.restassured.specification.RequestSpecification
 import io.smallrye.mutiny.coroutines.asUni
 import jakarta.inject.Inject
-import java.math.BigDecimal
-import java.time.LocalDate
-import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -32,6 +29,9 @@ import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.hasItem
 import org.hamcrest.Matchers.notNullValue
 import org.junit.jupiter.api.Test
+import java.math.BigDecimal
+import java.time.LocalDate
+import java.util.UUID
 
 /**
  * The routes ADR-0334 S8 adds for customer-edge and the admin UI, plus the replay protection every
