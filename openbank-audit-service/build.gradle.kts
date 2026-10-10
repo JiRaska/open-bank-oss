@@ -39,6 +39,9 @@ dependencies {
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.rest.assured.kotlin)
+    // Provider-side verification (ADR-0063 git-pact): AuditPactProviderVerificationTest replays the
+    // consumer pacts in pacts/ that name openbank-audit-service (#11900, lending's evidence read).
+    testImplementation(libs.pact.provider)
 
     // #6035: AuditSubscriptionSurfaceIT pushes records INTO the `audit-events-in` channel rather
     // than calling AuditConsumer directly — a direct call cannot tell a registered channel from an

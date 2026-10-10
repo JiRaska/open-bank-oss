@@ -15,6 +15,17 @@ sidecar.
 
 ## Change log
 
+### 2026-10-03 — east-west mTLS listener (8443) for the evidence-bundle caller (#11900)
+
+audit-service gains a private-CA mTLS listener on 8443 (`audit-service-internal-tls`, `openbank-ca`;
+`quarkus.http.ssl.client-auth=required` baked under `%prod`), same shape as consent-service's.
+lending-service's evidence-bundle read uses it with its `lending-internal-tls` client certificate,
+because that request carries a person's bearer token and must not cross the cluster in plaintext
+(ASVS V9.1, which flagged the first draft's `http://…:8113`). **STRIDE-I/S:** the token is no longer
+readable on the wire, and a caller without a CA-issued client certificate cannot reach 8443 at all.
+HTTP/8113 stays for existing callers (admin-ui, security-scanner) and the probes
+(`insecure-requests: enabled`); their migration is not part of this change.
+
 ### 2026-10-03 — evidence bundle route, and a fourth reader role (#11900)
 
 New `GET /api/v1/audit/evidence/{aggregateId}` (ADR-0214 D3): every entry about one aggregate,

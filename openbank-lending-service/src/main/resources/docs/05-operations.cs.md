@@ -59,6 +59,27 @@ _Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v je
 ### Roste backlog outboxu
 Řádky `lending_outbox.status` uvíznou neodeslané a `attempt_count` stoupá ⇒ zkontroluj Kafka konektivitu a `last_error`. Dispatcher (`@Scheduled every 5s`, batch 25, `SKIP` překryv) opakuje automaticky; trvalý backlog ukazuje na broker nebo topic `openbank.lending.events`. Nemazat řádky — jsou zárukou at-least-once doručení.
 
+### Důkazní balík a retence SENT řádků (#11900)
+`GET /api/v1/lending/applications/{id}/evidence` čte řetězec audit-service (`GET /api/v1/audit/evidence/{id}`, `AUDIT_SERVICE_URL`) s **vlastním tokenem volajícího** — nikdy přes m2m klienta. 401/403 z audit-service se předávají dál; cokoli jiného je **503**. Návrat k `lending_outbox` záměrně neexistuje.
+
+`lending_outbox` maže doručené řádky jako každý jiný outbox (ADR-0329), ale přepínač je tu **vypnutý** (`LENDING_OUTBOX_RETENTION_ENABLED`, výchozí `false`), dokud jednou neprojde tato kontrola shody. audit-service odebírá `openbank.lending.events` od 2026-07-31; události starší než retence topicu v tu chvíli se do řetězce nemusely nikdy dostat a jejich smazání z outboxu by je ztratilo.
+
+1. Přesná shoda podle id události (audit použije `eventId` producenta jako `entry_id`, pokud ho payload nese). Vyexportujte id z lendingu a dohledejte je v auditu:
+   ```sql
+   -- DB lendingu
+   SELECT event_id FROM lending_outbox WHERE status = 'SENT';
+   -- DB auditu, s těmito id v dočasné tabulce `lending_ids(event_id uuid)`
+   SELECT l.event_id FROM lending_ids l LEFT JOIN audit_entries a ON a.entry_id = l.event_id WHERE a.entry_id IS NULL;
+   ```
+2. Pojistka pro payloady bez `eventId` (audit pak záznam klíčuje podle adresy v Kafce): počty na žádost nesmí být v auditu nižší.
+   ```sql
+   -- DB lendingu
+   SELECT aggregate_id, count(*) FROM lending_outbox WHERE status = 'SENT' GROUP BY 1;
+   -- DB auditu
+   SELECT aggregate_id, count(*) FROM audit_entries WHERE source_service LIKE '%lending%' GROUP BY 1;
+   ```
+3. Žádné chybějící id a žádná žádost s menším počtem v auditu ⇒ nastavte `LENDING_OUTBOX_RETENTION_ENABLED=true`. Cokoli chybí ⇒ **nezapínejte**; důkazy těch úvěrů existují jen v outboxu a nejdřív je třeba je přehrát do řetězce.
+
 ### Selhává účetní zápis
 Při `LENDING_LEDGER_BACKEND=rest` jdou zápisy přes `LedgerCallGuard` (fault tolerance) do `ledger-service POST /api/v1/journals`. Selhání se projeví v disburse/repay/writeoff. Ověř `LEDGER_SERVICE_URL`, OIDC token služby a že GL účty `LENDING_GL_*` existují v účtové osnově. Zápisy jsou idempotentní (reference = idempotency key ledgeru), takže je bezpečné je opakovat.
 

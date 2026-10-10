@@ -17,6 +17,7 @@ Build is fast-jar (never uber-jar — see root CLAUDE.md GitOps rules). Generic 
 | Concern | Value | Source |
 |---|---|---|
 | App HTTP port | `8113` | `quarkus.http.port` |
+| East-west mTLS port | `8443` (private-CA cert `audit-service-internal-tls`, client certificate required; `%prod` only) | `QUARKUS_HTTP_SSL_*` env, `quarkus.http.ssl.client-auth` (build time) |
 | Management port | `8085`, root-path `/q` | `quarkus.management.*` |
 | Datasource | `postgresql://localhost:5432/openbank_audit` | `quarkus.datasource` |
 | Flyway | `migrate-at-start: true`, 10 connect retries | `quarkus.flyway` |
@@ -25,6 +26,8 @@ Build is fast-jar (never uber-jar — see root CLAUDE.md GitOps rules). Generic 
 | OIDC | `…/realms/openbank`, client `openbank-services` | `quarkus.oidc` |
 | OTel | OTLP `http://localhost:4317` | `quarkus.otel` |
 | Rate limit | enabled, max 200 concurrent | `openbank.rate-limit` |
+
+The 8443 listener exists for lending-service's evidence-bundle read (#11900), which carries a person's bearer token; HTTP/8113 stays for existing callers and the probes (`quarkus.http.insecure-requests: enabled`).
 
 Secrets (`POSTGRES_PASSWORD`, `OIDC_CLIENT_SECRET`) carry `CHANGE_ME_LOCAL_DEV_ONLY` placeholders; production injects real values (Vault, ADR-0017). Never ship the placeholders.
 
