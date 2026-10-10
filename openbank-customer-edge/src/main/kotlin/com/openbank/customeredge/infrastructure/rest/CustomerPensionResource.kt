@@ -644,7 +644,7 @@ class CustomerPensionResource(private val upstream: UpstreamClient, private val 
     /** Rule 1: always the token's own party; `X-Acting-For` is deliberately not passed. */
     private fun party(): UUID = parties.resolve(null)
 
-    private fun api() = "${pensionServiceUrl.trimEnd('/')}/api/v1/pension"
+    private fun api() = "${pensionServiceUrl.trimEnd('/')}/api/v2/pension"
 
     private fun json(value: Any) = EdgeJson.mapper.writeValueAsString(value)
 

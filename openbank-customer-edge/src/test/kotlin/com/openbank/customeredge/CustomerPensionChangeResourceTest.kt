@@ -31,7 +31,7 @@ class CustomerPensionChangeResourceTest {
     private val applicationId: UUID = UUID.randomUUID()
     private val challenge: UUID = UUID.randomUUID()
     private val pension = "http://pension.test"
-    private val api = "$pension/api/v1/pension"
+    private val api = "$pension/api/v2/pension"
     private val mapper = ObjectMapper()
     private val doc = "a".repeat(64)
 

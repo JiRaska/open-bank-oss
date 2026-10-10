@@ -76,7 +76,7 @@ class CustomerPensionResourceTest {
         val key = slot<String>()
         every {
             upstream.post(
-                "$pension/api/v1/pension/onboarding/applications",
+                "$pension/api/v2/pension/onboarding/applications",
                 capture(party),
                 capture(sent),
                 capture(key),
@@ -125,7 +125,7 @@ class CustomerPensionResourceTest {
         partyRecord(upstream, """{"dateOfBirth":"1985-05-05","address":{"countryCode":"CZ"}}""")
         val sent = slot<String>()
         every {
-            upstream.post("$pension/api/v1/pension/contracts/transfers-in", caller.toString(), capture(sent), "key-2")
+            upstream.post("$pension/api/v2/pension/contracts/transfers-in", caller.toString(), capture(sent), "key-2")
         } returns ok("""{"applicationId":"${UUID.randomUUID()}","kind":"TRANSFER_IN"}""", 201)
         val body = validApplication.replace(
             "\"participantPartyId\"",
@@ -148,7 +148,7 @@ class CustomerPensionResourceTest {
         val sent = slot<String>()
         every {
             upstream.post(
-                "$pension/api/v1/pension/onboarding/applications/$applicationId/sign",
+                "$pension/api/v2/pension/onboarding/applications/$applicationId/sign",
                 caller.toString(),
                 capture(sent),
                 "key-3",
@@ -169,7 +169,7 @@ class CustomerPensionResourceTest {
         val upstream = mockk<UpstreamClient>()
         val applicationId = UUID.randomUUID()
         every {
-            upstream.get("$pension/api/v1/pension/onboarding/applications/$applicationId", caller.toString())
+            upstream.get("$pension/api/v2/pension/onboarding/applications/$applicationId", caller.toString())
         } returns
             ok("""{"error":"not yours"}""", 403)
 
@@ -182,7 +182,7 @@ class CustomerPensionResourceTest {
     @Test
     fun `another party's contract is 404 and the unit register is never read`() {
         val upstream = mockk<UpstreamClient>()
-        every { upstream.get("$pension/api/v1/pension/contracts/$contractId", caller.toString()) } returns
+        every { upstream.get("$pension/api/v2/pension/contracts/$contractId", caller.toString()) } returns
             ok(contract(stranger))
 
         val response = resource(upstream).contract(contractId.toString())
@@ -199,7 +199,7 @@ class CustomerPensionResourceTest {
         verify(exactly = 0) { upstream.get(any(), any()) }
     }
 
-    private val valuationUrl get() = "$pension/api/v1/pension/contracts/$contractId/valuation"
+    private val valuationUrl get() = "$pension/api/v2/pension/contracts/$contractId/valuation"
 
     private val valuation = """
         {"contractId":"$contractId","currency":"CZK","status":"VALUED","totalValue":125.00,"asOf":"2026-10-01",
@@ -212,7 +212,7 @@ class CustomerPensionResourceTest {
     @Test
     fun `the overview drops the participant id and adds pension-service's valuation, never the fund API`() {
         val upstream = mockk<UpstreamClient>()
-        every { upstream.get("$pension/api/v1/pension/contracts/$contractId", caller.toString()) } returns
+        every { upstream.get("$pension/api/v2/pension/contracts/$contractId", caller.toString()) } returns
             ok(contract(caller))
         every { upstream.get(valuationUrl, caller.toString()) } returns ok(valuation)
 
@@ -232,7 +232,7 @@ class CustomerPensionResourceTest {
     @Test
     fun `a valuation pension-service cannot give is null, and the overview is still served`() {
         val upstream = mockk<UpstreamClient>()
-        every { upstream.get("$pension/api/v1/pension/contracts/$contractId", caller.toString()) } returns
+        every { upstream.get("$pension/api/v2/pension/contracts/$contractId", caller.toString()) } returns
             ok(contract(caller))
         every { upstream.get(valuationUrl, caller.toString()) } returns ok("""{"code":"UNAVAILABLE"}""", 503)
 
@@ -245,7 +245,7 @@ class CustomerPensionResourceTest {
     @Test
     fun `another party's contract never reaches the valuation or the transactions`() {
         val upstream = mockk<UpstreamClient>()
-        every { upstream.get("$pension/api/v1/pension/contracts/$contractId", caller.toString()) } returns
+        every { upstream.get("$pension/api/v2/pension/contracts/$contractId", caller.toString()) } returns
             ok(contract(stranger))
 
         assertThat(resource(upstream).contract(contractId.toString()).status).isEqualTo(404)
@@ -256,10 +256,10 @@ class CustomerPensionResourceTest {
     @Test
     fun `transactions are pension-service's page, projected, with the paging forwarded`() {
         val upstream = mockk<UpstreamClient>()
-        every { upstream.get("$pension/api/v1/pension/contracts/$contractId", caller.toString()) } returns
+        every { upstream.get("$pension/api/v2/pension/contracts/$contractId", caller.toString()) } returns
             ok(contract(caller))
         every {
-            upstream.get("$pension/api/v1/pension/contracts/$contractId/transactions?page=1&size=20", caller.toString())
+            upstream.get("$pension/api/v2/pension/contracts/$contractId/transactions?page=1&size=20", caller.toString())
         } returns ok(
             """{"items":[{"id":"${UUID.randomUUID()}","fundId":"${UUID.randomUUID()}","type":"SUBSCRIBE",
                "units":10,"amount":12.50,"navPerUnit":1.25,"pricedAt":"2026-09-01T16:00:00Z"}],
@@ -309,8 +309,8 @@ class CustomerPensionResourceTest {
         assertThat(quoted.status).isEqualTo(201)
         assertThat(signed.status).isEqualTo(200)
         assertThat(urls).containsExactly(
-            "$pension/api/v1/pension/contracts/$contractId/exit/termination/quote",
-            "$pension/api/v1/pension/contracts/$contractId/exit/termination/$noticeId/sign",
+            "$pension/api/v2/pension/contracts/$contractId/exit/termination/quote",
+            "$pension/api/v2/pension/contracts/$contractId/exit/termination/$noticeId/sign",
         )
         val signBody = mapper.readTree(bodies[1])
         assertThat(signBody["payoutIban"].asText()).isEqualTo("CZ6508000000192000145399")
@@ -327,7 +327,7 @@ class CustomerPensionResourceTest {
         val sent = slot<String>()
         every {
             upstream.put(
-                "$pension/api/v1/pension/contracts/$contractId/exit/payouts/$payoutId/account",
+                "$pension/api/v2/pension/contracts/$contractId/exit/payouts/$payoutId/account",
                 caller.toString(),
                 capture(sent),
             )
@@ -354,7 +354,7 @@ class CustomerPensionResourceTest {
     @Test
     fun `an upstream rule refusal is a fixed code and never the upstream body`() {
         val upstream = mockk<UpstreamClient>()
-        every { upstream.get("$pension/api/v1/pension/contracts/$contractId", caller.toString()) } returns
+        every { upstream.get("$pension/api/v2/pension/contracts/$contractId", caller.toString()) } returns
             ok(contract(caller))
         every { upstream.post(match { it.startsWith(sca) }, any(), any(), any()) } returns
             ok("""{"status":"COMPLETED"}""")
@@ -395,7 +395,7 @@ class CustomerPensionResourceTest {
     fun `a payout quote goes to the S5 exit route and a malformed payout id is 404 without a call`() {
         val upstream = mockk<UpstreamClient>()
         val url = slot<String>()
-        every { upstream.get("$pension/api/v1/pension/contracts/$contractId", caller.toString()) } returns
+        every { upstream.get("$pension/api/v2/pension/contracts/$contractId", caller.toString()) } returns
             ok(contract(caller))
         every { upstream.post(capture(url), caller.toString(), any(), any()) } returns ok("""{"payoutId":"p"}""", 201)
 
@@ -409,13 +409,13 @@ class CustomerPensionResourceTest {
         )
 
         assertThat(quoted.status).isEqualTo(201)
-        assertThat(url.captured).isEqualTo("$pension/api/v1/pension/contracts/$contractId/exit/payouts/quote")
+        assertThat(url.captured).isEqualTo("$pension/api/v2/pension/contracts/$contractId/exit/payouts/quote")
         assertThat(confirmed.status).isEqualTo(404)
         verify(exactly = 1) { upstream.post(any(), any(), any(), any()) }
     }
 
     private fun ownedContract(upstream: UpstreamClient) {
-        every { upstream.get("$pension/api/v1/pension/contracts/$contractId", caller.toString()) } returns
+        every { upstream.get("$pension/api/v2/pension/contracts/$contractId", caller.toString()) } returns
             ok(contract(caller))
     }
 
@@ -482,7 +482,7 @@ class CustomerPensionResourceTest {
                 if (mapper.readTree(thirdArg<String>())["payloadSha256"].asText() == signed) ok("{}") else ok("{}", 409)
             }
         every {
-            upstream.post("$pension/api/v1/pension/contracts/$contractId/suspend", caller.toString(), "{}", "key-u")
+            upstream.post("$pension/api/v2/pension/contracts/$contractId/suspend", caller.toString(), "{}", "key-u")
         } returns
             ok(contract(caller, "SUSPENDED"))
 
@@ -490,7 +490,7 @@ class CustomerPensionResourceTest {
 
         assertThat(response.status).isEqualTo(200)
         verify(exactly = 1) {
-            upstream.post("$pension/api/v1/pension/contracts/$contractId/suspend", any(), any(), any())
+            upstream.post("$pension/api/v2/pension/contracts/$contractId/suspend", any(), any(), any())
         }
     }
 
@@ -532,7 +532,7 @@ class CustomerPensionResourceTest {
         val sent = slot<String>()
         every {
             upstream.put(
-                "$pension/api/v1/pension/contracts/$contractId/strategy",
+                "$pension/api/v2/pension/contracts/$contractId/strategy",
                 caller.toString(),
                 capture(sent),
                 "key-s1",

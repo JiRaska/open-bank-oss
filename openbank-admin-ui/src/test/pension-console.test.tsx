@@ -134,7 +134,7 @@ describe('contract search', () => {
   it('caps the list request and degrades when the list route is not deployed', async () => {
     router = () => json({ error: 'Unknown service' }, 404)
     await renderPage(<PensionContractsPage />)
-    expect(calls[0].url).toContain('/api/svc/pension-service/api/v1/pension/contracts')
+    expect(calls[0].url).toContain('/api/svc/pension-service/api/v2/pension/contracts')
     expect(calls[0].url).toMatch(/limit=\d+/)
     expect(document.body.textContent).not.toMatch(/HTTP 404/)
   })
@@ -143,7 +143,7 @@ describe('contract search', () => {
 describe('contract detail', () => {
   it('shows holdings and offers no activation: a contract activates only through its application', async () => {
     router = url => {
-      if (url.includes(`/api/v1/pension/contracts/${CONTRACT_ID}`)) return json(contract('PENDING_ACTIVATION'))
+      if (url.includes(`/api/v2/pension/contracts/${CONTRACT_ID}`)) return json(contract('PENDING_ACTIVATION'))
       if (url.includes('/holdings')) return json({ contractId: CONTRACT_ID, holdings: [{ fundId: FUND_A, units: 10, navPerUnit: 1.5, navDate: '2026-10-08', value: 15, currency: 'CZK' }], pendingOrders: [] })
       if (url.includes('/transactions')) return json([])
       return json({}, 404)
@@ -217,18 +217,18 @@ describe('strategy change four-eyes', () => {
 describe('payouts and death claims', () => {
   it('reads the staff list routes and links each row to its contract', async () => {
     router = url => {
-      if (url.includes('/api/v1/pension/operator/payouts')) {
+      if (url.includes('/api/v2/pension/operator/payouts')) {
         return json([{ payoutId: 'pay-1', contractId: CONTRACT_ID, form: 'LUMP_SUM', status: 'CONFIRMED', grossAmount: 1000, taxWithheld: 150, netAmount: 850, currency: 'CZK', payoutAccountLast4: '5399', pendingAccountLast4: null }])
       }
-      if (url.includes('/api/v1/pension/death-claims')) {
+      if (url.includes('/api/v2/pension/death-claims')) {
         return json([{ claimId: 'claim-1', contractId: CONTRACT_ID, status: 'NOTIFIED', dateOfDeath: '2026-09-01', notifiedBy: 'olga.operator', approvedBy: null, valuation: 12000, incentiveReturn: 0 }])
       }
       return json({}, 404)
     }
     await renderPage(<PensionPayoutsPage />)
     const urls = calls.map(c => c.url)
-    expect(urls.some(u => u.includes('/api/svc/pension-service/api/v1/pension/operator/payouts'))).toBe(true)
-    expect(urls.some(u => u.includes('/api/svc/pension-service/api/v1/pension/death-claims'))).toBe(true)
+    expect(urls.some(u => u.includes('/api/svc/pension-service/api/v2/pension/operator/payouts'))).toBe(true)
+    expect(urls.some(u => u.includes('/api/svc/pension-service/api/v2/pension/death-claims'))).toBe(true)
     expect(urls.some(u => /\/api\/v1\/pension\/payouts(\?|$)/.test(u))).toBe(false)
     expect(document.body.textContent).toContain('5399')
     expect(document.body.textContent).toContain('2026-09-01')
@@ -255,7 +255,7 @@ describe('operator queues', () => {
       return json({}, 404)
     }
     await renderPage(<PensionQueuesPage />)
-    expect(calls.some(c => c.url.includes('/api/svc/pension-service/api/v1/pension/operator/onboarding/applications'))).toBe(true)
+    expect(calls.some(c => c.url.includes('/api/svc/pension-service/api/v2/pension/operator/onboarding/applications'))).toBe(true)
     expect(screen.getByText('app-1')).toBeTruthy()
     expect(screen.getByText('BALANCED')).toBeTruthy()
     expect(screen.getByRole('link', { name: 'tr-1' }).getAttribute('href')).toBe(`/pension/contracts/${CONTRACT_ID}`)

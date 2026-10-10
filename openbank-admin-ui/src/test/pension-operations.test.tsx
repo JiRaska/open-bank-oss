@@ -87,7 +87,7 @@ describe('annuity partner four-eyes', () => {
     expect(screen.getByText('Another operator approves')).toBeTruthy()
     await act(async () => { fireEvent.click(approve[0]) })
     const post = calls.find(c => c.init?.method === 'POST')
-    expect(post?.url).toContain('/api/svc/pension-service/api/v1/pension/operator/annuity-providers/other/activation-approval')
+    expect(post?.url).toContain('/api/svc/pension-service/api/v2/pension/operator/annuity-providers/other/activation-approval')
     expect((post?.init?.headers as Record<string, string>)['idempotency-key']).toMatch(/[0-9a-f-]{36}/)
   })
 
@@ -143,7 +143,7 @@ describe('contribution mandates', () => {
     await renderPage(<PensionMandatesPage />)
     expect(screen.getByText('SO-m-active')).toBeTruthy()
     expect(screen.getByText('SO-m-gone')).toBeTruthy()
-    const mandateCalls = calls.filter(c => c.url.includes('/api/v1/pension/operator/mandates'))
+    const mandateCalls = calls.filter(c => c.url.includes('/api/v2/pension/operator/mandates'))
     expect(mandateCalls).toHaveLength(2)
     expect(mandateCalls.every(c => (c.init?.method ?? 'GET') === 'GET')).toBe(true)
     const links = screen.getAllByRole('link').map(a => a.getAttribute('href'))
@@ -178,7 +178,7 @@ describe('participant changes on a contract', () => {
       return json({}, 404)
     }
     await renderPage(<ContractChanges contractId={CONTRACT_ID} />)
-    expect(calls.map(c => c.url).every(u => u.includes('/api/svc/pension-service/api/v1/pension/operator/contracts/'))).toBe(true)
+    expect(calls.map(c => c.url).every(u => u.includes('/api/svc/pension-service/api/v2/pension/operator/contracts/'))).toBe(true)
     expect(document.body.textContent).toMatch(/1000 CZK · MONTHLY · day 15/)
     expect(document.body.textContent).toMatch(/Jana 100 %/)
     expect(calls.some(c => c.init?.method)).toBe(false)

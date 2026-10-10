@@ -435,7 +435,7 @@ class CustomerPensionChangeResource(private val upstream: UpstreamClient, privat
 
     private fun party(): String = parties.resolve(null).toString()
 
-    private fun api() = "${pensionServiceUrl.trimEnd('/')}/api/v1/pension"
+    private fun api() = "${pensionServiceUrl.trimEnd('/')}/api/v2/pension"
 
     private fun app(applicationId: UUID) = "${api()}/onboarding/applications/$applicationId"
 

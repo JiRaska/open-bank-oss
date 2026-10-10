@@ -15,7 +15,7 @@
           "X-Customer-Party-Id": "11111111-1111-4111-8111-111111111111"
         },
         "method": "GET",
-        "path": "/api/v1/pension/contracts/44444444-4444-4444-8444-444444444444"
+        "path": "/api/v2/pension/contracts/44444444-4444-4444-8444-444444444444"
       },
       "response": {
         "status": 401
@@ -33,7 +33,7 @@
           "X-Customer-Party-Id": "11111111-1111-4111-8111-111111111111"
         },
         "method": "GET",
-        "path": "/api/v1/pension/contracts/44444444-4444-4444-8444-444444444444/beneficiaries"
+        "path": "/api/v2/pension/contracts/44444444-4444-4444-8444-444444444444/beneficiaries"
       },
       "response": {
         "body": {
@@ -72,7 +72,7 @@
           "X-Customer-Party-Id": "11111111-1111-4111-8111-111111111111"
         },
         "method": "GET",
-        "path": "/api/v1/pension/contracts/44444444-4444-4444-8444-444444444444/contribution-schedule"
+        "path": "/api/v2/pension/contracts/44444444-4444-4444-8444-444444444444/contribution-schedule"
       },
       "response": {
         "status": 200
@@ -90,7 +90,7 @@
           "X-Customer-Party-Id": "11111111-1111-4111-8111-111111111111"
         },
         "method": "GET",
-        "path": "/api/v1/pension/contracts"
+        "path": "/api/v2/pension/contracts"
       },
       "response": {
         "body": [
@@ -254,7 +254,7 @@
           "X-Customer-Party-Id": "11111111-1111-4111-8111-111111111111"
         },
         "method": "GET",
-        "path": "/api/v1/pension/contracts/44444444-4444-4444-8444-444444444444"
+        "path": "/api/v2/pension/contracts/44444444-4444-4444-8444-444444444444"
       },
       "response": {
         "body": {
@@ -429,7 +429,7 @@
           }
         },
         "method": "POST",
-        "path": "/api/v1/pension/contracts/44444444-4444-4444-8444-444444444444/contribution-schedule/preview"
+        "path": "/api/v2/pension/contracts/44444444-4444-4444-8444-444444444444/contribution-schedule/preview"
       },
       "response": {
         "body": {
@@ -491,7 +491,7 @@
           }
         },
         "method": "POST",
-        "path": "/api/v1/pension/contracts/44444444-4444-4444-8444-444444444444/suspend"
+        "path": "/api/v2/pension/contracts/44444444-4444-4444-8444-444444444444/suspend"
       },
       "response": {
         "body": {
@@ -668,7 +668,7 @@
           }
         },
         "method": "PUT",
-        "path": "/api/v1/pension/contracts/44444444-4444-4444-8444-444444444444/strategy"
+        "path": "/api/v2/pension/contracts/44444444-4444-4444-8444-444444444444/strategy"
       },
       "response": {
         "body": {
@@ -705,7 +705,7 @@
           "X-Customer-Party-Id": "11111111-1111-4111-8111-111111111111"
         },
         "method": "GET",
-        "path": "/api/v1/pension/contracts/99999999-9999-4999-8999-999999999999"
+        "path": "/api/v2/pension/contracts/99999999-9999-4999-8999-999999999999"
       },
       "response": {
         "status": 404
@@ -723,7 +723,7 @@
           "birthDate": "1985-05-05",
           "jurisdiction": "CZ",
           "productLine": "DPS",
-          "providerEntityId": "55555555-5555-4555-8555-555555555555",
+          "providerEntityId": "00000000-0000-4000-8000-000000000001",
           "providerType": "PENSION_COMPANY",
           "residencyCountry": "CZ",
           "schedule": {
@@ -752,7 +752,7 @@
           }
         },
         "method": "POST",
-        "path": "/api/v1/pension/onboarding/applications"
+        "path": "/api/v2/pension/onboarding/applications"
       },
       "response": {
         "body": {
@@ -835,7 +835,7 @@
           "X-Customer-Party-Id": "11111111-1111-4111-8111-111111111111"
         },
         "method": "GET",
-        "path": "/api/v1/pension/contracts/44444444-4444-4444-8444-444444444444/transactions",
+        "path": "/api/v2/pension/contracts/44444444-4444-4444-8444-444444444444/transactions",
         "query": {
           "page": [
             "0"
@@ -997,7 +997,7 @@
           "X-Customer-Party-Id": "11111111-1111-4111-8111-111111111111"
         },
         "method": "GET",
-        "path": "/api/v1/pension/contracts/44444444-4444-4444-8444-444444444444/valuation"
+        "path": "/api/v2/pension/contracts/44444444-4444-4444-8444-444444444444/valuation"
       },
       "response": {
         "body": {
@@ -1157,7 +1157,7 @@
           "X-Customer-Party-Id": "11111111-1111-4111-8111-111111111111"
         },
         "method": "GET",
-        "path": "/api/v1/pension/contracts/44444444-4444-4444-8444-444444444444"
+        "path": "/api/v2/pension/contracts/44444444-4444-4444-8444-444444444444"
       },
       "response": {
         "body": {

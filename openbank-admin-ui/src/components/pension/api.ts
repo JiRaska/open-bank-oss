@@ -16,7 +16,7 @@ export const PENSION_FUND = 'pension-fund-service'
 export { getJson, type Loaded }
 
 export const pensionUrl = (path: string, query?: Record<string, string>) =>
-  svcUrl(PENSION, `/api/v1/pension${path}`, query)
+  svcUrl(PENSION, `/api/v2/pension${path}`, query)
 
 export const fundUrl = (path: string, query?: Record<string, string>) =>
   svcUrl(PENSION_FUND, `/api/v1${path}`, query)

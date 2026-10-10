@@ -223,7 +223,7 @@ paths:
       operationId: simulatePension
       summary: 'Illustrative retirement projection per strategy'
       description: >-
-        Proxies pension-service POST /api/v1/pension/simulations. The answer is always illustrative
+        Proxies pension-service POST /api/v2/pension/simulations. The answer is always illustrative
         (illustrative: true with a disclaimer) and binds nothing, so no Idempotency-Key is required.
       security:
         - customerOidc: [pension:read]
@@ -247,7 +247,7 @@ paths:
       operationId: listPensionContracts
       summary: The caller's pension contracts
       description: >-
-        Proxies pension-service GET /api/v1/pension/contracts. The participant is always the token's
+        Proxies pension-service GET /api/v2/pension/contracts. The participant is always the token's
         own party; X-Acting-For is not honoured on pension routes.
       security:
         - customerOidc: [pension:read]
@@ -267,7 +267,7 @@ paths:
       operationId: startPensionApplication
       summary: 'Onboarding: open an application; eligibility and KYC are checked at once'
       description: >-
-        Proxies pension-service POST /api/v1/pension/onboarding/applications (S2). Birth date and
+        Proxies pension-service POST /api/v2/pension/onboarding/applications (S2). Birth date and
         residency country are read from the caller's party record, never from the request.
       security:
         - customerOidc: [pension:write]
@@ -294,7 +294,7 @@ paths:
       operationId: startPensionTransferIn
       summary: 'Onboarding by transfer-in: an application of kind TRANSFER_IN'
       description: >-
-        Proxies pension-service POST /api/v1/pension/contracts/transfers-in.
+        Proxies pension-service POST /api/v2/pension/contracts/transfers-in.
       security:
         - customerOidc: [pension:write]
       parameters:
@@ -666,7 +666,7 @@ paths:
       tags: [Pension]
       operationId: getPensionTaxSummary
       summary: Contributions, incentives and deductible amount for a tax year
-      description: Proxies pension-service GET /api/v1/pension/funding/contracts/{id}/tax-years/{year} (S3).
+      description: Proxies pension-service GET /api/v2/pension/funding/contracts/{id}/tax-years/{year} (S3).
       security:
         - customerOidc: [pension:read]
       parameters:
@@ -1194,7 +1194,7 @@ paths:
       operationId: requestPensionPayout
       summary: Binding payout quote for a payout form
       description: >-
-        Proxies pension-service POST /api/v1/pension/contracts/{id}/exit/payouts/quote (S5). The
+        Proxies pension-service POST /api/v2/pension/contracts/{id}/exit/payouts/quote (S5). The
         quote is confirmed by the separate /confirm route under SCA.
       security:
         - customerOidc: [pension:write]
@@ -1229,7 +1229,7 @@ paths:
       operationId: confirmPensionPayout
       summary: Confirm a quoted payout to the signed account under SCA
       description: >-
-        Proxies pension-service POST /api/v1/pension/contracts/{id}/exit/payouts/{payoutId}/confirm
+        Proxies pension-service POST /api/v2/pension/contracts/{id}/exit/payouts/{payoutId}/confirm
         (S5/S8). The challenge in X-SCA-Challenge-Id is forwarded and
         consumed by pension-service against the payout it quoted; the edge refuses a confirmation
         without one.

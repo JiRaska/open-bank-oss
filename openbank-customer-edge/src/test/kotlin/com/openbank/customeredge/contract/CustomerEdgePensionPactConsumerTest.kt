@@ -88,7 +88,7 @@ class CustomerEdgePensionPactConsumerTest {
     fun startApplication(builder: PactDslWithProvider): RequestResponsePact = builder
         .given(NO_CONTRACT_STATE)
         .uponReceiving("POST an onboarding application with the party's birth date and residency")
-        .path("/api/v1/pension/onboarding/applications")
+        .path("/api/v2/pension/onboarding/applications")
         .method("POST")
         .headers(mapOf("Content-Type" to "application/json", "X-Customer-Party-Id" to PARTY_ID))
         .matchHeader("Idempotency-Key", ".+", "pact-key")
@@ -124,7 +124,7 @@ class CustomerEdgePensionPactConsumerTest {
     fun listContracts(builder: PactDslWithProvider): RequestResponsePact = builder
         .given(ACTIVE_STATE)
         .uponReceiving("GET the customer party's own pension contracts")
-        .path("/api/v1/pension/contracts")
+        .path("/api/v2/pension/contracts")
         .method("GET")
         .headers(mapOf("X-Customer-Party-Id" to PARTY_ID))
         .willRespondWith()
@@ -138,7 +138,7 @@ class CustomerEdgePensionPactConsumerTest {
         .given(UNITS_STATE).readById("ACTIVE")
         .given(UNITS_STATE)
         .uponReceiving("GET the participant valuation of the contract")
-        .path("/api/v1/pension/contracts/$CONTRACT_ID/valuation")
+        .path("/api/v2/pension/contracts/$CONTRACT_ID/valuation")
         .method("GET")
         .headers(mapOf("X-Customer-Party-Id" to PARTY_ID))
         .willRespondWith()
@@ -169,7 +169,7 @@ class CustomerEdgePensionPactConsumerTest {
         .given(UNITS_STATE).readById("ACTIVE")
         .given(UNITS_STATE)
         .uponReceiving("GET the contract's unit transactions")
-        .path("/api/v1/pension/contracts/$CONTRACT_ID/transactions")
+        .path("/api/v2/pension/contracts/$CONTRACT_ID/transactions")
         .query("page=0&size=20")
         .method("GET")
         .headers(mapOf("X-Customer-Party-Id" to PARTY_ID))
@@ -204,7 +204,7 @@ class CustomerEdgePensionPactConsumerTest {
         .given(ACTIVE_STATE).readById("ACTIVE")
         .given(ACTIVE_STATE)
         .uponReceiving("PUT a signed strategy change on a contract with no assessment on file")
-        .path("/api/v1/pension/contracts/$CONTRACT_ID/strategy")
+        .path("/api/v2/pension/contracts/$CONTRACT_ID/strategy")
         .method("PUT")
         .headers(mapOf("Content-Type" to "application/json", "X-Customer-Party-Id" to PARTY_ID))
         .matchHeader("Idempotency-Key", ".+", "pact-key")
@@ -227,7 +227,7 @@ class CustomerEdgePensionPactConsumerTest {
         .given(ACTIVE_STATE).readById("ACTIVE")
         .given(ACTIVE_STATE)
         .uponReceiving("GET the contribution schedule of the contract")
-        .path("/api/v1/pension/contracts/$CONTRACT_ID/contribution-schedule")
+        .path("/api/v2/pension/contracts/$CONTRACT_ID/contribution-schedule")
         .method("GET")
         .headers(mapOf("X-Customer-Party-Id" to PARTY_ID))
         .willRespondWith()
@@ -239,7 +239,7 @@ class CustomerEdgePensionPactConsumerTest {
         .given(ACTIVE_STATE).readById("ACTIVE")
         .given(ACTIVE_STATE)
         .uponReceiving("POST a contribution schedule preview, which issues the document SCA signs")
-        .path("/api/v1/pension/contracts/$CONTRACT_ID/contribution-schedule/preview")
+        .path("/api/v2/pension/contracts/$CONTRACT_ID/contribution-schedule/preview")
         .method("POST")
         .headers(mapOf("Content-Type" to "application/json", "X-Customer-Party-Id" to PARTY_ID))
         .matchHeader("Idempotency-Key", ".+", "pact-key")
@@ -262,7 +262,7 @@ class CustomerEdgePensionPactConsumerTest {
         .given(ACTIVE_STATE).readById("ACTIVE")
         .given(ACTIVE_STATE)
         .uponReceiving("GET the beneficiary designation of the contract")
-        .path("/api/v1/pension/contracts/$CONTRACT_ID/beneficiaries")
+        .path("/api/v2/pension/contracts/$CONTRACT_ID/beneficiaries")
         .method("GET")
         .headers(mapOf("X-Customer-Party-Id" to PARTY_ID))
         .willRespondWith()
@@ -275,7 +275,7 @@ class CustomerEdgePensionPactConsumerTest {
         .given(ACTIVE_STATE).readById("ACTIVE")
         .given(ACTIVE_STATE)
         .uponReceiving("POST suspend contributions on the contract")
-        .path("/api/v1/pension/contracts/$CONTRACT_ID/suspend")
+        .path("/api/v2/pension/contracts/$CONTRACT_ID/suspend")
         .method("POST")
         .headers(mapOf("X-Customer-Party-Id" to PARTY_ID))
         .matchHeader("Idempotency-Key", ".+", "pact-key")
@@ -288,7 +288,7 @@ class CustomerEdgePensionPactConsumerTest {
     fun unknownContract(builder: PactDslWithProvider): RequestResponsePact = builder
         .given(NO_CONTRACT_STATE)
         .uponReceiving("GET a pension contract the customer party does not hold")
-        .path("/api/v1/pension/contracts/$UNKNOWN_ID")
+        .path("/api/v2/pension/contracts/$UNKNOWN_ID")
         .method("GET")
         .headers(mapOf("X-Customer-Party-Id" to PARTY_ID))
         .willRespondWith()
@@ -299,7 +299,7 @@ class CustomerEdgePensionPactConsumerTest {
     fun missingIdentity(builder: PactDslWithProvider): RequestResponsePact = builder
         .given(NEGATIVE_AUTH_STATE)
         .uponReceiving("GET a pension contract with no M2M identity")
-        .path("/api/v1/pension/contracts/$CONTRACT_ID")
+        .path("/api/v2/pension/contracts/$CONTRACT_ID")
         .method("GET")
         .headers(mapOf("X-Customer-Party-Id" to PARTY_ID))
         .willRespondWith()
@@ -397,7 +397,7 @@ class CustomerEdgePensionPactConsumerTest {
     @Test
     @PactTestFor(pactMethod = "missingIdentity")
     fun `the provider answers 401 UNAUTHORIZED to a caller with no identity`(mockServer: MockServer) {
-        val connection = java.net.URI("${mockServer.getUrl()}/api/v1/pension/contracts/$CONTRACT_ID").toURL()
+        val connection = java.net.URI("${mockServer.getUrl()}/api/v2/pension/contracts/$CONTRACT_ID").toURL()
             .openConnection() as java.net.HttpURLConnection
         connection.setRequestProperty("X-Customer-Party-Id", PARTY_ID)
 
@@ -434,7 +434,7 @@ class CustomerEdgePensionPactConsumerTest {
     private fun PactDslWithState.readById(status: String) =
         uponReceiving("GET the pension contract to prove the customer holds it").readById(status)
 
-    private fun PactDslRequestWithoutPath.readById(status: String) = path("/api/v1/pension/contracts/$CONTRACT_ID")
+    private fun PactDslRequestWithoutPath.readById(status: String) = path("/api/v2/pension/contracts/$CONTRACT_ID")
         .method("GET")
         .headers(mapOf("X-Customer-Party-Id" to PARTY_ID))
         .willRespondWith()
@@ -444,7 +444,9 @@ class CustomerEdgePensionPactConsumerTest {
     private companion object {
         const val PARTY_ID = "11111111-1111-4111-8111-111111111111"
         const val CONTRACT_ID = "44444444-4444-4444-8444-444444444444"
-        const val PROVIDER_ID = "55555555-5555-4555-8555-555555555555"
+        // pension-service refuses any provider but its configured legal entity; this is the
+        // synthetic fixture identity its test, dev and sandbox profiles share (application.yaml).
+        const val PROVIDER_ID = "00000000-0000-4000-8000-000000000001"
         const val UNKNOWN_ID = "99999999-9999-4999-8999-999999999999"
         const val CHALLENGE_ID = "77777777-7777-4777-8777-777777777777"
         const val FUTURE_DATE = "2099-01-01"
