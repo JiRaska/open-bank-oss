@@ -1,0 +1,170 @@
+# Pension-fund alerts (ADR-0334, #12424; umbrella #12350): the fund-administration half of
+# pension observability, beside openbank-pension-alerts (prometheus-rules-pension.yaml).
+#
+# Every rule reads a series pension-fund-service measured, never a sentinel:
+#
+#   * The state gauges (openbank_pension_fund_nav_last_published_age_seconds,
+#     openbank_pension_fund_orders_pending_oldest_age_seconds, openbank_pension_fund_queue_*) are
+#     registered only after the first snapshot was READ, so a cold pod publishes no series rather
+#     than a 0 that reads as "nothing pending" or an age that reads as "decades". A fund that has
+#     never published a NAV has no last-published series at all. Re-derived at t=0 on a cold pod:
+#     absent, so nothing below can fire from boot; "the refresh never ran" is the fleet
+#     WorkflowLivenessStale plus PensionFundStateGaugesAbsent here.
+#   * An EMPTY queue reports oldest_age_seconds = 0 -- a measurement, not a seed.
+#
+# The NAV cutoff: the NAV of business day T must be published by 12:00 UTC on the next business
+# day. Age is measured from the END of the latest published valuation day (00:00 UTC of T+1), so
+# a fund whose yesterday's NAV is published reads < 24h all day. Public holidays are NOT modelled
+# (no calendar in this service): on the business day after a holiday the rule fires once and is
+# silenced by the operator, see the runbook.
+#
+# Depositary reconciliation is NOT here: the service stores the depositary reference of each fund
+# but models no reconciliation against the depositary's statement, so there is no break to count.
+#
+# Runbook: docs/runbooks/pension-alerts.md (section "Pension fund").
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-pension-fund-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.pension_fund.nav
+      interval: 1m
+      rules:
+        # Tue-Sat after 12:00 UTC: yesterday's NAV is due (age > 24h means it is missing).
+        # Sunday: Friday's NAV is the latest due (age > 48h). Monday after 12:00: Friday's (> 72h).
+        - alert: PensionFundNavNotPublishedByCutoff
+          expr: |
+            (
+              max by (fund) (openbank_pension_fund_nav_last_published_age_seconds) > 86400
+              and on() (day_of_week() >= 2 and day_of_week() <= 6)
+              and on() hour() >= 12
+            )
+            or
+            (
+              max by (fund) (openbank_pension_fund_nav_last_published_age_seconds) > 2 * 86400
+              and on() day_of_week() == 0
+            )
+            or
+            (
+              max by (fund) (openbank_pension_fund_nav_last_published_age_seconds) > 3 * 86400
+              and on() day_of_week() == 1
+              and on() hour() >= 12
+            )
+          for: 15m
+          labels:
+            severity: critical
+            team: pension
+          annotations:
+            summary: "Pension fund {{ $labels.fund }} has not published its NAV by the cutoff"
+            description: >-
+              The latest published NAV of fund {{ $labels.fund }} is for a valuation day that ended
+              {{ $value | humanizeDuration }} ago, past the 12:00 UTC cutoff. Orders queued for the
+              fund stay PENDING until a NAV is published, and participants see a stale valuation.
+            runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/pension-alerts.md#pensionfundnavnotpublishedbycutoff"
+
+        # A published correction re-states a NAV participants were already priced at.
+        - alert: PensionFundNavCorrectionIssued
+          expr: |
+            sum by (fund) (increase(openbank_pension_fund_nav_events_total{event="published",correction="true"}[1h])) > 0
+          labels:
+            severity: warning
+            team: pension
+          annotations:
+            summary: "A NAV correction was published for pension fund {{ $labels.fund }}"
+            description: >-
+              A corrected NAV of fund {{ $labels.fund }} superseded a published one and re-priced the
+              transactions settled at it. A NAV error is a reportable incident: confirm the cause and
+              whether participants must be informed.
+            runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/pension-alerts.md#pensionfundnavcorrectionissued"
+            subject_period: continuous
+
+        - alert: PensionFundNavApprovalAging
+          expr: max(openbank_pension_fund_queue_oldest_age_seconds{queue="navs_awaiting_approval"}) > 4 * 3600
+          for: 15m
+          labels:
+            severity: warning
+            team: pension
+          annotations:
+            summary: "A calculated pension-fund NAV has waited more than 4 hours for its checker"
+            description: >-
+              The oldest CALCULATED NAV has waited {{ $value | humanizeDuration }} for four-eyes
+              publication. Until a checker publishes or rejects it, the fund's orders cannot settle.
+            runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/pension-alerts.md#pensionfundnavapprovalaging"
+
+    - name: openbank.pension_fund.register
+      interval: 1m
+      rules:
+        # Forward pricing settles an order at the next published NAV, normally T+1. Four calendar
+        # days covers a weekend; beyond it the order is stuck, not merely waiting.
+        - alert: PensionFundOrdersPendingBeyondSettlement
+          expr: max by (fund) (openbank_pension_fund_orders_pending_oldest_age_seconds) > 4 * 86400
+          for: 30m
+          labels:
+            severity: warning
+            team: pension
+          annotations:
+            summary: "Pension fund {{ $labels.fund }} has an order pending for more than 4 days"
+            description: >-
+              The oldest PENDING unit order of fund {{ $labels.fund }} is {{ $value | humanizeDuration }}
+              old. Participant money (or units) is committed but neither invested nor redeemed.
+            runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/pension-alerts.md#pensionfundorderspendingbeyondsettlement"
+
+        - alert: PensionFundStrategyChangeApprovalAging
+          expr: max(openbank_pension_fund_queue_oldest_age_seconds{queue="strategy_changes_awaiting_approval"}) > 5 * 86400
+          for: 1h
+          labels:
+            severity: warning
+            team: pension
+          annotations:
+            summary: "A pension strategy change has waited more than 5 days for approval"
+            description: >-
+              The oldest strategy change PENDING_APPROVAL was submitted {{ $value | humanizeDuration }}
+              ago. Its effective date needs the participant notice period AFTER approval, so every day
+              it waits pushes the earliest effective date out.
+            runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/pension-alerts.md#pensionfundstrategychangeapprovalaging"
+
+    - name: openbank.pension_fund.integrations
+      interval: 1m
+      rules:
+        # Lookups happen only when a NAV is calculated, so a rate over a short window is mostly
+        # empty. "Every lookup in the last hour threw" is the outage; a MISSING price (the feed
+        # answered, without a price for that day) is a data gap and is shown on the dashboard.
+        - alert: PensionFundPriceFeedFailing
+          expr: |
+            sum(increase(openbank_pension_fund_market_price_lookups_total{outcome="failed"}[1h])) > 0
+            unless
+            sum(increase(openbank_pension_fund_market_price_lookups_total{outcome="found"}[1h])) > 0
+          labels:
+            severity: warning
+            team: pension
+          annotations:
+            summary: "The pension-fund market-price feed failed every lookup in the last hour"
+            description: >-
+              Every market-price lookup of pension-fund-service in the last hour threw. NAVs whose
+              positions need a feed price cannot be calculated; positions priced manually still can.
+            runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/pension-alerts.md#pensionfundpricefeedfailing"
+            subject_period: continuous
+
+    - name: openbank.pension_fund.liveness
+      interval: 5m
+      rules:
+        # Staleness of the refresh is the fleet WorkflowLivenessStale; this catches the job never
+        # having registered at all, in which case every rule above is silent for want of data.
+        - alert: PensionFundStateGaugesAbsent
+          expr: |
+            absent(openbank_workflow_last_success_age_seconds{workflow="pension-fund-state-gauges"})
+            and on() count(up{namespace="pension-fund"} == 1) > 0
+          for: 30m
+          labels:
+            severity: warning
+            team: pension
+          annotations:
+            summary: "Pension-fund is running but publishes no state-gauge heartbeat"
+            description: >-
+              Pension-fund pods are up yet no pension-fund-state-gauges liveness series exists, so the
+              NAV-cutoff, order and approval alerts of openbank-pension-fund-alerts have no data.
+            runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/pension-alerts.md#pensionfundstategaugesabsent"

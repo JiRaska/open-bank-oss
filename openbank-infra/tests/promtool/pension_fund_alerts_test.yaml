@@ -1,0 +1,306 @@
+# SPDX-License-Identifier: Apache-2.0
+# Behavioural tests for openbank-pension-fund-alerts (#12424). Every alert has a must-FIRE case and
+# a must-NOT-fire control. Intervals stay at 1m (a wider input interval makes `for:` unreachable).
+# promtool's clock starts at 1970-01-01T00:00Z, a THURSDAY (day_of_week 4); 1970-01-04 is a
+# Sunday and 1970-01-05 a Monday, which is how the NAV-cutoff day arms are reached.
+rule_files:
+  - prometheus-rules-pension-fund.yaml
+
+evaluation_interval: 1m
+
+tests:
+  # ---- NAV cutoff ---------------------------------------------------------------------------
+  - interval: 1m
+    name: "Thursday 13:30, yesterday's NAV missing (age 25h+) fires PensionFundNavNotPublishedByCutoff"
+    input_series:
+      - series: 'openbank_pension_fund_nav_last_published_age_seconds{fund="CZ0008474053",pod="p1"}'
+        values: "90000+60x900"
+    alert_rule_test:
+      - eval_time: 13h30m
+        alertname: PensionFundNavNotPublishedByCutoff
+        exp_alerts:
+          - exp_labels:
+              fund: CZ0008474053
+              severity: critical
+              team: pension
+            exp_annotations:
+              summary: "Pension fund CZ0008474053 has not published its NAV by the cutoff"
+              description: "The latest published NAV of fund CZ0008474053 is for a valuation day that ended 1d 14h 30m 0s ago, past the 12:00 UTC cutoff. Orders queued for the fund stay PENDING until a NAV is published, and participants see a stale valuation."
+              runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/pension-alerts.md#pensionfundnavnotpublishedbycutoff"
+
+  - interval: 1m
+    name: "before the 12:00 cutoff the same missing NAV does NOT fire PensionFundNavNotPublishedByCutoff"
+    input_series:
+      - series: 'openbank_pension_fund_nav_last_published_age_seconds{fund="CZ0008474053",pod="p1"}'
+        values: "90000+60x900"
+    alert_rule_test:
+      - eval_time: 11h50m
+        alertname: PensionFundNavNotPublishedByCutoff
+        exp_alerts: []
+
+  - interval: 1m
+    name: "Thursday 13:30 with yesterday's NAV published (age < 24h) does NOT fire"
+    input_series:
+      - series: 'openbank_pension_fund_nav_last_published_age_seconds{fund="CZ0008474053",pod="p1"}'
+        values: "0+60x900"
+    alert_rule_test:
+      - eval_time: 13h30m
+        alertname: PensionFundNavNotPublishedByCutoff
+        exp_alerts: []
+
+  # Fixtures below are affine in time: value(t) = start + 60 * minutes, so start is chosen for the
+  # age the gauge must read AT eval_time (a negative start is a fixture artefact, never a reading).
+  - interval: 1m
+    name: "Monday 13:30 with Friday's NAV published (age 61h30m) does NOT fire"
+    input_series:
+      - series: 'openbank_pension_fund_nav_last_published_age_seconds{fund="CZ0008474053",pod="p1"}'
+        values: "-172800+60x6600"
+    alert_rule_test:
+      # 4d13h30m = Monday 1970-01-05 13:30; Friday's valuation day ended Saturday 00:00 -> 61h30m.
+      - eval_time: 4d13h30m
+        alertname: PensionFundNavNotPublishedByCutoff
+        exp_alerts: []
+
+  - interval: 1m
+    name: "Monday 13:30 with Friday's NAV missing (age 85h30m) fires"
+    input_series:
+      - series: 'openbank_pension_fund_nav_last_published_age_seconds{fund="CZ0008474053",pod="p1"}'
+        values: "-86400+60x6600"
+    alert_rule_test:
+      - eval_time: 4d13h30m
+        alertname: PensionFundNavNotPublishedByCutoff
+        exp_alerts:
+          - exp_labels:
+              fund: CZ0008474053
+              severity: critical
+              team: pension
+            exp_annotations:
+              summary: "Pension fund CZ0008474053 has not published its NAV by the cutoff"
+              description: "The latest published NAV of fund CZ0008474053 is for a valuation day that ended 3d 13h 30m 0s ago, past the 12:00 UTC cutoff. Orders queued for the fund stay PENDING until a NAV is published, and participants see a stale valuation."
+              runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/pension-alerts.md#pensionfundnavnotpublishedbycutoff"
+
+  - interval: 1m
+    name: "Sunday 12:00 with Friday's NAV published (age 36h) does NOT fire: the Tue-Sat 24h arm is not Sunday's"
+    input_series:
+      - series: 'openbank_pension_fund_nav_last_published_age_seconds{fund="CZ0008474053",pod="p1"}'
+        values: "-172800+60x5100"
+    alert_rule_test:
+      # 3d12h = Sunday 1970-01-04 12:00.
+      - eval_time: 3d12h
+        alertname: PensionFundNavNotPublishedByCutoff
+        exp_alerts: []
+
+  - interval: 1m
+    name: "Sunday 12:00 with Friday's NAV missing (age 50h) fires"
+    input_series:
+      - series: 'openbank_pension_fund_nav_last_published_age_seconds{fund="CZ0008474053",pod="p1"}'
+        values: "-122400+60x5100"
+    alert_rule_test:
+      - eval_time: 3d12h
+        alertname: PensionFundNavNotPublishedByCutoff
+        exp_alerts:
+          - exp_labels:
+              fund: CZ0008474053
+              severity: critical
+              team: pension
+            exp_annotations:
+              summary: "Pension fund CZ0008474053 has not published its NAV by the cutoff"
+              description: "The latest published NAV of fund CZ0008474053 is for a valuation day that ended 2d 2h 0m 0s ago, past the 12:00 UTC cutoff. Orders queued for the fund stay PENDING until a NAV is published, and participants see a stale valuation."
+              runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/pension-alerts.md#pensionfundnavnotpublishedbycutoff"
+
+  # ---- NAV correction -----------------------------------------------------------------------
+  - interval: 1m
+    name: "a published correction fires PensionFundNavCorrectionIssued"
+    input_series:
+      - series: 'openbank_pension_fund_nav_events_total{fund="CZ0008474053",event="published",correction="true",pod="p1"}'
+        values: "0 0 0 1 1 1 1 1 1 1"
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: PensionFundNavCorrectionIssued
+        exp_alerts:
+          - exp_labels:
+              fund: CZ0008474053
+              severity: warning
+              team: pension
+            exp_annotations:
+              summary: "A NAV correction was published for pension fund CZ0008474053"
+              description: "A corrected NAV of fund CZ0008474053 superseded a published one and re-priced the transactions settled at it. A NAV error is a reportable incident: confirm the cause and whether participants must be informed."
+              runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/pension-alerts.md#pensionfundnavcorrectionissued"
+              subject_period: continuous
+
+  - interval: 1m
+    name: "an ordinary publication and a CALCULATED correction do NOT fire PensionFundNavCorrectionIssued"
+    input_series:
+      - series: 'openbank_pension_fund_nav_events_total{fund="CZ0008474053",event="published",correction="false",pod="p1"}'
+        values: "0 0 0 1 1 2 2 2 2 2"
+      - series: 'openbank_pension_fund_nav_events_total{fund="CZ0008474053",event="calculated",correction="true",pod="p1"}'
+        values: "0 0 0 1 1 1 1 1 1 1"
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: PensionFundNavCorrectionIssued
+        exp_alerts: []
+
+  # ---- approvals ----------------------------------------------------------------------------
+  - interval: 1m
+    name: "a NAV waiting 5h for its checker fires PensionFundNavApprovalAging"
+    input_series:
+      - series: 'openbank_pension_fund_queue_oldest_age_seconds{queue="navs_awaiting_approval",pod="p1"}'
+        values: "18000+60x30"
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: PensionFundNavApprovalAging
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: pension
+            exp_annotations:
+              summary: "A calculated pension-fund NAV has waited more than 4 hours for its checker"
+              description: "The oldest CALCULATED NAV has waited 5h 16m 0s for four-eyes publication. Until a checker publishes or rejects it, the fund's orders cannot settle."
+              runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/pension-alerts.md#pensionfundnavapprovalaging"
+
+  - interval: 1m
+    name: "an empty NAV approval queue (age 0) beside an old strategy change does NOT fire PensionFundNavApprovalAging"
+    input_series:
+      - series: 'openbank_pension_fund_queue_oldest_age_seconds{queue="navs_awaiting_approval",pod="p1"}'
+        values: "0+0x30"
+      - series: 'openbank_pension_fund_queue_oldest_age_seconds{queue="strategy_changes_awaiting_approval",pod="p1"}'
+        values: "900000+0x30"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: PensionFundNavApprovalAging
+        exp_alerts: []
+
+  - interval: 1m
+    name: "a strategy change waiting 6 days fires PensionFundStrategyChangeApprovalAging"
+    input_series:
+      - series: 'openbank_pension_fund_queue_oldest_age_seconds{queue="strategy_changes_awaiting_approval",pod="p1"}'
+        values: "518400+60x70"
+    alert_rule_test:
+      - eval_time: 61m
+        alertname: PensionFundStrategyChangeApprovalAging
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: pension
+            exp_annotations:
+              summary: "A pension strategy change has waited more than 5 days for approval"
+              description: "The oldest strategy change PENDING_APPROVAL was submitted 6d 1h 1m 0s ago. Its effective date needs the participant notice period AFTER approval, so every day it waits pushes the earliest effective date out."
+              runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/pension-alerts.md#pensionfundstrategychangeapprovalaging"
+
+  - interval: 1m
+    name: "a strategy change waiting 2 days does NOT fire PensionFundStrategyChangeApprovalAging"
+    input_series:
+      - series: 'openbank_pension_fund_queue_oldest_age_seconds{queue="strategy_changes_awaiting_approval",pod="p1"}'
+        values: "172800+60x70"
+    alert_rule_test:
+      - eval_time: 61m
+        alertname: PensionFundStrategyChangeApprovalAging
+        exp_alerts: []
+
+  # ---- orders -------------------------------------------------------------------------------
+  - interval: 1m
+    name: "an order pending for 5 days fires PensionFundOrdersPendingBeyondSettlement"
+    input_series:
+      - series: 'openbank_pension_fund_orders_pending_oldest_age_seconds{fund="CZ0008474053",pod="p1"}'
+        values: "432000+60x40"
+    alert_rule_test:
+      - eval_time: 31m
+        alertname: PensionFundOrdersPendingBeyondSettlement
+        exp_alerts:
+          - exp_labels:
+              fund: CZ0008474053
+              severity: warning
+              team: pension
+            exp_annotations:
+              summary: "Pension fund CZ0008474053 has an order pending for more than 4 days"
+              description: "The oldest PENDING unit order of fund CZ0008474053 is 5d 0h 31m 0s old. Participant money (or units) is committed but neither invested nor redeemed."
+              runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/pension-alerts.md#pensionfundorderspendingbeyondsettlement"
+
+  - interval: 1m
+    name: "an order pending over a weekend (3 days) does NOT fire PensionFundOrdersPendingBeyondSettlement"
+    input_series:
+      - series: 'openbank_pension_fund_orders_pending_oldest_age_seconds{fund="CZ0008474053",pod="p1"}'
+        values: "259200+60x40"
+    alert_rule_test:
+      - eval_time: 31m
+        alertname: PensionFundOrdersPendingBeyondSettlement
+        exp_alerts: []
+
+  # ---- price feed ---------------------------------------------------------------------------
+  - interval: 1m
+    name: "every lookup failing fires PensionFundPriceFeedFailing"
+    input_series:
+      - series: 'openbank_pension_fund_market_price_lookups_total{outcome="failed",pod="p1"}'
+        values: "0 0 3 3 6 6 6 6"
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: PensionFundPriceFeedFailing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: pension
+            exp_annotations:
+              summary: "The pension-fund market-price feed failed every lookup in the last hour"
+              description: "Every market-price lookup of pension-fund-service in the last hour threw. NAVs whose positions need a feed price cannot be calculated; positions priced manually still can."
+              runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/pension-alerts.md#pensionfundpricefeedfailing"
+              subject_period: continuous
+
+  - interval: 1m
+    name: "a failure beside successful lookups (and missing prices) does NOT fire PensionFundPriceFeedFailing"
+    input_series:
+      - series: 'openbank_pension_fund_market_price_lookups_total{outcome="failed",pod="p1"}'
+        values: "0 0 1 1 1 1 1 1"
+      - series: 'openbank_pension_fund_market_price_lookups_total{outcome="found",pod="p1"}'
+        values: "0 0 0 5 5 5 5 5"
+      - series: 'openbank_pension_fund_market_price_lookups_total{outcome="missing",pod="p1"}'
+        values: "0 0 2 2 2 2 2 2"
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: PensionFundPriceFeedFailing
+        exp_alerts: []
+
+  # ---- liveness -----------------------------------------------------------------------------
+  - interval: 1m
+    name: "pension-fund up with no state-gauge heartbeat fires PensionFundStateGaugesAbsent"
+    input_series:
+      - series: 'up{namespace="pension-fund",pod="p1"}'
+        values: "1+0x60"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: PensionFundStateGaugesAbsent
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: pension
+              workflow: pension-fund-state-gauges
+            exp_annotations:
+              summary: "Pension-fund is running but publishes no state-gauge heartbeat"
+              description: "Pension-fund pods are up yet no pension-fund-state-gauges liveness series exists, so the NAV-cutoff, order and approval alerts of openbank-pension-fund-alerts have no data."
+              runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/pension-alerts.md#pensionfundstategaugesabsent"
+
+  - interval: 1m
+    name: "the heartbeat present, or pension-fund not running, does NOT fire PensionFundStateGaugesAbsent"
+    input_series:
+      - series: 'up{namespace="pension-fund",pod="p1"}'
+        values: "1+0x60"
+      - series: 'openbank_workflow_last_success_age_seconds{workflow="pension-fund-state-gauges",pod="p1"}'
+        values: "10+0x60"
+      # The OTHER pension namespace without its own heartbeat must not leak into this rule.
+      - series: 'up{namespace="pension",pod="p2"}'
+        values: "1+0x60"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: PensionFundStateGaugesAbsent
+        exp_alerts: []
+
+  - interval: 1m
+    name: "pension-fund NOT running (only the pension namespace up) does NOT fire PensionFundStateGaugesAbsent"
+    input_series:
+      - series: 'up{namespace="pension",pod="p2"}'
+        values: "1+0x60"
+      - series: 'up{namespace="pension-fund",pod="p1"}'
+        values: "0+0x60"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: PensionFundStateGaugesAbsent
+        exp_alerts: []
