@@ -61,6 +61,7 @@ dependencies {
     // Consumer pacts for the sca/party/account identity checks (#12377), written to pacts/.
     // #12379: consumer pact for the document-service render call (ADR-0063 P2).
     testImplementation(libs.pact.consumer)
+    testImplementation(libs.wiremock.standalone)
     // RepinCzDpsV1MigrationTest drives Flyway directly (target V11, then V12) against a real Postgres.
     testRuntimeOnly("org.flywaydb:flyway-database-postgresql")
 }
