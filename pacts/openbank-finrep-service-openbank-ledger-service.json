@@ -31,7 +31,7 @@
             "evidenceState": "LINES_V1",
             "periodType": "MONTH",
             "status": "FROZEN",
-            "to": "2026-06-30"
+            "to": "2000-06-30"
           }
         ],
         "headers": {
@@ -41,7 +41,7 @@
       }
     },
     {
-      "description": "GET the GL trial balance for a FINREP reporting date",
+      "description": "GET the frozen GL closing balance for a FINREP reporting date",
       "providerStates": [
         {
           "name": "ledger has frozen monthly trial balance for the reporting date"
@@ -52,7 +52,7 @@
           "Accept": "application/json"
         },
         "method": "GET",
-        "path": "/api/v1/ledger/periods/MONTH/2026-06-30/frozen-trial-balance"
+        "path": "/api/v1/ledger/periods/MONTH/2000-06-30/frozen-closing-balance"
       },
       "response": {
         "body": {
@@ -65,7 +65,7 @@
               "type": "ASSET"
             }
           ],
-          "period": "MONTH:2026-06"
+          "period": "MONTH:2000-06"
         },
         "headers": {
           "Content-Type": "application/json"
@@ -127,7 +127,7 @@
       }
     },
     {
-      "description": "GET the mutable monthly GL trial balance for an internal working preview",
+      "description": "GET the mutable GL closing balance for an internal working preview",
       "providerStates": [
         {
           "name": "ledger has frozen monthly trial balance for the reporting date"
@@ -138,7 +138,7 @@
           "Accept": "application/json"
         },
         "method": "GET",
-        "path": "/api/v1/ledger/periods/MONTH/2026-06-30/trial-balance"
+        "path": "/api/v1/ledger/periods/MONTH/2000-06-30/closing-balance"
       },
       "response": {
         "body": {
@@ -151,7 +151,7 @@
               "type": "ASSET"
             }
           ],
-          "period": "MONTH:2026-06"
+          "period": "MONTH:2000-06"
         },
         "headers": {
           "Content-Type": "application/json"

@@ -7,7 +7,7 @@ info:
   # only — GET /journals/approvals (the checker's queue, issue #5679) plus two additive fields on
   # ApprovalResponse (makerId, createdAt). No breaking change.
   # 1.21.1 -> 1.22.0 (#11588): additive verified makerActorKind on approval responses.
-  version: 1.22.0
+  version: 1.23.0
   description: Double-entry journal ledger — query journal entries and transaction postings.
   license:
     name: Apache-2.0
@@ -796,7 +796,7 @@ paths:
       description: >
         Operational read. It returns LINES_V1 evidence for a new FROZEN close, but may recompute
         the current journal for DRAFT/no-close or historical HASH_ONLY closes. Regulatory readers
-        MUST use frozen-trial-balance, which fails closed unless immutable LINES_V1 exists.
+        MUST use the frozen-* reads, which fail closed unless immutable LINES_V1 exists.
 
 
         Bank-owned synthetic (canary) activity is excluded (ADR-0252), and there is deliberately
@@ -824,7 +824,8 @@ paths:
       summary: Immutable FROZEN LINES_V1 trial balance for regulatory reporting
       description: >
         Fail-closed evidence read. DRAFT, missing and pre-V23 HASH_ONLY closes return 409 instead
-        of a mutable recomputation. FINREP/COREP consumes this endpoint exclusively.
+        of a mutable recomputation. The lines are the period's MOVEMENTS (booked activity dated
+        inside it), not balances; a balance-sheet reader needs frozen-closing-balance.
       operationId: getFrozenPeriodTrialBalance
       parameters:
         - $ref: '#/components/parameters/PeriodTypePath'
@@ -842,6 +843,71 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '409':
           $ref: '#/components/responses/Conflict'
+
+  /api/v1/ledger/periods/{type}/{date}/closing-balance:
+    get:
+      tags: [ClosedPeriod]
+      summary: Cumulative balance at the end of the MONTH containing the date (computed on demand)
+      description: >
+        All booked activity up to and including the month's last day, per GL account and currency —
+        a stock, unlike trial-balance which is the month's movements. Mutable; for previews only.
+        Only `MONTH` is accepted (422 otherwise).
+      operationId: getPeriodClosingBalance
+      parameters:
+        - $ref: '#/components/parameters/PeriodTypePath'
+        - $ref: '#/components/parameters/PeriodDatePath'
+      responses:
+        '200':
+          description: Live cumulative balance at month end
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PeriodTrialBalanceResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          description: The period type is not MONTH
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/v1/ledger/periods/{type}/{date}/frozen-closing-balance:
+    get:
+      tags: [ClosedPeriod]
+      summary: Attested cumulative balance at the end of a FROZEN MONTH, for regulatory reporting
+      description: >
+        The sum of every FROZEN LINES_V1 month close up to and including the target month, each
+        hash-verified. Fail-closed (409) unless the target month is FROZEN LINES_V1 and the sum
+        equals the journal's cumulative balance at month end — i.e. no month with postings is
+        missing from the evidence chain. Every returned number comes from frozen evidence; the
+        `contentHash` is of this aggregate, not an attestation. FINREP/COREP consumes this endpoint.
+        Only `MONTH` is accepted (422 otherwise).
+      operationId: getFrozenPeriodClosingBalance
+      parameters:
+        - $ref: '#/components/parameters/PeriodTypePath'
+        - $ref: '#/components/parameters/PeriodDatePath'
+      responses:
+        '200':
+          description: Cumulative month-end balance built from frozen evidence
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PeriodTrialBalanceResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          description: The period type is not MONTH
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
 
   /api/v1/ledger/periods/{type}/{date}/verify:
     get:

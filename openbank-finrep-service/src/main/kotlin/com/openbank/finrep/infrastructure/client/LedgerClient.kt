@@ -29,8 +29,12 @@ import java.time.LocalDate
 /**
  * Outbound client for openbank-ledger-service's GL trial balance.
  *
- * FINREP/COREP reads only the statutory MONTH frozen-evidence endpoint. Ledger rejects DRAFT,
- * missing and legacy HASH_ONLY periods: a report must never silently fall back to a live aggregate.
+ * FINREP/COREP reads only the statutory MONTH frozen CLOSING BALANCE: the cumulative sum of every
+ * frozen month up to the reporting date. Ledger rejects DRAFT, missing and legacy HASH_ONLY periods,
+ * and any gap in the frozen chain: a report must never silently fall back to a live aggregate.
+ *
+ * Not `frozen-trial-balance` (#12499): that is ONE month's movements, and reading it as balances
+ * understated every stock cell (F 01.01 balance sheet, C 01.00 own funds) by every earlier month.
  *
  * The path is pinned by the consumer-driven pact in
  * [com.openbank.finrep.contract.LedgerTrialBalancePactConsumerTest] (git-pact, ADR-0063), which
@@ -48,11 +52,11 @@ import java.time.LocalDate
 interface LedgerRestClient {
 
     @GET
-    @Path("/MONTH/{asOf}/frozen-trial-balance")
+    @Path("/MONTH/{asOf}/frozen-closing-balance")
     fun getTrialBalance(@PathParam("asOf") asOf: String): Uni<ClosedPeriodTrialBalanceResponse>
 
     @GET
-    @Path("/MONTH/{asOf}/trial-balance")
+    @Path("/MONTH/{asOf}/closing-balance")
     fun getLiveTrialBalance(@PathParam("asOf") asOf: String): Uni<ClosedPeriodTrialBalanceResponse>
 
     @GET

@@ -89,8 +89,8 @@ class LedgerTrialBalancePactConsumerTest {
     @Pact(consumer = "openbank-finrep-service", provider = "openbank-ledger-service")
     fun trialBalanceWithEntriesPact(builder: PactDslWithProvider): RequestResponsePact = builder
         .given("ledger has frozen monthly trial balance for the reporting date")
-        .uponReceiving("GET the GL trial balance for a FINREP reporting date")
-        .path("$LEDGER_MONTH_TRIAL_BALANCE_PATH/$REPORTING_DATE/frozen-trial-balance")
+        .uponReceiving("GET the frozen GL closing balance for a FINREP reporting date")
+        .path("$LEDGER_MONTH_TRIAL_BALANCE_PATH/$REPORTING_DATE/frozen-closing-balance")
         .method("GET")
         .headers(mapOf("Accept" to "application/json"))
         .willRespondWith()
@@ -102,7 +102,7 @@ class LedgerTrialBalancePactConsumerTest {
                 // `asOf=` query parameter this interaction pins by literal. A trial balance
                 // returned for a DIFFERENT date than the one asked for is a reporting defect of
                 // the first order, and a type matcher accepted any date string at all.
-                o.stringValue("period", "MONTH:2026-06")
+                o.stringValue("period", "MONTH:2000-06")
                 o.booleanType("balanced", true)
                 // stringType on `code`/{currency,type}, DELIBERATELY (issue #2425): `lines`
                 // is a heterogeneous list — a real trial balance carries many GL codes, several
@@ -129,8 +129,8 @@ class LedgerTrialBalancePactConsumerTest {
     @Pact(consumer = "openbank-finrep-service", provider = "openbank-ledger-service")
     fun livePreviewTrialBalancePact(builder: PactDslWithProvider): RequestResponsePact = builder
         .given("ledger has frozen monthly trial balance for the reporting date")
-        .uponReceiving("GET the mutable monthly GL trial balance for an internal working preview")
-        .path("$LEDGER_MONTH_TRIAL_BALANCE_PATH/$REPORTING_DATE/trial-balance")
+        .uponReceiving("GET the mutable GL closing balance for an internal working preview")
+        .path("$LEDGER_MONTH_TRIAL_BALANCE_PATH/$REPORTING_DATE/closing-balance")
         .method("GET")
         .headers(mapOf("Accept" to "application/json"))
         .willRespondWith()
@@ -138,7 +138,7 @@ class LedgerTrialBalancePactConsumerTest {
         .headers(mapOf("Content-Type" to "application/json"))
         .body(
             newJsonBody { o ->
-                o.stringValue("period", "MONTH:2026-06")
+                o.stringValue("period", "MONTH:2000-06")
                 o.booleanType("balanced", true)
                 o.minArrayLike("lines", 0, 1) { line ->
                     line.stringType("code", "1100-CASH-CLEARING-CZK")
@@ -179,7 +179,7 @@ class LedgerTrialBalancePactConsumerTest {
         // Guards the reflection helpers themselves: were they ever to return an empty or partial
         // path, the interaction and the request would still agree with each other and both pact
         // tests would pass against a contract that pins nothing.
-        assertThat(ledgerTrialBalancePath).isEqualTo("$LEDGER_MONTH_TRIAL_BALANCE_PATH/{asOf}/frozen-trial-balance")
+        assertThat(ledgerTrialBalancePath).isEqualTo("$LEDGER_MONTH_TRIAL_BALANCE_PATH/{asOf}/frozen-closing-balance")
 
         val response = fetchTrialBalance(mockServer, REPORTING_DATE)
 
@@ -246,7 +246,7 @@ class LedgerTrialBalancePactConsumerTest {
     @PactTestFor(pactMethod = "livePreviewTrialBalancePact")
     fun `the ledger client uses a distinct explicit path for the mutable working preview`(mockServer: MockServer) {
         assertThat(ledgerLiveTrialBalancePath)
-            .isEqualTo("$LEDGER_MONTH_TRIAL_BALANCE_PATH/{asOf}/trial-balance")
+            .isEqualTo("$LEDGER_MONTH_TRIAL_BALANCE_PATH/{asOf}/closing-balance")
 
         given()
             .baseUri(mockServer.getUrl())
@@ -287,7 +287,7 @@ class LedgerTrialBalancePactConsumerTest {
 
         /** Ledger's query-parameter name for the as-of date — likewise literal. */
         /** A FINREP quarter-end reference date. */
-        const val REPORTING_DATE = "2026-06-30"
+        const val REPORTING_DATE = "2000-06-30"
 
         private val getTrialBalanceMethod =
             LedgerRestClient::class.java.getDeclaredMethod("getTrialBalance", String::class.java)

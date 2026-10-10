@@ -80,6 +80,28 @@ class ClosedPeriodResource(private val closedPeriodUseCase: ClosedPeriodUseCase)
     }
 
     @GET
+    @Path("/{type}/{date}/closing-balance")
+    @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "ledger.read", resource = "#date")
+    @Operation(summary = "Cumulative balance at the end of the MONTH containing the date (computed on demand)")
+    suspend fun closingBalance(@PathParam("type") type: String, @PathParam("date") date: String): Response {
+        val tb = closedPeriodUseCase.getClosingBalance(GetPeriodTrialBalanceQuery(period(type, date)))
+        return Response.ok(tb.toResponse()).build()
+    }
+
+    @GET
+    @Path("/{type}/{date}/frozen-closing-balance")
+    @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "ledger.read", resource = "#date")
+    @Operation(
+        summary = "Cumulative balance at the end of a FROZEN MONTH, summed from FROZEN LINES_V1 evidence (fail-closed)",
+    )
+    suspend fun frozenClosingBalance(@PathParam("type") type: String, @PathParam("date") date: String): Response {
+        val tb = closedPeriodUseCase.getFrozenClosingBalance(GetPeriodTrialBalanceQuery(period(type, date)))
+        return Response.ok(tb.toResponse()).build()
+    }
+
+    @GET
     @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "ledger.read", resource = "")
     @Operation(summary = "List closed-period records overlapping a date range")

@@ -21,13 +21,17 @@ import com.openbank.ledger.domain.model.ClosedPeriodRecord
 import com.openbank.ledger.domain.model.ClosedPeriodStatus
 import com.openbank.ledger.domain.model.ClosedPeriodVerification
 import com.openbank.ledger.domain.model.PeriodTrialBalance
+import com.openbank.ledger.domain.model.PeriodType
+import com.openbank.ledger.domain.model.TrialBalanceLine
 import com.openbank.ledger.domain.model.requireValid
 import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import jakarta.enterprise.context.ApplicationScoped
+import java.math.BigDecimal
 import java.time.Clock
 import java.time.Instant
+import java.time.LocalDate
 
 /**
  * The statutory period close (ADR-0096 D1), with the ledger as sole golden source (ADR-0039).
@@ -77,9 +81,61 @@ class ClosedPeriodService(
             ?: throw ClosedPeriodConflictException(
                 "Period ${query.period.label} has no frozen line evidence; regulatory reporting is fail-closed",
             )
+        return frozenEvidence(record)
+    }
+
+    /**
+     * The live closing balance at the END of a month: cumulative booked activity up to and
+     * including `period.to`. The period trial balance above is that month's MOVEMENTS only, which
+     * is the right input for a close and the wrong one for a balance sheet (#12499).
+     */
+    override suspend fun getClosingBalance(query: GetPeriodTrialBalanceQuery): PeriodTrialBalance {
+        requireMonth(query.period)
+        return PeriodTrialBalance(query.period, journalRepository.trialBalance(query.period.to))
+    }
+
+    /**
+     * The closing balance at the end of a FROZEN month, built only from attested evidence: the sum
+     * of every FROZEN `LINES_V1` month close up to and including the target (#12499).
+     *
+     * A month's frozen lines are its movements, so a stock figure (FINREP F 01.01, COREP own funds)
+     * is the cumulative sum of them. Two fail-closed checks make that sum trustworthy:
+     * - the target month itself must be FROZEN `LINES_V1` with a matching hash, as for the single
+     *   period read, and so must every summed month;
+     * - the sum must equal the journal's cumulative balance at `period.to`, per account and
+     *   currency. Frozen months cannot accept postings, so the only way they can disagree is a
+     *   month with postings that was never frozen (or is legacy `HASH_ONLY`) — a gap in the
+     *   evidence chain, which this refuses rather than reporting a balance short by that month.
+     *
+     * The journal is read as a guard only; every number returned comes from frozen evidence.
+     */
+    override suspend fun getFrozenClosingBalance(query: GetPeriodTrialBalanceQuery): PeriodTrialBalance {
+        requireMonth(query.period)
+        val target = getFrozenTrialBalance(query)
+        val earlierMonths = closedPeriodRepository.findRange(EVIDENCE_EPOCH, query.period.from.minusDays(1))
+            .filter {
+                it.period.type == PeriodType.MONTH &&
+                    it.status == ClosedPeriodStatus.FROZEN &&
+                    it.evidenceState == ClosedPeriodEvidenceState.LINES_V1
+            }
+        val evidence = earlierMonths.map { frozenEvidence(it) } + target
+        val closing = PeriodTrialBalance(query.period, cumulate(evidence.flatMap { it.lines }))
+
+        val journal = cumulate(journalRepository.trialBalance(query.period.to))
+        if (closing.lines.keyed() != journal.keyed()) {
+            throw ClosedPeriodConflictException(
+                "Frozen evidence through ${query.period.label} does not add up to the journal balance at " +
+                    "${query.period.to}: a month with postings is not FROZEN LINES_V1, so no attested " +
+                    "closing balance exists; regulatory reporting is fail-closed",
+            )
+        }
+        return closing
+    }
+
+    private suspend fun frozenEvidence(record: ClosedPeriodRecord): PeriodTrialBalance {
         if (record.status != ClosedPeriodStatus.FROZEN || record.evidenceState != ClosedPeriodEvidenceState.LINES_V1) {
             throw ClosedPeriodConflictException(
-                "Period ${query.period.label} evidence state is ${record.evidenceState}; regulatory reporting requires FROZEN LINES_V1",
+                "Period ${record.period.label} evidence state is ${record.evidenceState}; regulatory reporting requires FROZEN LINES_V1",
             )
         }
         return PeriodTrialBalance(record.period, closedPeriodRepository.findFrozenLines(record.id)).also { evidence ->
@@ -187,6 +243,29 @@ class ClosedPeriodService(
         }
     }
 
+    private fun requireMonth(period: AccountingPeriod) {
+        requireValid(period.type == PeriodType.MONTH) {
+            "A closing balance is defined per MONTH close; ${period.type} is not supported"
+        }
+    }
+
+    /** Sum lines per (GL account, currency): movements of several months into one balance. */
+    private fun cumulate(lines: List<TrialBalanceLine>): List<TrialBalanceLine> =
+        lines.groupBy { it.glAccountId to it.currency }.values.map { group ->
+            group.first().copy(
+                totalDebit = group.fold(BigDecimal.ZERO) { acc, l -> acc.add(l.totalDebit) },
+                totalCredit = group.fold(BigDecimal.ZERO) { acc, l -> acc.add(l.totalCredit) },
+            )
+        }.sortedWith(compareBy({ it.code }, { it.currency }))
+
+    /** Scale-insensitive comparison key: 100 and 100.00 are the same amount. */
+    private fun List<TrialBalanceLine>.keyed(): Map<Pair<String, String>, Pair<BigDecimal, BigDecimal>> =
+        filter { it.totalDebit.signum() != 0 || it.totalCredit.signum() != 0 }
+            .associate {
+                (it.code to it.currency) to
+                    (it.totalDebit.stripTrailingZeros() to it.totalCredit.stripTrailingZeros())
+            }
+
     private fun requireBalanced(trialBalance: PeriodTrialBalance) {
         if (!trialBalance.isBalanced) {
             throw ClosedPeriodConflictException(
@@ -220,6 +299,9 @@ class ClosedPeriodService(
 
     companion object {
         private const val PERIOD_FROZEN = "PeriodFrozen"
+
+        /** Lower bound for "every month close up to X"; no evidence predates the ledger. */
+        private val EVIDENCE_EPOCH: LocalDate = LocalDate.of(1970, 1, 1)
     }
 }
 

@@ -46,6 +46,15 @@ interface ClosedPeriodUseCase {
 
     /** Regulatory reader: only immutable `LINES_V1` evidence may cross this boundary. */
     suspend fun getFrozenTrialBalance(query: GetPeriodTrialBalanceQuery): PeriodTrialBalance
+
+    /** Live cumulative balance at the end of a MONTH (all booked activity up to `period.to`). */
+    suspend fun getClosingBalance(query: GetPeriodTrialBalanceQuery): PeriodTrialBalance
+
+    /**
+     * Attested cumulative balance at the end of a FROZEN MONTH: the sum of every FROZEN
+     * `LINES_V1` month's evidence up to it, fail-closed on any gap in that chain (#12499).
+     */
+    suspend fun getFrozenClosingBalance(query: GetPeriodTrialBalanceQuery): PeriodTrialBalance
     suspend fun createDraft(command: CreateClosedPeriodDraftCommand): ClosedPeriodRecord
     suspend fun freeze(command: FreezeClosedPeriodCommand): ClosedPeriodRecord
     suspend fun get(query: GetClosedPeriodQuery): ClosedPeriodRecord
