@@ -17,6 +17,8 @@ object CatalogRoles {
     const val READ = "CATALOG_SCOPE_READ"
     const val AUTHOR = "CATALOG_SCOPE_AUTHOR"
     const val PUBLISH = "CATALOG_SCOPE_PUBLISH"
+    const val PENSION_LEGAL_APPROVER = "PENSION_LEGAL_APPROVER"
+    const val PENSION_PRODUCT_OWNER = "PENSION_PRODUCT_OWNER"
 }
 
 /** Maps provider-neutral OAuth scopes to stable internal roles without trusting a tenant claim or OPA. */
@@ -28,6 +30,10 @@ class CatalogScopeRoleMapper(
     private val authorScope: String,
     @ConfigProperty(name = "openbank.catalog.security.publish-scope", defaultValue = "catalog:publish")
     private val publishScope: String,
+    @ConfigProperty(name = "openbank.catalog.security.pension-legal-scope", defaultValue = "pension:legal-approve")
+    private val pensionLegalScope: String,
+    @ConfigProperty(name = "openbank.catalog.security.pension-product-scope", defaultValue = "pension:product-approve")
+    private val pensionProductScope: String,
 ) {
     fun roles(scopeClaim: Any?): Set<String> {
         val scopes = when (scopeClaim) {
@@ -39,6 +45,8 @@ class CatalogScopeRoleMapper(
             if (readScope in scopes) add(CatalogRoles.READ)
             if (authorScope in scopes) add(CatalogRoles.AUTHOR)
             if (publishScope in scopes) add(CatalogRoles.PUBLISH)
+            if (pensionLegalScope in scopes) add(CatalogRoles.PENSION_LEGAL_APPROVER)
+            if (pensionProductScope in scopes) add(CatalogRoles.PENSION_PRODUCT_OWNER)
         }
     }
 }

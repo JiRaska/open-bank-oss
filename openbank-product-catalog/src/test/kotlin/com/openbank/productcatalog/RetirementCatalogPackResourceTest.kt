@@ -21,6 +21,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.hasItem
 import org.junit.jupiter.api.Test
+import java.time.Instant
 import java.util.UUID
 import javax.sql.DataSource
 
@@ -107,7 +108,11 @@ class RetirementCatalogPackResourceTest {
     @Test
     fun `every illustrative CZ DPS and DIP offering validates against the pack`() {
         val offerings = fixtureOfferings()
-        assertThat(offerings.map { it["attributes"]["productLine"].asText() to it["attributes"]["fundStrategy"].asText() })
+        assertThat(
+            offerings.map {
+                it["attributes"]["productLine"].asText() to it["attributes"]["fundStrategy"].asText()
+            },
+        )
             .containsExactlyInAnyOrderElementsOf(
                 listOf("DPS", "DIP").flatMap { line -> STRATEGIES.map { line to it } },
             )
@@ -153,30 +158,98 @@ class RetirementCatalogPackResourceTest {
     }
 
     @Test
-    fun `selected v2 instrument coverage survives independent publication`() {
+    @Suppress("LongMethod")
+    fun `v2 pension revision needs distinct legal and product evidence before publication`() {
         val offering = fixtureOfferings().first { it["attributes"]["productLine"].asText() == "DIP" }
         val specificationId = createSpecification("CZ_DIP_CLASSES_V2", version = 2)
         val offeringId = createOffering(specificationId, "CZ_DIP_CLASSES_V2")
         val attributes = (offering["attributes"].deepCopy<JsonNode>() as ObjectNode).apply {
             putArray("instrumentClasses").add("BOND_FUNDS").add("EQUITY_FUNDS")
+            put("reviewStatus", "LEGAL_AND_COMMERCIAL_REVIEWED")
         }
-        val revisionId = createRevision(offeringId, offering, version = 2, attributes = attributes)
+        val revisionId = createRevision(
+            offeringId,
+            offering,
+            version = 2,
+            attributes = attributes,
+            effectiveFrom = "2027-01-01T00:00:00Z",
+        )
         setMaker(revisionId, "independent-retirement-maker")
+        val publishPath = "/api/v2/offerings/$offeringId/revisions/$revisionId/publish"
+        Given {
+            contentType("application/json")
+            body("""{"reason":"reviewed instrument class coverage"}""")
+            header("If-Match", "\"0\"")
+        } When { post(publishPath) } Then { statusCode(409) }
+        insertPensionApproval(revisionId, "LEGAL_COUNSEL", "legal-subject")
+        Given {
+            contentType("application/json")
+            body("""{"reason":"reviewed instrument class coverage"}""")
+            header("If-Match", "\"0\"")
+        } When { post(publishPath) } Then { statusCode(409) }
+        insertPensionApproval(revisionId, "PRODUCT_OWNER", "product-subject")
         Given {
             contentType("application/json")
             body("""{"reason":"reviewed instrument class coverage"}""")
             header("If-Match", "\"0\"")
         } When {
-            post("/api/v2/offerings/$offeringId/revisions/$revisionId/publish")
+            post(publishPath)
         } Then {
             statusCode(200)
             body("state", equalTo("PUBLISHED"))
         }
         Given { this } When {
-            get("/api/v2/products/$offeringId")
+            get("/api/v2/products/$offeringId?effectiveAt=2027-01-02T00:00:00Z")
         } Then {
             statusCode(200)
             body("content.attributes.instrumentClasses", equalTo(listOf("BOND_FUNDS", "EQUITY_FUNDS")))
+        }
+
+        val staleOffering = createOffering(specificationId, "CZ_DIP_CLASSES_STALE_V2")
+        val staleRevision = createRevision(
+            staleOffering,
+            offering,
+            version = 2,
+            attributes = attributes,
+            effectiveFrom = "2027-02-01T00:00:00Z",
+        )
+        setMaker(staleRevision, "independent-retirement-maker")
+        insertPensionApproval(staleRevision, "LEGAL_COUNSEL", "legal-subject")
+        insertPensionApproval(staleRevision, "PRODUCT_OWNER", "product-subject")
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "UPDATE catalog_revisions SET effective_to = ?, lock_version = lock_version + 1 WHERE id = ?",
+            ).use { statement ->
+                statement.setTimestamp(1, java.sql.Timestamp.from(Instant.parse("2027-03-01T00:00:00Z")))
+                statement.setObject(2, staleRevision)
+                statement.executeUpdate()
+            }
+        }
+        Given {
+            contentType("application/json")
+            body("""{"reason":"changed effective interval"}""")
+            header("If-Match", "\"1\"")
+        } When { post("/api/v2/offerings/$staleOffering/revisions/$staleRevision/publish") } Then {
+            statusCode(409)
+        }
+
+        val sameActorOffering = createOffering(specificationId, "CZ_DIP_CLASSES_SAME_ACTOR_V2")
+        val sameActorRevision = createRevision(
+            sameActorOffering,
+            offering,
+            version = 2,
+            attributes = attributes,
+            effectiveFrom = "2027-04-01T00:00:00Z",
+        )
+        setMaker(sameActorRevision, "independent-retirement-maker")
+        insertPensionApproval(sameActorRevision, "LEGAL_COUNSEL", "shared-subject")
+        insertPensionApproval(sameActorRevision, "PRODUCT_OWNER", "shared-subject")
+        Given {
+            contentType("application/json")
+            body("""{"reason":"same actor must not suffice"}""")
+            header("If-Match", "\"0\"")
+        } When { post("/api/v2/offerings/$sameActorOffering/revisions/$sameActorRevision/publish") } Then {
+            statusCode(409)
         }
     }
 
@@ -250,6 +323,7 @@ class RetirementCatalogPackResourceTest {
         offering: JsonNode,
         version: Int = 1,
         attributes: JsonNode = offering["attributes"],
+        effectiveFrom: String? = null,
     ): UUID = UUID.fromString(
         Given {
             contentType("application/json")
@@ -259,7 +333,7 @@ class RetirementCatalogPackResourceTest {
                         "schemaRef" to mapOf("id" to SCHEMA_ID, "version" to version),
                         "name" to mapOf("en" to offering["name"].asText()),
                         "attributes" to attributes,
-                    ),
+                    ) + (effectiveFrom?.let { mapOf("effectiveFrom" to it) } ?: emptyMap()),
                 ),
             )
         } When {
@@ -277,6 +351,46 @@ class RetirementCatalogPackResourceTest {
             connection.prepareStatement("UPDATE catalog_revisions SET maker_id = ? WHERE id = ?").use { statement ->
                 statement.setString(1, maker)
                 statement.setObject(2, revisionId)
+                statement.executeUpdate()
+            }
+        }
+    }
+
+    @Suppress("NestedBlockDepth")
+    private fun insertPensionApproval(revisionId: UUID, role: String, subject: String) {
+        dataSource.connection.use { connection ->
+            val revision = connection.prepareStatement(
+                "SELECT offering_id, schema_id, schema_version, effective_from, effective_to, " +
+                    "content FROM catalog_revisions WHERE id = ?",
+            ).use { statement ->
+                statement.setObject(1, revisionId)
+                statement.executeQuery().use { result ->
+                    check(result.next())
+                    mapper.createObjectNode().apply {
+                        put("offeringId", result.getObject("offering_id").toString())
+                        put("revisionId", revisionId.toString())
+                        put("schemaId", result.getString("schema_id"))
+                        put("schemaVersion", result.getInt("schema_version"))
+                        put("effectiveFrom", result.getTimestamp("effective_from")?.toInstant()?.toString())
+                        put("effectiveTo", result.getTimestamp("effective_to")?.toInstant()?.toString())
+                        set<JsonNode>("content", mapper.readTree(result.getString("content")))
+                    }
+                }
+            }
+            val digest = com.openbank.productcatalog.infrastructure.catalog.CatalogJson(mapper).sha256(revision)
+            connection.prepareStatement(
+                "INSERT INTO pension_revision_approvals " +
+                    "(id, revision_id, role, issuer, subject, digest, reason, approved_at) " +
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ).use { statement ->
+                statement.setObject(1, UUID.randomUUID())
+                statement.setObject(2, revisionId)
+                statement.setString(3, role)
+                statement.setString(4, "https://example.invalid/issuer")
+                statement.setString(5, subject)
+                statement.setString(6, digest)
+                statement.setString(7, "separate approved decision")
+                statement.setTimestamp(8, java.sql.Timestamp.from(Instant.now()))
                 statement.executeUpdate()
             }
         }

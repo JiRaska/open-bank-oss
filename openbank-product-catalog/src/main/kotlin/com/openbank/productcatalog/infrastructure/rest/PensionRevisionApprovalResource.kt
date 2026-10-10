@@ -1,0 +1,102 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+
+package com.openbank.productcatalog.infrastructure.rest
+
+import com.openbank.productcatalog.application.CatalogForbiddenException
+import com.openbank.productcatalog.application.CatalogNotFoundException
+import com.openbank.productcatalog.application.CatalogPreconditionRequiredException
+import com.openbank.productcatalog.application.GenericCatalogService
+import com.openbank.productcatalog.application.port.out.PensionApprovalRole
+import com.openbank.productcatalog.application.port.out.PensionRevisionApproval
+import com.openbank.productcatalog.infrastructure.security.CatalogRoles
+import io.quarkus.security.identity.SecurityIdentity
+import jakarta.annotation.security.RolesAllowed
+import jakarta.enterprise.context.ApplicationScoped
+import jakarta.ws.rs.Consumes
+import jakarta.ws.rs.GET
+import jakarta.ws.rs.HeaderParam
+import jakarta.ws.rs.POST
+import jakarta.ws.rs.Path
+import jakarta.ws.rs.PathParam
+import jakarta.ws.rs.Produces
+import jakarta.ws.rs.core.MediaType
+import jakarta.ws.rs.core.Response
+import org.eclipse.microprofile.jwt.JsonWebToken
+import java.time.Instant
+import java.util.UUID
+
+data class PensionApprovalRequest(val reason: String)
+
+data class PensionApprovalResponse(val role: PensionApprovalRole, val digest: String, val approvedAt: Instant)
+
+@ApplicationScoped
+@Path("/api/v2/offerings/{offeringId}/revisions/{revisionId}/pension-approvals")
+@Produces(MediaType.APPLICATION_JSON)
+class PensionRevisionApprovalResource(
+    private val service: GenericCatalogService,
+    private val identity: SecurityIdentity,
+) {
+    @GET
+    @RolesAllowed(CatalogRoles.AUTHOR, CatalogRoles.PENSION_LEGAL_APPROVER, CatalogRoles.PENSION_PRODUCT_OWNER)
+    suspend fun list(
+        @PathParam("offeringId") offeringId: UUID,
+        @PathParam("revisionId") revisionId: UUID,
+    ): List<PensionApprovalResponse> {
+        requireOwner(offeringId, revisionId)
+        return service.pensionApprovals(revisionId).map(::response)
+    }
+
+    @POST
+    @Path("/{role}")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @RolesAllowed(CatalogRoles.PENSION_LEGAL_APPROVER, CatalogRoles.PENSION_PRODUCT_OWNER)
+    @Suppress("ThrowsCount")
+    suspend fun approve(
+        @PathParam("offeringId") offeringId: UUID,
+        @PathParam("revisionId") revisionId: UUID,
+        @PathParam("role") role: PensionApprovalRole,
+        @HeaderParam("If-Match") ifMatch: String?,
+        request: PensionApprovalRequest,
+    ): Response {
+        val requiredRole = when (role) {
+            PensionApprovalRole.LEGAL_COUNSEL -> CatalogRoles.PENSION_LEGAL_APPROVER
+            PensionApprovalRole.PRODUCT_OWNER -> CatalogRoles.PENSION_PRODUCT_OWNER
+        }
+        if (!identity.hasRole(requiredRole)) throw CatalogForbiddenException("approval role is required")
+        requireOwner(offeringId, revisionId)
+        val token = identity.principal as? JsonWebToken
+            ?: throw CatalogForbiddenException("a verified JWT principal is required")
+        val issuer = token.issuer?.takeIf(String::isNotBlank)
+            ?: throw CatalogForbiddenException("token issuer is required")
+        val subject = token.subject?.takeIf(String::isNotBlank)
+            ?: throw CatalogForbiddenException("token subject is required")
+        val revision = ifMatch?.let { STRONG_ETAG.matchEntire(it)?.groupValues?.get(1)?.toLongOrNull() }
+            ?: throw CatalogPreconditionRequiredException("a strong If-Match revision is required")
+        val approved = service.approvePensionRevision(
+            revisionId,
+            revision,
+            role,
+            issuer,
+            subject,
+            identity.principal.name,
+            request.reason,
+        )
+        return Response.status(Response.Status.CREATED).entity(response(approved)).build()
+    }
+
+    private suspend fun requireOwner(offeringId: UUID, revisionId: UUID) {
+        val revision = service.findRevision(revisionId)
+        if (revision.offeringId != offeringId) {
+            throw CatalogNotFoundException("revision $revisionId not found for offering $offeringId")
+        }
+    }
+
+    private fun response(approval: PensionRevisionApproval) =
+        PensionApprovalResponse(approval.role, approval.digest, approval.approvedAt)
+
+    private companion object {
+        val STRONG_ETAG = Regex("\\\"([0-9]+)\\\"")
+    }
+}

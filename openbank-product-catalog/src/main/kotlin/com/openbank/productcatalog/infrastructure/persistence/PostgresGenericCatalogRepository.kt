@@ -10,6 +10,8 @@ import com.openbank.productcatalog.application.CatalogConflictException
 import com.openbank.productcatalog.application.CatalogForbiddenException
 import com.openbank.productcatalog.application.CatalogPreconditionFailedException
 import com.openbank.productcatalog.application.port.out.GenericCatalogRepository
+import com.openbank.productcatalog.application.port.out.PensionApprovalRole
+import com.openbank.productcatalog.application.port.out.PensionRevisionApproval
 import com.openbank.productcatalog.domain.catalog.CatalogChangeEvent
 import com.openbank.productcatalog.domain.catalog.CatalogSchema
 import com.openbank.productcatalog.domain.catalog.MarketContext
@@ -202,12 +204,9 @@ class PostgresGenericCatalogRepository(
         at: Instant,
     ): ProductRevision = translateOptimisticFailure {
         sessions.withTransaction { session ->
-            session.createQuery(
-                "FROM CatalogRevisionEntity WHERE id = :id AND revision = :revision",
-                CatalogRevisionEntity::class.java,
-            ).setParameter("id", revisionId).setParameter("revision", expectedRevision).resultList
+            session.find(CatalogRevisionEntity::class.java, revisionId, LockMode.PESSIMISTIC_WRITE)
                 .map {
-                    it.firstOrNull()
+                    it?.takeIf { row -> row.revision == expectedRevision }
                         ?: throw CatalogPreconditionFailedException("revision was modified concurrently")
                 }
                 .flatMap { draft ->
@@ -221,7 +220,9 @@ class PostgresGenericCatalogRepository(
                     session.find(CatalogOfferingEntity::class.java, draft.offeringId, LockMode.PESSIMISTIC_WRITE)
                         .flatMap { offering ->
                             checkNotNull(offering) { "offering ${draft.offeringId} disappeared during publication" }
-                            preparePublication(session, draft, at, checkerId).flatMap {
+                            requirePensionApprovals(session, draft).flatMap {
+                                preparePublication(session, draft, at, checkerId)
+                            }.flatMap {
                                 draft.state = RevisionState.PUBLISHED.name
                                 draft.checkerId = checkerId
                                 draft.reason = reason
@@ -236,6 +237,125 @@ class PostgresGenericCatalogRepository(
                         }
                 }
         }.awaitSuspending()
+    }
+
+    override suspend fun approvePensionRevision(
+        revisionId: UUID,
+        expectedRevision: Long,
+        role: PensionApprovalRole,
+        issuer: String,
+        subject: String,
+        actorName: String,
+        reason: String,
+    ): PensionRevisionApproval = translatePersistenceConflict("approval already exists for this role and revision") {
+        sessions.withTransaction { session ->
+            session.find(CatalogRevisionEntity::class.java, revisionId, LockMode.PESSIMISTIC_WRITE)
+                .map {
+                    it?.takeIf { row -> row.revision == expectedRevision }
+                        ?: throw CatalogPreconditionFailedException("revision was modified concurrently")
+                }
+                .flatMap { draft ->
+                    if (draft.state != RevisionState.DRAFT.name ||
+                        draft.schemaId != PENSION_SCHEMA ||
+                        draft.schemaVersion != 2
+                    ) {
+                        throw CatalogConflictException("only draft pension pack v2 revisions accept role approvals")
+                    }
+                    if (draft.effectiveFrom == null) {
+                        throw CatalogConflictException("pension approval requires an explicit effectiveFrom")
+                    }
+                    if (draft.toDomain().content.attributes.values["reviewStatus"] !=
+                        com.openbank.productcatalog.domain.catalog.CatalogValue.TextValue(REVIEWED_STATUS)
+                    ) {
+                        throw CatalogConflictException("pension revision has not declared legal and commercial review")
+                    }
+                    if (draft.makerId == subject || draft.makerId == actorName) {
+                        throw CatalogForbiddenException("maker cannot approve their own revision")
+                    }
+                    val digest = catalogJson.approvalDigest(draft.toDomain())
+                    session.createQuery(
+                        "FROM PensionRevisionApprovalEntity WHERE revisionId = :id AND digest = :digest",
+                        PensionRevisionApprovalEntity::class.java,
+                    ).setParameter("id", revisionId).setParameter("digest", digest).resultList
+                        .flatMap { existing ->
+                            if (existing.any { it.role == role.name }) {
+                                throw CatalogConflictException("this role already approved the current revision")
+                            }
+                            if (existing.any { it.issuer == issuer && it.subject == subject }) {
+                                throw CatalogForbiddenException(
+                                    "legal and product approval require different principals",
+                                )
+                            }
+                            val approved = PensionRevisionApprovalEntity().apply {
+                                id = Ids.newId()
+                                this.revisionId = revisionId
+                                this.role = role.name
+                                this.issuer = issuer
+                                this.subject = subject
+                                this.digest = digest
+                                this.reason = reason
+                                approvedAt = Instant.now(clock)
+                            }
+                            session.persist(approved).flatMap {
+                                recordChange(session, "REVISION", revisionId, "PENSION_${role.name}_APPROVED", subject)
+                            }.map { approved.toDomain() }
+                        }
+                }
+        }.awaitSuspending()
+    }
+
+    override suspend fun pensionApprovals(revisionId: UUID): List<PensionRevisionApproval> =
+        sessions.withSession { session ->
+            session.createQuery(
+                "FROM PensionRevisionApprovalEntity WHERE revisionId = :id ORDER BY approvedAt, role",
+                PensionRevisionApprovalEntity::class.java,
+            ).setParameter("id", revisionId).resultList
+        }.map { rows -> rows.map { it.toDomain() } }.awaitSuspending()
+
+    @Suppress("ThrowsCount")
+    private fun requirePensionApprovals(session: Mutiny.Session, draft: CatalogRevisionEntity): Uni<Void> {
+        if (draft.schemaId != PENSION_SCHEMA || draft.schemaVersion != 2) return Uni.createFrom().voidItem()
+        if (draft.effectiveFrom == null) {
+            throw CatalogConflictException("pension publication requires an explicit effectiveFrom")
+        }
+        if (draft.toDomain().content.attributes.values["reviewStatus"] !=
+            com.openbank.productcatalog.domain.catalog.CatalogValue.TextValue(REVIEWED_STATUS)
+        ) {
+            throw CatalogConflictException("pension revision has not declared legal and commercial review")
+        }
+        val digest = catalogJson.approvalDigest(draft.toDomain())
+        return session.createQuery(
+            "FROM PensionRevisionApprovalEntity WHERE revisionId = :id AND digest = :digest",
+            PensionRevisionApprovalEntity::class.java,
+        ).setParameter("id", draft.id).setParameter("digest", digest).resultList.invoke { rows ->
+            val legal = rows.singleOrNull { it.role == PensionApprovalRole.LEGAL_COUNSEL.name }
+            val product = rows.singleOrNull { it.role == PensionApprovalRole.PRODUCT_OWNER.name }
+            val complete = legal != null && product != null
+            val distinct = if (legal == null || product == null) {
+                false
+            } else {
+                legal.issuer != product.issuer || legal.subject != product.subject
+            }
+            val makerExcluded = rows.none { it.subject == draft.makerId }
+            if (!complete || !distinct || !makerExcluded) {
+                throw CatalogConflictException("pension revision requires independent legal and product approvals")
+            }
+        }.replaceWithVoid()
+    }
+
+    private fun PensionRevisionApprovalEntity.toDomain() = PensionRevisionApproval(
+        revisionId,
+        PensionApprovalRole.valueOf(role),
+        issuer,
+        subject,
+        digest,
+        reason,
+        approvedAt,
+    )
+
+    private companion object {
+        const val PENSION_SCHEMA = "org.openbank.retirement.pension-savings"
+        const val REVIEWED_STATUS = "LEGAL_AND_COMMERCIAL_REVIEWED"
     }
 
     override suspend fun findPublished(offeringId: UUID, effectiveAt: Instant): ProductRevision? =

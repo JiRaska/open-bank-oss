@@ -22,6 +22,20 @@ import org.junit.jupiter.api.Test
 )
 class CatalogScopeAuthorizationTest {
     @Test
+    @TestSecurity(user = "pension-legal", augmentors = [CatalogScopeIdentityAugmentor::class])
+    @OidcSecurity(claims = [Claim(key = "scope", value = "pension:legal-approve")])
+    fun pensionLegalScopeCannotImpersonateProductOwner() {
+        val base = "/api/v2/offerings/00000000-0000-0000-0000-000000000001" +
+            "/revisions/00000000-0000-0000-0000-000000000002/pension-approvals"
+        given().contentType("application/json").header("If-Match", "\"0\"")
+            .body("""{"reason":"review"}""")
+            .post("$base/PRODUCT_OWNER").then().statusCode(403)
+        given().contentType("application/json").header("If-Match", "\"0\"")
+            .body("""{"reason":"review"}""")
+            .post("$base/LEGAL_COUNSEL").then().statusCode(404)
+    }
+
+    @Test
     @TestSecurity(user = "pension-catalog-reader", augmentors = [CatalogScopeIdentityAugmentor::class])
     @OidcSecurity(claims = [Claim(key = "scope", value = "catalog:read")])
     fun readScopeAllowsV2ReadsButNotAuthoring() {

@@ -8,7 +8,13 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
 class CatalogScopeRoleMapperTest {
-    private val mapper = CatalogScopeRoleMapper("catalog:read", "catalog:author", "catalog:publish")
+    private val mapper = CatalogScopeRoleMapper(
+        "catalog:read",
+        "catalog:author",
+        "catalog:publish",
+        "pension:legal-approve",
+        "pension:product-approve",
+    )
 
     @Test
     fun `maps standards based scope strings and arrays without provider roles`() {
@@ -17,5 +23,9 @@ class CatalogScopeRoleMapperTest {
         assertThat(mapper.roles(listOf("catalog:read", "catalog:publish")))
             .containsExactlyInAnyOrder(CatalogRoles.READ, CatalogRoles.PUBLISH)
         assertThat(mapper.roles("unrelated")).isEmpty()
+        assertThat(mapper.roles("pension:legal-approve"))
+            .containsExactly(CatalogRoles.PENSION_LEGAL_APPROVER)
+        assertThat(mapper.roles("pension:product-approve"))
+            .containsExactly(CatalogRoles.PENSION_PRODUCT_OWNER)
     }
 }

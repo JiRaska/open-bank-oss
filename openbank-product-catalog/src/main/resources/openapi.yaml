@@ -4,7 +4,7 @@ openapi: 3.1.0
 info:
   title: Product Catalog API
   # API-contract version is independent of version.txt (ADR-0048); newest URL major is /api/v2.
-  version: 2.2.0
+  version: 2.3.0
   description: >-
     Industry-neutral, schema-governed catalog API with immutable four-eyes publication,
     exact decimal pricing, effective-dated reads and transactional audit/outbox. The
@@ -36,6 +36,8 @@ tags:
     description: Durable pull cursor for standalone change delivery
   - name: Catalog V2
     description: Generated runtime contract for the governed generic catalog
+  - name: Pension Approvals
+    description: Independent legal and product evidence for pension pack v2 revisions
 security:
   - bearerAuth: []
 paths:
@@ -593,6 +595,53 @@ paths:
         '428': { $ref: '#/components/responses/PreconditionRequired' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v2/offerings/{offeringId}/revisions/{revisionId}/pension-approvals:
+    get:
+      tags: [Pension Approvals]
+      operationId: listPensionRevisionApprovalsV2
+      summary: List role approvals recorded for a pension catalog revision
+      parameters:
+        - { name: offeringId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: revisionId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Approval metadata matching the revision's current content and effective interval
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/PensionApprovalResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/CatalogNotFound' }
+  /api/v2/offerings/{offeringId}/revisions/{revisionId}/pension-approvals/{role}:
+    post:
+      tags: [Pension Approvals]
+      operationId: approvePensionRevisionV2
+      summary: Record one immutable, authenticated, role-qualified approval of an exact draft
+      parameters:
+        - { name: offeringId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: revisionId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: role, in: path, required: true, schema: { type: string, enum: [LEGAL_COUNSEL, PRODUCT_OWNER] } }
+        - { $ref: '#/components/parameters/IfMatchRequired' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PensionApprovalRequest' }
+      responses:
+        '201':
+          description: Immutable approval evidence recorded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PensionApprovalResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/CatalogNotFound' }
+        '409': { $ref: '#/components/responses/CatalogConflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+        '428': { $ref: '#/components/responses/PreconditionRequired' }
   /api/v2/products/{offeringId}:
     get:
       tags: [Catalog V2]
@@ -706,6 +755,20 @@ components:
       description: Strong optimistic-concurrency token for this product representation.
       schema: { type: string, pattern: '^"[0-9]+"$' }
   schemas:
+    PensionApprovalRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 1, maxLength: 4096 }
+    PensionApprovalResponse:
+      type: object
+      additionalProperties: false
+      required: [role, digest, approvedAt]
+      properties:
+        role: { type: string, enum: [LEGAL_COUNSEL, PRODUCT_OWNER] }
+        digest: { type: string, pattern: '^[0-9a-f]{64}$' }
+        approvedAt: { type: string, format: date-time }
     LegacyError:
       type: object
       properties:
