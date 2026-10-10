@@ -42,9 +42,11 @@ import java.util.UUID
  *
  * **Failure handling separates two things this consumer used to conflate (#5698/#5745).**
  *
- * A **malformed event** — unparseable JSON, an unparsable `totalTaxAmount`, a missing `dueDate` — is
- * unretryable: replaying it fails identically forever, so it is counted and acked. That is the
- * genuine poison pill and the only case that may be acked on failure.
+ * A **malformed target event** — unparseable JSON, an unparsable `totalTaxAmount`, a missing
+ * `dueDate` — is unretryable without correction. It is counted and nacked into the configured DLQ;
+ * acknowledging it would permanently omit its amount from the filing. The connector parks the
+ * original Kafka record, including its key, value and headers. Neither logs nor nack reasons carry
+ * its payload.
  *
  * A **failed write** ([TaxFilingService.observe] → `openIfAbsent` + `record`) is the opposite: the
  * event is fine, the database is not. Acking there was the worst variant of this bug class in the
@@ -54,22 +56,17 @@ import java.util.UUID
  * `auto.offset.reset: latest` also rules out recovering it by replay. Those failures now go through
  * [EventRetry.withRetry] and are RETHROWN.
  *
- * **This channel HALTS on a persistent failure, and that is currently unavoidable — say so rather
- * than call it a dead-letter.** The mechanism this handler controls is the rethrow: the record is not
- * acknowledged as done. What follows is the connector's `failure-strategy` for
- * `withholding-remitted-in`, and unlike its siblings this one cannot yet be given a DLQ. #5751 wires
- * the fleet's incoming channels to explicit dead-letter topics and deliberately BASELINES this one:
- * `openbank-tax-reporting-service` has no `KafkaUser` manifest anywhere under
- * `openbank-infra/gitops/components/`, so no `Write` ACL can be granted for a dead-letter topic, and
- * a DLQ configured without the ACL wedges on the DLQ send itself — parking the record on the very
- * failure it was meant to park. So SmallRye's default `fail` applies and the channel stops.
+ * **What follows a rethrow is the connector's configured `failure-strategy` for
+ * `withholding-remitted-in`, not this class.** The mechanism this handler controls is the rethrow:
+ * the record is nacked. application.yaml answers what the strategy is today, and the gitops
+ * component under `openbank-infra/gitops/components/tax-reporting/` carries the dead-letter topic
+ * and the KafkaUser Write ACL a dead-letter strategy needs — without that ACL the DLQ send itself
+ * fails and the channel wedges on the very record it was meant to park (#5745).
  *
- * That is a real operational property of a statutory filing path, not a footnote: a §38d remittance
- * arriving during a tax-db outage stops this consumer group until someone intervenes. It is still the
- * right trade against the alternative — a halted channel is loud and its backlog is intact, whereas
- * the old ack silently understated a return that then got filed — but it is a trade someone must
- * know about while operating this service. Creating a KafkaUser for tax-reporting is what unblocks
- * the DLQ; until then, this consumer wedging IS the alert.
+ * A dead-lettered remittance is still a remittance missing from a §38d return, so it is not a
+ * resolution: the return for that period understates the tax withheld until someone replays it.
+ * `auto.offset.reset: latest` rules out recovering it from the source topic, which is why the
+ * dead-letter topic is the copy that matters.
  *
  * `observe` is idempotent on the remittance id (that is what the `duplicate` outcome is), so a retry
  * or a redelivery cannot double-count a batch into the return.
@@ -84,7 +81,7 @@ class WithholdingRemittedConsumer(
     private val log = Logger.getLogger(WithholdingRemittedConsumer::class.java)
 
     @Incoming("withholding-remitted-in")
-    @Suppress("TooGenericExceptionCaught") // the two catches below mean opposite things; see the KDoc
+    @Suppress("TooGenericExceptionCaught") // decode and storage failures have separate counters
     suspend fun consume(record: ConsumerRecord<String, String>) {
         val eventType = record.headers().lastHeader(OutboxKafkaHeaders.HEADER_EVENT_TYPE)
             ?.let { String(it.value(), StandardCharsets.UTF_8) }
@@ -93,14 +90,14 @@ class WithholdingRemittedConsumer(
             return
         }
 
-        // Poison pill: an event this consumer cannot decode fails identically on every replay, so it
-        // is counted and acked rather than wedging the group and stalling every later filing period.
+        // A target event that cannot be decoded must remain recoverable. The connector parks the
+        // original record on nack; never copy its potentially sensitive value into the exception.
         val remittance = try {
             parse(objectMapper.readTree(record.value()))
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             count(OUTCOME_MALFORMED)
-            log.errorf(e, "[withholding-filing] unparseable remitted event, acking: %.300s", record.value())
-            return
+            log.error("[withholding-filing] malformed remitted event; sending original record to DLQ")
+            throw IllegalArgumentException("Malformed withholding remittance event")
         }
 
         try {
@@ -110,7 +107,7 @@ class WithholdingRemittedConsumer(
             count(if (recorded) OUTCOME_RECORDED else OUTCOME_DUPLICATE)
         } catch (e: Exception) {
             // Counted BEFORE the rethrow so the `failed` population survives whichever
-            // failure-strategy the channel is configured with — today, a halt (see the KDoc).
+            // failure-strategy the channel is configured with — today, the explicit DLQ.
             count(OUTCOME_FAILED)
             throw e
         }
@@ -133,7 +130,7 @@ class WithholdingRemittedConsumer(
     private fun decimalOf(node: JsonNode): BigDecimal {
         val raw = if (node.isTextual) node.asText() else node.toString()
         return runCatching { BigDecimal(raw) }.getOrElse {
-            throw IllegalArgumentException("Unparsable totalTaxAmount in remitted event: $raw")
+            throw IllegalArgumentException("Unparsable totalTaxAmount in remitted event")
         }
     }
 

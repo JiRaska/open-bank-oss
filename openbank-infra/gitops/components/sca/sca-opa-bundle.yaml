@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: sca-service
     app.kubernetes.io/part-of: sca
   annotations:
-    openbank.tech/policy-checksum: "9869e8cef658d004"
+    openbank.tech/policy-checksum: "f2c8ddad8f4eb382"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1670,6 +1670,9 @@ data:
       operator_read_any_excluded_actions:
         - pension-fund.holding.read   # participants' unit holdings and orders (ADR-0334 S4, #12350):
                                       # staff + service-account-openbank-pension only
+        - tax.filing.read             # §38d withholding returns and the per-remittance audit trail behind
+                                      # them (#5760): real staff only via tax_reporting_rest_ext.rego; no
+                                      # service-account reads them through operator-read-any
       role_action_matrix:
         ROLE_OPERATOR:
           grant:
