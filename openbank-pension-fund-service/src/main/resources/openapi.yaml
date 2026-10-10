@@ -174,13 +174,14 @@ paths:
     post:
       tags: [NAV]
       operationId: proposeClassificationCorrection
+      parameters: [ { $ref: '#/components/parameters/ClassificationIdempotencyKey' } ]
       summary: Propose a position's instrument class (maker)
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: '#/components/schemas/ClassificationCorrectionRequest' } } }
       responses:
-        '200': { description: Proposed, content: { application/json: { schema: { $ref: '#/components/schemas/ClassificationCorrection' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
+        '200': { description: Proposed, content: { application/json: { schema: { $ref: '#/components/schemas/ClassificationCorrection' } } } }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
   /api/v1/position-classification-corrections/{correctionId}/approve:
@@ -188,8 +189,10 @@ paths:
     post:
       tags: [NAV]
       operationId: approveClassificationCorrection
+      parameters: [ { $ref: '#/components/parameters/ClassificationIdempotencyKey' } ]
       summary: Approve a proposed instrument class (checker, never the proposer)
       responses:
+        '400': { $ref: '#/components/responses/BadRequest' }
         '200': { description: Approved, content: { application/json: { schema: { $ref: '#/components/schemas/ClassificationCorrection' } } } }
         '403': { $ref: '#/components/responses/FourEyes' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -199,8 +202,10 @@ paths:
     post:
       tags: [NAV]
       operationId: rejectClassificationCorrection
+      parameters: [ { $ref: '#/components/parameters/ClassificationIdempotencyKey' } ]
       summary: Reject a proposed instrument class (checker, never the proposer)
       responses:
+        '400': { $ref: '#/components/responses/BadRequest' }
         '200': { description: Rejected, content: { application/json: { schema: { $ref: '#/components/schemas/ClassificationCorrection' } } } }
         '403': { $ref: '#/components/responses/FourEyes' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -375,6 +380,12 @@ components:
       bearerFormat: JWT
 
   parameters:
+    ClassificationIdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Scoped to caller and operation. Replays the original response; changed content with the same key is 409.
+      schema: { type: string, minLength: 1, maxLength: 128 }
     FundId: { name: fundId, in: path, required: true, schema: { type: string, format: uuid } }
     NavId: { name: navId, in: path, required: true, schema: { type: string, format: uuid } }
     StrategyId: { name: strategyId, in: path, required: true, schema: { type: string, format: uuid } }

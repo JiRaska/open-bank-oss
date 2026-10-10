@@ -4,6 +4,7 @@
 
 package com.openbank.pensionfund.application
 
+import com.openbank.pensionfund.application.port.ClassificationReceipt
 import com.openbank.pensionfund.application.port.PensionFundStore
 import com.openbank.pensionfund.application.port.StoreChanges
 import com.openbank.pensionfund.domain.model.Fund
@@ -32,7 +33,15 @@ class InMemoryStore : PensionFundStore {
     val positions = mutableListOf<NavPosition>()
     val classifications = linkedMapOf<UUID, PositionClassificationCorrection>()
 
+    val receipts = linkedMapOf<String, ClassificationReceipt>()
+
+    override suspend fun classificationReceipt(key: String) = receipts[key]
+
     override suspend fun commit(changes: StoreChanges) {
+        changes.classificationReceipt?.let {
+            check(it.key !in receipts) { "duplicate receipt" }
+            receipts[it.key] = it
+        }
         changes.funds.forEach { funds[it.id] = it }
         changes.strategies.forEach { strategies[it.id] = it }
         changes.strategyChanges.forEach { this.changes[it.id] = it }
