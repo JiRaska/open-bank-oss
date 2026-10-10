@@ -12,7 +12,7 @@ The filing API lists monthly periods, their remittances, and overdue returns. An
 
 Bearer tokens are validated against the identity provider. Reads and state changes also require the corresponding OPA decisions; assembling and recording a filing require a human operator. A service account with an operator role cannot perform those state changes. The application uses a PostgreSQL datasource and applies its Flyway migrations at startup. Its management port serves health and metrics separately from the filing API.
 
-Withholding-remitted events feed the monthly totals. A failed event is retried and, after a persistent failure, sent to the configured dead-letter topic. The dead-letter copy needs investigation and replay before its remittance can appear in a return; the source consumer starts at the latest offset and is not a historical backfill mechanism. Check the dead-letter backlog and period totals before filing. A successful application rollout by itself does not prove that a return is complete or submitted.
+Withholding-remitted events feed the monthly totals. Events with an unexpected type are ignored. Events that cannot be decoded are counted as malformed and acknowledged; they do not enter the dead-letter topic. If a valid remittance cannot be recorded, the write is retried and a persistent failure is sent to the configured dead-letter topic. Both the malformed count and dead-letter backlog need investigation before filing: an affected remittance is absent from the period total until corrected or replayed. The source consumer starts at the latest offset and is not a historical backfill mechanism. A successful application rollout by itself does not prove that a return is complete or submitted.
 
 ## Build identity
 
