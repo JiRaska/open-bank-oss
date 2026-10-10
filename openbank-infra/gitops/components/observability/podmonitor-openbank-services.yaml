@@ -89,6 +89,7 @@ spec:
       - onboarding
       - party
       - payments
+      - pension
       - pid
       - platform
       - psd2
@@ -103,6 +104,7 @@ spec:
       - tpp-registry
       - treasury
       - wealth
+      - pension-fund
   podMetricsEndpoints:
     - port: management
       path: /q/metrics

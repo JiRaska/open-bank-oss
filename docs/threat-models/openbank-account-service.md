@@ -100,6 +100,8 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `account_outbox` kept every SENT row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; its v1 repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`. PENDING, FAILED, DISPATCHING and DEAD rows are never touched. Information disclosure: shrinks the window in which a database read (replica, backup, operator query) exposes past event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now comes from the broker or audit-service, not this table.
+
 - **2026-09-30** — Screening gate turned into an ALLOW-list (#8345 follow-up). The gate blocked
   only `HIT` and `REVIEW`; sanctions-service has never returned `REVIEW` (its vocabulary is
   `CLEAR | HIT | POTENTIAL_HIT | WHITELISTED | ESCALATED`), so a `POTENTIAL_HIT` (a 0.65+ fuzzy

@@ -48,6 +48,11 @@
 
 **Immutability:** PostgreSQL `DO INSTEAD NOTHING` rules silently discard any `UPDATE`/`DELETE`. The trail is physically append-only; correction is by appending a new compensating entry, never by editing.
 
+For SEPA Instant outbox events, the audit entry uses the Kafka `ce-id` header as its stable
+identity when the payload has no event ID. A retry at another Kafka offset therefore reuses
+the same `entry_id`. The consumer accepts an identical redelivery, ignoring only the new
+ingest timestamp, and rejects the same ID with different persisted evidence.
+
 ## PII & data classification
 
 The audit trail stores the **verbatim payload** of every upstream event, so it transitively contains whatever PII the producers emit (account ids, IBANs, party ids, possibly transaction detail). Additional directly-personal fields captured at this layer:

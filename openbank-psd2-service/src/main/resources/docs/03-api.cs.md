@@ -115,6 +115,8 @@ Tělo požadavku se liší dle produktu:
 
 Každá iniciace ověří souhlas (scope `PAYMENTS_INITIATE`, nebo `DOMESTIC_PAYMENT_INITIATE` / `SIPO_PAYMENT_INITIATE`) a poté přepošle do `transaction-service`. Chybějící IBAN plátce/příjemce ⇒ `InvalidPaymentProductException` → `400 PRODUCT_INVALID`.
 
+Pro `domestic-cz` přijímají obě PIS rozhraní (bespoke i Berlin) pouze CZK. Jiná měna vrátí `400 FORMAT_ERROR` ještě před rezervací `Idempotency-Key` / `X-Request-ID` a kontrolou souhlasu, takže opravený požadavek může použít stejný klíč. Chybějící identita TPP vrátí `401` před iniciací platby.
+
 ```http
 GET /open-banking/v2/payments/{product}/{paymentId}/status
 # product ∈ sepa-credit-transfers | instant-sepa-credit-transfers | domestic-cz | sipo

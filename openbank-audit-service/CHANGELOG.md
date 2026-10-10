@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.26.1](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.26.0...audit-service-v0.26.1) (2026-10-09)
+
+
+### Bug Fixes
+
+* **audit:** deduplicate SEPA Instant events by stable ce-id ([#12323](https://github.com/JiRaska/open-bank-oss/issues/12323)) ([301cbb4](https://github.com/JiRaska/open-bank-oss/commit/301cbb421ee9d3389a2b22d54f3c0a6c69d28104))
+
 ## [0.26.0](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.25.0...audit-service-v0.26.0) (2026-10-05)
 
 

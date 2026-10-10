@@ -41,8 +41,9 @@ openbank-sdd-service.
 
 - **External entities:** customer-edge (authenticated customer), admin-UI (ROLE_OPERATOR),
   sepa-payment / account-service / transaction-service (M2M callees).
-- **Trust boundaries:** edge → service (OIDC + OPA sidecar, currently AUTHZ_ENFORCE=false
-  advisory); service → Kafka (mTLS via Strimzi); service → sepa-payment (OIDC client credentials,
+- **Trust boundaries:** edge → service (OIDC + OPA sidecar; the GitOps manifest declares
+  `AUTHZ_ENFORCE=true` for the `@Authorize` pause action); service → Kafka (mTLS via Strimzi);
+  service → sepa-payment (OIDC client credentials,
   `openbank-services` client, ROLE_OPERATOR accepted by sepa-payment's createPayment); service →
   account-service (same client, ROLE_OPERATOR accepted by `account.read`, read-only IBAN lookup,
   new — #889 follow-up); service → transaction-service (same client, ROLE_OPERATOR accepted by
@@ -54,9 +55,10 @@ openbank-sdd-service.
 
 - All REST endpoints: `@RolesAllowed` (ROLE_CUSTOMER for own orders, ROLE_OPERATOR/ROLE_ADMIN for
   operator surface), verified by `StandingOrderSecurityTest` and `StandingOrderSecurityContractTest`.
-- OPA sidecar deployed (ADR-0034 Phase 5); `AUTHZ_ENFORCE=false` (advisory) — decisions are
-  evaluated and logged but not enforced yet; the flip is a deliberate follow-up with an
-  observation window (rules.yaml AUTHZ_ENFORCE guardrail, issue #3679 cohort).
+- OPA sidecar deployed (ADR-0034 Phase 5); the GitOps manifest declares
+  `AUTHZ_ENFORCE=true` for `standingOrder.pause`, the only `@Authorize` method. The advisory
+  observation window had no pause requests or authorization decisions, so a positive live
+  customer-edge call and PDP availability still need verification after rollout (#12324).
 - Execution calls to sepa-payment are service-to-service (OIDC client credentials via
   `OidcClientRequestReactiveFilter`), not ambient authority.
 - **`standingOrder.pause` is identity-scoped, not role-only (GHSA-58jq-9hq3-66jr, #4228).**
@@ -88,9 +90,10 @@ openbank-sdd-service.
 
 ## 5. Residual risks / assumptions
 
-- **Advisory authz:** `AUTHZ_ENFORCE=false` means the OPA sidecar logs but does not block; RBAC
-  (`@RolesAllowed`) is the only enforced fine-grained gate until the enforce flip (tracked in the
-  #3679 cohort).
+- **Enforcement rollout:** the GitOps manifest sets `AUTHZ_ENFORCE=true`, but this single-replica
+  Deployment has no canary. OPA enforcement applies only to `standingOrder.pause`; the other REST
+  actions remain `@RolesAllowed`-only. Verify the live edge pause path and PDP health before
+  treating the manifest change as an effective authorization control (#12324).
 - **Partially-wired rails (#889):** `DOMESTIC`/`INTERNAL` orders now execute when the creditor IBAN
   resolves to an account of the SAME party as the order (own-account move, transaction-service
   `TRANSFER`, no screening needed — the same case `domestic-payment` itself skips AML/sanctions for).
@@ -105,6 +108,9 @@ openbank-sdd-service.
 
 ## 6. Change log
 
+- **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `standing_order_outbox` kept every SENT row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; its v1 repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`. PENDING, FAILED, DISPATCHING and DEAD rows are never touched. Information disclosure: shrinks the window in which a database read (replica, backup, operator query) exposes past event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now comes from the broker or audit-service, not this table.
+
+- **2026-10-08** — **OPA authorization ENFORCED (`AUTHZ_ENFORCE=true`, #12324).** `standingOrder.pause`, the only `@Authorize` method, now blocks on a deny (403) and fails closed when the PDP is unreachable (503); before this the decision was advisory. Checked with `opa eval` against the deployed `standing-order-opa-bundle` ConfigMap (identical to the repo copy): customer-edge's self-service pause (`service-account-openbank-edge`) is allowed via `m2m-standing-order-pause`, staff `ROLE_OPERATOR`/`ROLE_ADMIN` via `operator-standing-order-pause`; the shared `openbank-services` account (in every realm's role set), every `ROLE_API` per-service account, compliance, viewer, a customer bearer, an AI agent and an anonymous caller are denied. With `standing_order_rest_ext.rego` removed from the bundle, the edge and operator cells turn DENY. Live evidence: zero `openbank_authz_decisions_total` series and zero `pause` requests for this service over the 8-day Prometheus window, so no observed caller is affected. Residual: the workload is a plain Deployment, so there is no canary analysis; resume/cancel/record-execution are still `@RolesAllowed`-only and never consult OPA. Rollback: set `AUTHZ_ENFORCE` back to `"false"` and restore the allowlist entry in `check-authz-enforce-money-path.py`.
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
   #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
   `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into

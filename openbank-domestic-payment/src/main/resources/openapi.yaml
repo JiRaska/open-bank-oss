@@ -6,7 +6,8 @@ info:
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.5 -> 1.6): additive
   # machine-readable 409 for unsafe Idempotency-Key reuse. No request/response field was removed.
   # 1.9.0 -> 1.10.0 (#11588): additive verified makerActorKind on approval responses.
-  version: 1.10.0
+  # 1.10.0 -> 1.11.0 (#12059): additive 400 CURRENCY_NOT_ALLOWED on the CZK-only domestic rail.
+  version: 1.11.0
   description: >-
     Czech domestic payment lifecycle (CZ-specific rails, SIPO). On create, debtor and creditor names
     are synchronously screened against the sanctions lists (ADR-0032): a clean payment is returned
@@ -280,7 +281,9 @@ components:
         AMOUNT_SCALE_EXCEEDED — `amount` has more decimal places than the currency's minor unit
         (e.g. 100.005 CZK); trailing zeros are not counted (100.500 CZK is accepted as 100.50).
         CURRENCY_UNSUPPORTED — `currency` is not an ISO 4217 code with a minor unit (unknown codes,
-        wrong length, metals such as XAU). Case and surrounding blanks are ignored (`czk` is CZK).
+        wrong length, metals such as XAU). CURRENCY_NOT_ALLOWED — the currency is valid but not CZK;
+        the Czech domestic scheme carries CZK only. Case and surrounding blanks are ignored
+        (`czk` is CZK).
         VALIDATION_ERROR — any other invalid field, including an absent amount, one outside the
         supported magnitude, or an amount that is zero or negative (a payment moves a strictly
         positive amount). Nothing is created and the Idempotency-Key is not consumed. The offending
@@ -339,7 +342,7 @@ components:
         currency:
           type: string
           example: CZK
-          description: ISO 4217 code with a minor unit, case-insensitive (`czk` is stored as `CZK`).
+          description: CZK only for the Czech domestic scheme, case-insensitive (`czk` is stored as `CZK`).
         variableSymbol:
           type: string
         specificSymbol:

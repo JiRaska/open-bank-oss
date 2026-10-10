@@ -11,6 +11,7 @@ import com.openbank.domestic.application.port.out.DelegatedPaymentSaveOutcome
 import com.openbank.domestic.application.port.out.DelegatedSpendBindingRepository
 import com.openbank.domestic.application.port.out.DomesticPaymentEventPublisher
 import com.openbank.domestic.application.port.out.DomesticPaymentRepository
+import com.openbank.domestic.domain.error.DomesticSchemeErrorCode
 import com.openbank.domestic.domain.model.DelegatedSpendBinding
 import com.openbank.domestic.domain.model.DelegatedSpendBindingState
 import com.openbank.domestic.domain.model.DelegatedSpendReservationSnapshot
@@ -18,6 +19,7 @@ import com.openbank.domestic.domain.model.DelegatedSpendReservationState
 import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentPriority
 import com.openbank.domestic.domain.model.DomesticTransferScope
+import com.openbank.libs.domain.error.ValidationFailure
 import com.openbank.libs.domain.money.Money
 import com.openbank.libs.observability.DomainMetrics
 import io.mockk.coEvery
@@ -29,6 +31,7 @@ import io.mockk.verify
 import io.temporal.client.WorkflowClient
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
@@ -62,6 +65,22 @@ class DelegatedDomesticPaymentServiceTest {
         coEvery { accountLookup.findAccountIdByIban(DEBTOR_IBAN) } returns ACCOUNT_ID
         coEvery { accountLookup.findPartyByAccountId(ACCOUNT_ID) } returns GRANTOR_ID
         coEvery { accountLookup.findPartyByIban(any()) } returns GRANTEE_ID
+    }
+
+    @Test
+    fun `non-CZK delegated command is rejected before reading reservation projection`() {
+        assertThatThrownBy {
+            runBlocking {
+                service.createDelegatedPayment(
+                    RESERVATION_ID,
+                    command().copy(amount = Money.of(BigDecimal("1500.00"), "EUR")),
+                )
+            }
+        }.isInstanceOfSatisfying(ValidationFailure::class.java) {
+            assertThat(it.errorCode).isEqualTo(DomesticSchemeErrorCode.CURRENCY_NOT_ALLOWED)
+        }
+        coVerify(exactly = 0) { bindingRepository.findByReservationId(any()) }
+        assertNoCreationSideEffects()
     }
 
     @Test

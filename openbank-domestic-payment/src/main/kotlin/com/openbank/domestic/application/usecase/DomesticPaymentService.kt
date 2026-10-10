@@ -17,6 +17,7 @@ import com.openbank.domestic.application.port.out.DelegatedSpendBindingRepositor
 import com.openbank.domestic.application.port.out.DomesticPaymentEventPublisher
 import com.openbank.domestic.application.port.out.DomesticPaymentRepository
 import com.openbank.domestic.application.workflow.DomesticPaymentWorkflow
+import com.openbank.domestic.domain.error.DomesticSchemeRules
 import com.openbank.domestic.domain.model.DelegatedSpendBindingState
 import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentPriority
@@ -122,6 +123,7 @@ class DomesticPaymentService(
         require(command.delegationId == null && command.reservationId == null) {
             "The public domestic-payment use case accepts owner-funded payments only"
         }
+        DomesticSchemeRules.requireSchemeCurrency(command.amount)
         return checkNotNull(
             createPaymentInternal(
                 command = command,
@@ -137,6 +139,7 @@ class DomesticPaymentService(
         reservationId: UUID,
         command: CreateDomesticPaymentCommand,
     ): DelegatedDomesticPaymentResult {
+        DomesticSchemeRules.requireSchemeCurrency(command.amount)
         val binding = delegatedSpendBindingRepository.findByReservationId(reservationId)
             ?: return DelegatedDomesticPaymentResult.ReservationProjectionPending
         if (binding.bindingState == DelegatedSpendBindingState.FINALIZED_ABSENT) {

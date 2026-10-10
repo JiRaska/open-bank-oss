@@ -153,6 +153,23 @@ def plan(entries: list[dict], max_updates: int) -> list[tuple[int, bool, str]]:
     return out
 
 
+def resolve_state(state: str | None, mergeable: bool | None, behind_by: int | None) -> str | None:
+    """Settle a `mergeable_state` GitHub has not computed yet.
+
+    GitHub computes it lazily, so a read can answer `unknown` (or null) for hours on a PR
+    nobody opens. Read as "not behind", that strands every armed PR nobody is looking at.
+    `mergeable: false` already means conflicts; otherwise the compare API's `behind_by`
+    decides behind-ness directly. Anything still undecided stays as it was (a skip).
+    """
+    if state not in (None, "unknown"):
+        return state
+    if mergeable is False:
+        return "dirty"
+    if behind_by:
+        return "behind"
+    return state
+
+
 def self_test() -> int:
     now = dt.datetime(2026, 9, 30, 12, 0, tzinfo=dt.timezone.utc)
     old = now - dt.timedelta(hours=2)
@@ -178,6 +195,18 @@ def self_test() -> int:
         ok = got == want
         failures += not ok
         print(f"{'PASS' if ok else 'FAIL'}  {name}: update={got} ({why})")
+    for name, args, want in [
+        ("unknown + behind_by>0 -> behind", ("unknown", None, 3), "behind"),
+        ("null + behind_by>0 -> behind", (None, None, 1), "behind"),
+        ("unknown + mergeable=false -> dirty", ("unknown", False, 3), "dirty"),
+        ("unknown + behind_by=0 -> unknown", ("unknown", None, 0), "unknown"),
+        ("unknown + compare unread -> unknown", ("unknown", None, None), "unknown"),
+        ("clean is never overridden", ("clean", None, 5), "clean"),
+    ]:
+        got = resolve_state(*args)
+        ok = got == want
+        failures += not ok
+        print(f"{'PASS' if ok else 'FAIL'}  resolve {name}: {got}")
     # An empty required set must never read as "all green" (vacuous pass).
     got, why = decide(base, [], {}, now, old, 20)
     failures += got
@@ -430,6 +459,12 @@ def run(repo: str, branch: str, max_updates: int, debounce: int, dry_run: bool,
         pr = {"draft": full["draft"], "auto_merge": full["auto_merge"],
               "same_repo": (full["head"].get("repo") or {}).get("full_name") == repo,
               "mergeable_state": full.get("mergeable_state")}
+        if pr["same_repo"] and pr["mergeable_state"] in (None, "unknown"):
+            behind_by = (get(f"/repos/{repo}/compare/{branch}...{sha}") or {}).get("behind_by")
+            settled = resolve_state(pr["mergeable_state"], full.get("mergeable"), behind_by)
+            print(f"STATE  #{n} {sha[:9]}: mergeable_state={pr['mergeable_state']}, "
+                  f"behind_by={behind_by} -> {settled}")
+            pr["mergeable_state"] = settled
         kind, building = "unknown", False
         if not pr["same_repo"]:
             ok, why = decide(pr, required, {}, now, None, debounce)

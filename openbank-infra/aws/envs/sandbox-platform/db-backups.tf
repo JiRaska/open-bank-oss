@@ -260,19 +260,19 @@ locals {
     audit        = { namespace = "audit", sa = "audit-db" }
     sanctions    = { namespace = "sanctions", sa = "sanctions-db" }
     # Extended fleet — all remaining clusters with barmanObjectStore to openbank-sandbox-db-backups
-    aml              = { namespace = "aml", sa = "aml-db" }
-    dispute          = { namespace = "dispute", sa = "dispute-db" }
-    fraud            = { namespace = "fraud", sa = "fraud-db" }
-    fx               = { namespace = "fx", sa = "fx-db" }
-    keycloak         = { namespace = "iam", sa = "keycloak-db" }
-    interest         = { namespace = "interest", sa = "interest-db" }
-    lending          = { namespace = "lending", sa = "lending-db" }
-    apicurio         = { namespace = "messaging", sa = "apicurio-db" }
-    notifications    = { namespace = "notifications", sa = "notifications-db" }
-    onboarding       = { namespace = "onboarding", sa = "onboarding-db" }
-    pact-broker      = { namespace = "pact-broker", sa = "pact-broker-db" }
-    party            = { namespace = "party", sa = "party-db" }
-    card-issuance    = { namespace = "payments", sa = "card-issuance-db" }
+    aml           = { namespace = "aml", sa = "aml-db" }
+    dispute       = { namespace = "dispute", sa = "dispute-db" }
+    fraud         = { namespace = "fraud", sa = "fraud-db" }
+    fx            = { namespace = "fx", sa = "fx-db" }
+    keycloak      = { namespace = "iam", sa = "keycloak-db" }
+    interest      = { namespace = "interest", sa = "interest-db" }
+    lending       = { namespace = "lending", sa = "lending-db" }
+    apicurio      = { namespace = "messaging", sa = "apicurio-db" }
+    notifications = { namespace = "notifications", sa = "notifications-db" }
+    onboarding    = { namespace = "onboarding", sa = "onboarding-db" }
+    pact-broker   = { namespace = "pact-broker", sa = "pact-broker-db" }
+    party         = { namespace = "party", sa = "party-db" }
+    card-issuance = { namespace = "payments", sa = "card-issuance-db" }
     # ADR-0283 phase 1 (#8809). Added in the same PR as the cluster, which is the WRONG order:
     # GitOps created the Cluster ~4 min after merge, this association existed only after a later
     # `tofu apply`, and EKS Pod Identity injects credentials at pod ADMISSION — so the primary
@@ -310,6 +310,11 @@ locals {
     # BEFORE the manifest lands, so WAL archiving never runs without credentials.
     pricing = { namespace = "pricing", sa = "pricing-db" }
     vop     = { namespace = "payments", sa = "vop-db" }
+    # pension-db (#12350): association lands and is applied BEFORE the cluster that archives with it.
+    pension = { namespace = "pension", sa = "pension-db" }
+    # pension-fund-db (#12350): association lands and is applied BEFORE the cluster
+    # that archives with it (#12355), so WAL archiving never runs without credentials.
+    pension-fund = { namespace = "pension-fund", sa = "pension-fund-db" }
     # Added by #1444 (second wave). These 11 declared NO backup at all — they never even
     # attempted an archive, so nothing alerted, and they would have had no recovery point the
     # first time anyone needed one. The matching barmanObjectStore + ScheduledBackup + a bounded

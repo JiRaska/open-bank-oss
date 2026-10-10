@@ -48,6 +48,11 @@
 
 **Neměnnost:** PostgreSQL pravidla `DO INSTEAD NOTHING` tiše zahodí jakýkoli `UPDATE`/`DELETE`. Stopa je fyzicky append-only; oprava se dělá připojením nového kompenzačního záznamu, nikdy editací.
 
+U událostí ze SEPA Instant outboxu používá auditní záznam hlavičku Kafka `ce-id` jako
+stabilní identitu, pokud payload nemá vlastní ID události. Opakování na jiném Kafka
+offsetu proto použije stejné `entry_id`. Konzument přijme shodné opakování, při porovnání
+ignoruje pouze nový čas ingestu, a odmítne stejné ID s jinými uloženými údaji.
+
 ## PII & klasifikace dat
 
 Auditní stopa ukládá **doslovný payload** každé upstream události, takže tranzitivně obsahuje jakékoli PII, které producenti emitují (id účtů, IBANy, id klientů, případně detail transakce). Další přímo osobní pole zachytávaná na této vrstvě:
