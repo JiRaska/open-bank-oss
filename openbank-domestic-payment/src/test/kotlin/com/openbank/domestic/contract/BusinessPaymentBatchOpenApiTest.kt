@@ -15,6 +15,23 @@ class BusinessPaymentBatchOpenApiTest {
         .readTree(requireNotNull(javaClass.getResource("/openapi.yaml")).readText())
 
     @Test
+    fun `every draft operation declares the implemented authentication scheme`() {
+        val operations = listOf(
+            "/api/v1/business-payment-batches" to "get",
+            "/api/v1/business-payment-batches" to "post",
+            "/api/v1/business-payment-batches/{id}" to "get",
+            "/api/v1/business-payment-batches/{id}/items" to "put",
+        )
+        operations.forEach { (path, method) ->
+            val security = spec.path("paths").path(path).path(method).path("security")
+            assertThat(security.size()).isEqualTo(1)
+            assertThat(security[0].fieldNames().asSequence().toList()).containsExactly("bearerAuth")
+            assertThat(security[0].path("bearerAuth").isArray).isTrue()
+            assertThat(security[0].path("bearerAuth").size()).isZero()
+        }
+    }
+
+    @Test
     fun `all successful draft routes declare their JSON responses`() {
         val paths = spec.path("paths")
         val expected = listOf(

@@ -260,6 +260,8 @@ paths:
 
   /api/v1/business-payment-batches:
     get:
+      security:
+        - bearerAuth: []
       summary: List company payment drafts (bounded to 20 per page)
       parameters:
         - name: X-Customer-Party-Id
@@ -280,6 +282,8 @@ paths:
               schema: {$ref: '#/components/schemas/BusinessPaymentBatchDraftPage'}
         '403': {description: Human mandate or trusted edge missing}
     post:
+      security:
+        - bearerAuth: []
       summary: Create a company payment draft without dispatch
       parameters:
         - name: X-Customer-Party-Id
@@ -336,6 +340,8 @@ paths:
         '409': {description: Idempotency key conflict}
   /api/v1/business-payment-batches/{id}:
     get:
+      security:
+        - bearerAuth: []
       summary: Get one company payment draft with a 20 item page
       parameters:
         - name: X-Customer-Party-Id
@@ -358,6 +364,8 @@ paths:
         '404': {description: Draft absent from this company}
   /api/v1/business-payment-batches/{id}/items:
     put:
+      security:
+        - bearerAuth: []
       summary: Replace all items in a draft at the expected revision
       parameters:
         - name: X-Customer-Party-Id
