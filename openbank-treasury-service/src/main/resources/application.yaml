@@ -203,6 +203,22 @@ openbank:
       # least this amount in its own currency (0 = any amount).
       break-alert-age-days: ${OPENBANK_TREASURY_NOSTRO_BREAK_ALERT_AGE_DAYS:3}
       break-alert-min-amount: ${OPENBANK_TREASURY_NOSTRO_BREAK_ALERT_MIN_AMOUNT:0}
+    portfolio:
+      # ADR-0337 amendment: the custodian's semt.002 statement of holdings (PSP 34-12 PS). Only the
+      # treasury-pension-co deployment keeps a portfolio: it sets the entity and its safekeeping
+      # account(s) in its own configuration. Without an entity every upload is refused and every
+      # period-end read answers 409 — the bank's own treasury keeps no portfolio here. Set
+      # OPENBANK_TREASURY_PORTFOLIO_ENTITY and OPENBANK_TREASURY_PORTFOLIO_SAFEKEEPING_ACCOUNTS
+      # on that deployment (both deliberately absent here: no default entity exists).
+      # Instrument class per CFI PREFIX (ISO 10962; longest prefix wins). A CFI no prefix covers
+      # refuses the WHOLE statement at upload — a holding is never classified by guess.
+      cfi-classes:
+        DB: DEBT_SECURITY
+        DY: MONEY_MARKET_INSTRUMENT
+        ES: EQUITY
+        EP: EQUITY
+        CI: FUND_UNIT
+        CE: FUND_UNIT
     nostro-breaks:
       # Hourly sweep: re-reconcile statements of the last 31 days (a late ledger booking resolves
       # its break), then age every open break and alert once on those over the threshold.

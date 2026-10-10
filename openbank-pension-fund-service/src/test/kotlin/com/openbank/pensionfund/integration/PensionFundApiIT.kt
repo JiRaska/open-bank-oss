@@ -39,6 +39,9 @@ class PensionFundApiIT {
         lateinit var strategy: String
         lateinit var change: String
         lateinit var nav: String
+        lateinit var loanNav: String
+        lateinit var correction: String
+        lateinit var loanPosition: String
     }
 
     private fun fundBody(isin: String) = """
@@ -138,6 +141,112 @@ class PensionFundApiIT {
                 st.executeQuery().use { rs ->
                     assertThat(rs.next()).isTrue()
                     assertThat(rs.getBigDecimal(1)).isEqualByComparingTo("1000")
+                }
+            }
+        }
+    }
+
+    @Test
+    @Order(4)
+    @TestSecurity(user = "service-account-openbank-tax-reporting", roles = ["ROLE_API"])
+    fun `the reporting read model serves period aggregates that reconcile, over real HTTP and SQL`() {
+        val today = LocalDate.now(ZoneOffset.UTC)
+        val start = today.withDayOfMonth(1)
+        val path = "/api/v1/reporting/funds/$fundA/period-figures"
+        val body = given().queryParam("periodStart", "$start").queryParam("periodEnd", "$today")
+            .`when`().get(path).then().log().ifValidationFails().statusCode(200)
+            .body("units.opening", equalTo(0.0f))
+            .body("units.issued", equalTo(1000.0f))
+            .body("units.closing", equalTo(1000.0f))
+            .body("flows.subscriptions", equalTo(1000.0f))
+            .body("participants.holders", equalTo(1))
+            .body("portfolio.holdingsCount", equalTo(0))
+            .extract().asString()
+        // Aggregate only: the contract the IT subscribed for appears nowhere in the payload.
+        assertThat(body).doesNotContain(contract.toString())
+        // The same question twice is the same answer.
+        val again = given().queryParam("periodStart", "$start").queryParam("periodEnd", "$today")
+            .`when`().get(path).then().statusCode(200).extract().path<String>("fingerprint")
+        assertThat(body).contains(again)
+
+        // Absent parameter: 400, never a 500 (#3104). Malformed date: 400.
+        given().queryParam("periodEnd", "$today").`when`().get(path).then().statusCode(400)
+        given().queryParam("periodStart", "nope").queryParam("periodEnd", "$today")
+            .`when`().get(path).then().statusCode(400)
+        // A period before any NAV: not reportable (409), never a report of zeroes.
+        given().queryParam("periodStart", "2001-01-01").queryParam("periodEnd", "2001-01-31")
+            .`when`().get(path).then().statusCode(409)
+        given().queryParam("periodStart", "$start").queryParam("periodEnd", "$today")
+            .`when`().get("/api/v1/reporting/funds/${UUID.randomUUID()}/period-figures").then().statusCode(404)
+    }
+
+    @Test
+    @Order(5)
+    @TestSecurity(user = "cust-1", roles = ["ROLE_CUSTOMER"])
+    fun `a customer cannot reach the reporting read model`() {
+        val today = LocalDate.now(ZoneOffset.UTC)
+        given().queryParam("periodStart", "${today.withDayOfMonth(1)}").queryParam("periodEnd", "$today")
+            .`when`().get("/api/v1/reporting/funds/$fundA/period-figures").then().statusCode(403)
+    }
+
+    @Test
+    @Order(6)
+    @TestSecurity(user = "maker", roles = ["ROLE_OPERATOR"])
+    fun `a position recorded without a class is UNCLASSIFIED and the maker can only propose a class`() {
+        loanNav = post(
+            "/api/v1/funds/$fundB/navs",
+            """{"valuationDate":"${LocalDate.now(ZoneOffset.UTC)}","cash":0,
+                "positions":[{"instrumentId":"LOAN-1","quantity":1,"price":100},
+                             {"instrumentId":"CZ-BOND-1","quantity":2,"price":50,"instrumentClass":"DEBT_SECURITY"}]}""",
+        ).then().statusCode(201).extract().path("id")
+        loanPosition = given().`when`().get("/api/v1/navs/$loanNav/positions").then().statusCode(200)
+            .body("find { it.instrumentId == 'LOAN-1' }.instrumentClass", equalTo("UNCLASSIFIED"))
+            .body("find { it.instrumentId == 'CZ-BOND-1' }.instrumentClass", equalTo("DEBT_SECURITY"))
+            .extract().path("find { it.instrumentId == 'LOAN-1' }.positionId")
+
+        // Missing fields are a 400, never a 500.
+        post("/api/v1/position-classification-corrections", """{"positionId":"$loanPosition"}""").then().statusCode(400)
+        correction = post(
+            "/api/v1/position-classification-corrections",
+            """{"positionId":"$loanPosition","toClass":"LOAN","reason":"depositary statement"}""",
+        ).then().statusCode(200).body("status", equalTo("PROPOSED")).body("fromClass", equalTo("UNCLASSIFIED"))
+            .extract().path("id")
+        // The proposer is not the checker.
+        post("/api/v1/position-classification-corrections/$correction/approve").then().statusCode(403)
+    }
+
+    @Test
+    @Order(7)
+    @TestSecurity(user = "checker", roles = ["ROLE_OPERATOR"])
+    fun `the checker approves the class, the position row itself is never rewritten`() {
+        post("/api/v1/position-classification-corrections/$correction/approve").then().statusCode(200)
+            .body("status", equalTo("APPROVED")).body("decidedBy", equalTo("checker"))
+        post("/api/v1/position-classification-corrections/$correction/approve").then().statusCode(409)
+        given().`when`().get("/api/v1/navs/$loanNav/positions").then().statusCode(200)
+            .body("find { it.instrumentId == 'LOAN-1' }.instrumentClass", equalTo("LOAN"))
+
+        val config = ConfigProvider.getConfig()
+        DriverManager.getConnection(
+            config.getValue("quarkus.datasource.jdbc.url", String::class.java),
+            config.getValue("quarkus.datasource.username", String::class.java),
+            config.getValue("quarkus.datasource.password", String::class.java),
+        ).use { c ->
+            c.prepareStatement("select instrument_class from fund_nav_positions where id = ?").use { st ->
+                st.setObject(1, UUID.fromString(loanPosition))
+                st.executeQuery().use { rs ->
+                    assertThat(rs.next()).isTrue()
+                    assertThat(rs.getString(1)).isEqualTo("UNCLASSIFIED")
+                }
+            }
+            c.prepareStatement(
+                "select status, proposed_by, decided_by from position_classification_corrections where id = ?",
+            ).use { st ->
+                st.setObject(1, UUID.fromString(correction))
+                st.executeQuery().use { rs ->
+                    assertThat(rs.next()).isTrue()
+                    assertThat(rs.getString(1)).isEqualTo("APPROVED")
+                    assertThat(rs.getString(2)).isEqualTo("maker")
+                    assertThat(rs.getString(3)).isEqualTo("checker")
                 }
             }
         }

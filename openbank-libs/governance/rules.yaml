@@ -3213,6 +3213,13 @@ authz:
     - tax.filing.read             # §38d withholding returns and the per-remittance audit trail behind
                                   # them (#5760): real staff only via tax_reporting_rest_ext.rego; no
                                   # service-account reads them through operator-read-any
+    - pension-fund.reporting.read # period-end fund aggregates for the ČNB returns (#12425, ADR-0336 D4):
+                                  # staff + service-account-openbank-tax-reporting only. Aggregates,
+                                  # but they are a supervisory filing's figures before it is filed.
+    - treasury.portfolio.read     # the pension company's own holdings, custodian semt.002 (ADR-0337
+                                  # amendment, PSP 34-12 PS): treasury staff +
+                                  # service-account-openbank-tax-reporting only. Also excluded
+                                  # from compliance-read-any (rest.rego honours this list there).
   role_action_matrix:
     ROLE_OPERATOR:
       grant:
@@ -4374,6 +4381,8 @@ security_sensitive_paths:
       - "src/main/kotlin/**/*RiskCurveClient*.kt"  # ADR-0315 D9: m2m OIDC client to the risk engine
       - "src/main/kotlin/**/nostro/**"
       - "src/main/kotlin/**/rest/NostroResource.kt"
+      - "src/main/kotlin/**/portfolio/**"            # ADR-0337 amendment: custodian holdings store
+      - "src/main/kotlin/**/rest/PortfolioResource.kt"  # semt.002 upload (sha256 evidence) + portfolio read
       - "src/main/kotlin/**/*PaymentService*.kt"
       - "src/main/kotlin/**/*PaymentConfirmation*.kt"
     pii:

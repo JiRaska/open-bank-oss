@@ -58,6 +58,41 @@ kafka:
   bootstrap:
     servers: localhost:9092
 
+  # #12425: tax-reporting-service's OWN machine identity — Keycloak client `openbank-tax-reporting`,
+  # ROLE_API only — for the pension reporting read models. pension-service and pension-fund-service
+  # admit their aggregate routes for service-account-openbank-tax-reporting and staff alone; never
+  # the shared openbank-services client.
+  oidc-client:
+    auth-server-url: ${OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+    client-id: openbank-tax-reporting
+    credentials:
+      secret: ${OIDC_TAX_REPORTING_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    grant:
+      type: client
+
+  rest-client:
+    pension-service:
+      url: ${PENSION_SERVICE_URL:http://localhost:8171}
+      connect-timeout: 2000
+      read-timeout: 10000
+    pension-fund-service:
+      url: ${PENSION_FUND_SERVICE_URL:http://localhost:8162}
+      connect-timeout: 2000
+      read-timeout: 10000
+    # ADR-0337: the PENSION COMPANY's own ledger-service instance — never the bank's ledger. The
+    # configKey is the provider module's; the URL names the company's deployment.
+    ledger-service:
+      url: ${PENSION_COMPANY_LEDGER_URL:http://localhost:8099}
+      connect-timeout: 2000
+      read-timeout: 10000
+    # ADR-0337: the PENSION COMPANY's own treasury-service instance (PSP 34-12 PS, its own
+    # portfolio). No default on purpose: unset = PSP 34-12 PS is refused (503, "not configured")
+    # rather than read from whichever treasury happens to answer on a default port.
+    treasury-service:
+      url: ${PENSION_COMPANY_TREASURY_URL:}
+      connect-timeout: 2000
+      read-timeout: 10000
+
 mp:
   messaging:
     incoming:
@@ -101,6 +136,15 @@ authz:
 openbank:
   api:
     version: "1"
+  # ADR-0336: catalogue-defined statutory returns. Until the reporting start and fund roster are
+  # configured, deadline checks fail closed and workflow liveness cannot report success.
+  statutory-returns:
+    catalogues: statutory-returns/cz/pension-cnb.v1.json
+    company-id: company
+    deadline-check-every: 1h
+    # ADR-0337: the first day of the pension company's books. Unset = every company-books return
+    # is refused (503), because a balance summed from an unknown start cannot be shown complete.
+    # company-books.opened: 2025-01-01
   build:
     time: "${BUILD_TIME:unknown}"
   git:
@@ -116,6 +160,8 @@ openbank:
     management:
       enabled: false
     oidc:
+      enabled: false
+    oidc-client:
       enabled: false
     devservices:
       enabled: false

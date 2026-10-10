@@ -22,6 +22,10 @@ dependencies {
     implementation(libs.quarkus.micrometer.registry.prometheus)
     implementation(libs.quarkus.opentelemetry)
     implementation(libs.quarkus.oidc)
+    // #12425: REST adapters to the pension reporting read models, on this service's OWN M2M client.
+    implementation(libs.quarkus.rest.client.reactive)
+    implementation(libs.quarkus.rest.client.reactive.jackson)
+    implementation(libs.quarkus.oidc.client.reactive.filter)
     implementation(libs.quarkus.config.yaml)
     implementation(libs.quarkus.smallrye.openapi)
     implementation(libs.kotlinx.coroutines.core)
@@ -38,4 +42,6 @@ dependencies {
     testImplementation(libs.rest.assured.kotlin)
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
     testImplementation(project(":openbank-libs-testing"))
+    // #12425: consumer pacts for the pension reporting read models, written to pacts/.
+    testImplementation(libs.pact.consumer)
 }

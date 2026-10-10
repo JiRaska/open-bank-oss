@@ -9,15 +9,19 @@ import com.fasterxml.jackson.module.kotlin.readValue
 import com.openbank.pensionfund.application.port.PensionFundStore
 import com.openbank.pensionfund.application.port.StoreChanges
 import com.openbank.pensionfund.domain.model.AllocationTarget
+import com.openbank.pensionfund.domain.model.ClassificationCorrectionStatus
 import com.openbank.pensionfund.domain.model.Fund
 import com.openbank.pensionfund.domain.model.FundStatus
 import com.openbank.pensionfund.domain.model.FundStrategy
 import com.openbank.pensionfund.domain.model.GlidePathStep
+import com.openbank.pensionfund.domain.model.InstrumentClass
 import com.openbank.pensionfund.domain.model.NavFigures
+import com.openbank.pensionfund.domain.model.NavPosition
 import com.openbank.pensionfund.domain.model.NavRecord
 import com.openbank.pensionfund.domain.model.NavStatus
 import com.openbank.pensionfund.domain.model.OrderStatus
 import com.openbank.pensionfund.domain.model.OrderType
+import com.openbank.pensionfund.domain.model.PositionClassificationCorrection
 import com.openbank.pensionfund.domain.model.Precision
 import com.openbank.pensionfund.domain.model.StrategyChange
 import com.openbank.pensionfund.domain.model.StrategyChangeStatus
@@ -45,6 +49,8 @@ class PanachePensionFundStore(
     private val orders: UnitOrderRepository,
     private val holdings: UnitHoldingRepository,
     private val transactions: UnitTransactionRepository,
+    private val positions: FundNavPositionRepository,
+    private val classifications: PositionClassificationCorrectionRepository,
 ) : PensionFundStore {
 
     private val json = jacksonObjectMapper().findAndRegisterModules()
@@ -65,6 +71,8 @@ class PanachePensionFundStore(
                 changes.orders.forEach { o -> writes += { session.merge(o.toEntity()).flatMap { session.flush() } } }
                 changes.holdings.forEach { h -> writes += { session.merge(h.toEntity()) } }
                 changes.transactions.forEach { t -> writes += { session.merge(t.toEntity()) } }
+                changes.navPositions.forEach { p -> writes += { session.persist(p.toEntity()) } }
+                changes.classificationCorrections.forEach { c -> writes += { session.merge(c.toEntity()) } }
                 writes.fold(Uni.createFrom().voidItem() as Uni<*>) { acc, w -> acc.flatMap { w() } }
                     .flatMap { session.flush() }
             }
@@ -140,6 +148,45 @@ class PanachePensionFundStore(
 
     override suspend fun transactions(contractId: UUID): List<UnitTransaction> =
         read { transactions.find("contractId = ?1 order by pricedAt desc", contractId).list() }.map { it.toDomain() }
+
+    override suspend fun publishedNavsUpTo(fundId: UUID, upTo: LocalDate): List<NavRecord> = read {
+        navs.find(
+            "fundId = ?1 and status = ?2 and valuationDate <= ?3 order by valuationDate",
+            fundId,
+            NavStatus.PUBLISHED.name,
+            upTo,
+        ).list()
+    }.map { it.toDomain() }
+
+    override suspend fun transactionsPricedAtAny(navIds: Collection<UUID>): List<UnitTransaction> =
+        if (navIds.isEmpty()) {
+            emptyList()
+        } else {
+            read { transactions.find("navId in ?1", navIds.toList()).list() }.map { it.toDomain() }
+        }
+
+    override suspend fun navPositions(navId: UUID): List<NavPosition> =
+        read { positions.find("navId = ?1 order by instrumentId", navId).list() }.map { it.toDomain() }
+
+    override suspend fun navPositionsOf(navIds: Collection<UUID>): List<NavPosition> = if (navIds.isEmpty()) {
+        emptyList()
+    } else {
+        read { positions.find("navId in ?1 order by instrumentId", navIds.toList()).list() }.map { it.toDomain() }
+    }
+
+    override suspend fun navPosition(id: UUID): NavPosition? = read { positions.findById(id) }?.toDomain()
+
+    override suspend fun classificationCorrection(id: UUID): PositionClassificationCorrection? =
+        read { classifications.findById(id) }?.toDomain()
+
+    override suspend fun classificationCorrections(
+        positionIds: Collection<UUID>,
+    ): List<PositionClassificationCorrection> = if (positionIds.isEmpty()) {
+        emptyList()
+    } else {
+        read { classifications.find("positionId in ?1 order by proposedAt", positionIds.toList()).list() }
+            .map { it.toDomain() }
+    }
 
     // ---- mapping -----------------------------------------------------------------------------
 
@@ -247,7 +294,49 @@ class PanachePensionFundStore(
         it.correctsNavId = correctsNavId
         it.approvedBy = approvedBy
         it.publishedAt = publishedAt
+        it.positionsRecorded = positionsRecorded
     }
+
+    private fun NavPosition.toEntity() = FundNavPositionEntity().also {
+        // Written only inside the NAV's own (atomic) calculation commit; the id is minted with it.
+        it.id = id
+        it.navId = navId
+        it.instrumentId = instrumentId
+        it.quantity = quantity
+        it.price = price
+        it.instrumentClass = instrumentClass.name
+    }
+
+    private fun FundNavPositionEntity.toDomain() =
+        NavPosition(id, navId, instrumentId, quantity, price, InstrumentClass.valueOf(instrumentClass))
+
+    private fun PositionClassificationCorrection.toEntity() = PositionClassificationCorrectionEntity().also {
+        it.id = id
+        it.positionId = positionId
+        it.navId = navId
+        it.fromClass = fromClass.name
+        it.toClass = toClass.name
+        it.reason = reason
+        it.proposedBy = proposedBy
+        it.proposedAt = proposedAt
+        it.status = status.name
+        it.decidedBy = decidedBy
+        it.decidedAt = decidedAt
+    }
+
+    private fun PositionClassificationCorrectionEntity.toDomain() = PositionClassificationCorrection(
+        id = id,
+        positionId = positionId,
+        navId = navId,
+        fromClass = InstrumentClass.valueOf(fromClass),
+        toClass = InstrumentClass.valueOf(toClass),
+        reason = reason,
+        proposedBy = proposedBy,
+        proposedAt = proposedAt,
+        status = ClassificationCorrectionStatus.valueOf(status),
+        decidedBy = decidedBy,
+        decidedAt = decidedAt,
+    )
 
     private fun FundNavEntity.toDomain() = NavRecord(
         id = id,
@@ -267,6 +356,7 @@ class PanachePensionFundStore(
         correctsNavId = correctsNavId,
         approvedBy = approvedBy,
         publishedAt = publishedAt,
+        positionsRecorded = positionsRecorded,
     )
 
     private fun UnitOrder.toEntity() = UnitOrderEntity().also {
