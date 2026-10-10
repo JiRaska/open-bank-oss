@@ -12,6 +12,7 @@ import com.openbank.pensionfund.domain.model.NavPosition
 import com.openbank.pensionfund.domain.model.NavRecord
 import com.openbank.pensionfund.domain.model.NavStatus
 import com.openbank.pensionfund.domain.model.OrderStatus
+import com.openbank.pensionfund.domain.model.PositionClassificationCorrection
 import com.openbank.pensionfund.domain.model.StrategyChange
 import com.openbank.pensionfund.domain.model.UnitHolding
 import com.openbank.pensionfund.domain.model.UnitOrder
@@ -29,6 +30,7 @@ class InMemoryStore : PensionFundStore {
     val transactions = linkedMapOf<UUID, UnitTransaction>()
     val holdings = linkedMapOf<Pair<UUID, UUID>, UnitHolding>()
     val positions = mutableListOf<NavPosition>()
+    val classifications = linkedMapOf<UUID, PositionClassificationCorrection>()
 
     override suspend fun commit(changes: StoreChanges) {
         changes.funds.forEach { funds[it.id] = it }
@@ -39,6 +41,7 @@ class InMemoryStore : PensionFundStore {
         changes.transactions.forEach { transactions[it.id] = it }
         changes.holdings.forEach { holdings[it.contractId to it.fundId] = it }
         positions += changes.navPositions
+        changes.classificationCorrections.forEach { classifications[it.id] = it }
     }
 
     override suspend fun fund(id: UUID) = funds[id]
@@ -77,4 +80,9 @@ class InMemoryStore : PensionFundStore {
     override suspend fun transactionsPricedAtAny(navIds: Collection<UUID>) =
         transactions.values.filter { it.navId in navIds }
     override suspend fun navPositions(navId: UUID) = positions.filter { it.navId == navId }
+    override suspend fun navPositionsOf(navIds: Collection<UUID>) = positions.filter { it.navId in navIds }
+    override suspend fun navPosition(id: UUID) = positions.firstOrNull { it.id == id }
+    override suspend fun classificationCorrection(id: UUID) = classifications[id]
+    override suspend fun classificationCorrections(positionIds: Collection<UUID>) =
+        classifications.values.filter { it.positionId in positionIds }
 }

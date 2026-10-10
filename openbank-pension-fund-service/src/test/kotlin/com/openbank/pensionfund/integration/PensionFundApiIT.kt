@@ -39,6 +39,9 @@ class PensionFundApiIT {
         lateinit var strategy: String
         lateinit var change: String
         lateinit var nav: String
+        lateinit var loanNav: String
+        lateinit var correction: String
+        lateinit var loanPosition: String
     }
 
     private fun fundBody(isin: String) = """
@@ -184,5 +187,68 @@ class PensionFundApiIT {
         val today = LocalDate.now(ZoneOffset.UTC)
         given().queryParam("periodStart", "${today.withDayOfMonth(1)}").queryParam("periodEnd", "$today")
             .`when`().get("/api/v1/reporting/funds/$fundA/period-figures").then().statusCode(403)
+    }
+
+    @Test
+    @Order(6)
+    @TestSecurity(user = "maker", roles = ["ROLE_OPERATOR"])
+    fun `a position recorded without a class is UNCLASSIFIED and the maker can only propose a class`() {
+        loanNav = post(
+            "/api/v1/funds/$fundB/navs",
+            """{"valuationDate":"${LocalDate.now(ZoneOffset.UTC)}","cash":0,
+                "positions":[{"instrumentId":"LOAN-1","quantity":1,"price":100},
+                             {"instrumentId":"CZ-BOND-1","quantity":2,"price":50,"instrumentClass":"DEBT_SECURITY"}]}""",
+        ).then().statusCode(201).extract().path("id")
+        loanPosition = given().`when`().get("/api/v1/navs/$loanNav/positions").then().statusCode(200)
+            .body("find { it.instrumentId == 'LOAN-1' }.instrumentClass", equalTo("UNCLASSIFIED"))
+            .body("find { it.instrumentId == 'CZ-BOND-1' }.instrumentClass", equalTo("DEBT_SECURITY"))
+            .extract().path("find { it.instrumentId == 'LOAN-1' }.positionId")
+
+        // Missing fields are a 400, never a 500.
+        post("/api/v1/position-classification-corrections", """{"positionId":"$loanPosition"}""").then().statusCode(400)
+        correction = post(
+            "/api/v1/position-classification-corrections",
+            """{"positionId":"$loanPosition","toClass":"LOAN","reason":"depositary statement"}""",
+        ).then().statusCode(200).body("status", equalTo("PROPOSED")).body("fromClass", equalTo("UNCLASSIFIED"))
+            .extract().path("id")
+        // The proposer is not the checker.
+        post("/api/v1/position-classification-corrections/$correction/approve").then().statusCode(403)
+    }
+
+    @Test
+    @Order(7)
+    @TestSecurity(user = "checker", roles = ["ROLE_OPERATOR"])
+    fun `the checker approves the class, the position row itself is never rewritten`() {
+        post("/api/v1/position-classification-corrections/$correction/approve").then().statusCode(200)
+            .body("status", equalTo("APPROVED")).body("decidedBy", equalTo("checker"))
+        post("/api/v1/position-classification-corrections/$correction/approve").then().statusCode(409)
+        given().`when`().get("/api/v1/navs/$loanNav/positions").then().statusCode(200)
+            .body("find { it.instrumentId == 'LOAN-1' }.instrumentClass", equalTo("LOAN"))
+
+        val config = ConfigProvider.getConfig()
+        DriverManager.getConnection(
+            config.getValue("quarkus.datasource.jdbc.url", String::class.java),
+            config.getValue("quarkus.datasource.username", String::class.java),
+            config.getValue("quarkus.datasource.password", String::class.java),
+        ).use { c ->
+            c.prepareStatement("select instrument_class from fund_nav_positions where id = ?").use { st ->
+                st.setObject(1, UUID.fromString(loanPosition))
+                st.executeQuery().use { rs ->
+                    assertThat(rs.next()).isTrue()
+                    assertThat(rs.getString(1)).isEqualTo("UNCLASSIFIED")
+                }
+            }
+            c.prepareStatement(
+                "select status, proposed_by, decided_by from position_classification_corrections where id = ?",
+            ).use { st ->
+                st.setObject(1, UUID.fromString(correction))
+                st.executeQuery().use { rs ->
+                    assertThat(rs.next()).isTrue()
+                    assertThat(rs.getString(1)).isEqualTo("APPROVED")
+                    assertThat(rs.getString(2)).isEqualTo("maker")
+                    assertThat(rs.getString(3)).isEqualTo("checker")
+                }
+            }
+        }
     }
 }

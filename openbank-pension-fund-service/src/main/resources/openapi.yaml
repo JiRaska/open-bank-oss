@@ -2,7 +2,9 @@ openapi: 3.1.0
 info:
   title: OpenBank Pension Fund Service API
   # 1.0.0: first contract (ADR-0334 slice S4, issue #12350).
-  # 1.1.0: period-end reporting read model for the ČNB returns (#12425) — additive.
+  # 1.1.0: period-end reporting read model for the ČNB returns (#12425) — additive. Includes the
+  #        separately accumulated P&L lines, the instrument class of positions and its four-eyes
+  #        correction route (still unreleased against 1.0.0, so one minor).
   version: 1.1.0
   description: |
     Provider side of the pension platform (ADR-0334 §1): segregated funds, fund strategies with
@@ -156,6 +158,50 @@ paths:
       summary: Reject a calculated NAV (checker)
       responses:
         '200': { description: Rejected, content: { application/json: { schema: { $ref: '#/components/schemas/Nav' } } } }
+        '403': { $ref: '#/components/responses/FourEyes' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/navs/{navId}/positions:
+    parameters: [ { $ref: '#/components/parameters/NavId' } ]
+    get:
+      tags: [NAV]
+      operationId: listNavPositions
+      summary: The positions a NAV was struck on, each with its effective instrument class
+      responses:
+        '200': { description: The positions, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/NavPosition' } } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/position-classification-corrections:
+    post:
+      tags: [NAV]
+      operationId: proposeClassificationCorrection
+      summary: Propose a position's instrument class (maker)
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ClassificationCorrectionRequest' } } }
+      responses:
+        '200': { description: Proposed, content: { application/json: { schema: { $ref: '#/components/schemas/ClassificationCorrection' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/position-classification-corrections/{correctionId}/approve:
+    parameters: [ { $ref: '#/components/parameters/CorrectionId' } ]
+    post:
+      tags: [NAV]
+      operationId: approveClassificationCorrection
+      summary: Approve a proposed instrument class (checker, never the proposer)
+      responses:
+        '200': { description: Approved, content: { application/json: { schema: { $ref: '#/components/schemas/ClassificationCorrection' } } } }
+        '403': { $ref: '#/components/responses/FourEyes' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/position-classification-corrections/{correctionId}/reject:
+    parameters: [ { $ref: '#/components/parameters/CorrectionId' } ]
+    post:
+      tags: [NAV]
+      operationId: rejectClassificationCorrection
+      summary: Reject a proposed instrument class (checker, never the proposer)
+      responses:
+        '200': { description: Rejected, content: { application/json: { schema: { $ref: '#/components/schemas/ClassificationCorrection' } } } }
         '403': { $ref: '#/components/responses/FourEyes' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
@@ -333,6 +379,7 @@ components:
     NavId: { name: navId, in: path, required: true, schema: { type: string, format: uuid } }
     StrategyId: { name: strategyId, in: path, required: true, schema: { type: string, format: uuid } }
     ChangeId: { name: changeId, in: path, required: true, schema: { type: string, format: uuid } }
+    CorrectionId: { name: correctionId, in: path, required: true, schema: { type: string, format: uuid } }
     ContractId: { name: contractId, in: path, required: true, schema: { type: string, format: uuid } }
 
   responses:
@@ -442,6 +489,10 @@ components:
         instrumentId: { type: string }
         quantity: { type: number }
         price: { type: number, description: Optional; when absent the market-price port prices it }
+        instrumentClass:
+          type: string
+          enum: [DEPOSIT, DEBT_SECURITY, LOAN, EQUITY, FUND_SHARE, DERIVATIVE, OTHER, UNCLASSIFIED]
+          description: ECB/2018/2 asset category. Optional; omitted records the position UNCLASSIFIED (unknown), correctable four-eyes.
     NavCalculationRequest:
       type: object
       required: [valuationDate]
@@ -558,11 +609,19 @@ components:
             totalEquity: { type: number, description: Net assets attributable to participants }
         profitAndLossYtd:
           type: object
-          required: [income, expenses, profitLoss]
+          description: |
+            Year-to-date lines, each accumulated NAV interval by NAV interval — never one derived
+            from another. Gains and losses are separate non-negative lines, so a loss year is not a
+            negative income. The three investment lines are null (with linesUnavailableReason) when
+            a NAV in the year predates position recording.
+          required: [managementFees, profitLoss]
           properties:
-            income: { type: number }
-            expenses: { type: number }
-            profitLoss: { type: number }
+            revaluationGains: { type: [number, 'null'], description: Price rises on units held across each interval }
+            revaluationLosses: { type: [number, 'null'], description: Price falls on units held across each interval, as a positive number }
+            otherInvestmentResult: { type: [number, 'null'], description: Signed. Interest, result on disposals and cash — not separable without a cash ledger }
+            managementFees: { type: number, description: Management fee accrued by the NAVs of the year }
+            profitLoss: { type: number, description: Signed. Closing net assets less opening net assets and capital flows }
+            linesUnavailableReason: { type: [string, 'null'] }
         units:
           type: object
           required: [opening, issued, cancelled, closing, unitValue, unitValuePeriodMax]
@@ -580,6 +639,12 @@ components:
             carryingValue: { type: [number, 'null'] }
             holdingsCount: { type: [integer, 'null'] }
             cash: { type: [number, 'null'] }
+            carryingValueByClass:
+              type: [object, 'null']
+              description: Carrying value per effective instrument class
+              additionalProperties: { type: number }
+            unclassifiedCount: { type: [integer, 'null'] }
+            loansOutstanding: { type: [number, 'null'], description: Null while any closing position is UNCLASSIFIED (it may be a loan) }
         flows:
           type: object
           required: [subscriptions, redemptions, switchesIn, switchesOut, unitFees, managementFeesAccrued]
@@ -606,3 +671,36 @@ components:
             subscribing: { type: integer }
         basisNavIds: { type: array, items: { type: string, format: uuid } }
         fingerprint: { type: string }
+    NavPosition:
+      type: object
+      required: [positionId, navId, instrumentId, quantity, price, marketValue, instrumentClass]
+      properties:
+        positionId: { type: string, format: uuid }
+        navId: { type: string, format: uuid }
+        instrumentId: { type: string }
+        quantity: { type: number }
+        price: { type: number }
+        marketValue: { type: number }
+        instrumentClass: { type: string, enum: [DEPOSIT, DEBT_SECURITY, LOAN, EQUITY, FUND_SHARE, DERIVATIVE, OTHER, UNCLASSIFIED] }
+    ClassificationCorrectionRequest:
+      type: object
+      required: [positionId, toClass, reason]
+      properties:
+        positionId: { type: string, format: uuid }
+        toClass: { type: string, enum: [DEPOSIT, DEBT_SECURITY, LOAN, EQUITY, FUND_SHARE, DERIVATIVE, OTHER] }
+        reason: { type: string }
+    ClassificationCorrection:
+      type: object
+      required: [id, positionId, navId, fromClass, toClass, reason, status, proposedBy, proposedAt]
+      properties:
+        id: { type: string, format: uuid }
+        positionId: { type: string, format: uuid }
+        navId: { type: string, format: uuid }
+        fromClass: { type: string, enum: [DEPOSIT, DEBT_SECURITY, LOAN, EQUITY, FUND_SHARE, DERIVATIVE, OTHER, UNCLASSIFIED] }
+        toClass: { type: string, enum: [DEPOSIT, DEBT_SECURITY, LOAN, EQUITY, FUND_SHARE, DERIVATIVE, OTHER, UNCLASSIFIED] }
+        reason: { type: string }
+        status: { type: string, enum: [PROPOSED, APPROVED, REJECTED] }
+        proposedBy: { type: string }
+        proposedAt: { type: string, format: date-time }
+        decidedBy: { type: [string, 'null'] }
+        decidedAt: { type: [string, 'null'], format: date-time }

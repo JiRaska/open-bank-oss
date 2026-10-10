@@ -8,6 +8,7 @@ import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import com.openbank.pensionfund.application.usecase.FundReportingService
 import com.openbank.pensionfund.domain.model.FundPeriodReport
+import com.openbank.pensionfund.domain.model.InstrumentClass
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.GET
@@ -65,7 +66,15 @@ class FundReportingResource {
 
 data class BalanceSheetDto(val totalAssets: BigDecimal, val totalLiabilities: BigDecimal, val totalEquity: BigDecimal)
 
-data class ProfitAndLossDto(val income: BigDecimal, val expenses: BigDecimal, val profitLoss: BigDecimal)
+/** Separately accumulated YTD lines; the revaluation lines are null (with a reason) when unknown. */
+data class ProfitAndLossDto(
+    val revaluationGains: BigDecimal?,
+    val revaluationLosses: BigDecimal?,
+    val otherInvestmentResult: BigDecimal?,
+    val managementFees: BigDecimal,
+    val profitLoss: BigDecimal,
+    val linesUnavailableReason: String?,
+)
 
 data class UnitsDto(
     val opening: BigDecimal,
@@ -76,7 +85,14 @@ data class UnitsDto(
     val unitValuePeriodMax: BigDecimal,
 )
 
-data class PortfolioDto(val carryingValue: BigDecimal?, val holdingsCount: Int?, val cash: BigDecimal?)
+data class PortfolioDto(
+    val carryingValue: BigDecimal?,
+    val holdingsCount: Int?,
+    val cash: BigDecimal?,
+    val carryingValueByClass: Map<InstrumentClass, BigDecimal>?,
+    val unclassifiedCount: Int?,
+    val loansOutstanding: BigDecimal?,
+)
 
 data class FlowsDto(
     val subscriptions: BigDecimal,
@@ -127,9 +143,12 @@ data class FundPeriodFiguresResponse(
                 r.balanceSheet.totalEquity,
             ),
             profitAndLossYtd = ProfitAndLossDto(
-                r.profitAndLossYtd.income,
-                r.profitAndLossYtd.expenses,
+                r.profitAndLossYtd.revaluationGains,
+                r.profitAndLossYtd.revaluationLosses,
+                r.profitAndLossYtd.otherInvestmentResult,
+                r.profitAndLossYtd.managementFees,
                 r.profitAndLossYtd.profitLoss,
+                r.profitAndLossYtd.linesUnavailableReason,
             ),
             units = UnitsDto(
                 r.units.opening,
@@ -139,7 +158,14 @@ data class FundPeriodFiguresResponse(
                 r.units.unitValue,
                 r.units.unitValuePeriodMax,
             ),
-            portfolio = PortfolioDto(r.portfolio.carryingValue, r.portfolio.holdingsCount, r.portfolio.cash),
+            portfolio = PortfolioDto(
+                r.portfolio.carryingValue,
+                r.portfolio.holdingsCount,
+                r.portfolio.cash,
+                r.portfolio.carryingValueByClass,
+                r.portfolio.unclassifiedCount,
+                r.portfolio.loansOutstanding,
+            ),
             flows = FlowsDto(
                 r.flows.subscriptions,
                 r.flows.redemptions,

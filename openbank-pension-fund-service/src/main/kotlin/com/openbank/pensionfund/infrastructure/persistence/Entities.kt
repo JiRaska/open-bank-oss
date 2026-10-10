@@ -215,6 +215,47 @@ class FundNavPositionEntity : PanacheEntityBase {
 
     @Column(name = "price", nullable = false)
     lateinit var price: BigDecimal
+
+    @Column(name = "instrument_class", nullable = false)
+    lateinit var instrumentClass: String
+}
+
+@Entity
+@Table(name = "position_classification_corrections")
+class PositionClassificationCorrectionEntity : PanacheEntityBase {
+    @Id
+    @Column(name = "id", nullable = false)
+    lateinit var id: UUID
+
+    @Column(name = "position_id", nullable = false)
+    lateinit var positionId: UUID
+
+    @Column(name = "nav_id", nullable = false)
+    lateinit var navId: UUID
+
+    @Column(name = "from_class", nullable = false)
+    lateinit var fromClass: String
+
+    @Column(name = "to_class", nullable = false)
+    lateinit var toClass: String
+
+    @Column(name = "reason", nullable = false)
+    lateinit var reason: String
+
+    @Column(name = "proposed_by", nullable = false)
+    lateinit var proposedBy: String
+
+    @Column(name = "proposed_at", nullable = false)
+    lateinit var proposedAt: Instant
+
+    @Column(name = "status", nullable = false)
+    lateinit var status: String
+
+    @Column(name = "decided_by")
+    var decidedBy: String? = null
+
+    @Column(name = "decided_at")
+    var decidedAt: Instant? = null
 }
 
 @Entity

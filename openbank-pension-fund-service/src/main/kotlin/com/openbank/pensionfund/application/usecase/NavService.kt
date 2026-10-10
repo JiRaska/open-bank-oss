@@ -11,6 +11,7 @@ import com.openbank.pensionfund.application.port.PensionFundStore
 import com.openbank.pensionfund.application.port.StoreChanges
 import com.openbank.pensionfund.domain.model.ForwardPricer
 import com.openbank.pensionfund.domain.model.FundStatus
+import com.openbank.pensionfund.domain.model.InstrumentClass
 import com.openbank.pensionfund.domain.model.NavCalculator
 import com.openbank.pensionfund.domain.model.NavInput
 import com.openbank.pensionfund.domain.model.NavPosition
@@ -55,14 +56,7 @@ class NavService(private val store: PensionFundStore, private val prices: Market
         val accrualDays =
             previous?.let { ChronoUnit.DAYS.between(it.valuationDate, request.valuationDate).toInt() } ?: 1
 
-        val positions = request.positions.map { line ->
-            val price = line.price
-                ?: prices.price(line.instrumentId, request.valuationDate, fund.currency)
-                ?: throw IllegalArgumentException(
-                    "no market price for ${line.instrumentId} on ${request.valuationDate}",
-                )
-            PricedPosition(line.instrumentId, line.quantity, price)
-        }
+        val positions = price(request, fund.currency)
         // A correction values the SAME units the original did: the units outstanding at that date
         // are the ones the original NAV priced, not whatever the register holds today.
         val units = original?.figures?.unitsOutstanding ?: store.unitsOutstanding(fundId)
@@ -91,10 +85,19 @@ class NavService(private val store: PensionFundStore, private val prices: Market
         store.commit(
             StoreChanges(
                 navs = listOf(nav),
-                navPositions = positions.map { NavPosition(nav.id, it.instrumentId, it.quantity, it.price) },
+                navPositions = positions.map {
+                    NavPosition(Ids.newId(), nav.id, it.instrumentId, it.quantity, it.price, it.instrumentClass)
+                },
             ),
         )
         return nav
+    }
+
+    private suspend fun price(request: NavCalculationRequest, currency: String) = request.positions.map { line ->
+        val price = line.price
+            ?: prices.price(line.instrumentId, request.valuationDate, currency)
+            ?: throw IllegalArgumentException("no market price for ${line.instrumentId} on ${request.valuationDate}")
+        PricedPosition(line.instrumentId, line.quantity, price, line.instrumentClass ?: InstrumentClass.UNCLASSIFIED)
     }
 
     suspend fun nav(id: UUID): NavRecord = store.nav(id) ?: throw NotFoundException("NAV $id not found")
