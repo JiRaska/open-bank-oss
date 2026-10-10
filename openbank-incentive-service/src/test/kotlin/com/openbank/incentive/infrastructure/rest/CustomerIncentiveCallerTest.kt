@@ -21,7 +21,7 @@ class CustomerIncentiveCallerTest {
         .build()
 
     private class TestJwt(private val claims: Map<String, Any?>) : JsonWebToken {
-        override fun getName(): String = claims["preferred_username"] as String? ?: "anonymous"
+        override fun getName(): String = claims["preferred_username"] as? String ?: "anonymous"
         override fun getClaimNames(): Set<String> = claims.filterValues { it != null }.keys
 
         @Suppress("UNCHECKED_CAST")
