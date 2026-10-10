@@ -147,6 +147,19 @@ mp:
       # Keep the plain-HTTP port: with client-auth REQUIRED Quarkus otherwise drops the HTTP
       # listener, and the readiness probe plus admin-ui BFF discovery still use 8117.
       insecure-requests: enabled
+      # Listener parity (#12511, the #12506 pattern): with client-auth on, Quarkus ALSO registers its
+      # mTLS authentication mechanism, which turns any trusted client certificate into an authenticated
+      # SecurityIdentity of its own — on 8443 only. The API must be authenticated identically on both
+      # listeners, by the OIDC bearer OPA decides on, so /api/* accepts the bearer mechanism ONLY; the
+      # certificate stays transport authentication. Measured before this: a fleet-CA certificate with no
+      # bearer reached the API as an authenticated principal (403 from authz, not 401).
+      # AmlListenerAuthParityIT holds both listeners to it with the production listener shape.
+      auth:
+        permission:
+          bearer-only:
+            paths: /api/*
+            policy: permit
+            auth-mechanism: bearer
     # The onboarding screening reconciler reads party-service's party list. Production uses a named
     # TLS bucket over party-service's private-CA mTLS listener (8443, client auth REQUIRED), the
     # same shape as sca-service and delegation-service. Local/test fixtures speak plain HTTP.
