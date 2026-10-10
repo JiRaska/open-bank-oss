@@ -688,7 +688,8 @@ class ProvisioningCoverageRepositoryImpl @Inject constructor(private val sf: Mut
 @ApplicationScoped
 class ProvisioningCycleRunRepositoryImpl @Inject constructor(private val sf: Mutiny.SessionFactory) :
     ProvisioningCycleRunRepository {
-    override fun markStarted(period: LocalDate, at: OffsetDateTime): Uni<Unit> = sf.withTransaction { session ->
+    override fun markStarted(period: LocalDate, at: OffsetDateTime): Uni<UUID> = sf.withTransaction { session ->
+        val attemptId = UUID.randomUUID()
         // The first observed day is the baseline. Thereafter every calendar day must have
         // evidence, even if no pod was alive to start the scheduler on that day.
         session.createNativeQuery<Any>(
@@ -708,36 +709,66 @@ class ProvisioningCycleRunRepositoryImpl @Inject constructor(private val sf: Mut
             .flatMap {
                 session.createNativeQuery<Any>(
                     """
-                    INSERT INTO provisioning_cycle_run (period, status, started_at, checked_at, missing_loans)
-                    VALUES (:period, 'RUNNING', :at, NULL, NULL)
+                    INSERT INTO provisioning_cycle_run
+                        (period, status, started_at, checked_at, missing_loans, current_attempt_id)
+                    VALUES (:period, 'RUNNING', :at, NULL, NULL, :attempt)
                     ON CONFLICT (period) DO UPDATE SET status = 'RUNNING', started_at = EXCLUDED.started_at,
-                        checked_at = NULL, missing_loans = NULL
+                        checked_at = NULL, missing_loans = NULL, current_attempt_id = EXCLUDED.current_attempt_id
                     """.trimIndent(),
                 )
                     .setParameter("period", period)
                     .setParameter("at", at)
+                    .setParameter("attempt", attemptId)
                     .executeUpdate()
-                    .map { Unit }
+                    .flatMap {
+                        session.createNativeQuery<Any>(
+                            """
+                            INSERT INTO provisioning_cycle_attempt
+                                (period, attempt_id, event_type, occurred_at)
+                            VALUES (:period, :attempt, 'STARTED', :at)
+                            """.trimIndent(),
+                        )
+                            .setParameter("period", period)
+                            .setParameter("attempt", attemptId)
+                            .setParameter("at", at)
+                            .executeUpdate()
+                            .map { attemptId }
+                    }
             }
     }
 
-    override fun markResult(period: LocalDate, missingLoans: Long?, at: OffsetDateTime): Uni<Unit> =
+    override fun markResult(period: LocalDate, attemptId: UUID, missingLoans: Long?, at: OffsetDateTime): Uni<Unit> =
         sf.withTransaction { session ->
             session.createNativeQuery<Any>(
                 """
                 UPDATE provisioning_cycle_run
                 SET status = :status,
                     checked_at = :at, missing_loans = :missing
-                WHERE period = :period AND status = 'RUNNING'
+                WHERE period = :period AND status = 'RUNNING' AND current_attempt_id = :attempt
                 """.trimIndent(),
             )
                 .setParameter("period", period)
+                .setParameter("attempt", attemptId)
                 .setParameter("status", if (missingLoans == 0L) "COMPLETE" else "INCOMPLETE")
                 .setParameter("missing", missingLoans)
                 .setParameter("at", at)
                 .executeUpdate()
-                .map { updated ->
-                    check(updated == 1) { "No running provisioning cycle for $period" }
+                .flatMap { updated ->
+                    check(updated == 1) { "No matching running provisioning attempt for $period" }
+                    session.createNativeQuery<Any>(
+                        """
+                        INSERT INTO provisioning_cycle_attempt
+                            (period, attempt_id, event_type, occurred_at, missing_loans)
+                        VALUES (:period, :attempt, :status, :at, :missing)
+                        """.trimIndent(),
+                    )
+                        .setParameter("period", period)
+                        .setParameter("attempt", attemptId)
+                        .setParameter("status", if (missingLoans == 0L) "COMPLETE" else "INCOMPLETE")
+                        .setParameter("at", at)
+                        .setParameter("missing", missingLoans)
+                        .executeUpdate()
+                        .map { Unit }
                 }
         }
 

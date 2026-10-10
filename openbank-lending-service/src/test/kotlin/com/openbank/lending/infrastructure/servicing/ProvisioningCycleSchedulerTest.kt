@@ -22,6 +22,7 @@ import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
+import java.util.UUID
 import java.util.function.Supplier
 
 /**
@@ -34,8 +35,8 @@ class ProvisioningCycleSchedulerTest {
     private val cycle = mockk<RunProvisioningCycleUseCase>()
     private val clock = Clock.fixed(Instant.parse("2026-06-15T04:00:00Z"), ZoneOffset.UTC)
     private val runs = mockk<ProvisioningCycleRunRepository> {
-        every { markStarted(any(), any()) } returns Uni.createFrom().item(Unit)
-        every { markResult(any(), any(), any()) } returns Uni.createFrom().item(Unit)
+        every { markStarted(any(), any()) } returns Uni.createFrom().item(UUID.randomUUID())
+        every { markResult(any(), any(), any(), any()) } returns Uni.createFrom().item(Unit)
         every { countUnresolvedBefore(any()) } returns Uni.createFrom().item(0L)
     }
     private val scheduler =

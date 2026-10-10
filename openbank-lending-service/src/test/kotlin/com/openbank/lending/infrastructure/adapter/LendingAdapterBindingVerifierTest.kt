@@ -21,6 +21,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatCode
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
+import java.lang.ref.Reference
 import java.util.UUID
 
 /** Stands in for a real, wired adapter: the name must not match the `NoOp`/`Logging` prefixes. */
@@ -179,7 +180,7 @@ class LendingAdapterBindingVerifierTest {
     @Test
     fun `publishes a gauge naming which implementation is bound, per property`() {
         val meters = SimpleMeterRegistry()
-        verifier(
+        val bindingVerifier = verifier(
             ledger = RestStubLedgerPort(),
             credit = NoOpBorrowerCreditPort(),
             events = JpaStubLoanEventEmitter(),
@@ -192,12 +193,27 @@ class LendingAdapterBindingVerifierTest {
         assertThat(gauges).hasSize(4) // ledger, borrower-credit, outbox, and the workflow port (#6085)
 
         val ledgerGauge = gauges.single { it.id.getTag("property") == "lending.ledger.backend" }
-        assertThat(ledgerGauge.value()).isEqualTo(1.0)
         assertThat(ledgerGauge.id.getTag("implementation")).isEqualTo("RestStubLedgerPort")
 
         val creditGauge = gauges.single { it.id.getTag("property") == "lending.borrower-credit.backend" }
-        assertThat(creditGauge.value()).isEqualTo(0.0)
         assertThat(creditGauge.id.getTag("implementation")).isEqualTo("NoOpBorrowerCreditPort")
+
+        val outboxGauge = gauges.single { it.id.getTag("property") == "lending.outbox.backend" }
+        assertThat(outboxGauge.id.getTag("implementation")).isEqualTo("JpaStubLoanEventEmitter")
+
+        val workflowGauge = gauges.single { it.id.getTag("property") == "openbank.temporal.enabled" }
+        assertThat(workflowGauge.id.getTag("implementation")).isEqualTo("TemporalStubOriginationWorkflowPort")
+
+        // Micrometer weakly holds the sampled AtomicIntegers. A live verifier owns them strongly.
+        // Force collection while it is still reachable, then sample every registered value.
+        repeat(5) {
+            System.gc()
+            assertThat(ledgerGauge.value()).isEqualTo(1.0)
+            assertThat(creditGauge.value()).isEqualTo(0.0)
+            assertThat(outboxGauge.value()).isEqualTo(1.0)
+            assertThat(workflowGauge.value()).isEqualTo(1.0)
+        }
+        Reference.reachabilityFence(bindingVerifier)
     }
 
     // --- #6085: the same mechanism on openbank.temporal.enabled ---------------------------------
@@ -243,7 +259,7 @@ class LendingAdapterBindingVerifierTest {
     @Test
     fun `publishes the bound-implementation gauge for the workflow port too`() {
         val meters = SimpleMeterRegistry()
-        verifier(
+        val bindingVerifier = verifier(
             ledger = RestStubLedgerPort(),
             credit = RestStubBorrowerCreditPort(),
             events = JpaStubLoanEventEmitter(),
@@ -257,7 +273,11 @@ class LendingAdapterBindingVerifierTest {
             .tag("property", "openbank.temporal.enabled")
             .gauge()
         assertThat(gauge).describedAs("the workflow port must be reported like every other port").isNotNull
-        assertThat(gauge!!.value()).isEqualTo(1.0)
+        repeat(5) {
+            System.gc()
+            assertThat(gauge!!.value()).isEqualTo(1.0)
+        }
+        Reference.reachabilityFence(bindingVerifier)
     }
 }
 

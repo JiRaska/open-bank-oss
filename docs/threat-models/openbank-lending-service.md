@@ -918,10 +918,13 @@ write `COMPLETE`. The scheduler queries all earlier non-complete dates before re
 success, exposes their count as a gauge, and the lending alert pages when it is nonzero. The row
 contains a date and counts, not borrower identifiers. An old gap is retained for independently
 reviewed reconciliation on the actual correction date; the scheduler never backdates current facts.
+V26 also appends one STARTED and at most one result event per attempt in
+`provisioning_cycle_attempt`; same-date retries retain their earlier measured shortfall, and a
+stale attempt ID cannot overwrite the newer attempt's status.
 
 **Residual risk:** This change detects and preserves a prior-date gap but does not reconstruct the
 historical eligible population or implement a reviewed closure operation. Direct mutation of the
-run row would defeat the control; operational access to the database remains privileged and the
+run or attempt rows would defeat the control; operational access to the database remains privileged and the
 reconciliation case must retain the approval and adjustment references. The existing `(loan_id,
 period)` uniqueness, per-loan lock and allowance outbox references are not weakened.
 
