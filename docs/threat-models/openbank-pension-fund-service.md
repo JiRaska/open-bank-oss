@@ -30,10 +30,15 @@ contact data.
    staff only, every `service-account-` excluded), then the domain (four-eyes).
 2. `/api/v1/contracts/{contractId}/*` is the unit-register surface pension-service calls through
    its FundAdministrationPort (ADR-0334 §1). Only real staff and pension-service's own client
-   (`service-account-openbank-pension`) may read holdings or place orders. `pension-fund.holding.read`
-   is listed in `rules.yaml: authz.operator_read_any_excluded_actions`, so base rest.rego's
-   `operator-read-any` no longer admits the shared service-account (which holds ROLE_OPERATOR) or
-   any other service. Proven both ways by `opa test` and by `opa eval` on the materialised bundle.
+   (`service-account-openbank-pension`) may read holdings or place orders. The read action is
+   `pension-fund.holding.inspect`, deliberately not a `.read`/`.list` verb: base rest.rego's
+   `operator-read-any` (ROLE_OPERATOR/ROLE_ADMIN) and `compliance-read-any` (ROLE_COMPLIANCE)
+   admit any HUMAN principal to every such action, and the shared service-account holds
+   ROLE_OPERATOR and ROLE_COMPLIANCE in the CI realm. The earlier remedy, an entry in
+   `rules.yaml: authz.operator_read_any_excluded_actions`, vetoed only the first of those rules,
+   so the shared account still read holdings through `compliance-read-any`. Proven both ways by
+   `opa test` (must-DENY the shared account under ROLE_OPERATOR, ROLE_COMPLIANCE and ROLE_ADMIN;
+   must-ALLOW staff and pension-service's client) and by `opa eval` on the materialised bundle.
 3. Market prices enter through `MarketPricePort`. The shipped adapter (`StubMarketPriceAdapter`)
    knows no prices, so every position must be priced in the request by the calculating
    administrator; an unpriced position is refused, never valued at an invented number.
