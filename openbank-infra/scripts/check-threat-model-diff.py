@@ -135,6 +135,34 @@ def gitops_tokens(service: str) -> set[str]:
     return toks
 
 
+def exact_names(service: str) -> set[str]:
+    """Whole component names S may own: openbank-ledger-service -> {ledger-service, ledger}."""
+    short = service.removeprefix("openbank-")
+    names = {short}
+    if short.endswith("-service"):
+        names.add(short[: -len("-service")])
+    return names
+
+
+def all_services() -> list[str]:
+    return sorted(p.name for p in REPO.glob("openbank-*") if (p / "src" / "main").is_dir())
+
+
+def component_owned_by_other(service: str, comp: str, services: list[str]) -> bool:
+    """True when a gitops component dir is EXACTLY another service's name and not S's.
+
+    `gitops_tokens` is loose on purpose so a shared component (`payments` hosts sepa-payment
+    and domestic-payment) is still attributed to each of them. But a token that is a strict
+    prefix of a sibling's whole name over-attributes a component that belongs to exactly one
+    other service: openbank-pension-service's token `pension` matched `pension-fund/`, so every
+    pension-fund gitops change demanded a pension-service threat-model edit (#12355). A dir
+    that names another service exactly is that service's; shared dirs name no one exactly.
+    """
+    if comp in exact_names(service):
+        return False
+    return any(comp in exact_names(other) for other in services if other != service)
+
+
 def token_in(tokens: set[str], text: str) -> bool:
     return any(
         re.search(rf"(^|[^a-z0-9]){re.escape(t)}s?($|[^a-z0-9])", text) for t in tokens
@@ -327,6 +355,8 @@ def gitops_hit(
     tokens = gitops_tokens(service)
     if not (token_in(tokens, comp) or token_in(tokens, fname)):
         return None
+    if component_owned_by_other(service, comp, all_services()):
+        return None
     rel = f"openbank-infra/gitops/components/{comp}/{fname}"
     if fname == "network-policies.yaml":
         # A NetworkPolicy is a boundary by construction, so ANY change to this service's own
@@ -494,6 +524,19 @@ DOC_SELF_TEST_CASES: list[tuple[str, str, str, bool]] = [
 ]
 
 
+# Component attribution (#12355): (service, component dir, sibling services, expected-attributed).
+OWNER_SELF_TEST_CASES: list[tuple[str, str, list[str], bool]] = [
+    ("openbank-pension-service", "pension-fund",
+     ["openbank-pension-service", "openbank-pension-fund-service"], False),
+    ("openbank-pension-fund-service", "pension-fund",
+     ["openbank-pension-service", "openbank-pension-fund-service"], True),
+    ("openbank-pension-service", "pension",
+     ["openbank-pension-service", "openbank-pension-fund-service"], True),
+    ("openbank-sepa-payment", "payments",
+     ["openbank-sepa-payment", "openbank-domestic-payment"], True),
+]
+
+
 def doc_scoped_flags(before: str, after: str) -> bool:
     """Same comparison gitops_hit makes: scope both sides to boundary docs, diff, classify."""
     base_scoped = boundary_docs_text(before)
@@ -526,6 +569,12 @@ def self_test() -> int:
         if got != expected:
             ok = False
         print(f"  [{mark}] {name}: flagged={got} expected={expected}")
+    for svc, comp, services, expected in OWNER_SELF_TEST_CASES:
+        got = not component_owned_by_other(svc, comp, services)
+        mark = "ok" if got == expected else "FAIL"
+        if got != expected:
+            ok = False
+        print(f"  [{mark}] {svc} attributed {comp}/: {got} expected={expected}")
     print(f"self-test: {'PASS' if ok else 'FAIL'}")
     return 0 if ok else 1
 
