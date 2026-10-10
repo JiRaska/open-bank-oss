@@ -149,17 +149,20 @@ def regenerate(modules: list[str]) -> None:
     nothing either way, and reporting it as a gap would send the author chasing
     entries that are fine.
 
-    ONE INVOCATION PER MODULE, not one invocation for the whole list (#4793). The
-    periodic sweep passes several modules per shard (`--shard I/N` strides a sorted
-    list, so a shard can land `openbank-libs-runtime` next to two or three others by
-    coincidence of alphabetical distance, not by any weighting). Bundling them into a
-    single `./gradlew ... target1 target2 target3` command line means ONE JVM holds
-    every module's resolved dependency graph in memory AT THE SAME TIME — so even
-    after #4907 raised the heap enough for libs-runtime ALONE, shard 4 still died: it
-    was libs-runtime plus three more modules in one process. Invoking Gradle once per
-    module releases the JVM (and its heap) between modules, so the peak footprint is
-    bounded by the single largest module in the shard, not their sum — the same bound
-    the PR-gate case (always exactly one module) already runs under successfully.
+    ONE INVOCATION PER MODULE preserves process isolation between requested task
+    sets (#4793), but does not bound dependency-resolution scope to that module.
+    In Gradle 9.8, the verification writer resolves every safely resolvable
+    configuration of every registered project at build finish, even when the
+    command requests tasks from one module. Per-module processes therefore still
+    repeat whole-build resolution; sharding bounds the number of invocations, not
+    the project graph inside each one. See #11442 and Gradle's dependency
+    verification documentation:
+    https://docs.gradle.org/current/userguide/dependency_verification.html
+
+    Keep the existing process isolation and heap settings until a scoped model
+    proves complete configuration coverage and omission detection with both warm
+    and cold caches. Unknown project edges or model inputs must retain the full
+    build. A task path alone is not that proof.
     """
     failures: list[tuple[str, int]] = []
     for module in modules:
