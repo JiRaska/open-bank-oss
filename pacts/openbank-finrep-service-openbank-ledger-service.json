@@ -673,24 +673,6 @@
       }
     },
     {
-      "description": "GET frozen-closing-balance for FINREP without an authenticated identity",
-      "providerStates": [
-        {
-          "name": "no valid M2M identity is presented"
-        }
-      ],
-      "request": {
-        "headers": {
-          "Accept": "application/json"
-        },
-        "method": "GET",
-        "path": "/api/v1/ledger/periods/MONTH/2000-06-30/frozen-closing-balance"
-      },
-      "response": {
-        "status": 401
-      }
-    },
-    {
       "description": "GET frozen-year-to-date-trial-balance for FINREP without an authenticated identity",
       "providerStates": [
         {
@@ -703,6 +685,24 @@
         },
         "method": "GET",
         "path": "/api/v1/ledger/periods/MONTH/2000-06-30/frozen-year-to-date-trial-balance"
+      },
+      "response": {
+        "status": 401
+      }
+    },
+    {
+      "description": "GET the frozen FINREP closing balance without a valid identity",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v1/ledger/periods/MONTH/2000-06-30/frozen-closing-balance"
       },
       "response": {
         "status": 401

@@ -126,6 +126,18 @@ class LedgerTrialBalancePactConsumerTest {
         )
         .toPact()
 
+    /** Ledger must not disclose a frozen reporting balance to a caller without a valid M2M identity. */
+    @Pact(consumer = "openbank-finrep-service", provider = "openbank-ledger-service")
+    fun frozenClosingBalanceMissingTokenPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("no valid M2M identity is presented")
+        .uponReceiving("GET the frozen FINREP closing balance without a valid identity")
+        .path("$LEDGER_MONTH_TRIAL_BALANCE_PATH/$REPORTING_DATE/frozen-closing-balance")
+        .method("GET")
+        .headers(mapOf("Accept" to "application/json"))
+        .willRespondWith()
+        .status(401)
+        .toPact()
+
     @Pact(consumer = "openbank-finrep-service", provider = "openbank-ledger-service")
     fun livePreviewTrialBalancePact(builder: PactDslWithProvider): RequestResponsePact = builder
         .given("ledger has frozen monthly trial balance for the reporting date")
@@ -305,6 +317,17 @@ class LedgerTrialBalancePactConsumerTest {
     }
 
     @Test
+    @PactTestFor(pactMethod = "frozenClosingBalanceMissingTokenPact")
+    fun `frozen reporting balance refuses a missing identity with 401`(mockServer: MockServer) {
+        given()
+            .baseUri(mockServer.getUrl())
+            .accept("application/json")
+            .get(ledgerTrialBalancePath.replace("{asOf}", REPORTING_DATE))
+            .then()
+            .statusCode(401)
+    }
+
+    @Test
     @PactTestFor(pactMethod = "closedPeriodsPact")
     fun `the ledger client exposes immutable reporting period eligibility`(mockServer: MockServer) {
         assertThat(ledgerPeriodsPath).isEqualTo(LEDGER_PERIODS_PATH)
@@ -378,17 +401,6 @@ class LedgerTrialBalancePactConsumerTest {
             .isEqualTo("$LEDGER_MONTH_TRIAL_BALANCE_PATH/{asOf}/year-to-date-trial-balance")
         given().baseUri(mockServer.getUrl()).accept("application/json")
             .get(ledgerLiveYearToDatePath.replace("{asOf}", REPORTING_DATE)).then().statusCode(200)
-    }
-
-    @Pact(consumer = "openbank-finrep-service", provider = "openbank-ledger-service")
-    fun anonymousClosingPact(builder: PactDslWithProvider): RequestResponsePact =
-        anonymousReadPact(builder, "frozen-closing-balance")
-
-    @Test
-    @PactTestFor(pactMethod = "anonymousClosingPact")
-    fun `anonymous frozen-closing-balance read is refused 401`(mockServer: MockServer) {
-        given().baseUri(mockServer.getUrl()).accept("application/json")
-            .get(ledgerTrialBalancePath.replace("{asOf}", REPORTING_DATE)).then().statusCode(401)
     }
 
     @Pact(consumer = "openbank-finrep-service", provider = "openbank-ledger-service")
