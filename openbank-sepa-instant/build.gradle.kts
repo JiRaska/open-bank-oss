@@ -82,6 +82,13 @@ kover {
     }
 }
 
+tasks.withType<Test> {
+    // The additional real-DB outbox profiles boot several Quarkus contexts in one test fork.
+    // Hosted PR #12316 exhausted Gradle's default 512m test heap after 43 tests; keep this
+    // module's full integration suite runnable without changing the fleet-wide test budget.
+    maxHeapSize = "2g"
+}
+
 // Mutation testing on the money-path domain (ADR-0063 / ADR-0030 D3). Weekly + manual via
 // pitest.yml, advisory — never a per-PR gate. Per-service plugin pin on purpose (rules.yaml
 // money_path_depth): keeping it out of the shared version catalog avoids a fleet-wide rebuild.
