@@ -5,6 +5,7 @@ Resolves all module configurations and root/included build-logic configurations.
 Does not execute original testClasses/Quarkus tasks, so it cannot yet replace the
 production metadata gate. Metadata is verified by Gradle, never regenerated.
 """
+import argparse
 import json
 import os
 import re
@@ -44,7 +45,19 @@ def check_inventory(directory, expected):
     return configurations, artifacts
 
 
-def main():
+def module_batches(modules, size):
+    if size < 1:
+        raise ValueError("Batch size must be positive")
+    return [modules[offset:offset + size] for offset in range(0, len(modules), size)]
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--batch-size", type=int, default=16,
+                        help="Maximum selected modules per project JVM (default: 16)")
+    args = parser.parse_args(argv)
+    if args.batch_size < 1:
+        raise ValueError("Batch size must be positive")
     root = Path.cwd()
     modules = sorted(path.name for path in root.iterdir()
                      if path.is_dir() and path.name.startswith("openbank-")
@@ -61,11 +74,19 @@ def main():
             ("plugins", ".github/scripts/global-metadata-plugin-model.init.gradle",
              [":exportPluginMetadataModel", ":build-logic:exportPluginMetadataModel"],
              {"OB_PLUGIN_MODEL_DIR": str(outputs / "plugins")}, ["openbank", "build-logic"]),
-            ("projects", ".github/scripts/global-metadata-project-model.init.gradle",
-             ["exportMetadataScopeModel"],
-             {"OB_METADATA_MODEL_DIR": str(outputs / "projects"),
-              "OB_METADATA_PROJECTS": ",".join(":" + name for name in modules)}, modules),
+
         ]
+        batches = module_batches(modules, args.batch_size)
+        covered_modules = [name for batch in batches for name in batch]
+        if covered_modules != modules or len(set(covered_modules)) != len(modules):
+            raise ValueError("Incomplete or duplicated batch module inventory")
+        phases.extend(
+            (f"projects-{index + 1}", ".github/scripts/global-metadata-project-model.init.gradle",
+             ["exportMetadataScopeModel"],
+             {"OB_METADATA_MODEL_DIR": str(outputs / f"projects-{index + 1}"),
+              "OB_METADATA_PROJECTS": ",".join(":" + name for name in batch)}, batch)
+            for index, batch in enumerate(batches)
+        )
         union = set()
         for label, init, targets, overrides, expected in phases:
             phase = time.monotonic()

@@ -1,5 +1,9 @@
 """Reject incomplete experimental model receipts before a success verdict."""
 import importlib.util
+import contextlib
+import io
+from types import SimpleNamespace
+from unittest import mock
 import json
 from pathlib import Path
 import tempfile
@@ -53,6 +57,70 @@ class GlobalMetadataInventoryTest(unittest.TestCase):
     def test_missing_model_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory, self.assertRaises(ValueError):
             MODULE.check_inventory(Path(directory), ['openbank-a'])
+
+
+class GlobalMetadataBatchTest(unittest.TestCase):
+    def test_partition_covers_fleet_once(self):
+        modules = [f'openbank-{index}' for index in range(79)]
+        batches = MODULE.module_batches(modules, 16)
+        self.assertEqual([len(batch) for batch in batches], [16, 16, 16, 16, 15])
+        self.assertEqual([m for batch in batches for m in batch], modules)
+        with self.assertRaises(ValueError):
+            MODULE.module_batches(modules, 0)
+
+    def exercise(self, fail_call=None, omit_call=None):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in ('openbank-a', 'openbank-b', 'openbank-c', 'openbank-d', 'openbank-e'):
+                (root / name).mkdir()
+                (root / name / 'build.gradle.kts').touch()
+            calls = []
+            def run(command, env):
+                calls.append((command, env))
+                if len(calls) == fail_call:
+                    return SimpleNamespace(returncode=1)
+                if 'OB_PLUGIN_MODEL_DIR' in env:
+                    output = Path(env['OB_PLUGIN_MODEL_DIR'])
+                    names = ['openbank', 'build-logic']
+                else:
+                    output = Path(env['OB_METADATA_MODEL_DIR'])
+                    names = [name[1:] for name in env['OB_METADATA_PROJECTS'].split(',')]
+                output.mkdir(parents=True)
+                if len(calls) == omit_call:
+                    names = names[:-1]
+                for name in names:
+                    (output / (name + '.json')).write_text(json.dumps({'configurations': [], 'receipts': {}}))
+                return SimpleNamespace(returncode=0)
+            text = io.StringIO()
+            with mock.patch.object(MODULE.Path, 'cwd', return_value=root), mock.patch.object(MODULE.subprocess, 'run', side_effect=run), contextlib.redirect_stdout(text):
+                try:
+                    code = MODULE.main(['--batch-size', '2'])
+                except ValueError as error:
+                    code = error
+            return code, calls, text.getvalue()
+
+    def test_all_batches_keep_strict_refresh_and_plugin_phase(self):
+        code, calls, output = self.exercise()
+        self.assertEqual(code, 0)
+        self.assertEqual(len(calls), 4)
+        self.assertEqual([len(env['OB_METADATA_PROJECTS'].split(',')) for _,env in calls[1:]], [2,2,1])
+        for command, _ in calls:
+            self.assertIn('--refresh-dependencies', command)
+            self.assertEqual(command[command.index('--dependency-verification')+1], 'strict')
+            self.assertNotIn('--write-verification-metadata', command)
+        self.assertIn('Strict resolution passed: 5 modules', output)
+
+    def test_failed_batch_stops_without_success_verdict(self):
+        code, calls, output = self.exercise(fail_call=3)
+        self.assertEqual(code, 2)
+        self.assertEqual(len(calls), 3)
+        self.assertNotIn('Strict resolution passed', output)
+
+    def test_missing_batch_receipt_is_rejected(self):
+        code, calls, output = self.exercise(omit_call=3)
+        self.assertIsInstance(code, ValueError)
+        self.assertEqual(len(calls), 3)
+        self.assertNotIn('Strict resolution passed', output)
 
 
 if __name__ == '__main__':
