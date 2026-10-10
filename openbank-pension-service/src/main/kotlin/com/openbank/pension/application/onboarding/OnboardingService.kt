@@ -230,7 +230,10 @@ class OnboardingService(
             built.copy(
                 strategyInstrumentMappings = onboarding.strategies.map { strategy ->
                     val matches = catalog.effectivePublished(
-                        application.jurisdiction, application.productLine, strategy.code, now(),
+                        application.jurisdiction,
+                        application.productLine,
+                        strategy.code,
+                        now(),
                     )
                     check(matches.size == 1) {
                         "exactly one published instrument mapping is required for ${strategy.code}"
@@ -244,7 +247,9 @@ class OnboardingService(
                     mapping
                 },
             )
-        } else built
+        } else {
+            built
+        }
         val recommendation = recommend(application, assessment)
         val saved = tx.inTransaction {
             application.assessmentId?.let { previous ->
@@ -718,7 +723,9 @@ class OnboardingService(
         val assessment = currentAssessment(application)
         val strategy = checkNotNull(application.chosenStrategy) { "no strategy has been chosen" }
         val required = WarningPolicy.required(
-            strategy, assessmentForChoice(application, assessment, strategy), recommend(application, assessment),
+            strategy,
+            assessmentForChoice(application, assessment, strategy),
+            recommend(application, assessment),
         )
         val missing = missingWarnings(application, required, assessment, strategy)
         check(missing.isEmpty()) { "warnings must be acknowledged before signing: ${missing.joinToString()}" }
@@ -769,7 +776,11 @@ class OnboardingService(
         val current = checkNotNull(instrumentMappings) { "instrument mapping catalog is unavailable" }
             .effectivePublished(application.jurisdiction, application.productLine, strategy, now())
         val decision = StrategyInstrumentGate.evaluate(
-            assessment, application.jurisdiction, strategy, pinned, questionnaire.appropriatenessMinScore,
+            assessment,
+            application.jurisdiction,
+            strategy,
+            pinned,
+            questionnaire.appropriatenessMinScore,
         )
         StrategyInstrumentGate.requireCurrent(decision, current)
         return decision

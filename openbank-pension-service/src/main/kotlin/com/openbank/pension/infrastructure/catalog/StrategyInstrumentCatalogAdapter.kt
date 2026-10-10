@@ -72,6 +72,7 @@ class StrategyInstrumentCatalogAdapter(@RestClient private val client: StrategyC
 
 /** Every catalog read must succeed; only a genuine 404 from the effective projection is absent. */
 class StrategyInstrumentCatalogResolver(private val catalog: StrategyCatalogRead) : StrategyInstrumentMappingPort {
+    @Suppress("LongMethod") // One fail-closed parse of the published projection and its review evidence.
     override suspend fun effectivePublished(
         jurisdiction: String,
         productLine: ProductLine,
@@ -87,7 +88,7 @@ class StrategyInstrumentCatalogResolver(private val catalog: StrategyCatalogRead
             val revision = try {
                 catalog.published(id, at.atOffset(ZoneOffset.UTC))
             } catch (e: WebApplicationException) {
-                if (e.response?.status == 404) return@mapNotNull null
+                if (e.response?.status == HTTP_NOT_FOUND) return@mapNotNull null
                 throw e
             }
             val schema = revision.path("schemaRef")
@@ -154,6 +155,7 @@ class StrategyInstrumentCatalogResolver(private val catalog: StrategyCatalogRead
     private fun JsonNode.optionalText(name: String): String? = path(name).takeIf(JsonNode::isTextual)?.textValue()
 
     private companion object {
+        const val HTTP_NOT_FOUND = 404
         const val RETIREMENT_SCHEMA = "org.openbank.retirement.pension-savings"
     }
 }
