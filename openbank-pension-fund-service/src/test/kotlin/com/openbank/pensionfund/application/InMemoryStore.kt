@@ -8,6 +8,7 @@ import com.openbank.pensionfund.application.port.PensionFundStore
 import com.openbank.pensionfund.application.port.StoreChanges
 import com.openbank.pensionfund.domain.model.Fund
 import com.openbank.pensionfund.domain.model.FundStrategy
+import com.openbank.pensionfund.domain.model.NavPosition
 import com.openbank.pensionfund.domain.model.NavRecord
 import com.openbank.pensionfund.domain.model.NavStatus
 import com.openbank.pensionfund.domain.model.OrderStatus
@@ -29,6 +30,7 @@ class InMemoryStore : PensionFundStore {
     val orders = linkedMapOf<UUID, UnitOrder>()
     val transactions = linkedMapOf<UUID, UnitTransaction>()
     val holdings = linkedMapOf<Pair<UUID, UUID>, UnitHolding>()
+    val positions = mutableListOf<NavPosition>()
 
     private val reservationLock = Mutex()
 
@@ -56,6 +58,7 @@ class InMemoryStore : PensionFundStore {
         changes.orders.forEach { orders[it.id] = it }
         changes.transactions.forEach { transactions[it.id] = it }
         changes.holdings.forEach { holdings[it.contractId to it.fundId] = it }
+        positions += changes.navPositions
     }
 
     override suspend fun fund(id: UUID) = funds[id]
@@ -88,4 +91,10 @@ class InMemoryStore : PensionFundStore {
         holdings.values.filter { it.fundId == fundId }.fold(BigDecimal.ZERO) { a, h -> a + h.units }
     override suspend fun transactionsPricedAt(navId: UUID) = transactions.values.filter { it.navId == navId }
     override suspend fun transactions(contractId: UUID) = transactions.values.filter { it.contractId == contractId }
+    override suspend fun publishedNavsUpTo(fundId: UUID, upTo: LocalDate) = navs.values
+        .filter { it.fundId == fundId && it.status == NavStatus.PUBLISHED && !it.valuationDate.isAfter(upTo) }
+        .sortedBy { it.valuationDate }
+    override suspend fun transactionsPricedAtAny(navIds: Collection<UUID>) =
+        transactions.values.filter { it.navId in navIds }
+    override suspend fun navPositions(navId: UUID) = positions.filter { it.navId == navId }
 }

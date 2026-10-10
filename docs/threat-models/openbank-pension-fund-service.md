@@ -2,7 +2,7 @@
 # Threat model — openbank-pension-fund-service
 
 - **Status:** integration (ADR-0334 slices S4/S8), sandbox only — pension-service machine caller
-- **Last reviewed:** 2026-10-10
+- **Last reviewed:** 2026-10-10 (#12425 reporting read model and #12435 integration)
 - **Owner:** pension-fund-service CODEOWNERS
 - **Related ADRs:** ADR-0030, ADR-0034, ADR-0315, ADR-0334
 
@@ -30,12 +30,15 @@ contact data.
    staff only, every `service-account-` excluded), then the domain (four-eyes).
 2. `/api/v1/contracts/{contractId}/*` is the unit-register surface pension-service calls through
    its FundAdministrationPort (ADR-0334 §1). Only real staff and pension-service's own client
-   (`service-account-openbank-pension`) may read holdings or place orders. The action
-   `pension-fund.holding.inspect` ends in neither `.read` nor `.list`, so base rest.rego's
-   `operator-read-any` and `compliance-read-any` cannot admit the shared service-account even
-   when it holds both roles. The identity-scoped pension-fund rule decides access. The old
-   `pension-fund.holding.read` entry remains in `operator_read_any_excluded_actions` for the retired
-   action; current endpoints use `holding.inspect` and rely on the identity-scoped rule.
+   (`service-account-openbank-pension`) may read holdings or place orders. The read action is
+   `pension-fund.holding.inspect`, deliberately not a `.read`/`.list` verb: base rest.rego's
+   `operator-read-any` (ROLE_OPERATOR/ROLE_ADMIN) and `compliance-read-any` (ROLE_COMPLIANCE)
+   admit any HUMAN principal to every such action, and the shared service-account holds
+   ROLE_OPERATOR and ROLE_COMPLIANCE in the CI realm. The earlier remedy, an entry in
+   `rules.yaml: authz.operator_read_any_excluded_actions`, vetoed only the first of those rules,
+   so the shared account still read holdings through `compliance-read-any`. Proven both ways by
+   `opa test` (must-DENY the shared account under ROLE_OPERATOR, ROLE_COMPLIANCE and ROLE_ADMIN;
+   must-ALLOW staff and pension-service's client) and by `opa eval` on the materialised bundle.
 3. The integration admits the `pension` namespace in pension-fund's ingress NetworkPolicy.
    This is network reachability, not authorization: the provider still checks the bearer identity,
    RBAC and OPA for each request. `PensionFundRestClient` uses `@OidcClientFilter` and the
@@ -46,6 +49,14 @@ contact data.
 4. Market prices enter through `MarketPricePort`. The shipped adapter (`StubMarketPriceAdapter`)
    knows no prices, so every position must be priced in the request by the calculating
    administrator; an unpriced position is refused, never valued at an invented number.
+5. `/api/v1/reporting/funds/{fundId}/period-figures` (#12425) is the period-end read model
+   tax-reporting-service assembles the ČNB returns from. Aggregate only — sums and counts, no
+   contract id. `pension-fund.reporting.inspect` is admitted for real staff and for
+   tax-reporting-service's OWN client (`service-account-openbank-tax-reporting`, ROLE_API) alone,
+   and, like `holding.inspect`, uses a non-read verb so neither `operator-read-any` nor
+   `compliance-read-any` lets the shared service-account reach it. Proven by `opa test` (must-ALLOW/must-DENY) and by `opa eval`
+   on the materialised bundle, including the sabotage run with the exclusion removed (the shared
+   account is then admitted by `operator-read-any`).
 
 ## STRIDE analysis
 
@@ -62,7 +73,9 @@ contact data.
 | Tampering — a wrong NAV stays wrong | A correction is a NEW NAV for the same date that the original's units are re-valued with; its publication (four-eyes) supersedes the original, re-prices every transaction priced at it and adjusts holdings by the unit difference; the partial unique index `uq_fund_navs_published` allows one published NAV per fund and day | The cash difference on redemptions (`amountDelta`) is reported, not paid — compensation payment is a pension-service follow-up; a switch-out correction does not cascade into its already-settled switch-in leg |
 | Tampering — fund assets reach the bank's books | No ledger or treasury client exists in this module; no GL account is referenced anywhere | A future integration must keep fund books on the provider entity's own GL (ADR-0334 §2) |
 | Repudiation | Maker and checker principal names and times are stored on every NAV and strategy change; transactions keep the NAV they were priced at and, after a correction, the NAV they were corrected from | No events are published yet, so nothing reaches the tamper-evident audit trail; the database rows are the only record |
-| Information disclosure — another service reads participants' holdings | ClusterIP only, generated NetworkPolicy allow-list, no participant PII; holdings use a non-read OPA action and are readable only by staff and `service-account-openbank-pension` (must-deny tests for the shared and an unrelated service-account) | Every operator can read every contract's holdings; the integration registers the pension-service client; compromise of that client exposes its permitted contract holdings and order surface. Caller-side contract ownership checks remain necessary |
+| Information disclosure — another service reads participants' holdings | ClusterIP only, generated NetworkPolicy allow-list, no participant PII; holdings readable only by staff and `service-account-openbank-pension` (declared exclusion from `operator-read-any`, must-deny tests for the shared and an unrelated service-account) | Every operator can read every contract's holdings; the pension-service Keycloak client is not registered yet, so until it is no machine can read holdings at all |
+| Information disclosure — the reporting read model leaks participants | The response carries counts and sums only; `PensionFundApiIT` asserts the seeded contract id is absent from the payload and the golden test asserts no contract id appears in the report | Small counts (one holder) are inferable; acceptable for a filing the regulator receives anyway |
+| Tampering — a filed figure silently restated | Period figures are derived only from PUBLISHED NAVs and the transactions priced at them, bucketed by valuation date; the response carries `basisNavIds` and a `fingerprint` that changes when, and only when, those inputs change (a NAV correction), so tax-reporting can file a revision rather than overwrite; every roll-forward's closing figure is computed independently of its movements (`FundReportingGoldenTest`, with a sabotage run that drops fee cancellations and fails 3 of 4 tests) | The read model is computed on request, not snapshotted; the fingerprint detects a restatement, it does not prevent one |
 | Denial of service | 1 MB body limit, rate limit, a NAV publication settles in one transaction | A fund with very many queued orders settles them all in one request |
 
 ## Invariants
@@ -73,6 +86,7 @@ contact data.
 3. At most one published NAV exists per fund and valuation date.
 4. Holdings never go negative.
 5. Nothing in this service posts to the bank ledger or treasury.
+6. A reporting period with no published NAV is not reportable (409), never a report of zeroes.
 
 ## Out of scope / follow-ups
 

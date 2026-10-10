@@ -6,6 +6,7 @@ package com.openbank.pensionfund.application.port
 
 import com.openbank.pensionfund.domain.model.Fund
 import com.openbank.pensionfund.domain.model.FundStrategy
+import com.openbank.pensionfund.domain.model.NavPosition
 import com.openbank.pensionfund.domain.model.NavRecord
 import com.openbank.pensionfund.domain.model.StrategyChange
 import com.openbank.pensionfund.domain.model.UnitHolding
@@ -30,6 +31,8 @@ data class StoreChanges(
     val orders: List<UnitOrder> = emptyList(),
     val transactions: List<UnitTransaction> = emptyList(),
     val holdings: List<UnitHolding> = emptyList(),
+    /** Written once, with the NAV that was struck on them (#12425); never rewritten on publication. */
+    val navPositions: List<NavPosition> = emptyList(),
 )
 
 // One read per query the use cases need; splitting it per aggregate would split the ONE commit too.
@@ -65,6 +68,17 @@ interface PensionFundStore {
 
     suspend fun transactionsPricedAt(navId: UUID): List<UnitTransaction>
     suspend fun transactions(contractId: UUID): List<UnitTransaction>
+
+    // ---- reporting reads (#12425): aggregate inputs, by fund and valuation date ----
+
+    /** PUBLISHED NAVs of [fundId] valued on or before [upTo], oldest first. */
+    suspend fun publishedNavsUpTo(fundId: UUID, upTo: LocalDate): List<NavRecord>
+
+    /** Every unit transaction priced at one of [navIds]. */
+    suspend fun transactionsPricedAtAny(navIds: Collection<UUID>): List<UnitTransaction>
+
+    /** The positions [navId] was struck on. */
+    suspend fun navPositions(navId: UUID): List<NavPosition>
 }
 
 /**
