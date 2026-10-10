@@ -107,10 +107,10 @@ const sections: {
     icon: <GitBranch size={22} />,
     title: ['Business Processes (BPMN)', 'Business Processes (BPMN)'],
     desc: [
-      'BPMN 2.0 diagramy klíčových procesů: Account Opening, SEPA, KYC, AML Screening + 8 dalších',
-      'BPMN 2.0 diagrams of key processes: Account Opening, SEPA, KYC, AML Screening + 8 more',
+      'Diagramy klíčových procesů a jejich mapování na služby: platby, FX, settlement, KYC, AML a další',
+      'Key process diagrams and service mappings: payments, FX, settlement, KYC, AML and more',
     ],
-    badge: '12 procesů',
+    badge: 'Procesní mapy',
     color: 'var(--accent-text)',
     solid: 'var(--accent)',
   },

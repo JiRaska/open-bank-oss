@@ -8,6 +8,7 @@ import { Network, RefreshCw, CheckCircle2, XCircle, HelpCircle, Database, ArrowR
 import type { GovernanceManifestEntry } from '@/lib/governance/manifest'
 import { classifyBffFailure, svcUrl, type BffFailure } from '@/lib/services/bff'
 import { CatalogDriftBanner } from '@/components/governance/CatalogDriftBanner'
+import Link from 'next/link'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 import { edgeGeometry, pathId, type Pt, type Half } from '@/components/topology/geometry'
@@ -16,7 +17,7 @@ import { useFlowAnimation } from '@/components/topology/useFlowAnimation'
 import { NodeShadow, ArrowMarker } from '@/components/topology/TopologyDefs'
 import { layoutBand } from '@/components/topology/layout'
 import {
-  parseMapGovernance, parseMapHealth, parseServiceMapGraph,
+  parseMapGovernance, parseMapHealth, parseServiceMapGraph, parseMapCatalog, type MapCatalogService,
   type MapExternalEdge as ExternalEdgeT, type MapExternalNode as ExternalNodeT,
   type MapInfraEdge as InfraEdgeT, type MapInfraNode as InfraNodeT,
 } from '@/lib/governance/service-map-evidence'
@@ -373,6 +374,7 @@ export default function ServiceMapPage() {
   // Inter-service edges come from the code-derived dependency graph (ADR-0029 D1),
   // not the sparse curatorial governance lineage. Seed empty; the fetch fills it.
   const [graphEdges, setGraphEdges] = useState<{ from: string; to: string; via: string; type: 'rest' | 'kafka' }[]>([])
+  const [catalogServices, setCatalogServices] = useState<MapCatalogService[] | null>(null)
   // Per-service degree (upstream + downstream) from the graph → drives brick size.
   const [degrees, setDegrees] = useState<Record<string, number>>({})
   const [isChecking, setIsChecking] = useState(true)
@@ -402,10 +404,11 @@ export default function ServiceMapPage() {
       governance: current.governance === 'ok' ? 'ok' : 'loading',
       topology: current.topology === 'ok' ? 'ok' : 'loading',
     }))
-    const [healthResult, governanceResult, graphResult] = await Promise.all([
+    const [healthResult, governanceResult, graphResult, catalogResult] = await Promise.all([
       fetchEvidence('/api/services/health', parseMapHealth),
       fetchEvidence('/api/services/governance', parseMapGovernance),
       fetchEvidence('/api/catalog/graph', parseServiceMapGraph),
+      fetchEvidence('/api/catalog/services', parseMapCatalog),
     ])
     if (generation !== requestGeneration.current) return
 
@@ -414,6 +417,7 @@ export default function ServiceMapPage() {
       setHealthStatuses({})
       setGovernanceData({})
       setGraphEdges([])
+      setCatalogServices(null)
       setDegrees({})
       setInfraNodes([])
       setExternalNodes([])
@@ -440,6 +444,7 @@ export default function ServiceMapPage() {
       setHealthStatuses(newStatuses)
     }
     if (governanceResult.ok && governanceResult.value.available) setGovernanceData(governanceResult.value.byService)
+    if (catalogResult.ok) setCatalogServices(catalogResult.value)
     if (graphResult.ok && graphResult.value.available) {
       const graph = graphResult.value.graph
       const deg: Record<string, number> = {}
@@ -469,6 +474,7 @@ export default function ServiceMapPage() {
   }, [checkHealth])
 
   const selectedSvc = SERVICES.find(s => s.id === selected)
+  const omittedServices = catalogServices?.filter(service => !CATALOG_PRESENT.includes(service.short)) ?? []
   const selectedTier: InfraNodeT | ExternalNodeT | undefined = [...infraNodes, ...externalNodes].find(n => n.id === selected)
   // Deterministically resolve the manifest service-name from the UI node id
   // This prevents mismatches where the UI human-readable name doesn't match the internal serviceName.
@@ -627,11 +633,32 @@ export default function ServiceMapPage() {
             <span className="breadcrumb-current">{t('Mapa služeb', 'Service Map')}</span>
           </>}
         title={t('Mapa architektury služeb', 'Service Architecture Map')}
-        subtitle={t(`Animovaná mapa toku dat napříč ${SERVICES.length} službami, infrastrukturou a 3. stranami · sync i async · najeďte myší na uzel pro zvýraznění cesty`, `Animated data-flow map across ${SERVICES.length} services, infrastructure and 3rd parties · sync and async · hover a node to highlight its path`)}
+        subtitle={t(`Kurátorované schéma ${SERVICES.length} vybraných služeb a jejich odvozených vazeb; není to úplný inventář nasazených služeb. Chybějící uzly ukazuje kontrola katalogu níže.`, `Curated diagram of ${SERVICES.length} selected services and derived dependencies; this is not the full deployed inventory. The catalog check below identifies omitted nodes.`)}
         icon={<Network aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
       />
 
       <CatalogDriftBanner present={CATALOG_PRESENT} />
+
+      <section className="card" aria-label={t('Služby mimo kreslené schéma', 'Services outside the drawing')} style={{ padding: '14px 16px', marginBottom: 16 }}>
+        <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>
+          {t('Úplnost mapy služeb', 'Service-map coverage')}
+        </h2>
+        <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8 }}>
+          {catalogServices
+            ? t(`Katalog sestavení eviduje ${catalogServices.length} spustitelných modulů. Schéma kreslí ${SERVICES.length} vybraných služeb; dalších ${omittedServices.length} je uvedeno níže, nikoli skryto. Vazby pocházejí ze zdrojových konfigurací, stav podů najdete ve Zdraví služeb.`,
+                `The build catalog contains ${catalogServices.length} runnable modules. The diagram draws ${SERVICES.length} selected services; ${omittedServices.length} more are listed below rather than hidden. Dependencies come from source configuration; use Service Health for pod status.`)
+            : t('Katalog není dostupný, proto nelze potvrdit úplnost kresleného schématu.', 'The catalog is unavailable, so completeness of the drawing cannot be confirmed.')}
+          {' '}<Link href="/services" style={{ color: 'var(--accent)' }}>{t('Zdraví služeb →', 'Service Health →')}</Link>
+        </p>
+        {omittedServices.length > 0 && <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {omittedServices.map(service => {
+            const connections = graphEdges.filter(edge => edge.from.replace(/^openbank-/, '') === service.short || edge.to.replace(/^openbank-/, '') === service.short).length
+            return <span key={service.name} className="tag" title={service.apiTitle ?? service.name}>
+              {service.short} · {connections} {t('vazeb', 'links')}
+            </span>
+          })}
+        </div>}
+      </section>
 
       <section className="card" aria-label={t('Stav zdrojů mapy', 'Map evidence status')} style={{ padding: '12px 14px', marginBottom: 16, display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10 }}>
         {(Object.keys(evidence) as (keyof typeof evidence)[]).map(key => {

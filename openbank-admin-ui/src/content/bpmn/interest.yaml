@@ -12,6 +12,8 @@ services:
   - account-service
   - balance-service
   - notification-service
+sourceRefs:
+  - openbank-interest-service/src/main/kotlin/com/openbank/interest/application/usecase/InterestService.kt
 steps:
   - id: start
     type: start

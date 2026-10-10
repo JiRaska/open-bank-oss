@@ -85,6 +85,8 @@ export const BpmnProcessSchema = z.object({
   steps: z.array(StepSchema).min(2),
   flows: z.array(FlowSchema).min(1),
   services: z.array(z.string().min(1)).min(1),
+  // Repository-relative implementation files; rendered as Git links, never as live-state proof.
+  sourceRefs: z.array(z.string().regex(/^openbank-[a-z0-9-]+\/src\/main\/.+\.kt$/)).min(1),
 })
 
 export type StepType = z.infer<typeof StepTypeSchema>

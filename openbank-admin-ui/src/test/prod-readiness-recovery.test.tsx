@@ -63,6 +63,21 @@ describe('production readiness recovery states', () => {
     expect(screen.getAllByText('GO')).toHaveLength(2)
   })
 
+  it('does not present an old baked scorecard as live readiness', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => response(REPORT)))
+    await renderPage()
+    expect(await screen.findByText(/This report is over two days old/)).toBeInTheDocument()
+    expect(screen.getByText(/not live service health/)).toBeInTheDocument()
+  })
+
+  it('labels a report with no valid evidence date as unverified', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => response({ ...REPORT, generated_for: '' })))
+    await renderPage()
+
+    expect(await screen.findByText(/Evidence date is unknown/)).toBeInTheDocument()
+    expect(screen.queryByText(/Use Service Health for current pod status/)).not.toBeInTheDocument()
+  })
+
   it('recovers after an explicit retry', async () => {
     const fetchMock = vi.fn()
       .mockRejectedValueOnce(new Error('offline'))

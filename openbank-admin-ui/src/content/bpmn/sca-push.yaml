@@ -9,6 +9,8 @@ regulation: PSD2 RTS on SCA + ADR-0021
 services:
   - sca-service
   - notification-service
+sourceRefs:
+  - openbank-sca-service/src/main/kotlin/com/openbank/sca/application/usecase/ScaService.kt
 steps:
   - id: start
     type: start

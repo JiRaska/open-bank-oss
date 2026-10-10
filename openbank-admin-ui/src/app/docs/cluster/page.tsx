@@ -36,7 +36,7 @@ interface Topology {
 }
 
 const STATUS: Record<Status, { cs: string; en: string; color: string; bg: string; border: string; Icon: React.ElementType }> = {
-  live: { cs: 'Live', en: 'Live', color: 'var(--success-text)', bg: 'var(--success-bg)', border: 'var(--success-border)', Icon: CheckCircle2 },
+  live: { cs: 'V GitOps', en: 'In GitOps', color: 'var(--success-text)', bg: 'var(--success-bg)', border: 'var(--success-border)', Icon: CheckCircle2 },
   partial: { cs: 'Částečně', en: 'Partial', color: 'var(--warning-text)', bg: 'var(--warning-bg)', border: 'var(--warning-border)', Icon: CircleDashed },
   planned: { cs: 'Plánováno', en: 'Planned', color: 'var(--text-primary)', bg: 'var(--surface-3)', border: 'var(--border-strong)', Icon: Circle },
 }
@@ -195,8 +195,8 @@ export default function ClusterDossierPage() {
           </>}
         title={t('Cluster & kontejner — topologie a hardening', 'Cluster & container — topology and hardening')}
         subtitle={t(
-              'Jak je platforma rozdělená po namespaces, jak je zabezpečená (obrana do hloubky) a jak je poskládaný a zabezpečený výchozí image — plán vs. realita, odvozeno z GitOpsu (ADR-0081).',
-              'How the platform is split across namespaces, how it is secured (defense in depth), and how the default service image is built and hardened — plan vs reality, derived from GitOps (ADR-0081).',
+              'Deklarovaná topologie a zabezpečení odvozené z GitOps manifestů (ADR-0081). Počty a štítky níže nepotvrzují aktuální stav běžícího clusteru.',
+              'Declared topology and security derived from GitOps manifests (ADR-0081). Counts and labels below do not confirm the current running cluster state.',
             )}
         icon={<Boxes aria-hidden="true" size={20} style={{ color: K8S_BLUE }} />}
         actions={<button onClick={load} disabled={loading} type="button" aria-busy={loading} className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
@@ -210,7 +210,7 @@ export default function ClusterDossierPage() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 12, marginBottom: 26 }}>
         {[
           { label: t('Namespaces', 'Namespaces'), value: c.namespaces ?? '—', Icon: Boxes, note: t('doménová izolace', 'domain isolation'), tone: 'var(--success-text)' },
-          { label: t('NetworkPolicies', 'NetworkPolicies'), value: c.networkPolicies ?? '—', Icon: Network, note: t('nasazeno, aktivace probíhá', 'deployed, activation in progress'), tone: 'var(--warning-text)' },
+          { label: t('NetworkPolicies', 'NetworkPolicies'), value: c.networkPolicies ?? '—', Icon: Network, note: t('deklarováno v GitOps', 'declared in GitOps'), tone: 'var(--warning-text)' },
           { label: t('External Secrets', 'External Secrets'), value: c.externalSecrets ?? '—', Icon: Key, note: t('nic v gitu', 'none in git'), tone: 'var(--success-text)' },
           { label: t('Admission policies', 'Admission policies'), value: c.clusterPolicies ?? '—', Icon: Shield, note: t('image-verify (Audit)', 'image-verify (Audit)'), tone: 'var(--warning-text)' },
         ].map(s => (
@@ -264,7 +264,7 @@ export default function ClusterDossierPage() {
                         <div id={panelId} role="region" aria-label={nsItem.name} style={{ marginTop: 6, fontSize: 11.5, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
                           {nsItem.role}
                           <div style={{ marginTop: 4, fontSize: 10.5, color: 'var(--text-secondary)' }}>
-                            {t('Izolace: ', 'Isolation: ')}{(c.networkPolicies ?? 0) > 0 ? t('NetworkPolicy nasazeny, fleet-wide aktivace probíhá (#854)', 'NetworkPolicies deployed, fleet-wide activation in progress (#854)') : t('zatím bez NetworkPolicy', 'no NetworkPolicy yet')}
+                            {t('Izolace: ', 'Isolation: ')}{(c.networkPolicies ?? 0) > 0 ? t('NetworkPolicy deklarovány v GitOps; účinnost v běžícím clusteru zde není ověřena.', 'NetworkPolicies are declared in GitOps; enforcement in the running cluster is not verified here.') : t('v generovaném přehledu nejsou NetworkPolicy', 'no NetworkPolicies in the generated inventory')}
                           </div>
                         </div>
                       )}

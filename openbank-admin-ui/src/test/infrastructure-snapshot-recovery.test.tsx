@@ -11,6 +11,20 @@ const json = (body: unknown, status = 200) => Response.json(body, { status })
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 describe('infrastructure snapshot recovery', () => {
+  it('counts and shows every component returned by the live probe contract', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith('/api/infra/status')) return json({
+        postgres: { id: 'postgres', status: 'UP', latencyMs: 8, checkedAt: '2026-09-09T08:00:00Z' },
+        'new-operator': { id: 'new-operator', status: 'UP', latencyMs: 4, checkedAt: '2026-09-09T08:00:00Z' },
+      })
+      return json({ error: 'unavailable' }, 503)
+    }))
+    render(<LanguageProvider><InfrastructurePage /></LanguageProvider>)
+
+    expect(await screen.findByText('new-operator')).toBeInTheDocument()
+    expect(screen.getByText('2/2 UP')).toBeInTheDocument()
+  })
+
   it('keeps the last verified health evidence when refresh fails', async () => {
     let statusCalls = 0
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {

@@ -63,6 +63,8 @@ export function LifecycleStrip({ data, name, t, dateLocale = 'en-GB' }: { data: 
   const lc = data.lifecycle
   const has = lc.available
   const running = data.running.version
+  const declaredOnly = data.running.source === 'gitops-image-tag' || data.running.source === 'gitops-chart-version'
+  const chartOnly = data.running.source === 'gitops-chart-version'
   const releaseNotesUrl = trustedHttpsUrl(data.upgrade.releaseNotesUrl)
 
   const planUpgrade = async () => {
@@ -72,7 +74,7 @@ export function LifecycleStrip({ data, name, t, dateLocale = 'en-GB' }: { data: 
       ? ` It carries ${data.cve.critical} critical and ${data.cve.high} high CVEs.`
       : ''
     const eolBit = has && 'eolPassed' in lc && lc.eolPassed
-      ? ' The running version is PAST end-of-life (unsupported).'
+      ? ' The known version is PAST end-of-life (unsupported).'
       : has && 'eolDaysLeft' in lc && lc.eolDaysLeft != null && lc.eolDaysLeft <= 90
         ? ` End-of-life is in ${lc.eolDaysLeft} days.` : ''
     try {
@@ -85,7 +87,7 @@ export function LifecycleStrip({ data, name, t, dateLocale = 'en-GB' }: { data: 
             name: 'draft_ticket',
             arguments: {
               title: `Upgrade ${name} ${running ?? '?'}${target ? ` → ${target}` : ''}`,
-              rationale: `${name} is running ${running ?? 'an unknown version'}.${eolBit}${cveBit}`.trim(),
+              rationale: `${name} ${chartOnly ? 'has a declared GitOps chart version' : declaredOnly ? 'has a declared GitOps image version' : 'reports version'} ${running ?? 'unknown'}.${eolBit}${cveBit}`.trim(),
               suggested_action: target
                 ? `Plan and roll out the upgrade to ${target}. Review release notes, test in staging, then schedule a maintenance window.`
                 : `Review the current version against its support lifecycle and plan remediation.`,
@@ -106,10 +108,11 @@ export function LifecycleStrip({ data, name, t, dateLocale = 'en-GB' }: { data: 
     <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border)', display: 'grid', gap: 6 }}>
       {/* version + urgency */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 11, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('Verze', 'Version')}</span>
+        <span style={{ fontSize: 11, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{chartOnly ? t('Chart v GitOps', 'GitOps chart') : declaredOnly ? t('Image v GitOps', 'GitOps image') : t('Běžící verze', 'Running version')}</span>
         <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'monospace' }} title={data.running.source}>
-          {running ?? t('neznámá', 'unknown')}
+          {running ?? t('nezjištěna', 'not detected')}
         </span>
+        {declaredOnly && <span style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>{t('nasazení neověřeno', 'deployment not verified')}</span>}
         <span style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 700, color: u.color, background: u.bg, border: `1px solid ${u.color}33`, padding: '2px 8px', borderRadius: 20 }}>
           {t(u.cs, u.en)}
         </span>

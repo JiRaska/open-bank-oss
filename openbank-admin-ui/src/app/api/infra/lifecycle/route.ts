@@ -4,8 +4,8 @@
 
 // Infrastructure lifecycle & vulnerability intelligence (ADR-0079). Joins three honest
 // sources into a per-component verdict:
-//   1. running version  — live build-info probe (versionSource=probe) or the GitOps image
-//      tag baked into infra-lifecycle.json (versionSource=gitops);
+//   1. version evidence — live build-info probe (versionSource=probe) or a GitOps image
+//      tag/chart revision baked into infra-lifecycle.json (not proof of deployment);
 //   2. lifecycle         — endoflife.date cycles from the baked snapshot (eol/lts/latest);
 //   3. vulnerabilities   — Grype summary from infra-vulns.json (or the ConfigMap, future).
 // Every field carries a `source`; gaps are explicit, never faked.
@@ -33,7 +33,7 @@ interface EolCycle {
 interface LifecycleComponent {
   id: string
   eolProduct: string | null
-  versionSource: 'gitops' | 'probe' | 'unknown'
+  versionSource: 'gitops' | 'gitops-chart' | 'probe' | 'unknown'
   gitopsVersion: string | null
   releaseNotes: string | null
   lifecycle: { cycles?: EolCycle[]; error?: string } | null
@@ -69,7 +69,7 @@ async function readJson<T>(envVar: string, fallbackFile: string): Promise<T | nu
 
 // Mirrors the Service DNS used by /api/infra/status. Each returns the running version
 // string or null (honest unknown). Build-info endpoints, short timeouts, fail soft.
-const VERSION_PROBES: Record<string, { url: string; pick: (j: unknown) => string | null }> = {
+const VERSION_PROBES: Record<string, { url: string; pick?: (j: unknown) => string | null; pickText?: (body: string) => string | null }> = {
   openbao: {
     // OpenBao replaced Vault (runbook 0005). /sys/health is API-compatible and
     // self-reports a clean version (e.g. "2.5.4"); Service is openbao.vault.svc.
@@ -98,6 +98,15 @@ const VERSION_PROBES: Record<string, { url: string; pick: (j: unknown) => string
     url: 'http://tempo.observability.svc:3200/api/status/buildinfo',
     pick: j => (j as { version?: string })?.version ?? null,
   },
+  pyroscope: {
+    url: 'http://pyroscope.observability.svc:4040/api/v1/status/buildinfo',
+    pick: j => (j as { data?: { version?: string } })?.data?.version ?? null,
+  },
+  alloy: {
+    // Alloy publishes its build version in the Prometheus metric, not JSON build-info.
+    url: 'http://alloy.observability.svc:12345/metrics',
+    pickText: body => body.match(/^alloy_build_info\{[^\n]*\bversion="([^"]+)"/m)?.[1] ?? null,
+  },
 }
 
 async function probeVersion(id: string): Promise<string | null> {
@@ -109,7 +118,7 @@ async function probeVersion(id: string): Promise<string | null> {
     const res = await fetch(probe.url, { signal: ctrl.signal, cache: 'no-store' })
     clearTimeout(timer)
     if (!res.ok) return null
-    const v = probe.pick(await res.json())
+    const v = probe.pickText ? probe.pickText(await res.text()) : probe.pick?.(await res.json())
     return v ? String(v).replace(/^v/, '').trim() : null
   } catch {
     return null
@@ -158,9 +167,9 @@ export async function GET() {
     // 1. running version
     let running: string | null = null
     let versionSource: string
-    if (c.versionSource === 'gitops') {
+    if (c.versionSource === 'gitops' || c.versionSource === 'gitops-chart') {
       running = c.gitopsVersion
-      versionSource = 'gitops-image-tag'
+      versionSource = c.versionSource === 'gitops-chart' ? 'gitops-chart-version' : 'gitops-image-tag'
     } else if (c.versionSource === 'probe' && probeOn) {
       running = await probeVersion(c.id)
       versionSource = running ? 'build-info-probe' : 'unavailable'

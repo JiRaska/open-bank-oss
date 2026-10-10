@@ -6,14 +6,15 @@ import { describe, expect, it } from 'vitest'
 const source = () => readFileSync(path.resolve(__dirname, '../components/docs/BpmnView.tsx'), 'utf8')
 
 describe('BPMN service status presentation', () => {
-  it('uses the shared semantic status system without changing operator labels', () => {
+  it('uses semantic status badges and identifies unavailable evidence as unknown', () => {
     const component = source()
 
     expect(component).toContain("import { StatusBadge } from '@/components/ui'")
     expect(component).toContain('<StatusBadge status="up" label={t(\'AKTIVNÍ\', \'UP\')}')
     expect(component).toContain('<StatusBadge status="down" label={t(\'NEDOSTUPNÉ\', \'DOWN\')}')
     expect(component).toContain('<StatusBadge status="loading" tone="warning" label={t(\'OVĚŘUJI\', \'CHECKING\')}')
-    expect(component).toContain('<StatusBadge status="unknown" label={t(\'N/A\', \'N/A\')}')
+    expect(component).toContain('<StatusBadge status="unknown" label={t(\'NEOVĚŘENO\', \'UNKNOWN\')}')
+    expect(component).toContain("updated[svc] = healthMap[svc] !== undefined ? healthMap[svc] : 'unknown'")
     expect(component).toContain("{ shape: 'status-up', color: 'var(--success-text)'")
     expect(component).toContain("{ shape: 'status-down', color: 'var(--danger-text)'")
     expect(component).not.toContain("color: '#16a34a', fontWeight: 600, background: '#dcfce7'")

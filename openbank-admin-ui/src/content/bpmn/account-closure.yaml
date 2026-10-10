@@ -12,6 +12,8 @@ services:
   - balance-service
   - notification-service
   - sepa-payment
+sourceRefs:
+  - openbank-account-service/src/main/kotlin/com/openbank/account/application/usecase/AccountService.kt
 steps:
   - id: start
     type: start

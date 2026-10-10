@@ -44,9 +44,16 @@ describe('infrastructure topology page', () => {
     await waitFor(() => expect(screen.getByText('ArgoCD')).toBeInTheDocument())
     expect(screen.getByText('PostgreSQL')).toBeInTheDocument()
     expect(screen.getByText('Prometheus')).toBeInTheDocument()
+    expect(screen.getByText('Envoy Gateway')).toBeInTheDocument()
+    expect(screen.getByText('LiteLLM')).toBeInTheDocument()
+    expect(screen.getByText('Langfuse web')).toBeInTheDocument()
+    expect(screen.getByText('Presidio Analyzer')).toBeInTheDocument()
+    expect(screen.queryByText('ingress-nginx')).not.toBeInTheDocument()
+    expect(screen.queryByText('Istio')).not.toBeInTheDocument()
     // Band headers are upper-cased and unique to the SVG bands.
     expect(screen.getByText('AWS SUBSTRATE')).toBeInTheDocument()
     expect(screen.getByText('OBSERVABILITY')).toBeInTheDocument()
+    expect(screen.getByText('AI PLATFORM')).toBeInTheDocument()
   })
 
   it('animates flow by default and stops when the flow toggle is turned off', async () => {

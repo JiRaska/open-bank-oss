@@ -13,6 +13,7 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { AuthGuard, Can } from '@/components/auth/AuthGuard'
 import { AgentCallError, classifyAgentFailure, type AgentFailureKind } from '@/lib/agent/mcpFailure'
+import Link from 'next/link'
 
 interface ToolDef {
   name: string
@@ -98,13 +99,26 @@ export default function AgentPage() {
             <span className="breadcrumb-current">Agent (MCP)</span>
           </div>}
         title={t('Agent služba', 'Agent Service')}
-        subtitle={t('MCP server zpřístupňující nástroje OpenBank AI agentům · JSON-RPC 2.0 přes HTTP', 'MCP server exposing OpenBank tools to AI agents · JSON-RPC 2.0 over HTTP')}
+        subtitle={t('Bezpečný způsob, jak může schválený AI asistent číst údaje o účtech, platbách a kontrolách.', 'A governed way for an approved AI assistant to read account, payment and compliance information.')}
         icon={<Bot aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
         actions={<button type="button" className="btn btn-secondary" onClick={loadTools} disabled={loading} aria-busy={loading} aria-label={t('Obnovit nástroje agenta', 'Refresh agent tools')}>
           <RefreshCw size={13} aria-hidden="true" className={cn(loading && 'animate-spin')} />
           {t('Obnovit', 'Refresh')}
         </button>}
       />
+
+      <section className="card" style={{ padding: '16px 18px', marginBottom: '20px' }} aria-label={t('Jak používat MCP', 'How to use MCP')}>
+        <h2 style={{ fontSize: '14px', fontWeight: 700, marginBottom: '8px' }}>{t('K čemu to je a jak se připojit', 'What it does and how to connect')}</h2>
+        <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '10px' }}>
+          {t('MCP je rozhraní pro asistenta, nikoli samostatný chatbot. Asistent si přes něj vyžádá konkrétní nástroj, například zůstatek účtu nebo stav AML případu. Každé volání se před spuštěním kontroluje podle identity a oprávnění; tato stránka pouze ukazuje dostupné nástroje.', 'MCP is an interface for an assistant, not a standalone chatbot. The assistant requests a specific tool, such as an account balance or AML case status. Each call is checked against identity and permissions before execution; this page only shows the available tools.')}
+        </p>
+        <ol style={{ paddingLeft: '18px', fontSize: '12px', color: 'var(--text-secondary)', display: 'grid', gap: '4px', marginBottom: '10px' }}>
+          <li>{t('Pro běžné použití se přihlaste do Admin UI a použijte asistenta v aplikaci; přihlášení i oprávnění zůstávají pod správou banky.', 'For everyday use, sign in to Admin UI and use the in-app assistant; sign-in and permissions remain bank-managed.')}</li>
+          <li>{t('Pro integraci vlastního agenta požádejte správce o schválenou identitu a oprávnění. Interní MCP služba není veřejný endpoint pro libovolného klienta.', 'To integrate your own agent, ask an administrator for an approved identity and capabilities. The internal MCP service is not a public endpoint for arbitrary clients.')}</li>
+          <li>{t('Technický klient po autorizaci provede initialize, tools/list a teprve potom tools/call. Zamítnutí policy není chyba připojení.', 'After authorization, a technical client calls initialize, tools/list and only then tools/call. A policy denial is not a connection failure.')}</li>
+        </ol>
+        <Link href="/services/agent-service/docs/03-api" style={{ fontSize: '12px', color: 'var(--accent)' }}>{t('Technický návod a kontrakt MCP →', 'MCP integration guide and contract →')}</Link>
+      </section>
 
       {/* Server info chips */}
       {serverInfo && (

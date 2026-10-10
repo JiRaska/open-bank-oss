@@ -11,6 +11,8 @@ services:
   - card-issuance-service
   - ledger-service
   - notification-service
+sourceRefs:
+  - openbank-dispute-service/src/main/kotlin/com/openbank/dispute/application/usecase/DisputeService.kt
 steps:
   - id: start
     type: start

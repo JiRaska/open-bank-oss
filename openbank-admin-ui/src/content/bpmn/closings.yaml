@@ -11,6 +11,8 @@ services:
   - statement-service
   - balance-service
   - fx-service
+sourceRefs:
+  - openbank-statement-service/src/main/kotlin/com/openbank/statement/infrastructure/rest/CloseRunResource.kt
 steps:
   - id: start
     type: start

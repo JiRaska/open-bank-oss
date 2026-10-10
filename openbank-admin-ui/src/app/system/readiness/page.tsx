@@ -47,12 +47,14 @@ export default function ReadinessPage() {
   const [data, setData] = useState<ReadinessReport | null>(null)
   const [loading, setLoading] = useState(true)
   const [unavailable, setUnavailable] = useState(false)
+  const [reportViewedAt, setReportViewedAt] = useState(() => Date.now())
 
   const load = useCallback(async () => {
     setLoading(true)
     setUnavailable(false)
     try {
       setData(await fetchReadinessReport())
+      setReportViewedAt(Date.now())
     } catch {
       // A transport failure is not an empty collector result. Keep the last verified report on
       // screen and label it stale; on first load render a recoverable unavailable state instead.
@@ -64,7 +66,7 @@ export default function ReadinessPage() {
   useEffect(() => {
     let active = true
     void fetchReadinessReport()
-      .then(report => { if (active) setData(report) })
+      .then(report => { if (active) { setData(report); setReportViewedAt(Date.now()) } })
       .catch(() => { if (active) setUnavailable(true) })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
@@ -79,16 +81,17 @@ export default function ReadinessPage() {
   const nogo = services.filter(s => s.gate === 'NO-GO').length
   const undeployed = services.filter(s => s.gate === 'NOT-DEPLOYED').length
   const mp = services.filter(s => s.money_path)
+  const reportDate = data?.generated_for && /^\d{4}-\d{2}-\d{2}$/.test(data.generated_for)
+    ? Date.parse(`${data.generated_for}T23:59:59Z`) : Number.NaN
+  const reportDateKnown = Number.isFinite(reportDate)
+  const reportStale = reportDateKnown && reportViewedAt - reportDate > 2 * 86_400_000
 
   return (
     <div style={{ padding: '32px', maxWidth: '1280px', margin: '0 auto' }}>
       <PageHeader
         icon={<ClipboardCheck size={28} className="tone-text-accent" />}
         title={t('Připravenost na produkci', 'Production Readiness')}
-        subtitle={t(
-          'Odvozená matice zralosti per služba × 9 technicko-provozních dimenzí (C1–C9). Generuje ji v CI prod-readiness-collector.py z repu + atestace s TTL — nikdy needitováno ručně. Gate: money-path musí mít vše ≥ Verified, kritické (Kód/Zálohy/Security) = Bank-grade.',
-          'Derived maturity matrix per service × 9 technical/operational dimensions (C1–C9). Generated in CI by prod-readiness-collector.py from the repo + TTL attestations — never hand-edited. Gate: money-path needs all ≥ Verified, critical (Code/Backup/Security) = Bank-grade.',
-        )}
+        subtitle={t('Skóre C1–C9 pochází z repozitáře a časově omezených atestací při sestavení Admin UI. Není to živý stav nasazených služeb ani schválení produkčního provozu.', 'C1–C9 scores come from repository evidence and time-limited attestations when Admin UI is built. This is not live service health or approval for production operation.')}
         actions={
           <button
             type="button"
@@ -105,6 +108,15 @@ export default function ReadinessPage() {
           </button>
         }
       />
+
+      {data && <p style={{ fontSize: '12px', margin: '0 0 16px', color: !reportDateKnown || reportStale ? 'var(--warning-text)' : 'var(--text-secondary)' }}>
+        {t('Stav podkladů k', 'Evidence as of')} {data.generated_for || t('nezjištěno', 'unknown')}.{' '}
+        {!reportDateKnown
+          ? t('Datum podkladů není známé; před použitím reportu ověřte výstup collectoru.', 'Evidence date is unknown; verify the collector output before using this report.')
+          : reportStale
+          ? t('Report je starší než dva dny; obnovit stránku nestačí, je potřeba nový build a atestace.', 'This report is over two days old; refreshing this page is not enough — a new build and attestations are needed.')
+          : t('Pro aktuální stav podů použijte Zdraví služeb.', 'Use Service Health for current pod status.')}
+      </p>}
 
       {unavailable && (
         <div

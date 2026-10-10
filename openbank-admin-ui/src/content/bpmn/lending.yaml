@@ -9,6 +9,8 @@ regulation: EBA GL/2020/06 (four-eyes) + IFRS 9 + CRR
 services:
   - lending-service
   - ledger-service
+sourceRefs:
+  - openbank-lending-service/src/main/kotlin/com/openbank/lending/application/usecase/LendingService.kt
 steps:
   - id: start
     type: start

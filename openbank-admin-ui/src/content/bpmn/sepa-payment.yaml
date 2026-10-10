@@ -13,6 +13,8 @@ services:
   - account-service
   - sepa-payment
   - audit-service
+sourceRefs:
+  - openbank-sepa-payment/src/main/kotlin/com/openbank/sepa/application/usecase/SepaPaymentService.kt
 steps:
   - id: start
     type: start

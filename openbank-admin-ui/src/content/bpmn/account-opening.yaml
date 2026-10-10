@@ -12,6 +12,9 @@ services:
   - aml-service
   - account-service
   - notification-service
+sourceRefs:
+  - openbank-party-service/src/main/kotlin/com/openbank/party/application/usecase/PartyService.kt
+  - openbank-account-service/src/main/kotlin/com/openbank/account/application/usecase/AccountService.kt
 steps:
   - id: start
     type: start

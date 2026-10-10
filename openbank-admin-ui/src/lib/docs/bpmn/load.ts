@@ -25,7 +25,11 @@ const BPMN_DIR = join(process.cwd(), 'src', 'content', 'bpmn')
 const ORDER = [
   'account-opening',
   'sepa-payment',
+  'domestic-payment',
+  'fx-conversion',
+  'settlement-booking',
   'kyc-process',
+  'business-onboarding-timers',
   'aml-screening',
   'card-issuance',
   'international-wire',
@@ -39,6 +43,8 @@ const ORDER = [
   'sca-push',
   'account-closure',
   'closings',
+  'marketing-consent',
+  'campaign-journey',
 ]
 
 export function loadBpmnProcess(slug: string): BpmnProcess {

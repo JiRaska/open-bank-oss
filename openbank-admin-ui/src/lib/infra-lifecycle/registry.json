@@ -1,5 +1,5 @@
 {
-  "_comment": "Infrastructure lifecycle registry (ADR-0077). Maps each /infrastructure component to its endoflife.date product slug, how its RUNNING version is detected, and a release-notes URL template ({version} = recommended target). eolProduct=null is an honest GAP (no public lifecycle feed). versionSource: 'gitops' = the generator greps imageGrep from the GitOps tree at build; 'probe' = the BFF reads it live at runtime (see lifecycle route); 'unknown' = not detectable in v1. NEVER hand-type a version here.",
+  "_comment": "Infrastructure lifecycle registry (ADR-0077). Maps each /infrastructure component to its endoflife.date product slug, version evidence, and a release-notes URL template ({version} = recommended target). eolProduct=null is an honest GAP (no public lifecycle feed). versionSource: 'gitops' = generator reads an image tag, 'gitops-chart' = generator reads an Argo Helm chart revision (neither proves deployment); 'probe' = BFF reads a live build-info response; 'unknown' = not detectable. NEVER hand-type a version here.",
   "components": [
     {
       "id": "postgres",
@@ -89,6 +89,48 @@
       "versionSource": "gitops",
       "imageGrep": "kafbat/kafka-ui",
       "releaseNotes": "https://github.com/kafbat/kafka-ui/releases"
+    },
+    {
+      "id": "envoy-gateway",
+      "eolProduct": null,
+      "versionSource": "gitops-chart",
+      "chartName": "gateway-helm",
+      "releaseNotes": "https://github.com/envoyproxy/gateway/releases"
+    },
+    {
+      "id": "litellm",
+      "eolProduct": null,
+      "versionSource": "gitops",
+      "imageGrep": "openbank-litellm",
+      "releaseNotes": "https://github.com/BerriAI/litellm/releases"
+    },
+    {
+      "id": "langfuse-web",
+      "eolProduct": null,
+      "versionSource": "gitops",
+      "imageGrep": "langfuse/langfuse",
+      "releaseNotes": "https://github.com/langfuse/langfuse/releases"
+    },
+    {
+      "id": "langfuse-worker",
+      "eolProduct": null,
+      "versionSource": "gitops",
+      "imageGrep": "langfuse/langfuse-worker",
+      "releaseNotes": "https://github.com/langfuse/langfuse/releases"
+    },
+    {
+      "id": "presidio-analyzer",
+      "eolProduct": null,
+      "versionSource": "gitops",
+      "imageGrep": "presidio-analyzer",
+      "releaseNotes": "https://github.com/microsoft/presidio/releases"
+    },
+    {
+      "id": "presidio-anonymizer",
+      "eolProduct": null,
+      "versionSource": "gitops",
+      "imageGrep": "presidio-anonymizer",
+      "releaseNotes": "https://github.com/microsoft/presidio/releases"
     }
   ]
 }

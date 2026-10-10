@@ -38,6 +38,20 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
  * window, it reads the envelope, and it stops reporting a broken route as an empty result set.
  */
 describe('KYC case list contract', () => {
+  it('shows officer-facing risk and next action before case identifiers', async () => {
+    const flagged = {
+      ...kycCase(1), status: 'UNDER_REVIEW', riskLevel: 'HIGH',
+      checks: [{ id: 'check-1', checkType: 'SANCTIONS_SCREENING', status: 'MANUAL_REVIEW' }],
+    }
+    vi.stubGlobal('fetch', vi.fn(async () => json(casePage(0, 1, [flagged]))))
+    render(<LanguageProvider><KycPage /></LanguageProvider>)
+
+    expect(await screen.findByText('Investigate flagged checks')).toBeInTheDocument()
+    expect(screen.getByText('HIGH')).toBeInTheDocument()
+    expect(screen.getByText('Open customer')).toBeInTheDocument()
+    expect(screen.getByTitle(flagged.id)).toHaveTextContent('Case')
+  })
+
   it('requests an explicit page window and pages through it using the envelope total', async () => {
     const f = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)

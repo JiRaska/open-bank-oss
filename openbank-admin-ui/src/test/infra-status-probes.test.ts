@@ -34,6 +34,20 @@ describe('infra-status probe definitions', () => {
     }
   })
 
+  it('shows GitOps-declared Envoy and AI workloads without inventing live health', async () => {
+    const ids = [
+      'envoy-gateway', 'litellm', 'langfuse-web', 'langfuse-worker',
+      'presidio-analyzer', 'presidio-anonymizer',
+    ]
+    for (const map of [CLUSTER_INFRA, LOCAL_INFRA]) {
+      for (const id of ids) {
+        const def = map.find(item => item.id === id)
+        expect(def?.probe, `${id} must not claim an unverified probe`).toEqual({ kind: 'absent' })
+        expect((await probeInfra(def!)).status).toBe('UNKNOWN')
+      }
+    }
+  })
+
   it('every probe has a valid kind and no duplicate ids', () => {
     for (const map of [CLUSTER_INFRA, LOCAL_INFRA]) {
       const ids = map.map(d => d.id)

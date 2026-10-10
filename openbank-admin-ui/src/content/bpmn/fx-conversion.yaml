@@ -1,0 +1,64 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+# Source: openbank-fx-service/src/main/kotlin/com/openbank/fx/application/workflow/FxWorkflowImpl.kt
+name: FX Conversion
+desc: Sankční screening a stínové fraud skórování před rozhodnutím. CLEAR dokončí konverzi, BLOCK ji ukončí a REVIEW ji podrží v PENDING pro AML řízení.
+regulation: AML / PSD2
+services:
+  - fx-service
+  - sanctions-service
+  - aml-service
+  - fraud-service
+sourceRefs:
+  - openbank-fx-service/src/main/kotlin/com/openbank/fx/application/workflow/FxWorkflowImpl.kt
+steps:
+  - { id: start, type: start, x: 70, y: 110, label: Konverze }
+  - id: screen
+    type: task
+    x: 230
+    y: 110
+    label: Sankční screening
+    lane: aml
+    relatedServices: [fx-service, sanctions-service]
+  - id: shadow
+    type: task
+    x: 430
+    y: 110
+    label: Fraud shadow
+    lane: core
+    relatedServices: [fx-service, fraud-service]
+  - { id: decision, type: gateway, x: 620, y: 110, label: Rozhodnutí }
+  - id: settle
+    type: task
+    x: 850
+    y: 60
+    label: Settle conversion
+    lane: core
+    relatedServices: [fx-service]
+  - { id: settled, type: end, x: 1050, y: 60, label: SETTLED }
+  - id: block
+    type: task
+    x: 850
+    y: 150
+    label: Block conversion
+    lane: aml
+    relatedServices: [fx-service]
+  - { id: failed, type: end-err, x: 1050, y: 150, label: FAILED }
+  - id: hold
+    type: task
+    x: 850
+    y: 240
+    label: Hold conversion
+    lane: aml
+    relatedServices: [fx-service, aml-service]
+  - { id: pending, type: end, x: 1050, y: 240, label: PENDING / AML }
+flows:
+  - { from: start, to: screen }
+  - { from: screen, to: shadow }
+  - { from: shadow, to: decision }
+  - { from: decision, to: settle, label: CLEAR }
+  - { from: settle, to: settled }
+  - { from: decision, to: block, label: BLOCK }
+  - { from: block, to: failed }
+  - { from: decision, to: hold, label: REVIEW }
+  - { from: hold, to: pending }

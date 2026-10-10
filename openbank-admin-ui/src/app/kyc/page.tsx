@@ -19,6 +19,20 @@ const KYC_SERVICE = '/api/svc/kyc-service'
 
 const PAGE_SIZE = 20
 
+function caseNextStep(c: KycCaseEvidence, t: (cs: string, en: string) => string): string {
+  if (c.checks.some(check => check.status === 'FAILED' || check.status === 'MANUAL_REVIEW')) {
+    return t('Prověřit neúspěšné kontroly', 'Investigate flagged checks')
+  }
+  switch (c.status) {
+    case 'DOCUMENTS_REQUIRED': return t('Vyžádat chybějící doklady', 'Request missing documents')
+    case 'UNDER_REVIEW': return t('Vyhodnotit podklady a rozhodnout', 'Review evidence and decide')
+    case 'OPEN': return t('Zahájit kontroly', 'Start checks')
+    case 'APPROVED': return t('Dokončeno — bez další akce', 'Complete — no action needed')
+    case 'REJECTED': return t('Uzavřeno — zkontrolovat důvod', 'Closed — review the reason')
+    default: return t('Ověřit platnost případu', 'Check case validity')
+  }
+}
+
 export default function KycPage() {
   const [cases, setCases]     = useState<KycCaseEvidence[]>([])
   const { t, language } = useLanguage()
@@ -148,7 +162,7 @@ export default function KycPage() {
     <div>
       <PageHeader
         title={t('KYC Případy', 'KYC Cases')}
-        subtitle={t('Ověření totožnosti zákazníka — přehled případů', 'Know Your Customer verification cases')}
+        subtitle={t('Pracovní fronta AML a back-office: riziko, výsledek kontrol a další krok pro každý případ.', 'AML and back-office queue: risk, check outcomes and the next step for each case.')}
         icon={<ShieldCheck size={20} aria-hidden="true" />}
         actions={<button
           type="button"
@@ -162,6 +176,10 @@ export default function KycPage() {
           {t('Obnovit', 'Refresh')}
         </button>}
       />
+
+      <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: '0 0 16px' }}>
+        {t('Začněte případy s vysokým rizikem nebo neúspěšnou kontrolou. Otevřete klienta pro souvislosti; samotné ID případu slouží jen k dohledání.', 'Start with high-risk cases or failed checks. Open the customer for context; the case ID is only a reference.')}
+      </p>
 
       <PartySearch
         selectedId={selectedParty?.id}
@@ -216,21 +234,20 @@ export default function KycPage() {
         <table className="data-table">
           <thead>
             <tr>
-              <th>{t('ID případu', 'Case ID')}</th>
-              <th>{t('Party ID', 'Party ID')}</th>
+              <th>{t('Klient / reference', 'Customer / reference')}</th>
+              <th>{t('Riziko', 'Risk')}</th>
               <th>{t('Stav', 'Status')}</th>
               <th>{t('Ověření', 'Checks')}</th>
-              <th>{t('Zkontroloval', 'Reviewed By')}</th>
+              <th>{t('Co dál', 'Next step')}</th>
               <th>{t('Aktualizováno', 'Updated')}</th>
-              <th></th>
             </tr>
           </thead>
           <tbody>
             {loading && Array.from({ length: 5 }).map((_, i) => (
-              <tr key={i}>{Array.from({ length: 7 }).map((_, j) => <td key={j}><div className="skeleton" style={{ height: '14px', width: j === 0 ? '200px' : '80px' }} /></td>)}</tr>
+              <tr key={i}>{Array.from({ length: 6 }).map((_, j) => <td key={j}><div className="skeleton" style={{ height: '14px', width: j === 0 ? '200px' : '80px' }} /></td>)}</tr>
             ))}
             {!loading && !unavailable && filtered.length === 0 && (
-              <tr><td colSpan={7} style={{ padding: 0 }}>
+              <tr><td colSpan={6} style={{ padding: 0 }}>
                 <DataUnavailable
                   kind="no_data"
                   feature={t('KYC případy', 'KYC cases')}
@@ -244,27 +261,24 @@ export default function KycPage() {
             )}
             {!loading && filtered.map(c => (
               <tr key={c.id}>
-                <td style={{ fontFamily: 'var(--font-mono)', fontSize: '11px' }}>{c.id.slice(0, 8)}…</td>
-                <td style={{ fontFamily: 'var(--font-mono)', fontSize: '11px' }}>
-                  <Can permission="parties:view"><Link href={`/parties/${c.partyId}`} style={{ color: 'var(--accent)', textDecoration: 'none' }}>{c.partyId.slice(0, 8)}…</Link></Can>
+                <td>
+                  <Can permission="parties:view"><Link href={`/parties/${c.partyId}`} style={{ color: 'var(--accent)', textDecoration: 'none', fontWeight: 600 }}>{t('Otevřít klienta', 'Open customer')} <ChevronRight size={12} aria-hidden="true" /></Link></Can>
+                  <div title={c.id} style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-muted)' }}>{t('Případ', 'Case')} {c.id.slice(0, 8)}…</div>
                 </td>
+                <td><StatusBadge status={c.riskLevel} /></td>
                 <td>
                   <StatusBadge status={c.status} />
                 </td>
                 <td>
                   <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                    {c.checks.length === 0 && <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{t('Zatím žádné', 'Not started')}</span>}
                     {c.checks.map(ch => (
                       <StatusBadge key={ch.id} status={ch.status} label={ch.checkType.replace(/_/g, ' ')} />
                     ))}
                   </div>
                 </td>
-                <td style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{c.reviewedBy ?? '—'}</td>
+                <td style={{ fontSize: '12px' }}>{caseNextStep(c, t)}{c.reviewedBy && <div style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{t('Kontroloval', 'Reviewed by')}: {c.reviewedBy}</div>}</td>
                 <td style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{new Date(c.updatedAt).toLocaleDateString(dateLocale)}</td>
-                <td>
-                  <Can permission="parties:view"><Link href={`/parties/${c.partyId}`} style={{ color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: '2px', fontSize: '12px', textDecoration: 'none' }}>
-                    {t('Klient', 'Party')} <ChevronRight size={12} />
-                  </Link></Can>
-                </td>
               </tr>
             ))}
           </tbody>

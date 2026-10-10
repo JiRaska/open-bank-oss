@@ -161,6 +161,8 @@ export interface ServiceConfigSnapshot {
   health: ServiceHealth | null
   latencyMs: number | null
   reachable: boolean
+  /** Intentionally idle under KEDA, not an outage. */
+  scaledToZero?: boolean
 }
 
 /** @deprecated Use ServiceConfigResponse – kept for backward compatibility */

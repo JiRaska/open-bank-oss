@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+# Source: openbank-campaign-service/src/main/kotlin/com/openbank/campaign/application/workflow/CampaignJourneyWorkflowImpl.kt
+# Individual steps are defined per campaign; this diagram maps the reusable executor, not one fixed campaign.
+name: Campaign Journey
+desc: Vykonávání definice kampaně jako lineárního nebo schváleného rozhodovacího grafu. Konkrétní kroky nejsou pevné; před odesláním se znovu ověřuje souhlas a revokace či uzavření cestu ukončí.
+regulation: GDPR / marketingový souhlas
+services:
+  - campaign-service
+  - consent-service
+  - notification-service
+sourceRefs:
+  - openbank-campaign-service/src/main/kotlin/com/openbank/campaign/application/workflow/CampaignJourneyWorkflowImpl.kt
+steps:
+  - { id: start, type: start, x: 70, y: 110, label: Journey }
+  - id: definition
+    type: task
+    x: 230
+    y: 110
+    label: Načíst definici
+    lane: platform
+    relatedServices: [campaign-service]
+  - { id: control, type: gateway, x: 400, y: 110, label: Lze pokračovat? }
+  - { id: stopped, type: end, x: 400, y: 230, label: Ukončeno }
+  - id: step
+    type: task
+    x: 560
+    y: 110
+    label: Krok a prodleva
+    lane: platform
+    relatedServices: [campaign-service]
+  - id: consent
+    type: task
+    x: 720
+    y: 110
+    label: Ověřit souhlas
+    lane: compliance
+    relatedServices: [campaign-service, consent-service]
+  - id: deliver
+    type: task
+    x: 880
+    y: 110
+    label: Doručit krok
+    lane: platform
+    relatedServices: [campaign-service, notification-service]
+  - { id: next, type: gateway, x: 1030, y: 110, label: Další krok? }
+  - { id: completed, type: end, x: 1030, y: 230, label: Completed }
+flows:
+  - { from: start, to: definition }
+  - { from: definition, to: control }
+  - { from: control, to: stopped, label: revoked / closed }
+  - { from: control, to: step, label: ano }
+  - { from: step, to: consent }
+  - { from: consent, to: stopped, label: bez souhlasu }
+  - { from: consent, to: deliver, label: povoleno }
+  - { from: deliver, to: next }
+  - { from: next, to: control, label: ano / větev }
+  - { from: next, to: completed, label: ne }

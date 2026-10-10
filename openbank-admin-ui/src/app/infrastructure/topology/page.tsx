@@ -15,6 +15,7 @@ import { useFlowAnimation } from '@/components/topology/useFlowAnimation'
 import { NodeShadow, ArrowMarker } from '@/components/topology/TopologyDefs'
 import { layoutBands } from '@/components/topology/layout'
 import { PageHeader, StatusBadge, statusTone } from '@/components/ui'
+import Link from 'next/link'
 
 // ---------------------------------------------------------------------------
 // Infrastructure topology (ADR-0027/0029). A companion to the code-derived
@@ -22,19 +23,19 @@ import { PageHeader, StatusBadge, statusTone } from '@/components/ui'
 // are the real platform components (with LIVE status from /api/infra/status) and
 // the EDGES are the *documented platform architecture* — how the pieces wire
 // together (ArgoCD deploys, CNPG backs Postgres up to S3, External Secrets pulls
-// from OpenBao, Karpenter provisions nodes, observability scrapes, Istio mesh,
-// ingress routes). That backbone is not machine-declared anywhere (operators live
+// from OpenBao, Karpenter provisions nodes, observability scrapes, Envoy Gateway
+// routes). That backbone is not machine-declared anywhere (operators live
 // in Terraform helm_release, gitops only has app→namespace + operator→workload),
 // so — like the existing cloud-architecture / observability-stack pages — the
 // edges are hand-authored but true & verifiable, NOT a derived-data claim.
 // ---------------------------------------------------------------------------
 
 type Status = 'UP' | 'DOWN' | 'UNKNOWN'
-type GroupKey = 'aws' | 'platform' | 'data' | 'observability'
+type GroupKey = 'aws' | 'platform' | 'data' | 'ai' | 'observability'
 type EdgeType =
   | 'deploys' | 'provisions' | 'admits' | 'issues'
   | 'manages' | 'uses' | 'backs-up' | 'secrets' | 'pulls' | 'routes' | 'auth'
-  | 'scales' | 'scrapes' | 'queries' | 'alerts' | 'mesh'
+  | 'scales' | 'scrapes' | 'queries' | 'alerts'
 
 type NodeDef = { id: string; group: GroupKey; label: string; descCs: string; descEn: string; live: boolean }
 type EdgeDef = { from: string; to: string; type: EdgeType }
@@ -44,12 +45,13 @@ const GROUPS: Record<GroupKey, { color: string; textColor: string; cs: string; e
   aws:           { color: 'var(--warning)', textColor: 'var(--warning-text)', cs: 'AWS substrát',            en: 'AWS substrate',        Icon: Cloud },
   platform:      { color: 'var(--accent)', textColor: 'var(--accent-text)', cs: 'Platforma / control plane', en: 'Platform / control plane', Icon: GitBranch },
   data:          { color: 'var(--info)', textColor: 'var(--info-text)', cs: 'Data / backing služby',   en: 'Data / backing services', Icon: Database },
+  ai:            { color: 'var(--warning)', textColor: 'var(--warning-text)', cs: 'AI platforma', en: 'AI platform', Icon: Server },
   observability: { color: 'var(--success)', textColor: 'var(--success-text)', cs: 'Observabilita',           en: 'Observability',         Icon: Eye },
 }
-const GROUP_ORDER: GroupKey[] = ['aws', 'platform', 'data', 'observability']
+const GROUP_ORDER: GroupKey[] = ['aws', 'platform', 'data', 'ai', 'observability']
 
 // Nodes. `live` ids match the /api/infra/status contract (badge overlays); the
-// rest are architectural-only (AWS substrate, operators, mesh) shown without a badge.
+// rest are architectural-only (AWS substrate, operators) shown without a badge.
 const NODES: NodeDef[] = [
   // AWS substrate
   { id: 'vpc',   group: 'aws', label: 'VPC',            descCs: 'Privátní síť, subnety, routing (ADR-0058).', descEn: 'Private network, subnets, routing (ADR-0058).', live: false },
@@ -66,8 +68,7 @@ const NODES: NodeDef[] = [
   { id: 'kyverno',         group: 'platform', label: 'Kyverno',        descCs: 'Admission policy — ověřuje image attestace.', descEn: 'Admission policy — verifies image attestations.', live: true },
   { id: 'cert-manager',    group: 'platform', label: 'cert-manager',   descCs: 'Životní cyklus TLS certifikátů.', descEn: 'TLS certificate lifecycle.', live: true },
   { id: 'external-secrets',group: 'platform', label: 'External Secrets', descCs: 'Synchronizuje Secrety z OpenBao (ESO).', descEn: 'Syncs Secrets from OpenBao (ESO).', live: false },
-  { id: 'ingress-nginx',   group: 'platform', label: 'ingress-nginx',  descCs: 'Vstupní routing HTTP(S) do clusteru.', descEn: 'HTTP(S) ingress routing into the cluster.', live: false },
-  { id: 'istio',           group: 'platform', label: 'Istio',          descCs: 'Service mesh — mTLS STRICT mezi službami.', descEn: 'Service mesh — STRICT mTLS between services.', live: false },
+  { id: 'envoy-gateway',   group: 'platform', label: 'Envoy Gateway', descCs: 'Gateway API a HTTPRoute deklarované v GitOps; běhový stav zde není ověřen.', descEn: 'Gateway API and HTTPRoutes declared in GitOps; runtime state is not verified here.', live: true },
   // Data / backing services
   { id: 'cnpg',            group: 'data', label: 'CloudNativePG',      descCs: 'Postgres operátor — spravuje DB clustery.', descEn: 'Postgres operator — manages DB clusters.', live: false },
   { id: 'postgres',        group: 'data', label: 'PostgreSQL',         descCs: 'Perzistentní stav služeb (per-service DB).', descEn: 'Per-service persistent state.', live: true },
@@ -79,6 +80,12 @@ const NODES: NodeDef[] = [
   { id: 'keycloak',        group: 'data', label: 'Keycloak',          descCs: 'Vydavatel identit a tokenů (OIDC).', descEn: 'Identity & token issuer (OIDC).', live: true },
   { id: 'temporal',        group: 'data', label: 'Temporal',          descCs: 'Orchestrace workflow (durable).', descEn: 'Durable workflow orchestration.', live: true },
   { id: 'opa',             group: 'data', label: 'OPA',               descCs: 'Rozhodovací bod autorizace (rego).', descEn: 'Authorization decision point (rego).', live: false },
+  // GitOps inventory, not a claim that all workloads are currently Ready.
+  { id: 'litellm', group: 'ai', label: 'LiteLLM', descCs: 'AI gateway deklarovaná v GitOps; běhový stav není ověřen.', descEn: 'AI gateway declared in GitOps; runtime state is unverified.', live: true },
+  { id: 'langfuse-web', group: 'ai', label: 'Langfuse web', descCs: 'Rozhraní pro AI observabilitu deklarované v GitOps.', descEn: 'AI observability UI declared in GitOps.', live: true },
+  { id: 'langfuse-worker', group: 'ai', label: 'Langfuse worker', descCs: 'Zpracování AI observability deklarované v GitOps.', descEn: 'AI observability worker declared in GitOps.', live: true },
+  { id: 'presidio-analyzer', group: 'ai', label: 'Presidio Analyzer', descCs: 'Analýza PII deklarovaná v GitOps.', descEn: 'PII analysis declared in GitOps.', live: true },
+  { id: 'presidio-anonymizer', group: 'ai', label: 'Presidio Anonymizer', descCs: 'Anonymizace PII deklarovaná v GitOps.', descEn: 'PII anonymization declared in GitOps.', live: true },
   // Observability
   { id: 'prometheus',   group: 'observability', label: 'Prometheus',    descCs: 'Metriky (time-series), pravidla, alerty.', descEn: 'Metrics (time-series), rules, alerts.', live: true },
   { id: 'grafana',      group: 'observability', label: 'Grafana',       descCs: 'Dashboardy nad metrikami/logy/trace.', descEn: 'Dashboards over metrics/logs/traces.', live: true },
@@ -111,7 +118,12 @@ const EDGES: EdgeDef[] = [
   { from: 'argocd', to: 'cert-manager', type: 'deploys' },
   { from: 'argocd', to: 'external-secrets', type: 'deploys' },
   { from: 'argocd', to: 'argo-rollouts', type: 'deploys' },
-  { from: 'argocd', to: 'ingress-nginx', type: 'deploys' },
+  { from: 'argocd', to: 'envoy-gateway', type: 'deploys' },
+  { from: 'argocd', to: 'litellm', type: 'deploys' },
+  { from: 'argocd', to: 'langfuse-web', type: 'deploys' },
+  { from: 'argocd', to: 'langfuse-worker', type: 'deploys' },
+  { from: 'argocd', to: 'presidio-analyzer', type: 'deploys' },
+  { from: 'argocd', to: 'presidio-anonymizer', type: 'deploys' },
   { from: 'argocd', to: 'prometheus', type: 'deploys' },
   { from: 'argocd', to: 'grafana', type: 'deploys' },
   // Operators → managed workloads
@@ -121,10 +133,9 @@ const EDGES: EdgeDef[] = [
   { from: 'external-secrets', to: 'openbao', type: 'secrets' },
   { from: 'keda', to: 'kafka', type: 'scales' }, // KEDA scales workloads ON Kafka consumer-lag (see label)
   { from: 'kyverno', to: 'eks', type: 'admits' },
-  { from: 'cert-manager', to: 'ingress-nginx', type: 'issues' },
-  { from: 'cert-manager', to: 'istio', type: 'issues' },
-  { from: 'ingress-nginx', to: 'keycloak', type: 'routes' },
-  { from: 'ingress-nginx', to: 'grafana', type: 'routes' },
+  { from: 'cert-manager', to: 'envoy-gateway', type: 'issues' },
+  { from: 'envoy-gateway', to: 'keycloak', type: 'routes' },
+  { from: 'envoy-gateway', to: 'langfuse-web', type: 'routes' },
   // Backing-service usage
   { from: 'keycloak', to: 'postgres', type: 'uses' },
   { from: 'temporal', to: 'postgres', type: 'uses' },
@@ -151,7 +162,7 @@ type EdgeCat = 'control' | 'data' | 'flow'
 const EDGE_CAT: Record<EdgeType, EdgeCat> = {
   deploys: 'control', provisions: 'control', admits: 'control', issues: 'control',
   manages: 'data', uses: 'data', 'backs-up': 'data', secrets: 'data', pulls: 'data', routes: 'data', auth: 'data',
-  scales: 'flow', scrapes: 'flow', queries: 'flow', alerts: 'flow', mesh: 'flow',
+  scales: 'flow', scrapes: 'flow', queries: 'flow', alerts: 'flow',
 }
 const CAT_COLOR: Record<EdgeCat, string> = { control: 'var(--accent)', data: 'var(--info)', flow: 'var(--success)' }
 const CAT_TEXT_COLOR: Record<EdgeCat, string> = { control: 'var(--accent-text)', data: 'var(--info-text)', flow: 'var(--success-text)' }
@@ -161,7 +172,7 @@ const edgeTypeLabel = (type: EdgeType, t: (cs: string, en: string) => string): s
   issues: t('vydává cert', 'issues cert'), manages: t('spravuje', 'manages'), uses: t('používá', 'uses'),
   'backs-up': t('zálohuje', 'backs up'), secrets: t('tajemství', 'secrets'), pulls: t('stahuje', 'pulls'),
   routes: t('routuje', 'routes'), auth: t('validuje JWT', 'validates JWT'), scales: t('škáluje dle lagu', 'scales on lag'),
-  scrapes: t('odesílá', 'ships'), queries: t('dotazuje', 'queries'), alerts: t('alerty', 'alerts'), mesh: t('mesh mTLS', 'mesh mTLS'),
+  scrapes: t('odesílá', 'ships'), queries: t('dotazuje', 'queries'), alerts: t('alerty', 'alerts'),
 }[type])
 
 // ---------------------------------------------------------------------------
@@ -249,10 +260,15 @@ export default function InfraTopologyPage() {
       <PageHeader
         icon={<Network size={18} aria-hidden="true" />}
         title={t('Topologie infrastruktury', 'Infrastructure Topology')}
-        subtitle={t('Jak jsou platformní komponenty zapojené — architektura toku dat s živým stavem. Hrany jsou zdokumentovaná architektura (ne odvozená data); uzly nesou živý stav z prób.',
-          'How the platform components are wired — a data-flow architecture with live status. Edges are the documented architecture (not derived data); nodes carry live probe status.')}
+        subtitle={t('Schéma vybraných platforemních vazeb. Hrany jsou dokumentované, ne živě objevené; stav mají jen uzly se sondou. Úplný seznam doménových služeb je v mapě služeb.',
+          'Selected platform relationships. Edges are documented, not discovered live; only probed nodes have health. The full domain-service inventory is in the service map.')}
         breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span>{t('Infrastruktura', 'Infrastructure')}</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Topologie', 'Topology')}</span></div>}
       />
+
+      <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '16px' }}>
+        {t('Hledáte chybějící bankovní službu nebo její závislosti? ', 'Looking for a banking service or its dependencies? ')}
+        <Link href="/docs/service-map" style={{ color: 'var(--accent)' }}>{t('Otevřít mapu služeb →', 'Open the service map →')}</Link>
+      </p>
 
       {/* Controls */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>

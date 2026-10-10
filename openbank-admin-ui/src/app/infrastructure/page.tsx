@@ -29,16 +29,16 @@ interface InfraComponent {
 }
 
 const INFRA_COMPONENTS: InfraComponent[] = [
-  { id: 'postgres',        name: 'PostgreSQL',        probeNote: 'TCP :5432 via Gatus',                  icon: <Database size={20} /> },
-  { id: 'kafka',           name: 'Apache Kafka',       probeNote: 'TCP :9092 via Gatus',                  icon: <Layers size={20} /> },
-  { id: 'keycloak',        name: 'Keycloak IAM',       probeNote: 'HTTP /health/ready via Gatus',         icon: <Lock size={20} /> },
-  { id: 'valkey',          name: 'Valkey (Cache)',      probeNote: 'TCP :6379 via Gatus',                  icon: <HardDrive size={20} /> },
-  { id: 'openbao',         name: 'OpenBao',            probeNote: 'HTTP /v1/sys/health via Gatus',        icon: <Lock size={20} /> },
-  { id: 'schema-registry', name: 'Schema Registry',   probeNote: 'HTTP :8081 via Gatus',                 icon: <Server size={20} /> },
-  { id: 'grafana',         name: 'Grafana',            probeNote: 'HTTP /api/health via Gatus',           icon: <Eye size={20} /> },
-  { id: 'prometheus',      name: 'Prometheus',         probeNote: 'HTTP /-/healthy via Gatus',            icon: <Activity size={20} /> },
-  { id: 'loki',            name: 'Loki',               probeNote: 'HTTP /ready via Gatus',                icon: <Activity size={20} /> },
-  { id: 'tempo',           name: 'Tempo',              probeNote: 'HTTP /ready via Gatus',                icon: <Activity size={20} /> },
+  { id: 'postgres',        name: 'PostgreSQL',        probeNote: 'TCP :5432',                            icon: <Database size={20} /> },
+  { id: 'kafka',           name: 'Apache Kafka',       probeNote: 'TCP :9092',                            icon: <Layers size={20} /> },
+  { id: 'keycloak',        name: 'Keycloak IAM',       probeNote: 'HTTP /realms/master',                 icon: <Lock size={20} /> },
+  { id: 'valkey',          name: 'Valkey (Cache)',      probeNote: 'TCP :6379',                            icon: <HardDrive size={20} /> },
+  { id: 'openbao',         name: 'OpenBao',            probeNote: 'HTTP /v1/sys/health',                  icon: <Lock size={20} /> },
+  { id: 'schema-registry', name: 'Schema Registry',   probeNote: 'TCP :8080 (cluster)',                  icon: <Server size={20} /> },
+  { id: 'grafana',         name: 'Grafana',            probeNote: 'HTTP /api/health',                     icon: <Eye size={20} /> },
+  { id: 'prometheus',      name: 'Prometheus',         probeNote: 'HTTP /-/ready',                       icon: <Activity size={20} /> },
+  { id: 'loki',            name: 'Loki',               probeNote: 'HTTP /ready',                         icon: <Activity size={20} /> },
+  { id: 'tempo',           name: 'Tempo',              probeNote: 'TCP :3200 (cluster)',                 icon: <Activity size={20} /> },
   { id: 'kafka-ui',        name: 'Kafka UI',           probeNote: 'HTTP /actuator/health via BFF',        icon: <LayoutTemplate size={20} /> },
   // Expanded observability stack (ADR-0077/0079/0088), all in the observability namespace.
   { id: 'pyroscope',       name: 'Pyroscope',          probeNote: 'TCP :4040 · continuous profiling',     icon: <Activity size={20} /> },
@@ -56,6 +56,13 @@ const INFRA_COMPONENTS: InfraComponent[] = [
   { id: 'kyverno',         name: 'Kyverno',            probeNote: 'TCP :8000 · admission policy',          icon: <ShieldCheck size={20} /> },
   { id: 'cert-manager',    name: 'cert-manager',       probeNote: 'TCP :9402 · TLS certificate lifecycle', icon: <Lock size={20} /> },
   { id: 'karpenter',       name: 'Karpenter',          probeNote: 'TCP :8080 · node autoscaler (Spot/arm64)', icon: <Cpu size={20} /> },
+  // GitOps-declared platform. Runtime health stays UNKNOWN until a scoped probe exists.
+  { id: 'envoy-gateway',   name: 'Envoy Gateway',      probeNote: 'GitOps · runtime status not probed', icon: <GitBranch size={20} /> },
+  { id: 'litellm',         name: 'LiteLLM',            probeNote: 'GitOps · runtime status not probed', icon: <Cpu size={20} /> },
+  { id: 'langfuse-web',    name: 'Langfuse web',       probeNote: 'GitOps · runtime status not probed', icon: <Eye size={20} /> },
+  { id: 'langfuse-worker', name: 'Langfuse worker',    probeNote: 'GitOps · runtime status not probed', icon: <Workflow size={20} /> },
+  { id: 'presidio-analyzer', name: 'Presidio Analyzer', probeNote: 'GitOps · runtime status not probed', icon: <ShieldCheck size={20} /> },
+  { id: 'presidio-anonymizer', name: 'Presidio Anonymizer', probeNote: 'GitOps · runtime status not probed', icon: <ShieldCheck size={20} /> },
 ]
 
 type StatusResult = InfrastructureStatusResult
@@ -161,8 +168,14 @@ export default function InfrastructurePage() {
     }
   }, [loadLifecycle])
 
-  const upCount = Object.values(statuses).filter(s => s.status === 'UP').length
-  const totalCount = INFRA_COMPONENTS.length
+  // The API is the set being counted. Metadata only enriches it; a newly probed component must
+  // not disappear from the cards while inflating the UP numerator.
+  const componentById = new Map(INFRA_COMPONENTS.map(comp => [comp.id, comp]))
+  const components = Object.keys(statuses).length
+    ? Object.keys(statuses).map(id => componentById.get(id) ?? { id, name: id, probeNote: t('Živá sonda', 'Live probe'), icon: <Server size={20} /> })
+    : INFRA_COMPONENTS
+  const upCount = components.filter(comp => statuses[comp.id]?.status === 'UP').length
+  const totalCount = components.length
   const attention = Object.values(lifecycle).filter(c => ['vulnerable', 'eol-soon', 'eol'].includes(c.urgency)).length
   const upgradable = Object.values(lifecycle).filter(c => c.urgency === 'patch-available' || c.urgency === 'major-available').length
 
@@ -213,7 +226,7 @@ export default function InfrastructurePage() {
         }}>
           <DataUnavailable
             kind={unavailable.kind}
-            service={t('Gatus monitoring agent', 'Gatus monitoring agent')}
+            service={t('Sondy Admin UI', 'Admin UI probes')}
             feature={t('Stav infrastruktury', 'Infrastructure status')}
             lang={language}
             detail={Object.keys(statuses).length > 0
@@ -226,7 +239,7 @@ export default function InfrastructurePage() {
 
       {loading && !lastRefresh ? (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '12px' }}>
-          {Array.from({ length: INFRA_COMPONENTS.length }).map((_, i) => (
+          {Array.from({ length: components.length }).map((_, i) => (
             <div key={i} className="skeleton" style={{ height: '120px' }} />
           ))}
         </div>
@@ -237,7 +250,7 @@ export default function InfrastructurePage() {
             {t('Komponenty infrastruktury', 'Infrastructure Components')}
           </h2>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '16px', marginBottom: '32px' }}>
-            {INFRA_COMPONENTS.map(comp => {
+            {components.map(comp => {
               const st = statuses[comp.id]
               const status: InfraStatus = st?.status ?? 'UNKNOWN'
               const tone = statusTone(status)
@@ -286,6 +299,11 @@ export default function InfrastructurePage() {
 
                   {lifecycle[comp.id] && (
                     <LifecycleStrip data={lifecycle[comp.id]} name={comp.name} t={t} dateLocale={dateLocale} />
+                  )}
+                  {!lifecycle[comp.id] && Object.keys(lifecycle).length > 0 && (
+                    <p style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--border)', color: 'var(--text-tertiary)', fontSize: '11px' }}>
+                      {t('Verze a životní cyklus této komponenty nejsou v současném registru pokryty.', 'Version and lifecycle for this component are not covered by the current registry.')}
+                    </p>
                   )}
                 </div>
               )
