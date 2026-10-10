@@ -51,7 +51,45 @@ packs are code-reviewed data baked into the image, not runtime input).
 | **Denial of service** | Request floods or oversized bodies | Fleet rate limit (100 concurrent), 1 MB body limit, read/idle timeouts from `application.yaml` |
 | **Elevation of privilege** | A backend service-account holding `ROLE_OPERATOR` writes a contract | `operator-pension-read` excludes `service-account-*` and is read-only; the edge grant is keyed on one principal id |
 
-## 4a. Exits — termination, payout, death (slice S5)
+## 4a. Trust boundary — pension-service → pension-fund-service (fund-administration port)
+
+pension-fund-service (ADR-0334) owns the unit register: holdings, unit orders and fund prices.
+pension-service reaches it through its `FundAdministrationPort` as the Keycloak client
+`openbank-pension` (`service-account-openbank-pension`, `ROLE_API`). The server side of this
+edge is declared in this PR; the client adapter in pension-service lands with the integration
+slice, and this section must be re-read when it does.
+
+**Assets:** a contract's unit holdings and order history (confidential participant data), and the
+unit orders themselves — an order converts contributed money into units, so a wrong or duplicated
+order mis-states a participant's savings.
+
+**Authorization on the fund side:** `pension_fund_rest_ext.rego` (reason
+`service-pension-unit-register`) admits that one principal id, and only with `ROLE_API`, to
+`pension-fund.holding.read`, `pension-fund.order.place` and the reference reads `fund.read`,
+`strategy.read`, `nav.read` — never NAV calculation/approval, fund or strategy administration.
+Every staff write excludes `service-account-*` principals, and `holding.read` is excluded from
+base `operator-read-any`, so the shared M2M account (`ROLE_OPERATOR`) is denied. Policy tests:
+`pension_fund_rest_ext_test.rego` (`test_pension_service_places_orders_but_cannot_administer`).
+
+| Threat | Vector | Mitigation |
+|---|---|---|
+| **Spoofing** | Another workload calls the fund API as pension-service | Grant keyed on the exact `principal.id` plus `ROLE_API`; the Keycloak client secret is held only by pension-service; every other service-account, including the shared one, is denied (rego + tests above) |
+| **Spoofing / IDOR** | A request carries a `contractId` the participant does not own | The fund side cannot judge ownership — it trusts pension-service for it. pension-service must only send a `contractId` it has resolved for the authenticated participant (the 404-confinement in §4, `PensionContractApiIT`); the port must never forward a client-supplied id unchecked |
+| **Tampering / replay** | A retried or replayed order is executed twice | `Idempotency-Key` is required on `POST /api/v1/contracts/{contractId}/orders` (`ContractUnitResource`); `uq_unit_orders_idempotency UNIQUE (contract_id, idempotency_key)` (`V1__init_pension_fund.sql`); reusing a key for a different instruction is rejected (`UnitRegisterService`). The adapter must derive the key deterministically from the pension-side operation, not mint one per attempt |
+| **Tampering** | Order amount or fund altered or out of range | Amounts normalised to money precision server-side (`Precision::money`); `fundId`/`type` required; prices come from the fund side's own published NAV, never from the caller |
+| **Information disclosure** | Holdings read beyond the participant's contract | Same ownership dependency as IDOR above; holdings excluded from `operator-read-any` |
+| **Denial of service** | pension-service floods the fund API, or a slow fund API stalls pension-service | Fund side: 1 MB body limit and 100-concurrent rate limit (`application.yaml`). Client side: the adapter must carry timeouts and must not retry an order without the same idempotency key |
+| **Elevation of privilege** | The pension client is used to approve a NAV or administer a fund | Those actions are outside the reason's action set and are staff-only with `service-account-*` excluded |
+
+**Residual risks:**
+- Contract ownership is enforced only in pension-service; a defect there is not caught by the fund side.
+- The fund-side ingress NetworkPolicy (`pension-fund/network-policies.yaml`) admits the `pension`
+  namespace since the integration slice (S8) wired the REST adapter (`PensionFundRestAdapter`, §4c);
+  the rule is generated from pension-service's rest-client config by `gen-network-policies.py`.
+- No mTLS client identity between the two services; caller identity rests on the OIDC client
+  credential alone.
+
+## 4b. Exits — termination, payout, death (slice S5)
 
 New trust boundaries: the fund unit register (redeem), the payment rail (payout), the tax authority
 (withholding remittance), the incentive ledger (clawback), an annuity insurer, sca-service and
@@ -78,10 +116,11 @@ staff BFF in `admin-ui`) on the API ports, and customer-edge no longer declares 
 the participant-facing edge cannot reach holdings or place orders even with a valid token. What
 remains is pension-service's own client: a compromised pension-service pod can read every
 contract's holdings and place redemptions within OPA's grant to
-`service-account-openbank-pension`. Participant valuation in the app therefore waits for a
-pension-service participant read; until then the edge serves the contract without holdings.
+`service-account-openbank-pension`. The app's participant valuation and unit transactions come
+from pension-service's own participant reads (`/contracts/{id}/valuation`, `/transactions`,
+ownership-checked there), relayed by the edge — never from the fund API.
 
-## 4b. Integration (slice S8)
+## 4c. Integration (slice S8)
 
 S8 joins S1/S2/S3/S5 into one service and adds the routes customer-edge needs. New trust boundary:
 pension-fund-service (the unit register), reached over REST as pension-service's OWN Keycloak
@@ -105,7 +144,7 @@ real adapter replaces the stub (fails closed until then). The notification port 
 refuses outside dev/test. Orders are forward-priced: a redemption returns the amount ordered, the
 proceeds settle at the next NAV.
 
-## 4c. Annuity partners (#12383)
+## 4d. Annuity partners (#12383)
 
 The ANNUITY payout form buys a policy from a partner insurer chosen by the participant among
 offers from every eligible partner. New trust boundary: external insurers, reached through the
@@ -144,8 +183,9 @@ not reversed automatically.
 
 ## 6. Change log
 
+- 2026-10-10 — §4a: pension → pension-fund trust boundary (fund-administration port, #12355).
 - 2026-10-09 — initial model with the S1 bootstrap (ADR-0334, #12350).
-- 2026-10-09 — S5 exits: termination, payout, death claims (§4a).
-- 2026-10-09 — S8 integration: fund REST client identity, onboarding-only activation, account-bound SCA, held account change, optimistic locking, POST replay (§4b).
-- 2026-10-09 — annuity partner integration: registry with four-eyes activation, adapter SPI, SCA-bound selection, premium/compensation flow (§4c, #12383).
-- 2026-10-10 — network reach of the unit register: only `pension` (plus the staff BFF) is admitted; customer-edge's direct route removed (§4a residual, #12359).
+- 2026-10-09 — S5 exits: termination, payout, death claims (§4b).
+- 2026-10-09 — S8 integration: fund REST client identity, onboarding-only activation, account-bound SCA, held account change, optimistic locking, POST replay (§4c).
+- 2026-10-09 — annuity partner integration: registry with four-eyes activation, adapter SPI, SCA-bound selection, premium/compensation flow (§4d, #12383).
+- 2026-10-10 — network reach of the unit register: only `pension` (plus the staff BFF) is admitted; customer-edge's direct route removed (§4b, #12359).

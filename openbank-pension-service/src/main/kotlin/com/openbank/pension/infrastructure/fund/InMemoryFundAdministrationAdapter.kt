@@ -5,6 +5,8 @@
 package com.openbank.pension.infrastructure.fund
 
 import com.openbank.pension.application.port.out.FundAdministrationPort
+import com.openbank.pension.application.port.out.FundHoldings
+import com.openbank.pension.application.port.out.FundUnitTransaction
 import com.openbank.pension.application.port.out.Redemption
 import com.openbank.pension.application.port.out.Valuation
 import io.quarkus.arc.profile.IfBuildProfile
@@ -37,6 +39,23 @@ class InMemoryFundAdministrationAdapter(
     private val log = Logger.getLogger(InMemoryFundAdministrationAdapter::class.java)
     private val values = ConcurrentHashMap<UUID, BigDecimal>()
     private val orders = ConcurrentHashMap<String, Pair<UUID, BigDecimal>>()
+    private val registerHoldings = ConcurrentHashMap<UUID, FundHoldings>()
+    private val registerTransactions = ConcurrentHashMap<UUID, List<FundUnitTransaction>>()
+
+    /**
+     * Tests and demos: what the register reports for [contractId]. Unset, a contract holds nothing —
+     * the stub never invents units or a NAV for the participant valuation view.
+     */
+    fun setHoldings(contractId: UUID, holdings: FundHoldings, transactions: List<FundUnitTransaction> = emptyList()) {
+        registerHoldings[contractId] = holdings
+        registerTransactions[contractId] = transactions
+    }
+
+    override suspend fun holdings(contractId: UUID): FundHoldings =
+        registerHoldings[contractId] ?: FundHoldings(emptyList(), emptyList())
+
+    override suspend fun transactions(contractId: UUID): List<FundUnitTransaction> =
+        registerTransactions[contractId].orEmpty()
 
     /** Tests and demos: pin the contract's value at the "latest NAV". */
     fun setValue(contractId: UUID, value: BigDecimal) {

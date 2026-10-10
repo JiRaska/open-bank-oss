@@ -588,6 +588,10 @@ class AnnuityMarketplaceServiceTest {
         override suspend fun redeem(contractId: UUID, amount: BigDecimal, currency: String, idempotencyKey: String) =
             Redemption("R", amount)
         override suspend fun reverseRedemption(contractId: UUID, redemption: Redemption, currency: String) = Unit
+        override suspend fun holdings(contractId: UUID) =
+            com.openbank.pension.application.port.out.FundHoldings(emptyList(), emptyList())
+        override suspend fun transactions(contractId: UUID) =
+            emptyList<com.openbank.pension.application.port.out.FundUnitTransaction>()
     }
 
     class Contracts : PensionContractRepository {

@@ -7,6 +7,10 @@ package com.openbank.pension.infrastructure.fund
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.openbank.libs.web.SyntheticTaintClientFilter
 import com.openbank.pension.application.port.out.FundAdministrationPort
+import com.openbank.pension.application.port.out.FundHolding
+import com.openbank.pension.application.port.out.FundHoldings
+import com.openbank.pension.application.port.out.FundUnitTransaction
+import com.openbank.pension.application.port.out.PendingFundOrder
 import com.openbank.pension.application.port.out.PensionContractRepository
 import com.openbank.pension.application.port.out.Redemption
 import com.openbank.pension.application.port.out.Valuation
@@ -30,6 +34,7 @@ import java.math.RoundingMode
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.time.Clock
+import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 
@@ -59,6 +64,10 @@ interface PensionFundRestClient {
     @GET
     @Path("/strategies")
     suspend fun strategies(): List<StrategyDto>
+
+    @GET
+    @Path("/contracts/{contractId}/transactions")
+    suspend fun transactions(@PathParam("contractId") contractId: UUID): List<UnitTransactionDto>
 }
 
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -68,10 +77,15 @@ data class HoldingDto(
     val navPerUnit: BigDecimal? = null,
     val value: BigDecimal? = null,
     val currency: String,
+    val navDate: LocalDate? = null,
 )
 
 @JsonIgnoreProperties(ignoreUnknown = true)
-data class ContractValuationDto(val contractId: UUID? = null, val holdings: List<HoldingDto> = emptyList())
+data class ContractValuationDto(
+    val contractId: UUID? = null,
+    val holdings: List<HoldingDto> = emptyList(),
+    val pendingOrders: List<UnitOrderDto> = emptyList(),
+)
 
 data class OrderRequestDto(
     val fundId: UUID,
@@ -81,7 +95,27 @@ data class OrderRequestDto(
 )
 
 @JsonIgnoreProperties(ignoreUnknown = true)
-data class UnitOrderDto(val id: UUID, val status: String? = null)
+data class UnitOrderDto(
+    val id: UUID,
+    val status: String? = null,
+    val fundId: UUID? = null,
+    val type: String? = null,
+    val amount: BigDecimal? = null,
+    val units: BigDecimal? = null,
+    val placedAt: Instant? = null,
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class UnitTransactionDto(
+    val id: UUID,
+    val fundId: UUID,
+    val type: String,
+    val units: BigDecimal,
+    val amount: BigDecimal,
+    val navPerUnit: BigDecimal,
+    val navId: UUID? = null,
+    val pricedAt: Instant,
+)
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class AllocationTargetDto(val fundId: UUID, val weight: BigDecimal)
@@ -95,7 +129,7 @@ data class StrategyDto(
 )
 
 /**
- * The three register calls the adapter's logic needs, WITHOUT the JAX-RS annotations: a test fake
+ * The register calls the adapter's logic needs, WITHOUT the JAX-RS annotations: a test fake
  * implementing the annotated [PensionFundRestClient] would itself be registered as a resource.
  */
 interface FundRegister {
@@ -104,6 +138,8 @@ interface FundRegister {
     suspend fun placeOrder(contractId: UUID, idempotencyKey: String, order: OrderRequestDto): UnitOrderDto
 
     suspend fun strategies(): List<StrategyDto>
+
+    suspend fun transactions(contractId: UUID): List<UnitTransactionDto>
 }
 
 /** Refusal from the unit register that the caller must not paper over (no NAV, no strategy, short). */
@@ -150,6 +186,8 @@ class PensionFundRestAdapter : FundAdministrationPort {
                     client.placeOrder(contractId, idempotencyKey, order)
 
                 override suspend fun strategies() = client.strategies()
+
+                override suspend fun transactions(contractId: UUID) = client.transactions(contractId)
             },
             { id -> contracts.findById(id)?.currentStrategy?.strategyCode },
             clock,
@@ -157,6 +195,10 @@ class PensionFundRestAdapter : FundAdministrationPort {
     }
 
     override suspend fun valuation(contractId: UUID, currency: String) = logic.valuation(contractId, currency)
+
+    override suspend fun holdings(contractId: UUID) = logic.holdings(contractId)
+
+    override suspend fun transactions(contractId: UUID) = logic.transactions(contractId)
 
     override suspend fun subscribe(contractId: UUID, amount: BigDecimal, currency: String, idempotencyKey: String) =
         logic.subscribe(contractId, amount, currency, idempotencyKey)
@@ -184,6 +226,31 @@ class PensionFundOrders(
         val total = holdings.fold(BigDecimal.ZERO) { a, h -> a + h.value!! }
         return Valuation(total.setScale(MONEY_SCALE, RoundingMode.HALF_EVEN), currency, LocalDate.now(clock))
     }
+
+    /** The register's view verbatim: a holding without a published NAV keeps `value == null`. */
+    override suspend fun holdings(contractId: UUID): FundHoldings {
+        val dto = client.holdings(contractId)
+        return FundHoldings(
+            holdings = dto.holdings.map {
+                FundHolding(it.fundId, it.units, it.navPerUnit, it.navDate, it.value, it.currency)
+            },
+            pendingOrders = dto.pendingOrders.map {
+                PendingFundOrder(
+                    orderId = it.id,
+                    fundId = requireNotNull(it.fundId) { "pending order ${it.id} carries no fundId" },
+                    type = requireNotNull(it.type) { "pending order ${it.id} carries no type" },
+                    amount = it.amount,
+                    units = it.units,
+                    placedAt = it.placedAt,
+                )
+            },
+        )
+    }
+
+    override suspend fun transactions(contractId: UUID): List<FundUnitTransaction> =
+        client.transactions(contractId).map {
+            FundUnitTransaction(it.id, it.fundId, it.type, it.units, it.amount, it.navPerUnit, it.navId, it.pricedAt)
+        }
 
     override suspend fun subscribe(
         contractId: UUID,
