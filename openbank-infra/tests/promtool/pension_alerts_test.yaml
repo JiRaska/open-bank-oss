@@ -1,0 +1,400 @@
+# SPDX-License-Identifier: Apache-2.0
+# Behavioural tests for openbank-pension-alerts (#12424). Every alert has a must-FIRE case and a
+# must-NOT-fire control. Intervals stay at 1m (a wider input interval makes `for:` unreachable)
+# and every eval_time is pushed past its threshold (promtool's time() starts at the epoch).
+rule_files:
+  - prometheus-rules-pension.yaml
+
+evaluation_interval: 1m
+
+tests:
+  # ---- queues ------------------------------------------------------------------------------
+  - interval: 1m
+    name: "unmatched payments older than 3 days fire PensionUnmatchedPaymentsAgeing"
+    input_series:
+      - series: 'openbank_pension_queue_oldest_age_seconds{queue="unmatched_payments",pod="p1"}'
+        values: "300000+60x60"
+    alert_rule_test:
+      - eval_time: 31m
+        alertname: PensionUnmatchedPaymentsAgeing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: pension
+            exp_annotations:
+              description: "The oldest OPEN unmatched pension payment is 3d 11h 51m 0s old. Work the operator queue (GET /api/v1/pension/funding/operations/unmatched?status=OPEN): assign each payment to its contract or return it to the payer."
+              runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/pension-alerts.md#pensionunmatchedpaymentsageing"
+              summary: "Pension unmatched payments older than 3 days"
+
+  - interval: 1m
+    name: "an empty unmatched queue (age 0) does NOT fire PensionUnmatchedPaymentsAgeing"
+    input_series:
+      - series: 'openbank_pension_queue_oldest_age_seconds{queue="unmatched_payments",pod="p1"}'
+        values: "0+0x60"
+      # A different queue past the threshold must not leak into this rule.
+      - series: 'openbank_pension_queue_oldest_age_seconds{queue="incentive_claims_pending",pod="p1"}'
+        values: "300000+0x60"
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: PensionUnmatchedPaymentsAgeing
+        exp_alerts: []
+
+  - interval: 1m
+    name: "a payout instruction pending for 3h fires PensionPaymentInstructionsStuck"
+    input_series:
+      - series: 'openbank_pension_queue_oldest_age_seconds{queue="payment_instructions_pending",pod="p1"}'
+        values: "10800+60x30"
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: PensionPaymentInstructionsStuck
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: pension
+            exp_annotations:
+              description: "The oldest PENDING pension payment instruction is 3h 16m 0s old: payout money is not reaching the payment hub. Check the exit Temporal workers and domestic-payment-service availability."
+              runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/pension-alerts.md#pensionpaymentinstructionsstuck"
+              summary: "Pension payout instructions pending for more than 2 hours"
+
+  - interval: 1m
+    name: "a payout instruction pending for 30 minutes does NOT fire PensionPaymentInstructionsStuck"
+    input_series:
+      - series: 'openbank_pension_queue_oldest_age_seconds{queue="payment_instructions_pending",pod="p1"}'
+        values: "1800+60x30"
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: PensionPaymentInstructionsStuck
+        exp_alerts: []
+
+  - interval: 1m
+    name: "a claim PENDING for 121 days fires PensionIncentiveClaimsUnfiled"
+    input_series:
+      - series: 'openbank_pension_queue_oldest_age_seconds{queue="incentive_claims_pending",pod="p1"}'
+        values: "10454400+60x70"
+    alert_rule_test:
+      - eval_time: 61m
+        alertname: PensionIncentiveClaimsUnfiled
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: pension
+            exp_annotations:
+              description: "The oldest PENDING state-incentive claim is 121d 1h 1m 0s old. A claim format with no channel adapter, or a filing job that is failing, leaves claims unfiled."
+              runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/pension-alerts.md#pensionincentiveclaimsunfiled"
+              summary: "Pension incentive claims PENDING for more than 120 days"
+
+  - interval: 1m
+    name: "a claim PENDING for 30 days does NOT fire PensionIncentiveClaimsUnfiled"
+    input_series:
+      - series: 'openbank_pension_queue_oldest_age_seconds{queue="incentive_claims_pending",pod="p1"}'
+        values: "2592000+60x70"
+    alert_rule_test:
+      - eval_time: 61m
+        alertname: PensionIncentiveClaimsUnfiled
+        exp_alerts: []
+
+  # ---- deadlines ---------------------------------------------------------------------------
+  # time() starts at 1970-01-01T00:00Z, so 7d2h is the 8th of the month and 1d2h the 2nd.
+  - interval: 1m
+    name: "returns DUE on the 8th fire PensionStateContributionReturnReportDue"
+    input_series:
+      - series: 'openbank_pension_queue_size{queue="state_contribution_returns_due",pod="p1"}'
+        values: "2+0x10300"
+    alert_rule_test:
+      - eval_time: 7d2h
+        alertname: PensionStateContributionReturnReportDue
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: pension
+            exp_annotations:
+              description: "2 state-contribution return(s) are DUE and the monthly return report is due by the 10th (ZDPS \xA718(4)). The daily deadline job files it; check that it is running (workflow pension-state-contribution-deadlines) or file it from the operations API."
+              runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/pension-alerts.md#pensionstatecontributionreturnreportdue"
+              summary: "State-contribution returns still DUE close to the 10th"
+
+  - interval: 1m
+    name: "returns DUE on the 2nd do NOT fire PensionStateContributionReturnReportDue"
+    input_series:
+      - series: 'openbank_pension_queue_size{queue="state_contribution_returns_due",pod="p1"}'
+        values: "2+0x1600"
+    alert_rule_test:
+      - eval_time: 1d2h
+        alertname: PensionStateContributionReturnReportDue
+        exp_alerts: []
+
+  - interval: 1m
+    name: "nothing DUE on the 8th does NOT fire PensionStateContributionReturnReportDue"
+    input_series:
+      - series: 'openbank_pension_queue_size{queue="state_contribution_returns_due",pod="p1"}'
+        values: "0+0x10300"
+    alert_rule_test:
+      - eval_time: 7d2h
+        alertname: PensionStateContributionReturnReportDue
+        exp_alerts: []
+
+  - interval: 1m
+    name: "a missed filing deadline fires PensionStateContributionDeadlineBreached per kind"
+    input_series:
+      - series: 'openbank_pension_state_contribution_deadline_breaches{kind="claim_filing",pod="p1"}'
+        values: "3+0x30"
+      - series: 'openbank_pension_state_contribution_deadline_breaches{kind="return_due",pod="p1"}'
+        values: "0+0x30"
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: PensionStateContributionDeadlineBreached
+        exp_alerts:
+          - exp_labels:
+              kind: claim_filing
+              severity: critical
+              team: pension
+            exp_annotations:
+              description: "The daily state-contribution check counts 3 item(s) past their claim_filing deadline (claim_filing: claims not filed in their quarter; claim_payment: filed claims the agency has not paid when expected; return_due: returns not reported by the 10th)."
+              runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/pension-alerts.md#pensionstatecontributiondeadlinebreached"
+              summary: "Pension state-contribution deadline missed"
+
+  - interval: 1m
+    name: "an absent deadline gauge (cold pod, check not yet run) does NOT fire PensionStateContributionDeadlineBreached"
+    input_series:
+      - series: 'up{namespace="pension",pod="p1"}'
+        values: "1+0x30"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: PensionStateContributionDeadlineBreached
+        exp_alerts: []
+
+  # ---- integrations ------------------------------------------------------------------------
+  - interval: 1m
+    name: "a record on the pension DLQ fires PensionPaymentEventDeadLettered"
+    input_series:
+      - series: 'kafka_topic_partition_current_offset{topic="openbank.dlq.pension.domestic-payment-events-in",partition="0"}'
+        values: "0 0 0 0 0 1 1 1 1 1"
+      - series: 'kafka_topic_partition_oldest_offset{topic="openbank.dlq.pension.domestic-payment-events-in",partition="0"}'
+        values: "0+0x10"
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: PensionPaymentEventDeadLettered
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: pension
+            exp_annotations:
+              description: "At least one domestic-payment status change could not be applied to a pension payout instruction after retries. The payout stays in its previous state until the record in openbank.dlq.pension.domestic-payment-events-in is replayed."
+              runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/pension-alerts.md#pensionpaymenteventdeadlettered"
+              subject_period: "continuous"
+              summary: "Pension dead-lettered a domestic-payment status event"
+
+  - interval: 1m
+    name: "an expired pension DLQ record and another service's DLQ do NOT fire PensionPaymentEventDeadLettered"
+    input_series:
+      - series: 'kafka_topic_partition_current_offset{topic="openbank.dlq.pension.domestic-payment-events-in",partition="0"}'
+        values: "4+0x10"
+      - series: 'kafka_topic_partition_oldest_offset{topic="openbank.dlq.pension.domestic-payment-events-in",partition="0"}'
+        values: "4+0x10"
+      - series: 'kafka_topic_partition_current_offset{topic="openbank.dlq.account.party-events-in",partition="0"}'
+        values: "0+1x10"
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: PensionPaymentEventDeadLettered
+        exp_alerts: []
+
+  - interval: 1m
+    name: "a one-scrape pension DLQ offset skew does NOT fire PensionPaymentEventDeadLettered"
+    input_series:
+      - series: 'kafka_topic_partition_current_offset{topic="openbank.dlq.pension.domestic-payment-events-in",partition="0"}'
+        values: "0 0 1 0 0 0 0 0"
+      - series: 'kafka_topic_partition_oldest_offset{topic="openbank.dlq.pension.domestic-payment-events-in",partition="0"}'
+        values: "0+0x8"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: PensionPaymentEventDeadLettered
+        exp_alerts: []
+
+  - interval: 1m
+    name: "a retained record stops alerting when its oldest offset catches up"
+    input_series:
+      - series: 'kafka_topic_partition_current_offset{topic="openbank.dlq.pension.domestic-payment-events-in",partition="0"}'
+        values: "1+0x15"
+      - series: 'kafka_topic_partition_oldest_offset{topic="openbank.dlq.pension.domestic-payment-events-in",partition="0"}'
+        values: "0 0 0 0 0 0 0 0 1 1 1 1 1 1 1 1"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: PensionPaymentEventDeadLettered
+        exp_alerts: []
+
+  - interval: 1m
+    name: "a retained pension DLQ record still alerts after the one-hour append window"
+    input_series:
+      - series: 'kafka_topic_partition_current_offset{topic="openbank.dlq.pension.domestic-payment-events-in",partition="0"}'
+        values: "1+0x100"
+      - series: 'kafka_topic_partition_oldest_offset{topic="openbank.dlq.pension.domestic-payment-events-in",partition="0"}'
+        values: "0+0x100"
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: PensionPaymentEventDeadLettered
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: pension
+            exp_annotations:
+              description: "At least one domestic-payment status change could not be applied to a pension payout instruction after retries. The payout stays in its previous state until the record in openbank.dlq.pension.domestic-payment-events-in is replayed."
+              runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/pension-alerts.md#pensionpaymenteventdeadlettered"
+              subject_period: "continuous"
+              summary: "Pension dead-lettered a domestic-payment status event"
+
+  - interval: 1m
+    name: "half of the notices failing fires PensionNotificationsFailing"
+    input_series:
+      - series: 'openbank_pension_notification_requests_total{kind="PAYOUT_ACCOUNT_CHANGED",outcome="failed",pod="p1"}'
+        values: "0+1x60"
+      - series: 'openbank_pension_notification_requests_total{kind="PAYOUT_ACCOUNT_CHANGED",outcome="enqueued",pod="p1"}'
+        values: "0+1x60"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: PensionNotificationsFailing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: pension
+            exp_annotations:
+              description: "50% of pension notices handed to the notification topic failed over 30m. Notices are statutory for payout-account changes: such a change stays held (inert) until its notice is sent."
+              runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/pension-alerts.md#pensionnotificationsfailing"
+              subject_period: "continuous"
+              summary: "Over 20% of pension participant notices are not enqueued"
+
+  - interval: 1m
+    name: "skipped notices (the switch is off) do NOT fire PensionNotificationsFailing"
+    input_series:
+      - series: 'openbank_pension_notification_requests_total{kind="PAYOUT_ACCOUNT_CHANGED",outcome="skipped",pod="p1"}'
+        values: "0+5x60"
+      - series: 'openbank_pension_notification_requests_total{kind="PAYOUT_ACCOUNT_CHANGED",outcome="enqueued",pod="p1"}'
+        values: "0+1x60"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: PensionNotificationsFailing
+        exp_alerts: []
+
+  - interval: 1m
+    name: "a held account change whose notice failed fires PensionPayoutAccountChangeNoticeFailed"
+    input_series:
+      - series: 'openbank_pension_payout_account_changes_total{outcome="notice_failed",pod="p1"}'
+        values: "0 0 0 1 1 1 1 1"
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: PensionPayoutAccountChangeNoticeFailed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: pension
+            exp_annotations:
+              description: "A participant's SCA-confirmed payout-account change was stored but could not be notified, so it cannot take effect. The participant will see the old account used."
+              runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/pension-alerts.md#pensionpayoutaccountchangenoticefailed"
+              subject_period: "continuous"
+              summary: "A pension payout-account change is held because its notice failed"
+
+  - interval: 1m
+    name: "notified account changes do NOT fire PensionPayoutAccountChangeNoticeFailed"
+    input_series:
+      - series: 'openbank_pension_payout_account_changes_total{outcome="notified",pod="p1"}'
+        values: "0+1x10"
+      - series: 'openbank_pension_payout_account_changes_total{outcome="notice_failed",pod="p1"}'
+        values: "2+0x10"
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: PensionPayoutAccountChangeNoticeFailed
+        exp_alerts: []
+
+  - interval: 1m
+    name: "sca-service unavailable for 10 minutes fires PensionScaUnavailable"
+    input_series:
+      - series: 'openbank_pension_sca_consume_total{outcome="unavailable",pod="p1"}'
+        values: "0+1x30"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: PensionScaUnavailable
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: pension
+            exp_annotations:
+              description: "Pension signatures, transfers, payouts and annuity selections fail closed (503) while sca-service cannot be reached or answers 5xx."
+              runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/pension-alerts.md#pensionscaunavailable"
+              subject_period: "continuous"
+              summary: "sca-service cannot answer pension challenge consumes"
+
+  - interval: 1m
+    name: "refused challenges are not an outage and do NOT fire PensionScaUnavailable"
+    input_series:
+      - series: 'openbank_pension_sca_consume_total{outcome="refused",pod="p1"}'
+        values: "0+3x30"
+      - series: 'openbank_pension_sca_consume_total{outcome="consumed",pod="p1"}'
+        values: "0+1x30"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: PensionScaUnavailable
+        exp_alerts: []
+
+  - interval: 1m
+    name: "only the partner that answered nothing fires PensionAnnuityPartnerFailing"
+    input_series:
+      - series: 'openbank_pension_annuity_quotes_total{partner="partner-a",outcome="failed",pod="p1"}'
+        values: "0 0 1 1 2 2 2 2 2 2"
+      - series: 'openbank_pension_annuity_quotes_total{partner="partner-b",outcome="failed",pod="p1"}'
+        values: "0 0 1 1 1 1 1 1 1 1"
+      - series: 'openbank_pension_annuity_quotes_total{partner="partner-b",outcome="offered",pod="p1"}'
+        values: "0 0 1 1 2 2 2 2 2 2"
+      - series: 'openbank_pension_annuity_quotes_total{partner="partner-c",outcome="no_valid_offer",pod="p1"}'
+        values: "0 0 1 1 2 2 2 2 2 2"
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: PensionAnnuityPartnerFailing
+        exp_alerts:
+          - exp_labels:
+              partner: partner-a
+              severity: warning
+              team: pension
+            exp_annotations:
+              description: "Annuity partner partner-a timed out or errored on every quote request in the last hour; participants see no offer from it. Check the partner adapter configuration in the registry and the partner endpoint."
+              runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/pension-alerts.md#pensionannuitypartnerfailing"
+              subject_period: "continuous"
+              summary: "Annuity partner partner-a failed every quote in the last hour"
+
+  # ---- liveness ----------------------------------------------------------------------------
+  - interval: 1m
+    name: "pension up without a state-gauge heartbeat fires PensionStateGaugesAbsent"
+    input_series:
+      - series: 'up{namespace="pension",pod="p1"}'
+        values: "1+0x60"
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: PensionStateGaugesAbsent
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: pension
+              workflow: pension-state-gauges
+            exp_annotations:
+              description: "Pension pods are up yet no pension-state-gauges liveness series exists, so the queue and deadline alerts of openbank-pension-alerts have no data to evaluate."
+              runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/pension-alerts.md#pensionstategaugesabsent"
+              summary: "Pension is running but publishes no state-gauge heartbeat"
+
+  - interval: 1m
+    name: "a published heartbeat does NOT fire PensionStateGaugesAbsent"
+    input_series:
+      - series: 'up{namespace="pension",pod="p1"}'
+        values: "1+0x60"
+      - series: 'openbank_workflow_last_success_age_seconds{workflow="pension-state-gauges",pod="p1"}'
+        values: "10+0x60"
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: PensionStateGaugesAbsent
+        exp_alerts: []
+
+  - interval: 1m
+    name: "pension not running does NOT fire PensionStateGaugesAbsent (not deployed is not this alert)"
+    input_series:
+      - series: 'up{namespace="ledger",pod="l1"}'
+        values: "1+0x60"
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: PensionStateGaugesAbsent
+        exp_alerts: []

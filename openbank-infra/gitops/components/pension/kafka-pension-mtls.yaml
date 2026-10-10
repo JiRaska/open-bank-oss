@@ -1,0 +1,95 @@
+# Kafka mTLS identity + ACLs for openbank-pension-service (ADR-0137 pattern, #12378).
+#
+# pension-service consumes domestic.payment.status-changed from openbank.domestic.payment.events
+# (group pension-service-domestic-payment) to record payout settlement. It publishes nothing; its
+# only Write is its own dead-letter topic. The KafkaUser lives in `messaging`; the Strimzi-minted
+# Secret is projected into `pension` by the ExternalSecrets below.
+---
+# ── KafkaUser: pension-service ────────────────────────────────────────────
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  annotations:
+    # ADR-0137: certs (KafkaUsers -> Strimzi secrets -> ESO projection) must land before the
+    # pension Deployment rolls pods onto mTLS; lower waves sync first and ArgoCD blocks on
+    # ExternalSecrets reaching SecretSynced.
+    argocd.argoproj.io/sync-wave: "-2"
+  name: pension-service
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      # #12378: payout settlement — domestic-payment's status changes.
+      - resource:
+          type: topic
+          name: openbank.domestic.payment.events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: group
+          name: pension-service-domestic-payment
+          patternType: literal
+        operations: [Read]
+        host: "*"
+      # Dead-letter topic of the `domestic-payment-events-in` channel. Without Write the DLQ send
+      # itself fails and the consumer wedges on the failure it was meant to park (#5745).
+      - resource:
+          type: topic
+          name: openbank.dlq.pension.domestic-payment-events-in
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+---
+# ── ExternalSecret: pension-service keystore ──────────────────────────────
+# Projects the Strimzi-minted pension-service Secret from `messaging` into `pension`.
+# `dataFrom.extract` copies every key verbatim, preserving the binary PKCS#12 payload byte-for-byte.
+# deletionPolicy: Retain so a transient store/RBAC blip never deletes a live keystore out from under
+# a running pod.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: pension-service-kafka-keystore
+  namespace: pension
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: pension-service-kafka-keystore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: pension-service
+---
+# ── ExternalSecret: cluster CA truststore ───────────────────────────────────
+# Shared cluster-CA truststore projected into `pension` — identical pattern to every other
+# Kafka-connected namespace (kyc, payments, clearing, etc.).
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: kafka-cluster-ca-truststore
+  namespace: pension
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: kafka-cluster-ca-truststore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: openbank-cluster-cluster-ca-cert
