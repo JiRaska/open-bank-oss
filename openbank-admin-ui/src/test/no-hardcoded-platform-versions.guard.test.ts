@@ -11,7 +11,7 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 const SRC = path.resolve(__dirname, '..')
-const PRODUCT = '(?:k8s|EKS|Kubernetes|Loki)'
+const PRODUCT = '(?:k8s|EKS|Kubernetes|Loki|Postgres(?:QL)?|Kafka|Valkey|Redis|Apicurio|Strimzi)'
 const VERSION = '\\d+\\.\\d{1,2}(?:\\.\\d+)?'
 // product word then a x.y version on the same line, or the reverse.
 const HARDCODED = new RegExp(
@@ -28,12 +28,17 @@ function walk(dir: string, out: string[] = []): string[] {
   return out
 }
 
+// `process.env.X_VERSION ?? '1.2'` : an env override with a typed default is a hardcoded version.
+const ENV_DEFAULT = /process\.env\.\w*VERSION\w*\s*(?:\?\?|\|\|)\s*['"`]\d/
+
 function offenders(): string[] {
   const hits: string[] = []
   for (const file of walk(SRC)) {
     readFileSync(file, 'utf8').split('\n').forEach((line, i) => {
       if (/^\s*(\/\/|\*|\/\*)/.test(line)) return
-      if (HARDCODED.test(line)) hits.push(`${path.relative(SRC, file)}:${i + 1}: ${line.trim().slice(0, 140)}`)
+      // 'AsyncAPI 3.0' is a spec version, not a platform version.
+      const scan = line.replace(/AsyncAPI \d+\.\d+/gi, 'AsyncAPI')
+      if (HARDCODED.test(scan) || ENV_DEFAULT.test(scan)) hits.push(`${path.relative(SRC, file)}:${i + 1}: ${line.trim().slice(0, 140)}`)
     })
   }
   return hits
@@ -44,6 +49,11 @@ describe('no hardcoded platform versions in UI source', () => {
     expect(HARDCODED.test("title: 'EKS control plane (1.35)'")).toBe(true)
     expect(HARDCODED.test("subtitle: 'k8s 1.35 · Karpenter'")).toBe(true)
     expect(HARDCODED.test("store: t('Loki 3.6 · S3', 'Loki 3.6 · S3')")).toBe(true)
+    expect(HARDCODED.test("version: '16.4', // PostgreSQL 16.4")).toBe(true)
+    expect(HARDCODED.test("managedBy: 'Strimzi 1.2.0 (in-cluster operator)'")).toBe(true)
+    expect(ENV_DEFAULT.test("version: process.env.KAFKA_VERSION ?? '4.2.0',")).toBe(true)
+    expect(ENV_DEFAULT.test("version: process.env.REDIS_VERSION ?? '7.4.9'")).toBe(true)
+    expect(ENV_DEFAULT.test('const v = process.env.NODE_ENV ?? "x"')).toBe(false)
     expect(HARDCODED.test('const label = `EKS ${pv.kubernetesVersion}`')).toBe(false)
   })
 

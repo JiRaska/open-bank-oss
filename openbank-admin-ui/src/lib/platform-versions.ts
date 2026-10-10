@@ -19,12 +19,20 @@ export interface EksLifecycle {
   versions: Record<string, EksVersionEntry>
 }
 
+export interface PinnedComponent {
+  version: string
+  source: string
+  pinnedIn?: number
+  otherPins?: Record<string, string[]>
+}
+
 export interface PlatformVersions {
   schema: string
   kubernetesVersion: string
   nodeGroup: { instanceType: string; desiredSize: number; minSize: number; maxSize: number }
   loki: { chartVersion: string; appVersion: string }
   eksLifecycle: EksLifecycle
+  components: Record<'postgres' | 'valkey' | 'apicurio' | 'kafka' | 'strimziOperator', PinnedComponent | null>
   sources: Record<string, string>
 }
 
@@ -50,4 +58,11 @@ export const lokiAppVersion = (): string => platformVersions?.loki.appVersion ??
 export function nodeGroupSummary(): string {
   const n = platformVersions?.nodeGroup
   return n ? `${n.instanceType}, desired ${n.desiredSize} (min ${n.minSize}, max ${n.maxSize})` : UNKNOWN_VERSION
+}
+
+export const NOT_PINNED = 'unknown (not pinned in gitops)'
+
+export function componentVersion(key: keyof PlatformVersions['components']): string {
+  if (!platformVersions) return UNKNOWN_VERSION
+  return platformVersions.components[key]?.version ?? NOT_PINNED
 }

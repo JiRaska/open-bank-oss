@@ -195,6 +195,20 @@ RUN set -e; \
     fi; \
     ls /origination-src/openbank-libs-lending/src/main/kotlin/com/openbank/libs/lending/origination
 
+# ──────────────────────────────────────────────────────────────────────
+# Stage: platform-versions-collector - the infra files scripts/generate-platform-versions.mjs PARSES
+# (substrate tofu, finops EKS lifecycle table, and the GitOps YAML for image/chart pins), staged at
+# their repo-relative paths. Only these are copied; the rest of openbank-infra stays out of the image.
+# ──────────────────────────────────────────────────────────────────────
+FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS platform-versions-collector
+COPY . /repo
+RUN set -e; \
+    mkdir -p /pv-src/openbank-infra/aws/envs/sandbox-substrate /pv-src/openbank-infra/aws/finops; \
+    cp /repo/openbank-infra/aws/envs/sandbox-substrate/variables.tf /repo/openbank-infra/aws/envs/sandbox-substrate/main.tf /pv-src/openbank-infra/aws/envs/sandbox-substrate/; \
+    cp /repo/openbank-infra/aws/finops/eks-version-lifecycle.json /pv-src/openbank-infra/aws/finops/; \
+    cd /repo && find openbank-infra/gitops -name '*.yaml' | while read -r f; do mkdir -p "/pv-src/$(dirname "$f")"; cp "$f" "/pv-src/$f"; done; \
+    test -s /pv-src/openbank-infra/gitops/components/kafka/kafka.yaml
+
 FROM --platform=$BUILDPLATFORM node:26-alpine@sha256:725aeba2364a9b16beae49e180d83bd597dbd0b15c47f1f28875c290bfd255b9 AS deps
 WORKDIR /app
 COPY openbank-admin-ui/package.json openbank-admin-ui/package-lock.json* ./
@@ -237,12 +251,9 @@ ENV NEXT_PUBLIC_BUILD_VERSION=$BUILD_VERSION \
 COPY --from=deps /app/node_modules ./node_modules
 COPY openbank-admin-ui/ ./
 COPY .github/gates/gates.yaml /.github/gates/gates.yaml
-# platform-versions.json is PARSED by `npm run build` (prebuild) from the infra sources of truth, at
-# their repo-relative paths, so the UI can never show a hand-typed Kubernetes/EKS/Loki version.
-COPY openbank-infra/aws/envs/sandbox-substrate/variables.tf /openbank-infra/aws/envs/sandbox-substrate/variables.tf
-COPY openbank-infra/aws/envs/sandbox-substrate/main.tf /openbank-infra/aws/envs/sandbox-substrate/main.tf
-COPY openbank-infra/gitops/apps/loki.yaml /openbank-infra/gitops/apps/loki.yaml
-COPY openbank-infra/aws/finops/eks-version-lifecycle.json /openbank-infra/aws/finops/eks-version-lifecycle.json
+# platform-versions.json is PARSED by `npm run build` (prebuild) from the infra sources of truth, staged
+# at their repo-relative paths, so the UI can never show a hand-typed Kubernetes/EKS/Loki/Postgres version.
+COPY --from=platform-versions-collector /pv-src/ /
 # The origination Kotlin, at the repo-relative path the generator expects (#3283). It resolves
 # against --repo, which defaults to the parent of the admin-ui directory — here, /.
 COPY --from=origination-collector /origination-src/openbank-libs-lending /openbank-libs-lending

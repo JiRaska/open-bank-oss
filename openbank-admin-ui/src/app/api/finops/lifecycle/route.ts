@@ -3,7 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 import { NextResponse } from 'next/server'
-import { platformVersions } from '@/lib/platform-versions'
+import { componentVersion, platformVersions } from '@/lib/platform-versions'
 
 export const dynamic = 'force-dynamic'
 
@@ -86,32 +86,32 @@ export async function GET() {
     },
     {
       name: 'PostgreSQL', kind: 'database',
-      version: process.env.POSTGRES_VERSION ?? '16.4',
+      version: componentVersion('postgres'),
       tier: 'supported',
       managedBy: 'CloudNativePG (in-cluster operator)',
-      // PostgreSQL 16 community EOL (postgresql.org/support/versioning)
-      standardEnd: '2028-11-09',
-      daysRemaining: daysBetween(now, new Date('2028-11-09')),
+      // No pinned source for a community EOL date: shown as rolling, never a typed date.
+      standardEnd: null,
+      daysRemaining: null,
     },
     {
       name: 'Apache Kafka', kind: 'messaging',
-      version: process.env.KAFKA_VERSION ?? '4.2.0',
+      version: componentVersion('kafka'),
       tier: 'rolling',
-      managedBy: 'Strimzi 1.2.0 (in-cluster operator)',
+      managedBy: `Strimzi ${componentVersion('strimziOperator')} (in-cluster operator)`,
       standardEnd: null,
       daysRemaining: null,
     },
     {
       name: 'Apicurio Registry', kind: 'messaging',
-      version: process.env.APICURIO_VERSION ?? '2.6.2',
+      version: componentVersion('apicurio'),
       tier: 'rolling',
       managedBy: 'Schema registry (in-cluster)',
       standardEnd: null,
       daysRemaining: null,
     },
     {
-      name: 'Redis', kind: 'cache',
-      version: process.env.REDIS_VERSION ?? '7.4.9',
+      name: 'Valkey (Redis-compatible)', kind: 'cache',
+      version: componentVersion('valkey'),
       tier: 'rolling',
       managedBy: 'Self-hosted (in-cluster)',
       standardEnd: null,
