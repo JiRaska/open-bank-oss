@@ -11,6 +11,7 @@ import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.eclipse.microprofile.config.ConfigProvider
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.Test
 import org.yaml.snakeyaml.Yaml
@@ -61,6 +62,18 @@ class AccountListenerAuthIT {
         assertThat(response.statusCode()).isEqualTo(200)
     }
 
+    @Test
+    fun `management health remains available without a client certificate`() {
+        val port = ConfigProvider.getConfig().getValue("quarkus.management.test-port", Int::class.javaObjectType)
+        val request = HttpRequest.newBuilder(URI.create("http://localhost:$port/q/health/ready"))
+            .timeout(Duration.ofSeconds(10))
+            .GET()
+            .build()
+        val response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString())
+        assertThat(response.statusCode()).isEqualTo(200)
+        assertThat(response.body()).contains("UP")
+    }
+
     private fun send(withCertificate: Boolean, bearer: String?): HttpResponse<String> {
         val request = HttpRequest.newBuilder(
             URI.create("https://localhost:$httpsPort/api/v1/accounts/search?q=abc"),
@@ -78,7 +91,10 @@ class AccountListenerAuthIT {
             listOf(QuarkusTestProfile.TestResourceEntry(ListenerMaterial::class.java))
 
         override fun getConfigOverrides(): Map<String, String> = productionListenerConfig() +
-            mapOf("quarkus.oidc.enabled" to "true")
+            mapOf(
+                "quarkus.oidc.enabled" to "true",
+                "quarkus.management.enabled" to "true",
+            )
 
         private fun productionListenerConfig(): Map<String, String> {
             val source = generateSequence(Path.of("").toAbsolutePath()) { it.parent }
