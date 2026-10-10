@@ -17,6 +17,7 @@ import com.openbank.pensionfund.application.usecase.PositionClassificationServic
 import com.openbank.pensionfund.application.usecase.PositionLine
 import com.openbank.pensionfund.application.usecase.UnitRegisterService
 import com.openbank.pensionfund.domain.model.ClassificationCorrectionStatus
+import com.openbank.pensionfund.domain.model.ClassificationTarget
 import com.openbank.pensionfund.domain.model.FourEyesViolationException
 import com.openbank.pensionfund.domain.model.InstrumentClass
 import com.openbank.pensionfund.domain.model.OrderType
@@ -41,6 +42,14 @@ import java.util.UUID
  * four-eyes correction route is the only way to make it known.
  */
 class FundLossAndClassificationTest {
+
+    @Test
+    fun `correction targets cover known classes and never permit unclassified`() {
+        assertThat(ClassificationTarget.entries.map { it.instrumentClass() })
+            .containsExactlyElementsOf(InstrumentClass.entries.filter { it != InstrumentClass.UNCLASSIFIED })
+        assertThatThrownBy { ClassificationTarget.valueOf("UNCLASSIFIED") }
+            .isInstanceOf(IllegalArgumentException::class.java)
+    }
 
     private class MutableClock(var now: Instant) : Clock() {
         override fun getZone(): ZoneId = ZoneOffset.UTC
