@@ -32,7 +32,7 @@ import org.junit.jupiter.api.extension.ExtendWith
  *
  * Replays AS tax-reporting's own client (`service-account-openbank-tax-reporting`, ROLE_API), the
  * one machine identity treasury_rest_ext.rego admits to `treasury.portfolio.read`. The 200
- * interaction (and the 409 one once the consumer records it) runs here; the 401 interaction is replayed by
+ * interaction and the 409 one (no snapshot for the date) run here; the 401 interaction is replayed by
  * [TreasuryNegativeAuthProviderVerificationTest], which boots without an identity.
  */
 @QuarkusTest
