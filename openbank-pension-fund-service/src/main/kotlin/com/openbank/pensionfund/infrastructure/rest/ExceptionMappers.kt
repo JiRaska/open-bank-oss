@@ -5,6 +5,7 @@
 package com.openbank.pensionfund.infrastructure.rest
 
 import com.openbank.pensionfund.application.port.NotFoundException
+import com.openbank.pensionfund.application.port.PensionFundMetrics
 import com.openbank.pensionfund.domain.model.FourEyesViolationException
 import jakarta.ws.rs.core.Response
 import org.jboss.resteasy.reactive.server.ServerExceptionMapper
@@ -14,7 +15,7 @@ import org.jboss.resteasy.reactive.server.ServerExceptionMapper
  * libs-runtime and must not be re-mapped here (#526); `IllegalStateException` is a rule broken by
  * the current state — a closed fund, a NAV already published — and is a 409.
  */
-class ExceptionMappers {
+class ExceptionMappers(private val metrics: PensionFundMetrics) {
 
     @ServerExceptionMapper
     fun notFound(e: NotFoundException): Response =
@@ -26,22 +27,26 @@ class ExceptionMappers {
 
     /** A concurrent writer changed a holding between our read and our write; nothing was applied. */
     @ServerExceptionMapper
-    fun staleHolding(e: jakarta.persistence.OptimisticLockException): Response =
-        Response.status(Response.Status.CONFLICT).entity(
+    fun staleHolding(e: jakarta.persistence.OptimisticLockException): Response {
+        metrics.optimisticLockConflict(VERSIONED_AGGREGATE)
+        return Response.status(Response.Status.CONFLICT).entity(
             mapOf(
                 "error" to "concurrent update, retry",
                 "cause" to e.javaClass.simpleName,
             ),
         ).build()
+    }
 
     @ServerExceptionMapper
-    fun staleHoldingHibernate(e: org.hibernate.StaleStateException): Response =
-        Response.status(Response.Status.CONFLICT).entity(
+    fun staleHoldingHibernate(e: org.hibernate.StaleStateException): Response {
+        metrics.optimisticLockConflict(VERSIONED_AGGREGATE)
+        return Response.status(Response.Status.CONFLICT).entity(
             mapOf(
                 "error" to "concurrent update, retry",
                 "cause" to e.javaClass.simpleName,
             ),
         ).build()
+    }
 
     /** The maker tried to be their own checker: forbidden for this caller, whatever their role. */
     /** No published NAV backs the period yet: not an error in the request, and never a report of zeroes. */
@@ -52,4 +57,9 @@ class ExceptionMappers {
     @ServerExceptionMapper
     fun fourEyes(e: FourEyesViolationException): Response =
         Response.status(Response.Status.FORBIDDEN).entity(mapOf("error" to e.message)).build()
+
+    private companion object {
+        /** The only entity carrying a JPA @Version: a unit holding (Entities.kt). */
+        const val VERSIONED_AGGREGATE = "unit_holding"
+    }
 }
