@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: card-processing-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "ec59f5e6b82be152"
+    openbank.tech/policy-checksum: "584a876b4b7bcfdf"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1662,6 +1662,9 @@ data:
       operator_read_any_excluded_actions:
         - pension-fund.holding.read   # participants' unit holdings and orders (ADR-0334 S4, #12350):
                                       # staff + service-account-openbank-pension only
+        - tax.filing.read             # §38d withholding returns and the per-remittance audit trail behind
+                                      # them (#5760): real staff only via tax_reporting_rest_ext.rego; no
+                                      # service-account reads them through operator-read-any
       role_action_matrix:
         ROLE_OPERATOR:
           grant:

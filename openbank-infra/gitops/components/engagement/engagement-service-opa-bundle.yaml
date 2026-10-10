@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: engagement-service
     app.kubernetes.io/part-of: engagement
   annotations:
-    openbank.tech/policy-checksum: "8b2e8ff3cc349a07"
+    openbank.tech/policy-checksum: "ac64b21ed6170492"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1200,6 +1200,9 @@ data:
       operator_read_any_excluded_actions:
         - pension-fund.holding.read   # participants' unit holdings and orders (ADR-0334 S4, #12350):
                                       # staff + service-account-openbank-pension only
+        - tax.filing.read             # §38d withholding returns and the per-remittance audit trail behind
+                                      # them (#5760): real staff only via tax_reporting_rest_ext.rego; no
+                                      # service-account reads them through operator-read-any
       role_action_matrix:
         ROLE_OPERATOR:
           grant:
