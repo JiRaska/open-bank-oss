@@ -126,6 +126,33 @@ class AdminUiImageInputsTest(unittest.TestCase):
                                       "attacker.invalid/openbank-admin-ui", "sandbox-aaaaaaaa")
                 calls.assert_not_called()
 
+    def test_image_readback_targets_validated_registry(self):
+        account = "1" * 12  # synthetic account, never a live registry
+        region = "test-1"
+        registry = f"{account}.dkr.ecr.{region}.amazonaws.com"
+        calls = []
+
+        def command(*argv):
+            calls.append(argv)
+            if argv[:2] == ("git", "-C") and "rev-parse" in argv:
+                return "a" * 40
+            if argv[:2] == ("git", "-C") and "merge-base" in argv:
+                return ""
+            if argv[:3] == ("aws", "ecr", "describe-images"):
+                raise RuntimeError("stop before external registry access")
+            raise AssertionError(f"unexpected command: {argv}")
+
+        with (
+            patch.dict("os.environ", {"ADMIN_UI_IMAGE_VERIFY_REGISTRY": registry}, clear=True),
+            patch.object(verify_mod, "run", side_effect=command),
+            self.assertRaisesRegex(RuntimeError, "stop before external registry"),
+        ):
+            verify_mod.verify(Path("."), "JiRaska/open-bank-oss",
+                              f"{registry}/openbank-admin-ui", "sandbox-aaaaaaaa")
+        readback = calls[-1]
+        self.assertEqual(readback[readback.index("--registry-id") + 1], account)
+        self.assertEqual(readback[readback.index("--region") + 1], region)
+
 
 if __name__ == "__main__":
     unittest.main()

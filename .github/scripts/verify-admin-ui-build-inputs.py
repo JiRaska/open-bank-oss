@@ -13,6 +13,9 @@ from pathlib import Path
 
 TAG = re.compile(r"sandbox-([0-9a-f]{8,40})(?:-run[0-9]+)?")
 DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
+ECR_REGISTRY = re.compile(
+    r"(?P<account>[0-9]{12})\.dkr\.ecr\.(?P<region>[a-z0-9-]+)\.amazonaws\.com(?:\.cn)?"
+)
 
 
 def validate(record: dict, manifest: bytes, image: str, tag: str) -> str:
@@ -64,7 +67,8 @@ def attestation_matches(record: dict, verified: list[dict]) -> bool:
 
 def verify(root: Path, repo: str, image: str, tag: str) -> None:
     trusted_registry = os.environ.get("ADMIN_UI_IMAGE_VERIFY_REGISTRY", "")
-    if not re.fullmatch(r"[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com(?:\.cn)?", trusted_registry):
+    registry_match = ECR_REGISTRY.fullmatch(trusted_registry)
+    if not registry_match:
         raise ValueError("trusted Admin UI registry is unavailable or invalid")
     if image != f"{trusted_registry}/openbank-admin-ui":
         raise ValueError("Admin UI image is outside the trusted registry and repository")
@@ -75,12 +79,14 @@ def verify(root: Path, repo: str, image: str, tag: str) -> None:
         raise ValueError("tag source is ambiguous or unavailable")
     run("git", "-C", str(root), "merge-base", "--is-ancestor", source, "HEAD")
     registry, repository = image.split("/", 1)
-    tag_digest = run("aws", "ecr", "describe-images", "--repository-name", repository,
+    tag_digest = run("aws", "ecr", "describe-images",
+                     "--registry-id", registry_match["account"], "--region", registry_match["region"],
+                     "--repository-name", repository,
                      "--image-ids", f"imageTag={tag}", "--query",
                      "imageDetails[0].imageDigest", "--output", "text")
     if not DIGEST.fullmatch(tag_digest):
         raise ValueError("registry did not return an image digest")
-    password = run("aws", "ecr", "get-login-password")
+    password = run("aws", "ecr", "get-login-password", "--region", registry_match["region"])
     subprocess.run(["docker", "login", "--username", "AWS", "--password-stdin", registry],
                    input=password, text=True, check=True, capture_output=True)
     verified = json.loads(run("gh", "attestation", "verify", f"oci://{image}@{tag_digest}", "--repo", repo,
