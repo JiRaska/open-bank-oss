@@ -123,6 +123,15 @@ quarkus:
       # still baked into the image; `test` and `dev` simply never see it.
       ssl:
         client-auth: required
+      # A trusted client certificate authenticates the transport, not the identity used for
+      # SCA business authorization. Require OIDC bearer identity for every business API route
+      # on both listeners; the mTLS handshake remains required on HTTPS (#12511).
+      auth:
+        permission:
+          bearer-only:
+            paths: /api/*
+            policy: permit
+            auth-mechanism: bearer
       # Keep the plain-HTTP port. With client-auth REQUIRED, Quarkus defaults
       # `insecure-requests` to `disabled` and drops the HTTP listener entirely, so the
       # readiness probe and every in-cluster plaintext caller get `connection refused`.
