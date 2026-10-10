@@ -41,7 +41,7 @@ data class AnnualStatementResponse(
  * mirrors; insert-once per (contract, year), and the route also requires an `Idempotency-Key`.
  */
 @Tag(name = "Pension funding operations")
-@Path("/api/v1/pension/funding/operations/contracts/{contractId}/annual-statements/{year}")
+@Path("/api/v2/pension/funding/operations/contracts/{contractId}/annual-statements/{year}")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)

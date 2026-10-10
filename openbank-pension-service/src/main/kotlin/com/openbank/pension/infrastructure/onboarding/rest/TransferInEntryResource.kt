@@ -24,10 +24,10 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag
 /**
  * The route the customer edge uses to start a transfer-in (ADR-0334 S2). It is the onboarding
  * start with `kind = TRANSFER_IN` — same eligibility, KYC reuse, questionnaire, KID and SCA steps,
- * continued on `/api/v1/pension/onboarding/applications/{id}/...` — so there is one flow, not two.
+ * continued on `/api/v2/pension/onboarding/applications/{id}/...` — so there is one flow, not two.
  */
 @Tag(name = "Pension onboarding", description = "Digital onboarding of a new pension contract or a transfer-in")
-@Path("/api/v1/pension/contracts/transfers-in")
+@Path("/api/v2/pension/contracts/transfers-in")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @RolesAllowed(Roles.API)

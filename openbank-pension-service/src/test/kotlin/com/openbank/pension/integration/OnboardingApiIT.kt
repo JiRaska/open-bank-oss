@@ -8,6 +8,7 @@ import com.openbank.pension.application.port.out.ActivationOutcome
 import com.openbank.pension.application.port.out.OnboardingActivationPort
 import com.openbank.pension.infrastructure.onboarding.temporal.onWorker
 import com.openbank.pension.it.PostgresTestResource
+import com.openbank.pension.testsupport.ProviderFixtures
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
@@ -31,8 +32,8 @@ import java.util.UUID
 @QuarkusTestResource(PostgresTestResource::class)
 class OnboardingApiIT {
 
-    private val apps = "/api/v1/pension/onboarding/applications"
-    private val transfers = "/api/v1/pension/transfers"
+    private val apps = "/api/v2/pension/onboarding/applications"
+    private val transfers = "/api/v2/pension/transfers"
     private val party: UUID = UUID.randomUUID()
 
     private fun startBody(kind: String = "NEW_CONTRACT", extra: String = "") = """
@@ -40,7 +41,7 @@ class OnboardingApiIT {
           "kind": "$kind",
           "productLine": "DPS",
           "jurisdiction": "CZ",
-          "providerEntityId": "${UUID.randomUUID()}",
+          "providerEntityId": "${ProviderFixtures.ID}",
           "providerType": "PENSION_COMPANY",
           "birthDate": "1990-05-05",
           "residencyCountry": "CZ",
@@ -80,6 +81,16 @@ class OnboardingApiIT {
             """{"documentId":"$doc"}""",
         ).statusCode(200).body("status", equalTo("KID_ACCEPTED"))
         return id
+    }
+
+    @Test
+    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    fun `creation for another provider is a bad request`() {
+        val body = startBody().replace(
+            ProviderFixtures.ID.toString(),
+            UUID.randomUUID().toString(),
+        )
+        call("POST", apps, body).statusCode(400)
     }
 
     @Test
@@ -131,10 +142,10 @@ class OnboardingApiIT {
     @Test
     @TestSecurity(user = "edge", roles = ["ROLE_API"])
     fun `the customer edge cannot reach operator or provider routes`() {
-        call("GET", "/api/v1/pension/operator/onboarding/applications").statusCode(403)
+        call("GET", "/api/v2/pension/operator/onboarding/applications").statusCode(403)
         call(
             "POST",
-            "/api/v1/pension/provider/transfers/out",
+            "/api/v2/pension/provider/transfers/out",
             """{"contractId":"${UUID.randomUUID()}","receivingProviderId":"P2","receivingProviderName":"Other","receivingContractNumber":"C-1"}""",
         ).statusCode(403)
     }
@@ -149,8 +160,8 @@ class OnboardingApiIT {
     @Test
     @TestSecurity(user = "operator", roles = ["ROLE_OPERATOR"])
     fun `operators list applications and transfers but cannot use the client routes`() {
-        given().`when`().get("/api/v1/pension/operator/onboarding/applications?limit=5").then().statusCode(200)
-        given().`when`().get("/api/v1/pension/operator/transfers?status=COMPLETED").then().statusCode(200)
+        given().`when`().get("/api/v2/pension/operator/onboarding/applications?limit=5").then().statusCode(200)
+        given().`when`().get("/api/v2/pension/operator/transfers?status=COMPLETED").then().statusCode(200)
         call("POST", apps, startBody()).statusCode(403)
     }
 
@@ -191,9 +202,9 @@ class OnboardingApiIT {
     @TestSecurity(user = "edge", roles = ["ROLE_API"])
     fun `the edge's transfer-in route starts a TRANSFER_IN application`() {
         val ceding = """, "transferIn": {"providerId":"P1","providerName":"Ceding","contractNumber":"OLD-2"}"""
-        call("POST", "/api/v1/pension/contracts/transfers-in", startBody("NEW_CONTRACT", ceding)).statusCode(201)
+        call("POST", "/api/v2/pension/contracts/transfers-in", startBody("NEW_CONTRACT", ceding)).statusCode(201)
             .body("kind", equalTo("TRANSFER_IN")).body("status", equalTo("STARTED"))
-        call("POST", "/api/v1/pension/contracts/transfers-in", startBody()).statusCode(400)
+        call("POST", "/api/v2/pension/contracts/transfers-in", startBody()).statusCode(400)
     }
 
     @Inject

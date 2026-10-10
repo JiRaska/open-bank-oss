@@ -30,11 +30,21 @@ packs are code-reviewed data baked into the image, not runtime input).
 - Every route is `@RolesAllowed(API, OPERATOR, ADMIN)` behind Keycloak OIDC; there is no
   anonymous surface.
 - `pension_rest_ext.rego` grants the participant actions (`create`, `submit`, `activate`,
-  `strategy`, `suspend`, `resume`, `terminate`, `read`) to `service-account-openbank-edge` only,
+  `strategy`, `suspend`, `resume`, `terminate`, `inspect`) to `service-account-openbank-edge` only,
   keyed on `principal.id`, and grants real staff (`HUMAN`, not `service-account-*`) **read only**.
   No action is placed in `rules.yaml: authz.role_action_matrix`, because a matrix line is a grant
   to every service-account holding the role and cannot be vetoed (#3765/#3734).
 - `AUTHZ_ENFORCE=true` from the first rollout. Policy tests carry a must-deny for every allow.
+- **No pension action ends in `.read` or `.list`.** Base `rest.rego` grants every such action to
+  any HUMAN-classified principal holding `ROLE_OPERATOR`/`ROLE_ADMIN` (`operator-read-any`) or
+  `ROLE_COMPLIANCE` (`compliance-read-any`), and the shared M2M account
+  `service-account-openbank-services` is classified HUMAN and holds those roles in at least one
+  realm. A per-service rule cannot veto a base allow, so the reads are named `*.inspect`
+  (`pension.contract.inspect`, `.exit.inspect`, `.funding.inspect`, `.death.inspect`,
+  `.onboarding.inspect`, `.transfer.inspect`, `.operator.inspect`) and reach only the edge and real
+  staff through the narrow rules. Measured with `opa eval` on the bundle: before the rename the
+  shared account was allowed all seven reads, after it none. `pension_rest_ext_test.rego` carries
+  a must-deny per action for that account with each of the three roles.
 
 ## 4. STRIDE
 
@@ -65,10 +75,11 @@ order mis-states a participant's savings.
 
 **Authorization on the fund side:** `pension_fund_rest_ext.rego` (reason
 `service-pension-unit-register`) admits that one principal id, and only with `ROLE_API`, to
-`pension-fund.holding.read`, `pension-fund.order.place` and the reference reads `fund.read`,
+`pension-fund.holding.inspect`, `pension-fund.order.place` and the reference reads `fund.read`,
 `strategy.read`, `nav.read` — never NAV calculation/approval, fund or strategy administration.
-Every staff write excludes `service-account-*` principals, and `holding.read` is excluded from
-base `operator-read-any`, so the shared M2M account (`ROLE_OPERATOR`) is denied. Policy tests:
+Every staff write excludes `service-account-*` principals. The non-read `holding.inspect` action
+matches neither base `operator-read-any` nor `compliance-read-any`, so the shared M2M account
+(`ROLE_OPERATOR` and `ROLE_COMPLIANCE`) is denied. Policy tests:
 `pension_fund_rest_ext_test.rego` (`test_pension_service_places_orders_but_cannot_administer`).
 
 | Threat | Vector | Mitigation |
@@ -77,7 +88,7 @@ base `operator-read-any`, so the shared M2M account (`ROLE_OPERATOR`) is denied.
 | **Spoofing / IDOR** | A request carries a `contractId` the participant does not own | The fund side cannot judge ownership — it trusts pension-service for it. pension-service must only send a `contractId` it has resolved for the authenticated participant (the 404-confinement in §4, `PensionContractApiIT`); the port must never forward a client-supplied id unchecked |
 | **Tampering / replay** | A retried or replayed order is executed twice | `Idempotency-Key` is required on `POST /api/v1/contracts/{contractId}/orders` (`ContractUnitResource`); `uq_unit_orders_idempotency UNIQUE (contract_id, idempotency_key)` (`V1__init_pension_fund.sql`); reusing a key for a different instruction is rejected (`UnitRegisterService`). The adapter must derive the key deterministically from the pension-side operation, not mint one per attempt |
 | **Tampering** | Order amount or fund altered or out of range | Amounts normalised to money precision server-side (`Precision::money`); `fundId`/`type` required; prices come from the fund side's own published NAV, never from the caller |
-| **Information disclosure** | Holdings read beyond the participant's contract | Same ownership dependency as IDOR above; holdings excluded from `operator-read-any` |
+| **Information disclosure** | Holdings read beyond the participant's contract | Same ownership dependency as IDOR above; the non-read holdings action avoids both generic staff-read grants |
 | **Denial of service** | pension-service floods the fund API, or a slow fund API stalls pension-service | Fund side: 1 MB body limit and 100-concurrent rate limit (`application.yaml`). Client side: the adapter must carry timeouts and must not retry an order without the same idempotency key |
 | **Elevation of privilege** | The pension client is used to approve a NAV or administer a fund | Those actions are outside the reason's action set and are staff-only with `service-account-*` excluded |
 
@@ -183,9 +194,25 @@ not reversed automatically.
 
 ## 6. Change log
 
+- 2026-10-10 — §3: pension reads renamed `*.read` → `*.inspect` so the shared M2M account no longer reaches them through base `operator-read-any`/`compliance-read-any` (#12371).
 - 2026-10-10 — §4a: pension → pension-fund trust boundary (fund-administration port, #12355).
 - 2026-10-09 — initial model with the S1 bootstrap (ADR-0334, #12350).
 - 2026-10-09 — S5 exits: termination, payout, death claims (§4b).
 - 2026-10-09 — S8 integration: fund REST client identity, onboarding-only activation, account-bound SCA, held account change, optimistic locking, POST replay (§4c).
 - 2026-10-09 — annuity partner integration: registry with four-eyes activation, adapter SPI, SCA-bound selection, premium/compensation flow (§4d, #12383).
 - 2026-10-10 — network reach of the unit register: only `pension` (plus the staff BFF) is admitted; customer-edge's direct route removed (§4b, #12359).
+
+## Creation and strategy decision controls
+
+- Draft and onboarding creation require the configured provider legal-entity UUID before
+  application work. A draft idempotency replay must also match that provider. Production requires
+  explicit configuration. Development, tests and sandbox use a synthetic fixture identity without
+  requiring production ownership evidence. This invariant does not establish tenant authorization
+  or ownership of existing data. Full production isolation and its launch evidence are tracked
+  in #12472.
+- Fund contribution routing selects a strategy effective at the date supplied by the injected
+  clock; no effective strategy refuses placement. Domain and actual-adapter tests cover the
+  effective-date boundary. Durable decision snapshots across retries remain tracked in #12474.
+- Before real-money production launch, reconcile the configured provider with existing data
+  and prove identity, database and workflow isolation (#12472). A configuration edit does not
+  relabel existing data; synthetic development fixtures are not production ownership evidence.

@@ -186,7 +186,7 @@ class PensionFundPactConsumerTest {
         .uponReceiving("POST a SUBSCRIBE unit order for a pension contract with an Idempotency-Key")
         .path("/api/v1/contracts/$ORDER_CONTRACT/orders")
         .method("POST")
-        .matchHeader("Idempotency-Key", "[0-9a-f]{64}", SUBSCRIBE_KEY)
+        .matchHeader("Idempotency-Key", "[0-9a-f]{64}", "a".repeat(64))
         .matchHeader("Content-Type", "application/json.*", "application/json")
         .body(
             newJsonBody { o ->
@@ -212,7 +212,7 @@ class PensionFundPactConsumerTest {
         .uponReceiving("POST a REDEEM unit order in units for a pension contract with an Idempotency-Key")
         .path("/api/v1/contracts/$PRICED_CONTRACT/orders")
         .method("POST")
-        .matchHeader("Idempotency-Key", "[0-9a-f]{64}", REDEEM_KEY)
+        .matchHeader("Idempotency-Key", "[0-9a-f]{64}", "b".repeat(64))
         .matchHeader("Content-Type", "application/json.*", "application/json")
         .body(
             newJsonBody { o ->
@@ -238,7 +238,7 @@ class PensionFundPactConsumerTest {
         .uponReceiving("POST a pension unit order with no M2M identity")
         .path("/api/v1/contracts/$ORDER_CONTRACT/orders")
         .method("POST")
-        .matchHeader("Idempotency-Key", "[0-9a-f]{64}", SUBSCRIBE_KEY)
+        .matchHeader("Idempotency-Key", "[0-9a-f]{64}", "c".repeat(64))
         .matchHeader("Content-Type", "application/json.*", "application/json")
         .body(
             newJsonBody { o ->

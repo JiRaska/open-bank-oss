@@ -140,6 +140,9 @@ openbank:
     server-url: ${OPENBANK_TEMPORAL_SERVER_URL:localhost:7233}
     namespace: ${OPENBANK_TEMPORAL_NAMESPACE:openbank-pension}
   pension:
+    # Required in production; dev/test profiles use a synthetic fixture provider.
+    # This only constrains creation, not authorization or existing-data isolation.
+    provider-entity-id: ${OPENBANK_PENSION_PROVIDER_ENTITY_ID}
     worker:
       enabled: ${OPENBANK_PENSION_WORKER_ENABLED:true}
     onboarding:
@@ -196,7 +199,7 @@ openbank:
     enabled: true
     max-concurrent-requests: 100
   api:
-    version: "1"
+    version: "2"
   build:
     time: "${BUILD_TIME:unknown}"
   git:
@@ -246,6 +249,8 @@ authz:
 "%dev":
   openbank:
     pension:
+      # Synthetic development identity, shared with test and sandbox fixtures.
+      provider-entity-id: ${OPENBANK_PENSION_PROVIDER_ENTITY_ID:00000000-0000-4000-8000-000000000001}
       stub-integrations:
         enabled: true
       worker:
@@ -280,6 +285,7 @@ authz:
 "%test":
   openbank:
     pension:
+      provider-entity-id: "00000000-0000-4000-8000-000000000001"
       # No Temporal frontend in @QuarkusTest: the tests register their own in-process worker.
       worker:
         enabled: false

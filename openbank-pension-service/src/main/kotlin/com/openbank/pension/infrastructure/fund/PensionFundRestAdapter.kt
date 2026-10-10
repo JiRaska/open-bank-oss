@@ -189,7 +189,7 @@ class PensionFundRestAdapter : FundAdministrationPort {
 
                 override suspend fun transactions(contractId: UUID) = client.transactions(contractId)
             },
-            { id -> contracts.findById(id)?.currentStrategy?.strategyCode },
+            { id -> contracts.findById(id)?.strategyOn(LocalDate.now(clock))?.strategyCode },
             clock,
         )
     }

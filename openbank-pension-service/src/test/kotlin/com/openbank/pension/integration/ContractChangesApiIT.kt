@@ -58,7 +58,7 @@ class ContractChangesApiIT {
     lateinit var claimRepo: com.openbank.pension.application.exit.DeathClaimRepository
 
     private val party: UUID = UUID.randomUUID()
-    private val contracts = "/api/v1/pension/contracts"
+    private val contracts = "/api/v2/pension/contracts"
 
     private fun <T> onVertx(block: suspend () -> T): T =
         VertxContextSupport.subscribeAndAwait { CoroutineScope(Dispatchers.Unconfined).async { block() }.asUni() }
@@ -131,9 +131,9 @@ class ContractChangesApiIT {
     @TestSecurity(user = "alice", roles = ["ROLE_OPERATOR"])
     fun `operator reads history but cannot change`() {
         val id = active()
-        given().get("/api/v1/pension/operator/contracts/$id/beneficiaries").then().statusCode(200)
+        given().get("/api/v2/pension/operator/contracts/$id/beneficiaries").then().statusCode(200)
             .body("current", hasSize<Any>(2))
-        given().get("/api/v1/pension/operator/contracts/$id/contribution-schedule").then().statusCode(200)
+        given().get("/api/v2/pension/operator/contracts/$id/contribution-schedule").then().statusCode(200)
         given().contentType("application/json").header("Idempotency-Key", "k")
             .body("""{"beneficiaries":[]}""").post("$contracts/$id/beneficiaries/changes").then().statusCode(400)
     }

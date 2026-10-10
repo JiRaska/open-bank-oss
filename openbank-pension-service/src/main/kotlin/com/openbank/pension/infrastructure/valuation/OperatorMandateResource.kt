@@ -32,7 +32,7 @@ import java.util.UUID
  * edge), and a request carrying a participant header is refused here — participants see their
  * mandates through their own contract, not through the operator list.
  */
-@Path("/api/v1/pension/operator/mandates")
+@Path("/api/v2/pension/operator/mandates")
 @Produces(MediaType.APPLICATION_JSON)
 @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, Roles.COMPLIANCE)
 class OperatorMandateResource {

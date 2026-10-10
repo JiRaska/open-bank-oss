@@ -36,12 +36,12 @@ import java.util.UUID
  * service's OWN client token). customer-edge talks only to pension-service; it never reaches the
  * fund service.
  *
- * Authorization is `pension.contract.read` (edge for the participant, real staff as readers);
+ * Authorization is `pension.contract.inspect` (edge for the participant, real staff as readers);
  * ownership is [ContractAccessGuard] + the use case's visibility check: a foreign contract is 404.
  * `@Path` sits directly above `class` (#3371).
  */
 @Tag(name = "Pension valuation", description = "Holdings at the latest published NAV and unit transactions")
-@Path("/api/v1/pension/contracts/{contractId}")
+@Path("/api/v2/pension/contracts/{contractId}")
 @Produces(MediaType.APPLICATION_JSON)
 @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN, Roles.COMPLIANCE)
 class ContractValuationResource {
@@ -57,7 +57,7 @@ class ContractValuationResource {
     @Operation(
         summary = "Holdings per fund at the latest published NAV, the total when it can be stated, and pending orders",
     )
-    @Authorize(action = "pension.contract.read", resource = "#contractId")
+    @Authorize(action = "pension.contract.inspect", resource = "#contractId")
     suspend fun valuation(
         @PathParam("contractId") contractId: UUID,
         @HeaderParam(ContractAccessGuard.PARTY_HEADER) party: String?,
@@ -66,7 +66,7 @@ class ContractValuationResource {
     @GET
     @Path("/transactions")
     @Operation(summary = "Priced unit transactions of the contract, newest first, paginated")
-    @Authorize(action = "pension.contract.read", resource = "#contractId")
+    @Authorize(action = "pension.contract.inspect", resource = "#contractId")
     suspend fun transactions(
         @PathParam("contractId") contractId: UUID,
         @HeaderParam(ContractAccessGuard.PARTY_HEADER) party: String?,

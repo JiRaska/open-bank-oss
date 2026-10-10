@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: card-processing-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "b75521df44a40373"
+    openbank.tech/policy-checksum: "455dca17a21ce166"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1654,18 +1654,6 @@ data:
       operator_read_any_excluded_actions:
         - pension-fund.holding.read   # participants' unit holdings and orders (ADR-0334 S4, #12350):
                                       # staff + service-account-openbank-pension only
-        # Pension participant data (ADR-0334): contract incl. valuation/transactions and annual
-        # statements, exits/payouts, death claims, contributions/incentives/mandates, onboarding and
-        # assessment, transfers, annuity purchases, operator views. Served only by pension_rest_ext.rego:
-        # human staff (never a service-account-*) and the customer edge relay for the participant.
-        - pension.contract.read
-        - pension.exit.read
-        - pension.death.read
-        - pension.funding.read
-        - pension.onboarding.read
-        - pension.transfer.read
-        - pension.operator.read
-        - pension.annuity.read
       role_action_matrix:
         ROLE_OPERATOR:
           grant:

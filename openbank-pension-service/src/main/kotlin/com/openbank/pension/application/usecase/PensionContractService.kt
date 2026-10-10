@@ -4,6 +4,7 @@
 
 package com.openbank.pension.application.usecase
 
+import com.openbank.pension.application.ProviderBoundary
 import com.openbank.pension.application.exit.ScaOperation
 import com.openbank.pension.application.exit.ScaVerificationPort
 import com.openbank.pension.application.port.`in`.Caller
@@ -41,12 +42,12 @@ class PensionContractService(
     private val suitability: StrategySuitabilityPort,
     /** Document-bound SCA for a strategy change (ADR-0335 `pension-strategy-change:` namespace). */
     private val sca: ScaVerificationPort,
+    private val providerBoundary: ProviderBoundary,
 ) : PensionContractUseCase {
 
     override suspend fun createDraft(command: CreateDraftCommand): PensionContract {
-        command.idempotencyKey?.let { key ->
-            contracts.findByIdempotencyKey(command.participantPartyId, key)?.let { return it }
-        }
+        providerBoundary.requireProvider(command.providerEntityId)
+        replayDraft(command)?.let { return it }
         require(command.beneficiaries.size <= Limits.MAX_BENEFICIARIES) {
             "at most ${Limits.MAX_BENEFICIARIES} beneficiaries"
         }
@@ -100,6 +101,13 @@ class PensionContractService(
             idempotencyKey = command.idempotencyKey,
         )
         return contracts.save(draft)
+    }
+
+    private suspend fun replayDraft(command: CreateDraftCommand): PensionContract? {
+        val key = command.idempotencyKey ?: return null
+        return contracts.findByIdempotencyKey(command.participantPartyId, key)?.also {
+            providerBoundary.requireProvider(it.providerEntityId)
+        }
     }
 
     override suspend fun submit(caller: Caller, id: UUID) =

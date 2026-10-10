@@ -17,6 +17,7 @@ import com.openbank.pension.domain.model.ProductLine
 import com.openbank.pension.domain.pack.ProviderType
 import com.openbank.pension.infrastructure.notification.RecordingParticipantNotifier
 import com.openbank.pension.infrastructure.pack.JurisdictionPackLoader
+import com.openbank.pension.testsupport.ProviderFixtures
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -50,7 +51,15 @@ class PensionContractServiceTest {
     private val suitability = com.openbank.pension.testsupport.RecordingSuitability()
     private val sca = com.openbank.pension.testsupport.RecordingSca()
     private val service =
-        PensionContractService(repo, JurisdictionPackLoader.loadRegistry(), clock, notifier, suitability, sca)
+        PensionContractService(
+            repo,
+            JurisdictionPackLoader.loadRegistry(),
+            clock,
+            notifier,
+            suitability,
+            sca,
+            ProviderFixtures.boundary,
+        )
 
     private fun change(id: UUID, code: String, from: String?, challenge: String? = "sca-${UUID.randomUUID()}") =
         com.openbank.pension.application.port.`in`.ElectStrategyCommand(
@@ -74,7 +83,7 @@ class PensionContractServiceTest {
         participantPartyId = party,
         productLine = line,
         jurisdiction = "CZ",
-        providerEntityId = UUID.randomUUID(),
+        providerEntityId = ProviderFixtures.ID,
         providerType = provider,
         birthDate = LocalDate.parse(birth),
         residencyCountry = "CZ",
@@ -85,6 +94,34 @@ class PensionContractServiceTest {
         beneficiaries = emptyList(),
         idempotencyKey = key,
     )
+
+    @Test
+    fun `another provider is refused before saving or replaying a draft`(): Unit = runBlocking {
+        val original = command(key = "provider-bound-key")
+        val saved = service.createDraft(original)
+        assertThat(service.createDraft(original).id).isEqualTo(saved.id)
+        assertThatThrownBy {
+            runBlocking { service.createDraft(original.copy(providerEntityId = UUID.randomUUID())) }
+        }.isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("configured pension provider")
+        assertThatThrownBy {
+            runBlocking {
+                service.createDraft(original.copy(providerEntityId = UUID.randomUUID(), idempotencyKey = "fresh"))
+            }
+        }.isInstanceOf(IllegalArgumentException::class.java)
+        assertThat(repo.rows.keys).containsExactly(saved.id)
+    }
+
+    @Test
+    fun `a stored draft from another provider is never replayed`(): Unit = runBlocking {
+        val original = command(key = "legacy-provider-key")
+        val saved = service.createDraft(original)
+        repo.rows[saved.id] = saved.copy(providerEntityId = UUID.randomUUID())
+        assertThatThrownBy { runBlocking { service.createDraft(original) } }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("configured pension provider")
+        assertThat(repo.rows).hasSize(1)
+    }
 
     @Test
     fun `a draft pins the pack version in force`(): Unit = runBlocking {

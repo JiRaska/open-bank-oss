@@ -27,8 +27,8 @@ import java.util.UUID
 @QuarkusTestResource(PostgresTestResource::class)
 class FundingApiIT {
 
-    private val funding = "/api/v1/pension/funding/contracts"
-    private val ops = "/api/v1/pension/funding/operations"
+    private val funding = "/api/v2/pension/funding/contracts"
+    private val ops = "/api/v2/pension/funding/operations"
 
     private fun spec(party: UUID?): RequestSpecification = given().contentType("application/json")
         .header("Idempotency-Key", UUID.randomUUID().toString())

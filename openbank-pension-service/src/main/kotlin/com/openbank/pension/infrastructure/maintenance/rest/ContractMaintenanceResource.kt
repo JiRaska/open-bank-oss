@@ -41,7 +41,7 @@ import java.util.UUID
  * `@Path` directly above `class` (#3371); nullable params checked in the body (#3104).
  */
 @Tag(name = "Pension contract changes", description = "Contribution schedule and beneficiary changes, with history")
-@Path("/api/v1/pension/contracts/{contractId}")
+@Path("/api/v2/pension/contracts/{contractId}")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)
@@ -58,7 +58,7 @@ class ContractMaintenanceResource {
     @GET
     @Path("/contribution-schedule")
     @Operation(summary = "Original, in-force and pending contribution schedule with the full change history")
-    @Authorize(action = "pension.contract.read", resource = "#contractId")
+    @Authorize(action = "pension.contract.inspect", resource = "#contractId")
     suspend fun schedule(
         @PathParam("contractId") contractId: UUID,
         @HeaderParam(PARTY_HEADER) party: String?,
@@ -108,7 +108,7 @@ class ContractMaintenanceResource {
     @GET
     @Path("/beneficiaries")
     @Operation(summary = "Current beneficiary designation with the full designation history")
-    @Authorize(action = "pension.contract.read", resource = "#contractId")
+    @Authorize(action = "pension.contract.inspect", resource = "#contractId")
     suspend fun beneficiaries(
         @PathParam("contractId") contractId: UUID,
         @HeaderParam(PARTY_HEADER) party: String?,

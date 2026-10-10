@@ -31,7 +31,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-pension-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "99c3cb3f4c27e8e8"
+        openbank.tech/policy-checksum: "12983ce348db52c7"
       labels:
         app.kubernetes.io/name: pension-service
         app.kubernetes.io/part-of: pension
@@ -60,6 +60,10 @@ spec:
             - name: management
               containerPort: 8090
           env:
+            # DEV-ONLY synthetic legal entity for this sandbox deployment; not production ownership evidence.
+            # Production must supply its assigned provider identity before real-money launch.
+            - name: OPENBANK_PENSION_PROVIDER_ENTITY_ID
+              value: "00000000-0000-4000-8000-000000000001"
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
               value: /mnt/internal-tls/tls.crt
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES

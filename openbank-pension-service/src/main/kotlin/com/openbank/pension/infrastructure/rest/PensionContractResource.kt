@@ -50,7 +50,7 @@ import java.util.UUID
  * refuses a staff write, and OPA grants staff read only).
  */
 @Tag(name = "Pension", description = "Pension contracts, strategy elections and jurisdiction-pack evaluation")
-@Path("/api/v1/pension/contracts")
+@Path("/api/v2/pension/contracts")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)
@@ -104,7 +104,7 @@ class PensionContractResource {
 
     @GET
     @Operation(summary = "The participant's own contracts (edge), or staff: contracts by status, newest first")
-    @Authorize(action = "pension.contract.read")
+    @Authorize(action = "pension.contract.inspect")
     suspend fun list(
         @HeaderParam("X-Customer-Party-Id") party: String?,
         @QueryParam("status") status: ContractStatus?,
@@ -114,7 +114,7 @@ class PensionContractResource {
     @GET
     @Path("/{id}")
     @Operation(summary = "Read one contract with its strategy history")
-    @Authorize(action = "pension.contract.read", resource = "#id")
+    @Authorize(action = "pension.contract.inspect", resource = "#id")
     suspend fun get(@PathParam("id") id: UUID, @HeaderParam("X-Customer-Party-Id") party: String?): ContractResponse =
         ContractResponse.from(contracts.get(access.readerFor(party), id))
 
@@ -203,7 +203,7 @@ class PensionContractResource {
     @POST
     @Path("/{id}/incentive-evaluation")
     @Operation(summary = "Evaluate the pinned pack's incentives for one contribution amount")
-    @Authorize(action = "pension.contract.read", resource = "#id")
+    @Authorize(action = "pension.contract.inspect", resource = "#id")
     suspend fun evaluateIncentives(
         @PathParam("id") id: UUID,
         @HeaderParam("X-Customer-Party-Id") party: String?,

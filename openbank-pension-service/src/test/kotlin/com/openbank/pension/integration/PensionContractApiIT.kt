@@ -6,6 +6,7 @@ package com.openbank.pension.integration
 
 import com.openbank.pension.application.port.out.PensionContractRepository
 import com.openbank.pension.it.PostgresTestResource
+import com.openbank.pension.testsupport.ProviderFixtures
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
@@ -37,14 +38,14 @@ import java.util.UUID
 @QuarkusTestResource(PostgresTestResource::class)
 class PensionContractApiIT {
 
-    private val base = "/api/v1/pension/contracts"
+    private val base = "/api/v2/pension/contracts"
     private val party: UUID = UUID.randomUUID()
 
     private fun createBody(providerType: String = "PENSION_COMPANY") = """
         {
           "productLine": "DPS",
           "jurisdiction": "CZ",
-          "providerEntityId": "${UUID.randomUUID()}",
+          "providerEntityId": "${ProviderFixtures.ID}",
           "providerType": "$providerType",
           "birthDate": "1985-05-05",
           "residencyCountry": "CZ",
@@ -85,6 +86,16 @@ class PensionContractApiIT {
     private fun activateDirectly(id: String) = onVertx {
         val pending = requireNotNull(contracts.findById(UUID.fromString(id)))
         contracts.save(pending.activate(LocalDate.now(), Instant.now()))
+    }
+
+    @Test
+    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    fun `creation for another provider is a bad request`() {
+        val body = createBody().replace(
+            ProviderFixtures.ID.toString(),
+            UUID.randomUUID().toString(),
+        )
+        post(base, body).statusCode(400)
     }
 
     @Test

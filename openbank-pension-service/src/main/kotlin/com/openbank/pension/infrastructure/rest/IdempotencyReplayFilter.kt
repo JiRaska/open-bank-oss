@@ -85,7 +85,7 @@ class IdempotencyReplayFilter {
     }
 
     private companion object {
-        const val API_PREFIX = "/api/v1/pension"
+        const val API_PREFIX = "/api/v2/pension"
         const val PARTY_HEADER = "X-Customer-Party-Id"
         const val REPLAY_HEADER = "Idempotent-Replayed"
         const val SCOPE_PROPERTY = "pension.idempotency.scope"

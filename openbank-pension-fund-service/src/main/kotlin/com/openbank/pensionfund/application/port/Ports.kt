@@ -37,6 +37,9 @@ data class StoreChanges(
 interface PensionFundStore {
     suspend fun commit(changes: StoreChanges)
 
+    /** Atomically reserve available units and persist an outgoing order; replay returns the original. */
+    suspend fun reserveOutgoing(order: UnitOrder): UnitOrder
+
     suspend fun fund(id: UUID): Fund?
     suspend fun funds(): List<Fund>
 

@@ -46,7 +46,7 @@ import java.util.UUID
  * `@Path` directly above `class` (#3371); nullable params checked in the body (#3104).
  */
 @Tag(name = "Pension exits", description = "Early termination, regular payout, partial withdrawal")
-@Path("/api/v1/pension/contracts/{contractId}/exit")
+@Path("/api/v2/pension/contracts/{contractId}/exit")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)
@@ -70,7 +70,7 @@ class PensionExitResource {
     @GET
     @Path("/payout-eligibility")
     @Operation(summary = "Whether the pinned pack's payout conditions are met, and which forms are allowed")
-    @Authorize(action = "pension.exit.read", resource = "#contractId")
+    @Authorize(action = "pension.exit.inspect", resource = "#contractId")
     suspend fun eligibility(@PathParam("contractId") contractId: UUID, @HeaderParam(PARTY_HEADER) party: String?) =
         EligibilityResponse.from(payouts.eligibility(reader(party), contractId))
 
@@ -120,7 +120,7 @@ class PensionExitResource {
     @GET
     @Path("/termination/{noticeId}")
     @Operation(summary = "One termination notice with its binding quote and progress")
-    @Authorize(action = "pension.exit.read", resource = "#contractId")
+    @Authorize(action = "pension.exit.inspect", resource = "#contractId")
     suspend fun getTermination(
         @PathParam("contractId") contractId: UUID,
         @PathParam("noticeId") noticeId: UUID,
@@ -209,7 +209,7 @@ class PensionExitResource {
     @GET
     @Path("/payouts/{payoutId}")
     @Operation(summary = "One payout with its schedule")
-    @Authorize(action = "pension.exit.read", resource = "#contractId")
+    @Authorize(action = "pension.exit.inspect", resource = "#contractId")
     suspend fun getPayout(
         @PathParam("contractId") contractId: UUID,
         @PathParam("payoutId") payoutId: UUID,
@@ -219,7 +219,7 @@ class PensionExitResource {
     @GET
     @Path("/payouts/{payoutId}/statement")
     @Operation(summary = "Payout statement: quoted, paid, withheld, outstanding")
-    @Authorize(action = "pension.exit.read", resource = "#contractId")
+    @Authorize(action = "pension.exit.inspect", resource = "#contractId")
     suspend fun statement(
         @PathParam("contractId") contractId: UUID,
         @PathParam("payoutId") payoutId: UUID,

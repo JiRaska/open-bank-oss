@@ -17,16 +17,16 @@ Dokumentaci služba publikuje na management endpointu `/q/openbank/docs` (Docs-a
 
 | Metoda a cesta | Co dělá |
 |---|---|
-| `POST /api/v1/pension/contracts` | Založí smlouvu ve stavu DRAFT podle dnes platného balíčku |
-| `GET /api/v1/pension/contracts/{id}` | Načte smlouvu včetně historie strategií |
-| `POST /api/v1/pension/contracts/{id}/submit` | DRAFT → PENDING_ACTIVATION |
-| `PUT /api/v1/pension/contracts/{id}/strategy` | Zvolí nebo změní strategii (historie se zachová) |
-| `POST /api/v1/pension/contracts/{id}/suspend` / `resume` | Přeruší / obnoví placení příspěvků |
-| `POST /api/v1/pension/contracts/{id}/incentive-evaluation` | Pobídky fixovaného balíčku pro jeden příspěvek |
-| `GET /api/v1/pension/contracts` | Vlastní smlouvy účastníka (personál: podle stavu) |
-| `POST /api/v1/pension/simulations` | Ilustrativní projekce podle strategie (není poradenství) |
-| `PUT /api/v1/pension/contracts/{contractId}/exit/payouts/{payoutId}/account` | Změna účtu pro výplatu se SCA, odkladem 3 dny a oznámením |
-| `GET /api/v1/pension/operator/payouts`, `GET /api/v1/pension/death-claims` | Fronty pro personál |
+| `POST /api/v2/pension/contracts` | Založí smlouvu ve stavu DRAFT podle dnes platného balíčku |
+| `GET /api/v2/pension/contracts/{id}` | Načte smlouvu včetně historie strategií |
+| `POST /api/v2/pension/contracts/{id}/submit` | DRAFT → PENDING_ACTIVATION |
+| `PUT /api/v2/pension/contracts/{id}/strategy` | Zvolí nebo změní strategii (historie se zachová) |
+| `POST /api/v2/pension/contracts/{id}/suspend` / `resume` | Přeruší / obnoví placení příspěvků |
+| `POST /api/v2/pension/contracts/{id}/incentive-evaluation` | Pobídky fixovaného balíčku pro jeden příspěvek |
+| `GET /api/v2/pension/contracts` | Vlastní smlouvy účastníka (personál: podle stavu) |
+| `POST /api/v2/pension/simulations` | Ilustrativní projekce podle strategie (není poradenství) |
+| `PUT /api/v2/pension/contracts/{contractId}/exit/payouts/{payoutId}/account` | Změna účtu pro výplatu se SCA, odkladem 3 dny a oznámením |
+| `GET /api/v2/pension/operator/payouts`, `GET /api/v2/pension/death-claims` | Fronty pro personál |
 
 Aktivace probíhá jen onboardingovým workflow (podepsaná žádost, lhůta na odstoupení, první
 příspěvek nebo převod); ukončení je tok kotace a podpisu v `/exit`. Každý POST vyžaduje

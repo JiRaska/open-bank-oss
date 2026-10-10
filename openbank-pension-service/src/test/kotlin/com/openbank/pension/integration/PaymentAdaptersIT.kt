@@ -40,7 +40,7 @@ class PaymentAdaptersIT {
     @CdiAny
     lateinit var connector: InMemoryConnector
 
-    private val funding = "/api/v1/pension/funding/contracts"
+    private val funding = "/api/v2/pension/funding/contracts"
 
     private fun spec(party: UUID?): RequestSpecification = given().contentType("application/json")
         .header("Idempotency-Key", UUID.randomUUID().toString())

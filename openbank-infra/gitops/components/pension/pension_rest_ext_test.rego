@@ -68,7 +68,7 @@ test_service_account_may_not_read_the_payout_queue if {
 test_operator_may_read_a_contract if {
 	rest.allow with input as {
 		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
-		"action": "pension.contract.read",
+		"action": "pension.contract.inspect",
 	}
 }
 
@@ -96,7 +96,7 @@ test_other_service_account_may_not_create if {
 test_anonymous_may_not_read if {
 	not rest.allow with input as {
 		"principal": {"type": "ANONYMOUS", "id": "", "roles": []},
-		"action": "pension.contract.read",
+		"action": "pension.contract.inspect",
 	}
 }
 
@@ -177,7 +177,7 @@ test_service_account_operator_may_not_relay if {
 test_compliance_may_read_but_not_act if {
 	rest.allow with input as {
 		"principal": {"type": "HUMAN", "id": "carol", "roles": ["ROLE_COMPLIANCE"]},
-		"action": "pension.operator.read",
+		"action": "pension.operator.inspect",
 	}
 	not rest.allow with input as {
 		"principal": {"type": "HUMAN", "id": "carol", "roles": ["ROLE_COMPLIANCE"]},
@@ -190,7 +190,7 @@ test_compliance_may_read_but_not_act if {
 test_edge_may_read_funding if {
 	rest.allow with input as {
 		"principal": {"type": "HUMAN", "id": pension_edge, "roles": ["ROLE_API"]},
-		"action": "pension.funding.read",
+		"action": "pension.funding.inspect",
 	}
 }
 
@@ -260,7 +260,7 @@ test_operator_may_not_set_up_a_mandate if {
 test_operator_may_read_funding if {
 	rest.allow with input as {
 		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
-		"action": "pension.funding.read",
+		"action": "pension.funding.inspect",
 	}
 }
 
@@ -280,7 +280,7 @@ test_edge_may_sign_a_termination_and_confirm_a_payout if {
 test_operator_may_read_exits_but_not_move_money if {
 	rest.allow with input as {
 		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
-		"action": "pension.exit.read",
+		"action": "pension.exit.inspect",
 	}
 	not rest.allow with input as {
 		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
@@ -293,7 +293,7 @@ test_operator_may_read_exits_but_not_move_money if {
 }
 
 test_operator_may_work_a_death_claim if {
-	every action in {"pension.death.read", "pension.death.notify", "pension.death.verify", "pension.death.approve"} {
+	every action in {"pension.death.inspect", "pension.death.notify", "pension.death.verify", "pension.death.approve"} {
 		rest.allow with input as {
 			"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
 			"action": action,
@@ -352,7 +352,7 @@ test_other_service_account_may_not_change_beneficiaries if {
 test_compliance_may_read_change_history_via_operator_view if {
 	rest.allow with input as {
 		"principal": {"type": "HUMAN", "id": "carol", "roles": ["ROLE_COMPLIANCE"]},
-		"action": "pension.operator.read",
+		"action": "pension.operator.inspect",
 	}
 }
 
@@ -412,14 +412,14 @@ test_compliance_may_not_write_annuity_partners if {
 test_edge_may_read_a_contract_valuation if {
 	rest.allow with input as {
 		"principal": {"type": "HUMAN", "id": pension_edge, "roles": ["ROLE_API"]},
-		"action": "pension.contract.read",
+		"action": "pension.contract.inspect",
 	}
 }
 
 test_shared_api_service_account_may_not_read_a_contract_valuation if {
 	not rest.allow with input as {
 		"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_API"]},
-		"action": "pension.contract.read",
+		"action": "pension.contract.inspect",
 	}
 }
 
@@ -460,34 +460,36 @@ test_customer_role_may_not_list_mandates if {
 
 # ---------------------------------------------------------------------------------------------
 # Participant-data reads vs the generic read rules (operator-read-any / compliance-read-any).
-# Mirrors rules.yaml: authz.operator_read_any_excluded_actions — the opa-eval matrix against the
-# materialised bundle is what proves the real list; these prove the rules do the work.
+# Every pension read is `.inspect`, so no generic `*.read` rule can match it — independent of
+# rules.yaml: authz.operator_read_any_excluded_actions, which is therefore evaluated EMPTY here.
 # ---------------------------------------------------------------------------------------------
 pension_participant_reads := [
-	"pension.contract.read",
-	"pension.exit.read",
-	"pension.death.read",
-	"pension.funding.read",
-	"pension.onboarding.read",
-	"pension.transfer.read",
-	"pension.operator.read",
-	"pension.annuity.read",
+	"pension.contract.inspect",
+	"pension.exit.inspect",
+	"pension.death.inspect",
+	"pension.funding.inspect",
+	"pension.onboarding.inspect",
+	"pension.transfer.inspect",
+	"pension.operator.inspect",
+	"pension.annuity.inspect",
 ]
 
-pension_excluded := {"authz": {"operator_read_any_excluded_actions": pension_participant_reads}}
+no_exclusions := {"authz": {"operator_read_any_excluded_actions": []}}
 
 pension_principal(id, roles) := {"type": "HUMAN", "id": id, "roles": roles}
 
 # must-DENY: the shared M2M client (ROLE_OPERATOR in the gitops realm, + ROLE_COMPLIANCE in CI),
-# an unrelated service, and an AI agent — for every participant read.
+# an unrelated service, and an AI agent — for every participant read, with no exclusion list.
 test_machines_cannot_read_pension_participant_data if {
 	every action in pension_participant_reads {
-		not rest.allow with input as {"principal": pension_principal("service-account-openbank-services", ["ROLE_OPERATOR", "ROLE_COMPLIANCE", "ROLE_API"]), "action": action}
-			with data.rules as pension_excluded
-		not rest.allow with input as {"principal": pension_principal("service-account-openbank-treasury", ["ROLE_OPERATOR", "ROLE_ADMIN"]), "action": action}
-			with data.rules as pension_excluded
+		every role in ["ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE"] {
+			not rest.allow with input as {"principal": pension_principal("service-account-openbank-services", [role, "ROLE_API"]), "action": action}
+				with data.rules as no_exclusions
+		}
+		not rest.allow with input as {"principal": pension_principal("service-account-openbank-treasury", ["ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE"]), "action": action}
+			with data.rules as no_exclusions
 		not rest.allow with input as {"principal": {"type": "AI_AGENT", "id": "agent-x", "roles": ["ROLE_OPERATOR"]}, "action": action}
-			with data.rules as pension_excluded
+			with data.rules as no_exclusions
 	}
 }
 
@@ -496,27 +498,28 @@ test_human_staff_read_pension_participant_data if {
 	every action in pension_participant_reads {
 		every role in ["ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE"] {
 			rest.allow with input as {"principal": pension_principal("alice", [role]), "action": action}
-				with data.rules as pension_excluded
+				with data.rules as no_exclusions
 		}
 	}
 }
 
 # must-ALLOW the edge relay for the participant's own reads; must-DENY it the staff-only ones.
 test_edge_relays_customer_scoped_reads_only if {
-	every action in ["pension.contract.read", "pension.exit.read", "pension.funding.read", "pension.onboarding.read", "pension.transfer.read", "pension.annuity.read"] {
+	every action in ["pension.contract.inspect", "pension.exit.inspect", "pension.funding.inspect", "pension.onboarding.inspect", "pension.transfer.inspect", "pension.annuity.inspect"] {
 		rest.allow with input as {"principal": pension_principal("service-account-openbank-edge", ["ROLE_API", "ROLE_OPERATOR"]), "action": action}
-			with data.rules as pension_excluded
+			with data.rules as no_exclusions
 	}
-	every action in ["pension.death.read", "pension.operator.read", "pension.operator.mandate-read"] {
+	every action in ["pension.death.inspect", "pension.operator.inspect", "pension.operator.mandate-read"] {
 		not rest.allow with input as {"principal": pension_principal("service-account-openbank-edge", ["ROLE_API", "ROLE_OPERATOR"]), "action": action}
-			with data.rules as pension_excluded
+			with data.rules as no_exclusions
 	}
 }
 
-# The exclusion is what does the work: without it the base rules re-admit the shared client.
-test_without_the_exclusion_the_shared_client_reads_pension_data if {
+# The verb is what does the work: the same read spelt `.read` IS admitted to the shared client by
+# the base rules — the control that shows the tests above can fail.
+test_a_read_verb_would_reach_the_shared_client if {
 	rest.allow with input as {"principal": pension_principal("service-account-openbank-services", ["ROLE_OPERATOR"]), "action": "pension.onboarding.read"}
-		with data.rules as {}
+		with data.rules as no_exclusions
 	rest.allow with input as {"principal": pension_principal("service-account-openbank-services", ["ROLE_COMPLIANCE"]), "action": "pension.contract.read"}
-		with data.rules as {}
+		with data.rules as no_exclusions
 }

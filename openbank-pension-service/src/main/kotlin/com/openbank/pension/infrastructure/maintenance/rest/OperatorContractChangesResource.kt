@@ -25,7 +25,7 @@ import java.util.UUID
  * The caller is staff via [ContractAccessGuard.readerFor] with no party header.
  */
 @Tag(name = "Pension operations", description = "Operator views of pension contracts")
-@Path("/api/v1/pension/operator/contracts/{contractId}")
+@Path("/api/v2/pension/operator/contracts/{contractId}")
 @Produces(MediaType.APPLICATION_JSON)
 @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, Roles.COMPLIANCE)
 class OperatorContractChangesResource {
@@ -39,14 +39,14 @@ class OperatorContractChangesResource {
     @GET
     @Path("/contribution-schedule")
     @Operation(summary = "Staff: original, in-force and pending schedule with the change history")
-    @Authorize(action = "pension.operator.read", resource = "#contractId")
+    @Authorize(action = "pension.operator.inspect", resource = "#contractId")
     suspend fun schedule(@PathParam("contractId") contractId: UUID): ScheduleViewResponse =
         ScheduleViewResponse.from(maintenance.schedule(access.readerFor(null), contractId))
 
     @GET
     @Path("/beneficiaries")
     @Operation(summary = "Staff: current beneficiary designation with the designation history")
-    @Authorize(action = "pension.operator.read", resource = "#contractId")
+    @Authorize(action = "pension.operator.inspect", resource = "#contractId")
     suspend fun beneficiaries(@PathParam("contractId") contractId: UUID): BeneficiaryViewResponse {
         val (contract, history) = maintenance.beneficiaries(access.readerFor(null), contractId)
         return BeneficiaryViewResponse.from(contract, history)

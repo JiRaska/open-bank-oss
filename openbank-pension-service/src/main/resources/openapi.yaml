@@ -14,12 +14,23 @@ info:
   #        this API has never been on main.
   # 1.3.0: additive (#12350) — participant valuation and unit transactions per contract, composed
   #        from pension-fund-service, and the staff operator mandates list. MINOR per ADR-0048.
-  version: 1.3.0
+  # 2.0.0: MAJOR (ADR-0048 D5/D2) — URL major moves to /api/v2. Measured against main, where
+  #        1.0.0 is released (pension-service 0.2.0): oasdiff reports three ERR-level changes —
+  #        POST /contracts/{id}/activate and /early-termination removed without deprecation, and
+  #        PUT /contracts/{id}/strategy gains a required request parameter (SCA). /activate
+  #        cannot stay: it activates a contract outside the onboarding workflow and so skips KID,
+  #        SCA and cooling-off. No deprecation window either, for the same reason, and no
+  #        exemption applies (check-api-contract.py has none for an undeployed service). /api/v1
+  #        is therefore not served at all; every route moved unchanged to /api/v2.
+  version: 2.0.0
   description: |
     Participant-side pension contracts (ADR-0334). A contract is created under the jurisdiction
     pack in force on its creation date and PINS that pack version for life; incentive evaluation
     and every exit quote always use the pinned version. Pack values are reference
     data pending legal review, not advice.
+    Contract and onboarding creation accept only the deployment's configured providerEntityId;
+    a different providerEntityId is a bad request. This creation constraint does not provide
+    multi-provider authorization or isolation of existing data.
 servers:
   - url: http://localhost:8171
 tags:
@@ -38,7 +49,7 @@ security:
   - bearerAuth: []
 
 paths:
-  /api/v1/pension/contracts:
+  /api/v2/pension/contracts:
     get:
       tags: [Pension]
       operationId: listContracts
@@ -90,7 +101,7 @@ paths:
                 $ref: '#/components/schemas/Contract'
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
-  /api/v1/pension/contracts/{id}:
+  /api/v2/pension/contracts/{id}:
     get:
       tags: [Pension]
       operationId: getContract
@@ -102,7 +113,7 @@ paths:
         '200': { $ref: '#/components/responses/Contract' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
-  /api/v1/pension/contracts/{id}/submit:
+  /api/v2/pension/contracts/{id}/submit:
     post:
       tags: [Pension]
       operationId: submitContract
@@ -116,7 +127,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/contracts/{id}/suspend:
+  /api/v2/pension/contracts/{id}/suspend:
     post:
       tags: [Pension]
       operationId: suspendContributions
@@ -130,7 +141,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/contracts/{id}/resume:
+  /api/v2/pension/contracts/{id}/resume:
     post:
       tags: [Pension]
       operationId: resumeContributions
@@ -144,7 +155,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/contracts/{id}/strategy:
+  /api/v2/pension/contracts/{id}/strategy:
     put:
       tags: [Pension]
       operationId: electStrategy
@@ -172,7 +183,7 @@ paths:
         '403': { description: 'SCA_REJECTED or STRATEGY_NOT_PERMITTED' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/contracts/{id}/incentive-evaluation:
+  /api/v2/pension/contracts/{id}/incentive-evaluation:
     post:
       tags: [Pension]
       operationId: evaluateIncentives
@@ -199,7 +210,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
-  /api/v1/pension/onboarding/applications:
+  /api/v2/pension/onboarding/applications:
     post:
       tags: [Pension onboarding]
       operationId: startOnboardingApplication
@@ -224,7 +235,7 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
         '503': { description: A collaborator this step depends on is not available (stub integration off) }
-  /api/v1/pension/onboarding/applications/{id}:
+  /api/v2/pension/onboarding/applications/{id}:
     get:
       tags: [Pension onboarding]
       operationId: getOnboardingApplication
@@ -243,7 +254,7 @@ paths:
         '403': { description: Caller's role or principal may not use this route }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/onboarding/applications/{id}/questionnaire:
+  /api/v2/pension/onboarding/applications/{id}/questionnaire:
     post:
       tags: [Pension onboarding]
       operationId: submitPensionQuestionnaire
@@ -296,7 +307,7 @@ paths:
         '403': { description: Caller's role or principal may not use this route }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/onboarding/applications/{id}/questionnaire/draft:
+  /api/v2/pension/onboarding/applications/{id}/questionnaire/draft:
     put:
       tags: [Pension onboarding]
       operationId: savePensionQuestionnaireDraft
@@ -326,7 +337,7 @@ paths:
         '403': { description: Caller's role or principal may not use this route }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/onboarding/applications/{id}/profile:
+  /api/v2/pension/onboarding/applications/{id}/profile:
     get:
       tags: [Pension onboarding]
       operationId: getPensionRiskProfile
@@ -350,7 +361,7 @@ paths:
         '403': { description: Caller's role or principal may not use this route }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/onboarding/applications/{id}/warnings:
+  /api/v2/pension/onboarding/applications/{id}/warnings:
     get:
       tags: [Pension onboarding]
       operationId: getPensionStrategyWarnings
@@ -380,7 +391,7 @@ paths:
         '403': { description: Caller's role or principal may not use this route }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/onboarding/applications/{id}/warnings/acknowledge:
+  /api/v2/pension/onboarding/applications/{id}/warnings/acknowledge:
     post:
       tags: [Pension onboarding]
       operationId: acknowledgePensionStrategyWarnings
@@ -405,7 +416,7 @@ paths:
         '403': { description: Caller's role or principal may not use this route }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/onboarding/applications/{id}/recommendation:
+  /api/v2/pension/onboarding/applications/{id}/recommendation:
     get:
       tags: [Pension onboarding]
       operationId: getPensionRecommendation
@@ -424,7 +435,7 @@ paths:
         '403': { description: Caller's role or principal may not use this route }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/onboarding/applications/{id}/strategy:
+  /api/v2/pension/onboarding/applications/{id}/strategy:
     post:
       tags: [Pension onboarding]
       operationId: choosePensionStrategy
@@ -450,7 +461,7 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
         '503': { description: A collaborator this step depends on is not available (stub integration off) }
-  /api/v1/pension/onboarding/applications/{id}/kid/accept:
+  /api/v2/pension/onboarding/applications/{id}/kid/accept:
     post:
       tags: [Pension onboarding]
       operationId: acceptPensionKid
@@ -475,7 +486,7 @@ paths:
         '403': { description: Caller's role or principal may not use this route }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/onboarding/applications/{id}/sign:
+  /api/v2/pension/onboarding/applications/{id}/sign:
     post:
       tags: [Pension onboarding]
       operationId: signPensionApplication
@@ -502,7 +513,7 @@ paths:
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { description: The SCA challenge was not verified (rejected, already spent, or bound elsewhere) }
         '503': { description: A collaborator this step depends on is not available (stub integration off) }
-  /api/v1/pension/onboarding/applications/{id}/withdraw:
+  /api/v2/pension/onboarding/applications/{id}/withdraw:
     post:
       tags: [Pension onboarding]
       operationId: withdrawPensionApplication
@@ -522,7 +533,7 @@ paths:
         '403': { description: Caller's role or principal may not use this route }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/onboarding/applications/{id}/abandon:
+  /api/v2/pension/onboarding/applications/{id}/abandon:
     post:
       tags: [Pension onboarding]
       operationId: abandonPensionApplication
@@ -542,7 +553,7 @@ paths:
         '403': { description: Caller's role or principal may not use this route }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/transfers/out:
+  /api/v2/pension/transfers/out:
     post:
       tags: [Pension transfers]
       operationId: requestPensionTransferOut
@@ -568,7 +579,7 @@ paths:
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { description: The SCA challenge was not verified (rejected, already spent, or bound elsewhere) }
         '503': { description: A collaborator this step depends on is not available (stub integration off) }
-  /api/v1/pension/transfers/{id}/consent:
+  /api/v2/pension/transfers/{id}/consent:
     post:
       tags: [Pension transfers]
       operationId: consentPensionTransferOut
@@ -594,7 +605,7 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { description: The SCA challenge was not verified (rejected, already spent, or bound elsewhere) }
-  /api/v1/pension/transfers/{id}:
+  /api/v2/pension/transfers/{id}:
     get:
       tags: [Pension transfers]
       operationId: getPensionTransfer
@@ -613,7 +624,7 @@ paths:
         '403': { description: Caller's role or principal may not use this route }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/provider/transfers/out:
+  /api/v2/pension/provider/transfers/out:
     post:
       tags: [Pension provider transfers]
       operationId: providerRequestPensionTransferOut
@@ -636,7 +647,7 @@ paths:
         '403': { description: Caller's role or principal may not use this route }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/operator/onboarding/applications:
+  /api/v2/pension/operator/onboarding/applications:
     get:
       tags: [Pension operations]
       operationId: listPensionApplications
@@ -654,7 +665,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { description: Caller's role or principal may not use this route }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/operator/onboarding/applications/{id}:
+  /api/v2/pension/operator/onboarding/applications/{id}:
     get:
       tags: [Pension operations]
       operationId: getPensionApplicationOperator
@@ -672,7 +683,7 @@ paths:
         '403': { description: Caller's role or principal may not use this route }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/operator/onboarding/applications/{id}/contribution-received:
+  /api/v2/pension/operator/onboarding/applications/{id}/contribution-received:
     post:
       tags: [Pension operations]
       operationId: recordPensionFirstContribution
@@ -691,7 +702,7 @@ paths:
         '403': { description: Caller's role or principal may not use this route }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/operator/transfers:
+  /api/v2/pension/operator/transfers:
     get:
       tags: [Pension operations]
       operationId: listPensionTransfers
@@ -709,7 +720,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { description: Caller's role or principal may not use this route }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/operator/transfers/{id}:
+  /api/v2/pension/operator/transfers/{id}:
     get:
       tags: [Pension operations]
       operationId: getPensionTransferOperator
@@ -727,7 +738,7 @@ paths:
         '403': { description: Caller's role or principal may not use this route }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/operator/transfers/{id}/counterparty-response:
+  /api/v2/pension/operator/transfers/{id}/counterparty-response:
     post:
       tags: [Pension operations]
       operationId: relayPensionCounterpartyResponse
@@ -751,7 +762,7 @@ paths:
         '403': { description: Caller's role or principal may not use this route }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/operator/transfers/{id}/funds-received:
+  /api/v2/pension/operator/transfers/{id}/funds-received:
     post:
       tags: [Pension operations]
       operationId: recordPensionTransferFunds
@@ -775,7 +786,7 @@ paths:
         '403': { description: Caller's role or principal may not use this route }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/contracts/transfers-in:
+  /api/v2/pension/contracts/transfers-in:
     post:
       tags: [Pension onboarding]
       operationId: startPensionTransferIn
@@ -799,7 +810,7 @@ paths:
         '403': { description: Caller's role or principal may not use this route }
         '503': { description: A collaborator this step depends on is not available (stub integration off) }
   # --- ADR-0334 S3: contributions & state incentives (info.version bumped once at integration) ---
-  /api/v1/pension/funding/contracts/{contractId}/payment-reference:
+  /api/v2/pension/funding/contracts/{contractId}/payment-reference:
     get:
       tags: [Pension funding]
       operationId: getPaymentReference
@@ -817,7 +828,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
-  /api/v1/pension/funding/contracts/{contractId}/contributions:
+  /api/v2/pension/funding/contracts/{contractId}/contributions:
     get:
       tags: [Pension funding]
       operationId: listContributions
@@ -837,7 +848,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
-  /api/v1/pension/funding/contracts/{contractId}/mandates:
+  /api/v2/pension/funding/contracts/{contractId}/mandates:
     post:
       tags: [Pension funding]
       operationId: setUpMandate
@@ -865,7 +876,7 @@ paths:
         '403':
           description: debtorIban is not a verified account of the participant (#12378).
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/funding/contracts/{contractId}/mandates/{mandateId}/cancel:
+  /api/v2/pension/funding/contracts/{contractId}/mandates/{mandateId}/cancel:
     post:
       tags: [Pension funding]
       operationId: cancelMandate
@@ -899,7 +910,7 @@ paths:
         '403':
           description: Strong customer authentication failed.
         '404': { $ref: '#/components/responses/NotFound' }
-  /api/v1/pension/funding/contracts/{contractId}/employers/{employerPartyId}:
+  /api/v2/pension/funding/contracts/{contractId}/employers/{employerPartyId}:
     put:
       tags: [Pension funding]
       operationId: enrolEmployer
@@ -926,7 +937,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/funding/contracts/{contractId}/incentives:
+  /api/v2/pension/funding/contracts/{contractId}/incentives:
     get:
       tags: [Pension funding]
       operationId: getIncentiveStatus
@@ -944,7 +955,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
-  /api/v1/pension/funding/contracts/{contractId}/tax-years/{year}:
+  /api/v2/pension/funding/contracts/{contractId}/tax-years/{year}:
     get:
       tags: [Pension funding]
       operationId: getTaxYear
@@ -963,7 +974,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
-  /api/v1/pension/funding/contracts/{contractId}/tax-years/{year}/external-cap-usage:
+  /api/v2/pension/funding/contracts/{contractId}/tax-years/{year}/external-cap-usage:
     put:
       tags: [Pension funding]
       operationId: declareExternalCapUsage
@@ -989,7 +1000,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/funding/operations/payments:
+  /api/v2/pension/funding/operations/payments:
     post:
       tags: [Pension funding operations]
       operationId: ingestPayment
@@ -1013,7 +1024,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403':
           description: Staff only
-  /api/v1/pension/funding/operations/employer-batches:
+  /api/v2/pension/funding/operations/employer-batches:
     post:
       tags: [Pension funding operations]
       operationId: ingestEmployerBatch
@@ -1039,7 +1050,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403':
           description: Staff only
-  /api/v1/pension/funding/operations/unmatched:
+  /api/v2/pension/funding/operations/unmatched:
     get:
       tags: [Pension funding operations]
       operationId: listUnmatched
@@ -1059,7 +1070,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403':
           description: Staff only
-  /api/v1/pension/funding/operations/unmatched/{id}/assign:
+  /api/v2/pension/funding/operations/unmatched/{id}/assign:
     post:
       tags: [Pension funding operations]
       operationId: assignUnmatched
@@ -1086,7 +1097,7 @@ paths:
           description: Staff only
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/funding/operations/unmatched/{id}/return:
+  /api/v2/pension/funding/operations/unmatched/{id}/return:
     post:
       tags: [Pension funding operations]
       operationId: returnUnmatched
@@ -1107,7 +1118,7 @@ paths:
           description: Staff only
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/funding/operations/claim-runs:
+  /api/v2/pension/funding/operations/claim-runs:
     post:
       tags: [Pension funding operations]
       operationId: runClaims
@@ -1131,7 +1142,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403':
           description: Staff only
-  /api/v1/pension/funding/operations/claim-batches:
+  /api/v2/pension/funding/operations/claim-batches:
     get:
       tags: [Pension funding operations]
       operationId: listClaimBatches
@@ -1149,7 +1160,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403':
           description: Staff only
-  /api/v1/pension/funding/operations/claim-batches/{id}/receipt:
+  /api/v2/pension/funding/operations/claim-batches/{id}/receipt:
     post:
       tags: [Pension funding operations]
       operationId: applyClaimReceipt
@@ -1176,7 +1187,7 @@ paths:
           description: Staff only
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/funding/operations/claims/{id}/return:
+  /api/v2/pension/funding/operations/claims/{id}/return:
     post:
       tags: [Pension funding operations]
       operationId: returnClaim
@@ -1197,7 +1208,7 @@ paths:
           description: Staff only
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/funding/operations/state-contribution/contracts/{contractId}/ineligibility:
+  /api/v2/pension/funding/operations/state-contribution/contracts/{contractId}/ineligibility:
     post:
       tags: [Pension funding operations]
       operationId: recordStateContributionIneligibility
@@ -1226,7 +1237,7 @@ paths:
           description: Staff only
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/funding/operations/state-contribution/returns:
+  /api/v2/pension/funding/operations/state-contribution/returns:
     get:
       tags: [Pension funding operations]
       operationId: listStateContributionReturns
@@ -1249,7 +1260,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403':
           description: Staff only
-  /api/v1/pension/funding/operations/state-contribution/returns/{id}/settle:
+  /api/v2/pension/funding/operations/state-contribution/returns/{id}/settle:
     post:
       tags: [Pension funding operations]
       operationId: settleStateContributionReturn
@@ -1270,7 +1281,7 @@ paths:
           description: Staff only
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/funding/operations/state-contribution/return-reports:
+  /api/v2/pension/funding/operations/state-contribution/return-reports:
     get:
       tags: [Pension funding operations]
       operationId: listReturnReports
@@ -1312,7 +1323,7 @@ paths:
         '403':
           description: Staff only
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/funding/operations/state-contribution/return-reports/{id}/result:
+  /api/v2/pension/funding/operations/state-contribution/return-reports/{id}/result:
     post:
       tags: [Pension funding operations]
       operationId: applyReturnReportResult
@@ -1339,7 +1350,7 @@ paths:
           description: Staff only
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/funding/operations/state-contribution/deadlines:
+  /api/v2/pension/funding/operations/state-contribution/deadlines:
     get:
       tags: [Pension funding operations]
       operationId: stateContributionDeadlines
@@ -1355,7 +1366,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403':
           description: Staff only
-  /api/v1/pension/funding/operations/contracts/{contractId}/clawback-preview:
+  /api/v2/pension/funding/operations/contracts/{contractId}/clawback-preview:
     get:
       tags: [Pension funding operations]
       operationId: previewClawback
@@ -1377,7 +1388,7 @@ paths:
         '403':
           description: Staff only
         '404': { $ref: '#/components/responses/NotFound' }
-  /api/v1/pension/funding/operations/contracts/{contractId}/tax-years/{year}/certificate:
+  /api/v2/pension/funding/operations/contracts/{contractId}/tax-years/{year}/certificate:
     post:
       tags: [Pension funding operations]
       operationId: issueTaxCertificate
@@ -1399,7 +1410,7 @@ paths:
           description: Staff only
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/funding/operations/contracts/{contractId}/annual-statements/{year}:
+  /api/v2/pension/funding/operations/contracts/{contractId}/annual-statements/{year}:
     post:
       tags: [Pension funding operations]
       operationId: issueAnnualStatement
@@ -1426,7 +1437,7 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '503':
           description: document-service unavailable or the template is not published
-  /api/v1/pension/contracts/{contractId}/annual-statements/{year}:
+  /api/v2/pension/contracts/{contractId}/annual-statements/{year}:
     get:
       tags: [Pension]
       operationId: getAnnualStatement
@@ -1445,7 +1456,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
-  /api/v1/pension/contracts/{contractId}/exit/payout-eligibility:
+  /api/v2/pension/contracts/{contractId}/exit/payout-eligibility:
     get:
       tags: [Pension exits]
       operationId: payoutEligibility
@@ -1463,7 +1474,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
-  /api/v1/pension/contracts/{contractId}/exit/termination/quote:
+  /api/v2/pension/contracts/{contractId}/exit/termination/quote:
     post:
       tags: [Pension exits]
       operationId: quoteTermination
@@ -1483,7 +1494,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/contracts/{contractId}/exit/termination/{noticeId}:
+  /api/v2/pension/contracts/{contractId}/exit/termination/{noticeId}:
     get:
       tags: [Pension exits]
       operationId: getTermination
@@ -1502,7 +1513,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
-  /api/v1/pension/contracts/{contractId}/exit/termination/{noticeId}/sign:
+  /api/v2/pension/contracts/{contractId}/exit/termination/{noticeId}/sign:
     post:
       tags: [Pension exits]
       operationId: signTermination
@@ -1530,7 +1541,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/contracts/{contractId}/exit/payouts/quote:
+  /api/v2/pension/contracts/{contractId}/exit/payouts/quote:
     post:
       tags: [Pension exits]
       operationId: quotePayout
@@ -1556,7 +1567,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/contracts/{contractId}/exit/payouts/{payoutId}:
+  /api/v2/pension/contracts/{contractId}/exit/payouts/{payoutId}:
     get:
       tags: [Pension exits]
       operationId: getPayout
@@ -1575,7 +1586,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
-  /api/v1/pension/contracts/{contractId}/exit/payouts/{payoutId}/confirm:
+  /api/v2/pension/contracts/{contractId}/exit/payouts/{payoutId}/confirm:
     post:
       tags: [Pension exits]
       operationId: confirmPayout
@@ -1603,7 +1614,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/contracts/{contractId}/exit/payouts/{payoutId}/statement:
+  /api/v2/pension/contracts/{contractId}/exit/payouts/{payoutId}/statement:
     get:
       tags: [Pension exits]
       operationId: payoutStatement
@@ -1622,7 +1633,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
-  /api/v1/pension/simulations:
+  /api/v2/pension/simulations:
     post:
       tags: [Pension simulation]
       operationId: simulateRetirement
@@ -1649,7 +1660,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
-  /api/v1/pension/contracts/{contractId}/exit/payouts/{payoutId}/account:
+  /api/v2/pension/contracts/{contractId}/exit/payouts/{payoutId}/account:
     put:
       tags: [Pension exit]
       operationId: changePayoutAccount
@@ -1686,7 +1697,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/operator/payouts:
+  /api/v2/pension/operator/payouts:
     get:
       tags: [Pension operations]
       operationId: listPayouts
@@ -1715,7 +1726,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
-  /api/v1/pension/contracts/{contractId}/valuation:
+  /api/v2/pension/contracts/{contractId}/valuation:
     get:
       tags: [Pension valuation]
       operationId: getContractValuation
@@ -1736,7 +1747,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
-  /api/v1/pension/contracts/{contractId}/transactions:
+  /api/v2/pension/contracts/{contractId}/transactions:
     get:
       tags: [Pension valuation]
       operationId: listContractUnitTransactions
@@ -1754,7 +1765,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
-  /api/v1/pension/operator/mandates:
+  /api/v2/pension/operator/mandates:
     get:
       tags: [Pension operations]
       operationId: listPaymentMandates
@@ -1774,7 +1785,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
-  /api/v1/pension/death-claims:
+  /api/v2/pension/death-claims:
     get:
       tags: [Pension death claims]
       operationId: listDeathClaims
@@ -1823,7 +1834,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/death-claims/{claimId}:
+  /api/v2/pension/death-claims/{claimId}:
     get:
       tags: [Pension death claims]
       operationId: getDeathClaim
@@ -1841,7 +1852,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
-  /api/v1/pension/death-claims/{claimId}/claimants:
+  /api/v2/pension/death-claims/{claimId}/claimants:
     put:
       tags: [Pension death claims]
       operationId: replaceClaimants
@@ -1866,7 +1877,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/death-claims/{claimId}/claimants/{claimantId}/verification:
+  /api/v2/pension/death-claims/{claimId}/claimants/{claimantId}/verification:
     post:
       tags: [Pension death claims]
       operationId: verifyClaimant
@@ -1893,7 +1904,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/death-claims/{claimId}/approve:
+  /api/v2/pension/death-claims/{claimId}/approve:
     post:
       tags: [Pension death claims]
       operationId: approveDeathClaim
@@ -1913,7 +1924,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/contracts/{contractId}/contribution-schedule:
+  /api/v2/pension/contracts/{contractId}/contribution-schedule:
     get:
       tags: [Pension contract changes]
       operationId: getContributionSchedule
@@ -1933,7 +1944,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
-  /api/v1/pension/contracts/{contractId}/contribution-schedule/preview:
+  /api/v2/pension/contracts/{contractId}/contribution-schedule/preview:
     post:
       tags: [Pension contract changes]
       operationId: previewContributionScheduleChange
@@ -1968,7 +1979,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/contracts/{contractId}/contribution-schedule/changes:
+  /api/v2/pension/contracts/{contractId}/contribution-schedule/changes:
     post:
       tags: [Pension contract changes]
       operationId: changeContributionSchedule
@@ -2001,7 +2012,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/contracts/{contractId}/beneficiaries:
+  /api/v2/pension/contracts/{contractId}/beneficiaries:
     get:
       tags: [Pension contract changes]
       operationId: getBeneficiaries
@@ -2021,7 +2032,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
-  /api/v1/pension/contracts/{contractId}/beneficiaries/preview:
+  /api/v2/pension/contracts/{contractId}/beneficiaries/preview:
     post:
       tags: [Pension contract changes]
       operationId: previewBeneficiaryChange
@@ -2054,7 +2065,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/contracts/{contractId}/beneficiaries/changes:
+  /api/v2/pension/contracts/{contractId}/beneficiaries/changes:
     post:
       tags: [Pension contract changes]
       operationId: changeBeneficiaries
@@ -2086,7 +2097,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/operator/contracts/{contractId}/contribution-schedule:
+  /api/v2/pension/operator/contracts/{contractId}/contribution-schedule:
     get:
       tags: [Pension operations]
       operationId: operatorGetContributionSchedule
@@ -2105,7 +2116,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
-  /api/v1/pension/operator/contracts/{contractId}/beneficiaries:
+  /api/v2/pension/operator/contracts/{contractId}/beneficiaries:
     get:
       tags: [Pension operations]
       operationId: operatorGetBeneficiaries
@@ -2126,7 +2137,7 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
 
   # ---- #12383: partner-agnostic annuity integration --------------------------------------------
-  /api/v1/pension/contracts/{contractId}/exit/payouts/{payoutId}/annuity:
+  /api/v2/pension/contracts/{contractId}/exit/payouts/{payoutId}/annuity:
     get:
       tags: [Pension annuity]
       operationId: getAnnuityPurchase
@@ -2144,7 +2155,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
-  /api/v1/pension/contracts/{contractId}/exit/payouts/{payoutId}/annuity/offers:
+  /api/v2/pension/contracts/{contractId}/exit/payouts/{payoutId}/annuity/offers:
     post:
       tags: [Pension annuity]
       operationId: requestAnnuityOffers
@@ -2176,7 +2187,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/contracts/{contractId}/exit/payouts/{payoutId}/annuity/selection:
+  /api/v2/pension/contracts/{contractId}/exit/payouts/{payoutId}/annuity/selection:
     post:
       tags: [Pension annuity]
       operationId: selectAnnuityOffer
@@ -2206,7 +2217,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/contracts/{contractId}/exit/payouts/{payoutId}/annuity/cancellation:
+  /api/v2/pension/contracts/{contractId}/exit/payouts/{payoutId}/annuity/cancellation:
     post:
       tags: [Pension annuity]
       operationId: cancelAnnuityPolicy
@@ -2235,7 +2246,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/operator/annuity-providers:
+  /api/v2/pension/operator/annuity-providers:
     get:
       tags: [Pension operations]
       operationId: listAnnuityProviders
@@ -2274,7 +2285,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/operator/annuity-providers/{partnerId}:
+  /api/v2/pension/operator/annuity-providers/{partnerId}:
     get:
       tags: [Pension operations]
       operationId: getAnnuityProvider
@@ -2312,7 +2323,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/operator/annuity-providers/{partnerId}/activation-request:
+  /api/v2/pension/operator/annuity-providers/{partnerId}/activation-request:
     post:
       tags: [Pension operations]
       operationId: requestAnnuityProviderActivation
@@ -2330,7 +2341,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/operator/annuity-providers/{partnerId}/activation-approval:
+  /api/v2/pension/operator/annuity-providers/{partnerId}/activation-approval:
     post:
       tags: [Pension operations]
       operationId: approveAnnuityProviderActivation
@@ -2348,7 +2359,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/pension/operator/annuity-providers/{partnerId}/disable:
+  /api/v2/pension/operator/annuity-providers/{partnerId}/disable:
     post:
       tags: [Pension operations]
       operationId: disableAnnuityProvider
@@ -2365,7 +2376,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
-  /api/v1/pension/operator/annuity-purchases:
+  /api/v2/pension/operator/annuity-purchases:
     get:
       tags: [Pension operations]
       operationId: listAnnuityPurchases
@@ -2387,7 +2398,7 @@ paths:
               schema: { type: array, items: { $ref: '#/components/schemas/AnnuityPurchase' } }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
-  /api/v1/pension/operator/annuity-purchases/{purchaseId}/sync:
+  /api/v2/pension/operator/annuity-purchases/{purchaseId}/sync:
     post:
       tags: [Pension operations]
       operationId: syncAnnuityPurchase
@@ -2673,7 +2684,10 @@ components:
       properties:
         productLine: { $ref: '#/components/schemas/ProductLine' }
         jurisdiction: { type: string, description: Jurisdiction code selecting the pack }
-        providerEntityId: { type: string, format: uuid }
+        providerEntityId:
+          type: string
+          format: uuid
+          description: Provider legal entity. Creation requires the deployment's configured providerEntityId.
         providerType: { $ref: '#/components/schemas/ProviderType' }
         birthDate: { type: string, format: date }
         residencyCountry: { type: string }
@@ -2723,7 +2737,10 @@ components:
         productLine: { $ref: '#/components/schemas/ProductLine' }
         jurisdiction: { type: string }
         packVersion: { type: integer }
-        providerEntityId: { type: string, format: uuid }
+        providerEntityId:
+          type: string
+          format: uuid
+          description: Provider legal entity. Creation requires the deployment's configured providerEntityId.
         providerType: { $ref: '#/components/schemas/ProviderType' }
         status: { $ref: '#/components/schemas/ContractStatus' }
         schedule: { $ref: '#/components/schemas/Schedule' }
@@ -2766,7 +2783,10 @@ components:
         kind: { $ref: '#/components/schemas/OnboardingKind' }
         productLine: { $ref: '#/components/schemas/ProductLine' }
         jurisdiction: { type: string }
-        providerEntityId: { type: string, format: uuid }
+        providerEntityId:
+          type: string
+          format: uuid
+          description: Provider legal entity. Creation requires the deployment's configured providerEntityId.
         providerType: { $ref: '#/components/schemas/ProviderType' }
         schedule:
           type: object

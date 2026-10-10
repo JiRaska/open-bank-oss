@@ -34,7 +34,7 @@ import java.util.UUID
  * contract answers 404.
  */
 @Tag(name = "Pension transfers", description = "Transfers of a pension contract between providers")
-@Path("/api/v1/pension/transfers")
+@Path("/api/v2/pension/transfers")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @RolesAllowed(Roles.API)
@@ -95,7 +95,7 @@ class PensionTransferResource {
     @GET
     @Path("/{id}")
     @Operation(summary = "Status of one of the caller's transfers")
-    @Authorize(action = "pension.transfer.read", resource = "#id")
+    @Authorize(action = "pension.transfer.inspect", resource = "#id")
     suspend fun get(@HeaderParam(PARTY_HEADER) party: String?, @PathParam("id") id: UUID): TransferResponse =
         TransferResponse.from(transfers.get(id, partyOf(party)))
 }

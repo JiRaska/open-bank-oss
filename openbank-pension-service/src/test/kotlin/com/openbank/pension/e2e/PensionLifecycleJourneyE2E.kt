@@ -7,6 +7,7 @@ package com.openbank.pension.e2e
 import com.openbank.pension.application.port.out.PensionContractRepository
 import com.openbank.pension.infrastructure.fund.InMemoryFundAdministrationAdapter
 import com.openbank.pension.it.PostgresTestResource
+import com.openbank.pension.testsupport.ProviderFixtures
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
@@ -240,14 +241,14 @@ class PensionLifecycleJourneyE2E {
         providerType: String = "PENSION_COMPANY",
         beneficiaries: String = """[{"name":"Jane Doe","sharePercent":100}]""",
     ) = """
-        {"productLine":"DPS","jurisdiction":"CZ","providerEntityId":"${UUID.randomUUID()}",
+        {"productLine":"DPS","jurisdiction":"CZ","providerEntityId":"${ProviderFixtures.ID}",
          "providerType":"$providerType","birthDate":"1985-05-05","residencyCountry":"CZ",
          "schedule":{"amount":$monthly,"currency":"CZK","frequency":"MONTHLY"},
          "strategyCode":"CONSERVATIVE","beneficiaries":$beneficiaries}
     """.trimIndent()
 
     private fun dip(providerType: String) = """
-        {"productLine":"DIP","jurisdiction":"CZ","providerEntityId":"${UUID.randomUUID()}",
+        {"productLine":"DIP","jurisdiction":"CZ","providerEntityId":"${ProviderFixtures.ID}",
          "providerType":"$providerType","birthDate":"1979-03-14",
          "schedule":{"amount":4000,"currency":"CZK","frequency":"MONTHLY"},
          "strategyCode":"CONSERVATIVE","beneficiaries":[]}
@@ -304,7 +305,7 @@ class PensionLifecycleJourneyE2E {
         BigDecimal(results.getString("find { it.incentiveId == '$incentiveId' }.amount"))
 
     private companion object {
-        const val BASE = "/api/v1/pension/contracts"
+        const val BASE = "/api/v2/pension/contracts"
         const val JSON = "application/json"
         const val PARTY = "X-Customer-Party-Id"
         const val IDEMPOTENCY = "Idempotency-Key"

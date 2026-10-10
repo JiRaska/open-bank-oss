@@ -5,6 +5,7 @@
 package com.openbank.pension.integration
 
 import com.openbank.pension.it.PostgresTestResource
+import com.openbank.pension.testsupport.ProviderFixtures
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
@@ -31,7 +32,7 @@ import java.util.UUID
 @QuarkusTestResource(PostgresTestResource::class)
 class QuestionnaireApiIT {
 
-    private val apps = "/api/v1/pension/onboarding/applications"
+    private val apps = "/api/v2/pension/onboarding/applications"
     private val party: UUID = UUID.randomUUID()
 
     private fun call(method: String, path: String, body: String? = null, asParty: UUID? = party): ValidatableResponse =
@@ -49,7 +50,7 @@ class QuestionnaireApiIT {
         "POST",
         apps,
         """{"kind":"NEW_CONTRACT","productLine":"$productLine","jurisdiction":"CZ",
-               "providerEntityId":"${UUID.randomUUID()}","providerType":"$providerType","birthDate":"$birth",
+               "providerEntityId":"${ProviderFixtures.ID}","providerType":"$providerType","birthDate":"$birth",
                "residencyCountry":"CZ","schedule":{"amount":1000,"currency":"CZK","frequency":"MONTHLY"}}""",
     ).statusCode(201).extract().path<String>("applicationId")
 
