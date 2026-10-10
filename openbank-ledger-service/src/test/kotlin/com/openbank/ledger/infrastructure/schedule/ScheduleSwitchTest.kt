@@ -10,10 +10,9 @@ import org.junit.jupiter.api.Test
 
 class ScheduleSwitchTest {
 
-    private fun config(vararg kv: Pair<String, String>) =
-        SmallRyeConfigBuilder()
-            .withSources(PropertiesConfigSource(mapOf(*kv), "test", 100))
-            .build()
+    private fun config(vararg kv: Pair<String, String>) = SmallRyeConfigBuilder()
+        .withSources(PropertiesConfigSource(mapOf(*kv), "test", 100))
+        .build()
 
     @Test
     fun `off and disabled, in any case and padding, switch a job off`() {
