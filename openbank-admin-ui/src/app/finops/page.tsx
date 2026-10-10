@@ -816,6 +816,10 @@ function FinOpsContent() {
                             {runway != null && runway > 0 ? `${runway}d` : 'EOL'}
                           </span>
                         </>
+                      ) : svc.tier === 'unknown' ? (
+                        <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
+                          {t('životní cyklus neznámý', 'lifecycle unknown')}
+                        </span>
                       ) : (
                         <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
                           {t('průběžné aktualizace (operátor)', 'rolling updates (operator-managed)')}

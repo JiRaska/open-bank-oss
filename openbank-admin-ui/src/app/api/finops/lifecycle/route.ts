@@ -3,8 +3,12 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 import { NextResponse } from 'next/server'
+import { promises as fs } from 'node:fs'
+import path from 'node:path'
 import { getEksLifecycle, getPlatformView } from '@/lib/live-platform-versions'
 import { versionText } from '@/lib/platform-view'
+import { componentVersion, platformVersions } from '@/lib/platform-versions'
+import { postgresEol, postgresPins } from '@/lib/postgres-platform-lifecycle'
 
 export const dynamic = 'force-dynamic'
 
@@ -73,13 +77,53 @@ export async function GET() {
   const hourlyDelta = EXTENDED_RATE - STANDARD_RATE
   const onStandard = currentTier === 'standard'
 
-  // Platform components actually running in the sandbox (ADR-0010 GitOps stack).
-  // These are NOT AWS-managed services — the data plane is self-hosted in-cluster
-  // via operators (CloudNativePG, Strimzi), so we report the management model
-  // honestly. A formal support-lifecycle countdown only exists where upstream
-  // publishes one (EKS, PostgreSQL major). Self-hosted operators roll versions
-  // continuously, so `standardEnd`/`daysRemaining` are null (rendered "rolling")
-  // rather than a fabricated date. Versions are LIVE from Prometheus with the declared value alongside (see lib/live-platform-versions.ts).
+  // The infra lifecycle collector refreshes this endoflife.date snapshot before image build.
+  // If it is missing or lacks the pinned major, report unknown rather than a fabricated EOL.
+  let infraLifecycle: unknown = null
+  try {
+    infraLifecycle = JSON.parse(await fs.readFile(
+      process.env.OPENBANK_INFRA_LIFECYCLE ?? path.resolve(process.cwd(), 'infra-lifecycle.json'),
+      'utf8',
+    ))
+  } catch { /* lifecycle state is explicitly unknown below */ }
+
+  // Include every running version and every declared GitOps pin. The live query may be unavailable,
+  // while an extra running version may have no matching declared pin. Neither case is hidden.
+  const declaredPins = postgresPins(platformVersions?.components.postgres ?? null)
+  const livePins = view.items.postgres?.live ?? []
+  const postgresVersions = [...new Set([
+    ...declaredPins.map(pin => pin.version),
+    ...livePins.map(pin => pin.version),
+  ])]
+  const postgresComponents = postgresVersions.map(version => {
+    const declared = declaredPins.find(pin => pin.version === version)?.manifests
+    const live = livePins.find(pin => pin.version === version)?.count
+    const counts = [
+      ...(live === undefined ? [] : [`${live} running ${live === 1 ? 'pod' : 'pods'}`]),
+      ...(declared === undefined ? [] : [`${declared} GitOps ${declared === 1 ? 'manifest' : 'manifests'}`]),
+    ]
+    const standardEnd = postgresEol(version, infraLifecycle)
+    const daysRemaining = standardEnd ? daysBetween(now, new Date(`${standardEnd}T00:00:00Z`)) : null
+    return {
+      name: `PostgreSQL (${counts.join('; ')})`,
+      kind: 'database',
+      version,
+      tier: daysRemaining === null ? 'unknown' : daysRemaining > 0 ? 'supported' : 'end_of_life',
+      managedBy: 'CloudNativePG (in-cluster operator)',
+      standardEnd,
+      daysRemaining,
+    }
+  })
+  if (postgresComponents.length === 0) {
+    postgresComponents.push({
+      name: 'PostgreSQL', kind: 'database', version: componentVersion('postgres'),
+      tier: 'unknown', managedBy: 'CloudNativePG (in-cluster operator)',
+      standardEnd: null, daysRemaining: null,
+    })
+  }
+
+  // GitOps image pins express desired versions, not live pod state. Only EKS and PostgreSQL
+  // have a dated lifecycle in these snapshots; unknown dates must remain unknown.
   const components = [
     {
       name: 'Amazon EKS', kind: 'kubernetes',
@@ -88,15 +132,7 @@ export async function GET() {
       standardEnd: current?.standardSupportEnds ?? null,
       daysRemaining: current?.daysToStandardEnd ?? null,
     },
-    {
-      name: 'PostgreSQL', kind: 'database',
-      version: versionText(view.items.postgres),
-      tier: 'supported',
-      managedBy: 'CloudNativePG (in-cluster operator)',
-      // No pinned source for a community EOL date: shown as rolling, never a typed date.
-      standardEnd: null,
-      daysRemaining: null,
-    },
+    ...postgresComponents,
     {
       name: 'Apache Kafka', kind: 'messaging',
       version: versionText(view.items.kafka),

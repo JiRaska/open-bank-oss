@@ -43,7 +43,7 @@ describe('platform versions derivation', () => {
     expect(read(c.postgres!.source)).toContain(`cloudnative-pg/postgresql:${c.postgres!.version}`)
     expect(read(c.valkey!.source)).toContain(`valkey/valkey:${c.valkey!.version}`)
     expect(read(c.apicurio!.source)).toContain(`:${c.apicurio!.version}`)
-    expect(read(c.kafka!.source)).toMatch(new RegExp(`version:\\s*${c.kafka!.version.replace(/\./g, '\\.')}`))
+    expect(read(c.kafka!.source).split('\n').some(line => line.trim() === `version: ${c.kafka!.version}`)).toBe(true)
     expect(read(c.strimziOperator!.source)).toContain(`targetRevision: ${c.strimziOperator!.version}`)
   })
 
