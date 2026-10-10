@@ -53,3 +53,18 @@ neposkytuje vzájemné TLS.
 `ServerTlsIT` ověřuje načtení PEM, vyjednání TLS 1.3, odmítnutí nedůvěryhodného
 certifikátu a zachování HTTP s dočasnými testovacími klíči. Deklarace ani tento
 test nedokazují připravenost certifikátu v clusteru.
+
+
+## Výkazy za období
+
+`GET /api/v1/reporting/funds/{fundId}/period-figures` vyžaduje datum
+`periodStart` a `periodEnd`. Vrací agregované údaje fondu pro tax-reporting-service:
+rozvahu, výsledek hospodaření od začátku roku, pohyb jednotek, portfolio a toky.
+Přístup vyžaduje povolenou roli a autorizační politiku `pension-fund.reporting.read`.
+
+Výpočet používá zveřejněné NAV a transakce oceněné těmito NAV podle data ocenění.
+Období bez zveřejněné NAV není vykazatelné; nejde o nulovou aktivitu. S nově
+vypočtenou NAV se ukládají její pozice. U starších NAV bez zaznamenaných pozic
+jsou údaje portfolia neznámé, nikoli prázdné. Identifikátory podkladových NAV
+a fingerprint určují vstupy výkazu. Tento model poskytuje údaje; nepodává
+regulátorovi statutární výkaz.
