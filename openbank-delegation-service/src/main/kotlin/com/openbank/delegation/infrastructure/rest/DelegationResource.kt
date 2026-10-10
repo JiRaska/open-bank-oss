@@ -27,6 +27,7 @@ import com.openbank.delegation.infrastructure.rest.dto.PreviewDelegationRequest
 import com.openbank.delegation.infrastructure.rest.dto.RevokeDelegationRequest
 import com.openbank.delegation.infrastructure.rest.dto.SuspendDelegationRequest
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.authz.ServiceAccountIdentity
 import com.openbank.libs.idempotency.IdempotencyKeyReusedException
 import com.openbank.libs.idempotency.IdempotencyRequestInProgressException
 import com.openbank.libs.idempotency.IdempotencyStore
@@ -283,7 +284,11 @@ class DelegationResource(
         requireNotNull(grantorPartyId) { "query parameter 'grantorPartyId' is required" }
         require(!idempotencyKey.isNullOrBlank()) { "Idempotency-Key header is required" }
         // Authenticate the customer scope before returning even an already recorded confirmation.
-        if (identity.principal.name != "service-account-openbank-edge" || customerPartyId != grantorPartyId) {
+        // #12448: the edge is recognised by its CLIENT identity (azp + its own service-account), never
+        // by the principal name, which Quarkus takes from a username claim.
+        if (!ServiceAccountIdentity.isPrincipal(identity, CUSTOMER_EDGE_PRINCIPAL) ||
+            customerPartyId != grantorPartyId
+        ) {
             throw ForbiddenException("recertification confirmation requires the grantor's customer session")
         }
         val cacheKey = recertificationConfirmKey(id, grantorPartyId, idempotencyKey)
@@ -459,3 +464,6 @@ class DelegationResource(
         const val CUSTOMER_ACTOR_PARTY_HEADER = "X-Customer-Actor-Party-Id"
     }
 }
+
+/** The customer-edge workload, by Keycloak service-account name (`service-account-<clientId>`). */
+private const val CUSTOMER_EDGE_PRINCIPAL = "service-account-openbank-edge"
