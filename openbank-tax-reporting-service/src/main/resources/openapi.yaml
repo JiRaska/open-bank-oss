@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Tax Reporting Service API
-  version: 1.0.0
+  version: 1.1.0
   description: >
     §38d Vyúčtování daně vybírané srážkou podle zvláštní sazby daně — the platform's system of
     record for the monthly withholding-tax return (ADR-0180). Consumes
@@ -17,6 +17,8 @@ servers:
     description: Local development
 tags:
   - name: TaxFiling
+  - name: StatutoryReturn
+    description: Catalogue-defined regulatory returns (ADR-0336) — Czech pension company ČNB PSP/PEF first
 
 paths:
   /api/v1/tax/filings:
@@ -162,6 +164,264 @@ paths:
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/UnprocessableEntity' }
 
+  /api/v1/statutory-returns:
+    get:
+      tags: [StatutoryReturn]
+      summary: List return revisions, newest period first
+      operationId: listStatutoryReturns
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/StatutoryReturnResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/statutory-returns/catalogues:
+    get:
+      tags: [StatutoryReturn]
+      summary: Jurisdiction return catalogues this deployment reports under
+      operationId: listReturnCatalogues
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ReturnCatalogueResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/statutory-returns/breaches:
+    get:
+      tags: [StatutoryReturn]
+      summary: Returns past their deadline without a submitted revision, including never-assembled ones
+      operationId: listStatutoryReturnBreaches
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ReturnBreachResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503':
+          description: Reporting start or fund roster is unconfigured; deadline status is unavailable
+
+  /api/v1/statutory-returns/capability:
+    get:
+      tags: [StatutoryReturn]
+      summary: Whether a data source and a wire renderer are bound
+      operationId: getStatutoryReturnCapability
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReturnCapabilityResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/statutory-returns/{id}:
+    get:
+      tags: [StatutoryReturn]
+      summary: Get one return revision
+      operationId: getStatutoryReturn
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatutoryReturnResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/statutory-returns/assemble:
+    post:
+      tags: [StatutoryReturn]
+      summary: Assemble and validate a return from sourced figures (→ ASSEMBLED); 503 while no data source is bound
+      operationId: assembleStatutoryReturn
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AssembleReturnRequest' }
+      responses:
+        '200':
+          description: The return after the transition
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatutoryReturnResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '503':
+          description: No data source is bound for this return
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /api/v1/statutory-returns/{id}/approve:
+    post:
+      tags: [StatutoryReturn]
+      summary: Approve and attest the content hash (ASSEMBLED → APPROVED; the assembler may not approve)
+      operationId: approveStatutoryReturn
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The return after the transition
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatutoryReturnResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /api/v1/statutory-returns/{id}/submitted:
+    post:
+      tags: [StatutoryReturn]
+      summary: Record the regulator submission reference (APPROVED → SUBMITTED; refused if content differs from the attestation)
+      operationId: recordStatutoryReturnSubmission
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RecordSubmissionRequest' }
+      responses:
+        '200':
+          description: The return after the transition
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatutoryReturnResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /api/v1/corporate-register:
+    get:
+      tags: [CorporateRegister]
+      summary: Every corporate-register entry of an entity, any status — the audit trail (#12425)
+      operationId: listCorporateRegister
+      parameters:
+        - { name: entityId, in: query, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Entries, by fact, effective date and version
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/CorporateRegisterEntry' } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [CorporateRegister]
+      summary: Propose a corporate figure (maker); it feeds no return until another operator approves it
+      operationId: proposeCorporateFact
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProposeCorporateFactRequest' }
+      responses:
+        '201':
+          description: The proposed entry
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CorporateRegisterEntry' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /api/v1/corporate-register/effective:
+    get:
+      tags: [CorporateRegister]
+      summary: The approved figure of each fact effective for a period; a fact with none approved is absent
+      operationId: effectiveCorporateFacts
+      parameters:
+        - { name: entityId, in: query, required: true, schema: { type: string } }
+        - { name: periodStart, in: query, required: true, schema: { type: string, format: date } }
+        - { name: periodEnd, in: query, required: true, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: Fact name to value
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: { type: number } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/corporate-register/{id}/approve:
+    post:
+      tags: [CorporateRegister]
+      summary: Approve a proposed figure (checker; the proposer may not)
+      operationId: approveCorporateFact
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The decided entry
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CorporateRegisterEntry' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/v1/corporate-register/{id}/reject:
+    post:
+      tags: [CorporateRegister]
+      summary: Reject a proposed figure (checker; the proposer may not)
+      operationId: rejectCorporateFact
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The decided entry
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CorporateRegisterEntry' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
 components:
   parameters:
     PeriodPath:
@@ -206,6 +466,107 @@ components:
           schema: { $ref: '#/components/schemas/ApiError' }
 
   schemas:
+    ProposeCorporateFactRequest:
+      type: object
+      required: [entityId, fact, value, effectiveFrom, reason, evidence]
+      properties:
+        entityId: { type: string, description: The reporting company id (openbank.statutory-returns.company-id) }
+        fact: { type: string, enum: [SHARE_CAPITAL, REGULATORY_CAPITAL, CAPITAL_REQUIREMENT, EMPLOYEES_COUNT, QUALIFYING_SHAREHOLDERS_COUNT, BOARD_OF_DIRECTORS_MEMBERS, SUPERVISORY_BOARD_MEMBERS, DIVIDEND_PAID_OR_PLANNED] }
+        value: { type: number, minimum: 0, description: Counts must be whole numbers }
+        effectiveFrom: { type: string, format: date }
+        reason: { type: string }
+        evidence: { type: string, description: The source document (minutes, capital calculation, HR report) }
+    CorporateRegisterEntry:
+      type: object
+      required: [id, entityId, fact, value, effectiveFrom, version, reason, evidence, status, proposedBy, proposedAt]
+      properties:
+        id: { type: string, format: uuid }
+        entityId: { type: string }
+        fact: { type: string, enum: [SHARE_CAPITAL, REGULATORY_CAPITAL, CAPITAL_REQUIREMENT, EMPLOYEES_COUNT, QUALIFYING_SHAREHOLDERS_COUNT, BOARD_OF_DIRECTORS_MEMBERS, SUPERVISORY_BOARD_MEMBERS, DIVIDEND_PAID_OR_PLANNED] }
+        value: { type: number }
+        effectiveFrom: { type: string, format: date }
+        version: { type: integer, minimum: 1 }
+        reason: { type: string }
+        evidence: { type: string }
+        status: { type: string, enum: [PROPOSED, APPROVED, REJECTED] }
+        proposedBy: { type: string }
+        proposedAt: { type: string, format: date-time }
+        decidedBy: { type: [string, 'null'] }
+        decidedAt: { type: [string, 'null'], format: date-time }
+    AssembleReturnRequest:
+      type: object
+      required: [catalogueId, returnCode, entityId, period]
+      properties:
+        catalogueId: { type: string, example: cz-pension-cnb }
+        returnCode: { type: string, example: PSP10-12-FUND }
+        entityId: { type: string }
+        period: { type: string, description: 'YYYY-MM, YYYY-Qn or YYYY per the return periodicity' }
+    RecordSubmissionRequest:
+      type: object
+      required: [reference]
+      properties:
+        reference: { type: string }
+    ReturnCapabilityResponse:
+      type: object
+      required: [dataSourceAvailable, wireFormatAvailable, note]
+      properties:
+        dataSourceAvailable: { type: boolean }
+        wireFormatAvailable: { type: boolean }
+        note: { type: string }
+    ReturnBreachResponse:
+      type: object
+      required: [catalogueId, returnCode, entityId, period, dueDate, kind]
+      properties:
+        catalogueId: { type: string }
+        returnCode: { type: string }
+        entityId: { type: string }
+        period: { type: string }
+        dueDate: { type: string, format: date }
+        kind: { type: string, enum: [NOT_ASSEMBLED, NOT_SUBMITTED] }
+    ReturnDefinitionResponse:
+      type: object
+      required: [code, name, scope, periodicity, deadlineDaysAfterPeriodEnd, legalBasis, datapoints]
+      properties:
+        code: { type: string }
+        name: { type: string }
+        scope: { type: string, enum: [COMPANY, FUND] }
+        periodicity: { type: string, enum: [MONTH, QUARTER, YEAR] }
+        deadlineDaysAfterPeriodEnd: { type: integer }
+        legalBasis: { type: string }
+        datapoints: { type: array, items: { type: string } }
+    ReturnCatalogueResponse:
+      type: object
+      required: [id, version, jurisdiction, wireFormatVerified, returns]
+      properties:
+        id: { type: string }
+        version: { type: integer }
+        jurisdiction: { type: string }
+        wireFormatVerified: { type: boolean }
+        returns: { type: array, items: { $ref: '#/components/schemas/ReturnDefinitionResponse' } }
+    StatutoryReturnResponse:
+      type: object
+      required: [id, catalogueId, catalogueVersion, returnCode, entityId, periodicity, period, revision, status, datapoints, contentHash, dueDate, assembledBy, assembledAt]
+      properties:
+        id: { type: string, format: uuid }
+        catalogueId: { type: string }
+        catalogueVersion: { type: integer }
+        returnCode: { type: string }
+        entityId: { type: string }
+        periodicity: { type: string, enum: [MONTH, QUARTER, YEAR] }
+        period: { type: string }
+        revision: { type: integer }
+        status: { type: string, enum: [ASSEMBLED, APPROVED, SUBMITTED] }
+        datapoints: { type: object, additionalProperties: { type: number } }
+        contentHash: { type: string, description: SHA-256 of the canonical content }
+        dueDate: { type: string, format: date }
+        assembledBy: { type: string }
+        assembledAt: { type: string, format: date-time }
+        approvedBy: { type: [string, 'null'] }
+        approvedAt: { type: [string, 'null'], format: date-time }
+        attestedHash: { type: [string, 'null'] }
+        submittedBy: { type: [string, 'null'] }
+        submittedAt: { type: [string, 'null'], format: date-time }
+        submissionReference: { type: [string, 'null'] }
     ApiError:
       type: object
       properties:
