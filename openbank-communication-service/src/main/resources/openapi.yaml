@@ -45,9 +45,9 @@ paths:
                 preferredTerms: {type: object, additionalProperties: {type: string}}
                 forbiddenTerms: {type: array, items: {type: string}}
                 signature: {type: string, nullable: true}
-                basePublishedVersion: {type: integer, minimum: 0, description: "Published styleVersion observed by the editor; 0 when none was published"}
+                basePublishedVersion: {type: integer, minimum: 0, description: "Latest published or retired styleVersion observed by the editor; 0 before the first publication. Must still match when the draft is created."}
                 uiMessages: {type: object, additionalProperties: {type: string}}
-      responses: {"201": {description: Created with basePublishedVersion}, "400": {description: Rejected by lint or validation}}
+      responses: {"201": {description: Created with basePublishedVersion}, "400": {description: Rejected by lint or validation}, "409": {description: Draft base does not match the current publication generation; no draft is persisted}}
   /api/v2/personas/style-versions/{id}/submit:
     post:
       summary: DRAFT -> IN_REVIEW, the maker's declaration this is ready for a checker

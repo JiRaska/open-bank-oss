@@ -77,6 +77,47 @@ class CommunicationStyleRestContractIT {
 
     @Test
     @TestSecurity(user = "copy-editor@openbank.test", roles = ["ROLE_COMMS_EDITOR"])
+    fun `a future published base is refused before draft persistence`() {
+        val personaKey = "future-base-${UUID.randomUUID()}"
+        val personaId = UUID.randomUUID()
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                """insert into persona (id, key, display_name, channel, language, description)
+                    values (?, ?, ?, 'ADMIN', 'cs', '')
+                """.trimIndent(),
+            ).use { statement ->
+                statement.setObject(1, personaId)
+                statement.setString(2, personaKey)
+                statement.setString(3, personaKey)
+                statement.executeUpdate()
+            }
+        }
+
+        Given {
+            contentType("application/json")
+            body(
+                """{"tone":"warm","formality":"informal","formOfAddress":"tykani",
+                    "basePublishedVersion":1}""",
+            )
+        } When {
+            post("/api/v2/personas/$personaKey/style-versions")
+        } Then {
+            statusCode(409)
+        }
+
+        dataSource.connection.use { connection ->
+            connection.prepareStatement("select count(*) from style_version where persona_id = ?").use { statement ->
+                statement.setObject(1, personaId)
+                statement.executeQuery().use { rows ->
+                    org.junit.jupiter.api.Assertions.assertTrue(rows.next())
+                    org.junit.jupiter.api.Assertions.assertEquals(0, rows.getInt(1))
+                }
+            }
+        }
+    }
+
+    @Test
+    @TestSecurity(user = "copy-editor@openbank.test", roles = ["ROLE_COMMS_EDITOR"])
     fun `null UI message is a validation error`() {
         Given {
             contentType("application/json")

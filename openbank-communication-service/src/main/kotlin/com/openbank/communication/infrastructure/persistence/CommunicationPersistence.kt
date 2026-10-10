@@ -133,27 +133,42 @@ class PanacheStyleVersionRepository :
                         if (persona == null) throw StyleVersionConflictException("persona no longer exists")
                         find("personaId = ?1 order by version desc", personaId)
                             .firstResult<StyleVersionEntity>().flatMap { latest ->
-                                val s = make((latest?.version ?: 0) + 1)
-                                require(s.personaId == personaId) { "draft persona does not match locked persona" }
-                                persist(
-                                    StyleVersionEntity().apply {
-                                        id = s.id
-                                        this.personaId = s.personaId
-                                        version = s.version
-                                        basePublishedVersion = s.basePublishedVersion
-                                        status = s.status.name
-                                        tone = s.tone
-                                        formality = s.formality
-                                        formOfAddress = s.formOfAddress
-                                        maxLength = s.maxLength
-                                        uiMessages = jsonMapper.writeValueAsString(s.uiMessages)
-                                        preferredTerms = jsonMapper.writeValueAsString(s.preferredTerms)
-                                        forbiddenTerms = jsonMapper.writeValueAsString(s.forbiddenTerms)
-                                        signature = s.signature
-                                        maker = s.maker
-                                        createdAt = s.createdAt
-                                    },
-                                ).replaceWith(s)
+                                find(
+                                    "personaId = ?1 and (status = ?2 or status = ?3) order by version desc",
+                                    personaId,
+                                    StyleVersionStatus.PUBLISHED.name,
+                                    StyleVersionStatus.RETIRED.name,
+                                ).firstResult<StyleVersionEntity>().flatMap { latestGeneration ->
+                                    val s = make((latest?.version ?: 0) + 1)
+                                    require(s.personaId == personaId) {
+                                        "draft persona does not match locked persona"
+                                    }
+                                    val currentGeneration = latestGeneration?.version ?: 0
+                                    if (s.basePublishedVersion != currentGeneration) {
+                                        throw StyleVersionConflictException(
+                                            "draft base does not match the current published generation",
+                                        )
+                                    }
+                                    persist(
+                                        StyleVersionEntity().apply {
+                                            id = s.id
+                                            this.personaId = s.personaId
+                                            version = s.version
+                                            basePublishedVersion = s.basePublishedVersion
+                                            status = s.status.name
+                                            tone = s.tone
+                                            formality = s.formality
+                                            formOfAddress = s.formOfAddress
+                                            maxLength = s.maxLength
+                                            uiMessages = jsonMapper.writeValueAsString(s.uiMessages)
+                                            preferredTerms = jsonMapper.writeValueAsString(s.preferredTerms)
+                                            forbiddenTerms = jsonMapper.writeValueAsString(s.forbiddenTerms)
+                                            signature = s.signature
+                                            maker = s.maker
+                                            createdAt = s.createdAt
+                                        },
+                                    ).replaceWith(s)
+                                }
                             }
                     }
             }
