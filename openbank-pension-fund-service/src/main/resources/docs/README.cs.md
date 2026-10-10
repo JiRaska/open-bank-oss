@@ -9,7 +9,7 @@ Dokumentaci publikuje služba na management endpointu `/q/openbank/docs` (Docs-a
 - **Stack:** Kotlin / Quarkus 3.x / Hibernate Reactive Panache / PostgreSQL (`pension-fund-db`, CNPG)
 - **Porty:** 8162 (aplikace), 8090 (management)
 - **Události:** zatím žádné
-- **Autentizace:** správu fondů provádějí jen zaměstnanci (`ROLE_OPERATOR`/`ROLE_ADMIN`, nikdy service-account). Číst mohou také `ROLE_AUDITOR` a `ROLE_API`. Držby, pokyny a transakce účastníků chrání akce `pension-fund.holding.inspect` (ne `.read`), takže je obecná operátorská ani compliance čtecí práva nezpřístupní: smí je jen zaměstnanci a vlastní klient pension-service.
+- **Autentizace:** správu fondů provádějí jen zaměstnanci (`ROLE_OPERATOR`/`ROLE_ADMIN`, nikdy service-account). Držby, pokyny a transakce účastníků mohou číst zaměstnanci s `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_AUDITOR` nebo `ROLE_COMPLIANCE` a vlastní klient pension-service s `ROLE_API`. Chrání je akce `pension-fund.holding.inspect` (ne `.read`), takže obecná operátorská ani compliance čtecí práva nepustí sdílený service-account.
 - **Čtyři oči:** kdo NAV spočítá nebo navrhne změnu strategie, ten ji nemůže zveřejnit ani schválit (403). Vynucuje to doména i DB CHECK.
 - **Forward pricing:** pokyn se přijme bez ceny (202). Vypořádá se za PŘÍŠTÍ zveřejněnou NAV fondu.
 

@@ -151,7 +151,7 @@ class PensionFundApiIT {
         given().`when`().get("/api/v1/contracts/$contract/holdings").then().statusCode(200)
         given().`when`().get("/api/v1/contracts/$contract/transactions").then().statusCode(200)
         given().contentType("application/json").header("Idempotency-Key", "compliance-denied")
-            .body("""{"fundId":"$fundA","type":"BUY","amount":1}""")
+            .body("""{"fundId":"$fundA","type":"SUBSCRIBE","amount":1}""")
             .`when`().post("/api/v1/contracts/$contract/orders").then().statusCode(403)
     }
 }
