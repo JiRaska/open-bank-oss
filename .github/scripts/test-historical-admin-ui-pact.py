@@ -2,9 +2,12 @@
 """Focused checks for the exact-version Pact replay guard and wiring."""
 
 import importlib.util
-from pathlib import Path
+import io
+import json
 import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / ".github/scripts/historical-admin-ui-pact.py"
@@ -72,13 +75,41 @@ class HistoricalPactTest(unittest.TestCase):
             old_provider = module.PROVIDER
             try:
                 module.PROVIDER = str(Path(temp, old_provider))
-                result.write_text('<testsuite><testcase classname="ProductCatalogPactBrokerProviderVerificationTest" name="one"/></testsuite>')
-                module.check_result()
-                result.write_text('<testsuite><testcase classname="ProductCatalogPactBrokerProviderVerificationTest" name="one"><skipped/></testcase></testsuite>')
-                with self.assertRaises(ValueError):
+                with patch.dict("os.environ", {"HISTORICAL_PACT_INTERACTION_COUNT": "2"}):
+                    one = '<testcase classname="ProductCatalogPactBrokerProviderVerificationTest" name="one"/>'
+                    two = '<testcase classname="ProductCatalogPactBrokerProviderVerificationTest" name="two"/>'
+                    result.write_text(f"<testsuite>{one}</testsuite>")
+                    with self.assertRaisesRegex(ValueError, "2 distinct successful"):
+                        module.check_result()
+                    result.write_text(f"<testsuite>{one}{two}</testsuite>")
                     module.check_result()
+                    result.write_text(f"<testsuite>{one}{one}</testsuite>")
+                    with self.assertRaisesRegex(ValueError, "duplicate"):
+                        module.check_result()
+                    result.write_text(f'<testsuite>{one}<testcase classname="{module.TEST_CLASS}" name="two"><skipped/></testcase></testsuite>')
+                    with self.assertRaisesRegex(ValueError, "zero skips"):
+                        module.check_result()
             finally:
                 module.PROVIDER = old_provider
+
+    def test_preflight_records_exact_archived_interaction_count(self):
+        class Response(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                self.close()
+
+        pact = {"consumer": {"name": module.CONSUMER}, "provider": {"name": module.PROVIDER},
+                "interactions": [{"description": "one"}, {"description": "two"}]}
+        with tempfile.TemporaryDirectory() as temp:
+            env_file = Path(temp, "github-env")
+            env = {**self.env, "HISTORICAL_PACT_URL": module.validate(self.env),
+                   "PACT_BROKER_USERNAME": "u", "PACT_BROKER_PASSWORD": "p", "GITHUB_ENV": str(env_file)}
+            opener = type("Opener", (), {"open": lambda *_args, **_kwargs: Response(json.dumps(pact).encode())})()
+            with patch.object(module.urllib.request, "build_opener", return_value=opener):
+                module.preflight(env)
+            self.assertEqual(env_file.read_text(), "HISTORICAL_PACT_INTERACTION_COUNT=2\n")
 
 
 if __name__ == "__main__":
