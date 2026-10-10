@@ -66,15 +66,28 @@ class StrategyCatalogWireMockResource : QuarkusTestResourceLifecycleManager {
                 val id = offeringId(index)
                 val revisionId = UUID.nameUUIDFromBytes("$id:$revision".toByteArray())
                 val classJson = classes.joinToString(",") { "\"$it\"" }
+                val approvalDigest = "b".repeat(64)
                 val body = """{"id":"$revisionId","offeringId":"$id","number":$revision,
                     "schemaRef":{"id":"org.openbank.retirement.pension-savings","version":2},
                     "state":"PUBLISHED","makerId":"maker","checkerId":"checker",
                     "reason":"reviewed composition","contentHash":"${"a".repeat(64)}",
+                    "effectiveFrom":"2020-01-01T00:00:00Z","effectiveTo":null,
+                    "pensionApprovalDigest":"$approvalDigest",
                     "content":{"attributes":{"productLine":"DIP","jurisdictionPackId":"CZ/DIP",
                     "fundStrategy":"$strategy","reviewStatus":"LEGAL_AND_COMMERCIAL_REVIEWED",
                     "instrumentClasses":[$classJson]}}}
                 """.trimIndent()
                 server.stubFor(get(urlPathEqualTo("/api/v2/products/$id")).willReturn(okJson(body)))
+                val approvals = """
+                    [{"role":"LEGAL_COUNSEL","digest":"$approvalDigest",
+                    "approvedAt":"2020-01-01T00:00:00Z"},
+                    {"role":"PRODUCT_OWNER","digest":"$approvalDigest",
+                    "approvedAt":"2020-01-01T00:00:00Z"}]
+                """.trimIndent()
+                server.stubFor(
+                    get(urlEqualTo("/api/v2/offerings/$id/revisions/$revisionId/pension-approvals"))
+                        .willReturn(okJson(approvals)),
+                )
             }
         }
 
@@ -87,6 +100,12 @@ class StrategyCatalogWireMockResource : QuarkusTestResourceLifecycleManager {
                 getRequestedFor(urlPathEqualTo("/api/v2/products/${offeringId(1)}"))
                     .withQueryParam("effectiveAt", matching(".+"))
                     .withHeader("Authorization", equalTo("Bearer test-token")),
+            )
+            val revisionId = UUID.nameUUIDFromBytes("${offeringId(1)}:7".toByteArray())
+            server.verify(
+                getRequestedFor(
+                    urlEqualTo("/api/v2/offerings/${offeringId(1)}/revisions/$revisionId/pension-approvals"),
+                ).withHeader("Authorization", equalTo("Bearer test-token")),
             )
         }
 
