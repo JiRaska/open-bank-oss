@@ -59,6 +59,10 @@ class ConsentListenerAuthMeasurementIT {
     fun `trusted certificate and valid API bearer pass authentication`() {
         val response = send(withCertificate = true, bearer = apiToken)
         assertThat(response.statusCode()).isEqualTo(404)
+        // A route miss is also 404. The consent-specific application error proves the request
+        // reached ConsentResource and its repository lookup after bearer authentication.
+        assertThat(response.body()).contains("\"code\":\"NOT_FOUND\"")
+            .contains("Consent not found: 00000000-0000-0000-0000-000000000001")
     }
 
     private fun send(withCertificate: Boolean, bearer: String?): HttpResponse<String> {
@@ -91,17 +95,21 @@ class ConsentListenerAuthMeasurementIT {
             val quarkus = prod.getValue("quarkus") as Map<String, Any>
             val http = quarkus.getValue("http") as Map<String, Any>
             val ssl = http.getValue("ssl") as Map<String, Any>
-            val auth = http.getValue("auth") as Map<String, Any>
-            val permissions = auth.getValue("permission") as Map<String, Any>
-            val bearerOnly = permissions.getValue("bearer-only") as Map<String, Any>
+            // Missing permission is intentionally allowed in the profile setup so the same
+            // listener test can demonstrate the pre-fix 403 on the parent commit.
+            val auth = http["auth"] as? Map<*, *>
+            val permissions = auth?.get("permission") as? Map<*, *>
+            val bearerOnly = permissions?.get("bearer-only") as? Map<*, *>
             val clientAuth = ssl.getValue("client-auth").toString().also { check(it == "required") }
-            return mapOf(
-                "quarkus.http.ssl.client-auth" to clientAuth,
-                "quarkus.http.auth.permission.bearer-only.paths" to bearerOnly.getValue("paths").toString(),
-                "quarkus.http.auth.permission.bearer-only.policy" to bearerOnly.getValue("policy").toString(),
-                "quarkus.http.auth.permission.bearer-only.auth-mechanism" to
-                    bearerOnly.getValue("auth-mechanism").toString(),
-            )
+            val bearerProperties = bearerOnly?.let {
+                mapOf(
+                    "quarkus.http.auth.permission.bearer-only.paths" to requireNotNull(it["paths"]).toString(),
+                    "quarkus.http.auth.permission.bearer-only.policy" to requireNotNull(it["policy"]).toString(),
+                    "quarkus.http.auth.permission.bearer-only.auth-mechanism" to
+                        requireNotNull(it["auth-mechanism"]).toString(),
+                )
+            }.orEmpty()
+            return mapOf("quarkus.http.ssl.client-auth" to clientAuth) + bearerProperties
         }
     }
 }
