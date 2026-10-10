@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: domestic-payment
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "11d02e035c9a220d"
+    openbank.tech/policy-checksum: "f40d8319f994113e"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1632,6 +1632,9 @@ data:
       operator_read_any_excluded_actions:
         - pension-fund.holding.read   # participants' unit holdings and orders (ADR-0334 S4, #12350):
                                       # staff + service-account-openbank-pension only
+        - pension-fund.reporting.read # period-end fund aggregates for the ČNB returns (#12425, ADR-0336 D4):
+                                      # staff + service-account-openbank-tax-reporting only. Aggregates,
+                                      # but they are a supervisory filing's figures before it is filed.
       role_action_matrix:
         ROLE_OPERATOR:
           grant:

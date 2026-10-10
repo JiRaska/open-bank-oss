@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: kyb-service
     app.kubernetes.io/part-of: kyb
   annotations:
-    openbank.tech/policy-checksum: "e188b962e49f43dc"
+    openbank.tech/policy-checksum: "c70dff6bb26b3924"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1624,6 +1624,9 @@ data:
       operator_read_any_excluded_actions:
         - pension-fund.holding.read   # participants' unit holdings and orders (ADR-0334 S4, #12350):
                                       # staff + service-account-openbank-pension only
+        - pension-fund.reporting.read # period-end fund aggregates for the ČNB returns (#12425, ADR-0336 D4):
+                                      # staff + service-account-openbank-tax-reporting only. Aggregates,
+                                      # but they are a supervisory filing's figures before it is filed.
       role_action_matrix:
         ROLE_OPERATOR:
           grant:

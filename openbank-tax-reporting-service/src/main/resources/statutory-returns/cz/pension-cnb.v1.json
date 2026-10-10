@@ -1,0 +1,161 @@
+{
+  "_comment": "ADR-0336. Czech pension company (penzijní společnost) periodic returns to ČNB. Return codes, scope, periodicity and deadlines are VERIFIED against vyhláška 425/2012 Sb. (consolidated text effective 2021-01-01) and vyhláška 314/2013 Sb. as amended by 217/2018 Sb. — see docs/research/cz-pension-regulatory-reporting.md. DATAPOINT IDS ARE PLATFORM IDENTIFIERS, NOT ČNB SDAT CELL CODES: the SDAT datapoint dictionary was not verified, so wireFormatVerified is false and no wire renderer is bound.",
+  "id": "cz-pension-cnb",
+  "version": 1,
+  "jurisdiction": "CZ",
+  "wireFormatVerified": false,
+  "returns": [
+    {
+      "code": "PSP10-12-PS", "name": "PSP (ČNB) 10-12 Měsíční rozvaha penzijní společnosti",
+      "scope": "COMPANY", "periodicity": "MONTH", "deadlineDaysAfterPeriodEnd": 20,
+      "legalBasis": "vyhl. 425/2012 Sb. §3(1)(a)(1)",
+      "datapoints": ["total_assets", "total_liabilities", "total_equity"],
+      "rules": [
+        {"type": "NON_NEGATIVE", "id": "assets-non-negative", "datapoints": ["total_assets", "total_liabilities"]},
+        {"type": "SUM_EQUALS", "id": "balance-sheet-balances", "target": "total_assets",
+         "terms": [{"datapoint": "total_liabilities", "sign": 1}, {"datapoint": "total_equity", "sign": 1}]}
+      ]
+    },
+    {
+      "code": "PSP10-12-FUND", "name": "PSP (ČNB) 10-12 Měsíční rozvaha fondu",
+      "scope": "FUND", "periodicity": "MONTH", "deadlineDaysAfterPeriodEnd": 20,
+      "legalBasis": "vyhl. 425/2012 Sb. §3(2)(a)",
+      "datapoints": ["total_assets", "total_liabilities", "total_equity"],
+      "rules": [
+        {"type": "NON_NEGATIVE", "id": "assets-non-negative", "datapoints": ["total_assets", "total_liabilities"]},
+        {"type": "SUM_EQUALS", "id": "balance-sheet-balances", "target": "total_assets",
+         "terms": [{"datapoint": "total_liabilities", "sign": 1}, {"datapoint": "total_equity", "sign": 1}]}
+      ]
+    },
+    {
+      "code": "PSP20-12-PS", "name": "PSP (ČNB) 20-12 Měsíční výkaz zisku a ztráty penzijní společnosti (year to date)",
+      "scope": "COMPANY", "periodicity": "MONTH", "deadlineDaysAfterPeriodEnd": 20,
+      "legalBasis": "vyhl. 425/2012 Sb. §3(1)(a)(2)",
+      "datapoints": ["income_ytd", "expenses_ytd", "profit_loss_ytd"],
+      "rules": [
+        {"type": "NON_NEGATIVE", "id": "pl-components-non-negative", "datapoints": ["income_ytd", "expenses_ytd"]},
+        {"type": "SUM_EQUALS", "id": "profit-is-income-less-expenses", "target": "profit_loss_ytd",
+         "terms": [{"datapoint": "income_ytd", "sign": 1}, {"datapoint": "expenses_ytd", "sign": -1}]}
+      ]
+    },
+    {
+      "code": "PSP20-12-FUND", "name": "PSP (ČNB) 20-12 Měsíční výkaz zisku a ztráty fondu (year to date)",
+      "scope": "FUND", "periodicity": "MONTH", "deadlineDaysAfterPeriodEnd": 20,
+      "legalBasis": "vyhl. 425/2012 Sb. §3(2)(b)",
+      "_comment": "Separate result lines (#12425): revaluation gains and losses are each non-negative and a loss year is a losses line, never a negative income. other_investment_result_ytd (interest, result on disposals, cash) and profit_loss_ytd are signed by nature. Line ids are platform identifiers, not SDAT cells.",
+      "datapoints": ["revaluation_gains_ytd", "revaluation_losses_ytd", "other_investment_result_ytd", "management_fees_ytd", "profit_loss_ytd"],
+      "rules": [
+        {"type": "NON_NEGATIVE", "id": "pl-gross-lines-non-negative", "datapoints": ["revaluation_gains_ytd", "revaluation_losses_ytd", "management_fees_ytd"]},
+        {"type": "SUM_EQUALS", "id": "profit-is-sum-of-lines", "target": "profit_loss_ytd",
+         "terms": [{"datapoint": "revaluation_gains_ytd", "sign": 1}, {"datapoint": "revaluation_losses_ytd", "sign": -1},
+                   {"datapoint": "other_investment_result_ytd", "sign": 1}, {"datapoint": "management_fees_ytd", "sign": -1}]}
+      ]
+    },
+    {
+      "code": "PSP30-12", "name": "PSP (ČNB) 30-12 Hlášení o penzijní jednotce",
+      "scope": "FUND", "periodicity": "MONTH", "deadlineDaysAfterPeriodEnd": 20,
+      "legalBasis": "vyhl. 425/2012 Sb. §3(1)(a)(3) — filed by the company, one set per účastnický fond",
+      "datapoints": ["units_opening", "units_issued", "units_cancelled", "units_closing", "unit_value", "unit_value_period_max", "fund_equity"],
+      "rules": [
+        {"type": "NON_NEGATIVE", "id": "unit-figures-non-negative",
+         "datapoints": ["units_opening", "units_issued", "units_cancelled", "units_closing", "unit_value", "unit_value_period_max", "fund_equity"]},
+        {"type": "SUM_EQUALS", "id": "unit-roll-forward", "target": "units_closing",
+         "terms": [{"datapoint": "units_opening", "sign": 1}, {"datapoint": "units_issued", "sign": 1}, {"datapoint": "units_cancelled", "sign": -1}]}
+      ]
+    },
+    {
+      "code": "PSP34-12-FUND", "name": "PSP (ČNB) 34-12 Hlášení o skladbě portfolia fondu",
+      "scope": "FUND", "periodicity": "MONTH", "deadlineDaysAfterPeriodEnd": 20,
+      "legalBasis": "vyhl. 425/2012 Sb. §3(2)(c)",
+      "datapoints": ["holdings_carrying_value", "holdings_count"],
+      "rules": [{"type": "NON_NEGATIVE", "id": "holdings-non-negative", "datapoints": ["holdings_carrying_value", "holdings_count"]}]
+    },
+    {
+      "code": "PSP34-12-PS", "name": "PSP (ČNB) 34-12 Hlášení o skladbě portfolia penzijní společnosti",
+      "scope": "COMPANY", "periodicity": "QUARTER", "deadlineDaysAfterPeriodEnd": 30,
+      "legalBasis": "vyhl. 425/2012 Sb. §3(1)(b)(4)",
+      "datapoints": ["holdings_carrying_value", "holdings_count"],
+      "rules": [{"type": "NON_NEGATIVE", "id": "holdings-non-negative", "datapoints": ["holdings_carrying_value", "holdings_count"]}]
+    },
+    {
+      "code": "PSP31-04", "name": "PSP (ČNB) 31-04 Hlášení o přijatých a vyplacených prostředcích (year to date)",
+      "scope": "COMPANY", "periodicity": "QUARTER", "deadlineDaysAfterPeriodEnd": 30,
+      "legalBasis": "vyhl. 425/2012 Sb. §3(1)(b)(2)",
+      "datapoints": ["contributions_participant_ytd", "contributions_employer_ytd", "contributions_state_ytd", "contributions_total_ytd", "payouts_total_ytd", "payout_cases_ytd", "pensioners_count"],
+      "rules": [
+        {"type": "NON_NEGATIVE", "id": "flows-non-negative",
+         "datapoints": ["contributions_participant_ytd", "contributions_employer_ytd", "contributions_state_ytd", "contributions_total_ytd", "payouts_total_ytd", "payout_cases_ytd", "pensioners_count"]},
+        {"type": "SUM_EQUALS", "id": "contributions-total", "target": "contributions_total_ytd",
+         "terms": [{"datapoint": "contributions_participant_ytd", "sign": 1}, {"datapoint": "contributions_employer_ytd", "sign": 1}, {"datapoint": "contributions_state_ytd", "sign": 1}]}
+      ]
+    },
+    {
+      "code": "PSP32-04", "name": "PSP (ČNB) 32-04 Hlášení o kapitálu a kapitálových požadavcích",
+      "scope": "COMPANY", "periodicity": "QUARTER", "deadlineDaysAfterPeriodEnd": 30,
+      "legalBasis": "vyhl. 425/2012 Sb. §3(1)(b)(3); zákon 427/2011 Sb. §38",
+      "datapoints": ["capital", "capital_requirement", "capital_surplus"],
+      "rules": [
+        {"type": "NON_NEGATIVE", "id": "capital-non-negative", "datapoints": ["capital", "capital_requirement"]},
+        {"type": "SUM_EQUALS", "id": "surplus-is-capital-less-requirement", "target": "capital_surplus",
+         "terms": [{"datapoint": "capital", "sign": 1}, {"datapoint": "capital_requirement", "sign": -1}]}
+      ]
+    },
+    {
+      "code": "PSP50-04", "name": "PSP (ČNB) 50-04 Hlášení o organizační struktuře",
+      "scope": "COMPANY", "periodicity": "QUARTER", "deadlineDaysAfterPeriodEnd": 30,
+      "legalBasis": "vyhl. 425/2012 Sb. §3(1)(b)(1)",
+      "_comment": "Sourced from the operator-maintained corporate register (#12425): no system produces these figures.",
+      "datapoints": ["share_capital", "employees_count", "qualifying_shareholders_count", "board_of_directors_members", "supervisory_board_members"],
+      "rules": [{"type": "NON_NEGATIVE", "id": "structure-non-negative", "datapoints": ["share_capital", "employees_count", "qualifying_shareholders_count", "board_of_directors_members", "supervisory_board_members"]}]
+    },
+    {
+      "code": "PSP40-01", "name": "PSP (ČNB) 40-01 Doplňující informace pro vyhodnocování rizikovosti",
+      "scope": "COMPANY", "periodicity": "YEAR", "deadlineDaysAfterPeriodEnd": 30,
+      "legalBasis": "vyhl. 425/2012 Sb. §3(1)(c)",
+      "datapoints": ["dividend_paid_or_planned", "contributions_received_year", "payouts_paid_year"],
+      "rules": [{"type": "NON_NEGATIVE", "id": "risk-info-non-negative", "datapoints": ["dividend_paid_or_planned", "contributions_received_year", "payouts_paid_year"]}]
+    },
+    {
+      "code": "PEF12-04-PS", "name": "PEF (ČNB) 12-04 Čtvrtletní bilance aktiv a pasiv penzijní společnosti",
+      "scope": "COMPANY", "periodicity": "QUARTER", "deadlineDaysAfterPeriodEnd": 30,
+      "legalBasis": "vyhl. 314/2013 Sb. ve znění 217/2018 Sb.; Reg. (EU) 2018/231 (ECB/2018/2)",
+      "datapoints": ["total_assets", "total_liabilities", "total_equity"],
+      "rules": [{"type": "SUM_EQUALS", "id": "balance-sheet-balances", "target": "total_assets",
+                 "terms": [{"datapoint": "total_liabilities", "sign": 1}, {"datapoint": "total_equity", "sign": 1}]}]
+    },
+    {
+      "code": "PEF12-04-FUND", "name": "PEF (ČNB) 12-04 Čtvrtletní bilance aktiv a pasiv fondu",
+      "scope": "FUND", "periodicity": "QUARTER", "deadlineDaysAfterPeriodEnd": 30,
+      "legalBasis": "vyhl. 314/2013 Sb. ve znění 217/2018 Sb.; Reg. (EU) 2018/231 (ECB/2018/2)",
+      "datapoints": ["total_assets", "total_liabilities", "total_equity"],
+      "rules": [{"type": "SUM_EQUALS", "id": "balance-sheet-balances", "target": "total_assets",
+                 "terms": [{"datapoint": "total_liabilities", "sign": 1}, {"datapoint": "total_equity", "sign": 1}]}]
+    },
+    {
+      "code": "PEF13-04", "name": "PEF (ČNB) 13-04 Čtvrtletní přehled o úvěrech fondu",
+      "scope": "FUND", "periodicity": "QUARTER", "deadlineDaysAfterPeriodEnd": 30,
+      "legalBasis": "vyhl. 314/2013 Sb. ve znění 217/2018 Sb.",
+      "datapoints": ["loans_outstanding"],
+      "rules": [{"type": "NON_NEGATIVE", "id": "loans-non-negative", "datapoints": ["loans_outstanding"]}]
+    },
+    {
+      "code": "PEF14-04", "name": "PEF (ČNB) 14-04 Čtvrtletní přehled o penzijních nárocích fondu",
+      "scope": "FUND", "periodicity": "QUARTER", "deadlineDaysAfterPeriodEnd": 30,
+      "legalBasis": "vyhl. 314/2013 Sb. ve znění 217/2018 Sb.",
+      "datapoints": ["pension_entitlements_opening", "entitlement_increase", "entitlement_decrease", "pension_entitlements_closing"],
+      "rules": [
+        {"type": "NON_NEGATIVE", "id": "entitlements-non-negative",
+         "datapoints": ["pension_entitlements_opening", "entitlement_increase", "entitlement_decrease", "pension_entitlements_closing"]},
+        {"type": "SUM_EQUALS", "id": "entitlement-roll-forward", "target": "pension_entitlements_closing",
+         "terms": [{"datapoint": "pension_entitlements_opening", "sign": 1}, {"datapoint": "entitlement_increase", "sign": 1}, {"datapoint": "entitlement_decrease", "sign": -1}]}
+      ]
+    },
+    {
+      "code": "PEF15-01", "name": "PEF (ČNB) 15-01 Roční doplňkové informace o účastnících fondu",
+      "scope": "FUND", "periodicity": "YEAR", "deadlineDaysAfterPeriodEnd": 30,
+      "legalBasis": "vyhl. 314/2013 Sb. ve znění 217/2018 Sb. (by 30 January)",
+      "datapoints": ["participants_count", "participants_contributing_count"],
+      "rules": [{"type": "NON_NEGATIVE", "id": "participants-non-negative", "datapoints": ["participants_count", "participants_contributing_count"]}]
+    }
+  ]
+}
