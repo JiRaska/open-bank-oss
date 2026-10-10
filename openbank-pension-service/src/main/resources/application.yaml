@@ -140,7 +140,7 @@ openbank:
     server-url: ${OPENBANK_TEMPORAL_SERVER_URL:localhost:7233}
     namespace: ${OPENBANK_TEMPORAL_NAMESPACE:openbank-pension}
   pension:
-    # Required in production AND development; no provider is assigned implicitly.
+    # Required in production; dev/test profiles use a synthetic fixture provider.
     # This only constrains creation, not authorization or existing-data isolation.
     provider-entity-id: ${OPENBANK_PENSION_PROVIDER_ENTITY_ID}
     worker:
@@ -249,6 +249,8 @@ authz:
 "%dev":
   openbank:
     pension:
+      # Synthetic development identity, shared with test and sandbox fixtures.
+      provider-entity-id: "00000000-0000-4000-8000-000000000001"
       stub-integrations:
         enabled: true
       worker:

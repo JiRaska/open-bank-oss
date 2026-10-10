@@ -27,7 +27,7 @@ import java.util.UUID
 @ApplicationScoped
 class PensionBeans {
 
-    /** No default: an unassigned deployment must fail at startup, including local development. */
+    /** Production requires an assigned provider; dev/test profiles supply a synthetic fixture identity. */
     @Produces
     @Startup
     @ApplicationScoped

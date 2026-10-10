@@ -100,6 +100,20 @@ class PensionContractApiIT {
 
     @Test
     @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    fun `the participant annual-statement read is served at its published path`() {
+        val id = create()
+        // Not issued yet: the RESOURCE's 404 (its message), which an unregistered route (#3371)
+        // cannot produce — a bare status would read the same either way.
+        val body = given().header("X-Customer-Party-Id", party.toString())
+            .`when`().get("$base/$id/annual-statements/2025").then().statusCode(404)
+            .extract().asString()
+        assertThat(body).contains("no annual statement for 2025")
+        given().header("X-Customer-Party-Id", UUID.randomUUID().toString())
+            .`when`().get("$base/$id/annual-statements/2025").then().statusCode(404)
+    }
+
+    @Test
+    @TestSecurity(user = "edge", roles = ["ROLE_API"])
     fun `the participant cannot activate or terminate through the retired S1 routes`() {
         val id = create()
         post("$base/$id/submit").statusCode(200).body("status", equalTo("PENDING_ACTIVATION"))

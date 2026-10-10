@@ -7,7 +7,7 @@ package com.openbank.pension.testsupport
 import com.openbank.pension.application.ProviderBoundary
 import java.util.UUID
 
-/** Matches the explicit test-profile provider in application.yaml; never a production default. */
+/** Matches the synthetic dev/test/sandbox provider; never a production default. */
 object ProviderFixtures {
     val ID: UUID = UUID.fromString("00000000-0000-4000-8000-000000000001")
     val boundary = ProviderBoundary(ID)

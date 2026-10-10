@@ -1,0 +1,518 @@
+openapi: 3.1.0
+info:
+  title: OpenBank Pension Fund Service API
+  # 1.0.0: first contract (ADR-0334 slice S4, issue #12350).
+  version: 1.0.0
+  description: |
+    Provider side of the pension platform (ADR-0334 §1): segregated funds, fund strategies with
+    lifecycle glide paths, the unit register and NAV.
+
+    Fund assets belong to the participants. They are held at the fund's depositary and are never
+    posted into treasury or the bank ledger as bank positions.
+
+    Every order is FORWARD-priced: it is accepted unpriced (202) and settles at the fund's next
+    published NAV. NAV publication and strategy changes are four-eyes: the principal who
+    calculated a NAV or submitted a change cannot approve it (403).
+servers:
+  - url: http://localhost:8162
+tags:
+  - name: Funds
+  - name: NAV
+  - name: Strategies
+  - name: Unit register
+security:
+  - bearerAuth: []
+
+paths:
+  /api/v1/funds:
+    post:
+      tags: [Funds]
+      operationId: createFund
+      summary: Create a segregated fund
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FundRequest' }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/Fund' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    get:
+      tags: [Funds]
+      operationId: listFunds
+      summary: List funds
+      responses:
+        '200':
+          description: Funds
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Fund' } } } }
+  /api/v1/funds/{fundId}:
+    parameters: [ { $ref: '#/components/parameters/FundId' } ]
+    get:
+      tags: [Funds]
+      operationId: getFund
+      summary: Read one fund
+      responses:
+        '200': { description: The fund, content: { application/json: { schema: { $ref: '#/components/schemas/Fund' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Funds]
+      operationId: amendFund
+      summary: Amend a fund's descriptive and fee terms; ISIN and currency are immutable
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FundRequest' }
+      responses:
+        '200': { description: Amended, content: { application/json: { schema: { $ref: '#/components/schemas/Fund' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    delete:
+      tags: [Funds]
+      operationId: closeFund
+      summary: Close a fund; refused while units are outstanding or a strategy uses it
+      responses:
+        '200': { description: Closed, content: { application/json: { schema: { $ref: '#/components/schemas/Fund' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/funds/{fundId}/navs:
+    parameters: [ { $ref: '#/components/parameters/FundId' } ]
+    post:
+      tags: [Funds]
+      operationId: calculateNav
+      summary: Calculate a NAV (maker); a second person publishes it
+      description: |
+        A position without `price` is priced through the market-price port; an unpriced position
+        is refused (400) rather than valued at an invented number. Calculating for a date that
+        already has a published NAV creates a CORRECTION of it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NavCalculationRequest' }
+      responses:
+        '201': { description: Calculated, content: { application/json: { schema: { $ref: '#/components/schemas/Nav' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    get:
+      tags: [Funds]
+      operationId: listNavs
+      summary: NAV history of a fund, newest first
+      responses:
+        '200':
+          description: NAVs
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Nav' } } } }
+  /api/v1/navs/{navId}:
+    parameters: [ { $ref: '#/components/parameters/NavId' } ]
+    get:
+      tags: [NAV]
+      operationId: getNav
+      summary: Read one NAV
+      responses:
+        '200': { description: The NAV, content: { application/json: { schema: { $ref: '#/components/schemas/Nav' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/navs/{navId}/approve:
+    parameters: [ { $ref: '#/components/parameters/NavId' } ]
+    post:
+      tags: [NAV]
+      operationId: approveNav
+      summary: Publish a calculated NAV (checker); settles queued orders, or re-prices for a correction
+      responses:
+        '200': { description: Published, content: { application/json: { schema: { $ref: '#/components/schemas/NavPublication' } } } }
+        '403': { $ref: '#/components/responses/FourEyes' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/navs/{navId}/reject:
+    parameters: [ { $ref: '#/components/parameters/NavId' } ]
+    post:
+      tags: [NAV]
+      operationId: rejectNav
+      summary: Reject a calculated NAV (checker)
+      responses:
+        '200': { description: Rejected, content: { application/json: { schema: { $ref: '#/components/schemas/Nav' } } } }
+        '403': { $ref: '#/components/responses/FourEyes' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/strategies:
+    post:
+      tags: [Strategies]
+      operationId: createStrategy
+      summary: Create a strategy (static allocation, optionally a lifecycle glide path)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StrategyRequest' }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/Strategy' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+    get:
+      tags: [Strategies]
+      operationId: listStrategies
+      summary: List strategies
+      responses:
+        '200':
+          description: Strategies
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Strategy' } } } }
+  /api/v1/strategies/{strategyId}:
+    parameters: [ { $ref: '#/components/parameters/StrategyId' } ]
+    get:
+      tags: [Strategies]
+      operationId: getStrategy
+      summary: Read one strategy
+      responses:
+        '200': { description: The strategy, content: { application/json: { schema: { $ref: '#/components/schemas/Strategy' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/strategies/{strategyId}/allocation:
+    parameters: [ { $ref: '#/components/parameters/StrategyId' } ]
+    get:
+      tags: [Strategies]
+      operationId: getStrategyAllocation
+      summary: Target allocation for a participant with the given years to retirement
+      parameters:
+        - name: yearsToRetirement
+          in: query
+          required: true
+          schema: { type: integer, format: int32 }
+      responses:
+        '200':
+          description: Allocation
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/AllocationTarget' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/strategies/{strategyId}/changes:
+    parameters: [ { $ref: '#/components/parameters/StrategyId' } ]
+    post:
+      tags: [Strategies]
+      operationId: submitStrategyChange
+      summary: Submit an allocation change (maker); needs approval and a notice period
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StrategyChangeRequest' }
+      responses:
+        '201': { description: Submitted, content: { application/json: { schema: { $ref: '#/components/schemas/StrategyChange' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    get:
+      tags: [Strategies]
+      operationId: listStrategyChanges
+      summary: Changes submitted against a strategy, newest first
+      responses:
+        '200':
+          description: Changes
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/StrategyChange' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/strategy-changes/{changeId}:
+    parameters: [ { $ref: '#/components/parameters/ChangeId' } ]
+    get:
+      tags: [Strategies]
+      operationId: getStrategyChange
+      summary: Read one strategy change
+      responses:
+        '200': { description: The change, content: { application/json: { schema: { $ref: '#/components/schemas/StrategyChange' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/strategy-changes/{changeId}/approve:
+    parameters: [ { $ref: '#/components/parameters/ChangeId' } ]
+    post:
+      tags: [Strategies]
+      operationId: approveStrategyChange
+      summary: Approve a change (checker, never the submitter); participants are notified from today
+      responses:
+        '200': { description: Approved, content: { application/json: { schema: { $ref: '#/components/schemas/StrategyChange' } } } }
+        '403': { $ref: '#/components/responses/FourEyes' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/strategy-changes/{changeId}/reject:
+    parameters: [ { $ref: '#/components/parameters/ChangeId' } ]
+    post:
+      tags: [Strategies]
+      operationId: rejectStrategyChange
+      summary: Reject a change (checker)
+      responses:
+        '200': { description: Rejected, content: { application/json: { schema: { $ref: '#/components/schemas/StrategyChange' } } } }
+        '403': { $ref: '#/components/responses/FourEyes' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/strategy-changes/{changeId}/apply:
+    parameters: [ { $ref: '#/components/parameters/ChangeId' } ]
+    post:
+      tags: [Strategies]
+      operationId: applyStrategyChange
+      summary: Apply an approved change on or after its effective date
+      responses:
+        '200': { description: Applied, content: { application/json: { schema: { $ref: '#/components/schemas/Strategy' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/contracts/{contractId}/orders:
+    parameters: [ { $ref: '#/components/parameters/ContractId' } ]
+    post:
+      tags: [Unit register]
+      operationId: placeOrder
+      summary: Place a subscription, redemption or switch; it queues until the next published NAV
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: A retry with the same key returns the original order; the same key with a different order is 409.
+          schema: { type: string, maxLength: 128 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OrderRequest' }
+      responses:
+        '202': { description: Accepted, unpriced, content: { application/json: { schema: { $ref: '#/components/schemas/UnitOrder' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    get:
+      tags: [Unit register]
+      operationId: listOrders
+      summary: Orders of a contract, newest first
+      responses:
+        '200':
+          description: Orders
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/UnitOrder' } } } }
+  /api/v1/contracts/{contractId}/holdings:
+    parameters: [ { $ref: '#/components/parameters/ContractId' } ]
+    get:
+      tags: [Unit register]
+      operationId: getHoldings
+      summary: Unit holdings of a contract valued at each fund's latest published NAV
+      responses:
+        '200': { description: Valuation, content: { application/json: { schema: { $ref: '#/components/schemas/ContractValuation' } } } }
+  /api/v1/contracts/{contractId}/transactions:
+    parameters: [ { $ref: '#/components/parameters/ContractId' } ]
+    get:
+      tags: [Unit register]
+      operationId: listTransactions
+      summary: Priced unit transactions of a contract, newest first
+      responses:
+        '200':
+          description: Transactions
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/UnitTransaction' } } } }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    FundId: { name: fundId, in: path, required: true, schema: { type: string, format: uuid } }
+    NavId: { name: navId, in: path, required: true, schema: { type: string, format: uuid } }
+    StrategyId: { name: strategyId, in: path, required: true, schema: { type: string, format: uuid } }
+    ChangeId: { name: changeId, in: path, required: true, schema: { type: string, format: uuid } }
+    ContractId: { name: contractId, in: path, required: true, schema: { type: string, format: uuid } }
+
+  responses:
+    BadRequest: { description: Malformed or missing input, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    NotFound: { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    Conflict: { description: Refused by the current state, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    FourEyes: { description: The maker cannot be the checker, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error: { type: string }
+    FundRequest:
+      type: object
+      required: [name, isin, lei, depositaryReference, custodyAccountReference, currency, riskClass, managementFeeRate]
+      properties:
+        name: { type: string }
+        isin: { type: string, pattern: '^[A-Z]{2}[A-Z0-9]{9}[0-9]$' }
+        lei: { type: string, pattern: '^[A-Z0-9]{18}[0-9]{2}$' }
+        depositaryReference: { type: string }
+        custodyAccountReference: { type: string }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        riskClass: { type: integer, minimum: 1, maximum: 7 }
+        mandatoryConservative: { type: boolean, default: false }
+        managementFeeRate: { type: number, description: Annual fraction of net assets, e.g. 0.008 }
+        launchNavPerUnit: { type: number, default: 1 }
+    Fund:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        isin: { type: string }
+        lei: { type: string }
+        depositaryReference: { type: string }
+        custodyAccountReference: { type: string }
+        currency: { type: string }
+        riskClass: { type: integer }
+        mandatoryConservative: { type: boolean }
+        managementFeeRate: { type: number }
+        launchNavPerUnit: { type: number }
+        status: { type: string, enum: [ACTIVE, CLOSED] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    AllocationTarget:
+      type: object
+      required: [fundId, weight, lowerBand, upperBand]
+      properties:
+        fundId: { type: string, format: uuid }
+        weight: { type: number }
+        lowerBand: { type: number }
+        upperBand: { type: number }
+    GlidePathStep:
+      type: object
+      required: [minYearsToRetirement, allocations]
+      properties:
+        minYearsToRetirement: { type: integer, minimum: 0 }
+        allocations: { type: array, items: { $ref: '#/components/schemas/AllocationTarget' } }
+    StrategyRequest:
+      type: object
+      required: [name, allocations]
+      properties:
+        name: { type: string }
+        allocations: { type: array, items: { $ref: '#/components/schemas/AllocationTarget' } }
+        glidePath: { type: array, items: { $ref: '#/components/schemas/GlidePathStep' } }
+    Strategy:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        allocations: { type: array, items: { $ref: '#/components/schemas/AllocationTarget' } }
+        glidePath: { type: array, items: { $ref: '#/components/schemas/GlidePathStep' } }
+        lifecycle: { type: boolean }
+        fundIds: { type: array, items: { type: string, format: uuid } }
+        status: { type: string, enum: [ACTIVE, CLOSED] }
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    StrategyChangeRequest:
+      type: object
+      required: [allocations, reason, effectiveDate]
+      properties:
+        allocations: { type: array, items: { $ref: '#/components/schemas/AllocationTarget' } }
+        glidePath: { type: array, items: { $ref: '#/components/schemas/GlidePathStep' } }
+        reason: { type: string }
+        effectiveDate: { type: string, format: date }
+    StrategyChange:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        strategyId: { type: string, format: uuid }
+        proposedAllocations: { type: array, items: { $ref: '#/components/schemas/AllocationTarget' } }
+        proposedGlidePath: { type: array, items: { $ref: '#/components/schemas/GlidePathStep' } }
+        reason: { type: string }
+        effectiveDate: { type: string, format: date }
+        submittedBy: { type: string }
+        submittedAt: { type: string, format: date-time }
+        status: { type: string, enum: [PENDING_APPROVAL, APPROVED, REJECTED, APPLIED] }
+        decidedBy: { type: [string, 'null'] }
+        decidedAt: { type: [string, 'null'], format: date-time }
+        participantNotificationDate: { type: [string, 'null'], format: date }
+        appliedAt: { type: [string, 'null'], format: date-time }
+    PositionLine:
+      type: object
+      required: [instrumentId, quantity]
+      properties:
+        instrumentId: { type: string }
+        quantity: { type: number }
+        price: { type: number, description: Optional; when absent the market-price port prices it }
+    NavCalculationRequest:
+      type: object
+      required: [valuationDate]
+      properties:
+        valuationDate: { type: string, format: date }
+        positions: { type: array, items: { $ref: '#/components/schemas/PositionLine' } }
+        cash: { type: number, default: 0 }
+        otherLiabilities: { type: number, default: 0 }
+    Nav:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        fundId: { type: string, format: uuid }
+        valuationDate: { type: string, format: date }
+        grossAssets: { type: number }
+        accruedManagementFee: { type: number }
+        otherLiabilities: { type: number }
+        netAssets: { type: number }
+        unitsOutstanding: { type: number }
+        navPerUnit: { type: number }
+        status: { type: string, enum: [CALCULATED, PUBLISHED, REJECTED, SUPERSEDED] }
+        calculatedBy: { type: string }
+        approvedBy: { type: [string, 'null'] }
+        publishedAt: { type: [string, 'null'], format: date-time }
+        correctsNavId: { type: [string, 'null'], format: uuid }
+    Correction:
+      type: object
+      properties:
+        transactionId: { type: string, format: uuid }
+        contractId: { type: string, format: uuid }
+        type: { type: string, enum: [SUBSCRIBE, REDEEM, SWITCH_OUT, SWITCH_IN, FEE] }
+        unitsDelta: { type: number }
+        amountDelta: { type: number }
+    NavPublication:
+      type: object
+      properties:
+        nav: { $ref: '#/components/schemas/Nav' }
+        settledOrders: { type: integer }
+        corrections: { type: array, items: { $ref: '#/components/schemas/Correction' } }
+    OrderRequest:
+      type: object
+      required: [fundId, type]
+      description: SUBSCRIBE takes `amount`; REDEEM and SWITCH_OUT take `units`; SWITCH_OUT also names `targetFundId`.
+      properties:
+        fundId: { type: string, format: uuid }
+        type:
+          type: string
+          enum: [SUBSCRIBE, REDEEM, SWITCH_OUT, SWITCH_IN]
+          description: SWITCH_IN is created by a settled SWITCH_OUT and is refused (400) when placed directly.
+        amount: { type: number }
+        units: { type: number }
+        targetFundId: { type: string, format: uuid }
+    UnitOrder:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        contractId: { type: string, format: uuid }
+        fundId: { type: string, format: uuid }
+        type: { type: string, enum: [SUBSCRIBE, REDEEM, SWITCH_OUT, SWITCH_IN] }
+        amount: { type: [number, 'null'] }
+        units: { type: [number, 'null'] }
+        targetFundId: { type: [string, 'null'], format: uuid }
+        parentOrderId: { type: [string, 'null'], format: uuid }
+        status: { type: string, enum: [PENDING, SETTLED] }
+        placedAt: { type: string, format: date-time }
+        settledAt: { type: [string, 'null'], format: date-time }
+        navId: { type: [string, 'null'], format: uuid }
+        outgoing: { type: boolean }
+    UnitTransaction:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        orderId: { type: [string, 'null'], format: uuid }
+        contractId: { type: string, format: uuid }
+        fundId: { type: string, format: uuid }
+        type: { type: string, enum: [SUBSCRIBE, REDEEM, SWITCH_OUT, SWITCH_IN, FEE] }
+        units: { type: number }
+        amount: { type: number }
+        navId: { type: string, format: uuid }
+        navPerUnit: { type: number }
+        pricedAt: { type: string, format: date-time }
+        correctedFromNavId: { type: [string, 'null'], format: uuid }
+    HoldingValuation:
+      type: object
+      properties:
+        fundId: { type: string, format: uuid }
+        units: { type: number }
+        navPerUnit: { type: [number, 'null'] }
+        navDate: { type: [string, 'null'], format: date }
+        value: { type: [number, 'null'] }
+        currency: { type: string }
+    ContractValuation:
+      type: object
+      properties:
+        contractId: { type: string, format: uuid }
+        holdings: { type: array, items: { $ref: '#/components/schemas/HoldingValuation' } }
+        pendingOrders: { type: array, items: { $ref: '#/components/schemas/UnitOrder' } }

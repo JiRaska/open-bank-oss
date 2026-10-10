@@ -20,8 +20,9 @@ import org.junit.jupiter.api.extension.ExtendWith
 /**
  * Consumer-driven contract for the settlement call sepa-instant makes once the scheme returns
  * ACSC ([com.openbank.sepainstant.infrastructure.client.SettlementAdapter.settleWithResilience],
- * ADR-0108, issue #468 edge 1). The consumer posts POST /api/v1/transactions and expects
- * {id, status}. The provider verification lives in TransactionPactProviderVerificationTest
+ * ADR-0108, issue #468 edge 1). The consumer posts POST /api/v1/transactions and checks
+ * the booked transaction's identity, amount, rail and status before reporting settlement.
+ * The provider verification lives in TransactionPactProviderVerificationTest
  * (transaction-service) — same provider as domestic-payment and sepa-payment's contracts, hence
  * the shared "a valid source account exists" state.
  *
@@ -71,6 +72,12 @@ class SepaInstantTransactionServicePactConsumerTest {
                 // made all four replays green about it for the life of the contracts.
                 // stringValue, NOT stringType: this is the field the consumer branches on.
                 o.stringValue("status", "COMPLETED")
+                o.stringValue("type", "DEBIT")
+                o.stringValue("sourceAccountId", "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+                o.decimalType("amount", 500.00)
+                o.stringValue("currencyCode", "EUR")
+                o.stringValue("rail", "SEPA_INST")
+                o.stringValue("instructionType", "ONE_OFF")
             }.build(),
         )
         .toPact()
@@ -89,5 +96,40 @@ class SepaInstantTransactionServicePactConsumerTest {
 
         assertThat(body.getString("id")).isNotBlank()
         assertThat(body.getString("status")).isEqualTo("COMPLETED")
+        assertThat(body.getString("type")).isEqualTo("DEBIT")
+        assertThat(body.getString("sourceAccountId")).isEqualTo("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+        assertThat(body.getDouble("amount")).isEqualTo(500.00)
+        assertThat(body.getString("currencyCode")).isEqualTo("EUR")
+        assertThat(body.getString("rail")).isEqualTo("SEPA_INST")
+        assertThat(body.getString("instructionType")).isEqualTo("ONE_OFF")
+    }
+
+    /**
+     * TransactionNegativeAuthPactVerificationTest replays this state without @TestSecurity.
+     * Pin only the 401: the container rejects an absent M2M identity before an error mapper
+     * can guarantee a response body.
+     */
+    @Pact(consumer = "openbank-sepa-instant", provider = "openbank-transaction-service")
+    fun initiateSctInstSettlementUnauthenticatedPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("no valid M2M identity is presented")
+        .uponReceiving("POST initiate SCT Inst settlement with no credentials")
+        .path("/api/v1/transactions")
+        .method("POST")
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(requestBody)
+        .willRespondWith()
+        .status(401)
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "initiateSctInstSettlementUnauthenticatedPact")
+    fun `initiateTransaction without credentials is refused with 401`(mockServer: MockServer) {
+        given()
+            .baseUri(mockServer.getUrl())
+            .contentType("application/json")
+            .body(requestBody)
+            .post("/api/v1/transactions")
+            .then()
+            .statusCode(401)
     }
 }
