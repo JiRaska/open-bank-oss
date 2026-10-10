@@ -6,20 +6,22 @@ package com.openbank.pensionfund.infrastructure.persistence
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
-import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.pensionfund.application.port.PensionFundStore
 import com.openbank.pensionfund.application.port.StoreChanges
 import com.openbank.pensionfund.domain.model.AllocationTarget
+import com.openbank.pensionfund.domain.model.ClassificationCorrectionStatus
 import com.openbank.pensionfund.domain.model.Fund
 import com.openbank.pensionfund.domain.model.FundStatus
 import com.openbank.pensionfund.domain.model.FundStrategy
 import com.openbank.pensionfund.domain.model.GlidePathStep
+import com.openbank.pensionfund.domain.model.InstrumentClass
 import com.openbank.pensionfund.domain.model.NavFigures
 import com.openbank.pensionfund.domain.model.NavPosition
 import com.openbank.pensionfund.domain.model.NavRecord
 import com.openbank.pensionfund.domain.model.NavStatus
 import com.openbank.pensionfund.domain.model.OrderStatus
 import com.openbank.pensionfund.domain.model.OrderType
+import com.openbank.pensionfund.domain.model.PositionClassificationCorrection
 import com.openbank.pensionfund.domain.model.Precision
 import com.openbank.pensionfund.domain.model.StrategyChange
 import com.openbank.pensionfund.domain.model.StrategyChangeStatus
@@ -48,6 +50,7 @@ class PanachePensionFundStore(
     private val holdings: UnitHoldingRepository,
     private val transactions: UnitTransactionRepository,
     private val positions: FundNavPositionRepository,
+    private val classifications: PositionClassificationCorrectionRepository,
 ) : PensionFundStore {
 
     private val json = jacksonObjectMapper().findAndRegisterModules()
@@ -69,6 +72,7 @@ class PanachePensionFundStore(
                 changes.holdings.forEach { h -> writes += { session.merge(h.toEntity()) } }
                 changes.transactions.forEach { t -> writes += { session.merge(t.toEntity()) } }
                 changes.navPositions.forEach { p -> writes += { session.persist(p.toEntity()) } }
+                changes.classificationCorrections.forEach { c -> writes += { session.merge(c.toEntity()) } }
                 writes.fold(Uni.createFrom().voidItem() as Uni<*>) { acc, w -> acc.flatMap { w() } }
                     .flatMap { session.flush() }
             }
@@ -162,8 +166,27 @@ class PanachePensionFundStore(
         }
 
     override suspend fun navPositions(navId: UUID): List<NavPosition> =
-        read { positions.find("navId = ?1 order by instrumentId", navId).list() }
-            .map { NavPosition(it.navId, it.instrumentId, it.quantity, it.price) }
+        read { positions.find("navId = ?1 order by instrumentId", navId).list() }.map { it.toDomain() }
+
+    override suspend fun navPositionsOf(navIds: Collection<UUID>): List<NavPosition> = if (navIds.isEmpty()) {
+        emptyList()
+    } else {
+        read { positions.find("navId in ?1 order by instrumentId", navIds.toList()).list() }.map { it.toDomain() }
+    }
+
+    override suspend fun navPosition(id: UUID): NavPosition? = read { positions.findById(id) }?.toDomain()
+
+    override suspend fun classificationCorrection(id: UUID): PositionClassificationCorrection? =
+        read { classifications.findById(id) }?.toDomain()
+
+    override suspend fun classificationCorrections(
+        positionIds: Collection<UUID>,
+    ): List<PositionClassificationCorrection> = if (positionIds.isEmpty()) {
+        emptyList()
+    } else {
+        read { classifications.find("positionId in ?1 order by proposedAt", positionIds.toList()).list() }
+            .map { it.toDomain() }
+    }
 
     // ---- mapping -----------------------------------------------------------------------------
 
@@ -275,13 +298,45 @@ class PanachePensionFundStore(
     }
 
     private fun NavPosition.toEntity() = FundNavPositionEntity().also {
-        // Written only inside the NAV's own (atomic) calculation commit, so a fresh id cannot duplicate.
-        it.id = Ids.newId()
+        // Written only inside the NAV's own (atomic) calculation commit; the id is minted with it.
+        it.id = id
         it.navId = navId
         it.instrumentId = instrumentId
         it.quantity = quantity
         it.price = price
+        it.instrumentClass = instrumentClass.name
     }
+
+    private fun FundNavPositionEntity.toDomain() =
+        NavPosition(id, navId, instrumentId, quantity, price, InstrumentClass.valueOf(instrumentClass))
+
+    private fun PositionClassificationCorrection.toEntity() = PositionClassificationCorrectionEntity().also {
+        it.id = id
+        it.positionId = positionId
+        it.navId = navId
+        it.fromClass = fromClass.name
+        it.toClass = toClass.name
+        it.reason = reason
+        it.proposedBy = proposedBy
+        it.proposedAt = proposedAt
+        it.status = status.name
+        it.decidedBy = decidedBy
+        it.decidedAt = decidedAt
+    }
+
+    private fun PositionClassificationCorrectionEntity.toDomain() = PositionClassificationCorrection(
+        id = id,
+        positionId = positionId,
+        navId = navId,
+        fromClass = InstrumentClass.valueOf(fromClass),
+        toClass = InstrumentClass.valueOf(toClass),
+        reason = reason,
+        proposedBy = proposedBy,
+        proposedAt = proposedAt,
+        status = ClassificationCorrectionStatus.valueOf(status),
+        decidedBy = decidedBy,
+        decidedAt = decidedAt,
+    )
 
     private fun FundNavEntity.toDomain() = NavRecord(
         id = id,
