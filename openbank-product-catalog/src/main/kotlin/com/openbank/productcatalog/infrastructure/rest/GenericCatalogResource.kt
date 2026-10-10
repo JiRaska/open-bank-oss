@@ -369,6 +369,7 @@ class GenericCatalogResource(
         updatedAt = revision.updatedAt.atOffset(ZoneOffset.UTC),
         revision = revision.revision,
         pensionApprovalDigest = revision.pensionApprovalDigest,
+        pensionApprovedEffectiveTo = revision.pensionApprovedEffectiveTo?.atOffset(ZoneOffset.UTC),
     )
 
     private fun requiredRevision(ifMatch: String?): Long {

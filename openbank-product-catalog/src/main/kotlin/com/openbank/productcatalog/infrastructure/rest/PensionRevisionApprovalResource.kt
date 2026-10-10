@@ -12,6 +12,7 @@ import com.openbank.productcatalog.application.GenericCatalogService
 import com.openbank.productcatalog.application.port.out.PensionApprovalRole
 import com.openbank.productcatalog.application.port.out.PensionRevisionApproval
 import com.openbank.productcatalog.infrastructure.security.CatalogRoles
+import com.openbank.productcatalog.infrastructure.security.CatalogScopeRoleMapper
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.enterprise.context.ApplicationScoped
@@ -24,6 +25,7 @@ import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.jwt.JsonWebToken
 import java.time.Instant
 import java.util.UUID
@@ -38,9 +40,16 @@ data class PensionApprovalResponse(val role: PensionApprovalRole, val digest: St
 class PensionRevisionApprovalResource(
     private val service: GenericCatalogService,
     private val identity: SecurityIdentity,
+    private val scopeMapper: CatalogScopeRoleMapper,
+    @ConfigProperty(name = "openbank.catalog.security.scope-claim", defaultValue = "scope")
+    private val scopeClaim: String,
 ) {
     @GET
-    @Authorize(action = "catalog.pensionApproval.read", resource = "#offeringId")
+    @Authorize(
+        action = "catalog.pensionApproval.read",
+        resource = "#offeringId",
+        attributes = ["azp", "subject", "preferred_username"],
+    )
     @RolesAllowed(CatalogRoles.READ)
     suspend fun list(
         @PathParam("offeringId") offeringId: UUID,
@@ -67,9 +76,13 @@ class PensionRevisionApprovalResource(
             PensionApprovalRole.LEGAL_COUNSEL -> CatalogRoles.PENSION_LEGAL_APPROVER
             PensionApprovalRole.PRODUCT_OWNER -> CatalogRoles.PENSION_PRODUCT_OWNER
         }
-        if (!identity.hasRole(requiredRole)) throw CatalogForbiddenException("approval role is required")
         val token = identity.principal as? JsonWebToken
             ?: throw CatalogForbiddenException("a verified JWT principal is required")
+        // Raw realm roles can reach @RolesAllowed. Derive the decision again from the verified
+        // realm assignment and the independent approval scope on this exact JWT.
+        if (requiredRole !in scopeMapper.roles(token.getClaim<Any?>(scopeClaim), identity.roles)) {
+            throw CatalogForbiddenException("approval role and scope are required")
+        }
         if (
             token.name.startsWith("service-account-") ||
             token.name.startsWith("agent:") ||
