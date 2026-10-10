@@ -125,7 +125,7 @@ object FinrepFrozenMonthPactSeed {
     }
 
     private val ENTRY_DATE: LocalDate = LocalDate.of(2000, 6, 15)
-    private val AMOUNT = BigDecimal("150000.00")
+    private val AMOUNT = BigDecimal("100.00")
     private val PERIOD_ID: UUID = UUID.fromString("00000000-0000-0000-0000-000000009601")
     private val JOURNAL_ID: UUID = UUID.fromString("b0000000-0000-0000-0000-000000012497")
     private val TRANSACTION_ID: UUID = UUID.fromString("b0000000-0000-0000-0000-000000012498")

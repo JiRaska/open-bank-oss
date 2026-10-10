@@ -8,6 +8,8 @@ import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
 import io.restassured.path.json.JsonPath
+import io.restassured.path.json.config.JsonPathConfig
+import io.restassured.path.json.config.JsonPathConfig.NumberReturnType
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.MethodOrderer
 import org.junit.jupiter.api.Order
@@ -75,14 +77,22 @@ class ClosedPeriodClosingBalanceIT {
     @Order(4)
     @TestSecurity(user = "viewer", roles = ["ROLE_VIEWER"])
     fun `the balance finrep reads for month 2 is opening plus movements`() {
-        val balance = read(FINREP_FROZEN_BALANCE_PATH, FEBRUARY, 200)
-        assertThat(net(balance, CASH_CODE)).isEqualByComparingTo("1300.00")
-        assertThat(net(balance, DEPOSITS_CODE)).isEqualByComparingTo("-1300.00")
-        assertThat(balance.getBoolean("balanced")).isTrue()
-        // Month 1's own closing balance is unchanged by month 2.
-        assertThat(net(read(FINREP_FROZEN_BALANCE_PATH, JANUARY, 200), CASH_CODE)).isEqualByComparingTo("1000.00")
+        // Relative, not absolute: other tests share this database and may hold frozen months
+        // before 2001. The defect is exactly "month 2's balance equals month 2's movements".
+        val january = read(FINREP_FROZEN_BALANCE_PATH, JANUARY, 200)
+        val february = read(FINREP_FROZEN_BALANCE_PATH, FEBRUARY, 200)
+        val februaryMovements = net(read("frozen-trial-balance", FEBRUARY, 200), CASH_CODE)
+        val januaryMovements = net(read("frozen-trial-balance", JANUARY, 200), CASH_CODE)
+
+        assertThat(net(february, CASH_CODE))
+            .isEqualByComparingTo(net(january, CASH_CODE) + februaryMovements)
+            .isGreaterThanOrEqualTo(januaryMovements + februaryMovements)
+        assertThat(net(february, DEPOSITS_CODE))
+            .isEqualByComparingTo(net(january, DEPOSITS_CODE) - februaryMovements)
+        assertThat(february.getBoolean("balanced")).isTrue()
         // The live preview gives the same stock.
-        assertThat(net(read("closing-balance", FEBRUARY, 200), CASH_CODE)).isEqualByComparingTo("1300.00")
+        assertThat(net(read("closing-balance", FEBRUARY, 200), CASH_CODE))
+            .isEqualByComparingTo(net(february, CASH_CODE))
     }
 
     @Test
@@ -137,6 +147,8 @@ class ClosedPeriodClosingBalanceIT {
     private fun read(path: String, date: String, status: Int, type: String = "MONTH"): JsonPath =
         given().accept("application/json").`when`().get("/api/v1/ledger/periods/$type/$date/$path")
             .then().statusCode(status).extract().jsonPath()
+            // BigDecimal, never the default Float: a float loses cents once balances grow.
+            .using(JsonPathConfig.jsonPathConfig().numberReturnType(NumberReturnType.BIG_DECIMAL))
 
     private fun net(body: JsonPath, code: String): BigDecimal {
         val nets = body.getList<Any>("lines.findAll { it.code == '$code' }.net").map { BigDecimal(it.toString()) }

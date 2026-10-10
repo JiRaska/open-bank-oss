@@ -54,6 +54,8 @@ import java.util.UUID
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @Tag(name = "ClosedPeriod", description = "Statutory GL period freeze — attested, immutable trial balance")
+// One REST surface per close lifecycle; splitting the period routes would scatter one contract.
+@Suppress("TooManyFunctions")
 class ClosedPeriodResource(private val closedPeriodUseCase: ClosedPeriodUseCase) {
 
     @Inject
