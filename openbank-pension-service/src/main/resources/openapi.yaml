@@ -7,7 +7,12 @@ info:
   #        account change, operator payout and death-claim lists, Idempotency-Key on every POST.
   #        Bumped ONCE for all slices (ADR-0048). S1's unreleased /activate and /early-termination
   #        were retired in the same change; no released client ever called them.
-  version: 1.1.0
+  # 1.2.0: final integration of follow-ups F1-F7 (schedule and beneficiary changes, payment adapters,
+  #        identity and SCA adapters, documents and notices, CZ state contribution and returns,
+  #        annuity partners, questionnaire). Bumped ONCE (ADR-0048). The SCA-bound requirements it
+  #        adds to strategy change, mandate set-up and employer enrolment break no released client:
+  #        this API has never been on main.
+  version: 1.2.0
   description: |
     Participant-side pension contracts (ADR-0334). A contract is created under the jurisdiction
     pack in force on its creation date and PINS that pack version for life; incentive evaluation
