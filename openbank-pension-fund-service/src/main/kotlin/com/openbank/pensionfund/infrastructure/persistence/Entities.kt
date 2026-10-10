@@ -365,3 +365,17 @@ class UnitTransactionEntity : PanacheEntityBase {
     @Column(name = "corrected_from_nav_id")
     var correctedFromNavId: UUID? = null
 }
+
+@Entity
+@Table(name = "classification_request_receipts")
+class ClassificationReceiptEntity : PanacheEntityBase {
+    @Id
+    @Column(name = "receipt_key", nullable = false)
+    lateinit var key: String
+
+    @Column(name = "fingerprint", nullable = false)
+    lateinit var fingerprint: String
+
+    @Column(name = "response_snapshot", nullable = false, columnDefinition = "text")
+    lateinit var responseSnapshot: String
+}

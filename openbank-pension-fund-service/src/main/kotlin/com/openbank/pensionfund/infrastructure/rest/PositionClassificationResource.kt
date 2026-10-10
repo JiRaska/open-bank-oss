@@ -8,6 +8,7 @@ import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import com.openbank.pensionfund.application.usecase.ClassificationCorrectionRequest
 import com.openbank.pensionfund.application.usecase.PositionClassificationService
+import com.openbank.pensionfund.domain.model.ClassificationTarget
 import com.openbank.pensionfund.domain.model.InstrumentClass
 import com.openbank.pensionfund.domain.model.NavPosition
 import com.openbank.pensionfund.domain.model.PositionClassificationCorrection
@@ -15,6 +16,7 @@ import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
+import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
@@ -47,14 +49,25 @@ class PositionClassificationResource {
     @Operation(summary = "Propose a position's instrument class (maker)")
     @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "pension-fund.nav.calculate")
-    suspend fun propose(body: ClassificationCorrectionDto?): ClassificationCorrectionResponse {
+    suspend fun propose(
+        body: ClassificationCorrectionDto?,
+        @HeaderParam("Idempotency-Key") key: String?,
+    ): ClassificationCorrectionResponse {
         val dto = requireNotNull(body) { "request body is required" }
         val request = ClassificationCorrectionRequest(
             positionId = requireNotNull(dto.positionId) { "positionId is required" },
-            toClass = requireNotNull(dto.toClass) { "toClass is required" },
+            toClass = requireNotNull(dto.toClass) { "toClass is required" }.instrumentClass(),
             reason = requireNotNull(dto.reason) { "reason is required" },
         )
-        return ClassificationCorrectionResponse.from(classification.propose(request, identity.actor()))
+        return ClassificationCorrectionResponse.from(
+            classification.propose(
+                request,
+                identity.actor(),
+                requireNotNull(key) {
+                    "Idempotency-Key is required"
+                },
+            ),
+        )
     }
 
     @POST
@@ -62,21 +75,41 @@ class PositionClassificationResource {
     @Operation(summary = "Approve a proposed instrument class (checker)")
     @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "pension-fund.nav.approve", resource = "#correctionId")
-    suspend fun approve(@PathParam("correctionId") correctionId: UUID): ClassificationCorrectionResponse =
-        ClassificationCorrectionResponse.from(classification.approve(correctionId, identity.actor()))
+    suspend fun approve(
+        @PathParam("correctionId") correctionId: UUID,
+        @HeaderParam("Idempotency-Key") key: String?,
+    ): ClassificationCorrectionResponse = ClassificationCorrectionResponse.from(
+        classification.approve(
+            correctionId,
+            identity.actor(),
+            requireNotNull(key) {
+                "Idempotency-Key is required"
+            },
+        ),
+    )
 
     @POST
     @Path("/{correctionId}/reject")
     @Operation(summary = "Reject a proposed instrument class (checker)")
     @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "pension-fund.nav.approve", resource = "#correctionId")
-    suspend fun reject(@PathParam("correctionId") correctionId: UUID): ClassificationCorrectionResponse =
-        ClassificationCorrectionResponse.from(classification.reject(correctionId, identity.actor()))
+    suspend fun reject(
+        @PathParam("correctionId") correctionId: UUID,
+        @HeaderParam("Idempotency-Key") key: String?,
+    ): ClassificationCorrectionResponse = ClassificationCorrectionResponse.from(
+        classification.reject(
+            correctionId,
+            identity.actor(),
+            requireNotNull(key) {
+                "Idempotency-Key is required"
+            },
+        ),
+    )
 }
 
 data class ClassificationCorrectionDto(
     val positionId: UUID? = null,
-    val toClass: InstrumentClass? = null,
+    val toClass: ClassificationTarget? = null,
     val reason: String? = null,
 )
 

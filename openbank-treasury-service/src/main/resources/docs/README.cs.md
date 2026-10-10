@@ -33,3 +33,16 @@ Pravidla hlášená v `breaches[]` jsou `PRODUCT_NOT_PERMITTED`, `CURRENCY_NOT_P
 ## Kontrakt
 
 Kontrakt API je `openapi.yaml` (`info.version` se řídí ADR-0048). Produktové limity jsou aditivní: 1.18.0, s odpovědí 422 u `submit` a `approve`.
+
+
+## Custodian výpisy portfolia
+
+Úplný custodian výpis `semt.002` v XML se nahrává přes `POST /api/v1/treasury/portfolio/statements` s neprázdným `Idempotency-Key` o nejvýše 128 znacích. Nahrání vyžaduje roli schvalovatele treasury a oprávnění `treasury.portfolio.upload`; ukládá držené pozice a nevytváří účetní zápisy.
+
+Nastavte `openbank.treasury.portfolio.entity`, `safekeeping-accounts` a `cfi-classes` pro vlastnící právnickou osobu a povolené účty úschovy. Třídu instrumentu určuje deklarované mapování prefixů CFI; vyhrává nejdelší shoda. Chybějící nebo nepokryté CFI, nepovolený účet úschovy či ocenění ve více měnách odmítají celý výpis. XML reader odmítá také neúplné stránkování, neúplné aktualizace, chybějící či duplicitní ISIN a deklarace DOCTYPE. Přiložené XSD je pracovní podmnožina, nikoli osvědčení úplné shody s ISO standardem zprávy.
+
+`GET /api/v1/treasury/portfolio/period-end?date=YYYY-MM-DD` vrací aktuální výpis přesně k danému datu: právnickou osobu, identifikátory výpisu a verze, měnu a pozice. Množství a ocenění jsou desetinné řetězce. Chybějící výpis vrací 409 `PORTFOLIO_SNAPSHOT_MISSING`, nikoli prázdné portfolio. Uložený prázdný výpis má prázdné pole pozic a výchozí měnu CZK. Historie verzí na `/statements?date=YYYY-MM-DD` může vrátit prázdný seznam, pokud žádná verze neexistuje.
+
+Stejný klíč uloženého výpisu se stejnými bajty vrátí uloženou verzi; jiné bajty pod tímto klíčem vrátí 409. Nahrání bajtů aktuálního výpisu pod jiným klíčem vrátí jeho aktuální verzi. Jiné bajty pro stejnou právnickou osobu a datum vytvoří další verzi a nahradí předchozí; zůstává zachována její identita, SHA-256, nahrávající uživatel a historie nahrazení. Historie odlišuje korekci od původního snapshotu.
+
+Nasazení bez nakonfigurované právnické osoby portfolia odmítá nahrávání a nemá snapshot ke konci období. Účetní knihy penzijní společnosti a bankovního treasury musí zůstat oddělené; před použitím pro reporting nastavte právnickou osobu a povolené účty úschovy. Samotné uložené portfolio neprokazuje sestavení výkazu, sesouhlasení ani zákonné podání.
