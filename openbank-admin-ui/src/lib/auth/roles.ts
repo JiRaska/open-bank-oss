@@ -141,7 +141,7 @@ export const PERMISSIONS = {
   "cards:block":           [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
   // Generic Product Studio. Scope-derived roles make the same UI usable with a provider-neutral
   // standalone OIDC issuer; OpenBank OPERATOR/ADMIN remain compatible personas.
-  "catalog:read":         [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.PAYMENTS, ROLES.CATALOG_READ, ROLES.CATALOG_AUTHOR, ROLES.CATALOG_PUBLISH, ROLES.PENSION_LEGAL_APPROVER, ROLES.PENSION_PRODUCT_OWNER],
+  "catalog:read":         [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.PAYMENTS, ROLES.CATALOG_READ, ROLES.CATALOG_AUTHOR, ROLES.CATALOG_PUBLISH],
   "catalog:author":       [ROLES.ADMIN, ROLES.OPERATOR, ROLES.CATALOG_AUTHOR],
   "catalog:publish":      [ROLES.ADMIN, ROLES.OPERATOR, ROLES.CATALOG_PUBLISH],
   "catalog:pension:legal-approve": [ROLES.PENSION_LEGAL_APPROVER],
