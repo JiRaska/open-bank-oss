@@ -199,7 +199,9 @@ export async function GET() {
       : c.releaseNotes ?? null
 
     // 3. vulnerabilities
-    const v = vulns?.images?.[c.id] ?? null
+    // A snapshot with no scannedAt is the unpopulated placeholder: whatever it carries is not a
+    // scan result, so the component must read "not yet scanned", never "0 vulnerabilities".
+    const v = vulns?.scannedAt ? (vulns.images?.[c.id] ?? null) : null
     const cve = v
       ? { scanned: true, critical: v.critical, high: v.high, medium: v.medium, low: v.low, total: v.total, top: v.top ?? [] }
       : { scanned: false, critical: 0, high: 0, medium: 0, low: 0, total: 0, top: [] as VulnSummary['top'] }

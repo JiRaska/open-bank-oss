@@ -12,58 +12,15 @@ import { ServerlessTierBadge } from '@/components/finops/ServerlessTierBadge'
 import { ServerlessLegend } from '@/components/finops/ServerlessLegend'
 import { CatalogDriftBanner } from '@/components/governance/CatalogDriftBanner'
 import { PageHeader } from '@/components/ui/PageHeader'
-import { findService, SERVICE_REGISTRY } from '@/lib/services/registry'
+import { buildRegistry, findInRegistry, type ServiceEntry } from '@/lib/services/registry'
 
-// Static fallback / backlog base. The live list comes from the cluster at runtime
-// (see the effect below: /api/services/health → ADR-0051 Kubernetes discovery), so a
-// newly-deployed service appears here automatically with no edit. This array is only
-// the off-cluster (local-dev) fallback AND the docs backlog of services that *should*
-// exist but aren't deployed yet — it is unioned with the live list, never the sole
-// source.
-//
-// Every id here MUST have a SERVICE_REGISTRY entry (src/lib/services/registry.ts).
-// Registry entries are preferred. Newly deployed services can also resolve through
-// Kubernetes discovery; the loader accepts only discovered workload URLs. `libs` is
-// the special case that reads the image-baked documentation bundle.
+// The ONLY hand-listed card: `libs` is a documentation bundle, not a runtime service, so no
+// catalog module backs it. Every service card is DERIVED at runtime from the code-generated catalog
+// (/api/catalog/services → every runnable module) and unioned with the live cluster inventory
+// (/api/services/health → Kubernetes discovery, ADR-0051), so neither a new module nor a newly
+// deployed workload needs an edit here.
 const STATIC_CANDIDATES = [
-  { id: 'libs',                label: 'openbank-libs',         group: 'platform' },
-  { id: 'account',             label: 'Account Service',       group: 'core' },
-  { id: 'ledger',              label: 'Ledger Service',        group: 'core' },
-  { id: 'transaction',         label: 'Transaction Service',   group: 'core' },
-  { id: 'balance',             label: 'Balance Service',       group: 'core' },
-  { id: 'product-catalog',     label: 'Product Catalog',       group: 'core' },
-  { id: 'pid',                 label: 'PID Service',           group: 'identity' },
-  { id: 'kyb',                 label: 'KYB Service',           group: 'identity' },
-  { id: 'party',               label: 'Party Service',         group: 'identity' },
-  { id: 'sca',                 label: 'SCA Service',           group: 'identity' },
-  { id: 'consent',             label: 'Consent Service',       group: 'open-banking' },
-  { id: 'psd2',                label: 'PSD2 Service',          group: 'open-banking' },
-  { id: 'tpp-registry',        label: 'TPP Registry',          group: 'open-banking' },
-  { id: 'sepa-payment',        label: 'SEPA Payment',          group: 'payments' },
-  { id: 'sepa-instant',        label: 'SEPA Instant',          group: 'payments' },
-  { id: 'domestic-payment',    label: 'Domestic Payment',      group: 'payments' },
-  { id: 'card-issuance',       label: 'Card Issuance',         group: 'payments' },
-  { id: 'fx',                  label: 'FX Service',            group: 'payments' },
-  { id: 'standing-order',      label: 'Standing Order',        group: 'payments' },
-  { id: 'swift',               label: 'SWIFT Service',         group: 'payments' },
-  { id: 'clearing',            label: 'Clearing Service',      group: 'payments' },
-  { id: 'interest',            label: 'Interest Service',      group: 'payments' },
-  { id: 'lending',             label: 'Lending Service',       group: 'payments' },
-  { id: 'sdd',                 label: 'SDD Service',           group: 'payments' },
-  { id: 'kyc',                 label: 'KYC Service',           group: 'compliance' },
-  { id: 'aml',                 label: 'AML Service',           group: 'compliance' },
-  { id: 'sanctions',           label: 'Sanctions Service',     group: 'compliance' },
-  { id: 'audit',               label: 'Audit Service',         group: 'compliance' },
-  { id: 'dispute',             label: 'Dispute Service',       group: 'compliance' },
-  { id: 'anacredit',           label: 'AnaCredit Service',     group: 'compliance' },
-  { id: 'statement',           label: 'Statement Service',     group: 'compliance' },
-  { id: 'fraud',               label: 'Fraud Service',         group: 'compliance' },
-  { id: 'onboarding',          label: 'Onboarding Service',    group: 'identity' },
-  { id: 'agent',               label: 'Agent (MCP)',           group: 'platform' },
-  { id: 'notification',        label: 'Notification Service',  group: 'platform' },
-  { id: 'copilot',             label: 'Copilot Service',       group: 'platform' },
-  { id: 'security-scanner',    label: 'Security Scanner',      group: 'platform' },
-  { id: 'analytics-sink',      label: 'Analytics Sink',        group: 'platform' },
+  { id: 'libs', label: 'openbank-libs', group: 'platform' },
 ] as const
 
 const GROUP_LABELS: Record<string, { label: string; color: string }> = {
@@ -97,7 +54,7 @@ const NON_FLEET_MODULES = new Set(['infra', 'libs-domain', 'libs-runtime', 'libs
 
 /**
  * Fleet size, derived from the code-generated catalog (ADR-0029 D3) rather than
- * hand-counted. The previous hardcoded "33" was stale by 21 services; a derived
+ * hand-counted. The previous hand-typed count went stale; a derived
  * count cannot drift.
  */
 function fleetSize(services: { short: string; kind: string; runnable?: boolean }[]): number {
@@ -106,10 +63,10 @@ function fleetSize(services: { short: string; kind: string; runnable?: boolean }
   ).length
 }
 
-interface CatalogModule { name: string; short: string; kind: string; runnable?: boolean; apiTitle?: string | null }
+interface CatalogModule { name: string; short: string; kind: string; runnable?: boolean; apiTitle?: string | null; port?: number | null; mgmtPort?: number | null }
 
-function candidateFromCatalog(catalogModule: CatalogModule): Candidate {
-  const registered = SERVICE_REGISTRY.find(service => service.container === catalogModule.name)
+function candidateFromCatalog(registry: readonly ServiceEntry[], catalogModule: CatalogModule): Candidate {
+  const registered = registry.find(service => service.container === catalogModule.name)
   const id = registered?.id ?? catalogModule.short.replace(/-service$/, '')
   return {
     id,
@@ -130,36 +87,25 @@ function candidateFromCatalog(catalogModule: CatalogModule): Candidate {
  * Deliberately `container`-derived and NOT k8sNameOf(): the catalog is keyed by
  * module directory, which differs from the k8s workload name for security-scanner.
  */
-function catalogShortFor(c: Candidate): string {
+function catalogShortFor(registry: readonly ServiceEntry[], c: Candidate): string {
   if (c.catalogShort) return c.catalogShort
-  const entry = findService(c.id)
+  const entry = findInRegistry(registry, c.id)
   return entry ? entry.container.replace(/^openbank-/, '') : c.id
 }
 
 export default function ServicesDocsOverviewPage() {
   const { t } = useLanguage()
   const [candidates, setCandidates] = useState<Candidate[]>(STATIC_CANDIDATES as readonly Candidate[] as Candidate[])
-  const [source, setSource] = useState<'kubernetes' | 'static'>('static')
+  const [source, setSource] = useState<'kubernetes' | 'static' | 'unavailable'>('unavailable')
+  const [catalogAvailable, setCatalogAvailable] = useState(false)
+  const [liveInventoryEmpty, setLiveInventoryEmpty] = useState(false)
   const [statuses, setStatuses] = useState<Record<string, DocsStatus>>({})
   const [loading, setLoading] = useState(true)
   const [fleetCount, setFleetCount] = useState<number | null>(null)
+  const [registry, setRegistry] = useState<ServiceEntry[]>([])
   const [query, setQuery] = useState('')
   const [groupFilter, setGroupFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState<'all' | 'documented' | 'missing'>('all')
-
-  // Fleet size for the openbank-libs card copy, derived from the catalog snapshot.
-  // Degrades to a count-free description if the snapshot is absent (graceful-state
-  // rule #1) — never renders a guessed number.
-  useEffect(() => {
-    let mounted = true
-    fetch('/api/catalog/services', { cache: 'no-store' })
-      .then(r => (r.ok ? r.json() : null))
-      .then((data: { services?: CatalogModule[] } | null) => {
-        if (mounted && Array.isArray(data?.services)) setFleetCount(fleetSize(data.services))
-      })
-      .catch(() => { /* catalog snapshot absent — omit the number */ })
-    return () => { mounted = false }
-  }, [])
 
   useEffect(() => {
     let mounted = true
@@ -172,18 +118,31 @@ export default function ServicesDocsOverviewPage() {
       const byId = new Map<string, Candidate>(
         (STATIC_CANDIDATES as readonly Candidate[]).map(c => [c.id, c]),
       )
+      let fleet: ServiceEntry[] = []
+      let catalogReady = false
+      let catalogCount: number | null = null
       try {
         const catalogResponse = await fetch('/api/catalog/services', { cache: 'no-store' })
         if (catalogResponse.ok) {
-          const catalog = await catalogResponse.json() as { services?: CatalogModule[] }
-          for (const catalogModule of catalog.services ?? []) {
-            if (catalogModule.runnable !== true) continue
-            const candidate = candidateFromCatalog(catalogModule)
-            if (!byId.has(candidate.id)) byId.set(candidate.id, candidate)
+          const catalog = await catalogResponse.json() as { available?: boolean; services?: CatalogModule[] }
+          if (catalog.available === true && Array.isArray(catalog.services)) {
+            const derived = buildRegistry(catalog.services)
+            const catalogCandidates = catalog.services
+              .filter(catalogModule => catalogModule.runnable === true)
+              .map(catalogModule => candidateFromCatalog(derived, catalogModule))
+            const count = fleetSize(catalog.services)
+            for (const candidate of catalogCandidates) {
+              if (!byId.has(candidate.id)) byId.set(candidate.id, candidate)
+            }
+            fleet = derived
+            catalogCount = count
+            catalogReady = true
+            if (mounted) setRegistry(derived)
           }
         }
-      } catch { /* keep the static fallback */ }
-      let src: 'kubernetes' | 'static' = 'static'
+      } catch { /* keep only the bundled library until a live inventory answers */ }
+      let src: 'kubernetes' | 'static' | 'unavailable' = catalogReady ? 'static' : 'unavailable'
+      let liveEmpty = false
       try {
         const r = await fetch('/api/services/health', { cache: 'no-store' })
         if (r.ok) {
@@ -191,10 +150,11 @@ export default function ServicesDocsOverviewPage() {
             services?: { name: string; label: string; group: string }[]
             source?: string
           }
-          if (body.source === 'kubernetes' && body.services?.length) {
-            src = 'kubernetes'
+          if (body.source === 'kubernetes' && Array.isArray(body.services)) {
+            liveEmpty = body.services.length === 0
+            if (!liveEmpty) src = 'kubernetes'
             for (const s of body.services) {
-              const registered = SERVICE_REGISTRY.find(service => service.k8sName === s.name || service.container === `openbank-${s.name}`)
+              const registered = fleet.find(service => service.k8sName === s.name || service.container === `openbank-${s.name}`)
               const id = registered?.id ?? s.name.replace(/-service$/, '')
               const existing = byId.get(id)
               byId.set(id, existing
@@ -204,10 +164,16 @@ export default function ServicesDocsOverviewPage() {
           }
         }
       } catch {
-        // unreachable inventory → fall back to the static catalog
+        // unreachable inventory → use the catalog if available, otherwise only the bundled card
       }
       const list = Array.from(byId.values())
-      if (mounted) { setCandidates(list); setSource(src) }
+      if (mounted) {
+        setCandidates(list)
+        setSource(src)
+        setCatalogAvailable(catalogReady)
+        setFleetCount(catalogCount)
+        setLiveInventoryEmpty(liveEmpty)
+      }
 
       // 2. Probe docs presence per service (live Docs-as-Service endpoint).
       const results = await Promise.all(
@@ -296,15 +262,38 @@ export default function ServicesDocsOverviewPage() {
             {!loading && (
               <span style={{ color: 'var(--text-tertiary)', marginLeft: '6px' }}>
                 · {source === 'kubernetes'
-                    ? t('živě z clusteru', 'live from cluster')
-                    : t('statický katalog', 'static catalog')}
+                    ? catalogAvailable
+                      ? t('katalog a živý cluster', 'build catalog and live cluster')
+                      : t('živý cluster a přibalená knihovna', 'live cluster and bundled library')
+                    : source === 'static'
+                      ? liveInventoryEmpty
+                        ? t('katalog; v clusteru žádné služby', 'build catalog; no live workloads')
+                        : t('statický katalog', 'static catalog')
+                      : liveInventoryEmpty
+                        ? t('žádné živé služby; katalog nedostupný', 'no live workloads; catalog unavailable')
+                        : t('inventář nedostupný', 'inventory unavailable')}
               </span>
             )}
           </div>
         </div>
         <div style={{ marginLeft: 'auto', fontSize: '12px', color: 'var(--text-tertiary)', maxWidth: '420px', lineHeight: 1.5 }}>
-          {t('Seznam vychází z katalogu buildu a z clusteru. Každá služba publikuje dokumentaci ze svého image na /q/openbank/docs; vlastní kapitoly patří do src/main/resources/docs/.',
-             'The list comes from the build catalog and cluster. Each service publishes docs from its own image at /q/openbank/docs; authored chapters live in src/main/resources/docs/.')}
+          {source === 'unavailable'
+            ? liveInventoryEmpty
+              ? t('Živý cluster hlásí nula služeb a katalog buildu není dostupný; zobrazena je pouze přibalená dokumentace knihovny.',
+                  'The live cluster reports zero service workloads and the build catalog is unavailable; only bundled library documentation is shown.')
+              : t('Katalog služeb ani živý inventář nejsou dostupné; zobrazena je pouze přibalená dokumentace knihovny.',
+                  'Service inventory is unavailable; only bundled library documentation is shown.')
+            : source === 'kubernetes' && !catalogAvailable
+              ? t('Seznam služeb pochází z živého clusteru; katalog buildu není dostupný.',
+                  'The service list comes from the live cluster; the build catalog is unavailable.')
+            : source === 'static' && liveInventoryEmpty
+              ? t('Očekávané služby pocházejí z katalogu buildu; živý cluster nehlásí žádné služby.',
+                  'Expected services come from the build catalog; the live cluster reports zero service workloads.')
+            : source === 'static'
+              ? t('Očekávané služby pocházejí z katalogu buildu; živý inventář clusteru není k dispozici.',
+                  'Expected services come from the build catalog; no live cluster inventory is available.')
+            : t('Seznam vychází z katalogu buildu a z clusteru. Každá služba publikuje dokumentaci ze svého image na /q/openbank/docs; vlastní kapitoly patří do src/main/resources/docs/.',
+                'The list comes from the build catalog and cluster. Each service publishes docs from its own image at /q/openbank/docs; authored chapters live in src/main/resources/docs/.')}
         </div>
       </div>
 
@@ -353,7 +342,9 @@ export default function ServicesDocsOverviewPage() {
           </select>
         </label>
         <span role="status" aria-live="polite" style={{ marginLeft: 'auto', fontSize: '11px', color: 'var(--text-tertiary)' }}>
-          {t(`${filteredCandidates.length} z ${candidates.length} služeb`, `${filteredCandidates.length} of ${candidates.length} services`)}
+          {source === 'unavailable'
+            ? t(`${filteredCandidates.length} z ${candidates.length} přibalených položek`, `${filteredCandidates.length} of ${candidates.length} bundled entries`)
+            : t(`${filteredCandidates.length} z ${candidates.length} položek dokumentace`, `${filteredCandidates.length} of ${candidates.length} documentation entries`)}
         </span>
       </section>
 
@@ -449,7 +440,7 @@ export default function ServicesDocsOverviewPage() {
           {t('Žádná služba neodpovídá zvoleným filtrům.', 'No services match the selected filters.')}
         </div>
       )}
-      <CatalogDriftBanner present={candidates.map(catalogShortFor)} />
+      <CatalogDriftBanner present={candidates.map(c => catalogShortFor(registry, c))} />
     </div>
   )
 }

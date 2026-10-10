@@ -49,6 +49,19 @@ const GRAPH = {
   available: true,
 }
 
+// The map's nodes are DERIVED from the catalog (/api/catalog/services), so the hermetic fixture must
+// supply the modules it draws.
+const CATALOG = {
+  schema: 'openbank.catalog/v1',
+  available: true,
+  services: [
+    { name: 'openbank-account-service', short: 'account-service', kind: 'service', runnable: true, port: 8100 },
+    { name: 'openbank-ledger-service', short: 'ledger-service', kind: 'service', runnable: true, port: 8101 },
+    { name: 'openbank-notification-service', short: 'notification-service', kind: 'service', runnable: true, port: 8112 },
+    { name: 'openbank-agent-service', short: 'agent-service', kind: 'service', runnable: true, port: 8109 },
+  ],
+}
+
 function Providers({ children }: { children: React.ReactNode }) {
   return React.createElement(SessionProvider, null, React.createElement(LanguageProvider, null, children))
 }
@@ -60,6 +73,7 @@ function mockFetch() {
     const url = String(input)
     const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
     if (url.includes('/api/auth/session')) return new Response('null', { status: 200, headers: { 'content-type': 'application/json' } })
+    if (url.includes('/api/catalog/services')) return json(CATALOG)
     if (url.includes('/api/catalog/graph')) return json(GRAPH)
     if (url.includes('/api/services/health')) return json({ services: [] })
     if (url.includes('/api/services/governance')) return json({ available: true, byService: {} })
@@ -117,6 +131,7 @@ describe('service-map data-flow tiers', () => {
       const url = String(input)
       const json = (body: unknown) => new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } })
       if (url.includes('/api/auth/session')) return new Response('null')
+      if (url.includes('/api/catalog/services')) return json(CATALOG)
       if (url.includes('/api/catalog/graph')) return json(GRAPH)
       if (url.includes('/api/services/health')) return json({ services: 'invalid' })
       return json({ available: true, byService: {} })
@@ -132,6 +147,7 @@ describe('service-map data-flow tiers', () => {
       const url = String(input)
       const json = (body: unknown) => new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } })
       if (url.includes('/api/auth/session')) return new Response('null')
+      if (url.includes('/api/catalog/services')) return json(CATALOG)
       if (url.includes('/api/catalog/graph')) return json({ available: false, nodes: [], edges: [], infraNodes: [], externalNodes: [], infraEdges: [], externalEdges: [] })
       if (url.includes('/api/services/health')) return json({ services: [] })
       return json({ available: true, byService: {} })
@@ -147,6 +163,7 @@ describe('service-map data-flow tiers', () => {
       const url = String(input)
       const json = (body: unknown) => new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } })
       if (url.includes('/api/auth/session')) return new Response('null')
+      if (url.includes('/api/catalog/services')) return json(CATALOG)
       if (url.includes('/api/catalog/graph')) return json(++graphReads === 1 ? GRAPH : { available: true, nodes: 'invalid', edges: [] })
       if (url.includes('/api/services/health')) return json({ services: [] })
       return json({ available: true, byService: {} })
@@ -164,6 +181,7 @@ describe('service-map data-flow tiers', () => {
       const url = String(input)
       const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
       if (url.includes('/api/auth/session')) return new Response('null')
+      if (url.includes('/api/catalog/services')) return json(CATALOG)
       if (url.includes('/api/catalog/graph')) return json(GRAPH)
       if (url.includes('/api/services/health')) return json({ services: [] })
       if (url.includes('/api/services/governance')) {
@@ -196,6 +214,7 @@ describe('service-map data-flow tiers', () => {
       if (url.includes('/api/auth/session')) return new Response('null')
       if (url.includes('/api/services/health')) return json({ services: [] })
       if (url.includes('/api/services/governance')) return json({ available: true, byService: {} })
+      if (url.includes('/api/catalog/services')) return json(CATALOG)
       if (url.includes('/api/catalog/graph')) {
         graphReads += 1
         const read = graphReads
