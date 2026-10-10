@@ -19,12 +19,19 @@ import java.util.UUID
 
 class NotFoundException(message: String) : RuntimeException(message)
 
+data class ClassificationReceipt(
+    val key: String,
+    val fingerprint: String,
+    val result: PositionClassificationCorrection,
+)
+
 /**
  * Everything one use case changes, committed in ONE transaction. A NAV publication settles orders,
  * moves holdings, writes transactions and may spawn switch-in legs — a partial commit would leave
  * the register disagreeing with itself, so the store takes the whole change set or nothing.
  */
 data class StoreChanges(
+    val classificationReceipt: ClassificationReceipt? = null,
     val funds: List<Fund> = emptyList(),
     val strategies: List<FundStrategy> = emptyList(),
     val strategyChanges: List<StrategyChange> = emptyList(),
@@ -42,6 +49,8 @@ data class StoreChanges(
 @Suppress("TooManyFunctions")
 interface PensionFundStore {
     suspend fun commit(changes: StoreChanges)
+
+    suspend fun classificationReceipt(key: String): ClassificationReceipt?
 
     suspend fun fund(id: UUID): Fund?
     suspend fun funds(): List<Fund>
