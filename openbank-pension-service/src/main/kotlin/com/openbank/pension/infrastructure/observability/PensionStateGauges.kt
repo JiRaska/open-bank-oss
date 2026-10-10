@@ -182,6 +182,8 @@ class PensionStateGaugeRefresher(
         concurrentExecution = Scheduled.ConcurrentExecution.SKIP,
     )
     suspend fun refresh() {
+        // observed-by: openbank_workflow_last_success_age_seconds{workflow="pension-state-gauges"}
+        // stops resetting on failure; WorkflowLivenessStale alerts while the scheduler retries next minute.
         runCatching { publisher.publish(source.snapshot()) }
             .onSuccess { liveness?.recordSuccess() }
             .onFailure { log.warnf(it, "pension state gauges not refreshed; the previous values stay published") }
