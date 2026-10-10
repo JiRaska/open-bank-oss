@@ -83,7 +83,8 @@ export default function ReadinessPage() {
   const mp = services.filter(s => s.money_path)
   const reportDate = data?.generated_for && /^\d{4}-\d{2}-\d{2}$/.test(data.generated_for)
     ? Date.parse(`${data.generated_for}T23:59:59Z`) : Number.NaN
-  const reportStale = Number.isFinite(reportDate) && reportViewedAt - reportDate > 2 * 86_400_000
+  const reportDateKnown = Number.isFinite(reportDate)
+  const reportStale = reportDateKnown && reportViewedAt - reportDate > 2 * 86_400_000
 
   return (
     <div style={{ padding: '32px', maxWidth: '1280px', margin: '0 auto' }}>
@@ -108,9 +109,11 @@ export default function ReadinessPage() {
         }
       />
 
-      {data && <p style={{ fontSize: '12px', margin: '0 0 16px', color: reportStale ? 'var(--warning-text)' : 'var(--text-secondary)' }}>
+      {data && <p style={{ fontSize: '12px', margin: '0 0 16px', color: !reportDateKnown || reportStale ? 'var(--warning-text)' : 'var(--text-secondary)' }}>
         {t('Stav podkladů k', 'Evidence as of')} {data.generated_for || t('nezjištěno', 'unknown')}.{' '}
-        {reportStale
+        {!reportDateKnown
+          ? t('Datum podkladů není známé; před použitím reportu ověřte výstup collectoru.', 'Evidence date is unknown; verify the collector output before using this report.')
+          : reportStale
           ? t('Report je starší než dva dny; obnovit stránku nestačí, je potřeba nový build a atestace.', 'This report is over two days old; refreshing this page is not enough — a new build and attestations are needed.')
           : t('Pro aktuální stav podů použijte Zdraví služeb.', 'Use Service Health for current pod status.')}
       </p>}
