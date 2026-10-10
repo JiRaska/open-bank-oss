@@ -46,3 +46,5 @@ Configure `openbank.treasury.portfolio.entity`, `safekeeping-accounts`, and `cfi
 Reusing a stored upload's key with the same bytes returns that stored version; different bytes under that key return 409. Uploading the current statement's bytes under another key returns its current version. Different bytes for the same entity/date create a new version and supersede the previous one, preserving its identifiers, SHA-256, uploader and supersession trail. Read the history to distinguish a correction from the original snapshot.
 
 A deployment with no configured portfolio entity rejects uploads and has no period-end snapshot. Keep pension-company and bank treasury books separate; configure the entity and custody account allowlist before using this source for reporting. A stored portfolio alone does not prove reporting assembly, reconciliation or statutory submission.
+
+Every accepted key, including a new key for identical bytes, is durably bound to the returned version. After later corrections it still replays that accepted version; different bytes under that key return 409. Migration V16 preserves existing statements' original keys and adds the binding table.
