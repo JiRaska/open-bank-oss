@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: interest-service
     app.kubernetes.io/part-of: interest
   annotations:
-    openbank.tech/policy-checksum: "19eacf7121c14282"
+    openbank.tech/policy-checksum: "a5f7baf39cf16738"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1412,6 +1412,17 @@ data:
                                                 # PENDING_APPROVAL state already is. Writes are human-only in
                                                 # treasury_rest_ext.rego.
       - openbank-card-processing-service       # ADR-0283 phase 1 (#8809): the card money path — holds approved spend,
+                                                # applies clearing presentments against the hold and posts cleared
+                                                # spend to the books on the CARD rail through transaction-service.
+                                                # Its threat model has called it money-path since the first commit
+                                                # (docs/threat-models/openbank-card-processing-service.md) but it was
+                                                # never listed here (found with the clearing-idempotency fix, #11990).
+                                                # four-eyes assessed: cardprocessing.authorize/clear/reverse are
+                                                # acquirer automation (M2M, per presentment) — gating them would
+                                                # stop card traffic, not add a second human; the sandbox acquirer is
+                                                # ROLE_ADMIN, off by default and 404 when off. No operator endpoint
+                                                # moves money by hand today — add a verb here when one ships.
+      - openbank-pension-service               # ADR-0334 S1 (#12350): participant-side pension contracts. Listed
 
     money_path_action_prefixes:
       sepa-payment: [sepaPayment]
