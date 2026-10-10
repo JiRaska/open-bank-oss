@@ -50,11 +50,9 @@ class LedgerListenerAuthMeasurementIT {
     }
 
     @Test
-    fun `measure trusted certificate without a bearer`() {
+    fun `trusted certificate without a bearer is unauthorized`() {
         val response = send(withCertificate = true, bearer = null)
-        // Baseline measurement: 403 means the certificate became an authenticated identity
-        // and reached authorization. Keep the expected result explicit until the later fix.
-        assertThat(response.statusCode()).isEqualTo(403)
+        assertThat(response.statusCode()).isEqualTo(401)
     }
 
     @Test
@@ -79,13 +77,10 @@ class LedgerListenerAuthMeasurementIT {
         override fun testResources(): List<QuarkusTestProfile.TestResourceEntry> =
             listOf(QuarkusTestProfile.TestResourceEntry(ListenerMaterial::class.java))
 
-        override fun getConfigOverrides(): Map<String, String> = mapOf(
-            // The value is parsed from the service's %prod YAML, not copied into this test.
-            "quarkus.http.ssl.client-auth" to productionClientAuth(),
-            "quarkus.oidc.enabled" to "true",
-        )
+        override fun getConfigOverrides(): Map<String, String> = productionListenerConfig() +
+            mapOf("quarkus.oidc.enabled" to "true")
 
-        private fun productionClientAuth(): String {
+        private fun productionListenerConfig(): Map<String, String> {
             val source = generateSequence(Path.of("").toAbsolutePath()) { it.parent }
                 .map { it.resolve("openbank-ledger-service/src/main/resources/application.yaml") }
                 .first { Files.isRegularFile(it) }
@@ -96,7 +91,17 @@ class LedgerListenerAuthMeasurementIT {
             val quarkus = prod.getValue("quarkus") as Map<String, Any>
             val http = quarkus.getValue("http") as Map<String, Any>
             val ssl = http.getValue("ssl") as Map<String, Any>
-            return ssl.getValue("client-auth").toString().also { check(it == "required") }
+            val auth = http.getValue("auth") as Map<String, Any>
+            val permissions = auth.getValue("permission") as Map<String, Any>
+            val bearerOnly = permissions.getValue("bearer-only") as Map<String, Any>
+            val clientAuth = ssl.getValue("client-auth").toString().also { check(it == "required") }
+            return mapOf(
+                "quarkus.http.ssl.client-auth" to clientAuth,
+                "quarkus.http.auth.permission.bearer-only.paths" to bearerOnly.getValue("paths").toString(),
+                "quarkus.http.auth.permission.bearer-only.policy" to bearerOnly.getValue("policy").toString(),
+                "quarkus.http.auth.permission.bearer-only.auth-mechanism" to
+                    bearerOnly.getValue("auth-mechanism").toString(),
+            )
         }
     }
 }
