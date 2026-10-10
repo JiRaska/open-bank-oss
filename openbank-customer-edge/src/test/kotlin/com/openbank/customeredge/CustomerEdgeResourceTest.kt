@@ -9,6 +9,7 @@ import com.openbank.customeredge.infrastructure.rest.CustomerEdgeResource
 import com.openbank.customeredge.infrastructure.rest.PaymentSessionStore
 import com.openbank.customeredge.infrastructure.rest.UpstreamClient
 import com.openbank.customeredge.infrastructure.rest.inMemoryPaymentSessionStore
+import io.mockk.Called
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
@@ -1070,6 +1071,24 @@ class CustomerEdgeResourceTest {
         every { upstream.get(match { it.contains("/parties/$caller") }, any()) } returns Response.ok(
             """{"id":"$caller","legalName":"Jan Novák"}""",
         ).build()
+    }
+
+    @Test
+    fun `non-CZK domestic request is refused before debit authority reservation or SCA`() {
+        val caller = UUID.randomUUID()
+        val acct = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+
+        val response = paymentResourceFor(upstream, caller)
+            .createDomesticPayment(
+                domesticBody(acct).replace("CZK", "EUR"),
+                "key-currency",
+                UUID.randomUUID().toString(),
+            )
+
+        assertThat(response.status).isEqualTo(400)
+        assertThat(mapper.readTree(response.entity.toString()).get("code").asText()).isEqualTo("CURRENCY_NOT_ALLOWED")
+        verify { upstream wasNot Called }
     }
 
     @Test
