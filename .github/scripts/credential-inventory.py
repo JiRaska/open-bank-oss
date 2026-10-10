@@ -16,6 +16,9 @@ CONVENTION INTRODUCED (and enforced on NEW manifests only):
     or another dynamic mount) must carry metadata annotation
     `openbank.io/rotation-deadline: YYYY-MM-DD` — the date by which the credential is
     rotated or the reference migrates to a dynamic mount;
+  * Strimzi certificate projections are controller-managed only when the referenced
+    Kubernetes store, managed Kafka CAs, User Operator and TLS KafkaUser are present;
+    unknown keys and external certificates still require a deadline;
   * dynamic references may annotate `openbank.io/rotation: dynamic` for the reader's
     benefit, but the path prefix already proves it, so it is not required.
 
@@ -38,6 +41,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import yaml
+
 GITOPS = Path("openbank-infra/gitops")
 DYNAMIC_KEY = re.compile(r"database/creds/|(^|/)creds/[a-z0-9-]+-db-vault-role")
 DEADLINE = "openbank.io/rotation-deadline"
@@ -48,12 +53,18 @@ DOC_SPLIT = re.compile(r"^---\s*$", re.M)
 
 
 class Cred:
-    def __init__(self, doc: str, file: Path):
+    def __init__(self, doc: str, file: Path, managed: dict[str, set[str]] | None = None):
         self.file = file
         self.name = _field(doc, r"name:\s*([a-z0-9.-]+)") or "?"
         self.namespace = _field(doc, r"namespace:\s*([a-z0-9.-]+)") or "?"
         self.keys = re.findall(r"key:\s*([A-Za-z0-9_./-]+)", doc)
         self.dynamic = any(DYNAMIC_KEY.search(k) for k in self.keys)
+        resource = yaml.safe_load(doc) or {}
+        spec = resource.get("spec", {})
+        store = spec.get("secretStoreRef", {})
+        if (store.get("kind") == "ClusterSecretStore" and self.keys
+                and set(self.keys) <= (managed or {}).get(store.get("name"), set())):
+            self.dynamic = True
         ann_block = re.search(r"annotations:\n((?:\s{4,}[^\n]*\n?)*)", doc)
         self.annotations = ann_block.group(1) if ann_block else ""
         self.deadline = _field(self.annotations, re.escape(DEADLINE) + r':\s*"?([^"\n]+)"?')
@@ -68,15 +79,58 @@ def _field(text: str, pattern: str) -> str | None:
     return m.group(1).strip() if m else None
 
 
+def managed_certificate_keys(root: Path) -> dict[str, set[str]]:
+    """Prove controller rotation from the store, Kafka cluster and TLS KafkaUser sources.
+
+    A store name or a self-declared annotation alone never exempts a credential.
+    Unknown keys, custom CAs and clusters without a User Operator stay static.
+    """
+    docs = []
+    for path in sorted(root.rglob("*.yaml")):
+        text = path.read_text()
+        if not re.search(r"^kind: (Kafka|KafkaUser|ClusterSecretStore)$", text, re.M):
+            continue
+        docs.extend(d for d in yaml.safe_load_all(text) if isinstance(d, dict))
+    clusters = {}
+    for d in docs:
+        if d.get("kind") != "Kafka":
+            continue
+        spec = d.get("spec", {})
+        if ("userOperator" in spec.get("entityOperator", {})
+                and spec.get("clientsCa", {}).get("generateCertificateAuthority", True)
+                and spec.get("clusterCa", {}).get("generateCertificateAuthority", True)):
+            m = d["metadata"]
+            clusters[(m.get("namespace"), m["name"])] = {m["name"] + "-cluster-ca-cert"}
+    for d in docs:
+        if d.get("kind") != "KafkaUser" or d.get("spec", {}).get("authentication", {}).get("type") != "tls":
+            continue
+        m = d["metadata"]
+        key = (m.get("namespace"), m.get("labels", {}).get("strimzi.io/cluster"))
+        if key in clusters:
+            clusters[key].add(m["name"])
+    stores = {}
+    for d in docs:
+        if d.get("kind") != "ClusterSecretStore":
+            continue
+        provider = d.get("spec", {}).get("provider", {}).get("kubernetes", {})
+        # An explicit remote server is not proof that this tree owns its operators.
+        if provider and not provider.get("server", {}).get("url"):
+            namespace = provider.get("remoteNamespace")
+            stores[d["metadata"]["name"]] = set().union(
+                *(keys for (ns, _), keys in clusters.items() if ns == namespace))
+    return stores
+
+
 def scan(root: Path) -> list[Cred]:
     out: list[Cred] = []
+    managed = managed_certificate_keys(root)
     for f in sorted(root.rglob("*.yaml")):
         if GITOPS.parts[0] not in f.parts and str(GITOPS) not in str(f):
             continue
         text = f.read_text()
         for doc in DOC_SPLIT.split(text):
             if re.search(r"^kind:\s*ExternalSecret\s*$", doc, re.M):
-                out.append(Cred(doc, f))
+                out.append(Cred(doc, f, managed))
     return out
 
 
@@ -100,7 +154,7 @@ def inventory(root: Path, today: dt.date) -> tuple[str, int]:
     lines = [
         "# Long-lived credential inventory", "",
         f"ExternalSecrets: **{len(creds)}** total — {len(statics)} static (long-lived), "
-        f"{len(creds) - len(statics)} dynamic (`database/creds/…`, ADR-0099).", "",
+        f"{len(creds) - len(statics)} dynamic (database leases or proven Strimzi certificate rotation).", "",
         f"Static credentials with a valid rotation deadline: **{len(declared)}**; "
         f"overdue: **{len(overdue)}**; undeclared (debt): **{len(undeclared)}**.", "",
         "## Static credentials", "",
@@ -184,6 +238,7 @@ def enforce_new(base: str, today: dt.date) -> int:
               f"finding against this pull request. git said: {out.stderr.strip()[:300]}")
         return 1
     bad = 0
+    managed = managed_certificate_keys(GITOPS)
     for name in out.stdout.splitlines():
         f = Path(name)
         if not f.exists() or f.suffix != ".yaml":
@@ -191,7 +246,7 @@ def enforce_new(base: str, today: dt.date) -> int:
         for doc in DOC_SPLIT.split(f.read_text()):
             if not re.search(r"^kind:\s*ExternalSecret\s*$", doc, re.M):
                 continue
-            c = Cred(doc, f)
+            c = Cred(doc, f, managed)
             if not c.static:
                 continue
             violation = validate_deadline(c, today)
@@ -229,6 +284,40 @@ def self_test() -> int:
     doc_bad = doc_ok.replace('"2027-01-01"', '"next quarter"')
     if validate_deadline(Cred(doc_bad, Path("x.yaml")), today) is None:
         print("self-test FAIL: non-date deadline accepted"); bad += 1
+    # Controller-managed projections require evidence from all three resource types.
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        cluster = {"kind": "Kafka", "metadata": {"name": "bank", "namespace": "messaging"},
+                   "spec": {"entityOperator": {"userOperator": {}}}}
+        user = {"kind": "KafkaUser", "metadata": {"name": "foo", "namespace": "messaging",
+                "labels": {"strimzi.io/cluster": "bank"}}, "spec": {"authentication": {"type": "tls"}}}
+        store = {"kind": "ClusterSecretStore", "metadata": {"name": "certs"},
+                 "spec": {"provider": {"kubernetes": {"remoteNamespace": "messaging"}}}}
+        fixture = root / "sources.yaml"
+        def classify(key: str, **changes: object) -> bool:
+            fixture.write_text(yaml.safe_dump_all([cluster, user, store]))
+            projection = {"kind": "ExternalSecret", "metadata": {"name": "projection"},
+                          "spec": {"secretStoreRef": {"name": "certs", "kind": "ClusterSecretStore"},
+                                   "dataFrom": [{"extract": {"key": key}}]}}
+            projection["spec"].update(changes)
+            return Cred(yaml.safe_dump(projection), fixture, managed_certificate_keys(root)).dynamic
+        cases = [(classify("foo"), True), (classify("bank-cluster-ca-cert"), True),
+                 (classify("unowned"), False),
+                 (classify("foo", secretStoreRef={"name": "other", "kind": "ClusterSecretStore"}), False)]
+        user["spec"]["authentication"]["type"] = "tls-external"
+        cases.append((classify("foo"), False))
+        user["spec"]["authentication"]["type"] = "tls"
+        cluster["spec"]["clientsCa"] = {"generateCertificateAuthority": False}
+        cases.append((classify("foo"), False))
+        cluster["spec"].pop("clientsCa")
+        cluster["spec"]["entityOperator"] = {}
+        cases.append((classify("foo"), False))
+        cluster["spec"]["entityOperator"] = {"userOperator": {}}
+        store["spec"]["provider"]["kubernetes"]["server"] = {"url": "https://example.invalid"}
+        cases.append((classify("foo"), False))
+        if any(actual != expected for actual, expected in cases):
+            print("self-test FAIL: controller rotation evidence"); bad += 1
     # The gate must be unable to pass off "could not look" as "looked and found nothing" —
     # and must not dress it up as a credential finding either. A sha of the right shape that
     # cannot exist stands in for the scrolled-out base seen in CI.
