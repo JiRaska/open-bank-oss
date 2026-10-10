@@ -21,6 +21,12 @@ class StrategyChangeRepository : PanacheRepositoryBase<StrategyChangeEntity, UUI
 class FundNavRepository : PanacheRepositoryBase<FundNavEntity, UUID>
 
 @ApplicationScoped
+class FundNavPositionRepository : PanacheRepositoryBase<FundNavPositionEntity, UUID>
+
+@ApplicationScoped
+class PositionClassificationCorrectionRepository : PanacheRepositoryBase<PositionClassificationCorrectionEntity, UUID>
+
+@ApplicationScoped
 class UnitOrderRepository : PanacheRepositoryBase<UnitOrderEntity, UUID>
 
 @ApplicationScoped
@@ -28,3 +34,6 @@ class UnitHoldingRepository : PanacheRepositoryBase<UnitHoldingEntity, UUID>
 
 @ApplicationScoped
 class UnitTransactionRepository : PanacheRepositoryBase<UnitTransactionEntity, UUID>
+
+@ApplicationScoped
+class ClassificationReceiptRepository : PanacheRepositoryBase<ClassificationReceiptEntity, String>
