@@ -21,7 +21,7 @@ test_operator_may_calculate_and_approve_nav if {
 test_auditor_may_read_holdings if {
 	rest.allow with input as {
 		"principal": {"type": "HUMAN", "id": "carol", "roles": ["ROLE_AUDITOR"]},
-		"action": "pension-fund.holding.read",
+		"action": "pension-fund.holding.inspect",
 	}
 }
 
@@ -86,39 +86,71 @@ test_machines_and_agents_denied_every_sensitive_write if {
 test_customer_cannot_read_holdings if {
 	not rest.allow with input as {
 		"principal": {"type": "HUMAN", "id": "cust-1", "roles": ["ROLE_CUSTOMER"]},
-		"action": "pension-fund.holding.read",
+		"action": "pension-fund.holding.inspect",
 		"resource": "c1",
 	}
 }
 
-excluded := {"authz": {"operator_read_any_excluded_actions": ["pension-fund.holding.read"]}}
+# The CI realm's shared client: ROLE_OPERATOR + ROLE_COMPLIANCE (.github/workflows/keycloak).
+shared_sa_role_sets := [["ROLE_OPERATOR"], ["ROLE_COMPLIANCE"], ["ROLE_ADMIN"], ["ROLE_OPERATOR", "ROLE_COMPLIANCE", "ROLE_API"]]
 
-# Holdings: must-DENY the shared M2M account and an unrelated service, even holding ROLE_OPERATOR.
-test_shared_and_unrelated_service_accounts_cannot_read_holdings if {
-	not rest.allow with input as {
-		"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR", "ROLE_API"]},
-		"action": "pension-fund.holding.read",
+# Holdings: must-DENY the shared M2M account under every staff role a realm hands it, and an
+# unrelated service. Evaluated against the REAL rules data (no `with data.rules`), so a base
+# read-any rule that re-admits the action fails here.
+test_shared_service_account_cannot_inspect_holdings_under_any_role if {
+	every roles in shared_sa_role_sets {
+		not rest.allow with input as {
+			"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": roles},
+			"action": "pension-fund.holding.inspect",
+			"resource": "c1",
+		}
 	}
-		with data.rules as excluded
-	not rest.allow with input as {
-		"principal": {"type": "HUMAN", "id": "service-account-openbank-treasury", "roles": ["ROLE_OPERATOR", "ROLE_API"]},
-		"action": "pension-fund.holding.read",
-	}
-		with data.rules as excluded
 }
 
-# Holdings: must-ALLOW pension-service's own client and staff.
-test_pension_service_and_staff_read_holdings if {
+test_unrelated_service_account_cannot_inspect_holdings if {
+	every roles in shared_sa_role_sets {
+		not rest.allow with input as {
+			"principal": {"type": "HUMAN", "id": "service-account-openbank-treasury", "roles": roles},
+			"action": "pension-fund.holding.inspect",
+			"resource": "c1",
+		}
+	}
+}
+
+# The negative case that used to slip through: compliance-read-any has no exclusion list, so it
+# must not be what decides this action for anyone.
+test_no_base_read_any_reason_fires_for_holdings if {
+	reasons := rest.allowed_reasons with input as {
+		"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR", "ROLE_COMPLIANCE", "ROLE_ADMIN"]},
+		"action": "pension-fund.holding.inspect",
+	}
+	not "compliance-read-any" in reasons
+	not "operator-read-any" in reasons
+}
+
+# Holdings: must-ALLOW pension-service's own client and real staff of every oversight role.
+test_pension_service_and_staff_inspect_holdings if {
 	rest.allow with input as {
 		"principal": {"type": "HUMAN", "id": "service-account-openbank-pension", "roles": ["ROLE_API"]},
-		"action": "pension-fund.holding.read",
+		"action": "pension-fund.holding.inspect",
+		"resource": "c1",
 	}
-		with data.rules as excluded
-	rest.allow with input as {
-		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
-		"action": "pension-fund.holding.read",
+	every role in ["ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE", "ROLE_AUDITOR"] {
+		rest.allow with input as {
+			"principal": {"type": "HUMAN", "id": "alice", "roles": [role]},
+			"action": "pension-fund.holding.inspect",
+			"resource": "c1",
+		}
 	}
-		with data.rules as excluded
+}
+
+# pension-service's client is admitted only with ROLE_API; an AI agent never.
+test_pension_service_without_api_role_and_agents_denied_holdings if {
+	not rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "service-account-openbank-pension", "roles": ["ROLE_OPERATOR"]},
+		"action": "pension-fund.holding.inspect",
+	}
+	not rest.allow with input as {"principal": {"type": "AI_AGENT", "id": "agent:x", "roles": ["ROLE_COMPLIANCE"]}, "action": "pension-fund.holding.inspect"}
 }
 
 test_pension_service_places_orders_but_cannot_administer if {
@@ -130,13 +162,4 @@ test_pension_service_places_orders_but_cannot_administer if {
 		"principal": {"type": "HUMAN", "id": "service-account-openbank-pension", "roles": ["ROLE_API"]},
 		"action": "pension-fund.nav.approve",
 	}
-}
-
-# The exclusion is what does the work: without it the base rule re-admits the shared account.
-test_without_the_exclusion_the_base_rule_reopens_holdings if {
-	rest.allow with input as {
-		"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]},
-		"action": "pension-fund.holding.read",
-	}
-		with data.rules as {}
 }

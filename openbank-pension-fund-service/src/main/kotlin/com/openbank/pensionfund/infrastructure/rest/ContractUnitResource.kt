@@ -69,21 +69,21 @@ class ContractUnitResource {
     @Path("/orders")
     @Operation(summary = "Orders of a contract, newest first")
     @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)
-    @Authorize(action = "pension-fund.holding.read", resource = "#contractId")
+    @Authorize(action = "pension-fund.holding.inspect", resource = "#contractId")
     suspend fun orders(@PathParam("contractId") contractId: UUID): List<UnitOrder> = register.orders(contractId)
 
     @GET
     @Path("/holdings")
     @Operation(summary = "Unit holdings of a contract valued at each fund's latest published NAV")
     @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN, Roles.AUDITOR)
-    @Authorize(action = "pension-fund.holding.read", resource = "#contractId")
+    @Authorize(action = "pension-fund.holding.inspect", resource = "#contractId")
     suspend fun holdings(@PathParam("contractId") contractId: UUID): ContractValuation = register.valuation(contractId)
 
     @GET
     @Path("/transactions")
     @Operation(summary = "Priced unit transactions of a contract, newest first")
     @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN, Roles.AUDITOR)
-    @Authorize(action = "pension-fund.holding.read", resource = "#contractId")
+    @Authorize(action = "pension-fund.holding.inspect", resource = "#contractId")
     suspend fun transactions(@PathParam("contractId") contractId: UUID): List<UnitTransaction> =
         register.transactions(contractId)
 }
