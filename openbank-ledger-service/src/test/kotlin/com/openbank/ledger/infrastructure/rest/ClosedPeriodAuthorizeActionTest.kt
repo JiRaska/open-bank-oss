@@ -15,11 +15,10 @@ import org.junit.jupiter.api.Test
  */
 class ClosedPeriodAuthorizeActionTest {
 
-    private fun actionOf(method: String): String =
-        ClosedPeriodResource::class.java.declaredMethods
-            .single { it.name == method }
-            .getAnnotation(Authorize::class.java)
-            .action
+    private fun actionOf(method: String): String = ClosedPeriodResource::class.java.declaredMethods
+        .single { it.name == method }
+        .getAnnotation(Authorize::class.java)
+        .action
 
     @Test
     fun `the frozen trial balance has its own non-read action`() {

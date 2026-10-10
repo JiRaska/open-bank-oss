@@ -103,6 +103,7 @@ class FxRevaluationScheduler(
 
         /** ADR-0160 mechanism 3 workflow tag — stable, low-cardinality. */
         const val WORKFLOW_NAME = "ledger-fx-revaluation"
+
         /** The property this job's `@Scheduled` cron expression reads. */
         const val CRON_PROPERTY = "openbank.ledger.fx-revaluation.cron"
     }

@@ -110,6 +110,7 @@ class TieOutFreshnessWatchdog(
         const val DAILY_SLA_HOURS = 25L
         const val JOB_NAME = "ledger.tieout.freshness"
         const val WORKFLOW_NAME = "ledger-tieout-freshness"
+
         /** The property this job's `@Scheduled` cron expression reads. */
         const val CRON_PROPERTY = "openbank.ledger.tieout.freshness-cron"
     }
