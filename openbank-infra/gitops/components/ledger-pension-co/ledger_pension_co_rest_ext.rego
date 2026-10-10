@@ -6,8 +6,10 @@
 # rules) plus THIS file, which narrows the machine callers to one:
 #
 #   service-account-openbank-tax-reporting (Keycloak client `openbank-tax-reporting`, ROLE_API)
-#   may perform `ledger.read` — the action of GET /api/v1/ledger/periods/{type}/{date}/
-#   frozen-trial-balance (ClosedPeriodResource), which CompanyBooksCalculator reads (ADR-0337 D3).
+#   may perform `ledger.close.inspect` and nothing else — the dedicated action of GET
+#   /api/v1/ledger/periods/{type}/{date}/frozen-trial-balance (ClosedPeriodResource), the attested
+#   statutory trial balance CompanyBooksCalculator reads (ADR-0337 D3). Not `ledger.read`: that
+#   action is shared by every journal / trial-balance / control-account read of ledger-service.
 #
 # Every OTHER service-account is prohibited on this instance, for every action, at the allow
 # head. That matters because the bank-ledger rules this bundle reuses admit machines:
@@ -22,11 +24,9 @@
 # Identity is principal.id (`service-account-<clientId>`). Never principal.type == "SERVICE":
 # AuthorizeInterceptor never emits it (#266, rules.yaml: authz_policy).
 #
-# Residual scope (stated, not hidden): `ledger.read` is shared by every read endpoint of
-# ledger-service, so tax-reporting may also read journals and trial balances of THIS instance —
-# the company's own books, the data the returns are built from. A frozen-TB-only action needs a
-# dedicated @Authorize action in ledger-service (follow-up). It can never reach the bank's
-# ledger: this file is mounted in ledger-pension-co-opa-bundle only.
+# Scope: one endpoint. tax-reporting reads the FROZEN trial balance of a closed period and no
+# journal, no live trial balance, no control account — on this instance only, since this file is
+# mounted in ledger-pension-co-opa-bundle alone; the bank's ledger never sees the grant.
 
 package openbank.rest
 
@@ -34,7 +34,7 @@ import rego.v1
 
 ledger_pension_co_tax_reporting_account := "service-account-openbank-tax-reporting"
 
-ledger_pension_co_tax_reporting_actions := {"ledger.read"}
+ledger_pension_co_tax_reporting_actions := {"ledger.close.inspect"}
 
 ledger_pension_co_tax_reporting_read if {
 	input.principal.type == "HUMAN"

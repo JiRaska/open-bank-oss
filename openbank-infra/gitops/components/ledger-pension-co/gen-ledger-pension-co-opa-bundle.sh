@@ -13,7 +13,8 @@ MANIFEST=$REPO/openbank-infra/opa/bundle.manifest
 # script — ledger_rest_ext_test.rego needs a real file.
 LEDGER_REST_EXT=$REPO/openbank-infra/gitops/components/ledger/ledger_rest_ext.rego
 # ADR-0337: the pension company's ledger instance reuses the bank ledger's extension (staff rules)
-# and adds its own, which admits tax-reporting's service-account to ledger.read and vetoes every
+# and adds its own, which admits tax-reporting's service-account to ledger.close.inspect (the frozen
+# trial balance, nothing else) and vetoes every
 # other machine identity on this instance.
 PCO_REST_EXT=$REPO/openbank-infra/gitops/components/ledger-pension-co/ledger_pension_co_rest_ext.rego
 

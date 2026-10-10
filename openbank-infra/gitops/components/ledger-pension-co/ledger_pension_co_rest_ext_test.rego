@@ -32,7 +32,32 @@ pension_client := {"type": "HUMAN", "id": "service-account-openbank-pension", "r
 staff := {"type": "HUMAN", "id": "u-accountant", "roles": ["ROLE_OPERATOR"]}
 
 test_tax_reporting_reads_frozen_trial_balance if {
-	rest.allow.allow with input as {"principal": tax_reporting, "action": "ledger.read", "resource": {"id": "2025-01-01"}}
+	rest.allow.allow with input as {"principal": tax_reporting, "action": "ledger.close.inspect", "resource": "2025-01-31"}
+		with data.rules as rules_mock
+	"service-tax-reporting-company-books-read" in rest.allowed_reasons with input as {"principal": tax_reporting, "action": "ledger.close.inspect", "resource": "2025-01-31"}
+		with data.rules as rules_mock
+}
+
+# The grant is the frozen trial balance ONLY: every other read and every write of ledger-service is
+# denied to tax-reporting, including ledger.read (journals, live trial balance, control accounts).
+test_tax_reporting_may_perform_no_other_ledger_action if {
+	every action in {
+		"ledger.read", "ledger.list", "ledger.create", "ledger.reverse", "ledger.trigger",
+		"ledger.replay", "ledger.approve", "ledger.close.draft",
+	} {
+		not rest.allow.allow with input as {"principal": tax_reporting, "action": action, "resource": "2025-01-31"}
+			with data.rules as rules_mock
+	}
+}
+
+# The bank's grant of ledger.close.inspect to the shared client (finrep) is vetoed here.
+test_shared_client_may_not_inspect_the_company_books if {
+	not rest.allow.allow with input as {"principal": shared_client, "action": "ledger.close.inspect"}
+		with data.rules as rules_mock
+}
+
+test_staff_still_inspect if {
+	rest.allow.allow with input as {"principal": staff, "action": "ledger.close.inspect"}
 		with data.rules as rules_mock
 }
 
@@ -49,7 +74,7 @@ test_tax_reporting_may_not_reverse if {
 test_tax_reporting_without_role_api_denied if {
 	not rest.allow.allow with input as {
 		"principal": {"type": "HUMAN", "id": "service-account-openbank-tax-reporting", "roles": []},
-		"action": "ledger.read",
+		"action": "ledger.close.inspect",
 	}
 		with data.rules as rules_mock
 }
@@ -65,6 +90,8 @@ test_shared_client_may_not_post_despite_bank_m2m_rules if {
 }
 
 test_other_service_account_may_not_read if {
+	not rest.allow.allow with input as {"principal": pension_client, "action": "ledger.close.inspect"}
+		with data.rules as rules_mock
 	not rest.allow.allow with input as {"principal": pension_client, "action": "ledger.read"}
 		with data.rules as rules_mock
 }
