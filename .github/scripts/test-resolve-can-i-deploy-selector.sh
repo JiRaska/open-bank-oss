@@ -155,3 +155,11 @@ if [ "$fails" -ne 0 ]; then
   exit 1
 fi
 echo "all cases behaved as declared"
+
+# The gate-level regression uses associative arrays in can-i-deploy-gate.sh. CI runs it
+# with Linux Bash 5; macOS's system Bash 3 can still run the selector cases above.
+if [ "${BASH_VERSINFO[0]}" -ge 4 ]; then
+  bash "${SCRIPT_DIR}/test-can-i-deploy-exact-version.sh"
+else
+  echo "SKIP exact-version gate integration test (requires Bash 4+)"
+fi
