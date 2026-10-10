@@ -18,6 +18,7 @@ vi.mock('@/lib/discovery', () => ({
   inCluster: () => state.inCluster,
   discoverServices: async () => [
     { name: 'account-service', namespace: 'core', port: 8100, scaledToZero: false },
+    { name: 'mcp-service', namespace: 'agents', port: 8150, scaledToZero: false },
     { name: 'devops-agent', namespace: 'agents', port: 8142, scaledToZero: false },
     { name: 'not-in-catalog-service', namespace: 'x', port: 9999, scaledToZero: false },
   ],
@@ -49,6 +50,12 @@ for (const mode of ['off-cluster', 'in-cluster'] as const) {
         expect(fetchMock).not.toHaveBeenCalled()
       })
     }
+
+    it('mcp-service is Unknown service (it has its own /api/agent/mcp route)', async () => {
+      const res = await call('mcp-service')
+      expect(res.status).toBe(404)
+      expect(fetchMock).not.toHaveBeenCalled()
+    })
 
     it('control: a real catalog business service still proxies', async () => {
       const res = await call('account-service')

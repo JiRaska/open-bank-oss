@@ -115,6 +115,8 @@ export const SERVICE_OVERRIDES: Record<string, { label?: string; group?: Service
   'openbank-flaky-test-hunter':          { exposeViaBff: false },
   'openbank-governance-auditor':         { exposeViaBff: false },
   'openbank-release-steward':            { exposeViaBff: false },
+  // Owner decision: mcp-service is reached through admin-ui's own /api/agent/mcp route, not the generic proxy.
+  'openbank-mcp-service':                { exposeViaBff: false },
 }
 
 /** The subset of a `catalog.json` module this registry needs. */

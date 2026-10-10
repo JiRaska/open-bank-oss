@@ -306,7 +306,7 @@ describe('service registry drift guard', () => {
       .filter(s => exposed.has(s.container) && SERVICE_OVERRIDES[s.container]?.exposeViaBff !== true)
     expect(leaked.map(s => s.container)).toEqual([])
     for (const name of ['openbank-devops-agent', 'openbank-finops-agent', 'openbank-analytics-sink', 'openbank-clearing-simulator',
-      'openbank-release-steward', 'openbank-governance-auditor']) {
+      'openbank-release-steward', 'openbank-governance-auditor', 'openbank-mcp-service']) {
       expect(exposed.has(name), `${name} must not be BFF-exposed`).toBe(false)
     }
     // Every module the old hand-kept BFF map served remains reachable.
