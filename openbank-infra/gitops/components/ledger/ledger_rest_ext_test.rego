@@ -352,3 +352,57 @@ test_treasury_read_rule_admits_no_other_role_api_account if {
 		}
 	}
 }
+
+# --- ledger.close.inspect: the frozen statutory trial balance (ADR-0337, #12496) ---
+
+inspect_input(p) := {"principal": p, "action": "ledger.close.inspect", "resource": "2026-06-30"}
+
+# Every audience the endpoint had under ledger.read keeps it under its own action.
+test_close_inspect_keeps_every_previous_staff_reader if {
+	every role in ["ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_VIEWER", "ROLE_AUDITOR"] {
+		p := {"type": "HUMAN", "id": "u-staff", "roles": [role]}
+		decision := rest.allow with input as inspect_input(p) with data.rules as rules_mock
+		decision.allow == true
+		"ledger-close-inspect" in rest.allowed_reasons with input as inspect_input(p) with data.rules as rules_mock
+	}
+}
+
+# finrep-service reads the frozen TB through the shared openbank-services client.
+test_close_inspect_admits_the_shared_client_finrep_uses if {
+	decision := rest.allow with input as inspect_input(services_m2m) with data.rules as rules_mock
+	decision.allow == true
+	"service-ledger-close-inspect" in rest.allowed_reasons with input as inspect_input(services_m2m) with data.rules as rules_mock
+}
+
+# Not a read verb: no base *-read-any rule may reach it implicitly. ROLE_COMPLIANCE
+# (compliance-read-any is keyed on `.read`) and a party self-service principal stay denied.
+test_close_inspect_is_not_reached_by_base_read_rules if {
+	rest.allow == false with input as inspect_input({"type": "HUMAN", "id": "u-comp", "roles": ["ROLE_COMPLIANCE"]})
+		with data.rules as rules_mock
+	rest.allow == false with input as inspect_input({"type": "HUMAN", "id": "2026-06-30", "roles": ["ROLE_CUSTOMER"]})
+		with data.rules as rules_mock
+}
+
+# Machines other than the shared client: denied, including ones holding a staff role, and
+# including every identity that holds ledger.read today (settlement, treasury).
+test_close_inspect_denies_every_other_machine if {
+	every p in [
+		edge,
+		other_role_api_sa,
+		settlement_m2m,
+		treasury_m2m,
+		{"type": "HUMAN", "id": "service-account-openbank-tax-reporting", "roles": ["ROLE_API"]},
+		{"type": "HUMAN", "id": "service-account-openbank-x", "roles": ["ROLE_VIEWER", "ROLE_AUDITOR", "ROLE_ADMIN"]},
+	] {
+		rest.allow == false with input as inspect_input(p) with data.rules as rules_mock
+	}
+}
+
+# The narrowing is one-directional: holding ledger.close.inspect grants no other ledger action.
+# The shared client keeps its pre-existing reads (service-ledger-read) and gains nothing else.
+test_close_inspect_grant_reaches_no_write if {
+	every action in {"ledger.trigger", "ledger.replay", "ledger.approve", "ledger.close.draft"} {
+		rest.allow == false with input as {"principal": services_m2m, "action": action}
+			with data.rules as rules_mock
+	}
+}

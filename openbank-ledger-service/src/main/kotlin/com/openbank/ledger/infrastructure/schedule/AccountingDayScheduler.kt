@@ -126,7 +126,11 @@ class AccountingDayScheduler(
     private var stuckCutoffAge: MultiGauge? = null
 
     fun onStart(@Observes @Suppress("UNUSED_PARAMETER") ev: StartupEvent) {
-        liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, EXPECTED_INTERVAL)
+        // A switched-off job registers no heartbeat (ScheduleSwitch): it cannot run, so a seeded
+        // age would only grow until WorkflowLivenessStale fired on an instance that runs without it.
+        if (!ScheduleSwitch.isOff(CRON_PROPERTY)) {
+            liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, EXPECTED_INTERVAL)
+        }
         Gauge.builder(STUCK_GAUGE, stuckCutoffDays) { it.get().toDouble() }
             .description(
                 "Accounting days sitting in CUTOFF longer than the configured threshold — the " +
@@ -312,11 +316,13 @@ class AccountingDayScheduler(
         }
     }
 
-    private companion object {
+    internal companion object {
         const val JOB_NAME = "ledger.accounting-day"
 
         /** ADR-0160 mechanism 3 workflow tag — stable, low-cardinality. */
         const val WORKFLOW_NAME = "ledger-accounting-day"
+        /** The property this job's `@Scheduled` cron expression reads. */
+        const val CRON_PROPERTY = "openbank.ledger.accounting-day.cron"
 
         const val STUCK_GAUGE = "openbank.ledger.accounting_day.stuck_cutoff_days"
 
