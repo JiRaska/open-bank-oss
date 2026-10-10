@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: audit-service
     app.kubernetes.io/part-of: audit
   annotations:
-    openbank.tech/policy-checksum: "0792e4ac13cf03ef"
+    openbank.tech/policy-checksum: "e8bc040a4acf3da2"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -303,6 +303,55 @@ data:
     	some role in {"ROLE_COMMS_APPROVER", "ROLE_ADMIN"}
     	role in input.principal.roles
     	input.action == "commstyle.approval.read"
+    }
+
+    # Pension catalog approval is a distinct human decision, never a generic publish grant.
+    # The endpoint checks the requested legal/product role and immutable JWT actor identity.
+    allowed_reasons contains "pension-catalog-decide-approval" if {
+    	input.principal.type == "HUMAN"
+    	not startswith(input.principal.id, "service-account-")
+    	input.action == "catalog.pensionApproval.decide"
+    	input.resource.id
+    	some role in {"PENSION_LEGAL_APPROVER", "PENSION_PRODUCT_OWNER"}
+    	role in input.principal.roles
+    }
+
+    allowed_reasons contains "pension-catalog-read-approval" if {
+    	input.principal.type == "HUMAN"
+    	not startswith(input.principal.id, "service-account-")
+    	input.action == "catalog.pensionApproval.read"
+    	input.resource.id
+    	"CATALOG_SCOPE_READ" in input.principal.roles
+    }
+
+    # A named human legal/product reviewer needs the catalog workspace before deciding a revision.
+    # The read role is derived from that reviewer's verified realm role by product-catalog; it is
+    # never a realm-wide default or an assignable CATALOG_SCOPE_READ role.
+    allowed_reasons contains "pension-catalog-human-reviewer-read" if {
+    	input.principal.type == "HUMAN"
+    	not startswith(input.principal.id, "service-account-")
+    	input.action == "catalog.read"
+    	"CATALOG_SCOPE_READ" in input.principal.roles
+    	some role in {"PENSION_LEGAL_APPROVER", "PENSION_PRODUCT_OWNER"}
+    	role in input.principal.roles
+    }
+
+    # The pension service reads published strategy mappings and their approval evidence with its
+    # own client_credentials identity. The scope alone is insufficient for OPA: only this named
+    # caller may traverse these catalog reads; approval decisions remain human-only above.
+    allowed_reasons contains "pension-catalog-m2m-read" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-pension"
+    	"CATALOG_SCOPE_READ" in input.principal.roles
+    	input.action == "catalog.read"
+    }
+
+    allowed_reasons contains "pension-catalog-m2m-read-approval" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-pension"
+    	"CATALOG_SCOPE_READ" in input.principal.roles
+    	input.action == "catalog.pensionApproval.read"
+    	input.resource.id
     }
 
     # Authenticated customers may perform any `customer.*` action (initiate payments, enroll

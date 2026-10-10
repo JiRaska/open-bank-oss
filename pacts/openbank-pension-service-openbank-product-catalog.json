@@ -1,0 +1,236 @@
+{
+  "consumer": {
+    "name": "openbank-pension-service"
+  },
+  "interactions": [
+    {
+      "description": "GET effective published DIP strategy revision",
+      "providerStates": [
+        {
+          "name": "a published DIP strategy revision has separate legal and product approvals"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/products/20000000-0000-0000-0000-000000000084",
+        "query": {
+          "effectiveAt": [
+            "2026-10-09T10:00:00Z"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "content": {
+            "attributes": {
+              "fundStrategy": "DYNAMIC",
+              "instrumentClasses": [
+                "BOND_FUNDS",
+                "EQUITY_FUNDS"
+              ],
+              "productLine": "DIP",
+              "reviewStatus": "LEGAL_AND_COMMERCIAL_REVIEWED"
+            }
+          },
+          "id": "30000000-0000-0000-0000-000000000084",
+          "number": 1,
+          "offeringId": "20000000-0000-0000-0000-000000000084",
+          "pensionApprovalDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "schemaRef": {
+            "id": "org.openbank.retirement.pension-savings",
+            "version": 2
+          },
+          "state": "PUBLISHED"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.number": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.offeringId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.schemaRef.version": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json.*"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET independent legal and product approvals for the exact revision",
+      "providerStates": [
+        {
+          "name": "a published DIP strategy revision has separate legal and product approvals"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/offerings/20000000-0000-0000-0000-000000000084/revisions/30000000-0000-0000-0000-000000000084/pension-approvals"
+      },
+      "response": {
+        "body": [
+          {
+            "approvedAt": "2026-10-08T10:00:00Z",
+            "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "role": "LEGAL_COUNSEL"
+          },
+          {
+            "approvedAt": "2026-10-08T11:00:00Z",
+            "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "role": "PRODUCT_OWNER"
+          }
+        ],
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$[0].approvedAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[1].approvedAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json.*"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET strategy catalog offerings",
+      "providerStates": [
+        {
+          "name": "a published DIP strategy revision has separate legal and product approvals"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/offerings"
+      },
+      "response": {
+        "body": [
+          {
+            "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304"
+          }
+        ],
+        "generators": {
+          "body": {
+            "$[*].id": {
+              "type": "Uuid"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 1
+                }
+              ]
+            },
+            "$[*].id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json.*"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-product-catalog"
+  }
+}

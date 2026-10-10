@@ -7,6 +7,7 @@ package com.openbank.pension.onboarding
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.pension.domain.model.ProductLine
+import com.openbank.pension.domain.questionnaire.StrategyInstrumentMapping
 import com.openbank.pension.infrastructure.catalog.StrategyCatalogRead
 import com.openbank.pension.infrastructure.catalog.StrategyInstrumentCatalogResolver
 import jakarta.ws.rs.WebApplicationException
@@ -60,9 +61,8 @@ class StrategyInstrumentCatalogResolverTest {
         },
     )
 
-    private fun lookup(resolver: StrategyInstrumentCatalogResolver) = runBlocking {
-        resolver.effectivePublished("CZ", ProductLine.DIP, "DYNAMIC", at)
-    }
+    private fun lookup(resolver: StrategyInstrumentCatalogResolver): List<StrategyInstrumentMapping> =
+        runBlocking { resolver.effectivePublished("CZ", ProductLine.DIP, "DYNAMIC", at) }
 
     @Test
     fun `pins exact published effective revision and passes requested instant`() {

@@ -4,6 +4,7 @@
 
 package com.openbank.pension.application.usecase
 
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.pension.application.exit.ScaOperation
 import com.openbank.pension.application.exit.ScaVerificationPort
 import com.openbank.pension.application.port.out.MandateRequest
@@ -138,7 +139,7 @@ class PaymentMandateService(
         val now = clock.instant()
         return mandates.recordIfAbsent(
             PaymentMandate(
-                UUID.randomUUID(),
+                Ids.newId(),
                 request.contractId,
                 request.kind,
                 externalId,

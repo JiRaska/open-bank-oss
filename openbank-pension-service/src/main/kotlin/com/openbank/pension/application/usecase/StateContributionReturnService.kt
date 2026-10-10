@@ -4,6 +4,7 @@
 
 package com.openbank.pension.application.usecase
 
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.pension.application.port.out.AgencyDocument
 import com.openbank.pension.application.port.out.AgencyDocumentKind
 import com.openbank.pension.application.port.out.ContractFundingDirectory
@@ -165,7 +166,7 @@ class StateContributionReturnService(
             )
         }
         val report =
-            ReturnReport(UUID.randomUUID(), month, due.map { it.id }, channel.render(month, lines), null, false, now())
+            ReturnReport(Ids.newId(), month, due.map { it.id }, channel.render(month, lines), null, false, now())
         if (!returns.fileReportAtomically(report, now())) {
             log.warnf("return report for %s lost a race with a concurrent run; nothing reported twice", month)
             return null
@@ -257,7 +258,7 @@ class StateContributionReturnService(
         dueBy: LocalDate,
         sourceKey: String,
     ) = StateContributionReturn(
-        UUID.randomUUID(), contractId, claimId, cause, amount, currency, discoveredOn, dueBy, sourceKey,
+        Ids.newId(), contractId, claimId, cause, amount, currency, discoveredOn, dueBy, sourceKey,
         ReturnStatus.DUE, null, now(), now(),
     )
 
