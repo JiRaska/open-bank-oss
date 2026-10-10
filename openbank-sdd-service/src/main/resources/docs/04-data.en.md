@@ -80,3 +80,13 @@ The mandate row and the `collection.authorised` event carry personal data: `debt
 ## Retention
 
 The service governance manifest declares a **7-year retention policy** (`governance.yaml: retentionPolicy: 7 years`), consistent with payments/AML record-keeping. The `V1` schema does not itself implement a purge job; retention is enforced operationally / by a downstream archival policy. There is no built-in erasure path (AML/PSD2 record-keeping obligations take precedence — see compliance).
+
+## Outbox retention (SENT rows)
+
+`sdd_outbox` is a delivery buffer, not a record. Rows that reached the broker (`status = 'SENT'`) are deleted once their `sent_at` is older than `openbank.outbox.retention.sent-days` (default **7**), by libs-runtime's shared `OutboxSentRetentionJob` (ADR-0329, ADR-0327 D8). The repository is on the kernel base (`AbstractPanacheOutboxRepository`, ADR-0327), which implements `SentOutboxRetention`.
+
+- Runs nightly (`openbank.outbox.retention.cron`, default `0 17 3 * * ?`) on every replica; each delete is bounded (`batch-size` 5 000, at most `max-batches` 200 per run), so a long-unpurged table drains over several nights.
+- PENDING, FAILED, DISPATCHING and DEAD rows are never touched — DEAD rows are the producer-side DLQ.
+- Replaying an event older than the window comes from the Kafka topic or audit-service, not from this table.
+- Signals: `openbank_outbox_purged_total{service,status="SENT"}`, `openbank_outbox_purge_failed_total`, and workflow liveness `outbox-sent-retention`.
+- Opt-out: `openbank.outbox.retention.enabled=false` (logs a WARN at boot). Don't lower `sent-days` below what any reader of SENT rows needs.

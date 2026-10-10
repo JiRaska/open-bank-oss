@@ -43,7 +43,7 @@
     "catalogPacks": {
       "type": "array",
       "uniqueItems": true,
-      "items": {"enum": ["banking", "insurance"]}
+      "items": {"enum": ["banking", "insurance", "retirement"]}
     },
     "bankV1CompatibilityEnabled": {"type": "boolean"},
     "service": {

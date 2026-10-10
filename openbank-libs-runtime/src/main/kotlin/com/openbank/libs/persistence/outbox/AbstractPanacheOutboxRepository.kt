@@ -183,13 +183,11 @@ abstract class AbstractPanacheOutboxRepository<E : PanacheOutboxEntity> : Outbox
                 }
         }.awaitSuspending()
 
-    override suspend fun purgeSent(olderThan: Duration, batch: Int, now: Instant): Int = inTransaction<Int> { s ->
-        s.createNativeQuery<Int>(OutboxSql.purgeSent(shape))
-            .setParameter("sent", OutboxStatus.SENT.name)
-            .setParameter("cut", now.minus(olderThan))
-            .setParameter("limit", batch.coerceAtLeast(1))
-            .executeUpdate()
-    }.awaitSuspending()
+    override suspend fun purgeSent(olderThan: Duration, batch: Int, now: Instant): Int =
+        PanacheOutboxRetention.purgeSent(shape, olderThan, batch, now)
+
+    /** Same label rule as a v1 repository's [PanacheOutboxRetention]: the table names the outbox. */
+    override val retentionLabel: String get() = shape.table.removeSuffix("_outbox").replace('_', '-')
 
     override suspend fun purgeDead(olderThan: Duration, batch: Int, now: Instant): Int = inTransaction<Int> { s ->
         s.createNativeQuery<Int>(OutboxSql.purgeDead(shape))

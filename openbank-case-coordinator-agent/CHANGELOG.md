@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.11.3...case-coordinator-agent-v0.12.0) (2026-10-09)
+
+
+### Features
+
+* **libs:** purge SENT outbox rows fleet-wide with one shared retention job ([#11899](https://github.com/JiRaska/open-bank-oss/issues/11899)) ([b322ed7](https://github.com/JiRaska/open-bank-oss/commit/b322ed7116137ecc8f132dc79cd79444c995bb2f))
+
 ## [0.11.3](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.11.2...case-coordinator-agent-v0.11.3) (2026-10-04)
 
 

@@ -102,6 +102,8 @@ Content-Type: application/json
 
 The edge enriches `debtorAccountNumber`/`debtorBankCode` (from the account's Czech IBAN), `debtorName` (party-service), splits the creditor `number/bankcode`, maps `reference`→`messageForPayee`, defaults `priority=STANDARD`, then forwards to `domestic-payment-service`. Money does not move — initiation creates and screens only; settlement is SCA-gated.
 
+The domestic rail accepts CZK only. Another currency returns `400 CURRENCY_NOT_ALLOWED` before account lookup, delegated spend reservation, or SCA; the `Idempotency-Key` remains available for a valid retry. A caller without debit authority receives the same `403` whether the account or a delegation exists, so this response does not reveal either.
+
 ### Start onboarding (anonymous)
 
 ```http

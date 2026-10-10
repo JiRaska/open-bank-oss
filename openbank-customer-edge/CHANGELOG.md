@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.90.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.90.0...customer-edge-v0.90.1) (2026-10-09)
+
+
+### Bug Fixes
+
+* **customer-edge:** refuse non-CZK domestic payments before SCA ([#12306](https://github.com/JiRaska/open-bank-oss/issues/12306)) ([4bd1032](https://github.com/JiRaska/open-bank-oss/commit/4bd1032ba04f1d65d543314349209c530e8769f7))
+
 ## [0.90.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.89.0...customer-edge-v0.90.0) (2026-10-08)
 
 

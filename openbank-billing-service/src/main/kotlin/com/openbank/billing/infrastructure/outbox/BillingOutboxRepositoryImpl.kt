@@ -12,6 +12,9 @@ import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxFailurePolicy
 import com.openbank.libs.persistence.outbox.OutboxRepository
 import com.openbank.libs.persistence.outbox.OutboxStatus
+import com.openbank.libs.persistence.outbox.OutboxTableShape
+import com.openbank.libs.persistence.outbox.PanacheOutboxRetention
+import com.openbank.libs.persistence.outbox.SentOutboxRetention
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.smallrye.mutiny.Uni
@@ -35,7 +38,12 @@ import java.util.UUID
 @ApplicationScoped
 class BillingOutboxRepositoryImpl(private val assessments: BillingAssessmentRepository, private val clock: Clock) :
     OutboxRepository,
+    SentOutboxRetention by PanacheOutboxRetention(OutboxTableShape("billing_outbox")),
     PanacheRepository<BillingOutboxEntity> {
+
+    // The annual summary still uses a SENT outbox row as its rerun guard. Remove this exemption
+    // only after the durable issuance migration in #12311 is merged and deployed (#12187).
+    override val sentRetentionExempt: Boolean = true
 
     private val mapper = jacksonObjectMapper().findAndRegisterModules()
 

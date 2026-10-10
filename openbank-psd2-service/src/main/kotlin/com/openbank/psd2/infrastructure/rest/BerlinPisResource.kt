@@ -12,6 +12,7 @@ import com.openbank.libs.idempotency.RequestFingerprints
 import com.openbank.psd2.application.port.`in`.GetPaymentStatusQuery
 import com.openbank.psd2.application.port.`in`.InitiatePaymentCommand
 import com.openbank.psd2.application.port.`in`.PaymentInitiationUseCase
+import com.openbank.psd2.application.usecase.DomesticCzCurrency
 import com.openbank.psd2.domain.model.DomesticCzPayment
 import com.openbank.psd2.domain.model.PaymentInitiation
 import com.openbank.psd2.domain.model.PaymentProduct
@@ -63,7 +64,14 @@ class BerlinPisResource(
         val product = BerlinXs2aMappers.productOf(paymentProduct) ?: return productNotSupported()
         if (consentId.isNullOrBlank()) return missingConsentId()
         if (xRequestId.isNullOrBlank()) return missingRequestId()
-        val payment = runCatching { deserialize(product, body) }.getOrElse { return malformedBody() }
+        val payment = runCatching {
+            val parsed = deserialize(product, body)
+            if (product == PaymentProduct.DOMESTIC_CZ) {
+                DomesticCzCurrency.normalize(parsed as DomesticCzPayment)
+            } else {
+                parsed
+            }
+        }.getOrElse { return malformedBody() }
 
         // X-Request-ID is the NextGenPSD2 request identifier and has always been this surface's
         // idempotency key; it is now bound to the fingerprint of the payment that executes (#10916).

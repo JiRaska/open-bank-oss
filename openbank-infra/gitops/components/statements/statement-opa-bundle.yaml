@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: statement-service
     app.kubernetes.io/part-of: statements
   annotations:
-    openbank.tech/policy-checksum: "5a6b51c59befd39b"
+    openbank.tech/policy-checksum: "b2bbf36d9ee1dfb8"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -197,6 +197,16 @@ data:
     	role in input.principal.roles
     	some verb in {"list", "read"}
     	endswith(input.action, sprintf(".%v", [verb]))
+    	not operator_read_any_excluded(input.action)
+    }
+
+    # Reads too sensitive for the generic operator rule, declared in rules.yaml:
+    # authz.operator_read_any_excluded_actions. The shared backend service-account carries
+    # ROLE_OPERATOR, so without this an excluded read is reachable by every service in the fleet.
+    # Each listed action's own service MUST carry identity-scoped rules for its staff and its named
+    # machine caller; removing an action from that list re-opens it fleet-wide.
+    operator_read_any_excluded(action) if {
+    	action in object.get(data.rules, ["authz", "operator_read_any_excluded_actions"], [])
     }
 
     # ADR-0224 D2: staff agent-session lifecycle (issue/read/revoke). Operator/admin only — sessions
@@ -1420,6 +1430,26 @@ data:
                                                 # PENDING_APPROVAL state already is. Writes are human-only in
                                                 # treasury_rest_ext.rego.
       - openbank-card-processing-service       # ADR-0283 phase 1 (#8809): the card money path — holds approved spend,
+                                                # applies clearing presentments against the hold and posts cleared
+                                                # spend to the books on the CARD rail through transaction-service.
+                                                # Its threat model has called it money-path since the first commit
+                                                # (docs/threat-models/openbank-card-processing-service.md) but it was
+                                                # never listed here (found with the clearing-idempotency fix, #11990).
+                                                # four-eyes assessed: cardprocessing.authorize/clear/reverse are
+                                                # acquirer automation (M2M, per presentment) — gating them would
+                                                # stop card traffic, not add a second human; the sandbox acquirer is
+                                                # ROLE_ADMIN, off by default and 404 when off. No operator endpoint
+                                                # moves money by hand today — add a verb here when one ships.
+      - openbank-pension-service               # ADR-0334 S1 (#12350): participant-side pension contracts. Listed
+                                                # from the bootstrap, before any money moves: contributions, state
+                                                # incentive receipt/clawback and payouts land in this service in the
+                                                # next slices, and the threat model + two-approval rule must already
+                                                # hold when they do (docs/threat-models/openbank-pension-service.md).
+                                                # four-eyes assessed: S1 exposes no operator write that moves money —
+                                                # create/activate/strategy/suspend/resume/terminate are the
+                                                # participant's own intent through the edge; add a verb when payout
+                                                # or an operator-side correction ships.
+      - openbank-pension-fund-service          # ADR-0334 S4 (#12350): the unit register of segregated pension funds —
 
     money_path_action_prefixes:
       sepa-payment: [sepaPayment]
@@ -1620,6 +1650,15 @@ data:
         - lending-disbursement-enabled
 
     authz:
+      # Actions the generic `operator-read-any` rule in rest.rego must NOT grant. That rule admits
+      # any HUMAN principal holding ROLE_OPERATOR/ROLE_ADMIN to every `*.read`/`*.list`, and the
+      # shared service-account (service-account-openbank-services) is classified HUMAN and holds
+      # ROLE_OPERATOR, so without an entry here the action is readable by every backend service.
+      # An action listed here is served ONLY by its service's identity-scoped rules (staff, and the
+      # one named machine caller). Tested must-deny/must-allow in that service's rest_ext test.
+      operator_read_any_excluded_actions:
+        - pension-fund.holding.read   # participants' unit holdings and orders (ADR-0334 S4, #12350):
+                                      # staff + service-account-openbank-pension only
       role_action_matrix:
         ROLE_OPERATOR:
           grant:

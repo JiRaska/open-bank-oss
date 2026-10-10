@@ -183,6 +183,16 @@ allowed_reasons contains "operator-read-any" if {
 	role in input.principal.roles
 	some verb in {"list", "read"}
 	endswith(input.action, sprintf(".%v", [verb]))
+	not operator_read_any_excluded(input.action)
+}
+
+# Reads too sensitive for the generic operator rule, declared in rules.yaml:
+# authz.operator_read_any_excluded_actions. The shared backend service-account carries
+# ROLE_OPERATOR, so without this an excluded read is reachable by every service in the fleet.
+# Each listed action's own service MUST carry identity-scoped rules for its staff and its named
+# machine caller; removing an action from that list re-opens it fleet-wide.
+operator_read_any_excluded(action) if {
+	action in object.get(data.rules, ["authz", "operator_read_any_excluded_actions"], [])
 }
 
 # ADR-0224 D2: staff agent-session lifecycle (issue/read/revoke). Operator/admin only — sessions

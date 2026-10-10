@@ -51,8 +51,11 @@ money (debits the customer, credits fee income), so it is a money-path service.
    a SECOND way (`AccountPartyLookupPort`, new — resolves `partyId`, the same existing endpoint
    `RestAccountContextPort` already calls for `productId`) and reads `assessed_fee` rows
    (`postedFeesForAccount`, POSTED-only, in-year) to build an `AnnualFeeSummary`. Appends a
-   `billing_outbox` row (`billing.annual-fee-summary.ready`) idempotent per `(accountId, year)`
-   (`appendAnnualFeeSummaryEvent`), dispatched by the SAME `BillingOutboxDispatcher` →
+   `billing_outbox` row (`billing.annual-fee-summary.ready`) with a durable
+   `(accountId, year)` issuance key (`billing_annual_fee_summary_issuance`) reserved in the same
+   database transaction (`appendAnnualFeeSummaryEvent`). This repository stays exempt from SENT
+   outbox purge until that key is deployed and historical coverage is confirmed. The event is
+   dispatched by the SAME `BillingOutboxDispatcher` →
    `LedgerOutboxEventPublisher`, which routes this `eventType` to a **new Kafka producer**
    (`billing-events-out` → topic `openbank.billing.fee.event`) instead of the ledger REST call —
    billing-service's first Kafka publisher; document-service consumes it to render the PAD Art. 5
@@ -205,9 +208,12 @@ first departure from "every trust boundary here is OIDC+mTLS REST".
     unescaped fee names (fixed separately, #5642). The scheduler itself is still off, so this
     channel carries no live traffic yet.
     Delivery is at-least-once (standard outbox semantics); document-service's consumer is
-    responsible for its own idempotent handling of `(accountId, year)` — billing only guarantees
-    it appends the outbox row at most once per `(accountId, year)` (deterministic `aggregateId`
-    + a transactional existence check), not that Kafka delivers it exactly once.
+    responsible for its own idempotent handling of `(accountId, year)` — billing guarantees one
+    durable issuance reservation per key using a database unique constraint and writes that
+    reservation with the outbox row in one transaction. The reservation survives SENT-row purge,
+    so concurrent schedulers, delayed reruns, and post-retention reruns cannot append another
+    trigger. V8 backfills retained events and aborts on malformed or duplicate historical keys.
+    Kafka itself can still redeliver the one event; downstream idempotency remains required.
   - `interestRate` is **always `null`** — billing-service has no source for a debit/credit
     interest rate anywhere in its domain. A downstream consumer that silently treats `null` as
     `0.00` rather than "unknown" would misrepresent the PAD Art. 5 document; this is a data-gap
@@ -223,6 +229,8 @@ first departure from "every trust boundary here is OIDC+mTLS REST".
     (`partyId`) read off an already-trusted response.
 
 ## 6. Change log
+
+- **2026-10-03** — **Fleet SENT retention excludes billing pending #12311** (ADR-0329, #12187). The shared `OutboxSentRetentionJob` can purge other services, but `BillingOutboxRepositoryImpl.sentRetentionExempt=true` preserves billing's annual-summary rerun guard. `billing_outbox` SENT payloads therefore remain until a durable account/year issuance key is deployed. The exemption is paired with a reason in the enforced fleet gate; remove both only after the migration and real-DB purge/rerun tests in #12311 are merged. No billing endpoint, caller or privilege changes in this phase.
 
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
   #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
@@ -296,6 +304,12 @@ first departure from "every trust boundary here is OIDC+mTLS REST".
   maker-cannot-approve-own test exists for this service. Rollback: revert to the inline
   implementation this PR replaces.
 
+- **2026-10-06** — **Annual fee-summary replay guard survives outbox retention (#12187).** A
+  durable `(accountId, year)` issuance table with a unique key is backfilled from retained annual
+  summary events and written atomically with each new outbox row. Duplicate historical keys fail
+  migration closed. The record survives SENT-row purge; Kafka remains at-least-once and the
+  document consumer still needs idempotency. Rollback must preserve the issuance table after
+  publication; see the billing docs retention note.
 - **2026-10-01** — **Balance read binds the field balance-service actually sends (#11650).**
   `BalanceDto` required a `currentBalance` that `GET /api/v1/balances/{accountId}/{currency}` has
   never serialised (it sends `Balance` verbatim: `bookedAmount`, `availableAmount`, …), so every

@@ -18,7 +18,6 @@ import com.openbank.sepainstant.application.port.out.SchemeGatewayPort
 import com.openbank.sepainstant.application.port.out.SchemeGatewayUnavailableException
 import com.openbank.sepainstant.application.port.out.SchemeSubmissionOutcome
 import com.openbank.sepainstant.application.port.out.ScreeningUnavailableException
-import com.openbank.sepainstant.application.port.out.SctInstEventPublisher
 import com.openbank.sepainstant.application.port.out.SctInstPaymentRepository
 import com.openbank.sepainstant.application.port.out.SettlementOutcome
 import com.openbank.sepainstant.application.port.out.SettlementPort
@@ -53,7 +52,6 @@ class SctInstPaymentServiceTest {
     private val clock = Clock.fixed(fixedInstant, ZoneOffset.UTC)
 
     private val repo = mockk<SctInstPaymentRepository>()
-    private val publisher = mockk<SctInstEventPublisher>()
     private val screeningPort = mockk<SanctionsScreeningPort>()
     private val amlCasePort = mockk<AmlCasePort>()
     private val fraudScoringPort = mockk<FraudScoringPort>()
@@ -64,7 +62,6 @@ class SctInstPaymentServiceTest {
 
     private fun buildService(schemeSubmissionEnabled: Boolean) = SctInstPaymentService(
         repo,
-        publisher,
         screeningPort,
         amlCasePort,
         fraudScoringPort,
@@ -78,9 +75,12 @@ class SctInstPaymentServiceTest {
 
     @BeforeEach
     fun setUp() {
-        // Defaults reused by most tests: repo echoes the saved aggregate, publisher and AML case succeed.
+        // Defaults reused by most tests: the atomic repository echoes the saved aggregate.
         every { repo.save(any()) } answers { Uni.createFrom().item(firstArg<SctInstPayment>()) }
-        every { publisher.publish(any()) } returns Uni.createFrom().nullItem()
+        every { repo.saveWithEvent(any(), any()) } answers { Uni.createFrom().item(firstArg<SctInstPayment>()) }
+        every { repo.updateWithEvent(any(), any(), any()) } answers {
+            Uni.createFrom().item(firstArg<SctInstPayment>())
+        }
         every { amlCasePort.openCase(any()) } returns Uni.createFrom().voidItem()
         // Fraud scoring is SHADOW (ADR-0084): default to ALLOW; never affects the payment outcome.
         every { fraudScoringPort.score(any()) } returns
@@ -110,7 +110,7 @@ class SctInstPaymentServiceTest {
         assertThat(result).isSameAs(existing)
         verify(exactly = 1) { repo.findByIdempotencyKey(command.idempotencyKey) }
         verify(exactly = 0) { repo.save(any()) }
-        verify(exactly = 0) { publisher.publish(any()) }
+        verify(exactly = 0) { repo.saveWithEvent(any(), any()) }
         verify(exactly = 0) { screeningPort.screen(any(), any(), any()) }
         // SHADOW: idempotent replay skips fraud scoring (payment was already scored on first submit).
         verify(exactly = 0) { fraudScoringPort.score(any()) }
@@ -207,7 +207,9 @@ class SctInstPaymentServiceTest {
         val paymentSlot = slot<SctInstPayment>()
 
         every { repo.findByIdempotencyKey(command.idempotencyKey) } returns Uni.createFrom().nullItem()
-        every { repo.save(capture(paymentSlot)) } answers { Uni.createFrom().item(paymentSlot.captured) }
+        every { repo.saveWithEvent(capture(paymentSlot), any()) } answers {
+            Uni.createFrom().item(paymentSlot.captured)
+        }
         clearScreening()
 
         val result = service.submit(command).await().indefinitely()
@@ -225,8 +227,9 @@ class SctInstPaymentServiceTest {
         assertThat(executionTimeoutAt).isAfter(submittedAt)
         assertThat(result).isSameAs(paymentSlot.captured)
 
-        verify(exactly = 1) { repo.save(any()) }
-        verify(exactly = 1) { publisher.publish(match<SctInstPaymentSubmitted> { it.paymentId == result.paymentId }) }
+        verify(exactly = 1) {
+            repo.saveWithEvent(any(), match<SctInstPaymentSubmitted> { it.paymentId == result.paymentId })
+        }
         verify(exactly = 0) { amlCasePort.openCase(any()) }
     }
 
@@ -236,7 +239,9 @@ class SctInstPaymentServiceTest {
         val paymentSlot = slot<SctInstPayment>()
 
         every { repo.findByIdempotencyKey(command.idempotencyKey) } returns Uni.createFrom().nullItem()
-        every { repo.save(capture(paymentSlot)) } answers { Uni.createFrom().item(paymentSlot.captured) }
+        every { repo.saveWithEvent(capture(paymentSlot), any()) } answers {
+            Uni.createFrom().item(paymentSlot.captured)
+        }
         every { screeningPort.screen(any(), ScreeningRole.DEBTOR, any()) } returns
             Uni.createFrom().item(
                 ScreeningResult("Alice Debtor", ScreeningRole.DEBTOR, ScreeningMatchStatus.CLEAR, 0.0, null),
@@ -265,8 +270,10 @@ class SctInstPaymentServiceTest {
                 },
             )
         }
-        verify(exactly = 1) { publisher.publish(match<SctInstPaymentRejected> { it.paymentId == result.paymentId }) }
-        verify(exactly = 0) { publisher.publish(match<SctInstPaymentSubmitted> { true }) }
+        verify(exactly = 1) {
+            repo.saveWithEvent(any(), match<SctInstPaymentRejected> { it.paymentId == result.paymentId })
+        }
+        verify(exactly = 0) { repo.saveWithEvent(any(), match<SctInstPaymentSubmitted> { true }) }
         verify(exactly = 1) { metrics.paymentCompleted("sepa_instant", result.currency, "rejected") }
         verify(exactly = 1) { metrics.paymentProcessingDuration("sepa_instant", "rejected", any()) }
     }
@@ -301,7 +308,7 @@ class SctInstPaymentServiceTest {
                 },
             )
         }
-        verify(exactly = 0) { publisher.publish(any()) }
+        verify(exactly = 0) { repo.saveWithEvent(any(), any()) }
         // PENDING is not terminal — neither completion metric should fire.
         verify(exactly = 0) { metrics.paymentCompleted(any(), any(), any()) }
         verify(exactly = 0) { metrics.paymentProcessingDuration(any(), any(), any()) }
@@ -325,7 +332,7 @@ class SctInstPaymentServiceTest {
                 },
             )
         }
-        verify(exactly = 0) { publisher.publish(any()) }
+        verify(exactly = 0) { repo.saveWithEvent(any(), any()) }
     }
 
     @Test
@@ -341,7 +348,7 @@ class SctInstPaymentServiceTest {
             .hasMessageContaining("Only SETTLED payments can be recalled")
 
         verify(exactly = 0) { repo.updateStatus(any(), any()) }
-        verify(exactly = 0) { publisher.publish(any()) }
+        verify(exactly = 0) { repo.updateWithEvent(any(), any(), any()) }
     }
 
     @Test
@@ -350,14 +357,6 @@ class SctInstPaymentServiceTest {
         val settled = payment(status = SctInstStatus.SETTLED, paymentId = paymentId)
 
         every { repo.findByPaymentId(paymentId) } returns Uni.createFrom().item(settled)
-        every { repo.updateStatus(paymentId, SctInstStatus.RECALLED) } returns Uni.createFrom().item(1)
-        every {
-            publisher.publish(
-                match<SctInstPaymentRecalled> {
-                    it.paymentId == paymentId && it.recallReason == "Customer requested"
-                },
-            )
-        } returns Uni.createFrom().nullItem()
 
         val result = service.recall(paymentId, "Customer requested").await().indefinitely()
 
@@ -367,8 +366,13 @@ class SctInstPaymentServiceTest {
         assertThat(result.recallReason).isEqualTo("Customer requested")
 
         verify(exactly = 1) { repo.findByPaymentId(paymentId) }
-        verify(exactly = 1) { repo.updateStatus(paymentId, SctInstStatus.RECALLED) }
-        verify(exactly = 1) { publisher.publish(any()) }
+        verify(exactly = 1) {
+            repo.updateWithEvent(
+                match { it.paymentId == paymentId && it.status == SctInstStatus.RECALLED },
+                SctInstStatus.SETTLED,
+                match<SctInstPaymentRecalled> { it.recallReason == "Customer requested" },
+            )
+        }
     }
 
     private fun command(
