@@ -99,3 +99,72 @@ delivered (`CompanyBooksCalculator`, golden IT), the instance is not — hence `
 
 - ADR-0334 §2, ADR-0336, ADR-0096 D1, ADR-0097, ADR-0152
 - `openbank-ledger-service/src/main/resources/db/migration/V1__init_ledger.sql`, `V22__closed_period.sql`
+
+## Amendment 2026-10-10: PSP 34-12 PS needs a holdings source, and treasury is not one yet
+
+The Consequences above leave PSP 34-12 PS (the company's own portfolio: instrument class, ISIN,
+quantity, valuation at period end) unsourced. We evaluated the obvious candidate, a second
+deployment of `openbank-treasury-service` (ADR-0315) for the pension company, the same pattern
+this ADR applies to the ledger. It cannot answer the return today:
+
+- **No securities product.** `ProductType` is `MM_PLACEMENT`, `MM_BORROWING`,
+  `CNB_DEPOSIT_FACILITY`, `CNB_LOMBARD`, `FX_SPOT`. ADR-0315 D2 plans `BOND_PURCHASE` /
+  `BOND_SALE` but neither exists, and no equity or fund-unit product is planned.
+- **No instrument identity or quantity.** A `Deal` carries `principal` and `rate` (ACT/360
+  money-market terms). No migration V1–V14 has an ISIN, an instrument class or a unit count.
+- **No GL accounts to post securities to.** The posting map (`Postings.kt`) knows nostro,
+  placement, ČNB facility, borrowing, accruals and FX position. ADR-0315 D5's "bonds by IFRS 9
+  category" accounts were never added to the ledger.
+- **No valuation source anywhere in the fleet.** Treasury's only market input is the risk
+  engine's curve set (rates, not security prices). `openbank-wealth-service` fetches no prices
+  (customer-declared figures only), and `openbank-pension-fund-service` holds the funds' own ISIN
+  and NAV, not the instruments the funds or the company invest in.
+
+Making treasury derive holdings from deals therefore needs, in order: securities products on the
+`Deal` aggregate (ISIN, instrument class, quantity, clean price), the ledger GL accounts and
+posting rules for them in each entity's ledger, and a price source. That is a money-path feature
+of ADR-0315, not a read model.
+
+### Decision (amended)
+
+1. **The holdings source of record for PSP 34-12 PS is the depositary's period-end statement of
+   holdings** (ISO 20022 `semt.002`). The pension company's own investments sit with a custodian,
+   and the custodian's statement already carries ISIN, quantity and a valuation at the statement
+   date. A `treasury-pension-co` deployment ingests it the way treasury already ingests nostro
+   `camt.053` statements (ADR-0315 D7): an idempotent upload keyed by account and statement date,
+   one immutable snapshot per date.
+2. **The read contract stays as agreed with tax-reporting:**
+   `GET /api/v1/treasury/portfolio/period-end?date=YYYY-MM-DD` answers the snapshot for exactly
+   that date (`asOf`, `currency`, positions of `instrumentClass`, `isin`, `quantity`,
+   `valuation`, `valuationCurrency`, decimals as strings), OPA action `treasury.portfolio.read`
+   granted to tax-reporting's service account by `principal.id` only. With no snapshot for the
+   date it answers **409**, never an empty list: an empty portfolio and a missing statement must
+   not look the same, the same fail-closed rule as the frozen trial balance in Decision 2.
+3. **Instrument class is mapped, not guessed.** `semt.002` carries a CFI code per ISIN (ISO
+   10962); the ČNB class is a declared CFI-prefix mapping in configuration, and an unmapped CFI
+   refuses the snapshot at ingestion.
+4. **Deals-derived holdings come later and must reconcile to the statement.** When ADR-0315 gains
+   securities products, holdings derived from settled deals become a second view, reconciled per
+   ISIN and quantity against the custodian snapshot like nostro breaks. The statement stays the
+   source of record for the return.
+5. **The `treasury-pension-co` instance runs no bank automation**, as Decision 4 requires of the
+   ledger: simulated market, interest accrual, nostro break sweep and outbox dispatch to the
+   bank's topics are off, and any GL posting points at `ledger-pension-co`, never the bank's
+   ledger.
+
+### Alternatives considered (amendment)
+
+- **Build securities deals in treasury first, then derive holdings.** The correct end state for
+  the deal lifecycle and GL, but it adds three missing pieces (products, GL accounts, prices)
+  before the return gets any answer, and still needs a price source that does not exist.
+- **Store the portfolio in pension-fund-service.** Rejected: that service administers the
+  participants' funds. Putting the company's own assets there breaks the segregation ADR-0334
+  §1 and this ADR's Decision 1 rely on.
+- **Hand-entered positions in tax-reporting.** Rejected: the return would be its own source
+  system with no evidence behind it.
+
+### Delivery check (amendment)
+
+`grep -rn "portfolio/period-end" openbank-treasury-service/src/main/resources/openapi.yaml` and
+`ls openbank-infra/gitops/components | grep treasury-pension-co` both print nothing today.
+PSP 34-12 PS stays unsourced, and tax-reporting must keep refusing it, until both print a line.
