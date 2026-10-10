@@ -6,8 +6,6 @@ package com.openbank.pension.infrastructure.rest.funding
 
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
-import com.openbank.pension.application.exit.ScaOperation
-import com.openbank.pension.application.exit.ScaVerificationPort
 import com.openbank.pension.application.port.`in`.Caller
 import com.openbank.pension.application.port.out.ContractNotFoundException
 import com.openbank.pension.application.port.out.MandateRequest
@@ -66,9 +64,6 @@ class ContractFundingResource {
 
     @Inject
     lateinit var mandateService: PaymentMandateService
-
-    @Inject
-    lateinit var sca: ScaVerificationPort
 
     /** S1's single ownership rule, applied to the contract as S1 stores it — never re-implemented here. */
     private suspend fun visible(caller: Caller, contractId: UUID): PensionContract = guard.requireVisible(
@@ -152,19 +147,7 @@ class ContractFundingResource {
     ): MandateResponse {
         requireIdempotencyKey(idempotencyKey)
         val contract = visible(guard.actingParticipant(party), contractId)
-        val challenge = requireNotNull(request?.scaChallengeId?.takeIf { it.isNotBlank() }) {
-            "scaChallengeId is required"
-        }
-        if (!sca.verify(
-                contract.participantPartyId,
-                challenge,
-                PaymentMandateCancellation.documentHash(contractId, mandateId),
-                ScaOperation.MANDATE_CANCELLATION,
-            )
-        ) {
-            throw MandateScaFailedException()
-        }
-        val mandate = mandateService.cancel(contractId, mandateId)
+        val mandate = mandateService.cancel(contractId, contract.participantPartyId, mandateId, request?.scaChallengeId)
         return MandateResponse(mandate.externalId, mandate.id, mandate.status.name)
     }
 
@@ -176,9 +159,12 @@ class ContractFundingResource {
         @PathParam("contractId") contractId: UUID,
         @PathParam("employerPartyId") employerPartyId: UUID,
         @HeaderParam(ContractAccessGuard.PARTY_HEADER) party: String?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        request: MandateCancelRequest?,
     ): Response {
-        visible(guard.actingParticipant(party), contractId)
-        contributions.enrolEmployer(contractId, employerPartyId)
+        requireIdempotencyKey(idempotencyKey)
+        val contract = visible(guard.actingParticipant(party), contractId)
+        mandateService.enrolEmployer(contractId, contract.participantPartyId, employerPartyId, request?.scaChallengeId)
         return Response.noContent().build()
     }
 

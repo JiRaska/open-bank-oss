@@ -179,6 +179,9 @@ class ContributionService(
     }
 
     /** The participant authorises [employerPartyId] to pay into the contract by bulk file. */
+    suspend fun isEmployerEnrolled(contractId: UUID, employerPartyId: UUID): Boolean =
+        enrolments.isEnrolled(contractId, employerPartyId)
+
     suspend fun enrolEmployer(contractId: UUID, employerPartyId: UUID) {
         val contract = requireContract(contractId)
         check(contract.status in ACCEPTING) { "contract ${contract.contractId} is ${contract.status}" }

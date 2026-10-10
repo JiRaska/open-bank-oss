@@ -105,7 +105,7 @@ class PaymentAdaptersIT {
         assertThat(text("SELECT count(*) FROM pension_payment_mandates WHERE contract_id = '$id'")).isEqualTo("1")
 
         // No challenge: refused before anything else.
-        spec(owner).body("{}").`when`().post("$funding/$id/mandates/$mandateId/cancel").then().statusCode(400)
+        spec(owner).body("{}").`when`().post("$funding/$id/mandates/$mandateId/cancel").then().statusCode(403)
 
         // Another participant's contract naming this mandate: 404 (their contract is not visible).
         val stranger = UUID.randomUUID()

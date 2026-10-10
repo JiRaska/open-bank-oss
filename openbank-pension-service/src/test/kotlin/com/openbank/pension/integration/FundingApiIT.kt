@@ -184,7 +184,13 @@ class FundingApiIT {
         val owner = UUID.randomUUID()
         val id = seededContract(owner)
         val employer = UUID.randomUUID()
-        spec(owner).body("{}").`when`().put("$funding/$id/employers/$employer").then().statusCode(204)
+        // Binding an employer to the contract is SCA-bound like every sibling: no challenge, 403.
+        spec(owner).body("{}")
+            .`when`().put("$funding/$id/employers/$employer").then().statusCode(403)
+        assertThat(rows("SELECT count(*) FROM pension_employer_enrolments WHERE contract_id = '$id'")).isEqualTo(0)
+        spec(owner)
+            .body("""{"scaChallengeId":"sca-${UUID.randomUUID()}"}""")
+            .`when`().put("$funding/$id/employers/$employer").then().statusCode(204)
         assertThat(rows("SELECT count(*) FROM pension_employer_enrolments WHERE contract_id = '$id'")).isEqualTo(1)
     }
 

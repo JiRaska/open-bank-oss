@@ -133,7 +133,28 @@ class PaymentMandateAndSettlementTest {
         assertThat(doc(req.copy(debtorIban = "cz65 0800 0000 1920 0014 5399"))).isEqualTo(hash)
     }
 
+    @Test
+    fun `cancel and employer enrolment are SCA-bound in the use case, and replays spend nothing`() {
+        val mandates = Mandates()
+        val svc = service(Port(), mandates)
+        val contract = UUID.randomUUID()
+        val created = runBlocking { svc.setUp(request(contract), "sca-ok") }
+        listOf(null, "sca-wrong").forEach { challenge ->
+            assertThatThrownBy { runBlocking { svc.cancel(contract, PARTY, created.id, challenge) } }
+                .isInstanceOf(
+                    com.openbank.pension.application.usecase.MandateCancellationScaFailedException::class.java,
+                )
+        }
+        runBlocking { svc.cancel(contract, PARTY, created.id, "sca-ok") }
+        val spent = sca.spent.size
+        runBlocking { svc.cancel(contract, PARTY, created.id, null) } // already cancelled: no-op, no SCA
+        assertThat(sca.spent).hasSize(spent)
+        assertThat(sca.spent.last().second)
+            .isEqualTo(com.openbank.pension.application.exit.ScaOperation.MANDATE_CANCELLATION)
+    }
+
     private companion object {
+        val PARTY: UUID = UUID.fromString("00000000-0000-4000-8000-00000000b001")
         const val FOREIGN = "CZ5508000000001234567899"
     }
 
@@ -162,13 +183,13 @@ class PaymentMandateAndSettlementTest {
         assertThat(mandates.rows).hasSize(1)
 
         // Another contract naming this mandate id: 404, and nothing reaches the rail.
-        assertThatThrownBy { runBlocking { svc.cancel(other, created.id) } }
+        assertThatThrownBy { runBlocking { svc.cancel(other, PARTY, created.id, "sca-ok") } }
             .isInstanceOf(PaymentMandateNotFoundException::class.java)
         assertThat(port.cancelled).isEmpty()
 
-        val cancelled = runBlocking { svc.cancel(mine, created.id) }
+        val cancelled = runBlocking { svc.cancel(mine, PARTY, created.id, "sca-ok") }
         assertThat(cancelled.status).isEqualTo(PaymentMandateStatus.CANCELLED)
-        runBlocking { svc.cancel(mine, created.id) } // replay: no second downstream call
+        runBlocking { svc.cancel(mine, PARTY, created.id, "sca-ok") } // replay: no second downstream call
         assertThat(port.cancelled).containsExactly(created.externalId)
     }
 
@@ -180,7 +201,9 @@ class PaymentMandateAndSettlementTest {
         val contract = UUID.randomUUID()
         val created = runBlocking { svc.setUp(request(contract), "sca-ok") }
 
-        assertThatThrownBy { runBlocking { svc.cancel(contract, created.id) } }.hasMessageContaining("rail down")
+        assertThatThrownBy {
+            runBlocking { svc.cancel(contract, PARTY, created.id, "sca-ok") }
+        }.hasMessageContaining("rail down")
         assertThat(mandates.rows.getValue(created.id).status).isEqualTo(PaymentMandateStatus.ACTIVE)
     }
 

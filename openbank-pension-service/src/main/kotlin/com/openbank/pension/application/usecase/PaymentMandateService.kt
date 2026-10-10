@@ -67,6 +67,25 @@ object PaymentMandateSetup {
     }
 }
 
+/** Documents the cancellation and employer-enrolment challenges sign. */
+object PaymentMandateLifecycle {
+    fun cancellationHash(contractId: UUID, mandateId: UUID): String =
+        sha("pension-mandate-cancel|$contractId|$mandateId")
+
+    fun employerEnrolmentHash(contractId: UUID, employerPartyId: UUID): String =
+        sha("pension-employer-enrolment|$contractId|$employerPartyId")
+
+    private fun sha(doc: String): String = java.security.MessageDigest.getInstance("SHA-256")
+        .digest(doc.toByteArray(java.nio.charset.StandardCharsets.UTF_8))
+        .joinToString("") { "%02x".format(it) }
+}
+
+class MandateCancellationScaFailedException :
+    RuntimeException("strong customer authentication failed for this cancellation")
+
+class EmployerEnrolmentScaFailedException :
+    RuntimeException("strong customer authentication failed for this employer authorisation")
+
 /** The participant's SCA over the mandate document was not verified (403); nothing was looked up or sent. */
 class MandateSetupScaFailedException : RuntimeException("strong customer authentication failed for this mandate")
 
@@ -118,6 +137,37 @@ class PaymentMandateService(
         )
     }
 
+    /**
+     * Authorises an employer to contribute through its bulk files (#12378): a binding of a third
+     * party to the contract, so SCA-bound like every sibling. Already enrolled = idempotent no-op.
+     */
+    suspend fun enrolEmployer(
+        contractId: UUID,
+        participantPartyId: UUID,
+        employerPartyId: UUID,
+        scaChallengeId: String?,
+    ) {
+        if (contributions.isEmployerEnrolled(contractId, employerPartyId)) return
+        requireSca(
+            participantPartyId,
+            scaChallengeId,
+            PaymentMandateLifecycle.employerEnrolmentHash(contractId, employerPartyId),
+            ScaOperation.EMPLOYER_ENROLMENT,
+        ) { EmployerEnrolmentScaFailedException() }
+        contributions.enrolEmployer(contractId, employerPartyId)
+    }
+
+    private suspend fun requireSca(
+        partyId: UUID,
+        scaChallengeId: String?,
+        hash: String,
+        operation: ScaOperation,
+        failure: () -> RuntimeException,
+    ) {
+        val challenge = scaChallengeId?.takeIf { it.isNotBlank() }
+        if (challenge == null || !sca.verify(partyId, challenge, hash, operation)) throw failure()
+    }
+
     private suspend fun requireMandateSca(request: MandateRequest, scaChallengeId: String?) {
         val challenge = scaChallengeId?.takeIf { it.isNotBlank() }
         val verified = challenge != null &&
@@ -130,10 +180,26 @@ class PaymentMandateService(
         if (!verified) throw MandateSetupScaFailedException()
     }
 
-    suspend fun cancel(contractId: UUID, mandateId: UUID): PaymentMandate {
+    /**
+     * Cancels a regular payment of THIS contract, SCA-bound in the use case (not only in REST): the
+     * challenge must sign `pension-mandate-cancellation:<hash(contract, mandate)>`. An already
+     * cancelled mandate is an idempotent no-op that spends nothing.
+     */
+    suspend fun cancel(
+        contractId: UUID,
+        participantPartyId: UUID,
+        mandateId: UUID,
+        scaChallengeId: String?,
+    ): PaymentMandate {
         val mandate = mandates.findById(mandateId)?.takeIf { it.contractId == contractId }
             ?: throw PaymentMandateNotFoundException(mandateId)
         if (mandate.status == PaymentMandateStatus.CANCELLED) return mandate
+        requireSca(
+            participantPartyId,
+            scaChallengeId,
+            PaymentMandateLifecycle.cancellationHash(contractId, mandateId),
+            ScaOperation.MANDATE_CANCELLATION,
+        ) { MandateCancellationScaFailedException() }
         // Downstream first: if the rail refuses, the row stays ACTIVE and says the truth.
         port.cancel(mandate.kind, mandate.externalId)
         val now = clock.instant()

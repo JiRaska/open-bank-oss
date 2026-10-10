@@ -141,9 +141,16 @@ paths:
       tags: [Pension]
       operationId: electStrategy
       summary: Elect or change the investment strategy; earlier elections stay as history
+      description: >-
+        One guarded path for every strategy change: ownership, idempotent replay of an applied change,
+        the suitability gate (409 REASSESSMENT_REQUIRED with reason and applicationId; 409
+        WARNINGS_REQUIRED with the warnings to show and acknowledge; 403 STRATEGY_NOT_PERMITTED under
+        MiFID or without an assessment), then a single-use SCA challenge over
+        `pension-strategy-change:<sha256(pension-strategy-change|contractId|strategyCode|effectiveFrom|SORTED,ACKS)>`.
       parameters:
         - $ref: '#/components/parameters/ContractId'
         - $ref: '#/components/parameters/CustomerPartyIdOptional'
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string } }
       requestBody:
         required: true
         content:
@@ -154,6 +161,7 @@ paths:
         '200': { $ref: '#/components/responses/Contract' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: 'SCA_REJECTED or STRATEGY_NOT_PERMITTED' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
   /api/v1/pension/contracts/{id}/incentive-evaluation:
@@ -892,9 +900,20 @@ paths:
         - $ref: '#/components/parameters/FundingContractId'
         - $ref: '#/components/parameters/EmployerPartyId'
         - $ref: '#/components/parameters/CustomerPartyId'
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MandateCancelRequest'
+      description: >-
+        SCA-bound: scaChallengeId must sign `pension-employer-enrolment:<sha256(pension-employer-enrolment|contractId|employerPartyId)>`.
+        An already enrolled employer is a no-op.
       responses:
         '204':
           description: Done
+        '403': { description: SCA_REJECTED }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -2543,6 +2562,11 @@ components:
       properties:
         strategyCode: { type: string, minLength: 1 }
         effectiveFrom: { type: string, format: date, description: Defaults to today; never in the past }
+        scaChallengeId: { type: string, description: 'Single-use challenge over pension-strategy-change:<hash>' }
+        acknowledgedWarnings:
+          type: array
+          items: { type: string, enum: [STRATEGY_ABOVE_PROFILE, PRODUCT_NOT_APPROPRIATE, SUSTAINABILITY_PREFERENCE_NOT_MET] }
+        language: { type: string, description: 'Language the warnings were shown in (cs / en)' }
     IncentiveEvaluationRequest:
       type: object
       required: [contribution, period]
