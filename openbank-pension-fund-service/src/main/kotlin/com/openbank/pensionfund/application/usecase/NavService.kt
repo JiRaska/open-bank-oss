@@ -16,6 +16,7 @@ import com.openbank.pensionfund.domain.model.ForwardPricer
 import com.openbank.pensionfund.domain.model.FundStatus
 import com.openbank.pensionfund.domain.model.NavCalculator
 import com.openbank.pensionfund.domain.model.NavInput
+import com.openbank.pensionfund.domain.model.NavPosition
 import com.openbank.pensionfund.domain.model.NavRecord
 import com.openbank.pensionfund.domain.model.NavStatus
 import com.openbank.pensionfund.domain.model.OrderStatus
@@ -97,8 +98,14 @@ class NavService(
             calculatedBy = actor,
             calculatedAt = clock.instant(),
             correctsNavId = original?.id,
+            positionsRecorded = true,
         )
-        store.commit(StoreChanges(navs = listOf(nav)))
+        store.commit(
+            StoreChanges(
+                navs = listOf(nav),
+                navPositions = positions.map { NavPosition(nav.id, it.instrumentId, it.quantity, it.price) },
+            ),
+        )
         metrics.navEvent(fund.isin, NavEvent.CALCULATED, nav.isCorrection)
         return nav
     }
