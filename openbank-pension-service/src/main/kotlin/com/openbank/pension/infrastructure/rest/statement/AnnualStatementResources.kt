@@ -6,7 +6,6 @@ package com.openbank.pension.infrastructure.rest.statement
 
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
-import com.openbank.pension.application.port.`in`.PensionContractUseCase
 import com.openbank.pension.application.port.out.AnnualStatement
 import com.openbank.pension.application.usecase.AnnualStatementService
 import com.openbank.pension.infrastructure.authz.ContractAccessGuard
@@ -14,9 +13,7 @@ import com.openbank.pension.infrastructure.rest.requireIdempotencyKey
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
-import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
-import jakarta.ws.rs.NotFoundException
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
@@ -67,35 +64,5 @@ class AnnualStatementOperationsResource {
         // Staff only: no party header is accepted on an operator route.
         access.readerFor(null)
         return AnnualStatementResponse.from(statements.issue(contractId, year))
-    }
-}
-
-/** The participant's (or staff's) read of an issued annual statement: its document id and hash. */
-@Tag(name = "Pension")
-@Path("/api/v1/pension/contracts/{contractId}/annual-statements/{year}")
-@Produces(MediaType.APPLICATION_JSON)
-@RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)
-class AnnualStatementResource {
-    @Inject
-    lateinit var contracts: PensionContractUseCase
-
-    @Inject
-    lateinit var statements: AnnualStatementService
-
-    @Inject
-    lateinit var access: ContractAccessGuard
-
-    @GET
-    @Operation(summary = "Read the issued annual statement for a year (404 until issued)")
-    @Authorize(action = "pension.contract.read", resource = "#contractId")
-    suspend fun get(
-        @PathParam("contractId") contractId: UUID,
-        @PathParam("year") year: Int,
-        @HeaderParam("X-Customer-Party-Id") party: String?,
-    ): AnnualStatementResponse {
-        // Ownership first: someone else's contract is NOT FOUND, exactly like the contract read.
-        contracts.get(access.readerFor(party), contractId)
-        val statement = statements.find(contractId, year) ?: throw NotFoundException("no annual statement for $year")
-        return AnnualStatementResponse.from(statement)
     }
 }

@@ -104,6 +104,7 @@ spec:
       - tpp-registry
       - treasury
       - wealth
+      - pension-fund
   podMetricsEndpoints:
     - port: management
       path: /q/metrics

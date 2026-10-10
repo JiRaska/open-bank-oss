@@ -9,6 +9,9 @@ It serves an industry-neutral v2 catalog while preserving the v1 banking contrac
   effective-dated revisions, exact decimal price components, eligibility, relationships and document codes.
 - **Trusted industry packs** — closed JSON Schema 2020-12 profiles. The initial banking-deposit and
   term-life insurance packs prove that industry attributes do not leak into the kernel.
+  The `retirement` pack (ADR-0334) adds `org.openbank.retirement.pension-savings` for CZ supplementary
+  pension savings (DPS, `CZ/DPS`) and the long-term investment product (DIP, `CZ/DIP`), one offering per
+  fund strategy. Its values are illustrative and carry `reviewStatus` until legal/commercial review.
 
 - **Product master** — one record per product (e.g. `SAVINGS_STANDARD`, `CURRENT_PERSONAL`, `LOAN_PERSONAL_5Y`, `MORTGAGE_FIXED_20Y`, `CREDIT_CARD_CLASSIC`, `TERM_DEPOSIT_12M`, `OVERDRAFT_PERSONAL`, multi-currency umbrella). Each carries identity (`code`, `name`, `type`, `currency`), lifecycle `status` (DRAFT / ACTIVE / INACTIVE / DEPRECATED / ARCHIVED), pricing (`baseRate`, `fee`, `fees[]`), eligibility segments, version history and terms-and-conditions.
 - **Per-type configuration blocks** — `cardConfig`, `multiCurrencyConfig`, `overdraftConfig`, `termDepositConfig`, `savingsConfig` (rates, FX margins, card networks/tiers, withdrawal notice, etc.).
