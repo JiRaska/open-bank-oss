@@ -25,6 +25,7 @@ import com.openbank.pension.application.port.out.PensionContractRepository
 import com.openbank.pension.application.usecase.ContributionService
 import com.openbank.pension.domain.pack.JurisdictionPackRegistry
 import com.openbank.pension.domain.questionnaire.QuestionSetRegistry
+import com.openbank.pension.domain.questionnaire.StrategyInstrumentMappingPort
 import com.openbank.pension.infrastructure.onboarding.pack.OnboardingRulesLoader
 import com.openbank.pension.infrastructure.onboarding.pack.StaticOnboardingRulesRegistry
 import io.quarkus.runtime.Startup
@@ -66,9 +67,10 @@ class OnboardingBeans {
         clock: Clock,
         questionSets: QuestionSetRegistry,
         providerBoundary: ProviderBoundary,
+        instrumentMappings: StrategyInstrumentMappingPort,
     ): OnboardingService = OnboardingService(
         applications, assessments, transfers, contracts, packs, rules, kyc, relations, documents, signatures,
-        orchestrator, tx, clock, questionSets, providerBoundary,
+        orchestrator, tx, clock, questionSets, providerBoundary, instrumentMappings,
     )
 
     /** The port slice S3 calls on a first contribution; backed by the real onboarding workflow. */

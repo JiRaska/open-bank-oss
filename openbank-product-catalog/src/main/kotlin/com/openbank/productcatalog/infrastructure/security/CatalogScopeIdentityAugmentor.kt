@@ -17,6 +17,8 @@ object CatalogRoles {
     const val READ = "CATALOG_SCOPE_READ"
     const val AUTHOR = "CATALOG_SCOPE_AUTHOR"
     const val PUBLISH = "CATALOG_SCOPE_PUBLISH"
+    const val PENSION_LEGAL_APPROVER = "PENSION_LEGAL_APPROVER"
+    const val PENSION_PRODUCT_OWNER = "PENSION_PRODUCT_OWNER"
 }
 
 /** Maps provider-neutral OAuth scopes to stable internal roles without trusting a tenant claim or OPA. */
@@ -51,7 +53,17 @@ class CatalogScopeIdentityAugmentor(
 ) : SecurityIdentityAugmentor {
     override fun augment(identity: SecurityIdentity, context: AuthenticationRequestContext): Uni<SecurityIdentity> {
         val token = identity.principal as? JsonWebToken ?: return Uni.createFrom().item(identity)
-        val roles = mapper.roles(token.getClaim<Any?>(scopeClaim))
+        val roles = mapper.roles(token.getClaim<Any?>(scopeClaim)).toMutableSet()
+        val name = token.name
+        val humanApprover =
+            name.isNotBlank() &&
+                !name.startsWith("service-account-") &&
+                !name.startsWith("agent:") &&
+                token.subject?.startsWith("agent:") != true &&
+                identity.roles.any {
+                    it == CatalogRoles.PENSION_LEGAL_APPROVER || it == CatalogRoles.PENSION_PRODUCT_OWNER
+                }
+        if (humanApprover) roles.add(CatalogRoles.READ)
         if (roles.isEmpty()) return Uni.createFrom().item(identity)
         return Uni.createFrom().item(QuarkusSecurityIdentity.builder(identity).addRoles(roles).build())
     }

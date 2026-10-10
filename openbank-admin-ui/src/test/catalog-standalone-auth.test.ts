@@ -15,6 +15,34 @@ describe('standalone Product Studio auth contract', () => {
     )).toEqual(['CATALOG_SCOPE_READ', 'CATALOG_SCOPE_PUBLISH'])
   })
 
+  it('derives catalog read only from named human pension approver realm roles', () => {
+    const legalReader = extractCatalogScopeRoles({
+      preferred_username: 'legal-reviewer',
+      sub: 'legal-reviewer',
+      realm_access: { roles: ['PENSION_LEGAL_APPROVER'] },
+    })
+    expect(hasPermission(legalReader, 'catalog:read')).toBe(true)
+    expect(hasPermission(legalReader, 'catalog:pension:legal-approve')).toBe(true)
+    expect(hasPermission(legalReader, 'catalog:pension:product-approve')).toBe(false)
+    expect(hasPermission(legalReader, 'catalog:publish')).toBe(false)
+    const productReader = extractCatalogScopeRoles({
+      preferred_username: 'product-reviewer',
+      sub: 'product-reviewer',
+      realm_access: { roles: ['PENSION_PRODUCT_OWNER'] },
+    })
+    expect(hasPermission(productReader, 'catalog:read')).toBe(true)
+    expect(hasPermission(productReader, 'catalog:pension:product-approve')).toBe(true)
+    expect(hasPermission(productReader, 'catalog:pension:legal-approve')).toBe(false)
+    const scopeOnly = extractCatalogScopeRoles({ scope: 'pension:legal-approve pension:product-approve' })
+    expect(scopeOnly).toEqual([])
+    const machineWithRole = extractCatalogScopeRoles({
+      preferred_username: 'service-account-other',
+      sub: 'machine-subject',
+      realm_access: { roles: ['PENSION_LEGAL_APPROVER'] },
+    })
+    expect(machineWithRole).toEqual([])
+  })
+
   it('keeps author and independent publisher capabilities separate', () => {
     const author = [ROLES.CATALOG_READ, ROLES.CATALOG_AUTHOR]
     const publisher = [ROLES.CATALOG_READ, ROLES.CATALOG_PUBLISH]

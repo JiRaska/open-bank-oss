@@ -2,7 +2,7 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root for details.
 
-export type CatalogSchemaScalar = 'boolean' | 'integer' | 'number' | 'string'
+export type CatalogSchemaScalar = 'boolean' | 'integer' | 'number' | 'string' | 'enum-array'
 
 export interface CatalogSchemaField {
   path: string[]
@@ -11,6 +11,7 @@ export interface CatalogSchemaField {
   required: boolean
   choices: string[]
   description?: string
+  minItems?: number
 }
 
 type JsonSchema = {
@@ -19,13 +20,15 @@ type JsonSchema = {
   required?: string[]
   enum?: unknown[]
   description?: string
+  items?: JsonSchema
+  minItems?: number
 }
 
 const scalarTypes = new Set<CatalogSchemaScalar>(['boolean', 'integer', 'number', 'string'])
 
 /**
- * Produces a deliberately small, safe form surface from a trusted pack schema. Complex arrays
- * remain in expert JSON mode; scalar fields nested in objects become approachable controls.
+ * Produces controls for scalars and string enum arrays from a trusted pack schema.
+ * Complex arrays remain in expert JSON mode.
  */
 export function catalogSchemaFields(document: unknown, maxDepth = 3): CatalogSchemaField[] {
   const root = asSchema(document)
@@ -33,6 +36,13 @@ export function catalogSchemaFields(document: unknown, maxDepth = 3): CatalogSch
 }
 
 function collect(node: JsonSchema, prefix: string[], required: boolean, depth: number): CatalogSchemaField[] {
+  if (node.type === 'array' && node.items?.type === 'string' && Array.isArray(node.items.enum)) {
+    const choices = node.items.enum.filter((value): value is string => typeof value === 'string')
+    if (choices.length > 0) return [{
+      path: prefix, label: prefix.join(' · '), type: 'enum-array', required,
+      choices, description: node.description, minItems: node.minItems,
+    }]
+  }
   if (scalarTypes.has(node.type as CatalogSchemaScalar)) {
     return [{
       path: prefix,

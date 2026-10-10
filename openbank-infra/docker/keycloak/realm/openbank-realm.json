@@ -41,6 +41,14 @@
         "description": "Machine-to-machine API access"
       },
       {
+        "name": "PENSION_LEGAL_APPROVER",
+        "description": "Named human legal reviewer of pension strategy revisions; no default assignment."
+      },
+      {
+        "name": "PENSION_PRODUCT_OWNER",
+        "description": "Named human product owner reviewer of pension strategy revisions; no default assignment."
+      },
+      {
         "name": "ROLE_DEMO",
         "description": "Demo account — full access except Settings"
       }
@@ -1042,7 +1050,8 @@
       "defaultClientScopes": [
         "openid",
         "profile",
-        "roles"
+        "roles",
+        "catalog:read"
       ],
       "attributes": {}
     },

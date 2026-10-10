@@ -273,4 +273,6 @@ data class WarningText(val code: WarningCode, val text: LocalizedText)
 /** The loaded question sets; one per `(jurisdiction, productLine)` pack key, latest version wins. */
 interface QuestionSetRegistry {
     fun questionSet(jurisdiction: String, productLine: ProductLine): QuestionSet
+
+    fun questionSet(id: String, version: Int): QuestionSet
 }

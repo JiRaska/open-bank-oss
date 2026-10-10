@@ -180,8 +180,9 @@ server-side enforcement without custom OTel processors.
 back. They are **runtime-derived internal roles, not grantable realm roles**:
 `CatalogScopeIdentityAugmentor` in openbank-product-catalog synthesises them per request
 from the token's OAuth `scope` claim (`catalog:read` / `catalog:author` /
-`catalog:publish`), and its own KDoc says why — *"without trusting a tenant claim or
-OPA"*. The scope-to-role mapping is meant to be the only path to those roles.
+`catalog:publish`). The narrow pension-review exception below derives READ from a
+verified, named human realm approver role. Neither path grants a realm role named
+`CATALOG_SCOPE_READ`.
 
 Declaring them in the realm makes them assignable in the Keycloak admin console, so an
 operator could grant `CATALOG_SCOPE_PUBLISH` to a user directly and reach every
@@ -193,6 +194,16 @@ or delete the declaration"*) — here it is always the delete.
 Removing them also clears three `check-realm-role-parity` findings that had been failing
 the `keycloak-realm-drift` CronJob (`declaredNotLive` + `namedByCodeButNotLive`, 9/1/15
 `@RolesAllowed` sites respectively).
+
+Pension revision approval uses two separately assignable human realm roles,
+`PENSION_LEGAL_APPROVER` and `PENSION_PRODUCT_OWNER`. Neither role is assigned to a
+user, group, or client by the committed templates. Product Catalog derives its internal
+`CATALOG_SCOPE_READ` role for a verified human token carrying either approver role;
+Admin UI makes the same display-only derivation. A service-account identity cannot use
+those roles to decide an approval. Assign the two roles to separately authorized people
+through the approved identity process and verify their live access tokens and the
+two-person approval flow before enabling publication. Do not make either approval role
+or `catalog:read` a default scope of the Admin UI client.
 
 **Separate and still open — the reason those 25 sites are unreachable is NOT these
 roles.** `catalog:read|author|publish` is not declared as a client scope in either realm

@@ -199,6 +199,14 @@ class PensionContractServiceTest {
     }
 
     @Test
+    fun `direct DIP submission cannot bypass signed onboarding`(): Unit = runBlocking {
+        val draft = service.createDraft(command(ProductLine.DIP, ProviderType.BANK))
+        assertThatThrownBy { runBlocking { service.submit(me, draft.id) } }
+            .hasMessageContaining("signed onboarding flow")
+        assertThat(repo.rows[draft.id]?.status).isEqualTo(ContractStatus.DRAFT)
+    }
+
+    @Test
     fun `amounts above the bound are refused`(): Unit = runBlocking {
         assertThatThrownBy {
             ContributionSchedule(BigDecimal("1000000000.01"), "CZK", ContributionFrequency.MONTHLY)

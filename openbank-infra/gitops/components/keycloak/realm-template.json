@@ -99,6 +99,14 @@
         "description": "Communication Studio checker: publishes and retires style/playbook versions and decides commstyle.publish four-eyes approvals (ADR-0285 D3/D6). Never granted to the same person's own draft (application-layer maker!=checker check)."
       },
       {
+        "name": "PENSION_LEGAL_APPROVER",
+        "description": "Named human legal reviewer of one pension strategy revision. Grants catalog read at runtime; no default user or client assignment."
+      },
+      {
+        "name": "PENSION_PRODUCT_OWNER",
+        "description": "Named human product owner reviewer of one pension strategy revision. Grants catalog read at runtime; no default user or client assignment."
+      },
+      {
         "name": "ROLE_RISK",
         "description": "Risk department (ALM/market risk): reads balance-sheet snapshots, instruments, cash-flow ladders and curve sets in openbank-risk-engine; creates snapshots and uploads curve sets (humans only, ADR-0313/0314). #10618"
       },
@@ -1262,7 +1270,7 @@
     {
       "clientId": "openbank-pension",
       "name": "OpenBank Pension Service",
-      "description": "Per-service M2M client for pension-service's FundAdministrationPort calls to pension-fund-service (holdings read, unit orders) (ADR-0334 S8). Holds ROLE_API only; pension-fund-service grants those actions to this identity alone.",
+      "description": "Per-service M2M client for pension-service's fund calls and catalog strategy reads (ADR-0334). Holds ROLE_API and the narrow catalog:read scope; OPA grants catalog reads to this identity alone.",
       "enabled": true,
       "publicClient": false,
       "standardFlowEnabled": false,
@@ -1274,7 +1282,8 @@
       "defaultClientScopes": [
         "openid",
         "profile",
-        "roles"
+        "roles",
+        "catalog:read"
       ],
       "secret": "__PENSION_CLIENT_SECRET__"
     },

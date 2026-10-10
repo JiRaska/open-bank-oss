@@ -8,6 +8,7 @@ import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.pension.domain.model.ContributionSchedule
 import com.openbank.pension.domain.model.ProductLine
 import com.openbank.pension.domain.pack.ProviderType
+import com.openbank.pension.domain.questionnaire.StrategyInstrumentDecision
 import com.openbank.pension.domain.questionnaire.WarningAcknowledgement
 import java.time.Instant
 import java.time.LocalDate
@@ -122,6 +123,8 @@ data class OnboardingApplication(
     val questionnaireDraft: Map<String, String> = emptyMap(),
     /** Warnings acknowledged for the current assessment; re-answering clears them (issue #12384). */
     val warningAcknowledgements: List<WarningAcknowledgement> = emptyList(),
+    /** Per-class decision for the chosen strategy; null on pre-upgrade applications. */
+    val strategyInstrumentDecision: StrategyInstrumentDecision? = null,
     val version: Long = 0,
     val createdAt: Instant,
     val updatedAt: Instant,
@@ -146,6 +149,7 @@ data class OnboardingApplication(
             kid = null,
             kidAcceptedAt = null,
             warningAcknowledgements = emptyList(),
+            strategyInstrumentDecision = null,
         )
     }
 
@@ -195,6 +199,7 @@ data class OnboardingApplication(
         acknowledgedUnsuitable: Boolean,
         kid: IssuedKid,
         now: Instant,
+        instrumentDecision: StrategyInstrumentDecision? = null,
     ): OnboardingApplication {
         check(assessmentId != null) { "the questionnaire must be answered before a strategy is chosen" }
         require(kid.strategyCode == strategyCode) { "the document must be issued for the chosen strategy" }
@@ -203,6 +208,7 @@ data class OnboardingApplication(
             unsuitableChoiceAcknowledged = acknowledgedUnsuitable,
             kid = kid,
             kidAcceptedAt = null,
+            strategyInstrumentDecision = instrumentDecision,
         )
     }
 

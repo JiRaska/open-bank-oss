@@ -21,12 +21,14 @@ import com.openbank.pension.domain.questionnaire.QuestionSetRegistry
  */
 class StaticQuestionSetRegistry(sets: List<QuestionSet>, onboarding: List<OnboardingRules>) : QuestionSetRegistry {
 
+    private val byVersion: Map<Pair<String, Int>, QuestionSet> = sets.associateBy { it.id to it.version }
     private val latest: Map<Pair<String, ProductLine>, QuestionSet> =
         sets.groupBy { it.jurisdiction to it.productLine }.mapValues { (_, v) -> v.maxBy { it.version } }
 
     init {
         val keys = sets.map { Triple(it.jurisdiction, it.productLine, it.version) }
         require(keys.toSet().size == keys.size) { "duplicate question set version" }
+        require(byVersion.size == sets.size) { "duplicate question set id/version" }
         onboarding.forEach { rules ->
             val set = latest[rules.jurisdiction to rules.productLine]
             require(set != null) { "no question set for ${rules.jurisdiction}/${rules.productLine}" }
@@ -40,6 +42,9 @@ class StaticQuestionSetRegistry(sets: List<QuestionSet>, onboarding: List<Onboar
     override fun questionSet(jurisdiction: String, productLine: ProductLine): QuestionSet =
         latest[jurisdiction to productLine]
             ?: throw PackNotFoundException("no question set for $jurisdiction/$productLine")
+
+    override fun questionSet(id: String, version: Int): QuestionSet = byVersion[id to version]
+        ?: throw PackNotFoundException("no question set $id version $version")
 }
 
 /** Loads `jurisdiction-packs/questionnaire/` through `index.json` with a STRICT mapper (ADR-0212 D2). */

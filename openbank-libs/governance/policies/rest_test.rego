@@ -1474,6 +1474,126 @@ test_commstyle_publish_allows_human_approver if {
 	decision.reason == "commstyle-publish"
 }
 
+test_pension_catalog_approval_allows_role_qualified_human if {
+	decision := rest.allow with input as {
+		"principal": {"id": "legal-reviewer", "type": "HUMAN", "roles": ["PENSION_LEGAL_APPROVER"]},
+		"action": "catalog.pensionApproval.decide",
+		"resource": {"type": "catalog", "id": "offering-1"},
+	}
+		with data.openbank.bundle as bundle
+
+	decision.allow == true
+	decision.reason == "pension-catalog-decide-approval"
+}
+
+test_pension_catalog_approval_does_not_grant_generic_publish if {
+	not rest.allow with input as {
+		"principal": {"id": "legal-reviewer", "type": "HUMAN", "roles": ["PENSION_LEGAL_APPROVER"]},
+		"action": "catalog.publish",
+		"resource": {"type": "catalog", "id": "offering-1"},
+	}
+}
+
+test_pension_catalog_approval_denies_service_account if {
+	not rest.allow with input as {
+		"principal": {"id": "service-account-catalog", "type": "HUMAN", "roles": ["PENSION_PRODUCT_OWNER"]},
+		"action": "catalog.pensionApproval.decide",
+		"resource": {"type": "catalog", "id": "offering-1"},
+	}
+}
+
+test_pension_catalog_approval_read_requires_read_scope if {
+	decision := rest.allow with input as {
+		"principal": {"id": "legal-reviewer", "type": "HUMAN", "roles": ["CATALOG_SCOPE_READ"]},
+		"action": "catalog.pensionApproval.read",
+		"resource": {"type": "catalog", "id": "offering-1"},
+	}
+		with data.openbank.bundle as bundle
+
+	decision.allow == true
+	not rest.allow with input as {
+		"principal": {"id": "legal-reviewer", "type": "HUMAN", "roles": ["PENSION_LEGAL_APPROVER"]},
+		"action": "catalog.pensionApproval.read",
+		"resource": {"type": "catalog", "id": "offering-1"},
+	}
+}
+
+test_pension_catalog_human_reviewer_can_read_workspace_without_publish if {
+	decision := rest.allow with input as {
+		"principal": {
+			"id": "named-legal-reviewer",
+			"type": "HUMAN",
+			"roles": ["PENSION_LEGAL_APPROVER", "CATALOG_SCOPE_READ"],
+		},
+		"action": "catalog.read",
+		"resource": {"type": "catalog"},
+	} with data.openbank.bundle as bundle
+	decision.allow == true
+	decision.reason == "pension-catalog-human-reviewer-read"
+	not rest.allow with input as {
+		"principal": {
+			"id": "named-legal-reviewer",
+			"type": "HUMAN",
+			"roles": ["PENSION_LEGAL_APPROVER", "CATALOG_SCOPE_READ"],
+		},
+		"action": "catalog.publish",
+		"resource": {"type": "catalog", "id": "offering-1"},
+	}
+}
+
+test_pension_catalog_human_reviewer_read_denies_machine_or_missing_role if {
+	forbidden := [
+		{"id": "service-account-other", "roles": ["PENSION_LEGAL_APPROVER", "CATALOG_SCOPE_READ"]},
+		{"id": "named-legal-reviewer", "roles": ["PENSION_LEGAL_APPROVER"]},
+		{"id": "named-operator", "roles": ["CATALOG_SCOPE_READ"]},
+	]
+	every candidate in forbidden {
+		not rest.allow with input as {
+			"principal": {"id": candidate.id, "type": "HUMAN", "roles": candidate.roles},
+			"action": "catalog.read",
+			"resource": {"type": "catalog"},
+		}
+	}
+}
+
+test_pension_catalog_named_m2m_can_read_mappings_and_approval_evidence if {
+	principal := {
+		"id": "service-account-openbank-pension",
+		"type": "HUMAN",
+		"roles": ["ROLE_API", "CATALOG_SCOPE_READ"],
+	}
+	listing := rest.allow with input as {
+		"principal": principal,
+		"action": "catalog.read",
+		"resource": {"type": "catalog"},
+	} with data.openbank.bundle as bundle
+	listing.allow == true
+	listing.reason == "pension-catalog-m2m-read"
+	approval := rest.allow with input as {
+		"principal": principal,
+		"action": "catalog.pensionApproval.read",
+		"resource": {"type": "catalog", "id": "offering-1"},
+	} with data.openbank.bundle as bundle
+	approval.allow == true
+	approval.reason == "pension-catalog-m2m-read-approval"
+}
+
+test_pension_catalog_m2m_grant_denies_other_identity_missing_scope_and_writes if {
+	forbidden := [
+		{"id": "service-account-openbank-services", "roles": ["ROLE_API", "CATALOG_SCOPE_READ"], "action": "catalog.read"},
+		{"id": "service-account-openbank-pension", "roles": ["ROLE_API"], "action": "catalog.read"},
+		{"id": "service-account-openbank-pension", "roles": ["ROLE_API", "CATALOG_SCOPE_READ"], "action": "catalog.author"},
+		{"id": "service-account-openbank-pension", "roles": ["ROLE_API", "CATALOG_SCOPE_READ"], "action": "catalog.pensionApproval.decide"},
+	]
+	every candidate in forbidden {
+		not rest.allow with input as {
+			"principal": {"id": candidate.id, "type": "HUMAN", "roles": candidate.roles},
+			"action": candidate.action,
+			"resource": {"type": "catalog", "id": "offering-1"},
+		}
+	}
+}
+
 test_commstyle_publish_denies_service_account_with_every_role if {
 	not rest.allow with input as {
 		"principal": {

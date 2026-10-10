@@ -8,6 +8,7 @@ import com.openbank.pension.domain.model.ProductLine
 import com.openbank.pension.domain.onboarding.AssessmentStatus
 import com.openbank.pension.domain.onboarding.EsgPreference
 import com.openbank.pension.domain.onboarding.QuestionnaireRegime
+import com.openbank.pension.domain.onboarding.QuestionnaireRules
 import com.openbank.pension.domain.onboarding.RecommendationReason
 import com.openbank.pension.domain.onboarding.RiskLabel
 import com.openbank.pension.domain.onboarding.StrategyRecommendation
@@ -99,6 +100,14 @@ class QuestionnaireEngineTest {
     }
 
     @Test
+    fun `registry keeps older versions for rendering stored assessments`() {
+        val newer = dip.copy(version = dip.version + 1)
+        val versioned = StaticQuestionSetRegistry(sets + newer, onboardingRules)
+        assertThat(versioned.questionSet("CZ", ProductLine.DIP)).isEqualTo(newer)
+        assertThat(versioned.questionSet(dip.id, dip.version)).isEqualTo(dip)
+    }
+
+    @Test
     fun `a MiFID set without a knowledge question, or a set missing warning wording, is refused`() {
         assertThatThrownBy {
             dip.copy(
@@ -185,6 +194,20 @@ class QuestionnaireEngineTest {
         assertThat(expert.appropriate).isTrue()
     }
 
+    @Test
+    fun `appropriateness cannot combine knowledge and experience from different instruments`() {
+        val crossed = dipAnswers(knowledge = "DONT_KNOW", experience = "NEVER") + mapOf(
+            "dip.knowledge_bonds" to "CORRECT",
+            "dip.experience_equity" to "PROFESSIONALLY",
+        )
+        val profile = QuestionnaireEngine.profile(dip, crossed)
+        assertThat(profile.competence.map { it.knowledge + it.experience }).containsExactly(3, 3)
+        val assessment = assess(profile, dipRules.questionnaire.copy(appropriatenessMinScore = 4))
+        assertThat(assessment.appropriate).isFalse()
+        assertThat(WarningPolicy.required("BALANCED", assessment, recommendation))
+            .containsExactly(WarningCode.PRODUCT_NOT_APPROPRIATE)
+    }
+
     // --- validation, progress, consistency ------------------------------------------------------
 
     @Test
@@ -254,20 +277,22 @@ class QuestionnaireEngineTest {
 
     // --- warnings ------------------------------------------------------------------------------------
 
-    private fun assess(profile: com.openbank.pension.domain.questionnaire.QuestionnaireProfile) =
-        SuitabilityAssessment.fromQuestionnaire(
-            UUID.randomUUID(),
-            UUID.randomUUID(),
-            ProductLine.DIP,
-            dipRules.questionnaire,
-            profile,
-            QuestionnaireRecord(
-                dip.id, dip.version, emptyMap(), profile.riskClass, profile.bindingReasons, profile.competence,
-                profile.sustainability, null, null, null, emptyList(),
-            ),
-            today,
-            now,
-        )
+    private fun assess(
+        profile: com.openbank.pension.domain.questionnaire.QuestionnaireProfile,
+        rules: QuestionnaireRules = dipRules.questionnaire,
+    ) = SuitabilityAssessment.fromQuestionnaire(
+        UUID.randomUUID(),
+        UUID.randomUUID(),
+        ProductLine.DIP,
+        rules,
+        profile,
+        QuestionnaireRecord(
+            dip.id, dip.version, emptyMap(), profile.riskClass, profile.bindingReasons, profile.competence,
+            profile.sustainability, null, null, null, emptyList(),
+        ),
+        today,
+        now,
+    )
 
     private val recommendation =
         StrategyRecommendation("BALANCED", listOf("CONSERVATIVE", "BALANCED"), 3, 25, emptyList())
@@ -286,12 +311,29 @@ class QuestionnaireEngineTest {
     @Test
     fun `an acknowledgement counts only for its own assessment and strategy`() {
         val assessmentId = UUID.randomUUID()
-        val ack = WarningAcknowledgement(WarningCode.STRATEGY_ABOVE_PROFILE, assessmentId, "DYNAMIC", "sha", "cs", now)
+        val ack = WarningAcknowledgement(
+            WarningCode.STRATEGY_ABOVE_PROFILE,
+            assessmentId,
+            "DYNAMIC",
+            WarningPolicy.sha256("current"),
+            "cs",
+            now,
+        )
         val required = setOf(WarningCode.STRATEGY_ABOVE_PROFILE)
-        assertThat(WarningPolicy.missing(required, listOf(ack), assessmentId, "DYNAMIC")).isEmpty()
-        assertThat(WarningPolicy.missing(required, listOf(ack), assessmentId, "EQUITY_GLOBAL")).isEqualTo(required)
-        assertThat(WarningPolicy.missing(required, listOf(ack), UUID.randomUUID(), "DYNAMIC")).isEqualTo(required)
-        assertThat(WarningPolicy.missing(required, emptyList(), assessmentId, "DYNAMIC")).isEqualTo(required)
+        val currentText: (WarningCode, String) -> String = { _, _ -> "current" }
+        fun missing(
+            acknowledgements: List<WarningAcknowledgement> = listOf(ack),
+            id: UUID = assessmentId,
+            strategy: String = "DYNAMIC",
+            text: (WarningCode, String) -> String = currentText,
+            language: String? = null,
+        ) = WarningPolicy.missing(required, acknowledgements, id, strategy, text, language)
+        assertThat(missing(language = "cs")).isEmpty()
+        assertThat(missing(strategy = "EQUITY_GLOBAL")).isEqualTo(required)
+        assertThat(missing(id = UUID.randomUUID())).isEqualTo(required)
+        assertThat(missing(acknowledgements = emptyList())).isEqualTo(required)
+        assertThat(missing(language = "en")).isEqualTo(required)
+        assertThat(missing(text = { _, _ -> "revised" })).isEqualTo(required)
     }
 
     @Test

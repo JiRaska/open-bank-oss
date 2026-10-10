@@ -26,9 +26,20 @@ export function extractCatalogScopeRoles(
   const scopes = typeof raw === 'string'
     ? raw.split(' ')
     : Array.isArray(raw) ? raw.filter((scope): scope is string => typeof scope === 'string') : []
+  const realmAccess = payload.realm_access as { roles?: unknown } | undefined
+  const realmRoles = Array.isArray(realmAccess?.roles) ? realmAccess.roles : []
+  const username = payload.preferred_username
+  const subject = payload.sub
+  const human = typeof username === 'string' && username.length > 0 &&
+    !username.startsWith('service-account-') && !username.startsWith('agent:') &&
+    !(typeof subject === 'string' && subject.startsWith('agent:'))
+  const legalApprover = human && realmRoles.includes('PENSION_LEGAL_APPROVER')
+  const productOwner = human && realmRoles.includes('PENSION_PRODUCT_OWNER')
   return [
-    ...(scopes.includes(config.read) ? ['CATALOG_SCOPE_READ'] : []),
+    ...(scopes.includes(config.read) || legalApprover || productOwner ? ['CATALOG_SCOPE_READ'] : []),
     ...(scopes.includes(config.author) ? ['CATALOG_SCOPE_AUTHOR'] : []),
     ...(scopes.includes(config.publish) ? ['CATALOG_SCOPE_PUBLISH'] : []),
+    ...(legalApprover ? ['PENSION_LEGAL_APPROVER'] : []),
+    ...(productOwner ? ['PENSION_PRODUCT_OWNER'] : []),
   ]
 }

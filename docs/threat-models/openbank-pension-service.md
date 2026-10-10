@@ -48,6 +48,20 @@ packs are code-reviewed data baked into the image, not runtime input).
 
 ## 4. STRIDE
 
+Questionnaire appropriateness for investment products uses the effective published catalog
+instrument mapping for each offered strategy. Submission stores the mapping revisions and classes
+in the immutable assessment JSON; strategy choice stores the selected per-class decision in the
+application JSON. Choice and signature reject a missing, ambiguous, or changed mapping. Historical
+assessments without this evidence must be answered again before a DIP strategy can be chosen.
+Legacy scale-only submissions are rejected for an appropriateness regime because they cannot
+provide per-class evidence.
+The pre-SCA signature check prevents spending a challenge after the mapping has changed. DPS
+packs without an appropriateness test retain their existing risk-profile warning flow.
+
+Residual: the separate post-onboarding contract strategy-election endpoint does not yet resolve
+the assessment or apply this instrument gate. It must be gated before investment strategy changes
+can use this evidence.
+
 | Threat | Vector | Mitigation in S1 |
 |---|---|---|
 | **Spoofing** | A caller impersonates the participant to open or terminate a contract | Writes reachable only through the edge principal, which authenticates the human and stamps `X-Customer-Party-Id`; an absent header is a 400 (nullable param + `requireNotNull`, #3104) |

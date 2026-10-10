@@ -8,6 +8,8 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.openbank.libs.domain.error.ResourceConflictException
 import com.openbank.libs.domain.error.ResourceNotFoundException
 import com.openbank.productcatalog.application.port.out.GenericCatalogRepository
+import com.openbank.productcatalog.application.port.out.PensionApprovalRole
+import com.openbank.productcatalog.application.port.out.PensionRevisionApproval
 import com.openbank.productcatalog.domain.catalog.CatalogSchema
 import com.openbank.productcatalog.domain.catalog.CatalogSchemaValidator
 import com.openbank.productcatalog.domain.catalog.MarketContext
@@ -184,6 +186,50 @@ class GenericCatalogService(
         )
     }
 
+    @Suppress("ThrowsCount")
+    suspend fun approvePensionRevision(
+        revisionId: UUID,
+        expectedRevision: Long,
+        role: PensionApprovalRole,
+        issuer: String,
+        subject: String,
+        actorName: String,
+        reason: String,
+    ): PensionRevisionApproval {
+        val draft = findRevision(revisionId)
+        requireExpected(draft, expectedRevision)
+        if (draft.schemaRef.id != PENSION_SCHEMA ||
+            draft.schemaRef.version != 2 ||
+            draft.state != RevisionState.DRAFT
+        ) {
+            throw CatalogConflictException("only draft pension pack v2 revisions accept role approvals")
+        }
+        if (draft.effectiveFrom == null) {
+            throw CatalogConflictException("pension approval requires an explicit effectiveFrom")
+        }
+        if (catalogJson.toContentNode(draft.content).path("attributes").path("reviewStatus").asText() !=
+            REVIEWED_STATUS
+        ) {
+            throw CatalogConflictException("pension revision has not declared legal and commercial review")
+        }
+        require(issuer.isNotBlank() && subject.isNotBlank()) { "authenticated approver is required" }
+        require(actorName.isNotBlank() && reason.isNotBlank()) { "approver and reason are required" }
+        require(reason.length <= MAX_APPROVAL_REASON_LENGTH) { "approval reason is too long" }
+        if (draft.makerId == subject || draft.makerId == actorName) {
+            throw CatalogForbiddenException("maker cannot approve their own revision")
+        }
+        validateOrThrow(draft.schemaRef, draft.content.attributes)
+        return repository.approvePensionRevision(revisionId, expectedRevision, role, issuer, subject, actorName, reason)
+    }
+
+    suspend fun pensionApprovals(revisionId: UUID): List<PensionRevisionApproval> {
+        val revision = findRevision(revisionId)
+        if (revision.schemaRef.id != PENSION_SCHEMA || revision.schemaRef.version != 2) {
+            throw CatalogConflictException("revision is not pension pack v2")
+        }
+        return repository.pensionApprovals(revisionId)
+    }
+
     suspend fun findPublished(offeringId: UUID, effectiveAt: Instant): ProductRevision =
         repository.findPublished(offeringId, effectiveAt)
             ?: throw CatalogNotFoundException("no published offering $offeringId is effective at $effectiveAt")
@@ -205,6 +251,12 @@ class GenericCatalogService(
                 "revision ${revision.id} was modified (expected $expected, current ${revision.revision})",
             )
         }
+    }
+
+    private companion object {
+        const val PENSION_SCHEMA = "org.openbank.retirement.pension-savings"
+        const val REVIEWED_STATUS = "LEGAL_AND_COMMERCIAL_REVIEWED"
+        const val MAX_APPROVAL_REASON_LENGTH = 4_096
     }
 
     /**

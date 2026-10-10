@@ -3009,7 +3009,10 @@ components:
               answer: { type: string }
               maxRiskClass: { type: integer }
         financialSituationStable: { type: boolean }
-        appropriate: { type: boolean, nullable: true }
+        appropriate:
+          type: boolean
+          nullable: true
+          description: Null when appropriateness depends on the selected strategy's published instrument classes.
         competence:
           type: array
           items:

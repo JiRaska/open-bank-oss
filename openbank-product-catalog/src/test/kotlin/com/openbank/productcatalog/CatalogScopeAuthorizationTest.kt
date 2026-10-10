@@ -22,6 +22,112 @@ import org.junit.jupiter.api.Test
 )
 class CatalogScopeAuthorizationTest {
     @Test
+    @TestSecurity(
+        user = "pension-legal",
+        roles = ["PENSION_LEGAL_APPROVER"],
+        augmentors = [CatalogScopeIdentityAugmentor::class],
+    )
+    @OidcSecurity(claims = [Claim(key = "scope", value = "openid")])
+    fun pensionLegalScopeCannotImpersonateProductOwner() {
+        val base = "/api/v2/offerings/00000000-0000-0000-0000-000000000001" +
+            "/revisions/00000000-0000-0000-0000-000000000002/pension-approvals"
+        given().contentType("application/json").header("If-Match", "\"0\"")
+            .body("""{"reason":"review"}""")
+            .post("$base/PRODUCT_OWNER").then().statusCode(403)
+        given().contentType("application/json").header("If-Match", "\"0\"")
+            .body("""{"reason":"review"}""")
+            .post("$base/LEGAL_COUNSEL").then().statusCode(404)
+    }
+
+    @Test
+    @TestSecurity(
+        user = "pension-legal",
+        roles = ["PENSION_LEGAL_APPROVER"],
+        augmentors = [CatalogScopeIdentityAugmentor::class],
+    )
+    @OidcSecurity(claims = [Claim(key = "scope", value = "openid")])
+    fun namedHumanLegalRealmRoleDerivesCatalogReadWithoutCatalogScope() {
+        given().get("/api/v2/offerings").then().statusCode(200)
+        given().get(
+            "/api/v2/offerings/00000000-0000-0000-0000-000000000001" +
+                "/revisions/00000000-0000-0000-0000-000000000002/pension-approvals",
+        ).then().statusCode(404)
+    }
+
+    @Test
+    @TestSecurity(user = "pension-scope-only", augmentors = [CatalogScopeIdentityAugmentor::class])
+    @OidcSecurity(claims = [Claim(key = "scope", value = "pension:legal-approve")])
+    fun approvalScopeWithoutRealmRoleCannotDecide() {
+        given().contentType("application/json").header("If-Match", "\"0\"")
+            .body("""{"reason":"review"}""")
+            .post(
+                "/api/v2/offerings/00000000-0000-0000-0000-000000000001" +
+                    "/revisions/00000000-0000-0000-0000-000000000002/pension-approvals/LEGAL_COUNSEL",
+            ).then().statusCode(403)
+    }
+
+    @Test
+    @TestSecurity(
+        user = "service-account-other",
+        roles = ["PENSION_LEGAL_APPROVER"],
+        augmentors = [CatalogScopeIdentityAugmentor::class],
+    )
+    @OidcSecurity(claims = [Claim(key = "scope", value = "openid")])
+    fun machineWithAccidentallyAssignedReviewerRoleCannotReadOrDecide() {
+        given().get("/api/v2/offerings").then().statusCode(403)
+        given().contentType("application/json").header("If-Match", "\"0\"")
+            .body("""{"reason":"review"}""")
+            .post(
+                "/api/v2/offerings/00000000-0000-0000-0000-000000000001" +
+                    "/revisions/00000000-0000-0000-0000-000000000002/pension-approvals/LEGAL_COUNSEL",
+            ).then().statusCode(403)
+    }
+
+    @Test
+    @TestSecurity(user = "pension-catalog-reader", augmentors = [CatalogScopeIdentityAugmentor::class])
+    @OidcSecurity(claims = [Claim(key = "scope", value = "catalog:read")])
+    fun readScopeAllowsV2ReadsButNotAuthoring() {
+        given().get("/api/v2/offerings").then().statusCode(200)
+        given().get("/api/v2/products/00000000-0000-0000-0000-000000000001")
+            .then().statusCode(404)
+        given().get(
+            "/api/v2/offerings/00000000-0000-0000-0000-000000000001" +
+                "/revisions/00000000-0000-0000-0000-000000000002/pension-approvals",
+        ).then().statusCode(404)
+        given().contentType("application/json")
+            .body(
+                """
+                {"code":"PENSION_READ_ONLY","schemaRef":{
+                    "id":"org.openbank.insurance.term-life","version":1}}
+                """.trimIndent(),
+            )
+            .post("/api/v2/specifications").then().statusCode(403)
+    }
+
+    @Test
+    @TestSecurity(user = "service-account-openbank-pension", augmentors = [CatalogScopeIdentityAugmentor::class])
+    @OidcSecurity(claims = [Claim(key = "scope", value = "catalog:read")])
+    fun pensionM2mScopePassesTheThreeCatalogReadRoleChecksOnly() {
+        given().get("/api/v2/offerings").then().statusCode(200)
+        given().get("/api/v2/products/00000000-0000-0000-0000-000000000001")
+            .then().statusCode(404)
+        given().get(
+            "/api/v2/offerings/00000000-0000-0000-0000-000000000001" +
+                "/revisions/00000000-0000-0000-0000-000000000002/pension-approvals",
+        ).then().statusCode(404)
+        given().contentType("application/json")
+            .body("""{"code":"PENSION_M2M_DENIED","schemaRef":{"id":"org.openbank.insurance.term-life","version":1}}""")
+            .post("/api/v2/specifications").then().statusCode(403)
+    }
+
+    @Test
+    @TestSecurity(user = "service-account-openbank-pension", augmentors = [CatalogScopeIdentityAugmentor::class])
+    @OidcSecurity(claims = [Claim(key = "scope", value = "openid")])
+    fun pensionM2mWithoutCatalogReadScopeCannotListOfferings() {
+        given().get("/api/v2/offerings").then().statusCode(403)
+    }
+
+    @Test
     @TestSecurity(user = "external-catalog-author", augmentors = [CatalogScopeIdentityAugmentor::class])
     @OidcSecurity(claims = [Claim(key = "scope", value = "catalog:read catalog:author")])
     fun authorizesProviderNeutralOidcScopesWithoutOpenBankRoles() {
