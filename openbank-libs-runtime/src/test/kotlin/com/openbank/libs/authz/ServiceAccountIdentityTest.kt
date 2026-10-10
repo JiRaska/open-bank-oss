@@ -13,6 +13,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.jwt.JsonWebToken
 import org.junit.jupiter.api.Test
 import java.io.File
+import java.security.Principal
 
 /** #12448: the service-account test is bound to the CLIENT (`azp`), never to the principal name. */
 class ServiceAccountIdentityTest {
@@ -33,6 +34,7 @@ class ServiceAccountIdentityTest {
     fun `the client's own service-account token is accepted`() {
         val id = jwt("openbank-edge", edge)
         assertThat(ServiceAccountIdentity.verifiedClientId(id)).isEqualTo("openbank-edge")
+        assertThat(ServiceAccountIdentity.verifiedClientId(id.principal)).isEqualTo("openbank-edge")
         assertThat(ServiceAccountIdentity.verifiedPrincipalName(id)).isEqualTo(edge)
         assertThat(ServiceAccountIdentity.isOneOf(id, setOf(edge))).isTrue()
         assertThat(ServiceAccountIdentity.isPrincipal(id, edge)).isTrue()
@@ -70,6 +72,22 @@ class ServiceAccountIdentityTest {
         val named = QuarkusSecurityIdentity.builder().setPrincipal(QuarkusPrincipal(edge)).build()
         assertThat(ServiceAccountIdentity.isOneOf(named, setOf(edge))).isFalse()
         assertThat(ServiceAccountIdentity.isOneOf(null, setOf(edge))).isFalse()
+        assertThat(ServiceAccountIdentity.verifiedClientId(Principal { edge })).isNull()
+    }
+
+    @Test
+    fun `malformed JWT claims fail closed for a JAX-RS principal`() {
+        for (badClaim in listOf("azp", "preferred_username")) {
+            val token = mockk<JsonWebToken> {
+                every { name } returns edge
+                every { subject } returns "5f0c2a8e"
+                every { getClaim<Any?>("azp") } returns
+                    if (badClaim == "azp") listOf("openbank-edge") else "openbank-edge"
+                every { getClaim<Any?>("preferred_username") } returns
+                    if (badClaim == "preferred_username") listOf(edge) else edge
+            }
+            assertThat(ServiceAccountIdentity.verifiedClientId(token as Principal)).isNull()
+        }
     }
 
     @Test

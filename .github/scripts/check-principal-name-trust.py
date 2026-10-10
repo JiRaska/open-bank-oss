@@ -45,8 +45,6 @@ OPT_OUT = "principal-name-trust: allow"
 KNOWN_PENDING = {
     # #12447 rebinds pension's relay to azp; left out of the fleet sweep so the two PRs don't fight.
     "openbank-pension-service/src/main/kotlin/com/openbank/pension/infrastructure/authz/ContractAccessGuard.kt": "#12447",
-    # Synthetic-taint marking (observability, not authorization); its own follow-up.
-    "openbank-libs-runtime/src/main/kotlin/com/openbank/libs/web/SyntheticTaintFilter.kt": "#12457",
 }
 SKIP_DIRS = {".git", "build", "node_modules", ".gradle", "worktrees"}
 

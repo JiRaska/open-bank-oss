@@ -6,6 +6,7 @@ package com.openbank.libs.authz
 
 import io.quarkus.security.identity.SecurityIdentity
 import org.eclipse.microprofile.jwt.JsonWebToken
+import java.security.Principal
 
 /**
  * The ONE test for "this request comes from service X's own Keycloak service-account" (#12448).
@@ -49,8 +50,11 @@ object ServiceAccountIdentity {
     }
 
     /** The client id whose OWN service-account issued this token, or `null` if it is not one. */
-    fun verifiedClientId(identity: SecurityIdentity?): String? {
-        val jwt = identity?.principal as? JsonWebToken ?: return null
+    fun verifiedClientId(identity: SecurityIdentity?): String? = verifiedClientId(identity?.principal)
+
+    /** JAX-RS filters can verify a JWT principal without injecting [SecurityIdentity]. */
+    fun verifiedClientId(principal: Principal?): String? {
+        val jwt = principal as? JsonWebToken ?: return null
         if (jwt.subject.isNullOrBlank()) return null
         val clientId = jwt.claimString(CLAIM_AZP)?.takeIf { it.isNotBlank() } ?: return null
         return clientId.takeIf { jwt.claimString(CLAIM_PREFERRED_USERNAME) == PRINCIPAL_PREFIX + it }
