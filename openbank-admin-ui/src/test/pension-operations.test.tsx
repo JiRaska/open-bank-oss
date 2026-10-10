@@ -24,6 +24,7 @@ vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }), usePat
 
 import PensionAnnuityPage from '@/app/pension/annuity/page'
 import PensionIncentiveBatchesPage from '@/app/pension/incentives/page'
+import PensionMandatesPage from '@/app/pension/mandates/page'
 import PensionApplicationPage from '@/app/pension/applications/[id]/page'
 import { ContractChanges } from '@/components/pension/ContractChanges'
 import { canApproveAnnuityProvider, canRequestAnnuityActivation } from '@/components/pension/model'
@@ -125,6 +126,28 @@ describe('state contribution', () => {
     expect(screen.getByText('Claims past the filing deadline')).toBeTruthy()
     expect(screen.getByText('ret-1')).toBeTruthy()
     expect(calls.some(c => c.url.includes('/state-contribution/returns') && c.url.includes('status=DUE'))).toBe(true)
+  })
+})
+
+describe('contribution mandates', () => {
+  it('reads the staff mandates list by status and links each row to its contract', async () => {
+    const mandate = (id: string, status: string) => ({
+      id, contractId: CONTRACT_ID, kind: 'STANDING_ORDER', externalId: `SO-${id}`, status,
+      createdAt: '2026-10-01T10:00:00Z', updatedAt: '2026-10-02T10:00:00Z',
+    })
+    router = url => {
+      if (url.includes('/operator/mandates') && url.includes('status=ACTIVE')) return json([mandate('m-active', 'ACTIVE')])
+      if (url.includes('/operator/mandates') && url.includes('status=CANCELLED')) return json([mandate('m-gone', 'CANCELLED')])
+      return json([], 404)
+    }
+    await renderPage(<PensionMandatesPage />)
+    expect(screen.getByText('SO-m-active')).toBeTruthy()
+    expect(screen.getByText('SO-m-gone')).toBeTruthy()
+    const mandateCalls = calls.filter(c => c.url.includes('/api/v1/pension/operator/mandates'))
+    expect(mandateCalls).toHaveLength(2)
+    expect(mandateCalls.every(c => (c.init?.method ?? 'GET') === 'GET')).toBe(true)
+    const links = screen.getAllByRole('link').map(a => a.getAttribute('href'))
+    expect(links).toContain(`/pension/contracts/${CONTRACT_ID}`)
   })
 })
 
