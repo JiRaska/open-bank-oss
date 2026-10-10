@@ -3,46 +3,15 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 import { NextResponse } from 'next/server'
-import { promises as fs } from 'fs'
-import path from 'path'
+import { platformVersions } from '@/lib/platform-versions'
 
 export const dynamic = 'force-dynamic'
-
-interface EksVersionEntry {
-  eks_release: string
-  end_of_standard_support: string
-  end_of_extended_support: string
-}
-
-interface EksLifecycleJson {
-  _meta: { pricing_note: string; last_refreshed: string }
-  versions: Record<string, EksVersionEntry>
-}
 
 const STANDARD_RATE = 0.10  // $/cluster-hr
 const EXTENDED_RATE = 0.60  // $/cluster-hr (6× penalty per ADR-0054)
 const HOURS_PER_MONTH = 730
 const HOURS_PER_YEAR = 8760
 const MIN_RUNWAY_DAYS = 180 // ADR-0054: ≥6 months standard support required
-
-// Embedded fallback — matches eks-version-lifecycle.json at 2026-06-01.
-// Update when AWS publishes new minor versions.
-const EMBEDDED_LIFECYCLE: EksLifecycleJson = {
-  _meta: { pricing_note: 'standard: $0.10/hr; extended: $0.60/hr (6× penalty)', last_refreshed: '2026-06-01' },
-  versions: {
-    '1.30': { eks_release: '2024-05-23', end_of_standard_support: '2025-07-23', end_of_extended_support: '2026-07-23' },
-    '1.31': { eks_release: '2024-09-26', end_of_standard_support: '2025-11-26', end_of_extended_support: '2026-11-26' },
-    '1.32': { eks_release: '2025-01-23', end_of_standard_support: '2026-03-23', end_of_extended_support: '2027-03-23' },
-    '1.33': { eks_release: '2025-05-29', end_of_standard_support: '2026-07-29', end_of_extended_support: '2027-07-29' },
-    '1.34': { eks_release: '2025-10-02', end_of_standard_support: '2026-12-02', end_of_extended_support: '2027-12-02' },
-    '1.35': { eks_release: '2026-01-27', end_of_standard_support: '2027-03-27', end_of_extended_support: '2028-03-27' },
-  },
-}
-
-function lifecycleFilePath(): string {
-  if (process.env.OPENBANK_FINOPS_LIFECYCLE) return process.env.OPENBANK_FINOPS_LIFECYCLE
-  return path.resolve(process.cwd(), '..', 'openbank-infra', 'aws', 'finops', 'eks-version-lifecycle.json')
-}
 
 function daysBetween(from: Date, to: Date): number {
   return Math.round((to.getTime() - from.getTime()) / 86_400_000)
@@ -55,16 +24,15 @@ function runwayStatus(days: number): 'ok' | 'warn' | 'critical' {
 }
 
 export async function GET() {
-  let lifecycle = EMBEDDED_LIFECYCLE
-  let dataSource: 'file' | 'embedded' = 'embedded'
-
-  try {
-    const raw = await fs.readFile(lifecycleFilePath(), 'utf-8')
-    const parsed = JSON.parse(raw) as EksLifecycleJson
-    if (parsed?.versions) { lifecycle = parsed; dataSource = 'file' }
-  } catch { /* use embedded */ }
-
-  const currentVersion = process.env.KUBERNETES_VERSION ?? '1.35'
+  // Everything EKS-related comes from platform-versions.json (generated from variables.tf and
+  // eks-version-lifecycle.json). No embedded table and no default version: a missing snapshot is
+  // reported as unavailable, never as a guessed cluster version.
+  if (!platformVersions) {
+    return NextResponse.json({ error: 'platform_versions_snapshot_missing' }, { status: 503, headers: { 'Cache-Control': 'no-store' } })
+  }
+  const lifecycle = platformVersions.eksLifecycle
+  const dataSource = 'file' as const
+  const currentVersion = platformVersions.kubernetesVersion
   const now = new Date()
 
   const versions = Object.entries(lifecycle.versions)

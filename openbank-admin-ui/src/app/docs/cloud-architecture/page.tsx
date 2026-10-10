@@ -7,6 +7,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { Cloud, Info, CheckCircle2, CircleDashed, Circle, X, RefreshCw, Wifi, WifiOff, Minus } from 'lucide-react'
 import type { InfraStatusResult } from '@/lib/infra/probes'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { eksVersion, nodeGroupSummary } from '@/lib/platform-versions'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 
 // Bilingual string tuple: [Czech, English] — spread into t(cs, en) at render.
@@ -71,8 +72,8 @@ const SUBSTRATE: Node[] = [
   node('s3-state', ['S3 — tofu state', 'S3 — tofu state'], 'live', ['Vzdálený verzovaný bucket se stavem OpenTofu + bootstrap. Aplikováno.', 'Remote versioned OpenTofu state bucket + bootstrap. Applied.']),
   node('runner', ['EC2 / Mac mini CI runner', 'EC2 / Mac mini CI runner'], 'live', ['Self-hosted pool GitHub Actions runnerů (ADR-0040: Mac mini aktivní, EC2 studená záloha). Běží.', 'Self-hosted GitHub Actions runner pool (ADR-0040: Mac mini active, EC2 cold standby). Running.']),
   node('vpc', ['VPC — 3 AZ', 'VPC — 3 AZ'], 'live', ['modules/network: privátní adresní prostor, IGW, veřejné+privátní subnety napříč 3 AZ, jediný NAT (FinOps), S3 gateway + interface VPC endpointy. Aplikováno.', 'modules/network: private address space, IGW, public+private subnets across 3 AZ, single NAT (FinOps), S3 gateway + interface VPC endpoints. Applied.']),
-  node('eks', ['EKS control plane (1.35)', 'EKS control plane (1.35)'], 'live', ['aws_eks_cluster v1.35, ACTIVE. OIDC/IRSA, EKS Pod Identity, authentication_mode=API (žádný aws-auth configmap), logy control-plane do CloudWatch. Addony: vpc-cni, kube-proxy, coredns, pod-identity.', 'aws_eks_cluster v1.35, ACTIVE. OIDC/IRSA, EKS Pod Identity, authentication_mode=API (no aws-auth configmap), control-plane logs to CloudWatch. Addons: vpc-cni, kube-proxy, coredns, pod-identity.']),
-  node('nodegroup', ['Bootstrap node group (Graviton)', 'Bootstrap node group (Graviton)'], 'live', ['t4g.medium AL2023 spravovaná node group — 2 uzly Ready. Nese systémové pody, Karpenter controller a ArgoCD; zbytek provisionuje Karpenter.', 't4g.medium AL2023 managed node group — 2 nodes Ready. Carries system pods, Karpenter controller and ArgoCD; Karpenter provisions the rest.']),
+  node('eks', [`EKS control plane (${eksVersion()})`, `EKS control plane (${eksVersion()})`], 'live', [`aws_eks_cluster v${eksVersion()}, ACTIVE. OIDC/IRSA, EKS Pod Identity, authentication_mode=API (žádný aws-auth configmap), logy control-plane do CloudWatch. Addony: vpc-cni, kube-proxy, coredns, pod-identity.`, `aws_eks_cluster v${eksVersion()}, ACTIVE. OIDC/IRSA, EKS Pod Identity, authentication_mode=API (no aws-auth configmap), control-plane logs to CloudWatch. Addons: vpc-cni, kube-proxy, coredns, pod-identity.`]),
+  node('nodegroup', ['Bootstrap node group (Graviton)', 'Bootstrap node group (Graviton)'], 'live', [`AL2023 spravovaná node group (${nodeGroupSummary()}). Nese systémové pody, Karpenter controller a ArgoCD; zbytek provisionuje Karpenter.`, `AL2023 managed node group (${nodeGroupSummary()}). Carries system pods, Karpenter controller and ArgoCD; Karpenter provisions the rest.`]),
   node('kms', ['KMS CMK', 'KMS CMK'], 'live', ['Zákaznicky spravovaný klíč pro envelope šifrování EKS secrets (aws_kms_key.secrets). Aplikováno.', 'Customer-managed key for EKS secrets envelope encryption (aws_kms_key.secrets). Applied.']),
   node('iam', ['IAM (cluster/node, OIDC, Karpenter)', 'IAM (cluster/node, OIDC, Karpenter)'], 'live', ['Role clusteru + uzlů, IRSA OIDC provider, IAM pro Karpenter controller/node přes EKS Pod Identity, SQS interruption queue. Aplikováno.', 'Cluster + node roles, IRSA OIDC provider, Karpenter controller/node IAM via EKS Pod Identity, SQS interruption queue. Applied.']),
   node('ecr', ['ECR', 'ECR'], 'live', ['Privátní container registry pro všechny image openbank-*-service. Aktivně používáno — image pushovány přes build-push-service.sh. Zatím nespravováno přes IaC (ruční vytváření ECR repo); zapojení do IaC je follow-up.', 'Private container registry for all openbank-*-service images. Actively used — images are pushed via build-push-service.sh. Not yet managed via IaC (manual ECR repository creation); IaC wiring is a follow-up.']),
@@ -274,7 +275,7 @@ export default function CloudArchitecturePage() {
 
           <ArchitectureArrow />
 
-          <ArchitectureZone title={t('EKS cluster — openbank-sandbox', 'EKS cluster — openbank-sandbox')} subtitle={t('k8s 1.35 · Karpenter Graviton/Spot autoscaling', 'k8s 1.35 · Karpenter Graviton/Spot autoscaling')} accent="var(--accent-text)">
+          <ArchitectureZone title={t('EKS cluster — openbank-sandbox', 'EKS cluster — openbank-sandbox')} subtitle={t(`k8s ${eksVersion()} · Karpenter Graviton/Spot autoscaling`, `k8s ${eksVersion()} · Karpenter Graviton/Spot autoscaling`)} accent="var(--accent-text)">
             <div style={{ marginBottom: '12px' }}>
               <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '6px' }}>
                 {t('Platform bootstrap (sandbox-platform → seeduje GitOps)', 'Platform bootstrap (sandbox-platform → seeds GitOps)')}

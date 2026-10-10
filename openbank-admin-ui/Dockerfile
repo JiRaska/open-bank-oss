@@ -237,6 +237,12 @@ ENV NEXT_PUBLIC_BUILD_VERSION=$BUILD_VERSION \
 COPY --from=deps /app/node_modules ./node_modules
 COPY openbank-admin-ui/ ./
 COPY .github/gates/gates.yaml /.github/gates/gates.yaml
+# platform-versions.json is PARSED by `npm run build` (prebuild) from the infra sources of truth, at
+# their repo-relative paths, so the UI can never show a hand-typed Kubernetes/EKS/Loki version.
+COPY openbank-infra/aws/envs/sandbox-substrate/variables.tf /openbank-infra/aws/envs/sandbox-substrate/variables.tf
+COPY openbank-infra/aws/envs/sandbox-substrate/main.tf /openbank-infra/aws/envs/sandbox-substrate/main.tf
+COPY openbank-infra/gitops/apps/loki.yaml /openbank-infra/gitops/apps/loki.yaml
+COPY openbank-infra/aws/finops/eks-version-lifecycle.json /openbank-infra/aws/finops/eks-version-lifecycle.json
 # The origination Kotlin, at the repo-relative path the generator expects (#3283). It resolves
 # against --repo, which defaults to the parent of the admin-ui directory — here, /.
 COPY --from=origination-collector /origination-src/openbank-libs-lending /openbank-libs-lending
