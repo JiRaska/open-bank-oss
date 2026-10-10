@@ -1,0 +1,335 @@
+{
+  "_note": "ILLUSTRATIVE ONLY (ADR-0334 S6a). Fees, limits, ages, SRI and SFDR classifications are placeholders that need legal and commercial review before any real offering is published.",
+  "offerings": [
+    {
+      "offeringCode": "CZ_DPS_CONSERVATIVE",
+      "name": "Supplementary pension savings - conservative strategy (illustrative)",
+      "attributes": {
+        "productLine": "DPS",
+        "jurisdictionPackId": "CZ/DPS",
+        "reviewStatus": "ILLUSTRATIVE_REQUIRES_LEGAL_AND_COMMERCIAL_REVIEW",
+        "fundStrategy": "CONSERVATIVE",
+        "permittedProviderTypes": [
+          "PENSION_COMPANY"
+        ],
+        "currency": "CZK",
+        "feeSchedule": {
+          "managementFeeAnnualPercent": "0.40",
+          "performanceFeePercent": "0"
+        },
+        "contributionLimits": {
+          "minMonthly": "500",
+          "maxMonthly": "100000"
+        },
+        "riskClass": 2,
+        "sustainability": {
+          "sfdrArticle": "ARTICLE_6"
+        },
+        "eligibility": {
+          "minAge": 18,
+          "residencyCountries": [
+            "CZ"
+          ]
+        },
+        "requiredDocuments": [
+          "KEY_INFORMATION_DOCUMENT",
+          "PENSION_PLAN_STATUTE",
+          "CONTRACT_TERMS",
+          "SUITABILITY_QUESTIONNAIRE",
+          "ESG_PREFERENCE_QUESTIONNAIRE"
+        ]
+      }
+    },
+    {
+      "offeringCode": "CZ_DPS_BALANCED",
+      "name": "Supplementary pension savings - balanced strategy (illustrative)",
+      "attributes": {
+        "productLine": "DPS",
+        "jurisdictionPackId": "CZ/DPS",
+        "reviewStatus": "ILLUSTRATIVE_REQUIRES_LEGAL_AND_COMMERCIAL_REVIEW",
+        "fundStrategy": "BALANCED",
+        "permittedProviderTypes": [
+          "PENSION_COMPANY"
+        ],
+        "currency": "CZK",
+        "feeSchedule": {
+          "managementFeeAnnualPercent": "0.80",
+          "performanceFeePercent": "10"
+        },
+        "contributionLimits": {
+          "minMonthly": "500",
+          "maxMonthly": "100000"
+        },
+        "riskClass": 3,
+        "sustainability": {
+          "sfdrArticle": "ARTICLE_8",
+          "minSustainableInvestmentPercent": 10
+        },
+        "eligibility": {
+          "minAge": 18,
+          "residencyCountries": [
+            "CZ"
+          ]
+        },
+        "requiredDocuments": [
+          "KEY_INFORMATION_DOCUMENT",
+          "PENSION_PLAN_STATUTE",
+          "CONTRACT_TERMS",
+          "SUITABILITY_QUESTIONNAIRE",
+          "ESG_PREFERENCE_QUESTIONNAIRE"
+        ]
+      }
+    },
+    {
+      "offeringCode": "CZ_DPS_DYNAMIC",
+      "name": "Supplementary pension savings - dynamic strategy (illustrative)",
+      "attributes": {
+        "productLine": "DPS",
+        "jurisdictionPackId": "CZ/DPS",
+        "reviewStatus": "ILLUSTRATIVE_REQUIRES_LEGAL_AND_COMMERCIAL_REVIEW",
+        "fundStrategy": "DYNAMIC",
+        "permittedProviderTypes": [
+          "PENSION_COMPANY"
+        ],
+        "currency": "CZK",
+        "feeSchedule": {
+          "managementFeeAnnualPercent": "1.00",
+          "performanceFeePercent": "15"
+        },
+        "contributionLimits": {
+          "minMonthly": "500",
+          "maxMonthly": "100000"
+        },
+        "riskClass": 4,
+        "sustainability": {
+          "sfdrArticle": "ARTICLE_8",
+          "minSustainableInvestmentPercent": 20
+        },
+        "eligibility": {
+          "minAge": 18,
+          "residencyCountries": [
+            "CZ"
+          ]
+        },
+        "requiredDocuments": [
+          "KEY_INFORMATION_DOCUMENT",
+          "PENSION_PLAN_STATUTE",
+          "CONTRACT_TERMS",
+          "SUITABILITY_QUESTIONNAIRE",
+          "ESG_PREFERENCE_QUESTIONNAIRE"
+        ]
+      }
+    },
+    {
+      "offeringCode": "CZ_DPS_LIFECYCLE",
+      "name": "Supplementary pension savings - lifecycle strategy (illustrative)",
+      "attributes": {
+        "productLine": "DPS",
+        "jurisdictionPackId": "CZ/DPS",
+        "reviewStatus": "ILLUSTRATIVE_REQUIRES_LEGAL_AND_COMMERCIAL_REVIEW",
+        "fundStrategy": "LIFECYCLE",
+        "permittedProviderTypes": [
+          "PENSION_COMPANY"
+        ],
+        "currency": "CZK",
+        "feeSchedule": {
+          "managementFeeAnnualPercent": "0.80",
+          "performanceFeePercent": "10"
+        },
+        "contributionLimits": {
+          "minMonthly": "500",
+          "maxMonthly": "100000"
+        },
+        "riskClass": 3,
+        "sustainability": {
+          "sfdrArticle": "ARTICLE_8",
+          "minSustainableInvestmentPercent": 10
+        },
+        "eligibility": {
+          "minAge": 18,
+          "residencyCountries": [
+            "CZ"
+          ]
+        },
+        "requiredDocuments": [
+          "KEY_INFORMATION_DOCUMENT",
+          "PENSION_PLAN_STATUTE",
+          "CONTRACT_TERMS",
+          "SUITABILITY_QUESTIONNAIRE",
+          "ESG_PREFERENCE_QUESTIONNAIRE"
+        ]
+      }
+    },
+    {
+      "offeringCode": "CZ_DIP_CONSERVATIVE",
+      "name": "Long-term investment product - conservative strategy (illustrative)",
+      "attributes": {
+        "productLine": "DIP",
+        "jurisdictionPackId": "CZ/DIP",
+        "reviewStatus": "ILLUSTRATIVE_REQUIRES_LEGAL_AND_COMMERCIAL_REVIEW",
+        "fundStrategy": "CONSERVATIVE",
+        "permittedProviderTypes": [
+          "PENSION_COMPANY",
+          "INVESTMENT_COMPANY",
+          "BANK",
+          "INSURANCE_COMPANY",
+          "SECURITIES_DEALER"
+        ],
+        "currency": "CZK",
+        "feeSchedule": {
+          "managementFeeAnnualPercent": "0.40",
+          "performanceFeePercent": "0"
+        },
+        "contributionLimits": {
+          "minMonthly": "300",
+          "maxMonthly": "100000"
+        },
+        "riskClass": 2,
+        "sustainability": {
+          "sfdrArticle": "ARTICLE_6"
+        },
+        "eligibility": {
+          "minAge": 18,
+          "residencyCountries": [
+            "CZ"
+          ]
+        },
+        "requiredDocuments": [
+          "KEY_INFORMATION_DOCUMENT",
+          "DIP_CONTRACT_TERMS",
+          "SUITABILITY_QUESTIONNAIRE",
+          "ESG_PREFERENCE_QUESTIONNAIRE"
+        ]
+      }
+    },
+    {
+      "offeringCode": "CZ_DIP_BALANCED",
+      "name": "Long-term investment product - balanced strategy (illustrative)",
+      "attributes": {
+        "productLine": "DIP",
+        "jurisdictionPackId": "CZ/DIP",
+        "reviewStatus": "ILLUSTRATIVE_REQUIRES_LEGAL_AND_COMMERCIAL_REVIEW",
+        "fundStrategy": "BALANCED",
+        "permittedProviderTypes": [
+          "PENSION_COMPANY",
+          "INVESTMENT_COMPANY",
+          "BANK",
+          "INSURANCE_COMPANY",
+          "SECURITIES_DEALER"
+        ],
+        "currency": "CZK",
+        "feeSchedule": {
+          "managementFeeAnnualPercent": "0.80",
+          "performanceFeePercent": "10"
+        },
+        "contributionLimits": {
+          "minMonthly": "300",
+          "maxMonthly": "100000"
+        },
+        "riskClass": 3,
+        "sustainability": {
+          "sfdrArticle": "ARTICLE_8",
+          "minSustainableInvestmentPercent": 10
+        },
+        "eligibility": {
+          "minAge": 18,
+          "residencyCountries": [
+            "CZ"
+          ]
+        },
+        "requiredDocuments": [
+          "KEY_INFORMATION_DOCUMENT",
+          "DIP_CONTRACT_TERMS",
+          "SUITABILITY_QUESTIONNAIRE",
+          "ESG_PREFERENCE_QUESTIONNAIRE"
+        ]
+      }
+    },
+    {
+      "offeringCode": "CZ_DIP_DYNAMIC",
+      "name": "Long-term investment product - dynamic strategy (illustrative)",
+      "attributes": {
+        "productLine": "DIP",
+        "jurisdictionPackId": "CZ/DIP",
+        "reviewStatus": "ILLUSTRATIVE_REQUIRES_LEGAL_AND_COMMERCIAL_REVIEW",
+        "fundStrategy": "DYNAMIC",
+        "permittedProviderTypes": [
+          "PENSION_COMPANY",
+          "INVESTMENT_COMPANY",
+          "BANK",
+          "INSURANCE_COMPANY",
+          "SECURITIES_DEALER"
+        ],
+        "currency": "CZK",
+        "feeSchedule": {
+          "managementFeeAnnualPercent": "1.00",
+          "performanceFeePercent": "15"
+        },
+        "contributionLimits": {
+          "minMonthly": "300",
+          "maxMonthly": "100000"
+        },
+        "riskClass": 4,
+        "sustainability": {
+          "sfdrArticle": "ARTICLE_8",
+          "minSustainableInvestmentPercent": 20
+        },
+        "eligibility": {
+          "minAge": 18,
+          "residencyCountries": [
+            "CZ"
+          ]
+        },
+        "requiredDocuments": [
+          "KEY_INFORMATION_DOCUMENT",
+          "DIP_CONTRACT_TERMS",
+          "SUITABILITY_QUESTIONNAIRE",
+          "ESG_PREFERENCE_QUESTIONNAIRE"
+        ]
+      }
+    },
+    {
+      "offeringCode": "CZ_DIP_LIFECYCLE",
+      "name": "Long-term investment product - lifecycle strategy (illustrative)",
+      "attributes": {
+        "productLine": "DIP",
+        "jurisdictionPackId": "CZ/DIP",
+        "reviewStatus": "ILLUSTRATIVE_REQUIRES_LEGAL_AND_COMMERCIAL_REVIEW",
+        "fundStrategy": "LIFECYCLE",
+        "permittedProviderTypes": [
+          "PENSION_COMPANY",
+          "INVESTMENT_COMPANY",
+          "BANK",
+          "INSURANCE_COMPANY",
+          "SECURITIES_DEALER"
+        ],
+        "currency": "CZK",
+        "feeSchedule": {
+          "managementFeeAnnualPercent": "0.80",
+          "performanceFeePercent": "10"
+        },
+        "contributionLimits": {
+          "minMonthly": "300",
+          "maxMonthly": "100000"
+        },
+        "riskClass": 3,
+        "sustainability": {
+          "sfdrArticle": "ARTICLE_8",
+          "minSustainableInvestmentPercent": 10
+        },
+        "eligibility": {
+          "minAge": 18,
+          "residencyCountries": [
+            "CZ"
+          ]
+        },
+        "requiredDocuments": [
+          "KEY_INFORMATION_DOCUMENT",
+          "DIP_CONTRACT_TERMS",
+          "SUITABILITY_QUESTIONNAIRE",
+          "ESG_PREFERENCE_QUESTIONNAIRE"
+        ]
+      }
+    }
+  ]
+}

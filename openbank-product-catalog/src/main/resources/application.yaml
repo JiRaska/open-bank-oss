@@ -91,9 +91,9 @@ authz:
 
 openbank:
   catalog:
-    # Current OpenBank deployment enables both reference packs. Standalone charts override this to
+    # Current OpenBank deployment enables all reference packs (retirement: ADR-0334). Standalone charts override this to
     # an empty value and let the operator opt in explicitly.
-    packs: ${OPENBANK_CATALOG_PACKS:banking,insurance}
+    packs: ${OPENBANK_CATALOG_PACKS:banking,insurance,retirement}
     bank-v1-compatibility-enabled: ${OPENBANK_CATALOG_BANK_V1_COMPATIBILITY_ENABLED:true}
     security:
       scope-claim: ${CATALOG_SCOPE_CLAIM:scope}

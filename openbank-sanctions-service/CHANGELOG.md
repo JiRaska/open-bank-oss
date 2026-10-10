@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.15.4...sanctions-service-v0.16.0) (2026-10-09)
+
+
+### Features
+
+* **libs:** purge SENT outbox rows fleet-wide with one shared retention job ([#11899](https://github.com/JiRaska/open-bank-oss/issues/11899)) ([b322ed7](https://github.com/JiRaska/open-bank-oss/commit/b322ed7116137ecc8f132dc79cd79444c995bb2f))
+
+## [0.15.4](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.15.3...sanctions-service-v0.15.4) (2026-10-07)
+
+
+### Bug Fixes
+
+* **approval:** preserve verified maker actor kind ([#12159](https://github.com/JiRaska/open-bank-oss/issues/12159)) ([74cba34](https://github.com/JiRaska/open-bank-oss/commit/74cba348b75c0b318902c033bf81356ddba32393))
+
+## [0.15.3](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.15.2...sanctions-service-v0.15.3) (2026-10-07)
+
+
+### Bug Fixes
+
+* **sanctions:** fence list publication across pods ([#11558](https://github.com/JiRaska/open-bank-oss/issues/11558)) ([6a30656](https://github.com/JiRaska/open-bank-oss/commit/6a3065680e62cbb2f0445a6b5632fde992ddbe7e))
+
 ## [0.15.2](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.15.1...sanctions-service-v0.15.2) (2026-10-04)
 
 

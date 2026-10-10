@@ -101,7 +101,7 @@ jobs:
           java-version: "25"
           distribution: temurin
 
-      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
           # READ-ONLY. setup-java's own `cache: gradle` SAVES a whole Gradle-home entry
           # (~1.1 GB) on this job's key, into a pool already over the 10 GB ceiling — so
@@ -113,7 +113,7 @@ jobs:
           cache-read-only: true
 
       - name: Validate Gradle wrapper
-        uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
 
       - name: Run pitest on domain layer
         run: ./gradlew :${{ matrix.service }}:pitest
@@ -194,13 +194,13 @@ jobs:
           java-version: "25"
           distribution: temurin
 
-      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
           # READ-ONLY — same cache-pool reasoning as the matrix job above (#3299).
           cache-read-only: true
 
       - name: Validate Gradle wrapper
-        uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
 
       - name: Run pitest on the authz package (threshold 63 enforced)
         run: |
@@ -284,13 +284,13 @@ jobs:
           java-version: "25"
           distribution: temurin
 
-      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
           # READ-ONLY — same cache-pool reasoning as the matrix job above (#3299).
           cache-read-only: true
 
       - name: Validate Gradle wrapper
-        uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
 
       - name: Run pitest on the shared libs module (advisory)
         run: |

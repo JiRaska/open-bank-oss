@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.33.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.32.2...ledger-service-v1.33.0) (2026-10-09)
+
+
+### Features
+
+* **libs:** purge SENT outbox rows fleet-wide with one shared retention job ([#11899](https://github.com/JiRaska/open-bank-oss/issues/11899)) ([b322ed7](https://github.com/JiRaska/open-bank-oss/commit/b322ed7116137ecc8f132dc79cd79444c995bb2f))
+
+## [1.32.2](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.32.1...ledger-service-v1.32.2) (2026-10-07)
+
+
+### Bug Fixes
+
+* **approval:** preserve verified maker actor kind ([#12159](https://github.com/JiRaska/open-bank-oss/issues/12159)) ([74cba34](https://github.com/JiRaska/open-bank-oss/commit/74cba348b75c0b318902c033bf81356ddba32393))
+
 ## [1.32.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.32.0...ledger-service-v1.32.1) (2026-10-02)
 
 

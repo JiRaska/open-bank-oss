@@ -58,3 +58,13 @@ Re-identification (joining `sub_account_id`/`transaction_id` back to a customer)
 - The append-only, year-partitioned journal makes retention a partition-lifecycle operation: partitions older than the retention horizon are DETACHed (DROP only under a deliberate, audited operator flag flip — `partition.drop-enabled` + clearing `dry-run`).
 - `partition_lifecycle_audit` is itself immutable and retained for the same statutory period — it is the evidence trail of any detach/drop.
 - `evidenceExported: true` — journal/trial-balance evidence is exportable for auditors.
+
+## Outbox retention (SENT rows)
+
+`ledger_outbox` is a delivery buffer, not a record. Rows that reached the broker (`status = 'SENT'`) are deleted once their `sent_at` is older than `openbank.outbox.retention.sent-days` (default **7**), by libs-runtime's shared `OutboxSentRetentionJob` (ADR-0329, ADR-0327 D8). The repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`.
+
+- Runs nightly (`openbank.outbox.retention.cron`, default `0 17 3 * * ?`) on every replica; each delete is bounded (`batch-size` 5 000, at most `max-batches` 200 per run), so a long-unpurged table drains over several nights.
+- PENDING, FAILED, DISPATCHING and DEAD rows are never touched — DEAD rows are the producer-side DLQ.
+- Replaying an event older than the window comes from the Kafka topic or audit-service, not from this table.
+- Signals: `openbank_outbox_purged_total{service,status="SENT"}`, `openbank_outbox_purge_failed_total`, and workflow liveness `outbox-sent-retention`.
+- Opt-out: `openbank.outbox.retention.enabled=false` (logs a WARN at boot). Don't lower `sent-days` below what any reader of SENT rows needs.
