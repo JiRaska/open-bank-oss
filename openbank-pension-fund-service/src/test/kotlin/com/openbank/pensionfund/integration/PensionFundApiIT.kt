@@ -142,4 +142,16 @@ class PensionFundApiIT {
             }
         }
     }
+
+    @Test
+    @Order(4)
+    @TestSecurity(user = "compliance-reviewer", roles = ["ROLE_COMPLIANCE"])
+    fun `compliance staff can inspect contract data but cannot place an order`() {
+        given().`when`().get("/api/v1/contracts/$contract/orders").then().statusCode(200)
+        given().`when`().get("/api/v1/contracts/$contract/holdings").then().statusCode(200)
+        given().`when`().get("/api/v1/contracts/$contract/transactions").then().statusCode(200)
+        given().contentType("application/json").header("Idempotency-Key", "compliance-denied")
+            .body("""{"fundId":"$fundA","type":"SUBSCRIBE","amount":1}""")
+            .`when`().post("/api/v1/contracts/$contract/orders").then().statusCode(403)
+    }
 }

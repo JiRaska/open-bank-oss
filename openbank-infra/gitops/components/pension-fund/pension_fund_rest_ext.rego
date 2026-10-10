@@ -8,7 +8,7 @@
 #   pension-fund.nav.read / .nav.calculate / .nav.approve    — FundResource, NavResource
 #   pension-fund.strategy.read / .strategy.manage            — StrategyResource
 #   pension-fund.strategy.change.submit / .approve / .apply  — StrategyResource, StrategyChangeResource
-#   pension-fund.order.place / .holding.read                 — ContractUnitResource
+#   pension-fund.order.place / .holding.inspect              — ContractUnitResource
 #
 # WHY NOT `rules.yaml: authz.role_action_matrix`: a matrix line is a grant to every MACHINE that
 # holds the role, and no policy can veto it (#3765/#3734). The Keycloak service-accounts are
@@ -19,12 +19,17 @@
 # Four-eyes (maker != checker) is enforced by the service itself, on the authenticated principal;
 # this policy only decides who may be a maker or a checker at all.
 #
-# Participant data (pension-fund.holding.read, pension-fund.order.place) is reachable by real
+# Participant data (pension-fund.holding.inspect, pension-fund.order.place) is reachable by real
 # staff and by pension-service's OWN client, service-account-openbank-pension (fleet naming
 # convention `openbank-<service>`; pension-service's FundAdministrationPort adapter, ADR-0334 §1),
-# and by nothing else. holding.read is also excluded from base `operator-read-any` via
-# rules.yaml: authz.operator_read_any_excluded_actions, which is what keeps the shared
-# service-account (ROLE_OPERATOR) and every other service out.
+# and by nothing else. The action deliberately does NOT end in `.read`/`.list`: base rest.rego's
+# `operator-read-any` (ROLE_OPERATOR/ROLE_ADMIN) and `compliance-read-any` (ROLE_COMPLIANCE) grant
+# every such action to any HUMAN principal, and the shared service-account
+# (service-account-openbank-services) is classified HUMAN and holds ROLE_OPERATOR and
+# ROLE_COMPLIANCE in at least one realm. `operator_read_any_excluded_actions` only vetoes the
+# first of those two rules, so a `.read` name stayed reachable through the second. A non-read
+# verb is reachable only through the identity-scoped reasons below (same remedy as
+# `audit.evidence.reconstruct`).
 #
 # Do NOT gate on input.principal.type == "SERVICE": AuthorizeInterceptor never emits it (#266).
 
@@ -47,7 +52,7 @@ pension_fund_read_actions := {
 	"pension-fund.fund.read",
 	"pension-fund.nav.read",
 	"pension-fund.strategy.read",
-	"pension-fund.holding.read",
+	"pension-fund.holding.inspect",
 }
 
 pension_fund_staff if {
@@ -78,5 +83,5 @@ allowed_reasons contains "service-pension-unit-register" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == pension_service_account
 	"ROLE_API" in input.principal.roles
-	input.action in {"pension-fund.holding.read", "pension-fund.order.place", "pension-fund.fund.read", "pension-fund.strategy.read", "pension-fund.nav.read"}
+	input.action in {"pension-fund.holding.inspect", "pension-fund.order.place", "pension-fund.fund.read", "pension-fund.strategy.read", "pension-fund.nav.read"}
 }
