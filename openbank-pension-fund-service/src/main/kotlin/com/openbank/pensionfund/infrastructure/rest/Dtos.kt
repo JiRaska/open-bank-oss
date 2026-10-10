@@ -11,6 +11,7 @@ import com.openbank.pensionfund.application.usecase.StrategyChangeRequest
 import com.openbank.pensionfund.application.usecase.StrategyDefinition
 import com.openbank.pensionfund.domain.model.AllocationTarget
 import com.openbank.pensionfund.domain.model.GlidePathStep
+import com.openbank.pensionfund.domain.model.InstrumentClass
 import com.openbank.pensionfund.domain.model.OrderType
 import java.math.BigDecimal
 import java.time.LocalDate
@@ -98,6 +99,8 @@ data class PositionDto(
     val instrumentId: String? = null,
     val quantity: BigDecimal? = null,
     val price: BigDecimal? = null,
+    /** Optional; omitted records the position UNCLASSIFIED, correctable four-eyes. */
+    val instrumentClass: InstrumentClass? = null,
 )
 
 data class NavCalculationDto(
@@ -114,6 +117,7 @@ data class NavCalculationDto(
                 req(line.instrumentId, "positions[$i].instrumentId"),
                 req(line.quantity, "positions[$i].quantity"),
                 line.price,
+                line.instrumentClass,
             )
         },
         cash = cash ?: BigDecimal.ZERO,

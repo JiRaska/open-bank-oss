@@ -1,0 +1,176 @@
+{
+  "consumer": {
+    "name": "openbank-tax-reporting-service"
+  },
+  "interactions": [
+    {
+      "description": "GET the pension company's portfolio for a year end with no custodian statement",
+      "providerStates": [
+        {
+          "name": "no portfolio snapshot exists for 2026-12-31"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/treasury/portfolio/period-end",
+        "query": {
+          "date": [
+            "2026-12-31"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "error": "PORTFOLIO_SNAPSHOT_MISSING"
+        },
+        "headers": {
+          "Content-Type": "application/json; charset=UTF-8"
+        },
+        "matchingRules": {
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json(;\\s?charset=[\\w\\-]+)?"
+                }
+              ]
+            }
+          }
+        },
+        "status": 409
+      }
+    },
+    {
+      "description": "GET the pension company's portfolio with no M2M identity is refused",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/treasury/portfolio/period-end",
+        "query": {
+          "date": [
+            "2026-12-31"
+          ]
+        }
+      },
+      "response": {
+        "status": 401
+      }
+    },
+    {
+      "description": "GET the pension company's portfolio at the 2026 year end",
+      "providerStates": [
+        {
+          "name": "the pension company holds investment positions at 2026-12-31"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/treasury/portfolio/period-end",
+        "query": {
+          "date": [
+            "2026-12-31"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "asOf": "2026-12-31",
+          "currency": "CZK",
+          "positions": [
+            {
+              "instrumentClass": "GOVERNMENT_BOND",
+              "isin": "CZ0001005037",
+              "quantity": "1000",
+              "valuation": "1012345.67",
+              "valuationCurrency": "CZK"
+            }
+          ]
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.currency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.positions": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 1
+                }
+              ]
+            },
+            "$.positions[*].instrumentClass": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.positions[*].isin": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.positions[*].quantity": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "-?[0-9]+(\\.[0-9]+)?"
+                }
+              ]
+            },
+            "$.positions[*].valuation": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "-?[0-9]+(\\.[0-9]+)?"
+                }
+              ]
+            },
+            "$.positions[*].valuationCurrency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-treasury-service"
+  }
+}
