@@ -166,7 +166,6 @@ class ListenerAuthParityIT {
                 "quarkus.http.ssl.certificate.trust-store-files" to dir.resolve("client.crt").toString(),
                 "quarkus.http.ssl.protocols" to "TLSv1.3",
                 "quarkus.http.test-ssl-port" to "0",
-                "quarkus.http.insecure-requests" to "enabled",
             ) + bearerFixture()
         }
 
