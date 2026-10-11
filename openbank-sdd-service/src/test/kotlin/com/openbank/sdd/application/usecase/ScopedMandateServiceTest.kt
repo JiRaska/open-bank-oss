@@ -104,6 +104,16 @@ class ScopedMandateServiceTest {
         verify(exactly = 0) { ownership.verify(any(), any()) }
     }
 
+    @Test
+    fun `undeclared caller cannot register or cancel and triggers no downstream operation`() {
+        assertRefused { service.register(command(), party, MandateInitiatorScope.Denied) }
+        assertRefused { service.cancel(UUID.randomUUID(), MandateInitiatorScope.Denied) }
+        verify(exactly = 0) { register.register(any()) }
+        verify(exactly = 0) { manage.cancel(any()) }
+        verify(exactly = 0) { list.get(any()) }
+        verify(exactly = 0) { ownership.verify(any(), any()) }
+    }
+
     private fun assertRefused(call: () -> Uni<SddMandate>) {
         assertThatThrownBy { call().await().indefinitely() }.isInstanceOf(MandateScopeViolationException::class.java)
     }

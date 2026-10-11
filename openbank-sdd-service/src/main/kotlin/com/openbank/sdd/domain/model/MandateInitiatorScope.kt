@@ -8,6 +8,9 @@ package com.openbank.sdd.domain.model
  * Which mandates an authenticated caller may register or cancel (ADR-0335 D6).
  */
 sealed interface MandateInitiatorScope {
+    /** An undeclared machine or unauthorised principal may perform no mandate action. */
+    data object Denied : MandateInitiatorScope
+
     /** Staff and the customer edge: unchanged behaviour. */
     data object General : MandateInitiatorScope
 

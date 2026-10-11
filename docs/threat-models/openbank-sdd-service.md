@@ -169,3 +169,11 @@ instruction, but the irreversible debit lives downstream.
   unreachable account-service fails the request. It never registers.
 - **New egress:** sdd to account-service (`ACCOUNT_SERVICE_URL`; the accounts NetworkPolicy was
   regenerated).
+
+### Declared mandate initiators
+
+The pension service account receives its scoped mandate capability; the declared edge
+service account and authenticated human operators retain their existing general capability.
+An undeclared service account, anonymous principal or ordinary customer is denied before
+ownership checks, mandate listing or mutation. Operator roles do not elevate undeclared
+machine identities.

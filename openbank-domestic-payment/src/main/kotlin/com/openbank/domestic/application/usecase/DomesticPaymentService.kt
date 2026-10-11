@@ -23,6 +23,7 @@ import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentPriority
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.domestic.domain.model.DomesticTransferScope
+import com.openbank.domestic.domain.model.InitiatorScope
 import com.openbank.libs.domain.error.ResourceConflictException
 import com.openbank.libs.domain.error.ResourceNotFoundException
 import com.openbank.libs.observability.DomainMetrics
@@ -128,6 +129,16 @@ class DomesticPaymentService(
         // machine pays from none. Before anything is persisted or any key is claimed.
         if (!command.initiatorScope.permits(command.debtorAccountId)) {
             throw InitiatorScopeViolationException(command.debtorAccountId)
+        }
+        if (command.initiatorScope is InitiatorScope.Scoped) {
+            val normalized = DomesticPaymentRequestFingerprint.normalize(command)
+            val debtorIban = CzechDomesticIban.fromAccountNumber(
+                accountNumber = normalized.debtorAccountNumber,
+                bankCode = normalized.debtorBankCode,
+            ) ?: throw InitiatorScopeViolationException(command.debtorAccountId)
+            if (accountLookupPort.findAccountIdByIban(debtorIban) != command.debtorAccountId) {
+                throw InitiatorScopeViolationException(command.debtorAccountId)
+            }
         }
         return checkNotNull(
             createPaymentInternal(

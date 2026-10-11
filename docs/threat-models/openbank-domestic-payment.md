@@ -680,3 +680,10 @@ ROLE_API-only caller:
   scheme rules and per-step idempotency still apply to every such payment. Payout limits, or a
   creditor allow-list from pension's own records, would narrow it further and belong to
   pension-service.
+
+### Scoped debtor coordinate binding
+
+A scoped initiator must supply its configured debtor account identifier. Before any
+idempotency lookup, persistence or workflow start, the normalized account number and
+bank code are resolved through the existing account lookup and must match that identifier.
+Missing or mismatched resolution fails closed. General initiators retain their existing flow.

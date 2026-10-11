@@ -19,6 +19,7 @@ import com.openbank.domestic.domain.model.InitiatorScope
 import com.openbank.libs.domain.error.ValidationFailure
 import com.openbank.libs.domain.money.Money
 import com.openbank.libs.observability.DomainMetrics
+import io.mockk.Called
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -125,6 +126,23 @@ class DomesticPaymentServiceTest {
     }
 
     @Test
+    fun `allowed account id with another debtor IBAN or unresolved authority is refused before any write`() {
+        val base = createCommand()
+        val command = base.copy(
+            initiatorScope = InitiatorScope.Scoped("service-account-openbank-pension", base.debtorAccountId),
+        )
+        listOf(UUID.randomUUID(), null).forEach { resolved ->
+            coEvery { accountLookupPort.findAccountIdByIban(any()) } returns resolved
+            assertThatThrownBy { runBlocking { service.createPayment(command) } }
+                .isInstanceOf(InitiatorScopeViolationException::class.java)
+        }
+        coVerify(exactly = 0) { paymentRepository.findByIdempotencyKey(any()) }
+        coVerify(exactly = 0) { paymentRepository.save(any(), any()) }
+        verify { eventPublisher wasNot Called }
+        verify { workflowClient wasNot Called }
+    }
+
+    @Test
     fun `a scoped initiator paying from its own account proceeds`(): Unit = runBlocking {
         val base = createCommand(idempotencyKey = "dom-idem-scoped")
         val command = base.copy(
@@ -133,6 +151,8 @@ class DomesticPaymentServiceTest {
         val existing = payment().copy(requestFingerprint = DomesticPaymentRequestFingerprint.sha256(command))
         coEvery { paymentRepository.findByIdempotencyKey("dom-idem-scoped") } returns
             existing.copy(idempotencyKey = "dom-idem-scoped")
+
+        coEvery { accountLookupPort.findAccountIdByIban(any()) } returns command.debtorAccountId
 
         val result = service.createPayment(command)
 

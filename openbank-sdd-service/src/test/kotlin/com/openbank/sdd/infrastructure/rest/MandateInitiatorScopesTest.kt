@@ -17,19 +17,31 @@ import java.util.Optional
 
 /** ADR-0335 D6: only the declared principal is scoped; the declaration is held to rules.yaml. */
 class MandateInitiatorScopesTest {
-    private fun identity(name: String) = mockk<SecurityIdentity>().also {
+    private fun identity(name: String, operator: Boolean = false) = mockk<SecurityIdentity>().also {
+        every { it.hasRole(any()) } answers { operator && firstArg<String>() == "ROLE_OPERATOR" }
         every { it.principal } returns
             Principal { name }
     }
 
     @Test
-    fun `pension is scoped to its configured creditor identifier, every other caller is general`() {
+    fun `pension is scoped and only declared edge and staff retain general access`() {
         val scopes = MandateInitiatorScopes(Optional.of("CZ00ZZZPENSION01"))
         assertThat(scopes.of(identity("service-account-openbank-pension")))
             .isEqualTo(MandateInitiatorScope.Scoped("service-account-openbank-pension", "CZ00ZZZPENSION01"))
         assertThat(scopes.of(identity("service-account-openbank-edge"))).isEqualTo(MandateInitiatorScope.General)
         assertThat(MandateInitiatorScopes(Optional.empty()).of(identity("service-account-openbank-pension")))
             .isEqualTo(MandateInitiatorScope.Scoped("service-account-openbank-pension", null))
+    }
+
+    @Test
+    fun `undeclared machines are denied even with operator roles`() {
+        val scopes = MandateInitiatorScopes(Optional.of("CZ00ZZZPENSION01"))
+        assertThat(scopes.of(identity("service-account-openbank-services", operator = true)))
+            .isEqualTo(MandateInitiatorScope.Denied)
+        assertThat(scopes.of(identity("service-account-new-caller", operator = true)))
+            .isEqualTo(MandateInitiatorScope.Denied)
+        assertThat(scopes.of(identity("staff", operator = true))).isEqualTo(MandateInitiatorScope.General)
+        assertThat(scopes.of(identity("customer"))).isEqualTo(MandateInitiatorScope.Denied)
     }
 
     @Test

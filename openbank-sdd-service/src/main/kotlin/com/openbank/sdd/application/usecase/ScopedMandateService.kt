@@ -36,6 +36,7 @@ class ScopedMandateService(
         subjectPartyId: UUID?,
         scope: MandateInitiatorScope,
     ): Uni<SddMandate> {
+        if (scope == MandateInitiatorScope.Denied) return refuse("caller is not a declared mandate initiator")
         if (scope !is MandateInitiatorScope.Scoped) return register.register(command)
         if (!scope.ownsCreditor(command.creditorIdentifier)) {
             return refuse("creditor identifier is outside the caller's scope")
@@ -52,6 +53,7 @@ class ScopedMandateService(
     }
 
     fun cancel(mandateId: UUID, scope: MandateInitiatorScope): Uni<SddMandate> {
+        if (scope == MandateInitiatorScope.Denied) return refuse("caller is not a declared mandate initiator")
         if (scope !is MandateInitiatorScope.Scoped) return manage.cancel(mandateId)
         return list.get(mandateId).flatMap { mandate ->
             val mine = scope.ownsCreditor(mandate.creditorIdentifier)
