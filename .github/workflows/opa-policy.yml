@@ -161,7 +161,11 @@ jobs:
           for t in "${TESTS[@]}"; do
             ext="${t%_test.rego}.rego"
             echo "--- $t"
-            opa test openbank-libs/governance/policies/rest.rego "$ext" "$t" || FAILED=1
+            # Governance data is mounted as data.rules in live bundles. Unit tests load its
+            # generated source at data.authz so service tests can inject the real list when
+            # exercising rollout compatibility exclusions (tax-reporting #12547).
+            opa test openbank-libs/governance/policies/rest.rego "$ext" "$t" \
+              openbank-libs/governance/rules-opa-data.yaml || FAILED=1
           done
           [ "$FAILED" -eq 0 ] || { echo "::error::One or more rest_ext suites failed."; exit 1; }
           echo "All ${#TESTS[@]} rest_ext suites green."

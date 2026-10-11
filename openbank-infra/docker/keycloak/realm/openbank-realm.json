@@ -1240,6 +1240,24 @@
         "roles"
       ],
       "secret": "changeme_local_admin_ui_dev_only"
+    },
+    {
+      "clientId": "openbank-pension",
+      "name": "OpenBank Pension Service",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "CHANGE_ME_LOCAL_DEV_ONLY",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "protocol": "openid-connect",
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles",
+        "catalog:read"
+      ],
+      "attributes": {}
     }
   ],
   "users": [
@@ -1527,6 +1545,14 @@
       "enabled": true,
       "serviceAccountClientId": "openbank-synthetic-catalog-read",
       "realmRoles": []
+    },
+    {
+      "username": "service-account-openbank-pension",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-pension",
+      "realmRoles": [
+        "ROLE_API"
+      ]
     }
   ]
 }
