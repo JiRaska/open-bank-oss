@@ -41,7 +41,7 @@ class FinrepService(private val ledgerPort: LedgerPort, private val metrics: Fin
 
     override suspend fun getTemplate(query: GetFinrepTemplateQuery): FinrepTemplate {
         val startedAt = System.nanoTime()
-        val snapshot = trialBalance(query.asOf, query.evidence)
+        val snapshot = trialBalance(query.templateId, query.asOf, query.evidence)
         val template = when (query.templateId) {
             "F01.01" -> F0101Mapper.map(snapshot, query.asOf)
             "F01.02" -> F0102Mapper.map(snapshot, query.asOf)
@@ -73,10 +73,17 @@ class FinrepService(private val ledgerPort: LedgerPort, private val metrics: Fin
      * REST-client failure mode (connect, timeout, 5xx, deserialisation) means the same thing here.
      */
     @Suppress("TooGenericExceptionCaught")
-    private suspend fun trialBalance(asOf: LocalDate, evidence: TrialBalanceEvidence): TrialBalanceSnapshot = try {
-        when (evidence) {
-            TrialBalanceEvidence.FROZEN -> ledgerPort.getTrialBalance(asOf)
-            TrialBalanceEvidence.LIVE_PREVIEW -> ledgerPort.getLiveTrialBalance(asOf)
+    private suspend fun trialBalance(
+        templateId: String,
+        asOf: LocalDate,
+        evidence: TrialBalanceEvidence,
+    ): TrialBalanceSnapshot = try {
+        when {
+            templateId == "F02.00" && evidence == TrialBalanceEvidence.FROZEN ->
+                ledgerPort.getYearToDateMovements(asOf)
+            templateId == "F02.00" -> ledgerPort.getLiveYearToDateMovements(asOf)
+            evidence == TrialBalanceEvidence.FROZEN -> ledgerPort.getTrialBalance(asOf)
+            else -> ledgerPort.getLiveTrialBalance(asOf)
         }
     } catch (e: Exception) {
         metrics.templateFailed(RegulatoryFramework.FINREP, TemplateFailureReason.LEDGER_UNAVAILABLE)

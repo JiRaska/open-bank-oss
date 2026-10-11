@@ -42,5 +42,4 @@
 # REMOVE THIS LINE once auto-deploy has built and pushed the service — at that point the pin
 # moves to the built tag and this entry would suppress nothing, which the gate's
 # --check-placeholders direction fails on.
-265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-pension-service:sandbox-000000000
-265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-pension-fund-service:sandbox-000000000
+265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-tax-reporting-service:sandbox-000000000

@@ -1,0 +1,63 @@
+# SPDX-License-Identifier: Apache-2.0
+# Tax-reporting DLQ alerts against the SHIPPED rules: fire for records on the tax-reporting DLQ,
+# never for another topic's DLQ, never for an empty one, and NotEmpty can clear when records
+# expire (oldest offset catches up). Clearance does not prove reconciliation.
+rule_files:
+  - prometheus-rules-tax-reporting.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    input_series:
+      # Tax DLQ: two records arrive at minute 10; expire (oldest -> 2) at minute 60.
+      - series: 'kafka_topic_partition_current_offset{topic="openbank.dlq.tax-reporting.withholding-remitted-in",partition="0"}'
+        values: '0x10 2x170'
+      - series: 'kafka_topic_partition_oldest_offset{topic="openbank.dlq.tax-reporting.withholding-remitted-in",partition="0"}'
+        values: '0x60 2x120'
+      # Another service's DLQ filling up: not this rule's business.
+      - series: 'kafka_topic_partition_current_offset{topic="openbank.dlq.interest.interest-withholding-remitted-in",partition="0"}'
+        values: '0+1x180'
+      - series: 'kafka_topic_partition_oldest_offset{topic="openbank.dlq.interest.interest-withholding-remitted-in",partition="0"}'
+        values: '0x180'
+    alert_rule_test:
+      # Before anything arrives: must not fire.
+      - eval_time: 5m
+        alertname: TaxWithholdingRemittanceDeadLettered
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: TaxWithholdingDeadLetterNotEmpty
+        exp_alerts: []
+      # Arrivals: critical fires at once.
+      - eval_time: 12m
+        alertname: TaxWithholdingRemittanceDeadLettered
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              team: platform
+              topic: openbank.dlq.tax-reporting.withholding-remitted-in
+            exp_annotations:
+              subject_period: continuous
+              summary: "§38d withholding remittance dead-lettered (tax-reporting)"
+              description: "tax-reporting-service parked a malformed target event or a remittance whose write failed on openbank.dlq.tax-reporting.withholding-remitted-in. Its period and amount may be unknown. Reconcile the source and hold potentially affected periods before assembling or filing."
+              runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0028-tax-reporting-withholding-dead-letter.md"
+      # Records still held after 15m: warning fires.
+      - eval_time: 30m
+        alertname: TaxWithholdingDeadLetterNotEmpty
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: platform
+              topic: openbank.dlq.tax-reporting.withholding-remitted-in
+            exp_annotations:
+              summary: "2 tax-reporting withholding DLQ record(s) retained"
+              description: "openbank.dlq.tax-reporting.withholding-remitted-in retains 2 record(s), including possibly malformed events with unknown period or amount. Reconcile each record with its source before filing; an offset count alone does not prove whether recovery is complete."
+              runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0028-tax-reporting-withholding-dead-letter.md"
+      # Records expire at minute 60: warning clears, without proving reconciliation.
+      - eval_time: 65m
+        alertname: TaxWithholdingDeadLetterNotEmpty
+        exp_alerts: []
+      # Arrivals stopped more than an hour ago: critical clears.
+      - eval_time: 75m
+        alertname: TaxWithholdingRemittanceDeadLettered
+        exp_alerts: []

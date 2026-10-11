@@ -17,7 +17,7 @@ The generated `00-build` page in this same documentation index reports the relea
 `periodStart` and `periodEnd` dates. It exposes aggregate fund figures for
 tax-reporting-service: balance sheet, year-to-date profit and loss, unit
 roll-forward, portfolio and flows. The endpoint requires an allowed reporting
-role and the `pension-fund.reporting.read` authorization policy.
+role and the `pension-fund.reporting.inspect` authorization policy.
 
 The calculation uses published NAVs and transactions priced at those NAVs,
 bucketed by valuation date. A period without a published NAV is not reportable;
