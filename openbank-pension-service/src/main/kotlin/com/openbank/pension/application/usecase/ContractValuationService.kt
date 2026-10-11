@@ -99,7 +99,7 @@ class ContractValuationService(
         ) {
             emptyList()
         } else {
-            all.subList(from.toInt(), minOf(all.size, from.toInt() + size))
+            all.subList(from.toInt(), minOf(all.size.toLong(), from + size.toLong()).toInt())
         }
         return TransactionPage(items, page, size, all.size)
     }
