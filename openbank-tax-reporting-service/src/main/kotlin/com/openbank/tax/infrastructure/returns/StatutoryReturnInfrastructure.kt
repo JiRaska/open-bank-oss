@@ -9,14 +9,11 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessRecorder
 import com.openbank.tax.application.port.out.ReturnCatalogueSource
-import com.openbank.tax.application.port.out.ReturnDataPort
-import com.openbank.tax.application.port.out.ReturnDataUnavailableException
 import com.openbank.tax.application.port.out.ReturnWireRendererPort
 import com.openbank.tax.application.port.out.StatutoryReturnMetricsPort
 import com.openbank.tax.application.usecase.ReportingEntities
 import com.openbank.tax.application.usecase.StatutoryReturnService
 import com.openbank.tax.domain.returns.Periodicity
-import com.openbank.tax.domain.returns.ReportingPeriod
 import com.openbank.tax.domain.returns.ReturnCatalogue
 import com.openbank.tax.domain.returns.ReturnDefinition
 import com.openbank.tax.domain.returns.ReturnScope
@@ -33,7 +30,6 @@ import jakarta.enterprise.inject.Produces
 import jakarta.inject.Singleton
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
-import java.math.BigDecimal
 import java.time.Duration
 import java.time.LocalDate
 import java.util.Optional
@@ -94,25 +90,6 @@ object CatalogueParser {
     private fun JsonNode.required(field: String): JsonNode = get(field) ?: error("Catalogue field '$field' missing")
 
     private fun JsonNode.text(field: String): String = required(field).asText()
-}
-
-/**
- * Bound until pension-service / pension-fund-service publish the reporting read models (ADR-0336
- * D4). Refuses rather than returning zeroes: a return of zeroes passes every arithmetic rule and
- * tells the regulator the funds are empty.
- */
-@ApplicationScoped
-class UnavailableReturnDataAdapter : ReturnDataPort {
-    override val available: Boolean = false
-
-    override suspend fun fetch(
-        catalogue: ReturnCatalogue,
-        definition: ReturnDefinition,
-        entityId: String,
-        period: ReportingPeriod,
-    ): Map<String, BigDecimal> = throw ReturnDataUnavailableException(
-        "No data source is bound for ${catalogue.id}/${definition.code} — the source read models are not built yet (ADR-0336)",
-    )
 }
 
 @ApplicationScoped

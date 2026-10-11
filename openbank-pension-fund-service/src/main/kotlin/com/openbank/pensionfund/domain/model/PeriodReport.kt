@@ -9,8 +9,18 @@ import java.security.MessageDigest
 import java.time.LocalDate
 import java.util.UUID
 
-/** One position a NAV was struck on, kept with the NAV so the portfolio at that date can be re-read. */
-data class NavPosition(val navId: UUID, val instrumentId: String, val quantity: BigDecimal, val price: BigDecimal) {
+/**
+ * One position a NAV was struck on, kept with the NAV so the portfolio at that date can be re-read.
+ * [instrumentClass] is the class it carries NOW — recorded, or set by an approved correction.
+ */
+data class NavPosition(
+    val id: UUID,
+    val navId: UUID,
+    val instrumentId: String,
+    val quantity: BigDecimal,
+    val price: BigDecimal,
+    val instrumentClass: InstrumentClass = InstrumentClass.UNCLASSIFIED,
+) {
     val marketValue: BigDecimal get() = Precision.money(quantity.multiply(price))
 }
 
@@ -19,7 +29,31 @@ class PeriodNotReportableException(message: String) : RuntimeException(message)
 
 data class FundBalanceSheet(val totalAssets: BigDecimal, val totalLiabilities: BigDecimal, val totalEquity: BigDecimal)
 
-data class FundProfitAndLoss(val income: BigDecimal, val expenses: BigDecimal, val profitLoss: BigDecimal)
+/**
+ * Year-to-date P&L as separately accumulated lines (#12425), never one figure derived from another.
+ *
+ * Each line is summed NAV interval by NAV interval:
+ * - [revaluationGains] / [revaluationLosses]: per instrument, the units held across an interval
+ *   times the change in its price — a rise is a gain and a fall a loss, each accumulated on its OWN
+ *   line, so a loss year is two non-negative numbers and never a negative "income".
+ * - [managementFees]: the fee each NAV accrued.
+ * - [otherInvestmentResult]: signed — interest, the result on disposals and cash. This service has
+ *   no cash or trade ledger, so those three cannot be told apart here; the line is what each
+ *   interval's result leaves once revaluation and fees are accounted for, and says so.
+ * - [profitLoss]: measured independently from net assets and capital flows.
+ *
+ * The revaluation lines need the positions of BOTH NAVs of every interval in the year. A NAV struck
+ * before positions were recorded makes them unknown: [linesUnavailableReason] says why, and the
+ * lines are null rather than zero. [profitLoss] and [managementFees] are always known.
+ */
+data class FundProfitAndLoss(
+    val revaluationGains: BigDecimal?,
+    val revaluationLosses: BigDecimal?,
+    val otherInvestmentResult: BigDecimal?,
+    val managementFees: BigDecimal,
+    val profitLoss: BigDecimal,
+    val linesUnavailableReason: String? = null,
+)
 
 data class UnitRollForward(
     val opening: BigDecimal,
@@ -30,8 +64,19 @@ data class UnitRollForward(
     val unitValuePeriodMax: BigDecimal,
 )
 
-/** Null figures mean the closing NAV was struck before positions were recorded — unknown, not zero. */
-data class PortfolioSummary(val carryingValue: BigDecimal?, val holdingsCount: Int?, val cash: BigDecimal?)
+/**
+ * Null figures mean the closing NAV was struck before positions were recorded — unknown, not zero.
+ * [loansOutstanding] is additionally null while any closing position is [InstrumentClass.UNCLASSIFIED]
+ * ([unclassifiedCount] > 0): such a position may be a loan.
+ */
+data class PortfolioSummary(
+    val carryingValue: BigDecimal?,
+    val holdingsCount: Int?,
+    val cash: BigDecimal?,
+    val carryingValueByClass: Map<InstrumentClass, BigDecimal>? = null,
+    val unclassifiedCount: Int? = null,
+    val loansOutstanding: BigDecimal? = null,
+)
 
 data class FlowFigures(
     val subscriptions: BigDecimal,
@@ -98,7 +143,7 @@ object FundPeriodCalculator {
         periodEnd: LocalDate,
         publishedNavs: List<NavRecord>,
         transactions: List<UnitTransaction>,
-        closingPositions: List<NavPosition>?,
+        positionsByNav: Map<UUID, List<NavPosition>>,
     ): FundPeriodReport {
         require(!periodEnd.isBefore(periodStart)) { "periodEnd must not be before periodStart" }
         val navs = publishedNavs
@@ -135,9 +180,9 @@ object FundPeriodCalculator {
                 ),
                 totalEquity = closing.figures.netAssets,
             ),
-            profitAndLossYtd = profitAndLossYtd(ctx),
+            profitAndLossYtd = profitAndLossYtd(ctx, positionsByNav),
             units = unitRollForward(ctx, inPeriod),
-            portfolio = portfolio(closing, closingPositions),
+            portfolio = portfolio(closing, positionsByNav[closing.id]),
             flows = flows(ctx),
             managementFeesAccrued = feesAccrued(navs, periodOpening?.valuationDate, periodStart, closing.valuationDate),
             entitlements = entitlements(ctx, periodOpening),
@@ -167,21 +212,62 @@ object FundPeriodCalculator {
         }
     }
 
-    private fun profitAndLossYtd(w: Window): FundProfitAndLoss {
+    private fun profitAndLossYtd(w: Window, positionsByNav: Map<UUID, List<NavPosition>>): FundProfitAndLoss {
         val yearStart = LocalDate.of(w.periodEnd.year, 1, 1)
         val opening = w.navs.lastOrNull { it.valuationDate.isBefore(yearStart) }
-        val flows = netCapitalFlows(w, opening?.valuationDate ?: yearStart)
-        val expenses = feesAccrued(w.navs, opening?.valuationDate, yearStart, w.closing.valuationDate)
-        val profit = w.closing.figures.netAssets - (opening?.figures?.netAssets ?: ZERO_MONEY) - flows.net
+        val flows = netCapitalFlowsBetween(w, opening?.valuationDate ?: yearStart, w.closing.valuationDate)
+        val fees = feesAccrued(w.navs, opening?.valuationDate, yearStart, w.closing.valuationDate)
+        val profit = Precision.money(
+            w.closing.figures.netAssets - (opening?.figures?.netAssets ?: ZERO_MONEY) - flows.net,
+        )
+        val chain = w.navs.filter {
+            (opening == null || it.valuationDate.isAfter(opening.valuationDate)) &&
+                !it.valuationDate.isBefore(yearStart) &&
+                !it.valuationDate.isAfter(w.closing.valuationDate)
+        }
+        val missing = (listOfNotNull(opening) + chain).filter { it.id !in positionsByNav }
+        if (missing.isNotEmpty()) {
+            return FundProfitAndLoss(
+                revaluationGains = null,
+                revaluationLosses = null,
+                otherInvestmentResult = null,
+                managementFees = fees,
+                profitLoss = profit,
+                linesUnavailableReason = "NAV(s) ${missing.joinToString { it.valuationDate.toString() }} were " +
+                    "struck before positions were recorded, so the revaluation in the year is unknown",
+            )
+        }
+        var gains = ZERO_MONEY
+        var losses = ZERO_MONEY
+        var other = ZERO_MONEY
+        var previous = opening
+        chain.forEach { nav ->
+            val (g, l) = revaluation(
+                previous?.let {
+                    positionsByNav.getValue(it.id)
+                }.orEmpty(),
+                positionsByNav.getValue(nav.id),
+            )
+            val intervalFlows = netCapitalFlowsBetween(w, previous?.valuationDate ?: yearStart, nav.valuationDate)
+            val intervalResult =
+                nav.figures.netAssets - (previous?.figures?.netAssets ?: ZERO_MONEY) - intervalFlows.net
+            // What the interval earned before its fee, less what revaluation explains.
+            other += intervalResult + nav.figures.accruedManagementFee - g + l
+            gains += g
+            losses += l
+            previous = nav
+        }
         return FundProfitAndLoss(
-            income = Precision.money(profit + expenses),
-            expenses = expenses,
-            profitLoss = Precision.money(profit),
+            revaluationGains = Precision.money(gains),
+            revaluationLosses = Precision.money(losses),
+            otherInvestmentResult = Precision.money(other),
+            managementFees = fees,
+            profitLoss = profit,
         )
     }
 
     private fun entitlements(w: Window, periodOpening: NavRecord?): EntitlementRollForward {
-        val flows = netCapitalFlows(w, periodOpening?.valuationDate ?: w.periodStart)
+        val flows = netCapitalFlowsBetween(w, periodOpening?.valuationDate ?: w.periodStart, w.closing.valuationDate)
         val openingEquity = periodOpening?.figures?.netAssets ?: ZERO_MONEY
         val closingEquity = w.closing.figures.netAssets
         val revaluation = closingEquity - openingEquity - flows.inflow + flows.outflow
@@ -214,10 +300,17 @@ object FundPeriodCalculator {
     private fun portfolio(closing: NavRecord, positions: List<NavPosition>?): PortfolioSummary {
         if (positions == null) return PortfolioSummary(null, null, null)
         val carrying = Precision.money(positions.fold(ZERO_MONEY) { a, p -> a + p.marketValue })
+        val byClass = positions.groupBy { it.instrumentClass }
+            .mapValues { (_, ps) -> Precision.money(ps.fold(ZERO_MONEY) { a, p -> a + p.marketValue }) }
+            .toSortedMap()
+        val unclassified = positions.count { it.instrumentClass == InstrumentClass.UNCLASSIFIED }
         return PortfolioSummary(
             carryingValue = carrying,
             holdingsCount = positions.count { it.quantity.signum() > 0 },
             cash = Precision.money(closing.figures.grossAssets - carrying),
+            carryingValueByClass = byClass,
+            unclassifiedCount = unclassified,
+            loansOutstanding = if (unclassified > 0) null else byClass[InstrumentClass.LOAN] ?: ZERO_MONEY,
         )
     }
 
@@ -244,11 +337,14 @@ object FundPeriodCalculator {
         val net: BigDecimal get() = inflow - outflow
     }
 
-    /** Flows priced at NAVs dated in [from, closing): the ones the closing NAV's cash contains. */
-    private fun netCapitalFlows(w: Window, from: LocalDate): CapitalFlows {
+    /**
+     * Flows priced at NAVs dated in [from, to). With `to` = the closing NAV's date these are the
+     * flows the closing NAV's cash contains.
+     */
+    private fun netCapitalFlowsBetween(w: Window, from: LocalDate, to: LocalDate): CapitalFlows {
         val window = w.txs.filter {
             val d = w.dateOf(it)
-            !d.isBefore(from) && d.isBefore(w.closing.valuationDate)
+            !d.isBefore(from) && d.isBefore(to)
         }
         val inflow = window.filter { it.type in INCOMING }.fold(ZERO_MONEY) { a, t -> a + t.amount }
         val outflow = window.filter { it.type !in INCOMING }.fold(ZERO_MONEY) { a, t -> a + t.amount }
@@ -291,3 +387,21 @@ private val INCOMING_TYPES = setOf(UnitTransactionType.SUBSCRIBE, UnitTransactio
 
 private fun signedUnits(tx: UnitTransaction): BigDecimal =
     if (tx.type in INCOMING_TYPES) tx.units else tx.units.negate()
+
+/**
+ * Price movement on the units of each instrument held at BOTH ends of an interval, split into
+ * (gains, losses), each non-negative. Units bought or sold in between are not revalued here:
+ * their price is not known to this service, so their result lands in the other line.
+ */
+private fun revaluation(before: List<NavPosition>, after: List<NavPosition>): Pair<BigDecimal, BigDecimal> {
+    val prior = before.groupBy { it.instrumentId }
+    var gains = BigDecimal.ZERO.setScale(Precision.MONEY_SCALE)
+    var losses = BigDecimal.ZERO.setScale(Precision.MONEY_SCALE)
+    after.groupBy { it.instrumentId }.forEach { (instrument, now) ->
+        val then = prior[instrument] ?: return@forEach
+        val carried = now.sumOf { it.quantity }.min(then.sumOf { it.quantity })
+        val move = Precision.money(carried.multiply(now.first().price - then.first().price))
+        if (move.signum() > 0) gains += move else losses += move.negate()
+    }
+    return gains to losses
+}

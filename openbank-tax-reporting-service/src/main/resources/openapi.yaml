@@ -329,6 +329,99 @@ paths:
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/UnprocessableEntity' }
 
+  /api/v1/corporate-register:
+    get:
+      tags: [CorporateRegister]
+      summary: Every corporate-register entry of an entity, any status — the audit trail (#12425)
+      operationId: listCorporateRegister
+      parameters:
+        - { name: entityId, in: query, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Entries, by fact, effective date and version
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/CorporateRegisterEntry' } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [CorporateRegister]
+      summary: Propose a corporate figure (maker); it feeds no return until another operator approves it
+      operationId: proposeCorporateFact
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProposeCorporateFactRequest' }
+      responses:
+        '201':
+          description: The proposed entry
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CorporateRegisterEntry' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /api/v1/corporate-register/effective:
+    get:
+      tags: [CorporateRegister]
+      summary: The approved figure of each fact effective for a period; a fact with none approved is absent
+      operationId: effectiveCorporateFacts
+      parameters:
+        - { name: entityId, in: query, required: true, schema: { type: string } }
+        - { name: periodStart, in: query, required: true, schema: { type: string, format: date } }
+        - { name: periodEnd, in: query, required: true, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: Fact name to value
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: { type: number } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/corporate-register/{id}/approve:
+    post:
+      tags: [CorporateRegister]
+      summary: Approve a proposed figure (checker; the proposer may not)
+      operationId: approveCorporateFact
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The decided entry
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CorporateRegisterEntry' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/v1/corporate-register/{id}/reject:
+    post:
+      tags: [CorporateRegister]
+      summary: Reject a proposed figure (checker; the proposer may not)
+      operationId: rejectCorporateFact
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The decided entry
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CorporateRegisterEntry' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
 components:
   parameters:
     PeriodPath:
@@ -373,6 +466,33 @@ components:
           schema: { $ref: '#/components/schemas/ApiError' }
 
   schemas:
+    ProposeCorporateFactRequest:
+      type: object
+      required: [entityId, fact, value, effectiveFrom, reason, evidence]
+      properties:
+        entityId: { type: string, description: The reporting company id (openbank.statutory-returns.company-id) }
+        fact: { type: string, enum: [SHARE_CAPITAL, REGULATORY_CAPITAL, CAPITAL_REQUIREMENT, EMPLOYEES_COUNT, QUALIFYING_SHAREHOLDERS_COUNT, BOARD_OF_DIRECTORS_MEMBERS, SUPERVISORY_BOARD_MEMBERS, DIVIDEND_PAID_OR_PLANNED] }
+        value: { type: number, minimum: 0, description: Counts must be whole numbers }
+        effectiveFrom: { type: string, format: date }
+        reason: { type: string }
+        evidence: { type: string, description: The source document (minutes, capital calculation, HR report) }
+    CorporateRegisterEntry:
+      type: object
+      required: [id, entityId, fact, value, effectiveFrom, version, reason, evidence, status, proposedBy, proposedAt]
+      properties:
+        id: { type: string, format: uuid }
+        entityId: { type: string }
+        fact: { type: string, enum: [SHARE_CAPITAL, REGULATORY_CAPITAL, CAPITAL_REQUIREMENT, EMPLOYEES_COUNT, QUALIFYING_SHAREHOLDERS_COUNT, BOARD_OF_DIRECTORS_MEMBERS, SUPERVISORY_BOARD_MEMBERS, DIVIDEND_PAID_OR_PLANNED] }
+        value: { type: number }
+        effectiveFrom: { type: string, format: date }
+        version: { type: integer, minimum: 1 }
+        reason: { type: string }
+        evidence: { type: string }
+        status: { type: string, enum: [PROPOSED, APPROVED, REJECTED] }
+        proposedBy: { type: string }
+        proposedAt: { type: string, format: date-time }
+        decidedBy: { type: [string, 'null'] }
+        decidedAt: { type: [string, 'null'], format: date-time }
     AssembleReturnRequest:
       type: object
       required: [catalogueId, returnCode, entityId, period]
