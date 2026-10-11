@@ -71,6 +71,8 @@ def action(pr: dict, head: str, base: str, required: list[str], reviews: int) ->
         raise ValueError("selected deploy PR carries a blocked deployment hold")
     if pr.get("headRefOid") != head or pr.get("baseRefOid") != base:
         raise ValueError("selected deploy PR head or base changed; retry selection")
+    if pr.get("baseRefName") != "main":
+        raise ValueError("selected deploy PR does not target main")
     head_name = str(pr.get("headRefName", ""))
     if head_name.startswith(DEPLOY_PREFIXES[1]):
         raise ValueError("Admin UI deploy held until #12211 image provenance is verified")
@@ -122,6 +124,15 @@ def verify_signatures(repo: str, commits: list[dict]) -> None:
             raise ValueError(f"deploy PR commit {sha!r} lacks a verified signature")
 
 
+def verified_action(pr: dict, head: str, base: str, required: list[str],
+                    reviews: int, repo: str) -> str:
+    choice = action(pr, head, base, required, reviews)
+    # Auto-merge is a write too: do not arm an unsigned commit and rely on a later
+    # check to happen before GitHub merges it.
+    verify_signatures(repo, pr.get("commits") or [])
+    return choice
+
+
 def self_test() -> None:
     sha = "a" * 40
     base = "b" * 40
@@ -133,6 +144,7 @@ def self_test() -> None:
                   {"type": "pull_request", "parameters": {"required_approving_review_count": 1}}]}
     checks, reviews = required_policy(policy)
     pr = {"state": "OPEN", "isDraft": False, "headRefName": DEPLOY_PREFIXES[0] + base,
+          "baseRefName": "main", "commits": [{"oid": sha}],
           "headRefOid": sha, "baseRefOid": base, "mergeStateStatus": "CLEAN",
           "reviewDecision": "APPROVED", "statusCheckRollup": [{"name": "all-green", "conclusion": "SUCCESS"}]}
     assert (checks, reviews) == (["all-green"], 1)
@@ -158,6 +170,7 @@ def self_test() -> None:
     for bad, h, b, r in [
         ({**pr, "headRefOid": "c" * 40}, sha, base, 0),
         ({**pr, "baseRefOid": "c" * 40}, sha, base, 0),
+        ({**pr, "baseRefName": "release"}, sha, base, 0),
         ({**pr, "statusCheckRollup": []}, sha, base, 0),
         ({**pr, "labels": [{"name": "blocked"}]}, sha, base, 0),
         ({**pr, "reviewDecision": ""}, sha, base, 1),
@@ -195,14 +208,17 @@ def self_test() -> None:
     original_gh = globals()["gh"]
     try:
         globals()["gh"] = lambda *_: {"commit": {"verification": {"verified": False}}}
-        try:
-            verify_signatures("example/open-bank", [{"oid": sha}])
-        except ValueError:
-            pass
-        else:
-            raise AssertionError("unverified deploy commit accepted")
+        for state in ("CLEAN", "BLOCKED", "PENDING"):
+            try:
+                verified_action({**pr, "mergeStateStatus": state}, sha, base, checks,
+                                reviews, "example/open-bank")
+            except ValueError as exc:
+                assert "verified signature" in str(exc)
+            else:
+                raise AssertionError(f"unverified deploy commit accepted in {state}")
         globals()["gh"] = lambda *_: {"commit": {"verification": {"verified": True}}}
-        verify_signatures("example/open-bank", [{"oid": sha}])
+        assert verified_action({**pr, "mergeStateStatus": "BLOCKED"}, sha, base,
+                               checks, reviews, "example/open-bank") == "ARM"
     finally:
         globals()["gh"] = original_gh
     print("deploy-window-mutate: CLEAN/BLOCKED/PENDING, Admin UI hold, review, checks and SHA guards OK")
@@ -215,14 +231,14 @@ def main(args: argparse.Namespace) -> None:
     if live_main(repo) != args.selected_main:
         raise ValueError("main changed after selection; retry next flush")
     pr = gh("pr", "view", str(args.number), "--repo", repo, "--json",
-            "state,isDraft,labels,headRefName,headRefOid,baseRefOid,mergeStateStatus,reviewDecision,statusCheckRollup,commits,id")
+            "state,isDraft,labels,headRefName,headRefOid,baseRefName,baseRefOid,mergeStateStatus,reviewDecision,statusCheckRollup,commits,id")
     listing = gh("api", f"repos/{repo}/rulesets")
     matches = [r for r in listing if r.get("name") == "main-protection" and r.get("enforcement") == "active"]
     if len(matches) != 1:
         raise ValueError("cannot identify one active main-protection ruleset")
     policy = gh("api", f"repos/{repo}/rulesets/{matches[0]['id']}")
     required, reviews = required_policy(policy)
-    choice = action(pr, args.selected_head, args.selected_main, required, reviews)
+    choice = verified_action(pr, args.selected_head, args.selected_main, required, reviews, repo)
     open_prs = gh("pr", "list", "--repo", repo, "--state", "open", "--limit", "200",
                   "--json", "number,headRefName,autoMergeRequest")
     armed = [p["number"] for p in open_prs if p["number"] != args.number and
@@ -247,10 +263,10 @@ def main(args: argparse.Namespace) -> None:
     if live_main(repo) != args.selected_main:
         raise ValueError("main changed before deploy mutation; retry next flush")
     current = gh("pr", "view", str(args.number), "--repo", repo, "--json",
-                 "state,isDraft,labels,headRefName,headRefOid,baseRefOid,mergeStateStatus,reviewDecision,statusCheckRollup,commits,id")
+                 "state,isDraft,labels,headRefName,headRefOid,baseRefName,baseRefOid,mergeStateStatus,reviewDecision,statusCheckRollup,commits,id")
     if required_policy(gh("api", f"repos/{repo}/rulesets/{matches[0]['id']}")) != (required, reviews):
         raise ValueError("main ruleset changed during deploy verification; retry selection")
-    if action(current, args.selected_head, args.selected_main, required, reviews) != choice:
+    if verified_action(current, args.selected_head, args.selected_main, required, reviews, repo) != choice:
         raise ValueError("deploy PR state changed during verification; retry next flush")
     if choice == "ARM":
         # GraphQL has no expected-head parameter. Narrow its race with a final live read;
@@ -258,15 +274,14 @@ def main(args: argparse.Namespace) -> None:
         if live_main(repo) != args.selected_main:
             raise ValueError("main changed before arming; retry next flush")
         latest = gh("pr", "view", str(args.number), "--repo", repo, "--json",
-                    "state,isDraft,labels,headRefName,headRefOid,baseRefOid,mergeStateStatus,reviewDecision,statusCheckRollup,id")
-        if latest.get("id") != current["id"] or action(latest, args.selected_head,
-                args.selected_main, required, reviews) != "ARM":
+                    "state,isDraft,labels,headRefName,headRefOid,baseRefName,baseRefOid,mergeStateStatus,reviewDecision,statusCheckRollup,commits,id")
+        if latest.get("id") != current["id"] or verified_action(latest, args.selected_head,
+                args.selected_main, required, reviews, repo) != "ARM":
             raise ValueError("deploy PR changed before arming; retry next flush")
         gh("api", "graphql", "-f", "query=mutation($id: ID!) { enablePullRequestAutoMerge(input: {pullRequestId: $id, mergeMethod: SQUASH}) {pullRequest {number}}}",
            "-f", f"id={current['id']}")
         print(f"auto-merge armed on deploy PR #{args.number}")
         return
-    verify_signatures(repo, current.get("commits") or [])
     if live_main(repo) != args.selected_main:
         raise ValueError("main changed before normal merge; retry next flush")
     response = gh("api", "-X", "PUT", f"repos/{repo}/pulls/{args.number}/merge",
