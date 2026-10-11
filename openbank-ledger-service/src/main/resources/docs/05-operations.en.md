@@ -33,6 +33,12 @@ The build uses the `openbank.quarkus-service` convention plugin (ADR-0049 D1). K
 
 Management endpoints live on the dedicated **management port 8085** (`quarkus.management.root-path: /q`); the business API is on **8101**.
 
+### API authentication on the production listeners
+
+The production HTTPS listener requires a trusted client certificate for the TLS connection. For every `/api/*` request, both that listener and the plain HTTP listener require an OIDC bearer token: a certificate alone cannot establish the API principal. A certificate-only request must receive 401, while a valid bearer token proceeds to the existing role and authorization checks. The listener parity integration test exercises both paths with production listener settings.
+
+This listener rule does not itself enable OPA enforcement. `AUTHZ_ENFORCE` defaults to `false` in `application.yaml`; the deployment must explicitly set it to `true` for OPA decisions to block requests. The four-eyes enforcement switch is independent and also defaults to `false`.
+
 ## Configuration
 
 | Env var | Default | Purpose |
