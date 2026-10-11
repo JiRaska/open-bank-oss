@@ -70,3 +70,15 @@ calculated NAVs. For older NAVs without recorded positions, portfolio figures
 are unknown rather than an empty portfolio. Basis NAV identifiers and a
 fingerprint identify the report inputs. This read model supplies figures;
 it does not submit a statutory return to the regulator.
+
+## Observability
+
+The service publishes `openbank.pension_fund.*` metrics: NAV publication lag,
+age and corrections, order and strategy-change outcomes, settled amounts,
+order replays, market-price lookups and optimistic-lock conflicts on unit
+holdings (counted by the REST mappers before they answer 409). State gauges
+(net assets, NAV per unit, units outstanding, pending orders and queue ages)
+are refreshed every minute by a scheduled job; a refresh that fails keeps the
+previous values and stops recording success, so the workflow-liveness gauge
+goes stale and alerts. Alert rules live in `prometheus-rules-pension-fund.yaml`
+and the runbook in `docs/runbooks/pension-alerts.md`.

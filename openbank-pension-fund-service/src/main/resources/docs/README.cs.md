@@ -68,3 +68,15 @@ vypočtenou NAV se ukládají její pozice. U starších NAV bez zaznamenaných 
 jsou údaje portfolia neznámé, nikoli prázdné. Identifikátory podkladových NAV
 a fingerprint určují vstupy výkazu. Tento model poskytuje údaje; nepodává
 regulátorovi statutární výkaz.
+
+## Pozorovatelnost
+
+Služba publikuje metriky `openbank.pension_fund.*`: zpoždění, stáří a opravy
+publikace NAV, výsledky pokynů a změn strategie, vypořádané částky, opakované
+pokyny, dotazy na tržní ceny a konflikty optimistického zamykání na držbách
+jednotek (počítají je REST mappery před odpovědí 409). Stavové gauge (čistá
+aktiva, NAV na jednotku, jednotky v oběhu, čekající pokyny a stáří front)
+obnovuje každou minutu plánovaná úloha; neúspěšné obnovení ponechá předchozí
+hodnoty a nezaznamená úspěch, takže gauge živosti workflow zestárne a spustí
+alert. Pravidla alertů jsou v `prometheus-rules-pension-fund.yaml`, runbook v
+`docs/runbooks/pension-alerts.md`.
