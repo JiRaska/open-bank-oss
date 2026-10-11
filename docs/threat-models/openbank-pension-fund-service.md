@@ -107,3 +107,8 @@ Any additional caller using 8443 must supply a trusted certificate. Rollback rev
 client URL/policy cutovers first; then required-client-auth can be removed while
 the HTTP compatibility listener remains. No deployment readiness is inferred from
 this manifest or a local health test.
+
+Client authentication is fixed at Quarkus augmentation time. The `%prod` profile therefore
+sets `quarkus.http.ssl.client-auth=required` and retains the HTTP compatibility listener;
+the matching deployment variable alone cannot establish required client authentication.
+Rollout verification must use the reviewed image built from this configuration.
