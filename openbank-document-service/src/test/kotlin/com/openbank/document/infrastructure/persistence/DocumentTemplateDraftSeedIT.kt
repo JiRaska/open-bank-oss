@@ -22,6 +22,7 @@ import kotlinx.coroutines.async
 import org.assertj.core.api.Assertions.assertThat
 import org.hibernate.reactive.mutiny.Mutiny
 import org.junit.jupiter.api.Test
+import java.security.MessageDigest
 import java.util.UUID
 
 @QuarkusTest
@@ -38,6 +39,66 @@ class DocumentTemplateDraftSeedIT {
 
     private fun <T> onContext(block: suspend () -> T): T = VertxContextSupport.subscribeAndAwait {
         CoroutineScope(Dispatchers.Unconfined).async { block() }.asUni()
+    }
+
+    @Test
+    fun `migration fingerprints match the eight current seed bodies`() {
+        val migration = requireNotNull(
+            javaClass.classLoader.getResource("db/migration/V15__retire_unreviewed_pension_seed_publications.sql"),
+        ).readText()
+        val pattern = Regex("'([0-9a-f-]+)'::uuid, '([^']+)', '([0-9a-f]{32})'")
+        val fingerprints = pattern.findAll(migration).associate { match ->
+            match.groupValues[2] to (match.groupValues[1] to match.groupValues[3])
+        }
+        val actual = DocumentTemplateSeed.templates.filter { it.code.startsWith("pension-") }.associate { template ->
+            val digest = MessageDigest.getInstance("MD5").digest(template.bodyHtml.toByteArray(Charsets.UTF_8))
+                .joinToString("") { "%02x".format(it) }
+            template.code to (template.id.toString() to digest)
+        }
+        assertThat(fingerprints).hasSize(8).isEqualTo(actual)
+    }
+
+    @Test
+    fun `migration demotes only the original published legal draft`() {
+        val draft = DocumentTemplateSeed.templates.first { it.code == "pension-dps-key-information-cs" }
+        val migration = requireNotNull(
+            javaClass.classLoader.getResource("db/migration/V15__retire_unreviewed_pension_seed_publications.sql"),
+        ).readText()
+
+        try {
+            onContext {
+                sf.withTransaction { session ->
+                    session.find(DocumentTemplateEntity::class.java, draft.id).invoke { row ->
+                        row.status = TemplateStatus.PUBLISHED
+                    }.replaceWithVoid()
+                }.awaitSuspending()
+                sf.withTransaction { session ->
+                    session.createNativeQuery<Any>(migration).executeUpdate()
+                }.awaitSuspending()
+                assertThat(repo.findById(draft.id)?.status).isEqualTo(TemplateStatus.DRAFT)
+
+                // A changed body at the same fixed ID is not proven to be the original seed.
+                sf.withTransaction { session ->
+                    session.find(DocumentTemplateEntity::class.java, draft.id).invoke { row ->
+                        row.bodyHtml += "<!-- changed after seeding -->"
+                        row.status = TemplateStatus.PUBLISHED
+                    }.replaceWithVoid()
+                }.awaitSuspending()
+                sf.withTransaction { session ->
+                    session.createNativeQuery<Any>(migration).executeUpdate()
+                }.awaitSuspending()
+                assertThat(repo.findById(draft.id)?.status).isEqualTo(TemplateStatus.PUBLISHED)
+            }
+        } finally {
+            onContext {
+                sf.withTransaction { session ->
+                    session.find(DocumentTemplateEntity::class.java, draft.id).invoke { row ->
+                        row.bodyHtml = draft.bodyHtml
+                        row.status = TemplateStatus.DRAFT
+                    }.replaceWithVoid()
+                }.awaitSuspending()
+            }
+        }
     }
 
     @Test
