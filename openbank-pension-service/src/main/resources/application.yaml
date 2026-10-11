@@ -245,6 +245,20 @@ mp:
         failure-strategy: dead-letter-queue
         dead-letter-queue:
           topic: openbank.dlq.pension.domestic-payment-events-in
+    outgoing:
+      # Participant notices -> notification-service (KafkaParticipantNotifier). Without this block the
+      # topic falls back to the CHANNEL name, which has no KafkaTopic and no Write ACL, so every send
+      # fails the moment openbank.pension.notifications.enabled flips. NESTED keys only (#686/#2945).
+      # The topic matches the Write ACL in kafka-pension-mtls.yaml.
+      participant-notifications-out:
+        connector: smallrye-kafka
+        topic: openbank.notification.requests
+        client:
+          id: pension-service-notif-${quarkus.uuid}
+        key:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
+        value:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
 
 opa:
   url: "${OPA_URL:http://localhost:8181}"
@@ -293,6 +307,9 @@ authz:
       incoming:
         domestic-payment-events-in:
           connector: smallrye-in-memory
+      outgoing:
+        participant-notifications-out:
+          connector: smallrye-in-memory
 
 "%test":
   openbank:
@@ -333,6 +350,9 @@ authz:
     messaging:
       incoming:
         domestic-payment-events-in:
+          connector: smallrye-in-memory
+      outgoing:
+        participant-notifications-out:
           connector: smallrye-in-memory
 
 "%prod":

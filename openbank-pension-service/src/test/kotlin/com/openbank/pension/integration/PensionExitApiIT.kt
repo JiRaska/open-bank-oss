@@ -107,6 +107,19 @@ class PensionExitApiIT {
 
     @Test
     @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    fun `a retried termination quote with the same key returns the original notice, not a second one`() {
+        val id = activeContract()
+        fund.setValue(id, BigDecimal("150000.00"))
+        val key = UUID.randomUUID().toString()
+        val first: String = req(key = key).post("$contracts/$id/exit/termination/quote").then().statusCode(201)
+            .extract().path("noticeId")
+        req(key = key).post("$contracts/$id/exit/termination/quote").then().statusCode(201)
+            .header("Idempotent-Replayed", "true")
+            .body("noticeId", equalTo(first))
+    }
+
+    @Test
+    @TestSecurity(user = "edge", roles = ["ROLE_API"])
     fun `early termination pays exactly the signed quote after the notice period, once`() {
         val id = activeContract()
         fund.setValue(id, BigDecimal("150000.00"))

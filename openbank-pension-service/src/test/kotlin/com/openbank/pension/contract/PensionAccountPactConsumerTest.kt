@@ -21,7 +21,9 @@ import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
 import jakarta.ws.rs.Path
 import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.MethodOrderer
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.TestMethodOrder
 import org.junit.jupiter.api.extension.ExtendWith
 import java.util.UUID
 
@@ -33,6 +35,7 @@ import java.util.UUID
  * pact (#12419); replayed by `AccountPactFolderProviderVerificationTest` and the negative-auth twin.
  */
 @ExtendWith(PactConsumerTestExt::class)
+@TestMethodOrder(MethodOrderer.MethodName::class)
 @PactTestFor(providerName = "openbank-account-service", pactVersion = PactSpecVersion.V3)
 class PensionAccountPactConsumerTest {
 

@@ -5,6 +5,9 @@
 package com.openbank.pension.infrastructure.rest
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.SerializationFeature
+import com.openbank.libs.idempotency.IdempotencyKeyReusedException
+import com.openbank.libs.idempotency.RequestFingerprint
 import io.quarkus.security.identity.SecurityIdentity
 import io.smallrye.mutiny.Uni
 import io.vertx.mutiny.sqlclient.Pool
@@ -16,11 +19,12 @@ import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.jboss.resteasy.reactive.server.ServerRequestFilter
 import org.jboss.resteasy.reactive.server.ServerResponseFilter
+import java.io.ByteArrayInputStream
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 
 /**
- * Replay protection for every pension-service POST (ADR-0334 S8). Each handler REQUIRES an
+ * Replay protection for every pension-service POST, PUT and PATCH (ADR-0334 S8). Each handler REQUIRES an
  * `Idempotency-Key` ([requireIdempotencyKey]); this filter makes the key mean something: the first
  * successful (2xx) response for a key is stored, and a retry with the same key — same caller, same
  * participant, same method and path — is answered from the store WITHOUT running the handler again.
@@ -30,7 +34,13 @@ import java.security.MessageDigest
  * Scope is `(principal, X-Customer-Party-Id, method, path, key)`: the edge relays every customer
  * under one service-account, so the party header is part of the scope, or two customers choosing
  * the same key would read each other's response. Failed attempts (4xx/5xx) are not stored, so a
- * corrected retry runs. Residual, as documented in the threat model: two concurrent FIRST attempts
+ * corrected retry runs.
+ *
+ * The key is bound to the REQUEST, not only to the route: the stored row carries a fingerprint
+ * ([RequestFingerprint] over method, path and the key-sorted JSON body). The same key with the same
+ * body replays; the same key with a DIFFERENT body is refused 409 `IDEMPOTENCY_KEY_REUSED` (libs
+ * mapper) — replaying would answer a different instruction with the first one's result. Rows written
+ * before the fingerprint existed carry none and are replayed as before. Residual, as documented in the threat model: two concurrent FIRST attempts
  * with one key can both run (the store is written after the response); every money-moving step
  * below this layer is idempotent on its own key or unique index as well.
  */
@@ -45,12 +55,18 @@ class IdempotencyReplayFilter {
     @Inject
     lateinit var mapper: ObjectMapper
 
-    @ServerRequestFilter
+    // readBody: the body is buffered before this runs, so it can be fingerprinted and then handed
+    // back to the resource method unchanged.
+    @ServerRequestFilter(readBody = true)
     fun replay(request: ContainerRequestContext): Uni<Response?> {
         val scope = scopeOf(request) ?: return Uni.createFrom().nullItem()
+        val fingerprint = fingerprintOf(request)
         request.setProperty(SCOPE_PROPERTY, scope)
+        request.setProperty(FINGERPRINT_PROPERTY, fingerprint)
         return pool.preparedQuery(SELECT).execute(Tuple.of(scope)).map { rows ->
             val row = rows.firstOrNull() ?: return@map null
+            val stored = row.getString("request_hash")
+            if (stored != null && stored != fingerprint) throw IdempotencyKeyReusedException()
             request.setProperty(REPLAYED_PROPERTY, true)
             Response.status(row.getInteger("status"))
                 .entity(row.getString("response_body"))
@@ -67,13 +83,39 @@ class IdempotencyReplayFilter {
             return Uni.createFrom().voidItem()
         }
         val body = response.entity?.let { if (it is String) it else mapper.writeValueAsString(it) }
-        return pool.preparedQuery(INSERT).execute(Tuple.of(scope, response.status, body))
+        val fingerprint = request.getProperty(FINGERPRINT_PROPERTY) as? String
+        return pool.preparedQuery(INSERT).execute(Tuple.of(scope, response.status, body, fingerprint))
             .replaceWithVoid()
             .onFailure().recoverWithItem { _ -> null }
     }
 
+    /** Method, path and the key-sorted JSON body; a non-JSON body is hashed verbatim. */
+    private fun fingerprintOf(request: ContainerRequestContext): String {
+        // readBody buffers the body only for a method that declares an entity parameter. A method
+        // without one ignores any body, so the request it answers is fully named by method + path;
+        // reading the unbuffered stream there would block the IO thread, so it is not read at all.
+        val bytes = if (request.hasEntity()) {
+            runCatching { request.entityStream?.readAllBytes() }.getOrNull()
+        } else {
+            null
+        }
+        if (bytes == null) return RequestFingerprint.of(request.method, request.uriInfo.path, "")
+        request.entityStream = ByteArrayInputStream(bytes)
+        val raw = String(bytes, StandardCharsets.UTF_8)
+        val canonical = if (raw.isBlank()) {
+            ""
+        } else {
+            runCatching {
+                canonicalWriter.writeValueAsString(mapper.readValue(raw, Any::class.java))
+            }.getOrDefault(raw)
+        }
+        return RequestFingerprint.of(request.method, request.uriInfo.path, canonical)
+    }
+
+    private val canonicalWriter by lazy { mapper.writer().with(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS) }
+
     private fun scopeOf(request: ContainerRequestContext): String? {
-        if (request.method != "POST" || !request.uriInfo.path.startsWith(API_PREFIX)) return null
+        if (request.method !in MUTATING || !request.uriInfo.path.startsWith(API_PREFIX)) return null
         val key = request.getHeaderString(IDEMPOTENCY_KEY_HEADER)?.takeIf {
             it.isNotBlank() && it.length <= MAX_IDEMPOTENCY_KEY_LENGTH
         } ?: return null
@@ -90,10 +132,14 @@ class IdempotencyReplayFilter {
         const val REPLAY_HEADER = "Idempotent-Replayed"
         const val SCOPE_PROPERTY = "pension.idempotency.scope"
         const val REPLAYED_PROPERTY = "pension.idempotency.replayed"
+        const val FINGERPRINT_PROPERTY = "pension.idempotency.fingerprint"
+        val MUTATING = setOf("POST", "PUT", "PATCH")
         val SUCCESS = 200..299
-        const val SELECT = "SELECT status, response_body FROM pension_idempotency_records WHERE scope_hash = $1"
+        const val SELECT =
+            "SELECT status, response_body, request_hash FROM pension_idempotency_records WHERE scope_hash = $1"
         const val INSERT =
-            "INSERT INTO pension_idempotency_records (scope_hash, status, response_body) VALUES ($1, $2, $3) " +
+            "INSERT INTO pension_idempotency_records (scope_hash, status, response_body, request_hash) " +
+                "VALUES ($1, $2, $3, $4) " +
                 "ON CONFLICT (scope_hash) DO NOTHING"
     }
 }

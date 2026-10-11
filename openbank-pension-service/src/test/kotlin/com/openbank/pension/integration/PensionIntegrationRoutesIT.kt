@@ -109,6 +109,23 @@ class PensionIntegrationRoutesIT {
 
     @Test
     @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    fun `the same key with a different body is refused 409 and never replays the first response`() {
+        val key = UUID.randomUUID().toString()
+        val first = edge(key = key).body(startBody).post("/api/v2/pension/onboarding/applications")
+            .then().statusCode(201).extract()
+        // Key order and whitespace do not change the request: still a replay.
+        val reordered = startBody.replace("{\"kind\":\"NEW_CONTRACT\",", "{ ").removeSuffix("}") +
+            ", \"kind\": \"NEW_CONTRACT\"}"
+        edge(key = key).body(reordered).post("/api/v2/pension/onboarding/applications")
+            .then().statusCode(201).header("Idempotent-Replayed", "true")
+            .body("applicationId", equalTo(first.path<String>("applicationId")))
+        val different = startBody.replace("\"amount\":1000", "\"amount\":2000")
+        edge(key = key).body(different).post("/api/v2/pension/onboarding/applications")
+            .then().statusCode(409).body("code", equalTo("IDEMPOTENCY_KEY_REUSED"))
+    }
+
+    @Test
+    @TestSecurity(user = "edge", roles = ["ROLE_API"])
     fun `a POST without an Idempotency-Key is refused before anything runs`() {
         edge(key = null).body(startBody).post("/api/v2/pension/onboarding/applications").then().statusCode(400)
         edge(key = null).body("{}").post("/api/v2/pension/simulations").then().statusCode(400)
