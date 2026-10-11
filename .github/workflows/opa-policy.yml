@@ -167,7 +167,10 @@ jobs:
             # the derived rules/agents data the bundle mounts.
             EXTRA=()
             while IFS= read -r x; do EXTRA+=("$x"); done < <(sed -n 's/^# opa-test-with: *//p' "$t")
-            DATA=()
+            # Governance data is mounted as data.rules in live bundles. By default unit tests load
+            # its generated source so service tests can inject the real list when exercising
+            # rollout compatibility exclusions (tax-reporting #12547).
+            DATA=(openbank-libs/governance/rules-opa-data.yaml)
             if grep -q '^# opa-test-data: real$' "$t"; then
               D=$(mktemp -d); mkdir -p "$D/rules" "$D/agents"
               cp openbank-libs/governance/rules-opa-data.yaml "$D/rules/data.yaml"

@@ -3,7 +3,8 @@
 openapi: 3.1.0
 info:
   title: Tax Reporting Service API
-  version: 1.1.0
+  # 1.2.0: additive (#12495) — corporate register routes feeding ČNB PSP 32-04, 50-04 and 40-01.
+  version: 1.2.0
   description: >
     §38d Vyúčtování daně vybírané srážkou podle zvláštní sazby daně — the platform's system of
     record for the monthly withholding-tax return (ADR-0180). Consumes
