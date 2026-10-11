@@ -13,7 +13,7 @@
 //
 // The canonical service key is the **Kubernetes Deployment / Service name**
 // (e.g. `account-service`, `product-catalog`) — the same key the proxy's
-// SERVICE_MAP and the discovery feed use. UI-local short ids (`account`,
+// the BFF allowlist and the discovery feed use. UI-local short ids (`account`,
 // `catalog`, `sepa`, …) must be resolved to this key before building a BFF URL.
 
 export const BFF_PREFIX = '/api/svc'

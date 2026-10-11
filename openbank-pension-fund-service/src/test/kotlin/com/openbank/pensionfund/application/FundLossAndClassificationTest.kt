@@ -19,6 +19,7 @@ import com.openbank.pensionfund.application.usecase.UnitRegisterService
 import com.openbank.pensionfund.domain.model.ClassificationCorrectionStatus
 import com.openbank.pensionfund.domain.model.ClassificationTarget
 import com.openbank.pensionfund.domain.model.FourEyesViolationException
+import com.openbank.pensionfund.domain.model.FundProfitAndLoss
 import com.openbank.pensionfund.domain.model.InstrumentClass
 import com.openbank.pensionfund.domain.model.OrderType
 import kotlinx.coroutines.runBlocking
@@ -126,6 +127,25 @@ class FundLossAndClassificationTest {
         listOf(pl.revaluationGains, pl.revaluationLosses, pl.managementFees).forEach {
             assertThat(it!!.signum()).isGreaterThanOrEqualTo(0)
         }
+        // Deprecated 1.1.0 fields, built from the separate lines: gains + positive other result,
+        // losses + fees. A loss month is a large expense, never a negative income.
+        assertThat(pl.income).isEqualByComparingTo("50.00")
+        assertThat(pl.expenses).isEqualByComparingTo("1023.47")
+        assertThat(pl.income - pl.expenses).isEqualByComparingTo(pl.profitLoss)
+    }
+
+    @Test
+    fun `deprecated income and expenses move a negative other result to expenses, never below zero`() {
+        val pl = FundProfitAndLoss(
+            revaluationGains = BigDecimal("120.00"),
+            revaluationLosses = BigDecimal("30.00"),
+            otherInvestmentResult = BigDecimal("-40.00"),
+            managementFees = BigDecimal("5.00"),
+            profitLoss = BigDecimal("45.00"),
+        )
+        assertThat(pl.income).isEqualByComparingTo("120.00")
+        assertThat(pl.expenses).isEqualByComparingTo("75.00")
+        assertThat(pl.income - pl.expenses).isEqualByComparingTo(pl.profitLoss)
     }
 
     @Test
@@ -142,6 +162,11 @@ class FundLossAndClassificationTest {
         assertThat(pl.linesUnavailableReason).contains("2026-02-28")
         // The measured result and the fee are still known.
         assertThat(pl.profitLoss).isEqualByComparingTo("-973.47")
+        // The deprecated fields stay non-null (1.1.0 published them required) and non-negative:
+        // the netted investment result -950.00 is all expense, on top of the 23.47 fee.
+        assertThat(pl.income).isEqualByComparingTo("0.00")
+        assertThat(pl.expenses).isEqualByComparingTo("973.47")
+        assertThat(pl.income - pl.expenses).isEqualByComparingTo(pl.profitLoss)
     }
 
     @Test
