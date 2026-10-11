@@ -35,6 +35,10 @@ escalating a consent is a direct path to unauthorized data access or payment ini
 
 - Mutations must be bound to an authenticated party + SCA (sca-service) per PSD2 RTS.
 - OPA enforce; consent issuance/activation should not be `@PermitAll`.
+- The suppression resource requires an authenticated `ROLE_API`, `ROLE_OPERATOR`, or `ROLE_ADMIN`
+  caller at the JAX-RS boundary. Create and revoke additionally require `ROLE_OPERATOR` or
+  `ROLE_ADMIN`; the read path retains `ROLE_API` for the contact-policy service. OPA checks remain
+  separate and narrower, including the human-operator restriction on writes.
 
 ## 4. STRIDE
 
@@ -56,6 +60,15 @@ escalating a consent is a direct path to unauthorized data access or payment ini
   `ConsentOutboxDispatcher`), closing the prior dual-write that could drop it entirely.
 
 ## 6. Change log
+
+- **2026-10-11** — Suppression REST authentication is enforced independently of the OPA advisory
+  setting (#12544). The existing `@Authorize` checks alone allowed an anonymous principal to
+  reach the PDP; in advisory mode that could expose the active suppression list or allow writes.
+  Class-level `@RolesAllowed` now rejects anonymous calls, while method-level roles restrict
+  create/revoke to operators and admins. The M2M read role remains admitted; OPA still decides
+  the fine-grained action. This closes a spoofing and information-disclosure gap at the inbound
+  REST boundary without adding an endpoint or caller. Reverting the JAX-RS role gate would restore
+  the advisory-mode exposure; retain the gate during rollback of unrelated changes.
 
 - **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `consent_outbox` kept every SENT row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; its v1 repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`. PENDING, FAILED, DISPATCHING and DEAD rows are never touched. Information disclosure: shrinks the window in which a database read (replica, backup, operator query) exposes past event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now comes from the broker or audit-service, not this table.
 
