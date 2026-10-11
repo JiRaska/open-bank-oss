@@ -97,9 +97,10 @@ describe('ledger backfill — four-eyes in the console', () => {
   })
 
   it('executes only after explicit confirmation, with execute=true', async () => {
+    const loanId = '8169e954-b42d-4bab-be5f-4c160263f098'
     router = (url, init) => {
       if (url.includes('/requests/appr-1/execute')) {
-        return json({ execution: { requestId: 'appr-1', executed: true, complete: true, loans: [{ loanId: 'l1', status: 'POSTED', legsPosted: 9, legsTotal: 9 }] }, glTotals: [] })
+        return json({ execution: { requestId: 'appr-1', executed: true, complete: true, loans: [{ loanId, status: 'POSTED', legsPosted: 9, legsTotal: 9 }] }, glTotals: [] })
       }
       if (url.includes('/ledger-backfill/requests') && !init?.method) return json({ requests: [APPROVED] })
       return json({}, 404)
@@ -112,6 +113,10 @@ describe('ledger backfill — four-eyes in the console', () => {
     fireEvent.click(screen.getByRole('checkbox'))
     fireEvent.click(post)
     await screen.findByText(/Backfill complete|Doúčtování dokončeno/)
+    expect(screen.getByText(/^(Úvěr|Loan) 1$/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Kopírovat ID úvěru|Copy loan ID/ })).toBeTruthy()
+    expect(screen.queryByText(loanId)).toBeNull()
+    expect(screen.getByTitle(loanId).textContent).toBe('8169e954…')
     expect(calls.find(c => c.url.includes('/execute'))!.url).toContain('/requests/appr-1/execute?execute=true')
   })
 })

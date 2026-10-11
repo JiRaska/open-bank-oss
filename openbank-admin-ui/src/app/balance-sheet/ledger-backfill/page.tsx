@@ -21,7 +21,7 @@ import { useSession } from 'next-auth/react'
 import { BookOpen, RefreshCw } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { PageHeader, StatCard, StatusBadge } from '@/components/ui'
+import { HumanReference, PageHeader, StatCard, StatusBadge } from '@/components/ui'
 import type { Tone } from '@/components/ui/tone'
 import { backfillUrl, getJson, sendJson, type WriteResult } from '@/components/balance-sheet/api'
 import {
@@ -240,7 +240,17 @@ function LedgerBackfill() {
             {plan.plan.loans.some(l => l.unsupportedReason) && (
               <p role="note" style={{ fontSize: 12, color: 'var(--danger-text)' }}>
                 {t('Nepodporované úvěry: ', 'Unsupported loans: ')}
-                {plan.plan.loans.filter(l => l.unsupportedReason).map(l => `${l.loanId} (${l.unsupportedReason})`).join('; ')}
+                {plan.plan.loans.filter(l => l.unsupportedReason).map((l, index) => (
+                  <span key={l.loanId}>
+                    {index > 0 && '; '}
+                    <HumanReference
+                      label={t(`Úvěr ${index + 1}`, `Loan ${index + 1}`)}
+                      reference={l.loanId}
+                      copyLabel={t('Kopírovat ID úvěru', 'Copy loan ID')}
+                    />
+                    {` (${l.unsupportedReason})`}
+                  </span>
+                ))}
               </p>
             )}
             {perms.propose && (
@@ -270,9 +280,15 @@ function LedgerBackfill() {
               </tr>
             </thead>
             <tbody>
-              {execution.execution.loans.map(l => (
+              {execution.execution.loans.map((l, index) => (
                 <tr key={l.loanId}>
-                  <td>{l.loanId}</td>
+                  <td>
+                    <HumanReference
+                      label={t(`Úvěr ${index + 1}`, `Loan ${index + 1}`)}
+                      reference={l.loanId}
+                      copyLabel={t('Kopírovat ID úvěru', 'Copy loan ID')}
+                    />
+                  </td>
                   <td><StatusBadge status={l.status} tone={l.status === 'POSTED' ? 'success' : 'danger'} /></td>
                   <td style={{ textAlign: 'right' }}>{`${l.legsPosted} / ${l.legsTotal}`}</td>
                 </tr>
