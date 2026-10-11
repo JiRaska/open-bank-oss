@@ -134,6 +134,17 @@ async function main() {
   assert.equal(legacy.state, 'open')
   assert.match(legacy.body, /build \(openbank-ledger-service\) \/ openbank-ledger-service \(contract\)/)
   assert.doesNotMatch(legacy.body, /- `all-green` \[failure\]/)
+  // The next run, 38170756443 at b433e3e18, built tax-reporting only.
+  // Watch 38171689719 also falsely closed #4195 on this scoped green.
+  await applyVerdict(github, context, verdict(38170756443, 'green', [], [
+    'Detect changed services',
+    'verification-metadata (openbank-tax-reporting-service)',
+    'build (openbank-tax-reporting-service) / openbank-tax-reporting-service (build)',
+    'build (openbank-tax-reporting-service) / openbank-tax-reporting-service (contract)',
+    'all-green',
+  ]))
+  assert.equal(legacy.state, 'open')
+  assert.match(legacy.body, /build \(openbank-ledger-service\) \/ openbank-ledger-service \(contract\)/)
   // A reused job name can succeed after its provider step is skipped or absent.
   // The exact legacy failure must survive both outcomes.
   await applyVerdict(github, context, verdict(105, 'green', [], [
