@@ -1,6 +1,7 @@
 # pension-service: participant-side pension contracts (ADR-0334 S1). Reactive Postgres datasource
-# + Flyway JDBC migrations against the single-owner CNPG cluster. Publishes and consumes nothing
-# yet and calls no other service. OIDC bearer validation points at Keycloak. Reachable only
+# + Flyway JDBC migrations against the single-owner CNPG cluster. Publishes participant notices
+# and consumes domestic-payment status; onboarding also calls approved internal services.
+# OIDC bearer validation points at Keycloak. Reachable only
 # in-cluster via ClusterIP, no ingress — the customer path is customer-edge.
 apiVersion: apps/v1
 kind: Deployment
@@ -141,8 +142,8 @@ spec:
               value: http://sdd-service.sdd.svc:8129
             - name: DOMESTIC_PAYMENT_URL
               value: http://domestic-payment.payments.svc:8116
-            # Kafka mTLS (ADR-0137, kafka-pension-mtls.yaml) — consumes domestic-payment status
-            # changes only, and writes only its own dead-letter topic.
+            # Kafka mTLS (ADR-0137, kafka-pension-mtls.yaml) — consumes domestic-payment status,
+            # publishes participant notices, and writes its own dead-letter topic.
             - name: KAFKA_BOOTSTRAP_SERVERS
               value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
             - name: QUARKUS_SMALLRYE_REACTIVE_MESSAGING_KAFKA_BOOTSTRAP_SERVERS
