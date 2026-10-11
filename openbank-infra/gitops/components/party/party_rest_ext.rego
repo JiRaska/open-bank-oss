@@ -65,7 +65,7 @@ allowed_reasons contains "operator-party-write" if {
 allowed_reasons contains "service-edge-party-m2m" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-edge"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action in {
         "party.create",
 		"party.consent.update",
@@ -95,7 +95,7 @@ allowed_reasons contains "kyc-party-create" if {
 allowed_reasons contains "service-kyb-party-m2m" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-kyb"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action in {
 		"party.create",
 		"party.mandate.grant",
@@ -108,6 +108,6 @@ allowed_reasons contains "service-kyb-party-m2m" if {
 allowed_reasons contains "service-delegation-mandate-read" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-delegation"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action in {"party.mandate.read"}
 }

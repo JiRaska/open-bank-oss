@@ -93,7 +93,7 @@ allowed_reasons contains "viewer-auditor-ledger-read" if {
 allowed_reasons contains "service-ledger-read" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-services"
-	input.principal.service_account == true
+	machine_grant_ok
 	some verb in {"list", "read"}
 	endswith(input.action, sprintf(".%v", [verb]))
 }
@@ -156,7 +156,7 @@ allowed_reasons contains "operator-year-close-attest" if {
 allowed_reasons contains "service-ledger-post" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-services"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action == "ledger.create"
 }
 
@@ -172,7 +172,7 @@ allowed_reasons contains "service-ledger-post" if {
 allowed_reasons contains "service-interest-ledger-post" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-interest"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action == "ledger.create"
 }
 
@@ -184,14 +184,14 @@ allowed_reasons contains "service-interest-ledger-post" if {
 allowed_reasons contains "service-lending-ledger-post" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-lending"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action == "ledger.create"
 }
 
 allowed_reasons contains "service-clearing-ledger-post" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-clearing"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action == "ledger.create"
 }
 
@@ -206,14 +206,14 @@ allowed_reasons contains "service-clearing-ledger-post" if {
 allowed_reasons contains "service-transaction-ledger-write" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-transaction"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action in {"ledger.create", "ledger.reverse"}
 }
 
 allowed_reasons contains "service-settlement-ledger-post" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-settlement"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action in {"ledger.create", "ledger.read"}
 }
 
@@ -224,7 +224,7 @@ allowed_reasons contains "service-settlement-ledger-post" if {
 allowed_reasons contains "service-treasury-ledger-post" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-treasury"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action == "ledger.create"
 }
 
@@ -235,7 +235,7 @@ allowed_reasons contains "service-treasury-ledger-post" if {
 allowed_reasons contains "service-treasury-ledger-read" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-treasury"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action in {"ledger.list", "ledger.read"}
 }
 
@@ -251,7 +251,7 @@ allowed_reasons contains "service-treasury-ledger-read" if {
 allowed_reasons contains "service-ledger-reverse" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-services"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action == "ledger.reverse"
 }
 
@@ -263,6 +263,6 @@ allowed_reasons contains "service-ledger-reverse" if {
 
 prohibited if {
 	input.principal.id == "service-account-openbank-edge"
-	input.principal.service_account == true
+	machine_grant_ok
     input.action in {"ledger.create", "ledger.reverse", "ledger.trigger", "ledger.replay", "ledger.approve", "ledger.close.draft"}
 }

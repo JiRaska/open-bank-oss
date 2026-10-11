@@ -1546,7 +1546,15 @@ test_absent_service_account_field_is_never_a_person if {
 	not rest.allowed_reasons["matrix-allows"] with input as {"principal": no_field, "action": "account.read"}
 		with data.rules.authz as matrix_op_read
 	not rest.allowed_reasons["operator-mcp-session"] with input as {"principal": no_field, "action": "mcp.session.issue"}
+}
 
+# Rollout transition: a PEP not yet on the phase-1 libs sends no field. Named-client grants keep
+# working on the legacy name (that path is unchanged from before), staff grants do not.
+test_absent_field_keeps_named_client_grants_during_rollout if {
 	edge_no_field := {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]}
-	not rest.allowed_reasons["edge-service-notification"] with input as {"principal": edge_no_field, "action": "notification.list"}
+	rest.allowed_reasons["edge-service-notification"] with input as {"principal": edge_no_field, "action": "notification.list"}
+
+	# once the field is present it alone decides: a person with that name gets nothing
+	impostor := {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"], "service_account": false}
+	not rest.allowed_reasons["edge-service-notification"] with input as {"principal": impostor, "action": "notification.list"}
 }

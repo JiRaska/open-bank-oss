@@ -137,7 +137,7 @@ allowed_reasons contains "compliance-lending-desk" if {
 # operator grant is tightened.
 allowed_reasons contains "edge-customer-intake" if {
 	input.principal.id == "service-account-openbank-edge"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action == "lending.intake"
 }
 
@@ -154,7 +154,7 @@ allowed_reasons contains "edge-customer-intake" if {
 # why it needs no entry in the `prohibited` veto below.
 allowed_reasons contains "service-credit-offer-eligibility" if {
 	input.principal.id == "service-account-openbank-services"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action == "lending.creditOffer.eligibility"
 }
 
@@ -168,7 +168,7 @@ allowed_reasons contains "service-credit-offer-eligibility" if {
 allowed_reasons contains "service-risk-loan-book-read" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-services"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action == "lending.book.read"
 }
 
@@ -189,7 +189,7 @@ allowed_reasons contains "service-risk-loan-book-read" if {
 # (acceleration.execute, advance, default.mark, ...) are closed by the exclusion alone.
 prohibited if {
 	input.principal.id == "service-account-openbank-edge"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action in {
 		"lending.approve",
 		"lending.collateralDecide",
@@ -214,7 +214,7 @@ prohibited if {
 # its roles, and no human without ROLE_ADMIN. maker != checker is enforced in LedgerBackfillService.
 prohibited if {
 	startswith(input.action, "lending.ledgerBackfill.")
-	input.principal.service_account == true
+	machine_grant_ok
 }
 
 #

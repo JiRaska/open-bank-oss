@@ -56,7 +56,7 @@ allowed_reasons contains "operator-risk-curve-set-create" if {
 allowed_reasons contains "finrep-m2m-risk-snapshot-read" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-finrep"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action == "risk.snapshot.read"
 }
 
@@ -66,6 +66,6 @@ allowed_reasons contains "finrep-m2m-risk-snapshot-read" if {
 allowed_reasons contains "treasury-m2m-risk-curve-set-read" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-treasury"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action == "risk.curve-set.read"
 }

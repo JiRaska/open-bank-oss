@@ -89,7 +89,7 @@ allowed_reasons contains "operator-consent-write" if {
 allowed_reasons contains "service-consent-m2m" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-services"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action in {"consent.read", "consent.validate", "consent.activate", "consent.reject"}
 }
 
@@ -111,7 +111,7 @@ allowed_reasons contains "service-consent-m2m" if {
 allowed_reasons contains "service-consent-m2m-marketing" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-services"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action in {"consent.grant", "consent.revoke"}
 	input.resource.id == "party-service:marketing-comms"
 }
@@ -133,7 +133,7 @@ allowed_reasons contains "service-consent-m2m-marketing" if {
 allowed_reasons contains "service-consent-m2m-credit" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-edge"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action in {"consent.grant", "consent.revoke"}
 	input.resource.id == "openbank"
 }
@@ -164,6 +164,6 @@ allowed_reasons contains "operator-suppression-read" if {
 allowed_reasons contains "service-suppression-m2m-read" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-services"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action == "suppression.read"
 }

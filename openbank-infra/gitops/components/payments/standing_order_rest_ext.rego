@@ -67,6 +67,6 @@ allowed_reasons contains "operator-standing-order-pause" if {
 allowed_reasons contains "m2m-standing-order-pause" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-edge"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action == "standingOrder.pause"
 }

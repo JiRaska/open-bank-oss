@@ -81,7 +81,7 @@ allowed_reasons contains "viewer-domestic-payment-read" if {
 allowed_reasons contains "service-domestic-payment-m2m" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-edge"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action in {
 		"domestic-payment.create",
 		"domestic-payment.read",

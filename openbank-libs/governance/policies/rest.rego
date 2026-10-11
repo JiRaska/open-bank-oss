@@ -88,13 +88,25 @@ default policy_version := "unknown"
 #
 # FAIL CLOSED: only an explicit `service_account == false` from the PEP makes a principal a
 # person. An absent field (an old or broken PEP, a hand-built input) is a machine, so it
-# reaches no staff grant; a specific-client grant needs an explicit `true`.
+# reaches no staff grant. Grants TO machines are below (machine_grant_ok).
 # ---------------------------------------------------------------------------------------
 principal_is_machine if not input.principal.service_account == false
 
+# Grants TO machines (a named client, or any machine). The verified flag decides; only while the
+# field is ABSENT (a PEP not yet rebuilt on the phase-1 libs-runtime) does the legacy name prefix
+# stand in, so a named-client or any-machine path that works today keeps working mid-rollout. An
+# absent field never grants a STAFF rule (principal_is_machine above). Remove the second body once
+# check-pdp-flag-rollout.sh --live reports the whole fleet current.
+machine_grant_ok if input.principal.service_account == true
+
+machine_grant_ok if {
+	object.get(input.principal, "service_account", null) == null
+	startswith(input.principal.id, "service-account-")
+}
+
 machine_named(name) if {
 	input.principal.id == name
-	input.principal.service_account == true
+	machine_grant_ok
 }
 
 policy_version := data.openbank.bundle.version
@@ -367,7 +379,7 @@ allowed_reasons contains "customer-self-action" if {
 allowed_reasons contains "edge-service-notification" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-edge"
-	input.principal.service_account == true
+	machine_grant_ok
 	some family in {"notification.", "device.", "document.", "signatureCeremony."}
 	startswith(input.action, family)
 }
@@ -384,7 +396,7 @@ allowed_reasons contains "edge-service-notification" if {
 allowed_reasons contains "edge-service-consent" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-edge"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action in {"consent.list", "consent.revoke"}
 }
 
@@ -397,7 +409,7 @@ allowed_reasons contains "edge-service-consent" if {
 allowed_reasons contains "edge-service-engagement" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-edge"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action in {"engagement.surface.read", "engagement.surface.recordEvent"}
 }
 
@@ -420,7 +432,7 @@ allowed_reasons contains "edge-service-engagement" if {
 allowed_reasons contains "edge-service-audit-customer" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-edge"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action == "audit.customerRead"
 }
 
@@ -449,7 +461,7 @@ allowed_reasons contains "edge-service-audit-customer" if {
 # staff sessions from this specific carve-out.
 allowed_reasons contains "m2m-sanctions-screening" if {
 	input.principal.type == "HUMAN"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action == "sanctions.create"
 }
 
@@ -581,7 +593,7 @@ prohibited if {
 shared_m2m_identity if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-services"
-	input.principal.service_account == true
+	machine_grant_ok
 }
 
 # Which role-only write reasons this prohibition applies to — DATA, not a name pattern.

@@ -48,7 +48,7 @@ allowed_reasons contains "operator-billing-write" if {
 # rest.rego gates its allow head on `not prohibited`).
 prohibited if {
 	input.principal.id == "service-account-openbank-edge"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action in {
 		"billing.post",
 		"billing.reverse",
@@ -62,6 +62,6 @@ prohibited if {
 # principals currently retain type HUMAN and ROLE_OPERATOR, so checking type or role alone is
 # insufficient to enforce the staff-only boundary.
 prohibited if {
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action == "billing.approval.read"
 }

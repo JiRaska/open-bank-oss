@@ -52,7 +52,7 @@ allowed_reasons contains "context-assignment-admin" if {
 
 prohibited if {
 	startswith(input.action, "context.assignment.")
-	input.principal.service_account == true
+	machine_grant_ok
 }
 
 # Reads remain purpose-bound even if a broad role rule also allows *.read. This is a second
@@ -89,5 +89,5 @@ prohibited if {
 
 prohibited if {
 	startswith(input.action, "context.")
-	input.principal.service_account == true
+	machine_grant_ok
 }

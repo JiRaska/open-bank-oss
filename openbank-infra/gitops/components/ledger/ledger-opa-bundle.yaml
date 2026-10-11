@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: ledger-service
     app.kubernetes.io/part-of: ledger
   annotations:
-    openbank.tech/policy-checksum: "55c267c74cc3f57c"
+    openbank.tech/policy-checksum: "82fee85b2948cfb5"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -102,13 +102,25 @@ data:
     #
     # FAIL CLOSED: only an explicit `service_account == false` from the PEP makes a principal a
     # person. An absent field (an old or broken PEP, a hand-built input) is a machine, so it
-    # reaches no staff grant; a specific-client grant needs an explicit `true`.
+    # reaches no staff grant. Grants TO machines are below (machine_grant_ok).
     # ---------------------------------------------------------------------------------------
     principal_is_machine if not input.principal.service_account == false
 
+    # Grants TO machines (a named client, or any machine). The verified flag decides; only while the
+    # field is ABSENT (a PEP not yet rebuilt on the phase-1 libs-runtime) does the legacy name prefix
+    # stand in, so a named-client or any-machine path that works today keeps working mid-rollout. An
+    # absent field never grants a STAFF rule (principal_is_machine above). Remove the second body once
+    # check-pdp-flag-rollout.sh --live reports the whole fleet current.
+    machine_grant_ok if input.principal.service_account == true
+
+    machine_grant_ok if {
+    	object.get(input.principal, "service_account", null) == null
+    	startswith(input.principal.id, "service-account-")
+    }
+
     machine_named(name) if {
     	input.principal.id == name
-    	input.principal.service_account == true
+    	machine_grant_ok
     }
 
     policy_version := data.openbank.bundle.version
@@ -381,7 +393,7 @@ data:
     allowed_reasons contains "edge-service-notification" if {
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-edge"
-    	input.principal.service_account == true
+    	machine_grant_ok
     	some family in {"notification.", "device.", "document.", "signatureCeremony."}
     	startswith(input.action, family)
     }
@@ -398,7 +410,7 @@ data:
     allowed_reasons contains "edge-service-consent" if {
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-edge"
-    	input.principal.service_account == true
+    	machine_grant_ok
     	input.action in {"consent.list", "consent.revoke"}
     }
 
@@ -411,7 +423,7 @@ data:
     allowed_reasons contains "edge-service-engagement" if {
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-edge"
-    	input.principal.service_account == true
+    	machine_grant_ok
     	input.action in {"engagement.surface.read", "engagement.surface.recordEvent"}
     }
 
@@ -434,7 +446,7 @@ data:
     allowed_reasons contains "edge-service-audit-customer" if {
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-edge"
-    	input.principal.service_account == true
+    	machine_grant_ok
     	input.action == "audit.customerRead"
     }
 
@@ -463,7 +475,7 @@ data:
     # staff sessions from this specific carve-out.
     allowed_reasons contains "m2m-sanctions-screening" if {
     	input.principal.type == "HUMAN"
-    	input.principal.service_account == true
+    	machine_grant_ok
     	input.action == "sanctions.create"
     }
 
@@ -595,7 +607,7 @@ data:
     shared_m2m_identity if {
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-services"
-    	input.principal.service_account == true
+    	machine_grant_ok
     }
 
     # Which role-only write reasons this prohibition applies to — DATA, not a name pattern.
@@ -722,7 +734,7 @@ data:
     allowed_reasons contains "service-ledger-read" if {
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-services"
-    	input.principal.service_account == true
+    	machine_grant_ok
     	some verb in {"list", "read"}
     	endswith(input.action, sprintf(".%v", [verb]))
     }
@@ -785,7 +797,7 @@ data:
     allowed_reasons contains "service-ledger-post" if {
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-services"
-    	input.principal.service_account == true
+    	machine_grant_ok
     	input.action == "ledger.create"
     }
 
@@ -801,7 +813,7 @@ data:
     allowed_reasons contains "service-interest-ledger-post" if {
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-interest"
-    	input.principal.service_account == true
+    	machine_grant_ok
     	input.action == "ledger.create"
     }
 
@@ -813,14 +825,14 @@ data:
     allowed_reasons contains "service-lending-ledger-post" if {
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-lending"
-    	input.principal.service_account == true
+    	machine_grant_ok
     	input.action == "ledger.create"
     }
 
     allowed_reasons contains "service-clearing-ledger-post" if {
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-clearing"
-    	input.principal.service_account == true
+    	machine_grant_ok
     	input.action == "ledger.create"
     }
 
@@ -835,14 +847,14 @@ data:
     allowed_reasons contains "service-transaction-ledger-write" if {
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-transaction"
-    	input.principal.service_account == true
+    	machine_grant_ok
     	input.action in {"ledger.create", "ledger.reverse"}
     }
 
     allowed_reasons contains "service-settlement-ledger-post" if {
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-settlement"
-    	input.principal.service_account == true
+    	machine_grant_ok
     	input.action in {"ledger.create", "ledger.read"}
     }
 
@@ -853,7 +865,7 @@ data:
     allowed_reasons contains "service-treasury-ledger-post" if {
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-treasury"
-    	input.principal.service_account == true
+    	machine_grant_ok
     	input.action == "ledger.create"
     }
 
@@ -864,7 +876,7 @@ data:
     allowed_reasons contains "service-treasury-ledger-read" if {
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-treasury"
-    	input.principal.service_account == true
+    	machine_grant_ok
     	input.action in {"ledger.list", "ledger.read"}
     }
 
@@ -880,7 +892,7 @@ data:
     allowed_reasons contains "service-ledger-reverse" if {
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-services"
-    	input.principal.service_account == true
+    	machine_grant_ok
     	input.action == "ledger.reverse"
     }
 
@@ -892,7 +904,7 @@ data:
 
     prohibited if {
     	input.principal.id == "service-account-openbank-edge"
-    	input.principal.service_account == true
+    	machine_grant_ok
         input.action in {"ledger.create", "ledger.reverse", "ledger.trigger", "ledger.replay", "ledger.approve", "ledger.close.draft"}
     }
   agents.rego: |

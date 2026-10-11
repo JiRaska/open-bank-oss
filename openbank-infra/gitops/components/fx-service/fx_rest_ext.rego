@@ -82,14 +82,14 @@ allowed_reasons contains "operator-fx-trigger" if {
 allowed_reasons contains "service-fx-edge-m2m" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-edge"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action in {"fx.read", "fx.list"}
 }
 
 allowed_reasons contains "service-fx-shared-client-m2m" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-services"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action in {"fx.read", "fx.list"}
 }
 
@@ -113,7 +113,7 @@ allowed_reasons contains "operator-fx-approval-decide" if {
 # need no veto — absent from the matrix grant, the exclusion closes them outright.
 prohibited if {
 	input.principal.id == "service-account-openbank-edge"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action == "fx.convert"
 }
 

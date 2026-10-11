@@ -6406,3 +6406,25 @@ gates:
     selftest_inputs: [".github/scripts/check-cronjob-max-success-age.py", "openbank-infra/gitops/components/observability/prometheus-rules-jobs.yaml"]
     run: |
       python3 .github/scripts/check-cronjob-max-success-age.py
+
+  # Phase 2 of the verified service_account flag. The rego that reads it treats a principal
+  # WITHOUT the field as a machine for staff rules, so it must not reach the cluster while any
+  # libs-runtime consumer still runs an image built before phase 1, which sends the field. This
+  # gate fails until every consumer's gitops pin is built from a commit that contains phase 1.
+  - id: pdp-flag-rollout-complete
+    name: "every libs-runtime consumer is pinned to an image that sends service_account (enforced)"
+    group: security
+    mode: enforced
+    rationale: >-
+      A policy bundle pod-roll reaches every service at once, while a libs-runtime change reaches a
+      service only when its image is rebuilt and its gitops pin moves. If the fail-closed rego landed
+      first, every service still on the old libs would send no flag and lose all staff grants: a
+      fleet-wide 403. The gate derives the consumers from build.gradle.kts and the marker commit
+      from history, and counts an unresolvable pin as lagging. It is monotonic once green.
+    review_after: "2027-04-11"
+    budget_seconds: 120                  # ~60 compare-API calls in a shallow checkout
+    run: |
+      bash .github/scripts/check-pdp-flag-rollout.sh
+    selftest: bash .github/scripts/check-pdp-flag-rollout.sh --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-pdp-flag-rollout.sh"]

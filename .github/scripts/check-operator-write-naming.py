@@ -175,6 +175,7 @@ IDENTITY_PIN_RE = re.compile(
     r"input\.principal\.id\s*=="
     r"|not\s+principal_is_machine\b"
     r"|input\.principal\.service_account\s*==\s*true"
+    r"|\bmachine_grant_ok\b"
 )
 
 

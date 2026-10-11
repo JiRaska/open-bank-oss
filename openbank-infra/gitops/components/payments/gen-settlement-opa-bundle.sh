@@ -73,7 +73,7 @@ allowed_reasons contains "operator-settlement-approval-decide" if {
 # ROLE_OPERATOR in at least one realm, so without this veto they could read it. No M2M consumer
 # exists (admin-ui forwards the operator's own token). Identity, never principal.type, decides.
 prohibited if {
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action in {"settlement.approval.read", "settlement.approval.decide"}
 }
 

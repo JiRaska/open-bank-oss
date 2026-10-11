@@ -71,7 +71,7 @@ allowed_reasons contains "operator-delegation-approval" if {
 # would otherwise admit `delegation.approval.read`. Veto the whole approval family for every
 # service account at the allow head; an extra allow reason can never bypass this.
 prohibited if {
-    input.principal.service_account == true
+    machine_grant_ok
     startswith(input.action, "delegation.approval.")
 }
 
@@ -86,7 +86,7 @@ prohibited if {
 allowed_reasons contains "edge-service-delegation" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-edge"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action in {
 		"delegation.offer",
         "delegation.preview",
@@ -122,7 +122,7 @@ allowed_reasons contains "edge-service-delegation" if {
 # services with their own event-fed projection (ADR-0232 D3) never call it at all.
 allowed_reasons contains "service-delegation-check" if {
 	input.principal.type == "HUMAN"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action == "delegation.check"
 }
 
@@ -143,7 +143,7 @@ prohibited if {
 allowed_reasons contains "edge-service-business-signing" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-edge"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action in {
 		"delegation.signing.evaluate",
 		"delegation.signing.policy.read",

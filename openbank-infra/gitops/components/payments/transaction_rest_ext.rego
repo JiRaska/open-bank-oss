@@ -137,35 +137,35 @@ allowed_reasons contains "viewer-transaction-read" if {
 allowed_reasons contains "service-account-transaction-create" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-account"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action == "transaction.create"
 }
 
 allowed_reasons contains "service-sdd-transaction-create" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-sdd"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action == "transaction.create"
 }
 
 allowed_reasons contains "service-standing-order-transaction-create" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-standing-order"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action == "transaction.create"
 }
 
 allowed_reasons contains "service-lending-transaction-create" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-lending"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action == "transaction.create"
 }
 
 allowed_reasons contains "service-sepa-payment-transaction-write" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-sepa-payment"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action in {"transaction.create", "transaction.reverse"}
 }
 
@@ -178,28 +178,28 @@ allowed_reasons contains "service-sepa-payment-transaction-write" if {
 allowed_reasons contains "service-domestic-payment-transaction-create" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-domestic-payment"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action == "transaction.create"
 }
 
 allowed_reasons contains "service-sepa-instant-transaction-create" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-sepa-instant"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action == "transaction.create"
 }
 
 allowed_reasons contains "service-swift-transaction-create" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-swift"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action == "transaction.create"
 }
 
 allowed_reasons contains "service-interest-transaction-create" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-interest"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action == "transaction.create"
 }
 
@@ -211,7 +211,7 @@ allowed_reasons contains "service-interest-transaction-create" if {
 allowed_reasons contains "service-party-transaction-read" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-party"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action == "transaction.list"
 }
 
@@ -227,20 +227,20 @@ allowed_reasons contains "service-party-transaction-read" if {
 allowed_reasons contains "service-statement-transaction-search" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-statement"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action == "transaction.search"
 }
 
 allowed_reasons contains "service-agent-transaction-read" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-agent"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action in {"transaction.list", "transaction.read"}
 }
 
 allowed_reasons contains "service-mcp-transaction-read" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-mcp"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action == "transaction.list"
 }

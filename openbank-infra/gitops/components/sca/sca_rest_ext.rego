@@ -87,7 +87,7 @@ allowed_reasons contains "operator-sca-write" if {
 allowed_reasons contains "service-sca-edge-m2m" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-edge"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action in {
 		"scaChallenge.initiate",
 		"scaChallenge.read",
@@ -99,7 +99,7 @@ allowed_reasons contains "service-sca-edge-m2m" if {
 allowed_reasons contains "service-sca-shared-client-m2m" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-services"
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action in {"scaChallenge.read", "scaChallenge.consume"}
 }
 
@@ -111,6 +111,6 @@ allowed_reasons contains "service-sca-shared-client-m2m" if {
 # consumer exists (admin-ui forwards the operator's own token; no backend client calls it), so
 # reading and deciding are human-operator only. Identity decides, never principal.type (#266).
 prohibited if {
-	input.principal.service_account == true
+	machine_grant_ok
 	input.action in {"scaChallenge.approval.read", "scaChallenge.approval.decide"}
 }
