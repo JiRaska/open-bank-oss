@@ -52,6 +52,12 @@ dependencies {
 // account and balance.
 tasks.withType<Test> {
     maxHeapSize = "2g"
+    val opaBundle = rootProject.file("openbank-infra/gitops/components/pension-fund/pension-fund-opa-bundle.yaml")
+    val deployment = rootProject.file("openbank-infra/gitops/components/pension-fund/pension-fund-service.yaml")
+    inputs.file(opaBundle).withPropertyName("pensionFundOpaBundle").withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.file(deployment).withPropertyName("pensionFundDeployment").withPathSensitivity(PathSensitivity.RELATIVE)
+    systemProperty("openbank.test.pension-fund-opa-bundle", opaBundle.absolutePath)
+    systemProperty("openbank.test.pension-fund-deployment", deployment.absolutePath)
 }
 
 kover {

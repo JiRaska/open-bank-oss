@@ -9,7 +9,7 @@ This documentation is published by the service at the management endpoint `/q/op
 - **Tech stack:** Kotlin / Quarkus 3.x / Hibernate Reactive Panache / PostgreSQL (`pension-fund-db`, CNPG)
 - **Ports:** 8162 (app), 8090 (management)
 - **Events:** none yet
-- **Auth:** fund administration is staff only (`ROLE_OPERATOR`/`ROLE_ADMIN`, never a service-account). Reads are also open to `ROLE_AUDITOR` and `ROLE_API`.
+- **Auth:** fund administration is staff only (`ROLE_OPERATOR`/`ROLE_ADMIN`, never a service-account). Participant holdings, orders and transactions are readable by human `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_AUDITOR` or `ROLE_COMPLIANCE` staff and pension-service's own `ROLE_API` client. They use the action `pension-fund.holding.inspect` (not a `.read`), so fleet-wide operator/compliance read grants cannot admit a shared service-account.
 - **Four-eyes:** the person who calculates a NAV or submits a strategy change cannot publish or approve it (403). This is enforced in the domain and by a DB CHECK.
 - **Forward pricing:** an order is accepted unpriced (202). It settles at the fund's NEXT published NAV.
 
@@ -54,6 +54,22 @@ This stage provides server authentication; it does not establish mutual TLS.
 certificate, and continued HTTP service with ephemeral test keys. Deployment
 declarations and this test do not prove that a cluster Certificate is ready.
 
+
+## Period reporting
+
+`GET /api/v1/reporting/funds/{fundId}/period-figures` accepts required
+`periodStart` and `periodEnd` dates. It exposes aggregate fund figures for
+tax-reporting-service: balance sheet, year-to-date profit and loss, unit
+roll-forward, portfolio and flows. The endpoint requires an allowed reporting
+role and the `pension-fund.reporting.inspect` authorization policy.
+
+The calculation uses published NAVs and transactions priced at those NAVs,
+bucketed by valuation date. A period without a published NAV is not reportable;
+it must not be presented as zero activity. Positions are stored with newly
+calculated NAVs. For older NAVs without recorded positions, portfolio figures
+are unknown rather than an empty portfolio. Basis NAV identifiers and a
+fingerprint identify the report inputs. This read model supplies figures;
+it does not submit a statutory return to the regulator.
 
 ### Reporting P&L and position classification
 

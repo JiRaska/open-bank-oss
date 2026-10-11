@@ -31,7 +31,37 @@
             "evidenceState": "LINES_V1",
             "periodType": "MONTH",
             "status": "FROZEN",
-            "to": "2026-06-30"
+            "to": "2000-01-31"
+          },
+          {
+            "evidenceState": "LINES_V1",
+            "periodType": "MONTH",
+            "status": "FROZEN",
+            "to": "2000-02-29"
+          },
+          {
+            "evidenceState": "LINES_V1",
+            "periodType": "MONTH",
+            "status": "FROZEN",
+            "to": "2000-03-31"
+          },
+          {
+            "evidenceState": "LINES_V1",
+            "periodType": "MONTH",
+            "status": "FROZEN",
+            "to": "2000-04-30"
+          },
+          {
+            "evidenceState": "LINES_V1",
+            "periodType": "MONTH",
+            "status": "FROZEN",
+            "to": "2000-05-31"
+          },
+          {
+            "evidenceState": "LINES_V1",
+            "periodType": "MONTH",
+            "status": "FROZEN",
+            "to": "2000-06-30"
           }
         ],
         "headers": {
@@ -41,7 +71,7 @@
       }
     },
     {
-      "description": "GET the GL trial balance for a FINREP reporting date",
+      "description": "GET frozen January-to-date movements for FINREP F02",
       "providerStates": [
         {
           "name": "ledger has frozen monthly trial balance for the reporting date"
@@ -52,20 +82,174 @@
           "Accept": "application/json"
         },
         "method": "GET",
-        "path": "/api/v1/ledger/periods/MONTH/2026-06-30/frozen-trial-balance"
+        "path": "/api/v1/ledger/periods/MONTH/2000-06-30/frozen-year-to-date-trial-balance"
       },
       "response": {
         "body": {
           "balanced": true,
+          "from": "2000-01-01",
           "lines": [
             {
-              "code": "1100-CASH-CLEARING-CZK",
+              "code": "1100",
               "currency": "CZK",
-              "net": 150000.0,
+              "net": 100.0,
               "type": "ASSET"
             }
           ],
-          "period": "MONTH:2026-06"
+          "period": "MONTH:2000-06",
+          "sourceContentHashes": [
+            "0000000000000000000000000000000000000000000000000000000000000000",
+            "0000000000000000000000000000000000000000000000000000000000000000",
+            "0000000000000000000000000000000000000000000000000000000000000000",
+            "0000000000000000000000000000000000000000000000000000000000000000",
+            "0000000000000000000000000000000000000000000000000000000000000000",
+            "0000000000000000000000000000000000000000000000000000000000000000"
+          ],
+          "sourcePeriods": [
+            "MONTH:2000-01",
+            "MONTH:2000-02",
+            "MONTH:2000-03",
+            "MONTH:2000-04",
+            "MONTH:2000-05",
+            "MONTH:2000-06"
+          ],
+          "to": "2000-06-30"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.balanced": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.lines": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 0
+                }
+              ]
+            },
+            "$.lines[*].code": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.lines[*].currency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.lines[*].net": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.lines[*].type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.sourceContentHashes[0]": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.sourceContentHashes[1]": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.sourceContentHashes[2]": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.sourceContentHashes[3]": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.sourceContentHashes[4]": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.sourceContentHashes[5]": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET mutable January-to-date movements for FINREP F02 preview",
+      "providerStates": [
+        {
+          "name": "ledger has frozen monthly trial balance for the reporting date"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v1/ledger/periods/MONTH/2000-06-30/year-to-date-trial-balance"
+      },
+      "response": {
+        "body": {
+          "balanced": true,
+          "from": "2000-01-01",
+          "lines": [
+            {
+              "code": "1100",
+              "currency": "CZK",
+              "net": 100.0,
+              "type": "ASSET"
+            }
+          ],
+          "period": "MONTH:2000-06",
+          "to": "2000-06-30"
         },
         "headers": {
           "Content-Type": "application/json"
@@ -127,7 +311,7 @@
       }
     },
     {
-      "description": "GET the mutable monthly GL trial balance for an internal working preview",
+      "description": "GET the frozen GL closing balance for a FINREP reporting date",
       "providerStates": [
         {
           "name": "ledger has frozen monthly trial balance for the reporting date"
@@ -138,7 +322,7 @@
           "Accept": "application/json"
         },
         "method": "GET",
-        "path": "/api/v1/ledger/periods/MONTH/2026-06-30/trial-balance"
+        "path": "/api/v1/ledger/periods/MONTH/2000-06-30/frozen-closing-balance"
       },
       "response": {
         "body": {
@@ -151,7 +335,7 @@
               "type": "ASSET"
             }
           ],
-          "period": "MONTH:2026-06"
+          "period": "MONTH:2000-06"
         },
         "headers": {
           "Content-Type": "application/json"
@@ -210,6 +394,336 @@
           }
         },
         "status": 200
+      }
+    },
+    {
+      "description": "GET the frozen monthly GL movements for F02 profit and loss",
+      "providerStates": [
+        {
+          "name": "ledger has frozen monthly trial balance for the reporting date"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v1/ledger/periods/MONTH/2000-06-30/frozen-trial-balance"
+      },
+      "response": {
+        "body": {
+          "balanced": true,
+          "lines": [
+            {
+              "code": "4100-INTEREST-INCOME-CZK",
+              "currency": "CZK",
+              "net": -150000.0,
+              "type": "INCOME"
+            }
+          ],
+          "period": "MONTH:2000-06"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.balanced": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.lines": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 0
+                }
+              ]
+            },
+            "$.lines[*].code": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.lines[*].currency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.lines[*].net": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.lines[*].type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET the mutable GL closing balance for an internal working preview",
+      "providerStates": [
+        {
+          "name": "ledger has frozen monthly trial balance for the reporting date"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v1/ledger/periods/MONTH/2000-06-30/closing-balance"
+      },
+      "response": {
+        "body": {
+          "balanced": true,
+          "lines": [
+            {
+              "code": "1100-CASH-CLEARING-CZK",
+              "currency": "CZK",
+              "net": 150000.0,
+              "type": "ASSET"
+            }
+          ],
+          "period": "MONTH:2000-06"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.balanced": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.lines": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 0
+                }
+              ]
+            },
+            "$.lines[*].code": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.lines[*].currency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.lines[*].net": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.lines[*].type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET the mutable monthly GL movements for F02 working preview",
+      "providerStates": [
+        {
+          "name": "ledger has frozen monthly trial balance for the reporting date"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v1/ledger/periods/MONTH/2000-06-30/trial-balance"
+      },
+      "response": {
+        "body": {
+          "balanced": true,
+          "lines": [
+            {
+              "code": "4100-INTEREST-INCOME-CZK",
+              "currency": "CZK",
+              "net": -150000.0,
+              "type": "INCOME"
+            }
+          ],
+          "period": "MONTH:2000-06"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.balanced": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.lines": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 0
+                }
+              ]
+            },
+            "$.lines[*].code": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.lines[*].currency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.lines[*].net": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.lines[*].type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET closing-balance for FINREP without an authenticated identity",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v1/ledger/periods/MONTH/2000-06-30/closing-balance"
+      },
+      "response": {
+        "status": 401
+      }
+    },
+    {
+      "description": "GET frozen-year-to-date-trial-balance for FINREP without an authenticated identity",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v1/ledger/periods/MONTH/2000-06-30/frozen-year-to-date-trial-balance"
+      },
+      "response": {
+        "status": 401
+      }
+    },
+    {
+      "description": "GET the frozen FINREP closing balance without a valid identity",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v1/ledger/periods/MONTH/2000-06-30/frozen-closing-balance"
+      },
+      "response": {
+        "status": 401
+      }
+    },
+    {
+      "description": "GET year-to-date-trial-balance for FINREP without an authenticated identity",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v1/ledger/periods/MONTH/2000-06-30/year-to-date-trial-balance"
+      },
+      "response": {
+        "status": 401
       }
     }
   ],
