@@ -205,10 +205,15 @@ mp:
 
 "%prod":
   quarkus:
+    http:
+      ssl:
+        client-auth: required
+      insecure-requests: enabled
     # ADR-0335 D6: account-service's private-CA mTLS listener (8443, client auth REQUIRED), same
     # shape as aml-service's account-authority. Local/test fixtures speak plain HTTP.
     tls:
       account-authority:
+        reload-period: 1h
         key-store:
           pem:
             client:
