@@ -94,3 +94,16 @@ Domain events and the audit subscription, live deployment verification of the pe
 FundAdministrationPort adapter (consumer/provider Pact tests are present), a real market-data adapter, investment orders and depositary reconciliation,
 limit/concentration checks, scheduled NAV and strategy application, participant notification
 delivery, compensation payments for NAV corrections, fund close/merge with unit migration.
+
+## Required client authentication on the parallel TLS listener
+
+The 8443 listener requires a client certificate chaining to `openbank-ca`, using
+the mounted certificate Secret's `ca.crt` as its trust anchor. The existing HTTP
+listener remains for current callers during the reviewed cutover. Client identity
+does not confer permission to read holdings or place orders: OIDC principal and
+contract-scoped business authorization remain mandatory. Verify issued certificates,
+listener readiness and the reviewed pension client image before migrating its URL.
+Any additional caller using 8443 must supply a trusted certificate. Rollback reverts
+client URL/policy cutovers first; then required-client-auth can be removed while
+the HTTP compatibility listener remains. No deployment readiness is inferred from
+this manifest or a local health test.

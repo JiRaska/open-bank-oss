@@ -66,6 +66,10 @@ spec:
               value: /mnt/internal-tls/tls.key
             - name: QUARKUS_HTTP_SSL_PORT
               value: "8443"
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_TRUST_STORE_FILES
+              value: /mnt/internal-tls/ca.crt
+            - name: QUARKUS_HTTP_SSL_CLIENT_AUTH
+              value: REQUIRED
             # Keep old callers working until the separately verified HTTPS cutover.
             - name: QUARKUS_HTTP_INSECURE_REQUESTS
               value: enabled
