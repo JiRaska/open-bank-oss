@@ -108,6 +108,12 @@ isolation from transport/persistence.
   regulatory source. During rollout the count of `HASH_ONLY` frozen records is an explicit report
   availability gate. No backfill is automatic: historical reproduction needs a separately approved,
   controlled evidence-import procedure and cannot be inferred from mutable journals.
+- **Regulatory year-to-date flow:** FINREP F02.00 uses January through the reporting month only.
+  The frozen route requires every intervening monthly `LINES_V1` close, verifies each hash, and
+  reconciles gross account/currency legs against that calendar year's journal range. Missing January
+  fails even when no January posting exists. A frozen mid-month request is rejected before month
+  normalization so later postings cannot leak into an earlier dated report. The separate mutable
+  January-to-date route is for working previews only; prior fiscal years cannot enter the submission source.
 - **Regulatory capital source integrity:** COREP reads only explicit 6000–6060 EQUITY accounts.
   Capital is never plugged as assets minus liabilities; each movement is a balanced, attributable
   journal subject to normal posting, idempotency, period-lock and frozen-evidence controls.

@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.33.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.33.0...ledger-service-v1.33.1) (2026-10-10)
+
+
+### Bug Fixes
+
+* **finrep:** report balances, not one month's movements ([#12505](https://github.com/JiRaska/open-bank-oss/issues/12505)) ([272ea30](https://github.com/JiRaska/open-bank-oss/commit/272ea303dade99fc0f3a743ebf0aee9aedfdffe5))
+
 ## [1.33.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.32.2...ledger-service-v1.33.0) (2026-10-09)
 
 

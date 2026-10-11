@@ -1,0 +1,56 @@
+# tax-reporting: §38d withholding-remittance dead-letter alerts (#5760).
+#
+# tax-reporting-service nacks malformed target events and failed writes to
+# openbank.dlq.tax-reporting.withholding-remitted-in. Nothing consumes that topic. A record may
+# lack a decodable period or amount; source reconciliation is needed before filing. `assemble`
+# totals only observed remittances, and these rules report DLQ activity and retention, not
+# reconciliation or filing safety.
+#
+# kafka_topic_partition_* come from the Strimzi Kafka Exporter (topicRegex ".*", so the DLQ is
+# scraped like every other topic). Not openbank_* metrics, so alert-metric-emitted does not
+# apply; the series names are the same ones PartyEventDeadLettered already fires on.
+#
+# Runbook: docs/runbooks/0028-tax-reporting-withholding-dead-letter.md
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-tax-reporting-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.tax-reporting.withholding
+      rules:
+        - alert: TaxWithholdingRemittanceDeadLettered
+          # New records arrived in the last hour. The offset only grows, so a plain `> 0` would
+          # latch forever; increase() clears an hour after arrivals stop. The NotEmpty rule below
+          # keeps the unresolved state visible after that.
+          expr: |
+            sum by (topic) (increase(kafka_topic_partition_current_offset{topic="openbank.dlq.tax-reporting.withholding-remitted-in"}[1h])) > 0
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            # Driven by real remittance traffic, not a schedule: no period to fit the window to.
+            subject_period: continuous
+            summary: "§38d withholding remittance dead-lettered (tax-reporting)"
+            description: "tax-reporting-service parked a malformed target event or a remittance whose write failed on {{ $labels.topic }}. Its period and amount may be unknown. Reconcile the source and hold potentially affected periods before assembling or filing."
+            runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0028-tax-reporting-withholding-dead-letter.md"
+        - alert: TaxWithholdingDeadLetterNotEmpty
+          # Records still retained on the DLQ. The gauge measures retention, not unresolved
+          # business state: it may remain positive after reconciliation and may clear on 30-day
+          # expiry without recovery. `for: 15m` avoids alerting on a short-lived arrival.
+          expr: |
+            sum by (topic) (
+              kafka_topic_partition_current_offset{topic="openbank.dlq.tax-reporting.withholding-remitted-in"}
+              - kafka_topic_partition_oldest_offset{topic="openbank.dlq.tax-reporting.withholding-remitted-in"}
+            ) > 0
+          for: 15m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "{{ $value }} tax-reporting withholding DLQ record(s) retained"
+            description: "{{ $labels.topic }} retains {{ $value }} record(s), including possibly malformed events with unknown period or amount. Reconcile each record with its source before filing; an offset count alone does not prove whether recovery is complete."
+            runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0028-tax-reporting-withholding-dead-letter.md"

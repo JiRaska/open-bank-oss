@@ -37,4 +37,5 @@ dependencies {
     testImplementation(libs.mockk)
     testImplementation(libs.rest.assured.kotlin)
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
+    testImplementation(project(":openbank-libs-testing"))
 }
