@@ -32,6 +32,8 @@ object ServiceAccountIdentity {
 
     private const val CLAIM_AZP = "azp"
     private const val CLAIM_PREFERRED_USERNAME = "preferred_username"
+    private const val CLAIM_CLIENT_ID = "client_id"
+    private const val CLAIM_CLIENT_ID_LEGACY = "clientId"
 
     /** Interactive clients in the realm templates; none issues client-credentials tokens. */
     private val HUMAN_CLIENT_IDS = setOf("openbank-admin-ui", "openbank-ops-cli", "admin-cli")
@@ -57,6 +59,38 @@ object ServiceAccountIdentity {
         if (jwt.subject.isNullOrBlank()) return null
         val clientId = jwt.claimString(CLAIM_AZP)?.takeIf { it.isNotBlank() } ?: return null
         return clientId.takeIf { jwt.claimString(CLAIM_PREFERRED_USERNAME) == PRINCIPAL_PREFIX + it }
+    }
+
+    /**
+     * The verified client of a MACHINE token, or `null` when the verified token is not one — the
+     * value the PEP hands OPA as `input.principal.service_account`/`client_id`.
+     *
+     * Broader than [verifiedClientId] on purpose: that one answers "is this exactly client C's own
+     * service-account" (for granting a SPECIFIC client), this one answers "is this a machine at
+     * all" (for keeping machines OUT), so it must fail towards `machine`. A JWT is a machine token
+     * when ANY holds:
+     *  - it carries `client_id` (or legacy `clientId`), the session note Keycloak sets only for a
+     *    client-credentials grant; a user login never carries it;
+     *  - `preferred_username` starts with `service-account-`;
+     *  - `preferred_username` is absent or blank: no username means no human to attribute to.
+     * None of these reads the principal NAME Quarkus derives (`upn` first), so a renamed user, a
+     * client_id-only token or name-mapper drift cannot make a machine look human.
+     * A non-JWT identity returns `null`: only OIDC bearer tokens authenticate in deployment.
+     * Returns `""` for a machine token that names no client.
+     */
+    fun machineClientId(identity: SecurityIdentity?): String? = machineClientId(identity?.principal)
+
+    /** JAX-RS form of [machineClientId]. */
+    fun machineClientId(principal: Principal?): String? {
+        val jwt = principal as? JsonWebToken ?: return null
+        // A claim that cannot be read is not evidence of a human: fail towards machine.
+        return runCatching {
+            val noted = (jwt.claimString(CLAIM_CLIENT_ID) ?: jwt.claimString(CLAIM_CLIENT_ID_LEGACY))
+                ?.takeIf { it.isNotBlank() }
+            val username = jwt.claimString(CLAIM_PREFERRED_USERNAME)
+            val machine = noted != null || username.isNullOrBlank() || username.startsWith(PRINCIPAL_PREFIX)
+            if (!machine) null else noted ?: jwt.claimString(CLAIM_AZP)?.takeIf { it.isNotBlank() } ?: ""
+        }.getOrDefault("")
     }
 
     /** The verified service-account principal name (`service-account-<azp>`), or `null`. */

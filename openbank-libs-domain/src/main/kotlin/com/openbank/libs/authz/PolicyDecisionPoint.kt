@@ -47,6 +47,15 @@ data class Principal(
     val roles: List<String> = emptyList(),
     /** Free-form claims forwarded to OPA `input.principal.attributes`. */
     val attributes: Map<String, Any?> = emptyMap(),
+    /**
+     * `true` iff the VERIFIED bearer token is a machine (client-credentials) token, derived by the
+     * PEP from verified claims only — never from [id], which is a name claim. Forwarded to OPA as
+     * `input.principal.service_account`; a rego rule that must keep machines out tests this flag,
+     * never `startswith(input.principal.id, "service-account-")`.
+     */
+    val serviceAccount: Boolean = false,
+    /** The verified client the machine token was issued to (`client_id`/`azp`); `null` for humans. */
+    val clientId: String? = null,
 )
 
 /**

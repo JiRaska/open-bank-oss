@@ -567,6 +567,51 @@ class AuthorizeInterceptorTest {
         assertThat(capturedQuery[0].principal.id).isEqualTo("anonymous")
     }
 
+    private fun capturePrincipalFor(claims: Map<String, String>, name: String): Principal {
+        every { sc.userPrincipal } returns JavaPrincipal { name }
+        every { identity.principal } returns mockk<JsonWebToken> {
+            every { subject } returns "5f0c2a8e"
+            every { getClaim<Any?>(any<String>()) } answers { claims[firstArg<String>()] }
+        }
+        every { identity.roles } returns setOf("ROLE_OPERATOR")
+        val captured = mutableListOf<AuthzQuery>()
+        interceptor.pdp = mockk {
+            every { isResolvable } returns true
+            every { get() } returns object : PolicyDecisionPoint {
+                override suspend fun allow(query: AuthzQuery): AuthzDecision {
+                    captured += query
+                    return AuthzDecision(allow = true, reason = "ok", policyVersion = "test")
+                }
+            }
+        }
+        interceptor.authorize(makeCtx(annotatedMethod))
+        return captured.single().principal
+    }
+
+    @Test
+    fun `a client_id-only machine token whose name is not service-account- is flagged service_account`() {
+        val p = capturePrincipalFor(mapOf("client_id" to "openbank-batch", "azp" to "openbank-batch"), "batch-bot")
+        assertThat(p.id).isEqualTo("batch-bot")
+        assertThat(p.serviceAccount).isTrue()
+        assertThat(p.clientId).isEqualTo("openbank-batch")
+    }
+
+    @Test
+    fun `a renamed service-account is flagged service_account`() {
+        val p = capturePrincipalFor(
+            mapOf("client_id" to "openbank-edge", "azp" to "openbank-edge", "preferred_username" to "alice"),
+            "alice",
+        )
+        assertThat(p.serviceAccount).isTrue()
+    }
+
+    @Test
+    fun `a human staff token is not flagged service_account`() {
+        val p = capturePrincipalFor(mapOf("azp" to "openbank-admin-ui", "preferred_username" to "alice"), "alice")
+        assertThat(p.serviceAccount).isFalse()
+        assertThat(p.clientId).isNull()
+    }
+
     @Test
     fun `principal type AI_AGENT when sub starts with agent colon`() {
         every { sc.userPrincipal } returns JavaPrincipal { "agent:onboarding" }

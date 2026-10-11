@@ -85,9 +85,35 @@ class OpaSidecarPolicyDecisionPointTest {
         assertThat(principal["id"]).isEqualTo("user-1")
         assertThat(principal["type"]).isEqualTo("HUMAN")
         assertThat(principal["roles"]).isEqualTo(listOf("ROLE_OPERATOR"))
+        assertThat(principal["service_account"]).isEqualTo(false)
+        assertThat(principal.containsKey("client_id")).isFalse()
         assertThat(input["action"]).isEqualTo("party.update")
         assertThat(input["resource"]).isEqualTo(mapOf("type" to "party", "id" to "p-123"))
         assertThat(input["attributes"]).isEqualTo(emptyMap<String, Any>())
+    }
+
+    @Test
+    fun `a machine principal carries service_account and client_id`(): Unit = runBlocking {
+        val mapper = spyk(ObjectMapper())
+        val serialized = slot<Any>()
+        every { mapper.writeValueAsString(capture(serialized)) } answers { callOriginal() }
+        stubResponse(200, """{"result":true}""")
+        val subject = OpaSidecarPolicyDecisionPoint(httpClient = httpClient, mapper = mapper)
+
+        subject.allow(
+            sampleQuery.copy(
+                principal = Principal(
+                    id = "batch-bot",
+                    type = "HUMAN",
+                    serviceAccount = true,
+                    clientId = "openbank-batch",
+                ),
+            ),
+        )
+
+        val principal = ((serialized.captured as Map<*, *>)["input"] as Map<*, *>)["principal"] as Map<*, *>
+        assertThat(principal["service_account"]).isEqualTo(true)
+        assertThat(principal["client_id"]).isEqualTo("openbank-batch")
     }
 
     @Test
