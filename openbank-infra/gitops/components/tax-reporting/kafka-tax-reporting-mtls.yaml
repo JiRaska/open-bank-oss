@@ -1,0 +1,51 @@
+# Kafka mTLS identity + ACLs for openbank-tax-reporting-service (ADR-0137 Tier 2).
+#
+# tax-reporting-service CONSUMES openbank.interest.accrual.event (interest.withholding.remitted.v1,
+# ADR-0180) as a second consumer group beside interest-service's own, and produces nothing except
+# to its dead-letter topic. The ACL set is the whole statement of what this identity can do.
+#
+# Identity model (ADR-0137): one KafkaUser = one mTLS client cert = one principal for all of this
+# service's Kafka traffic. The Strimzi User Operator mints the per-user Secret of the same name in
+# `messaging`; ESO projection into `tax-reporting` is done by kafka-mtls-externalsecrets.yaml.
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+  name: tax-reporting-service
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      - resource:
+          type: topic
+          name: openbank.interest.accrual.event
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      # The effective consumer group is `openbank-tax-reporting-service`: application.yaml
+      # deliberately omits `group.id` as a YAML key (SmallRye's dotted-key footgun, #686/#703), so
+      # the fallback — quarkus.application.name — is what Kafka sees. Any other name here would
+      # deny just as silently, and it is what keeps this group distinct from interest-service's.
+      - resource:
+          type: group
+          name: openbank-tax-reporting-service
+          patternType: literal
+        operations: [Read]
+        host: "*"
+      # #5745: dead-letter topic for `withholding-remitted-in` (failure-strategy: dead-letter-queue,
+      # nested topic key in application.yaml; the KafkaTopic CR is in
+      # components/kafka/kafka-dlq-topics.yaml). Without Write the DLQ send itself fails and the
+      # consumer wedges on the very record it was meant to park.
+      - resource:
+          type: topic
+          name: openbank.dlq.tax-reporting.withholding-remitted-in
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
