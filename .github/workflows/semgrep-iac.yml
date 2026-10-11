@@ -46,11 +46,32 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # semgrep/semgrep:1.99.0 @ 2026-09-03 linux/amd64.
-      - name: Semgrep scan (Dockerfile + YAML manifests)
+      # Pulled from mirror.gcr.io, Google's Docker Hub pull-through mirror: an anonymous
+      # Docker Hub pull from a shared hosted-runner IP hits `toomanyrequests` (issue #12410).
+      # A pull by digest is content-addressed, so the mirror cannot serve different bytes;
+      # Docker Hub stays as a fallback only for a mirror outage, at the same digest.
+      - name: Pull Semgrep engine (by digest)
+        id: engine
+        env:
+          DIGEST: sha256:ae27024c16f7848cdbfd49c24ed0b78b13f13b85fcd7b87c679aaa8b0c0dce98
         run: |
           set -euo pipefail
-          docker run --rm -v "$PWD:/src" \
-            semgrep/semgrep@sha256:ae27024c16f7848cdbfd49c24ed0b78b13f13b85fcd7b87c679aaa8b0c0dce98 \
+          for repo in mirror.gcr.io/semgrep/semgrep docker.io/semgrep/semgrep; do
+            if docker pull --quiet "$repo@$DIGEST"; then
+              echo "image=$repo@$DIGEST" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "::warning::pull from $repo failed, trying next source"
+          done
+          echo "::error::Semgrep engine could not be pulled from any source"
+          exit 1
+
+      - name: Semgrep scan (Dockerfile + YAML manifests)
+        env:
+          IMAGE: ${{ steps.engine.outputs.image }}
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$PWD:/src" "$IMAGE" \
             semgrep scan --config /src/.semgrep/rules/openbank-iac.yml \
               --include="Dockerfile" --include="*.yaml" --include="*.yml" \
               --exclude="node_modules" --exclude="**/build/**" \
