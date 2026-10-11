@@ -219,6 +219,10 @@ class TransferRequestRepositoryImpl(private val json: PayloadMapper) :
             query.range(0, limit - 1).list()
         }.awaitSuspending().map { it.toDomain() }
 
+    override suspend fun findByParty(partyId: UUID, limit: Int): List<TransferRequest> =
+        Panache.withSession { find("partyId = ?1 order by createdAt desc", partyId).range(0, limit - 1).list() }
+            .awaitSuspending().map { it.toDomain() }
+
     private fun TransferRequestEntity.toDomain(): TransferRequest =
         json.read(payload, TransferRequest::class.java).copy(version = version)
 }

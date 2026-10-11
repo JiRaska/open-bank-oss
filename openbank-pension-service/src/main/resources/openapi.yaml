@@ -74,32 +74,6 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
-    post:
-      tags: [Pension]
-      operationId: createContract
-      summary: Create a DRAFT contract under the jurisdiction pack in force today
-      description: |
-        Refused with 400 when no pack is in force for the jurisdiction and product line, when the
-        provider type is not permitted by the pack, when the currency differs from the pack's, or
-        when the participant fails the pack's eligibility rules.
-      parameters:
-        - $ref: '#/components/parameters/CustomerPartyId'
-        - $ref: '#/components/parameters/IdempotencyKey'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CreateContractRequest'
-      responses:
-        '201':
-          description: Draft contract created
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Contract'
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
   /api/v2/pension/contracts/{id}:
     get:
       tags: [Pension]
@@ -112,20 +86,6 @@ paths:
         '200': { $ref: '#/components/responses/Contract' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
-  /api/v2/pension/contracts/{id}/submit:
-    post:
-      tags: [Pension]
-      operationId: submitContract
-      summary: DRAFT -> PENDING_ACTIVATION
-      parameters:
-        - $ref: '#/components/parameters/ContractId'
-        - $ref: '#/components/parameters/CustomerPartyIdOptional'
-        - $ref: '#/components/parameters/IdempotencyKey'
-      responses:
-        '200': { $ref: '#/components/responses/Contract' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409': { $ref: '#/components/responses/Conflict' }
   /api/v2/pension/contracts/{id}/suspend:
     post:
       tags: [Pension]
@@ -552,6 +512,71 @@ paths:
         '403': { description: Caller's role or principal may not use this route }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
+  /api/v2/pension/transfers:
+    get:
+      tags: [Pension transfers]
+      operationId: listPensionTransfers
+      summary: The caller's transfers, incoming and outgoing; by default only those still pending
+      description: |
+        Only the caller's own transfers (party from the edge-stamped header). `pending=true` (the
+        default) keeps those not yet ended - including a receiving provider's request that waits
+        for the participant's consent. Newest first.
+      parameters:
+        - $ref: '#/components/parameters/CustomerPartyId'
+        - name: direction
+          in: query
+          required: false
+          schema: { type: string, enum: [IN, OUT] }
+        - name: pending
+          in: query
+          required: false
+          schema: { type: boolean, default: true }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/TransferRequest' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Caller's role or principal may not use this route }
+  /api/v2/pension/transfers/{id}/withdrawal:
+    post:
+      tags: [Pension transfers]
+      operationId: withdrawPensionTransferOut
+      summary: Withdraw a transfer-out (or its consent) before it executes (SCA-signed)
+      description: |
+        Allowed while the transfer-out is AWAITING_CONSENT or REQUESTED - before the contract is
+        valued and any unit is sold. Ends it CANCELLED; nothing is redeemed or paid. Once valuation
+        has started the transfer can no longer be withdrawn (409). Repeating a completed
+        withdrawal answers the same CANCELLED transfer and spends no challenge.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/TransferId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TransferWithdrawalRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransferRequest' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Caller's role or principal may not use this route }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { description: The SCA challenge was not verified (rejected, already spent, or bound elsewhere) }
   /api/v2/pension/transfers/out:
     post:
       tags: [Pension transfers]
@@ -2677,29 +2702,6 @@ components:
         name: { type: string, minLength: 1 }
         partyId: { type: string, format: uuid }
         sharePercent: { type: number, exclusiveMinimum: 0, maximum: 100 }
-    CreateContractRequest:
-      type: object
-      required: [productLine, jurisdiction, providerEntityId, providerType, birthDate, schedule, strategyCode]
-      properties:
-        productLine: { $ref: '#/components/schemas/ProductLine' }
-        jurisdiction: { type: string, description: Jurisdiction code selecting the pack }
-        providerEntityId:
-          type: string
-          format: uuid
-          description: Provider legal entity. Creation requires the deployment's configured providerEntityId.
-        providerType: { $ref: '#/components/schemas/ProviderType' }
-        birthDate: { type: string, format: date }
-        residencyCountry: { type: string }
-        residencyEvidence:
-          type: array
-          items: { type: string }
-        hasGuardian: { type: boolean }
-        schedule: { $ref: '#/components/schemas/Schedule' }
-        strategyCode: { type: string, minLength: 1 }
-        beneficiaries:
-          type: array
-          description: Shares must total 100 when any are given.
-          items: { $ref: '#/components/schemas/Beneficiary' }
     ElectStrategyRequest:
       type: object
       required: [strategyCode]
@@ -2850,6 +2852,11 @@ components:
       required: [scaChallengeId]
       properties:
         scaChallengeId: { type: string }
+    TransferWithdrawalRequest:
+      type: object
+      required: [scaChallengeId]
+      properties:
+        scaChallengeId: { type: string, description: 'Single-use challenge over pension-transfer-withdraw:<transferId>' }
     StrategyRecommendation:
       type: object
       properties:

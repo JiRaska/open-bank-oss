@@ -6,8 +6,6 @@
 # Actions gated (pension-service REST resources):
 #   pension.contract.inspect       — GET  /contracts (own list / staff by status), GET /contracts/{id},
 #                                    POST /contracts/{id}/incentive-evaluation
-#   pension.contract.create        — POST /contracts                 (S1 draft path; NO principal)
-#   pension.contract.submit        — POST /contracts/{id}/submit     (S1 draft path; NO principal)
 #   pension.contract.strategy      — PUT  /contracts/{id}/strategy
 #   pension.contract.suspend       — POST /contracts/{id}/suspend
 #   pension.contract.resume        — POST /contracts/{id}/resume
@@ -24,8 +22,8 @@
 #   pension.simulation.run         — POST /simulations (illustrative projection)                   (S8)
 #   pension.operator.exit-read     — GET  /operator/payouts (staff payout queue)                    (S8)
 #
-# The S1 draft path (create/submit) is granted to no one: a contract is born through onboarding
-# (pension.onboarding.*), and the edge has no route that uses it. Least privilege, #12435.
+# The S1 draft path (pension.contract.create / .submit) is RETIRED: no route serves it and no rule
+# grants it. A contract is born through onboarding (pension.onboarding.*), #12435.
 # Retired at integration (S8): pension.contract.activate (activation is the onboarding workflow's
 # alone) and pension.contract.terminate (S1's preview; S5's pension.exit.terminate replaces it).
 #
@@ -85,7 +83,7 @@ allowed_reasons contains "edge-service-pension" if {
 # --- ADR-0334 slice S2: onboarding and transfers ------------------------------------------------
 #
 #   pension.onboarding.{start,read,questionnaire,strategy,kid,sign,withdraw}  OnboardingResource
-#   pension.transfer.{request-out,consent,read}                               PensionTransferResource
+#   pension.transfer.{request-out,consent,withdraw,inspect}                   PensionTransferResource
 #   pension.transfer.provider-request                                         ReceivingProviderResource
 #   pension.operator.{read,contribution,transfer}                             PensionOperatorResource
 
@@ -103,6 +101,7 @@ allowed_reasons contains "edge-service-pension-onboarding" if {
 		"pension.onboarding.withdraw",
 		"pension.transfer.request-out",
 		"pension.transfer.consent",
+		"pension.transfer.withdraw",
 		"pension.transfer.inspect",
 	}
 }

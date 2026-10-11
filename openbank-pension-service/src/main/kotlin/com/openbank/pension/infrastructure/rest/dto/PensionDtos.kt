@@ -39,20 +39,6 @@ data class BeneficiaryDto(val name: String? = null, val partyId: UUID? = null, v
     }
 }
 
-data class CreateContractRequest(
-    val productLine: ProductLine? = null,
-    val jurisdiction: String? = null,
-    val providerEntityId: UUID? = null,
-    val providerType: ProviderType? = null,
-    val birthDate: LocalDate? = null,
-    val residencyCountry: String? = null,
-    val residencyEvidence: List<String?>? = null,
-    val hasGuardian: Boolean? = null,
-    val schedule: ScheduleDto? = null,
-    val strategyCode: String? = null,
-    val beneficiaries: List<BeneficiaryDto?>? = null,
-)
-
 data class ElectStrategyRequest(
     val strategyCode: String? = null,
     val effectiveFrom: LocalDate? = null,
