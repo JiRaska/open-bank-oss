@@ -13,8 +13,9 @@ moment a deploy PR's auto-merge is ARMED does:
   * `decide`  — pure decision retained for self-tests and manual diagnosis. Deploy producers
                 never arm directly, because independent reads can both see no armed PR.
   * `flush`   — the sole auto-merge writer, called by deploy-window-flush.yml after either
-                deploy workflow completes and on a short recovery cron. Picks the OLDEST deferred
-                deploy PR once the window has elapsed and nothing is armed. The caller re-runs
+                deploy workflow completes and on a short recovery cron. Holds Admin UI PRs until
+                #12211 proves their image provenance, then picks an eligible service deploy PR
+                once the window has elapsed and nothing is armed. The caller re-runs
                 supersede-deploy-prs.sh (ancestry + coverage) on it before arming.
                 A successful manual producer run expedites only its matching PR.
   * `carry`   — called by auto-deploy.yml's rewrite step. Re-applies the image pins of every
@@ -87,11 +88,14 @@ def manual_deploy_head(event: dict) -> str | None:
 
 def flush(prs: list[dict], now: int, last_deploy: int | None, window: int,
           manual_head: str | None = None) -> dict | None:
-    """Return the deferred PR to arm now, or None. prs: [{number, head, created_at, armed}]."""
+    """Return an eligible service PR, or None. prs: [{number, head, created_at, armed}]."""
     deploy = [p for p in prs if p["head"].startswith(DEPLOY_PREFIXES)]
     if any(p.get("armed") for p in deploy):
         return None
-    pending = sorted((p for p in deploy if not p.get("armed")), key=lambda p: (p["created_at"], p["number"]))
+    # Admin UI image provenance remains unverified (#12211). Keep those PRs visible and open,
+    # but never select or arm one; an older Admin UI PR must not starve service GitOps.
+    pending = sorted((p for p in deploy if p["head"].startswith(DEPLOY_PREFIXES[0])
+                      and not p.get("armed")), key=lambda p: (p["created_at"], p["number"]))
     if not pending:
         return None
     if manual_head:
@@ -106,11 +110,9 @@ def flush(prs: list[dict], now: int, last_deploy: int | None, window: int,
     verdict, _ = decide("flush", now, last_deploy, False, window)
     if verdict != "ARM":
         return None
-    # The kind (gitops / admin-ui) that has waited longest goes first, and within it the NEWEST
-    # PR is armed: it carries every older pin of its kind, so supersede-deploy-prs.sh closes the
-    # older ones. Arming the oldest instead would hit supersede's STALE_KEEP refusal forever.
-    prefix = next(x for x in DEPLOY_PREFIXES if pending[0]["head"].startswith(x))
-    return [p for p in pending if p["head"].startswith(prefix)][-1]
+    # The newest service PR carries older service pins. Arming an older one would hit
+    # supersede-deploy-prs.sh's STALE_KEEP refusal forever.
+    return pending[-1]
 
 
 def pins_from_diff(diff: str) -> list[tuple[str, str, str, str]]:
@@ -233,10 +235,15 @@ def self_test() -> int:
     ]
     check("flush inside the window -> nothing yet", flush(prs, T, T - 60, W) is None)
     pick = flush(prs, T, T - W, W)
-    check("flush at the window -> the longest-waiting kind first", pick is not None and pick["number"] == 11)
+    check("oldest Admin UI held; eligible service proceeds", pick is not None and pick["number"] == 12)
+    check("Admin UI alone is held, never armed", flush([prs[1]], T, T - W, W) is None)
     prs2 = prs + [{"number": 14, "head": "chore/admin-ui-deploy-d", "created_at": "2026-09-30T10:09:00Z", "armed": False}]
     pick = flush(prs2, T, T - W, W)
-    check("flush arms the NEWEST PR of that kind (it supersedes the older)", pick is not None and pick["number"] == 14)
+    check("newer Admin UI remains held behind service", pick is not None and pick["number"] == 12)
+    services = prs + [{"number": 15, "head": "chore/gitops-auto-deploy-e",
+                       "created_at": "2026-09-30T10:11:00Z", "armed": False}]
+    check("newest eligible service supersedes older service",
+          flush(services, T, T - W, W)["number"] == 15)
     check("flush never arms a second PR while one is armed",
           flush(prs + [{"number": 13, "head": "chore/admin-ui-deploy-c", "created_at": "z", "armed": True}], T, None, W) is None)
     # Exercise the same CLI and event file that the serialized workflow uses. An unrelated
@@ -251,7 +258,7 @@ def self_test() -> int:
                                   "path": ".github/workflows/auto-deploy.yml", "head_branch": "main",
                                   "head_repository": {"full_name": "example/open-bank"}}}
         paths = {name: os.path.join(d, name + ".json") for name in ("prs", "commits", "event")}
-        def run_fixture(prs_fixture, event_fixture):
+        def run_fixture_full(prs_fixture, event_fixture):
             for name, value in (("prs", prs_fixture), ("commits", [{"message": DEPLOY_SUBJECTS[0] + "old", "epoch": T - 60}]),
                                 ("event", event_fixture)):
                 with open(paths[name], "w", encoding="utf-8") as out:
@@ -259,7 +266,15 @@ def self_test() -> int:
             result = subprocess.run([sys.executable, __file__, "flush", "--prs-json", paths["prs"],
                                      "--commits-json", paths["commits"], "--event-json", paths["event"],
                                      "--now", str(T), "--window", str(W)], capture_output=True, text=True)
-            return result.returncode, result.stdout
+            return result.returncode, result.stdout, result.stderr
+        def run_fixture(prs_fixture, event_fixture):
+            code, stdout, _stderr = run_fixture_full(prs_fixture, event_fixture)
+            return code, stdout
+        held_code, held_stdout, held_stderr = run_fixture_full(
+            [prs[1], manual_pr], event)
+        check("CLI reports held Admin UI while manual service proceeds",
+              held_code == 0 and held_stdout == "arm=21\narm_head=" + manual_pr["head"] + "\n"
+              and "Admin UI deploy PRs held until #12211" in held_stderr and "[11]" in held_stderr)
         check("manual producer completion expedites only its matching PR inside the window",
               run_fixture(prs + [manual_pr], event) == (0, "arm=21\narm_head=" + manual_pr["head"] + "\n"))
         check("manual producer completion cannot expedite an unrelated PR",
@@ -283,11 +298,11 @@ def self_test() -> int:
                                                                "head_branch": "recovery"}})[1]
               == "arm=21\narm_head=" + manual_pr["head"] + "\n")
         admin_pr = {**manual_pr, "head": DEPLOY_PREFIXES[1] + sha}
-        check("manual Admin-UI completion expedites its own PR",
+        check("manual Admin-UI completion does not bypass provenance hold",
               run_fixture([admin_pr], {**event, "workflow_run": {**event["workflow_run"],
                                                        "name": "Admin-UI deploy",
                                                        "path": ".github/workflows/admin-ui-deploy.yml"}})[1]
-              == "arm=21\narm_head=" + admin_pr["head"] + "\n")
+              == "arm=\narm_head=\n")
         check("manual completion never arms beside an already armed deploy PR",
               run_fixture([manual_pr, {**prs[0], "armed": True}], event)[1] == "arm=\narm_head=\n")
         check("older manual PR cannot overtake a newer PR of the same kind",
@@ -373,7 +388,13 @@ def main() -> int:
     if a.cmd == "flush":
         last = last_deploy_from_commits(json.load(open(a.commits_json)))
         manual_head = manual_deploy_head(json.load(open(a.event_json))) if a.event_json else None
-        pick = flush(json.load(open(a.prs_json)), a.now, last, a.window, manual_head)
+        prs = json.load(open(a.prs_json))
+        held_admin = sorted(p["number"] for p in prs if p["head"].startswith(DEPLOY_PREFIXES[1])
+                            and not p.get("armed"))
+        if held_admin:
+            print(f"::notice::Admin UI deploy PRs held until #12211 image provenance is verified: {held_admin}",
+                  file=sys.stderr)
+        pick = flush(prs, a.now, last, a.window, manual_head)
         print(f"arm={pick['number'] if pick else ''}")
         print(f"arm_head={pick['head'] if pick else ''}")
         return 0
