@@ -50,7 +50,7 @@ describe('Test Intelligence agent BFF', () => {
       schemaVersion: 1, collectedAt: '2026-08-22T10:00:00Z',
       components: [{ component: 'openbank-ledger-service', moneyPath: true,
         evidence: [{ kind: 'integration', state: 'passed', observedAt: '2020-01-01T00:00:00Z', source: '/private/path' }],
-        testInfrastructure: { declared: ['postgres'], observed: [{ lifecycle: 'started' }] } }],
+        testInfrastructure: { declared: ['postgres', 'keycloak', 'unsupported'], observed: [{ lifecycle: 'started' }] } }],
       clientExperiences: [{ id: 'openbank-app', evidence: [{ kind: 'visual', state: 'passed', observedAt: new Date().toISOString(), source: '/private/app/path' }],
         rum: { state: 'passed', detail: '12 sampled spans', sampledSpansLast7d: 12 } }],
       testCases: [
@@ -71,7 +71,7 @@ describe('Test Intelligence agent BFF', () => {
     expect(body.findings).toEqual([{ ...agentFinding, checkType: 'advisory', detectedAt: '', rootCause: null, proposalUrl: null, status: 'open' }])
     const outbound = JSON.parse(fetchMock.mock.calls[0][1].body as string)
     expect(outbound.components[0]).toEqual({ component: 'openbank-ledger-service', moneyPath: true,
-      evidence: [{ kind: 'integration', state: 'stale' }], declaredInfrastructure: ['postgres'], observedInfrastructureStarts: 1, observedInfrastructureStops: 0,
+      evidence: [{ kind: 'integration', state: 'stale' }], declaredInfrastructure: ['postgres', 'keycloak'], observedInfrastructureStarts: 1, observedInfrastructureStops: 0,
       requiredControls: [{ kind: 'coverage', state: 'not-run' }, { kind: 'integration', state: 'stale' }],
       flakyTests: 1, failingTests: 1, sameCommitTransitions: 2, wastedDurationMs: 1750 })
     expect(outbound.components[1]).toEqual({ component: 'openbank-app', moneyPath: true,

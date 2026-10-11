@@ -20,6 +20,7 @@ import kotlin.io.path.readText
 class CatalogPensionOidcTestResource : QuarkusTestResourceLifecycleManager {
     private var container: GenericContainer<*>? = null
     private var started = false
+    private val evidenceScopeId = UUID.randomUUID().toString()
 
     override fun start(): Map<String, String> {
         val secret = UUID.randomUUID().toString()
@@ -116,7 +117,7 @@ class CatalogPensionOidcTestResource : QuarkusTestResourceLifecycleManager {
         try {
             keycloak.start()
             started = true
-            TestInfrastructureEvidence.record("keycloak", keycloak.dockerImageName, "started")
+            TestInfrastructureEvidence.record("keycloak", keycloak.dockerImageName, "started", evidenceScopeId)
             val issuer = "http://${keycloak.host}:${keycloak.getMappedPort(8080)}/realms/$REALM"
             return mapOf(
                 "quarkus.oidc.auth-server-url" to issuer,
@@ -132,7 +133,7 @@ class CatalogPensionOidcTestResource : QuarkusTestResourceLifecycleManager {
     override fun stop() {
         container?.let {
             it.stop()
-            if (started) TestInfrastructureEvidence.record("keycloak", it.dockerImageName, "stopped")
+            if (started) TestInfrastructureEvidence.record("keycloak", it.dockerImageName, "stopped", evidenceScopeId)
         }
         container = null
         started = false

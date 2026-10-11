@@ -395,6 +395,27 @@ verdict or alter CI/RUM state.
   evidence chain but does not reinterpret a test result.
 - Legacy APIs remain during the compatibility window and temporarily duplicate projections.
 
+## Run envelope v2 rollout for issuer evidence (#12541)
+
+The v1 run envelope remains immutable: its infrastructure vocabulary is exactly
+postgres/redpanda/valkey. Keycloak is admitted only by the separate v2 schema, where
+the collector publishes an image family plus public tag or digest, timestamps, and a
+job-local opaque resource scope. It never publishes a credential, host, mapped port,
+or daemon container ID. Unknown infrastructure and malformed records are omitted
+individually.
+
+Roll out readers first: the compatibility checker, artifact extractor, Admin UI
+collector, report types, and agent projection accept v1 and v2 while rejecting any
+other version. Keep the producer on its default v1 until that reader version is
+deployed. Then opt the CI collector into `--schema-version 2`, and verify an actual
+Keycloak test job's recorder events in its published run artifact before counting
+issuer runtime or cleanup as covered. Revert that producer option to v1 if any
+reader still rejects v2; the v1 schema and old artifacts remain valid throughout.
+
+The top-level Admin UI aggregate report retains its own schemaVersion 1. The v2
+number applies to individual service run envelopes only; the nested test-impact
+shadow contract also remains v1.
+
 ## Compliance impact
 
 <!-- Required (enforced). Do NOT write an article, clause or requirement number unless

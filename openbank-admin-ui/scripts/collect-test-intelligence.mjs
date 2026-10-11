@@ -259,7 +259,7 @@ async function simulationScenarioEvidence() {
   // CI stages both documents from one immutable service artifact. Reconcile the
   // XML cases with its run envelope too, so a lone or mismatched local XML cannot
   // acquire the run's verdict and provenance.
-  if (envelope?.schemaVersion !== 1 || envelope.component !== component
+  if (![1, 2].includes(envelope?.schemaVersion) || envelope.component !== component
       || !Array.isArray(envelope.testCases)
       || !Array.isArray(envelope.suites)
       || !envelope.suites.some(suite => suite.kind === 'simulation')) return projected
@@ -316,12 +316,12 @@ async function simulationScenarioEvidence() {
 function runEnvelope(component) {
   const file = path.join(repo, component, 'build', 'test-intelligence', 'run.json')
   const run = readJson(file)
-  if (!run || run.schemaVersion !== 1 || run.component !== component || !Array.isArray(run.suites)) return null
+  if (!run || ![1, 2].includes(run.schemaVersion) || run.component !== component || !Array.isArray(run.suites)) return null
   const provenance = safeRun(run.run, component)
   return {
     evidence: [...run.suites.map(suite => ({
       kind: suite.kind, state: freshnessAwareState(suite.state, run.run?.observedAt ?? observedAt(file)), observedAt: run.run?.observedAt ?? observedAt(file),
-      source: 'test-intelligence-run:v1', environment: 'ci', durationMs: suite.durationMs,
+      source: `test-intelligence-run:v${run.schemaVersion}`, environment: 'ci', durationMs: suite.durationMs,
       counts: { discovered: suite.discovered, executed: suite.executed, passed: suite.passed,
         failed: suite.failed, skipped: suite.skipped, errors: suite.errors }, run: provenance,
       diagnostics: (run.diagnostics ?? []).filter(item => item.suiteKind === suite.kind
@@ -344,7 +344,7 @@ function runEnvelope(component) {
     coverage: run.coverage ? {
       state: stateFrom(0, 1, run.run?.observedAt ?? observedAt(file)),
       observedAt: run.run?.observedAt ?? observedAt(file), lines: run.coverage.lines,
-      branches: run.coverage.branches, source: 'test-intelligence-run:v1',
+      branches: run.coverage.branches, source: `test-intelligence-run:v${run.schemaVersion}`,
     } : null,
     testImpact: run.testImpact ?? null,
     testInfrastructure: run.testInfrastructure ?? { declared: [], observed: [] },
@@ -430,7 +430,7 @@ function testCaseHistory(currentEnvelopes) {
   const historical = allFiles(path.join(repo, 'openbank-admin-ui', 'test-run-history'), file => file.endsWith('.json'))
     .map(readJson)
   const envelopes = [...historical, ...currentEnvelopes]
-    .filter(item => item?.schemaVersion === 1 && item?.run && item?.component && Array.isArray(item.testCases))
+    .filter(item => [1, 2].includes(item?.schemaVersion) && item?.run && item?.component && Array.isArray(item.testCases))
   const unique = new Map()
   for (const envelope of envelopes) {
     const envelopeRows = new Map()
@@ -910,7 +910,7 @@ function syntheticJourneys() {
       .filter(item => item?.workflow && item?.workflow_name)
       .map(item => [item.id, item.workflow_name]))
     const history = allFiles(path.join(repo, 'openbank-admin-ui', 'test-run-history'), candidate => candidate.endsWith('.json'))
-      .map(readJson).filter(item => item?.schemaVersion === 1 && item?.run)
+      .map(readJson).filter(item => [1, 2].includes(item?.schemaVersion) && item?.run)
       .sort((a, b) => Date.parse(a.run.observedAt) - Date.parse(b.run.observedAt))
     for (const envelope of history) {
       const provenance = safeRun(envelope.run, `synthetic:${envelope.component ?? 'unknown'}`)
@@ -1242,7 +1242,7 @@ async function main() {
   const serviceRunEnvelopes = [
     ...allFiles(path.join(repo, 'openbank-admin-ui', 'test-run-history'), file => file.endsWith('.json')).map(readJson),
     ...currentEnvelopes,
-  ].filter(item => item?.schemaVersion === 1 && item?.run && item?.component)
+  ].filter(item => [1, 2].includes(item?.schemaVersion) && item?.run && item?.component)
   const uniqueServiceRuns = new Map(serviceRunEnvelopes.map(item => [
     `${item.component}:${item.run.id}:${item.run.attempt}`, item,
   ]))

@@ -627,6 +627,33 @@ capabilities:
     ]))
   })
 
+  it('projects both Keycloak issuer lifecycles from a v2 run envelope', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-keycloak-'))
+    dirs.push(repo)
+    write(repo, 'openbank-alpha-service/version.txt', '1.0.0\n')
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'openbank-libs/governance/journeys.yaml', 'version: 1\njourneys: []\n')
+    write(repo, 'openbank-alpha-service/build/test-intelligence/run.json', JSON.stringify({
+      schemaVersion: 2,
+      run: { id: '42', attempt: 1, commit: 'abcdef012345', branch: 'main', workflow: 'Services CI', url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/42', observedAt: '2026-08-22T10:00:00Z' },
+      component: 'openbank-alpha-service', suites: [], testCases: [], coverage: null,
+      testInfrastructure: { declared: ['keycloak'], observed: [
+        { resource: 'keycloak', image: 'keycloak:27.0.0', lifecycle: 'started', observedAt: '2026-08-22T09:59:00Z', resourceScopeId: '11111111-1111-4111-8111-111111111111' },
+        { resource: 'keycloak', image: 'keycloak:27.0.0', lifecycle: 'started', observedAt: '2026-08-22T09:59:10Z', resourceScopeId: '22222222-2222-4222-8222-222222222222' },
+        { resource: 'keycloak', image: 'keycloak:27.0.0', lifecycle: 'stopped', observedAt: '2026-08-22T09:59:30Z', resourceScopeId: '11111111-1111-4111-8111-111111111111' },
+        { resource: 'keycloak', image: 'keycloak:27.0.0', lifecycle: 'stopped', observedAt: '2026-08-22T09:59:40Z', resourceScopeId: '22222222-2222-4222-8222-222222222222' },
+      ] },
+    }))
+    const out = path.join(repo, 'report.json')
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
+    const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+    expect(report.components[0].testInfrastructure.declared).toEqual(['keycloak'])
+    expect(report.components[0].testInfrastructure.observed).toHaveLength(4)
+    expect(report.requiredControls).toContainEqual(expect.objectContaining({
+      id: 'openbank-alpha-service:runtime:keycloak', state: 'passed',
+    }))
+  })
+
   it('prefers the versioned run envelope and preserves provenance plus Testcontainers runtime proof', () => {
     const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-envelope-'))
     dirs.push(repo)

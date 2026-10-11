@@ -88,7 +88,7 @@ export interface TestRunProvenance {
  * occurred. Absent `reprovisions` therefore means "provisioned once", never "unknown".
  */
 export interface TestInfrastructureObservation {
-  resource: 'postgres' | 'redpanda' | 'valkey'
+  resource: 'postgres' | 'redpanda' | 'valkey' | 'keycloak'
   image: string
   lifecycle: 'started' | 'stopped'
   observedAt: string
@@ -104,7 +104,7 @@ export interface ComponentTestPosture {
   evidence: EvidenceObservation[]
   coverage: CoverageObservation
   testInfrastructure: {
-    declared: Array<'postgres' | 'redpanda' | 'valkey'>
+    declared: Array<'postgres' | 'redpanda' | 'valkey' | 'keycloak'>
     observed: TestInfrastructureObservation[]
   }
 }

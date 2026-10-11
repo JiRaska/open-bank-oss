@@ -21,7 +21,18 @@ SUITE_KINDS = {"unit", "integration", "contract", "e2e", "simulation"}
 SUITE_STATES = {"passed", "failed", "skipped", "not-run"}
 SPECIALIZED_KINDS = {"performance", "mutation", "synthetic", "trace"}
 SPECIALIZED_STATES = SUITE_STATES | {"blocked", "unknown"}
-INFRASTRUCTURE = {"postgres", "redpanda", "valkey"}
+V1_INFRASTRUCTURE = {"postgres", "redpanda", "valkey"}
+V2_INFRASTRUCTURE = V1_INFRASTRUCTURE | {"keycloak"}
+
+
+def infrastructure_for_version(version: int) -> set[str]:
+    if type(version) is not int:
+        raise ValueError("unsupported run envelope schemaVersion")
+    if version == 1:
+        return V1_INFRASTRUCTURE
+    if version == 2:
+        return V2_INFRASTRUCTURE
+    raise ValueError("unsupported run envelope schemaVersion")
 DIAGNOSTIC_KINDS = {"playwright-report"}
 MAX_FUTURE_SKEW = timedelta(minutes=5)
 JSON_SAFE_INTEGER_MAX = 2**53 - 1
@@ -100,7 +111,8 @@ def validate_envelope(envelope: dict) -> None:
     required = {"schemaVersion", "run", "component", "suites", "coverage", "testInfrastructure"}
     if set(envelope) - (required | {"specializedEvidence", "testCases", "diagnostics", "testImpact"}) or not required.issubset(envelope):
         raise ValueError("run envelope has missing or unknown top-level fields")
-    if envelope["schemaVersion"] != 1 or not str(envelope["component"]).startswith("openbank-"):
+    infrastructure_vocabulary = infrastructure_for_version(envelope["schemaVersion"])
+    if not str(envelope["component"]).startswith("openbank-"):
         raise ValueError("run envelope schemaVersion/component is invalid")
     run = envelope["run"]
     if set(run) != {"id", "attempt", "commit", "branch", "workflow", "url", "observedAt"}:
@@ -134,7 +146,7 @@ def validate_envelope(envelope: dict) -> None:
             if percentage is not None and (not isinstance(percentage, (int, float)) or not 0 <= percentage <= 100):
                 raise ValueError("coverage percentage must be null or between 0 and 100")
     infrastructure = envelope["testInfrastructure"]
-    if set(infrastructure) != {"declared", "observed"} or not set(infrastructure["declared"]).issubset(INFRASTRUCTURE):
+    if set(infrastructure) != {"declared", "observed"} or not set(infrastructure["declared"]).issubset(infrastructure_vocabulary):
         raise ValueError("declared test infrastructure is invalid")
     for item in infrastructure["observed"]:
         required_runtime_fields = {"resource", "image", "lifecycle", "observedAt"}
@@ -144,7 +156,7 @@ def validate_envelope(envelope: dict) -> None:
         # count would simply stop being observable rather than being reconciled.
         if set(item) - (required_runtime_fields | {"resourceScopeId", "reprovisions"}) or not required_runtime_fields.issubset(item):
             raise ValueError("runtime observation contains unsafe or incomplete fields")
-        if item["resource"] not in INFRASTRUCTURE or item["lifecycle"] not in {"started", "stopped"} or not item["image"]:
+        if item["resource"] not in infrastructure_vocabulary or item["lifecycle"] not in {"started", "stopped"} or not item["image"]:
             raise ValueError("runtime observation values are invalid")
         if "resourceScopeId" in item and not re.fullmatch(
             r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
@@ -562,7 +574,7 @@ def coverage(service: Path) -> dict | None:
     return {"source": str(report), "lines": value("line"), "branches": value("branch")}
 
 
-def declared_infrastructure(service: Path) -> list[str]:
+def declared_infrastructure(service: Path, schema_version: int = 1) -> list[str]:
     sources = [path.read_text(errors="ignore") for path in service.glob("src/test/**/*.kt")]
     text = "\n".join(sources)
     build_file = service / "build.gradle.kts"
@@ -587,7 +599,9 @@ def declared_infrastructure(service: Path) -> list[str]:
             attached = re.search(rf"(?m)^\s*@QuarkusTestResource\s*\(\s*(?:value\s*=\s*)?{name}::class\b", source)
             if imported and attached:
                 values.update(infrastructure)
-    return [name for name in ("postgres", "redpanda", "valkey") if name in values]
+        if schema_version == 2 and re.search(r"(?m)^\s*@QuarkusTestResource\s*\(\s*(?:value\s*=\s*)?(?:ScaOidcTestResource|CatalogPensionOidcTestResource)::class\b", source):
+            values.add("keycloak")
+    return [name for name in ("postgres", "redpanda", "valkey", "keycloak") if name in values]
 
 
 def runtime_image_identity(image: str) -> str:
@@ -622,7 +636,8 @@ def public_runtime_image(resource: str, image: object) -> str:
     return f"{resource}:{tag.group(1)}" if tag else resource
 
 
-def observations(service: Path) -> list[dict]:
+def observations(service: Path, schema_version: int = 1) -> list[dict]:
+    infrastructure_vocabulary = infrastructure_for_version(schema_version)
     result = []
     for file in (service / "build" / "test-intelligence" / "runtime").rglob("*.jsonl"):
         for line in file.read_text().splitlines():
@@ -633,7 +648,7 @@ def observations(service: Path) -> list[dict]:
                 item.pop("schemaVersion", None)
                 if "observedAtUnix" in item:
                     image = str(item.get("image", ""))
-                    resource = "postgres" if "postgres" in image else "redpanda" if "redpanda" in image else "valkey" if re.search(r"valkey|redis", image, re.I) else None
+                    resource = "postgres" if "postgres" in image else "redpanda" if "redpanda" in image else "valkey" if re.search(r"valkey|redis", image, re.I) else "keycloak" if schema_version == 2 and re.search(r"(?:^|/)keycloak(?::|@|$)", image, re.I) else None
                     lifecycle = {"start": "started", "die": "stopped"}.get(item.get("lifecycle"))
                     if resource and lifecycle:
                         # Docker's daemon id is a transient correlation key only. It never
@@ -649,9 +664,9 @@ def observations(service: Path) -> list[dict]:
                     # stream. Keep that provenance only while deduplicating;
                     # the published schema deliberately contains no host data.
                     resource = item.get("resource")
-                    if not isinstance(resource, str) or resource not in INFRASTRUCTURE:
+                    if not isinstance(resource, str) or resource not in infrastructure_vocabulary:
                         # Same rule the Docker branch above already applies: a resource
-                        # outside the schema's vocabulary (opa, keycloak, ...) is not
+                        # outside this version's vocabulary (for example opa) is not
                         # observed. Passing it through made validate_envelope raise, so ONE
                         # out-of-vocabulary recorder line cost the service its whole
                         # envelope, and Admin-UI deploy refuses to bake an artifact with
@@ -660,13 +675,30 @@ def observations(service: Path) -> list[dict]:
                         continue
                     item["image"] = public_runtime_image(resource, item.get("image", ""))
                     result.append((0 if file.name == "testcontainers.jsonl" else 1, item))
-            except json.JSONDecodeError:
+            except (json.JSONDecodeError, ValueError, OverflowError, TypeError):
                 continue
     normalized = []
     for priority, item in result:
         try:
+            required = {"resource", "image", "lifecycle", "observedAt"}
+            allowed = required | {"resourceScopeId", "reprovisions", "_dockerContainerId"}
+            if (not required.issubset(item) or set(item) - allowed
+                    or item["resource"] not in infrastructure_vocabulary
+                    or item["lifecycle"] not in {"started", "stopped"}
+                    or not isinstance(item["image"], str) or not item["image"]):
+                continue
+            if "resourceScopeId" in item and not re.fullmatch(
+                r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+                str(item["resourceScopeId"]),
+            ):
+                continue
+            if "reprovisions" in item and (
+                item["lifecycle"] != "stopped" or type(item["reprovisions"]) is not int
+                or item["reprovisions"] < 1
+            ):
+                continue
             observed_at = parse_timestamp(item["observedAt"], "testInfrastructure.observed.observedAt")
-        except (KeyError, ValueError):
+        except (KeyError, TypeError, ValueError):
             continue
         normalized.append((priority, observed_at, item))
     normalized.sort(key=lambda entry: (entry[0], entry[1]))
@@ -847,6 +879,8 @@ def main() -> None:
     parser.add_argument("--service")
     parser.add_argument("--out")
     parser.add_argument("--component")
+    # v1 remains the default until all readers have been upgraded and deployed.
+    parser.add_argument("--schema-version", type=int, choices=(1, 2), default=1)
     parser.add_argument("--performance-summary")
     parser.add_argument("--performance-not-run-detail")
     parser.add_argument("--mutation-report")
@@ -1439,7 +1473,7 @@ def main() -> None:
     )
     specialized.extend(trace_contract_evidence(service))
     envelope = {
-        "schemaVersion": 1,
+        "schemaVersion": args.schema_version,
         "run": {
             "id": run_id, "attempt": run_attempt,
             "commit": os.getenv("GITHUB_SHA", "local000"),
@@ -1453,7 +1487,7 @@ def main() -> None:
         # A future producer may only advance this after emitting versioned, verified coverage or
         # dependency edges and measuring recommendations against the preserved full suite (#7207).
         "testImpact": {"schemaVersion": 1, "mode": "shadow", "mappingState": "unknown", "selectionState": "unavailable"},
-        "testInfrastructure": {"declared": declared_infrastructure(service), "observed": observations(service)},
+        "testInfrastructure": {"declared": declared_infrastructure(service, args.schema_version), "observed": observations(service, args.schema_version)},
         "specializedEvidence": specialized,
         "diagnostics": browser_diagnostics(args.browser_report_dir, run_id, run_attempt, run_url),
     }

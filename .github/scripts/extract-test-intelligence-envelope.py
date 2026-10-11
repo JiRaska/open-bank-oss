@@ -2,21 +2,29 @@
 """Select one main-branch Test Intelligence envelope from an Actions artifact ZIP."""
 
 import io
+import importlib.util
 import json
 import re
 import sys
 import tempfile
 import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 
 ENVELOPE_NAME = re.compile(r"(?:^|/)run(?:-[a-z0-9-]+)?\.json$")
+COLLECTOR_PATH = Path(__file__).with_name("collect-test-run-evidence.py")
+SPEC = importlib.util.spec_from_file_location("test_run_evidence_collector", COLLECTOR_PATH)
+assert SPEC and SPEC.loader
+COLLECTOR = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(COLLECTOR)
 
 
 def validate(payload: bytes) -> bytes:
     envelope = json.loads(payload)
-    if not isinstance(envelope, dict) or envelope.get("schemaVersion") != 1 or not isinstance(envelope.get("run"), dict):
+    if not isinstance(envelope, dict) or envelope.get("schemaVersion") not in (1, 2) or not isinstance(envelope.get("run"), dict):
         raise ValueError("run envelope has no supported schema or provenance")
+    COLLECTOR.validate_envelope(envelope)
     if envelope["run"].get("branch") != "main":
         raise ValueError("run envelope is not main-branch evidence")
     return payload
@@ -52,15 +60,25 @@ def self_test() -> None:
                 zipped.writestr(name, content)
         return buffer.getvalue()
 
-    good = json.dumps({"schemaVersion": 1, "run": {"branch": "main"}}).encode()
+    example = {
+        "schemaVersion": 1, "component": "openbank-example-service", "suites": [],
+        "coverage": None, "testInfrastructure": {"declared": [], "observed": []},
+        "run": {"id": "123", "attempt": 1, "commit": "abcdef012345",
+                "branch": "main", "workflow": "Services CI", "url": "",
+                "observedAt": datetime.now(timezone.utc).isoformat()},
+    }
+    good = json.dumps(example).encode()
+    v2 = json.dumps(example | {"schemaVersion": 2}).encode()
     for name in ("run.json", "run-chromium.json", "nested/run-security-excellence-firefox.json"):
         assert extract(archive({name: good})) == good
+        assert extract(archive({name: v2})) == v2
     for files in (
         {"run.json": good, "run-firefox.json": good},
         {"report.json": good},
         {"run.json": b"not-json"},
         {"run.json": b"[]"},
-        {"run.json": json.dumps({"schemaVersion": 1, "run": {"branch": "feature"}}).encode()},
+        {"run.json": json.dumps(example | {"run": example["run"] | {"branch": "feature"}}).encode()},
+        {"run.json": json.dumps(example | {"schemaVersion": 3}).encode()},
     ):
         try:
             extract(archive(files))
@@ -72,7 +90,7 @@ def self_test() -> None:
         cache = Path(temp)
         (cache / "valid.json").write_bytes(good)
         (cache / "wrong-branch.json").write_bytes(
-            json.dumps({"schemaVersion": 1, "run": {"branch": "feature"}}).encode()
+            json.dumps(example | {"run": example["run"] | {"branch": "feature"}}).encode()
         )
         (cache / "malformed.json").write_bytes(b"not-json")
         (cache / ".staged-ids").write_text("42\n43\n")
