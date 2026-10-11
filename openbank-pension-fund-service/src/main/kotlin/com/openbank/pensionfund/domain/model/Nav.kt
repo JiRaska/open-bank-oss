@@ -10,7 +10,12 @@ import java.time.LocalDate
 import java.util.UUID
 
 /** A priced position held by the fund at its depositary. */
-data class PricedPosition(val instrumentId: String, val quantity: BigDecimal, val price: BigDecimal) {
+data class PricedPosition(
+    val instrumentId: String,
+    val quantity: BigDecimal,
+    val price: BigDecimal,
+    val instrumentClass: InstrumentClass = InstrumentClass.UNCLASSIFIED,
+) {
     init {
         require(instrumentId.isNotBlank()) { "instrumentId must not be blank" }
         require(quantity.signum() >= 0) { "quantity must not be negative" }
@@ -92,6 +97,12 @@ data class NavRecord(
     val correctsNavId: UUID? = null,
     val approvedBy: String? = null,
     val publishedAt: Instant? = null,
+    /**
+     * True when the positions this NAV was struck on are stored with it (#12425). NAVs calculated
+     * before that are false: their portfolio is UNKNOWN, which a report must say rather than read
+     * an empty position list as an empty portfolio.
+     */
+    val positionsRecorded: Boolean = false,
 ) {
     val navPerUnit: BigDecimal get() = figures.navPerUnit
 
