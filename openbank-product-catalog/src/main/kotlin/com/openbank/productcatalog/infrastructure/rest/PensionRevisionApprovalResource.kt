@@ -107,6 +107,9 @@ class PensionRevisionApprovalResource(
         if (requiredRole !in scopeMapper.roles(token.getClaim<Any?>(scopeClaim), identity.roles)) {
             throw CatalogForbiddenException("approval role and scope are required")
         }
+        if (token.getClaim<String>("azp") != "openbank-admin-ui") {
+            throw CatalogForbiddenException("the Admin UI client is required for human pension approval")
+        }
         val username = token.getClaim<String>("preferred_username").orEmpty()
         val approverName = token.name ?: username
         if (

@@ -166,7 +166,19 @@ class RetirementCatalogPackResourceTest {
 
     @Test
     @Suppress("LongMethod")
-    @TestSecurity(user = "retirement-pack-operator", roles = ["ROLE_OPERATOR", "CATALOG_SCOPE_READ"])
+    @TestSecurity(
+        user = "retirement-pack-operator",
+        roles = ["ROLE_OPERATOR", "ROLE_PENSION_LEGAL_COUNSEL", "CATALOG_SCOPE_READ"],
+        augmentors = [com.openbank.productcatalog.infrastructure.security.CatalogScopeIdentityAugmentor::class],
+    )
+    @OidcSecurity(
+        claims = [
+            Claim(key = "scope", value = "pension:legal-approve"),
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "preferred_username", value = "retirement-pack-operator"),
+            Claim(key = "sub", value = "retirement-pack-operator-subject"),
+        ],
+    )
     fun `v2 pension revision needs distinct legal and product evidence before publication`() {
         val offering = fixtureOfferings().first { it["attributes"]["productLine"].asText() == "DIP" }
         val specificationId = createSpecification("CZ_DIP_CLASSES_V2", version = 2)
@@ -323,6 +335,7 @@ class RetirementCatalogPackResourceTest {
     @OidcSecurity(
         claims = [
             Claim(key = "scope", value = "pension:legal-approve"),
+            Claim(key = "azp", value = "openbank-admin-ui"),
             Claim(key = "iss", value = "https://example.invalid/legal-issuer"),
             Claim(key = "sub", value = "legal-reviewer"),
         ],
@@ -374,6 +387,7 @@ class RetirementCatalogPackResourceTest {
     @OidcSecurity(
         claims = [
             Claim(key = "scope", value = "pension:product-approve"),
+            Claim(key = "azp", value = "openbank-admin-ui"),
             Claim(key = "iss", value = "https://example.invalid/product-issuer"),
             Claim(key = "sub", value = "product-reviewer"),
         ],

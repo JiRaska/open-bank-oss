@@ -70,7 +70,8 @@ class CatalogScopeIdentityAugmentor(
         val username = token.getClaim<String>("preferred_username").orEmpty()
         val name = token.name ?: username
         val humanApprover =
-            name.isNotBlank() &&
+            token.getClaim<String>("azp") == "openbank-admin-ui" &&
+                name.isNotBlank() &&
                 !name.startsWith("service-account-") &&
                 !name.startsWith("agent:") &&
                 username.isNotBlank() &&

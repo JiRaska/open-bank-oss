@@ -45,7 +45,12 @@ class CatalogScopeAuthorizationTest {
         roles = ["ROLE_PENSION_LEGAL_COUNSEL"],
         augmentors = [CatalogScopeIdentityAugmentor::class],
     )
-    @OidcSecurity(claims = [Claim(key = "scope", value = "pension:legal-approve")])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "scope", value = "pension:legal-approve"),
+            Claim(key = "azp", value = "openbank-admin-ui"),
+        ],
+    )
     fun pensionLegalRoleAndScopeAllowOnlyLegalApproval() {
         val base = "/api/v2/offerings/00000000-0000-0000-0000-000000000001" +
             "/revisions/00000000-0000-0000-0000-000000000002/pension-approvals"
@@ -133,6 +138,7 @@ class CatalogScopeAuthorizationTest {
     @OidcSecurity(
         claims = [
             Claim(key = "scope", value = "pension:legal-approve"),
+            Claim(key = "azp", value = "openbank-admin-ui"),
             Claim(key = "preferred_username", value = "service-account-openbank-other"),
             Claim(key = "upn", value = "human-alias"),
         ],
@@ -140,6 +146,30 @@ class CatalogScopeAuthorizationTest {
     fun machineUsernameCannotBeMaskedByHumanDisplayName() {
         val base = "/api/v2/offerings/00000000-0000-0000-0000-000000000001" +
             "/revisions/00000000-0000-0000-0000-000000000002/pension-approvals"
+        given().get(base).then().statusCode(403)
+        given().contentType("application/json").header("If-Match", "\"0\"")
+            .body("""{"reason":"review"}""")
+            .post("$base/LEGAL_COUNSEL").then().statusCode(403)
+    }
+
+    @Test
+    @TestSecurity(
+        user = "legal-reviewer",
+        roles = ["ROLE_PENSION_LEGAL_COUNSEL"],
+        augmentors = [CatalogScopeIdentityAugmentor::class],
+    )
+    @OidcSecurity(
+        claims = [
+            Claim(key = "scope", value = "pension:legal-approve"),
+            Claim(key = "azp", value = "unrelated-client"),
+            Claim(key = "preferred_username", value = "legal-reviewer"),
+            Claim(key = "sub", value = "legal-reviewer-subject"),
+        ],
+    )
+    fun nonAdminClientCannotReadOrApproveDespiteHumanRoleAndScope() {
+        val base = "/api/v2/offerings/00000000-0000-0000-0000-000000000001" +
+            "/revisions/00000000-0000-0000-0000-000000000002/pension-approvals"
+        given().get("/api/v2/offerings").then().statusCode(403)
         given().get(base).then().statusCode(403)
         given().contentType("application/json").header("If-Match", "\"0\"")
             .body("""{"reason":"review"}""")
