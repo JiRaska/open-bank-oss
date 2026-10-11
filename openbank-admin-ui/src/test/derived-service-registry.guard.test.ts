@@ -47,7 +47,6 @@ const SANCTIONED = new Set(['src/lib/services/registry.ts'])
  */
 const BASELINE = new Set([
   'src/app/api/approvals/pending/route.ts',
-  'src/app/api/bcp/health/route.ts',
   'src/app/api/customer-360/[partyId]/graph/route.ts',
   'src/app/api/pyrra/summary/route.ts',
   'src/app/docs/bcp/page.tsx',

@@ -115,7 +115,7 @@ const TIERS: {
     services: [
       { name: 'domestic-payment',      label: 'Domestic Payment',    note: ['CZ domácí platby', 'CZ domestic payments'] },
       { name: 'sepa-payment',          label: 'SEPA Payment',        note: ['SEPA Credit Transfer', 'SEPA Credit Transfer'] },
-      { name: 'sepa-instant-service',  label: 'SEPA Instant',        note: ['SCT Inst — real-time EUR', 'SCT Inst — real-time EUR'] },
+      { name: 'sepa-instant',          label: 'SEPA Instant',        note: ['SCT Inst — real-time EUR', 'SCT Inst — real-time EUR'] },
       { name: 'swift-service',         label: 'SWIFT Service',       note: ['Mezinárodní platby MT/MX', 'International payments MT/MX'] },
       { name: 'fx-service',            label: 'FX Service',          note: ['Devizové operace', 'Foreign exchange operations'] },
       { name: 'clearing-service',      label: 'Clearing Service',    note: ['Mezibankovní clearing', 'Interbank clearing'] },
