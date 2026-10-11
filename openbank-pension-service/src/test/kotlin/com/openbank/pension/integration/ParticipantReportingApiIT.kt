@@ -60,7 +60,7 @@ class ParticipantReportingApiIT {
     companion object {
         private val ids = mutableMapOf<String, UUID>()
         private var seeded = false
-        private const val PATH = "/api/v1/pension/reporting/participant-aggregates"
+        private const val PATH = "/api/v2/pension/reporting/participant-aggregates"
     }
 
     private fun <T> jdbc(block: (Connection) -> T): T {

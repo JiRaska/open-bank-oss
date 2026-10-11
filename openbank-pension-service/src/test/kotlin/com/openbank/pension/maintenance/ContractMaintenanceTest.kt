@@ -35,6 +35,7 @@ import com.openbank.pension.domain.pack.JurisdictionPack
 import com.openbank.pension.domain.pack.ProviderType
 import com.openbank.pension.infrastructure.notification.RecordingParticipantNotifier
 import com.openbank.pension.infrastructure.pack.JurisdictionPackLoader
+import com.openbank.pension.testsupport.ProviderFixtures
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -291,6 +292,7 @@ class ContractMaintenanceTest {
             RecordingParticipantNotifier(),
             com.openbank.pension.testsupport.RecordingSuitability(),
             com.openbank.pension.testsupport.RecordingSca(),
+            ProviderFixtures.boundary,
         ),
         store,
         deaths,

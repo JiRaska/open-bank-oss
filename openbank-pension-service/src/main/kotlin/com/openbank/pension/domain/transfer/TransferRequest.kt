@@ -51,7 +51,8 @@ enum class TransferStatus {
         )
         private val OUT_EDGES: Map<TransferStatus, Set<TransferStatus>> = mapOf(
             AWAITING_CONSENT to setOf(REQUESTED, CANCELLED),
-            REQUESTED to setOf(VALUATED, REJECTED),
+            // The participant may withdraw until valuation starts; after it, units are being sold.
+            REQUESTED to setOf(VALUATED, REJECTED, CANCELLED),
             VALUATED to setOf(SETTLED, FAILED),
             SETTLED to setOf(COMPLETED),
         )
@@ -99,6 +100,7 @@ data class FundsArrival(
  * Immutable; [moveTo] consults the direction's own transition table. [version] is the optimistic
  * lock the repository compares, because a counterparty callback and a workflow timer can race.
  */
+@Suppress("TooManyFunctions") // one function per lifecycle edge; splitting the state machine hides it
 data class TransferRequest(
     val id: UUID,
     val direction: TransferDirection,
@@ -135,6 +137,22 @@ data class TransferRequest(
         require(signatureRef.isNotBlank()) { "consent must be SCA-signed" }
         return moveTo(TransferStatus.REQUESTED, now).copy(signatureRef = signatureRef)
     }
+
+    /**
+     * The participant withdraws a transfer-out, or declines a provider's request, before it
+     * executes: only while nothing has been valued, sold or paid. Nothing to compensate.
+     */
+    fun withdrawn(now: Instant): TransferRequest {
+        check(direction == TransferDirection.OUT) { "only a transfer-out is withdrawn this way" }
+        check(status == TransferStatus.AWAITING_CONSENT || status == TransferStatus.REQUESTED) {
+            "transfer $id is $status: it can no longer be withdrawn"
+        }
+        return failed(TransferStatus.CANCELLED, WITHDRAWN_BY_PARTICIPANT, Compensation.NONE, now)
+    }
+
+    /** True for a transfer-out the participant already withdrew — a retry answers it unchanged. */
+    val withdrawnByParticipant: Boolean
+        get() = status == TransferStatus.CANCELLED && failureReason == WITHDRAWN_BY_PARTICIPANT
 
     fun sent(reference: String, now: Instant): TransferRequest =
         moveTo(TransferStatus.SENT, now).copy(counterpartyReference = reference)
@@ -186,6 +204,8 @@ data class TransferRequest(
     }
 
     companion object {
+        const val WITHDRAWN_BY_PARTICIPANT = "withdrawn by the participant"
+
         @Suppress("LongParameterList")
         fun request(
             direction: TransferDirection,

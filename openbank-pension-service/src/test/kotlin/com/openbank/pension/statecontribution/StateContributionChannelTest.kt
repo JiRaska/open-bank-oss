@@ -281,6 +281,41 @@ class StateContributionChannelTest {
         }
 
     @Test
+    fun `ineligibility settled then exit - the settled month left the balance and is not returned twice`(): Unit =
+        runBlocking {
+            val c = twoReceivedMonths()
+            val inel = returns.registerIneligibility(c, YearMonth.of(2026, 2)).single()
+            val report = requireNotNull(returns.fileReturnReport(YearMonth.of(2026, 6)))
+            returns.applyReturnResult(report.id, StateAgencySimulator.returnResult(report.payload))
+            returns.settle(inel.id)
+            assertThat(returnedInLedger(c)).isEqualByComparingTo("340")
+            exit(c, "exit-c")
+            val exitReturn = store.rows.values.single { it.cause == ReturnCause.CONTRACT_TERMINATED }
+            assertThat(exitReturn.amount).describedAs("only January is left to return").isEqualByComparingTo("340")
+            assertThat(owedToAgency(c)).isEqualByComparingTo("680")
+            assertThat(returnedInLedger(c)).isEqualByComparingTo("680")
+            assertThat(f.incentiveService.status(c).balances.single().net).isEqualByComparingTo("0")
+        }
+
+    @Test
+    fun `settlement landing between the exit's ledger write and its registration returns nothing twice`(): Unit =
+        runBlocking {
+            val c = twoReceivedMonths()
+            val inel = returns.registerIneligibility(c, YearMonth.of(2026, 2)).single()
+            val report = requireNotNull(returns.fileReturnReport(YearMonth.of(2026, 6)))
+            returns.applyReturnResult(report.id, StateAgencySimulator.returnResult(report.payload))
+            // S5's activity: ledger entries first ...
+            val balance = f.incentiveService.clawbackBalance(c, LocalDate.of(2026, 6, 3)).stateIncentivesToReturn
+            f.incentiveService.settleClawback(c, balance, "exit-d")
+            // ... the ineligibility return settles before the activity registers the exit return ...
+            returns.settle(inel.id)
+            // ... then the registration (or its retry) runs.
+            returns.registerTermination(c, balance, LocalDate.of(2026, 6, 3), "exit-d")
+            assertThat(returnedInLedger(c)).describedAs("the ledger holds the 680 once").isEqualByComparingTo("680")
+            assertThat(owedToAgency(c)).describedAs("MF is owed each crown once").isEqualByComparingTo("680")
+        }
+
+    @Test
     fun `exit then ineligibility - a month the exit already returns is not owed a second time`(): Unit = runBlocking {
         val c = twoReceivedMonths()
         exit(c, "exit-b")

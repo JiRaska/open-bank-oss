@@ -25,7 +25,7 @@ import java.util.UUID
  * Operator view of payouts across contracts (ADR-0334 S8): the admin payout queue, optionally for
  * one contract. Staff only — the participant reads its own payouts by id under its contract.
  */
-@Path("/api/v1/pension/operator/payouts")
+@Path("/api/v2/pension/operator/payouts")
 @Produces(MediaType.APPLICATION_JSON)
 @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, Roles.COMPLIANCE)
 class PensionOperatorPayoutResource {

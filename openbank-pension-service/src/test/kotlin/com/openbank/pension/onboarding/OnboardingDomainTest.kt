@@ -20,6 +20,7 @@ import com.openbank.pension.domain.onboarding.StrategyRecommender
 import com.openbank.pension.domain.onboarding.SuitabilityAssessment
 import com.openbank.pension.domain.pack.ProviderType
 import com.openbank.pension.domain.pack.TransferRules
+import com.openbank.pension.domain.transfer.Compensation
 import com.openbank.pension.domain.transfer.Counterparty
 import com.openbank.pension.domain.transfer.FundsArrival
 import com.openbank.pension.domain.transfer.TransferDirection
@@ -263,5 +264,27 @@ class OnboardingDomainTest {
         assertThat(
             TransferTerms.fee(TransferRules(allowed = true), today, BigDecimal.TEN, today),
         ).isEqualByComparingTo("0")
+    }
+
+    @Test
+    fun `a transfer-out is withdrawn before valuation and never after`() {
+        val awaiting = transfer(TransferOrigin.RECEIVING_PROVIDER).withdrawn(now)
+        assertThat(awaiting.status).isEqualTo(TransferStatus.CANCELLED)
+        assertThat(awaiting.withdrawnByParticipant).isTrue()
+        assertThat(awaiting.compensation).isEqualTo(Compensation.NONE)
+        assertThat(transfer(TransferOrigin.PARTICIPANT).withdrawn(now).status).isEqualTo(TransferStatus.CANCELLED)
+
+        val valued = transfer(TransferOrigin.PARTICIPANT).valuated(BigDecimal.TEN, BigDecimal.ONE, now)
+        assertThatThrownBy { valued.withdrawn(now) }.isInstanceOf(IllegalStateException::class.java)
+        assertThatThrownBy { transfer(TransferOrigin.PARTICIPANT, TransferDirection.IN).withdrawn(now) }
+            .isInstanceOf(IllegalStateException::class.java)
+        // A withdrawn transfer can neither be valued nor consented to afterwards.
+        assertThatThrownBy { awaiting.consented("sca-3", now) }.isInstanceOf(IllegalStateException::class.java)
+        assertThatThrownBy { awaiting.valuated(BigDecimal.TEN, BigDecimal.ONE, now) }
+            .isInstanceOf(IllegalStateException::class.java)
+        // A provider's rejection is not a participant withdrawal: a retry must not read it as one.
+        val rejected = transfer(TransferOrigin.PARTICIPANT)
+            .failed(TransferStatus.REJECTED, "contract is TERMINATED", Compensation.NONE, now)
+        assertThat(rejected.withdrawnByParticipant).isFalse()
     }
 }

@@ -17,7 +17,6 @@ info:
   # 1.19 -> 1.20 (#9430): additive — proposal responses expose the immutable approval-group
   # snapshot and canonical approve/reject SCA references. Existing clients may ignore them.
   # 1.20 -> 1.21 (#11588): additive — approval responses expose verified makerActorKind.
-  # 1.21 -> 1.22 (#12465): additive — scoped pension ownership verification POST.
   version: 1.22.0
   description: BIAN-aligned account lifecycle management — open, query, freeze, close accounts.
   contact:
@@ -249,10 +248,13 @@ paths:
   /api/v1/accounts/ownership-verifications:
     post:
       tags: [Accounts]
-      summary: Verify a pension participant owns an active account
+      summary: Verify that a party owns an IBAN and that the account is active
+      description: >-
+        ADR-0335 D2 ownership projection (action `account.verifyOwnership`). The answer is exactly
+        `{owned, active}` plus `accountId` only when owned, and an unknown IBAN answers the same as another party's IBAN
+        (`owned=false, active=false`), so the endpoint is no existence oracle and returns no account
+        data. The IBAN travels in the body to keep it out of access logs.
       operationId: verifyAccountOwnership
-      security:
-        - bearerAuth: [ROLE_PENSION_ACCOUNT_VERIFY]
       requestBody:
         required: true
         content:
@@ -261,13 +263,15 @@ paths:
               $ref: '#/components/schemas/OwnershipVerificationRequest'
       responses:
         '200':
-          description: Non-disclosing ownership verdict; unknown or foreign IBANs both return false
+          description: Ownership verdict
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/OwnershipVerificationResponse'
+        '400':
+          description: iban or partyId missing, or the IBAN is malformed
         '401':
-          description: Missing M2M identity
+          description: Unauthenticated
         '403':
           $ref: '#/components/responses/Forbidden'
 
@@ -1065,15 +1069,27 @@ components:
       type: object
       required: [iban, partyId]
       properties:
-        iban: { type: string, minLength: 1 }
-        partyId: { type: string, format: uuid }
+        iban:
+          type: string
+          example: CZ6550510000001234567890
+        partyId:
+          type: string
+          format: uuid
     OwnershipVerificationResponse:
       type: object
       required: [owned, active]
+      additionalProperties: false
       properties:
-        owned: { type: boolean }
-        active: { type: boolean }
-        accountId: { type: [string, 'null'], format: uuid }
+        owned:
+          type: boolean
+          description: The party owns the account. False for an unknown IBAN too.
+        active:
+          type: boolean
+          description: The owned account is ACTIVE. Always false when owned is false.
+        accountId:
+          type: string
+          format: uuid
+          description: The account's id. Present only when owned is true.
     AuthorizationRole:
       type: string
       enum: [FULL_ACCESS, PAYMENT_ONLY, READ_ONLY, CARD_HOLDER]

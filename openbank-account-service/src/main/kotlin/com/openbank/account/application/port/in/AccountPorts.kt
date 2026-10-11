@@ -56,8 +56,6 @@ data class UnfreezeAccountCommand(val accountId: UUID, val reason: String, val r
 
 data class GetAccountQuery(val accountId: UUID)
 data class GetAccountByIbanQuery(val iban: String)
-data class VerifyAccountOwnershipQuery(val iban: String, val partyId: UUID)
-data class AccountOwnershipVerdict(val owned: Boolean, val active: Boolean, val accountId: UUID? = null)
 data class ListAccountsQuery(val partyId: UUID, val limit: Int = 20, val afterCursor: String? = null)
 data class SearchAccountsQuery(val query: String, val limit: Int = 20, val afterCursor: String? = null)
 
@@ -99,7 +97,6 @@ interface AccountUseCase {
     suspend fun unfreezeAccount(command: UnfreezeAccountCommand): Account
     suspend fun getAccount(query: GetAccountQuery): Account
     suspend fun getAccountByIban(query: GetAccountByIbanQuery): Account
-    suspend fun verifyAccountOwnership(query: VerifyAccountOwnershipQuery): AccountOwnershipVerdict
     suspend fun listAccounts(query: ListAccountsQuery): CursorPage<Account>
     suspend fun searchAccounts(query: SearchAccountsQuery): CursorPage<Account>
 
@@ -237,4 +234,11 @@ data class DelegatedPaymentDecision(
         get() = outcome == DelegatedPaymentOutcome.OWNER ||
             outcome == DelegatedPaymentOutcome.LEGACY_AUTHORIZATION ||
             outcome == DelegatedPaymentOutcome.DELEGATED
+}
+
+data class VerifyAccountOwnershipQuery(val iban: String, val partyId: UUID)
+
+/** ADR-0335 D2: answer "does this party own this IBAN, and is it active" — and nothing more. */
+interface VerifyAccountOwnershipUseCase {
+    suspend fun verifyOwnership(query: VerifyAccountOwnershipQuery): com.openbank.account.domain.model.OwnershipVerdict
 }

@@ -9,18 +9,21 @@ import com.openbank.libs.security.Roles
 import com.openbank.pension.application.onboarding.TransferOutCommand
 import com.openbank.pension.application.onboarding.TransferService
 import com.openbank.pension.domain.transfer.Counterparty
+import com.openbank.pension.domain.transfer.TransferDirection
 import com.openbank.pension.infrastructure.authz.ContractAccessGuard
 import com.openbank.pension.infrastructure.authz.ContractAccessGuard.Companion.PARTY_HEADER
 import com.openbank.pension.infrastructure.rest.requireIdempotencyKey
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
+import jakarta.ws.rs.DefaultValue
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
+import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.openapi.annotations.Operation
@@ -34,7 +37,7 @@ import java.util.UUID
  * contract answers 404.
  */
 @Tag(name = "Pension transfers", description = "Transfers of a pension contract between providers")
-@Path("/api/v1/pension/transfers")
+@Path("/api/v2/pension/transfers")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @RolesAllowed(Roles.API)
@@ -92,10 +95,37 @@ class PensionTransferResource {
         return Response.status(Response.Status.ACCEPTED).entity(TransferResponse.from(transfer)).build()
     }
 
+    @POST
+    @Path("/{id}/withdrawal")
+    @Operation(summary = "Withdraw a transfer-out (or the consent to one) before it executes (SCA-signed)")
+    @Authorize(action = "pension.transfer.withdraw", resource = "#id")
+    suspend fun withdraw(
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        @HeaderParam(PARTY_HEADER) party: String?,
+        @PathParam("id") id: UUID,
+        request: TransferWithdrawalRequest?,
+    ): TransferResponse {
+        requireIdempotencyKey(idempotencyKey)
+        val challenge =
+            requireNotNull(request?.scaChallengeId?.takeIf { it.isNotBlank() }) { "scaChallengeId is required" }
+        return TransferResponse.from(transfers.withdrawTransferOut(id, partyOf(party), challenge))
+    }
+
+    @GET
+    @Operation(summary = "The caller's transfers in either direction; by default only those still pending")
+    @Authorize(action = "pension.transfer.inspect")
+    suspend fun list(
+        @HeaderParam(PARTY_HEADER) party: String?,
+        @QueryParam("direction") direction: TransferDirection?,
+        @QueryParam("pending") @DefaultValue("true") pending: Boolean,
+        @QueryParam("limit") @DefaultValue("50") limit: Int,
+    ): List<TransferResponse> =
+        transfers.listForParticipant(partyOf(party), direction, pending, limit).map(TransferResponse::from)
+
     @GET
     @Path("/{id}")
     @Operation(summary = "Status of one of the caller's transfers")
-    @Authorize(action = "pension.transfer.read", resource = "#id")
+    @Authorize(action = "pension.transfer.inspect", resource = "#id")
     suspend fun get(@HeaderParam(PARTY_HEADER) party: String?, @PathParam("id") id: UUID): TransferResponse =
         TransferResponse.from(transfers.get(id, partyOf(party)))
 }

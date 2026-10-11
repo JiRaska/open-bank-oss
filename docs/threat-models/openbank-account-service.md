@@ -25,7 +25,6 @@ that is balance-service).
                                                                 |
                                                                 +--> [product-catalog] (OIDC M2M read, sync, fail-open, ADR-0158)
 [analytics-sink INITIAL_LOAD] --OIDC M2M read--> (GET /api/v1/accounts/active) --> [account-service]
-[pension-service] --OIDC M2M ROLE_PENSION_ACCOUNT_VERIFY--> (POST /api/v1/accounts/ownership-verifications) --> [account-service]
 [Kafka party events] --in--> [account-service PartyEventConsumer] --activate--> [account-service]
                                                                 |
                                                                 +--M2M client_credentials (ROLE_OPERATOR)--> [transaction-service POST /api/v1/transactions]   (welcome bonus, sandbox-only)
@@ -52,7 +51,6 @@ that is balance-service).
 | **T**ampering | Reuse an `Idempotency-Key` with a different opening request so the first account is replayed for the second (#10916) | Key bound to a request fingerprint (method + path + canonical body, `RequestFingerprints`) and claimed atomically in Redis before the use case runs; mismatch refused 409 `IDEMPOTENCY_KEY_REUSED`, concurrent duplicate 409 `IDEMPOTENCY_REQUEST_IN_PROGRESS`, nothing opened. Durable second check: `account_idempotency.request_hash` (V30) refuses a reused key after the Redis record expired. Keys stored before this change (and onboarding opens, which carry no HTTP fingerprint) still replay by key alone |
 | **R**epudiation | Operator denies freezing an account | AuditEvent per lifecycle transition (immutable, ADR audit) |
 | **I**nfo disclosure | IBAN / account enumeration via `/iban/{iban}` | AuthZ on lookup; rate limiting at gateway; no PII in IBAN response beyond need |
-| **I**nfo disclosure / **E**oP | Pension ownership probe is used to enumerate foreign IBANs or accepted with a generic service token | A dedicated realm role is assigned only to the pension service account, and the handler separately requires that exact authenticated service principal, so a misplaced role grant is refused even while OPA is advisory. The matching OPA action adds a second policy check under enforcement. Unknown and foreign IBANs both yield `owned=false, active=false` and no account ID; the account ID is returned only for the owner's ACTIVE account. Missing identity yields 401 and another service's token yields 403. A storage error propagates rather than producing a positive verdict. |
 | **I**nfo disclosure / **IDOR** | Customer reads another party's account/balance via a guessed id (reads are gated by role, not ownership; the edge calls with a ROLE_OPERATOR M2M token) | Primary control is at the customer-edge (resolves ownership before proxying, finding A1). **Defense-in-depth here:** when a call carries `X-Customer-Party-Id` the read must belong to that party, else 404 (no existence oracle) — catches an edge bug/new route that forwards the header but skips its own check. Operator/service reads (no header) unaffected. |
 | **I**nfo disclosure | Domain metrics leak PII / enable per-customer inference via high-cardinality labels | `DomainMetrics` low-cardinality contract (ADR-0077): `openbank.accounts.created` tagged only by `product_type` (closed `AccountType` enum) + `currency`; `openbank.accounts.closed` adds a `reason` **normalized to a closed set** (`customer_request`/`regulatory`/`fraud`/`inactivity`/`unspecified`/`other`) — the operator-supplied free-text reason never becomes a label; outbox-backlog gauge tagged only by `service`. Never an account id, IBAN, party id, or balance. Counters increment only after the commit + publish. `/q/metrics` is cluster-internal |
 | **I**nfo disclosure | Authorization-id enumeration via the revoke route: `DELETE /api/v1/accounts/{accountId}/authorizations/{authorizationId}` distinguishing "this id exists on another account" from "this id does not exist" | `AuthorizationNotFoundExceptionMapper` and `AuthorizationNotOnAccountExceptionMapper` both answer 404 with a byte-identical `AUTHORIZATION_NOT_FOUND` body, so an operator scoped to one account gets no existence oracle over ids on accounts they do not hold. The distinction is kept in a WARN log, not on the wire. Same posture as the `X-Customer-Party-Id` row above. |
@@ -967,3 +965,67 @@ than ten connections and compete with other account clients for that shared limi
 on nginx until the listener policy and 401/429 behavior have been checked on the Gateway
 address. Rollback is the coordinated DNS switch back to nginx; its Ingress and network
 allowance remain until Phase 5.
+
+
+## Pension integration boundary (ADR-0334/0335, #12435)
+
+**Account ownership verification.** This integration adds the `pension` namespace to `account-service-ingress-allow-list`.
+That grants namespace-wide network reachability to the selected provider pods; it does not
+restrict traffic to one workload and does not grant an application action. The pension REST
+client uses its own `openbank-pension` client-credentials identity for `POST /api/v1/accounts/ownership-verifications`.
+
+**Threat and required controls.** The response is an ownership decision for the requested party and account, not permission to move funds. A caller must not obtain unrestricted account enumeration through this edge.
+Compromise of any admitted namespace workload is therefore a network threat, while compromise
+of the pension client credential reaches whichever actions its provider authorization permits.
+Keep token validation, identity-scoped authorization and the provider's domain checks enabled.
+
+**Rollout dependency and proof limits.** The integration depends on #12419 for scoped downstream
+authorization; the allow-list change alone does not prove that grant is deployed or correct.
+Review the corresponding provider grant and negative caller/ownership tests before enabling
+this integration. Consumer contracts pin request/response shape; they do not prove a live token
+or account entitlement. No live deployment verification is claimed by this documentation update.
+## 2026-10-09 — Ownership-verification projection for pension-service (ADR-0335 D2)
+
+New endpoint `POST /api/v1/accounts/ownership-verifications`, under a new action
+`account.verifyOwnership`. It is granted to one machine identity,
+`service-account-openbank-pension` (ROLE_API), by `service-pension-account-verify-ownership`.
+Staff keep the action through `operator-account-write`. Pension is **not** granted
+`account.read`, `account.list` or any write.
+
+- **Information disclosure:** the answer is exactly `{owned, active}`. An unknown IBAN and
+  another party's IBAN both answer `owned=false, active=false`, and another party's account
+  status is never revealed. No balance, product, holder name or account id is returned. The IBAN
+  travels in the request body, so it stays out of access and ingress logs. A stolen pension
+  credential yields a membership oracle for (IBAN, party) pairs the attacker already holds. It
+  cannot enumerate accounts, and per-call audit makes a sweep visible.
+- **Elevation of privilege:** the shared `service-account-openbank-services` and
+  `service-account-openbank-edge` identities, every other service account, and an `AI_AGENT`
+  presenting the pension id are all denied. `account_rest_ext_test.rego` pins this.
+- **Repudiation:** each verification emits an `AuditEvent` with the calling principal as actor
+  and the claimed party as subject. The verdict goes in the payload; the IBAN never does.
+- **Tampering:** none. The endpoint is read-only.
+
+Tests: `OwnershipVerdictTest`, `AccountOwnershipResourceTest`, `AccountOwnershipVerificationIT`
+(real HTTP: route served, exact body, indistinguishable negatives, 400 not 500, 401 anonymous).
+
+
+Update the same day (ADR-0335 D2a): when `owned` is true, the answer also carries `accountId`, for
+the caller that binds a mandate to the account (#12387). It is never present for an unknown or
+foreign IBAN, so the no-oracle property holds. A second declared caller,
+`service-account-openbank-sdd`, verifies the debtor party of a scoped mandate initiator (D6).
+Every other identity is still denied (`account_rest_ext_test.rego`).
+
+
+### Pension client identity prerequisite (ADR-0335)
+
+The scoped pension ownership projection requires a token issuer that can mint the
+`openbank-pension` service-account identity. Both committed realm definitions now
+carry the same client and service-account user as the active pension integration
+(#12435), with only `ROLE_API` and the existing `catalog:read` client scope.
+Interactive login flows remain disabled. This establishes a reviewable issuer
+configuration prerequisite; it does not prove the live realm was imported, that
+credential material was supplied, or that a deployed token matches the policy.
+The account ownership projection still returns an account identifier only for an
+active account owned by the supplied party. A compromised pension credential can
+invoke its scoped projection; it does not acquire shared operator or compliance
+roles. Realm import and credential delivery must be verified before deployment.

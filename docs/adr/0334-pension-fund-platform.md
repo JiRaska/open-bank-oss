@@ -209,8 +209,10 @@ Both new services are added to `rules.yaml: money_path_services` and get threat 
   non-engineering track.
 
 **Neutral**
-- Legacy CZ transformed funds (closed to new contracts, capital guarantee) are out of scope;
-  a transfer-in from one is handled like any other ceding provider.
+- The original exclusion of legacy CZ transformed funds is amended by
+  [ADR-0338](0338-transformed-funds-and-complete-pension-platform.md): full plan-bound
+  entitlement and benefit administration is now in the target scope, with delivery planned.
+  Receiving a transfer into DPS alone does not satisfy that scope.
 - Occupational pensions (IORP) are out of scope.
 
 ## Compliance impact

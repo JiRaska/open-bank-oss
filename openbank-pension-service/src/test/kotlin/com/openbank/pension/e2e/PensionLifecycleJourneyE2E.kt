@@ -4,12 +4,26 @@
 
 package com.openbank.pension.e2e
 
+import com.openbank.pension.application.port.`in`.Caller
+import com.openbank.pension.application.port.`in`.CreateDraftCommand
+import com.openbank.pension.application.port.`in`.PensionContractUseCase
 import com.openbank.pension.application.port.out.PensionContractRepository
+import com.openbank.pension.domain.model.Beneficiary
+import com.openbank.pension.domain.model.ContributionFrequency
+import com.openbank.pension.domain.model.ContributionSchedule
+import com.openbank.pension.domain.model.ProductLine
+import com.openbank.pension.domain.pack.ProviderType
 import com.openbank.pension.infrastructure.fund.InMemoryFundAdministrationAdapter
+import com.openbank.pension.integration.QuestionnaireApiIT
+import com.openbank.pension.integration.StrategyCatalogWireMockResource
 import com.openbank.pension.it.PostgresTestResource
+import com.openbank.pension.testsupport.ProviderFixtures
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.quarkus.vertx.VertxContextSupport
 import io.restassured.RestAssured.given
 import io.restassured.path.json.JsonPath
@@ -38,8 +52,8 @@ import java.util.UUID
  * ### Service boundaries — stated, not pretended
  *
  * Activation is the onboarding workflow's alone since S8 (KID, SCA signature, cooling-off); it is
- * journeyed in [PensionFullLifecycleJourneyE2E]. Contracts here are created and submitted over
- * HTTP and then activated by a repository FIXTURE, because this class's subject is what an active
+ * journeyed in [PensionFullLifecycleJourneyE2E]. Contracts here are opened and submitted
+ * through the use case (the S1 draft routes are retired, #12435) and activated by a repository FIXTURE, because this class's subject is what an active
  * contract does, not how it became active.
  *
  * The unit register, NAV and strategy administration live in pension-fund-service and are
@@ -49,6 +63,8 @@ import java.util.UUID
  */
 @QuarkusTest
 @QuarkusTestResource(PostgresTestResource::class)
+@QuarkusTestResource(StrategyCatalogWireMockResource::class, restrictToAnnotatedClass = true)
+@TestProfile(QuestionnaireApiIT.CatalogOidcEnabled::class)
 class PensionLifecycleJourneyE2E {
 
     /**
@@ -58,20 +74,30 @@ class PensionLifecycleJourneyE2E {
      * booking and the state-agency claim/receipt (S3).
      */
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `a new DPS contract is onboarded, activated and earns the capped state contribution`() {
         val party = UUID.randomUUID()
-        val created = create(party, dps(monthly = 1700))
-        assertThat(created.statusCode).describedAs(created.body.asString()).isEqualTo(201)
-        val id = created.jsonPath().getString("contractId")
-        val draft = created.jsonPath()
+        // The S1 draft path is retired (#12435): a contract is born through onboarding, which
+        // PensionFullLifecycleJourneyE2E journeys. Neither the create nor the submit route is served.
+        assertThat(create(party, dps(monthly = 1700)).statusCode).isEqualTo(405)
+        val id = draftByFixture(party, monthly = 1700)
+        val draft = read(party, id).jsonPath()
         assertThat(draft.getString("status")).isEqualTo("DRAFT")
         assertThat(draft.getString("productLine")).isEqualTo("DPS")
         assertThat(draft.getString("jurisdiction")).isEqualTo("CZ")
         assertThat(draft.getInt("packVersion")).isEqualTo(2)
         assertThat(draft.getString("startDate")).isNull()
 
-        assertThat(post(party, "$BASE/$id/submit").jsonPath().getString("status")).isEqualTo("PENDING_ACTIVATION")
+        assertThat(post(party, "$BASE/$id/submit").statusCode).isEqualTo(404)
+        submitByFixture(party, id)
+        assertThat(read(party, id).jsonPath().getString("status")).isEqualTo("PENDING_ACTIVATION")
         // The participant cannot activate it themselves (S8): activation is the onboarding
         // workflow's, journeyed in PensionFullLifecycleJourneyE2E (a1/a2). Fixture from here.
         assertThat(post(party, "$BASE/$id/activate").statusCode).isEqualTo(404)
@@ -109,10 +135,17 @@ class PensionLifecycleJourneyE2E {
      * wiring that would trigger it from here is S3.
      */
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `a strategy change is appended to the history and the earlier election is kept`() {
         val party = UUID.randomUUID()
-        val id = activeContract(party, dps(monthly = 1000))
+        val id = activeContract(party, monthly = 1000)
 
         // An S1 contract has no suitability assessment: a riskier strategy is refused even when
         // signed, and nothing is appended.
@@ -135,10 +168,17 @@ class PensionLifecycleJourneyE2E {
      * signs under SCA; signing and paying out are journeyed in PensionFullLifecycleJourneyE2E (d1).
      */
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `early termination is quoted from the unit register and returns incentives, without moving the contract`() {
         val party = UUID.randomUUID()
-        val id = activeContract(party, dps(monthly = 1700))
+        val id = activeContract(party, monthly = 1700)
         fund.setValue(UUID.fromString(id), BigDecimal("50000.00"))
 
         val retired = post(party, "$BASE/$id/early-termination", """{"currentValue":1,"confirm":true}""")
@@ -162,16 +202,25 @@ class PensionLifecycleJourneyE2E {
      * designation those payouts will read is stored as submitted.
      */
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `beneficiary designations are stored as submitted for the later death payout`() {
         val party = UUID.randomUUID()
         val beneficiary = UUID.randomUUID()
-        val body = dps(
+        val id = activeContract(
+            party,
             monthly = 1000,
-            beneficiaries = """[{"name":"Jana Nova","partyId":"$beneficiary","sharePercent":60},
-                               {"name":"Petr Novy","sharePercent":40}]""",
+            beneficiaries = listOf(
+                Beneficiary("Jana Nova", beneficiary, BigDecimal("60")),
+                Beneficiary("Petr Novy", null, BigDecimal("40")),
+            ),
         )
-        val id = activeContract(party, body)
         val stored = read(party, id).jsonPath()
         assertThat(stored.getList<String>("beneficiaries.name")).containsExactly("Jana Nova", "Petr Novy")
         assertThat(stored.getString("beneficiaries[0].partyId")).isEqualTo(beneficiary.toString())
@@ -180,38 +229,46 @@ class PensionLifecycleJourneyE2E {
             .containsExactly(BigDecimal("60"), BigDecimal("40"))
     }
 
-    /** Scenario (f) — DIP happy path: a bank may provide it, and it earns tax relief, never a state contribution. */
+    /**
+     * Scenario (f) — no direct draft at all: the S1 create route is retired (#12435), so neither a
+     * DIP nor a bank-provided DPS contract can be opened around approved mapping and signed
+     * onboarding. The method is refused (405) and nothing is stored.
+     */
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
-    fun `a DIP contract provided by the bank activates and earns tax relief only`() {
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
+    fun `a direct DIP draft is refused before onboarding and leaves no contract`() {
         val party = UUID.randomUUID()
-        val id = activeContract(party, dip(providerType = "BANK"))
-        val contract = read(party, id).jsonPath()
-        assertThat(contract.getString("productLine")).isEqualTo("DIP")
-        assertThat(contract.getString("providerType")).isEqualTo("BANK")
+        val created = create(party, dip(providerType = "BANK"))
+        assertThat(created.statusCode).describedAs(created.body.asString()).isEqualTo(405)
+        val contracts = given().header(PARTY, party.toString()).`when`().get(BASE)
+        assertThat(contracts.statusCode).describedAs(contracts.body.asString()).isEqualTo(200)
+        assertThat(contracts.jsonPath().getList<Any>("$")).isEmpty()
 
-        val relief = incentives(party, id, contribution = 4000, period = "MONTH")
-        assertThat(relief.getList<String>("incentiveId")).doesNotContain("state-contribution")
-        assertThat(money(relief, "income-tax-deduction")).isEqualByComparingTo("48000.00")
-        // The deduction cap is shared with DPS: a participant who used 30 000 there has 18 000 left.
-        val shared = post(
-            party,
-            "$BASE/$id/incentive-evaluation",
-            """{"contribution":4000,"period":"MONTH","sharedCapUsed":{"retirement-products-deduction":30000}}""",
-        ).jsonPath()
-        assertThat(money(shared, "income-tax-deduction")).isEqualByComparingTo("18000.00")
-
-        // The DPS pack does not permit a bank as provider; the DIP pack does.
-        assertThat(create(party, dps(monthly = 1000, providerType = "BANK")).statusCode).isEqualTo(400)
+        assertThat(create(party, dps(monthly = 1000, providerType = "BANK")).statusCode).isEqualTo(405)
+        assertThat(given().header(PARTY, party.toString()).`when`().get(BASE).jsonPath().getList<Any>("$")).isEmpty()
     }
 
     /** Scenario (f) — authorisation negatives: another customer sees a 404 on every route, never a 403 or the data. */
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `another customer gets 404 on every route of a contract that is not theirs`() {
         val owner = UUID.randomUUID()
         val stranger = UUID.randomUUID()
-        val id = activeContract(owner, dps(monthly = 1700))
+        val id = activeContract(owner, monthly = 1700)
 
         assertThat(read(stranger, id).statusCode).isEqualTo(404)
         assertThat(post(stranger, "$BASE/$id/suspend").statusCode).isEqualTo(404)
@@ -240,14 +297,14 @@ class PensionLifecycleJourneyE2E {
         providerType: String = "PENSION_COMPANY",
         beneficiaries: String = """[{"name":"Jane Doe","sharePercent":100}]""",
     ) = """
-        {"productLine":"DPS","jurisdiction":"CZ","providerEntityId":"${UUID.randomUUID()}",
+        {"productLine":"DPS","jurisdiction":"CZ","providerEntityId":"${ProviderFixtures.ID}",
          "providerType":"$providerType","birthDate":"1985-05-05","residencyCountry":"CZ",
          "schedule":{"amount":$monthly,"currency":"CZK","frequency":"MONTHLY"},
          "strategyCode":"CONSERVATIVE","beneficiaries":$beneficiaries}
     """.trimIndent()
 
     private fun dip(providerType: String) = """
-        {"productLine":"DIP","jurisdiction":"CZ","providerEntityId":"${UUID.randomUUID()}",
+        {"productLine":"DIP","jurisdiction":"CZ","providerEntityId":"${ProviderFixtures.ID}",
          "providerType":"$providerType","birthDate":"1979-03-14",
          "schedule":{"amount":4000,"currency":"CZK","frequency":"MONTHLY"},
          "strategyCode":"CONSERVATIVE","beneficiaries":[]}
@@ -259,14 +316,45 @@ class PensionLifecycleJourneyE2E {
         .body(body)
         .`when`().post(BASE)
 
-    private fun activeContract(party: UUID, body: String): String {
-        val created = create(party, body)
-        assertThat(created.statusCode).describedAs(created.body.asString()).isEqualTo(201)
-        val id = created.jsonPath().getString("contractId")
-        assertThat(post(party, "$BASE/$id/submit").statusCode).isEqualTo(200)
+    private fun <T> onVertx(block: suspend () -> T): T =
+        VertxContextSupport.subscribeAndAwait { CoroutineScope(Dispatchers.Unconfined).async { block() }.asUni() }
+
+    private fun activeContract(
+        party: UUID,
+        monthly: Int,
+        beneficiaries: List<Beneficiary> = listOf(Beneficiary("Jane Doe", null, BigDecimal("100"))),
+    ): String {
+        val id = draftByFixture(party, monthly, beneficiaries)
+        submitByFixture(party, id)
         activateByFixture(id)
         return id
     }
+
+    /** Fixture: the S1 create route is retired (#12435); the use case still opens a draft. */
+    private fun draftByFixture(
+        party: UUID,
+        monthly: Int,
+        beneficiaries: List<Beneficiary> = listOf(Beneficiary("Jane Doe", null, BigDecimal("100"))),
+    ): String = onVertx {
+        useCase.createDraft(
+            CreateDraftCommand(
+                participantPartyId = party, productLine = ProductLine.DPS, jurisdiction = "CZ",
+                providerEntityId = ProviderFixtures.ID, providerType = ProviderType.PENSION_COMPANY,
+                birthDate = LocalDate.parse("1985-05-05"), residencyCountry = "CZ", residencyEvidence = emptySet(),
+                hasGuardian = false,
+                schedule = ContributionSchedule(BigDecimal(monthly), "CZK", ContributionFrequency.MONTHLY),
+                initialStrategy = "CONSERVATIVE", beneficiaries = beneficiaries,
+                idempotencyKey = UUID.randomUUID().toString(),
+            ),
+        ).id.toString()
+    }
+
+    private fun submitByFixture(party: UUID, id: String) {
+        onVertx { useCase.submit(Caller.customer(party), UUID.fromString(id)) }
+    }
+
+    @Inject
+    lateinit var useCase: PensionContractUseCase
 
     @Inject
     lateinit var contracts: PensionContractRepository
@@ -276,11 +364,9 @@ class PensionLifecycleJourneyE2E {
 
     /** Fixture: the product activates only through onboarding (S8); see the class KDoc. */
     private fun activateByFixture(id: String) {
-        VertxContextSupport.subscribeAndAwait {
-            CoroutineScope(Dispatchers.Unconfined).async {
-                val pending = requireNotNull(contracts.findById(UUID.fromString(id)))
-                contracts.save(pending.activate(LocalDate.now(), Instant.now()))
-            }.asUni()
+        onVertx {
+            val pending = requireNotNull(contracts.findById(UUID.fromString(id)))
+            contracts.save(pending.activate(LocalDate.now(), Instant.now()))
         }
     }
 
@@ -304,7 +390,7 @@ class PensionLifecycleJourneyE2E {
         BigDecimal(results.getString("find { it.incentiveId == '$incentiveId' }.amount"))
 
     private companion object {
-        const val BASE = "/api/v1/pension/contracts"
+        const val BASE = "/api/v2/pension/contracts"
         const val JSON = "application/json"
         const val PARTY = "X-Customer-Party-Id"
         const val IDEMPOTENCY = "Idempotency-Key"

@@ -50,7 +50,7 @@ import java.util.UUID
  * `@Path` sits directly above `class` (#3371); absent parameters are nullable and checked (#3104).
  */
 @Tag(name = "Pension onboarding", description = "Digital onboarding of a new pension contract or a transfer-in")
-@Path("/api/v1/pension/onboarding/applications")
+@Path("/api/v2/pension/onboarding/applications")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @RolesAllowed(Roles.API)
@@ -123,7 +123,7 @@ class OnboardingResource {
     @GET
     @Path("/{id}")
     @Operation(summary = "Status of one of the caller's applications")
-    @Authorize(action = "pension.onboarding.read", resource = "#id")
+    @Authorize(action = "pension.onboarding.inspect", resource = "#id")
     suspend fun get(@HeaderParam(PARTY_HEADER) party: String?, @PathParam("id") id: UUID): ApplicationResponse =
         ApplicationResponse.from(onboarding.get(id, partyOf(party)))
 
@@ -173,7 +173,7 @@ class OnboardingResource {
     @Operation(
         summary = "The question set for this application, with prefill, saved draft, progress and consistency hints",
     )
-    @Authorize(action = "pension.onboarding.read", resource = "#id")
+    @Authorize(action = "pension.onboarding.inspect", resource = "#id")
     suspend fun questionnaireView(
         @HeaderParam(PARTY_HEADER) party: String?,
         @PathParam("id") id: UUID,
@@ -199,7 +199,7 @@ class OnboardingResource {
     @GET
     @Path("/{id}/profile")
     @Operation(summary = "The risk profile (class 1-7), the answers that set it, and the recommended strategy")
-    @Authorize(action = "pension.onboarding.read", resource = "#id")
+    @Authorize(action = "pension.onboarding.inspect", resource = "#id")
     suspend fun profile(
         @HeaderParam(PARTY_HEADER) party: String?,
         @PathParam("id") id: UUID,
@@ -209,7 +209,7 @@ class OnboardingResource {
     @GET
     @Path("/{id}/warnings")
     @Operation(summary = "The warnings choosing a strategy would require, worded for display")
-    @Authorize(action = "pension.onboarding.read", resource = "#id")
+    @Authorize(action = "pension.onboarding.inspect", resource = "#id")
     suspend fun warnings(
         @HeaderParam(PARTY_HEADER) party: String?,
         @PathParam("id") id: UUID,
@@ -246,7 +246,7 @@ class OnboardingResource {
     @GET
     @Path("/{id}/recommendation")
     @Operation(summary = "The strategy recommendation from the risk profile and years to retirement")
-    @Authorize(action = "pension.onboarding.read", resource = "#id")
+    @Authorize(action = "pension.onboarding.inspect", resource = "#id")
     suspend fun recommendation(
         @HeaderParam(PARTY_HEADER) party: String?,
         @PathParam("id") id: UUID,

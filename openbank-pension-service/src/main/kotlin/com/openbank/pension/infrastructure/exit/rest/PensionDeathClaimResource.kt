@@ -40,7 +40,7 @@ import java.util.UUID
  * four-eyes, enforced in the aggregate (the registering operator cannot approve).
  */
 @Tag(name = "Pension death claims", description = "Operator-driven settlement on the participant's death")
-@Path("/api/v1/pension/death-claims")
+@Path("/api/v2/pension/death-claims")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
@@ -84,7 +84,7 @@ class PensionDeathClaimResource {
 
     @GET
     @Operation(summary = "Death claims, newest first, optionally by status (operator queue)")
-    @Authorize(action = "pension.death.read")
+    @Authorize(action = "pension.death.inspect")
     suspend fun list(
         @QueryParam("status") status: DeathClaimStatus?,
         @QueryParam("limit") @DefaultValue("50") limit: Int,
@@ -96,7 +96,7 @@ class PensionDeathClaimResource {
     @GET
     @Path("/{claimId}")
     @Operation(summary = "One death claim with its claimants")
-    @Authorize(action = "pension.death.read", resource = "#claimId")
+    @Authorize(action = "pension.death.inspect", resource = "#claimId")
     suspend fun get(@PathParam("claimId") claimId: UUID) = DeathClaimResponse.from(claims.get(claimId))
 
     @PUT

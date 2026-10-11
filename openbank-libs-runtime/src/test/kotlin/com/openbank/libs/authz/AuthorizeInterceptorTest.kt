@@ -114,6 +114,9 @@ class AuthorizeInterceptorTest {
     @Authorize(action = "payment.create", attributes = ["time-of-day", "client-ip"])
     fun dummyMethodWithAttrs() = Unit
 
+    @Authorize(action = "catalog.pensionApproval.read", attributes = ["azp", "subject", "preferred_username"])
+    fun dummyMethodWithServiceTokenAttrs() = Unit
+
     data class DummyRequest(val granteeId: String, val scopes: List<String>)
 
     data class DummyRequestWithNullableField(val granteeId: String?)
@@ -162,6 +165,9 @@ class AuthorizeInterceptorTest {
 
     private val annotatedMethodWithAttrs: Method =
         AuthorizeInterceptorTest::class.java.getDeclaredMethod("dummyMethodWithAttrs")
+
+    private val annotatedMethodWithServiceTokenAttrs: Method =
+        AuthorizeInterceptorTest::class.java.getDeclaredMethod("dummyMethodWithServiceTokenAttrs")
 
     private val annotatedMethodWithDottedResource: Method =
         AuthorizeInterceptorTest::class.java.getDeclaredMethod(
@@ -639,6 +645,40 @@ class AuthorizeInterceptorTest {
         val attrs = capturedQuery[0].attributes
         assertThat(attrs).containsOnlyKeys("time-of-day")
         assertThat(attrs).doesNotContainKey("client-ip")
+    }
+
+    @Test
+    fun `service token claims reach only explicitly requested policy attributes`() {
+        every { identity.roles } returns setOf("ROLE_API")
+        every { sc.userPrincipal } returns JavaPrincipal { "service-account-openbank-pension" }
+        every { identity.principal } returns mockk<JsonWebToken> {
+            every { subject } returns "service-subject"
+            every { getClaim<String>("azp") } returns "openbank-pension"
+            every { getClaim<String>("preferred_username") } returns "service-account-openbank-pension"
+        }
+        val captured = mutableListOf<AuthzQuery>()
+        val pdp = object : PolicyDecisionPoint {
+            override suspend fun allow(query: AuthzQuery): AuthzDecision {
+                captured += query
+                return AuthzDecision(allow = true)
+            }
+        }
+        interceptor.pdp = mockk {
+            every { isResolvable } returns true
+            every { get() } returns pdp
+        }
+        interceptor.authorize(makeCtx(annotatedMethodWithServiceTokenAttrs))
+        assertThat(captured.single().attributes).containsExactlyInAnyOrderEntriesOf(
+            mapOf(
+                "azp" to "openbank-pension",
+                "subject" to "service-subject",
+                "preferred_username" to "service-account-openbank-pension",
+            ),
+        )
+        captured.clear()
+        every { sc.userPrincipal } returns JavaPrincipal { "human-reviewer" }
+        interceptor.authorize(makeCtx(annotatedMethodWithServiceTokenAttrs))
+        assertThat(captured.single().attributes).isEmpty()
     }
 
     // ---------------------------------------------------------------------------------------

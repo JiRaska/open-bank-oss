@@ -224,9 +224,6 @@ spec:
               kubernetes.io/metadata.name: customer-edge
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: pension
-        - namespaceSelector:
-            matchLabels:
               kubernetes.io/metadata.name: security-scanner
         - namespaceSelector:
             matchLabels:
@@ -234,6 +231,16 @@ spec:
       ports:
         - protocol: TCP
           port: 8116
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: pension
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: admin-ui
+      ports:
+        - protocol: TCP
+          port: 8443
     - from:
         - namespaceSelector:
             matchLabels:
@@ -478,9 +485,6 @@ spec:
               kubernetes.io/metadata.name: customer-edge
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: pension
-        - namespaceSelector:
-            matchLabels:
               kubernetes.io/metadata.name: security-scanner
         - namespaceSelector:
             matchLabels:
@@ -488,6 +492,16 @@ spec:
       ports:
         - protocol: TCP
           port: 8121
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: pension
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: admin-ui
+      ports:
+        - protocol: TCP
+          port: 8443
     - from:
         - namespaceSelector:
             matchLabels:

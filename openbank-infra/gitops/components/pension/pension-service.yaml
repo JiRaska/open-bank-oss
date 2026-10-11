@@ -1,6 +1,7 @@
 # pension-service: participant-side pension contracts (ADR-0334 S1). Reactive Postgres datasource
-# + Flyway JDBC migrations against the single-owner CNPG cluster. Publishes and consumes nothing
-# yet and calls no other service. OIDC bearer validation points at Keycloak. Reachable only
+# + Flyway JDBC migrations against the single-owner CNPG cluster. Publishes participant notices
+# and consumes domestic-payment status; onboarding also calls approved internal services.
+# OIDC bearer validation points at Keycloak. Reachable only
 # in-cluster via ClusterIP, no ingress — the customer path is customer-edge.
 apiVersion: apps/v1
 kind: Deployment
@@ -31,7 +32,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-pension-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "13e4303b3b72f10c"
+        openbank.tech/policy-checksum: "a43d53a8e2840d96"
       labels:
         app.kubernetes.io/name: pension-service
         app.kubernetes.io/part-of: pension
@@ -47,7 +48,7 @@ spec:
         - name: pension-service
           # First build lands via auto-deploy on the merge that adds openbank-pension-service to
           # ALL_SERVICES; the auto-deploy gitops PR rewrites this pin to the built sha.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-pension-service:sandbox-000000000
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-pension-service:sandbox-f7b803bd
           imagePullPolicy: IfNotPresent
           ports:
             # HTTP 8171 and management 8090 — both read off the service's own application.yaml
@@ -60,6 +61,10 @@ spec:
             - name: management
               containerPort: 8090
           env:
+            # DEV-ONLY synthetic legal entity for this sandbox deployment; not production ownership evidence.
+            # Production must supply its assigned provider identity before real-money launch.
+            - name: OPENBANK_PENSION_PROVIDER_ENTITY_ID
+              value: "00000000-0000-4000-8000-000000000001"
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
               value: /mnt/internal-tls/tls.crt
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
@@ -124,17 +129,23 @@ spec:
                   name: pension-service-m2m-oidc
                   key: OIDC_PENSION_CLIENT_SECRET
                   optional: false
+            # Internal-TLS listeners (8443, client certificate required). Each client presents its
+            # own identity and trusts only its issuer via the per-upstream *-authority TLS bucket
+            # in application.yaml (%prod), hostname verification on. product-catalog keeps
+            # min: 1 replica, so the direct call never meets a scaled-to-zero target.
             - name: PENSION_FUND_SERVICE_URL
-              value: http://pension-fund-service.pension-fund.svc:8162
+              value: https://pension-fund-service.pension-fund.svc:8443
+            - name: PRODUCT_CATALOG_SERVICE_URL
+              value: https://product-catalog.accounts.svc:8443
             # #12378 payment adapters (pension-service's own OIDC client).
             - name: STANDING_ORDER_SERVICE_URL
-              value: http://standing-order-service.payments.svc:8121
+              value: https://standing-order-service.payments.svc:8443
             - name: SDD_SERVICE_URL
-              value: http://sdd-service.sdd.svc:8129
+              value: https://sdd-service.sdd.svc:8443
             - name: DOMESTIC_PAYMENT_URL
-              value: http://domestic-payment.payments.svc:8116
-            # Kafka mTLS (ADR-0137, kafka-pension-mtls.yaml) — consumes domestic-payment status
-            # changes only, and writes only its own dead-letter topic.
+              value: https://domestic-payment.payments.svc:8443
+            # Kafka mTLS (ADR-0137, kafka-pension-mtls.yaml) — consumes domestic-payment status,
+            # publishes participant notices, and writes its own dead-letter topic.
             - name: KAFKA_BOOTSTRAP_SERVERS
               value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
             - name: QUARKUS_SMALLRYE_REACTIVE_MESSAGING_KAFKA_BOOTSTRAP_SERVERS
@@ -159,17 +170,13 @@ spec:
                 secretKeyRef:
                   name: kafka-cluster-ca-truststore
                   key: ca.password
-            # issue #686: group.id / auto.offset.reset come from the pension-service-msg-override
-            # ConfigMap (a properties file), never dotted YAML keys or env vars.
-            - name: QUARKUS_CONFIG_LOCATIONS
-              value: /mnt/msg-config/override.properties
             # Identity and SCA checks (#12377), authenticated as openbank-pension.
             - name: SCA_SERVICE_URL
-              value: http://sca-service.sca.svc:8110
+              value: https://sca-service.sca.svc:8443
             - name: PARTY_SERVICE_URL
-              value: http://party-service.party.svc:8111
+              value: https://party-service.party.svc:8443
             - name: ACCOUNT_SERVICE_URL
-              value: http://account-service.accounts.svc:8100
+              value: https://account-service.accounts.svc:8443
             # OPA sidecar enforced from the first rollout: pension_rest_ext.rego grants the
             # participant actions to the edge principal only, and no service-account reaches a
             # write by any rule.
@@ -201,6 +208,30 @@ spec:
               drop:
                 - ALL
           volumeMounts:
+            - name: account-tls
+              mountPath: /mnt/account-tls
+              readOnly: true
+            - name: party-tls
+              mountPath: /mnt/party-tls
+              readOnly: true
+            - name: sdd-tls
+              mountPath: /mnt/sdd-tls
+              readOnly: true
+            - name: domestic-payment-tls
+              mountPath: /mnt/domestic-payment-tls
+              readOnly: true
+            - name: standing-order-tls
+              mountPath: /mnt/standing-order-tls
+              readOnly: true
+            - name: fund-tls
+              mountPath: /mnt/fund-tls
+              readOnly: true
+            - name: sca-tls
+              mountPath: /mnt/sca-tls
+              readOnly: true
+            - name: catalog-tls
+              mountPath: /mnt/catalog-tls
+              readOnly: true
             - name: internal-tls
               mountPath: /mnt/internal-tls
               readOnly: true
@@ -211,9 +242,6 @@ spec:
               readOnly: true
             - name: kafka-truststore
               mountPath: /mnt/kafka-truststore
-              readOnly: true
-            - name: msg-override
-              mountPath: /mnt/msg-config
               readOnly: true
         # OPA policy decision point (ADR-0034). Co-located sidecar the app reaches on
         # localhost:8181 (AuthorizeInterceptor default). Bundle mounted read-only from the
@@ -291,6 +319,31 @@ spec:
             - name: opa-tmp
               mountPath: /tmp
       volumes:
+        - name: account-tls
+          secret:
+            secretName: pension-service-client-tls
+        - name: party-tls
+          secret:
+            secretName: pension-service-client-tls
+        - name: sdd-tls
+          secret:
+            secretName: pension-service-client-tls
+        - name: domestic-payment-tls
+          secret:
+            secretName: pension-service-client-tls
+        - name: standing-order-tls
+          secret:
+            secretName: pension-service-client-tls
+        - name: fund-tls
+          secret:
+            secretName: pension-service-client-tls
+
+        - name: sca-tls
+          secret:
+            secretName: pension-service-client-tls
+        - name: catalog-tls
+          secret:
+            secretName: pension-service-client-tls
         - name: internal-tls
           secret:
             secretName: pension-service-internal-tls
@@ -307,9 +360,6 @@ spec:
         - name: kafka-truststore
           secret:
             secretName: kafka-cluster-ca-truststore
-        - name: msg-override
-          configMap:
-            name: pension-service-msg-override
 ---
 apiVersion: v1
 kind: Service

@@ -167,9 +167,17 @@ data class PensionContract(
         }
     }
 
-    /** The election in force today: the newest by effective date, then by election time. */
+    /**
+     * Latest recorded election, including scheduled changes. Kept for the contract response and
+     * election replay compatibility; money movement must use [strategyOn] with its business date.
+     */
     val currentStrategy: StrategyElection
         get() = strategyHistory.maxWith(compareBy<StrategyElection>({ it.effectiveFrom }, { it.electedAt }))
+
+    /** The election in force on [asOf], or null before the first election takes effect. */
+    fun strategyOn(asOf: LocalDate): StrategyElection? = strategyHistory
+        .filter { !it.effectiveFrom.isAfter(asOf) }
+        .maxWithOrNull(compareBy<StrategyElection>({ it.effectiveFrom }, { it.electedAt }))
 
     fun submit(now: Instant): PensionContract = moveTo(ContractStatus.PENDING_ACTIVATION, now)
 

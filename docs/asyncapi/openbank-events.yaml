@@ -75,9 +75,9 @@ info:
       those topics trigger, so those rows assert a business time nobody measured (#3883).
 
     Known gaps this document now records rather than hides: `openbank.accounts.account.created`
-    carries four structurally unrelated bodies; sepa-instant emits no `ce-type`, no `ce-id` and no
-    partition key at all (ADR-0003 N2/N3 violation) and drops every subtype-specific field before
-    the wire; and the interest payloads carry no event time of any kind.
+    carries four structurally unrelated bodies; sepa-instant carries `ce-type` and stable `ce-id`
+    but no partition key, and drops every subtype-specific field before the wire; and the interest
+    payloads carry no event time of any kind.
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -160,21 +160,21 @@ channels:
   sepa-instant-events:
     address: openbank.sepa.instant.events
     description: |
-      SCT Inst lifecycle. **A direct emitter** — one of the very few producers on this platform
-      that bypasses the outbox entirely (`KafkaSctInstEventPublisher`, a bare `MutinyEmitter`).
-      Consequences a consumer must plan for: there is **no `ce-type` header, no `ce-id`, no
-      `idempotency-key` and no record key**, so these events cannot be deduplicated at-least-once
-      and are not ordered per aggregate (ADR-0003 N2/N3).
+      SCT Inst lifecycle. Payment state and its event are committed together, then relayed from
+      the outbox with retry. The relay preserves the existing body and sends `ce-type`, stable
+      `ce-id` and `idempotency-key` headers. The record is keyed by the payment id, so order per payment is
+      preserved within its partition. Consumers can use `ce-id` to deduplicate a retried send.
 
       The discriminator is the body key **`type`** — spelled `type`, not `eventType` — whose value
       is a Kotlin class simple name (`SctInstPaymentSubmitted`, `SctInstPaymentSettled`,
       `SctInstPaymentRejected`, `SctInstPaymentTimeout`, `SctInstPaymentRecalled`), not a dotted
       event name like every other channel here.
 
-      **The wire body is three keys and nothing else.** The publisher builds its own map and
+      **The wire body is four keys and nothing else.** The publisher builds its own map and
       discards every subtype-specific field of the domain event — `debtorIban`, `creditorIban`,
       `amount`, `currency`, `endToEndId`, `settledAt`, `reason`, `recallReason` never reach the
-      wire. A consumer needing any of them must call back into the service.
+      wire. `sourceService` is `sepa-instant`. A consumer needing a subtype-specific field must
+      call back into the service.
     messages:
       SctInstEvent:
         $ref: '#/components/messages/SctInstEvent'
@@ -504,7 +504,7 @@ operations:
     action: send
     channel:
       $ref: '#/channels/sepa-instant-events'
-    summary: sepa-instant publishes SCT Inst lifecycle events directly, with no headers
+    summary: sepa-instant relays SCT Inst lifecycle events with stable ce-id and ce-type headers
 
   publishDomesticPaymentEvent:
     action: send
@@ -699,8 +699,8 @@ components:
     SctInstEvent:
       name: SctInstEvent
       description: >-
-        Direct emitter, no headers of any kind. The discriminator is the body key `type` (a Kotlin
-        class simple name). Three keys total.
+        Outbox-relayed with stable `ce-id`, `ce-type` and `idempotency-key` headers. The body
+        discriminator is `type` (a Kotlin class simple name). Four body keys total.
       contentType: application/json
       payload:
         $ref: '#/components/schemas/SctInstEventPayload'
@@ -1307,10 +1307,10 @@ components:
           const: sepa-payment
 
     SctInstEventPayload:
-      # Three keys, and that is the whole message. The publisher builds this map by hand and
+      # Four keys, and that is the whole message. The publisher builds this map by hand and
       # discards every other field of the domain event before it reaches the wire.
       type: object
-      required: [type, paymentId, occurredAt]
+      required: [type, paymentId, occurredAt, sourceService]
       properties:
         type:
           type: string
@@ -1322,13 +1322,16 @@ components:
             - SctInstPaymentRecalled
           description: >-
             The discriminator, spelled `type` rather than `eventType`, and valued with a Kotlin
-            class simple name rather than a dotted event name. No `ce-type` header exists here.
+            class simple name rather than a dotted event name. Also carried as `ce-type`.
         paymentId:
           type: string
           format: uuid
         occurredAt:
           type: string
           format: date-time
+        sourceService:
+          type: string
+          const: sepa-instant
 
     DomesticPaymentCreatedPayload:
       type: object

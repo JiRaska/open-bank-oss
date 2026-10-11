@@ -16,6 +16,8 @@ import com.openbank.pension.testsupport.ContractFixtures
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.quarkus.vertx.VertxContextSupport
 import io.restassured.RestAssured.given
 import io.smallrye.mutiny.coroutines.asUni
@@ -58,7 +60,7 @@ class ContractChangesApiIT {
     lateinit var claimRepo: com.openbank.pension.application.exit.DeathClaimRepository
 
     private val party: UUID = UUID.randomUUID()
-    private val contracts = "/api/v1/pension/contracts"
+    private val contracts = "/api/v2/pension/contracts"
 
     private fun <T> onVertx(block: suspend () -> T): T =
         VertxContextSupport.subscribeAndAwait { CoroutineScope(Dispatchers.Unconfined).async { block() }.asUni() }
@@ -88,7 +90,14 @@ class ContractChangesApiIT {
     }
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `schedule change - preview, SCA change, replay, history`() {
         val id = active()
         val body = """{"amount":2000,"frequency":"MONTHLY","dayOfMonth":20}"""
@@ -113,7 +122,14 @@ class ContractChangesApiIT {
     }
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `beneficiary change - shares must total 100, history kept, contract updated`() {
         val id = active()
         val bad = """{"beneficiaries":[{"name":"A","sharePercent":60},{"name":"B","sharePercent":30}],""" +
@@ -131,9 +147,9 @@ class ContractChangesApiIT {
     @TestSecurity(user = "alice", roles = ["ROLE_OPERATOR"])
     fun `operator reads history but cannot change`() {
         val id = active()
-        given().get("/api/v1/pension/operator/contracts/$id/beneficiaries").then().statusCode(200)
+        given().get("/api/v2/pension/operator/contracts/$id/beneficiaries").then().statusCode(200)
             .body("current", hasSize<Any>(2))
-        given().get("/api/v1/pension/operator/contracts/$id/contribution-schedule").then().statusCode(200)
+        given().get("/api/v2/pension/operator/contracts/$id/contribution-schedule").then().statusCode(200)
         given().contentType("application/json").header("Idempotency-Key", "k")
             .body("""{"beneficiaries":[]}""").post("$contracts/$id/beneficiaries/changes").then().statusCode(400)
     }

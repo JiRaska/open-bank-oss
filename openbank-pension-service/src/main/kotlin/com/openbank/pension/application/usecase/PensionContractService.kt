@@ -4,6 +4,7 @@
 
 package com.openbank.pension.application.usecase
 
+import com.openbank.pension.application.ProviderBoundary
 import com.openbank.pension.application.exit.ScaOperation
 import com.openbank.pension.application.exit.ScaVerificationPort
 import com.openbank.pension.application.port.`in`.Caller
@@ -16,11 +17,13 @@ import com.openbank.pension.application.port.`in`.StrategyChangeDocument
 import com.openbank.pension.application.port.out.ContractNotFoundException
 import com.openbank.pension.application.port.out.ParticipantNotifier
 import com.openbank.pension.application.port.out.PensionContractRepository
+import com.openbank.pension.application.port.out.StrategyNotPermittedException
 import com.openbank.pension.application.port.out.StrategySuitabilityPort
 import com.openbank.pension.application.port.out.StrategySuitabilityRequest
 import com.openbank.pension.domain.model.ContractStatus
 import com.openbank.pension.domain.model.Limits
 import com.openbank.pension.domain.model.PensionContract
+import com.openbank.pension.domain.model.ProductLine
 import com.openbank.pension.domain.pack.IncentiveResult
 import com.openbank.pension.domain.pack.JurisdictionPackRegistry
 import com.openbank.pension.domain.pack.PackEvaluator
@@ -41,12 +44,12 @@ class PensionContractService(
     private val suitability: StrategySuitabilityPort,
     /** Document-bound SCA for a strategy change (ADR-0335 `pension-strategy-change:` namespace). */
     private val sca: ScaVerificationPort,
+    private val providerBoundary: ProviderBoundary,
 ) : PensionContractUseCase {
 
     override suspend fun createDraft(command: CreateDraftCommand): PensionContract {
-        command.idempotencyKey?.let { key ->
-            contracts.findByIdempotencyKey(command.participantPartyId, key)?.let { return it }
-        }
+        providerBoundary.requireProvider(command.providerEntityId)
+        replayDraft(command)?.let { return it }
         require(command.beneficiaries.size <= Limits.MAX_BENEFICIARIES) {
             "at most ${Limits.MAX_BENEFICIARIES} beneficiaries"
         }
@@ -102,8 +105,20 @@ class PensionContractService(
         return contracts.save(draft)
     }
 
-    override suspend fun submit(caller: Caller, id: UUID) =
-        transition(caller, id, ContractStatus.PENDING_ACTIVATION) { it.submit(clock.instant()) }
+    private suspend fun replayDraft(command: CreateDraftCommand): PensionContract? {
+        val key = command.idempotencyKey ?: return null
+        return contracts.findByIdempotencyKey(command.participantPartyId, key)?.also {
+            providerBoundary.requireProvider(it.providerEntityId)
+        }
+    }
+
+    override suspend fun submit(caller: Caller, id: UUID): PensionContract {
+        val contract = get(caller, id)
+        if (contract.productLine == ProductLine.DIP) {
+            throw StrategyNotPermittedException("DIP submission requires the signed onboarding flow")
+        }
+        return transition(caller, id, ContractStatus.PENDING_ACTIVATION) { it.submit(clock.instant()) }
+    }
 
     override suspend fun list(caller: Caller, status: ContractStatus?, limit: Int): List<PensionContract> {
         val page = limit.coerceIn(1, MAX_LIST)

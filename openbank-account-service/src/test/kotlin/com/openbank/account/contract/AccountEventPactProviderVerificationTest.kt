@@ -94,10 +94,7 @@ import java.util.concurrent.TimeUnit
     value = PostgresRedpandaRedisTestResource::class,
     initArgs = [ResourceArg(name = "db", value = "openbank_accounts_it")],
 )
-@TestSecurity(
-    user = "service-account-openbank-pension",
-    roles = ["ROLE_API", "ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_PENSION_ACCOUNT_VERIFY"],
-)
+@TestSecurity(user = "pact-verifier", roles = ["ROLE_API", "ROLE_VIEWER", "ROLE_OPERATOR"])
 @Provider("openbank-account-service")
 @PactBroker(enablePendingPacts = "true")
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")

@@ -45,7 +45,7 @@ import java.util.UUID
     name = "Pension funding operations",
     description = "Operator queue, employer batches and state incentive claim batches",
 )
-@Path("/api/v1/pension/funding/operations")
+@Path("/api/v2/pension/funding/operations")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, Roles.PAYMENTS)

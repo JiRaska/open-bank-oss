@@ -35,7 +35,7 @@ private const val PARTY_HEADER = ContractAccessGuard.PARTY_HEADER
  * Real human staff only (OPA: `operator-pension-annuity-*`; [ContractAccessGuard.staffActor]).
  */
 @Tag(name = "Pension operations", description = "Annuity partner registry")
-@Path("/api/v1/pension/operator/annuity-providers")
+@Path("/api/v2/pension/operator/annuity-providers")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, Roles.COMPLIANCE)

@@ -3,7 +3,7 @@
 The ONE client-facing flow contract for the pension lifecycle (ADR-0334). It says what the app
 shows and which route backs it, not pixels. The app talks only to `openbank-customer-edge` under
 `/customer/v1/pension`; the edge relays to `openbank-pension-service` (the routes named below
-are pension-service's, under `/api/v1/pension`). Domain truth lives in ADR-0334 and the services'
+are pension-service's, under `/api/v2/pension`). Domain truth lives in ADR-0334 and the services'
 `openapi.yaml`; when this doc and the ADR disagree, the ADR wins. This file supersedes
 `docs/ux/pension-onboarding-questionnaire.md` (F7) and `docs/ux/pension-lifecycle.md` (#12359,
 which should drop its copy when it rebases onto this one).

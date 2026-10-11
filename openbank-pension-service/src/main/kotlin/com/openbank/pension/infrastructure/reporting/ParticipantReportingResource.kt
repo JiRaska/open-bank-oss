@@ -45,7 +45,7 @@ class ParticipantReportingBeans {
  * (MixedCurrencyException is an IllegalStateException), never a sum across currencies.
  */
 @Tag(name = "Reporting", description = "Participant aggregates for regulatory returns (#12425)")
-@Path("/api/v1/pension/reporting")
+@Path("/api/v2/pension/reporting")
 @jakarta.ws.rs.Produces(MediaType.APPLICATION_JSON)
 class ParticipantReportingResource {
 

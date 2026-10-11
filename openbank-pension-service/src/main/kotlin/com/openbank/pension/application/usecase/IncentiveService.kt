@@ -270,6 +270,20 @@ class IncentiveService(
         return IncentiveStatus(claims.byContract(contractId), balances)
     }
 
+    /**
+     * What the ledger itself already returned on [contractId]: the claims whose own RETURNED entry
+     * exists, and whether an executed exit (S5) wrote its lump RETURNED entries. The return service
+     * decides from this — the money record — never from which return rows happen to exist yet, so
+     * the order in which an exit and an ineligibility settlement land cannot return a month twice.
+     */
+    suspend fun ledgerReturns(contractId: UUID): LedgerReturns {
+        val returned = ledger.byContract(contractId).filter { it.kind == LedgerEntryKind.RETURNED }
+        return LedgerReturns(
+            claimIds = returned.mapNotNull { it.claimId }.toSet(),
+            exitClawbackWritten = returned.any { it.claimId == null && it.idempotencyKey != null },
+        )
+    }
+
     /** What early termination on [on] would have to return (read by S5). */
     suspend fun clawbackPreview(contractId: UUID, on: LocalDate): List<ClawbackItem> {
         val contract = requireContract(contractId)
@@ -466,3 +480,6 @@ class IncentiveService(
         const val UNSPECIFIED_FORMAT = "unspecified"
     }
 }
+
+/** See [IncentiveService.ledgerReturns]. */
+data class LedgerReturns(val claimIds: Set<UUID>, val exitClawbackWritten: Boolean)

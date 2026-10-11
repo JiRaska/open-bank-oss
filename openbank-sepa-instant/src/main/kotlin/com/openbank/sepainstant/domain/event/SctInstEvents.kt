@@ -18,9 +18,9 @@ sealed class SctInstEvent {
      * already maps `openbank.sepa.instant.events` -> `sepa-instant` correctly, but only as
      * TOPIC-sourced, not the producer's own claim, and audit-service subscribes to this topic
      * today (`openbank-audit-service/src/main/resources/application.yaml`'s consumed-topics
-     * list), so this is a live attribution upgrade. `KafkaSctInstEventPublisher.publish` builds a
-     * HAND-BUILT map, not a serialised data class, so this property alone does not reach the
-     * wire — it is copied into that map explicitly.
+     * list), so this is a live attribution upgrade. `SctInstEventPayloadCodec` builds the
+     * hand-built four-field map persisted to the outbox; this property is explicitly copied
+     * into that map before the dispatcher sends it.
      */
     val sourceService: String = SOURCE_SERVICE
 
