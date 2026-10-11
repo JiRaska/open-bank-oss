@@ -95,6 +95,7 @@ allowed_reasons contains "viewer-clearing-read" if {
 allowed_reasons contains "service-clearing-m2m" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-services"
+	input.principal.service_account == true
 	input.action in {
 		"clearingBatch.list",
 		"clearingBatch.read",

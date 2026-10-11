@@ -70,23 +70,23 @@ DECLARED_EXCEPTIONS = {
 # the set empty there is no longer a precedent line to append to, which is the state this list
 # was always meant to reach. A future role-only write is a hard failure at PR time, and the
 # correct response is one of the three remediation paths #4228 worked through (rename if it is
-# not a write; `not startswith(input.principal.id, "service-account-")` if no M2M caller exists;
+# not a write; `not principal_is_machine` if no M2M caller exists;
 # an identity-pinned m2m-<action> rule FIRST if one does), never a new baseline entry.
 BASELINE: set[str] = set()
 # Verified individually, not assembled by hand: derived by emptying this set and reading what
 # the check reports. An earlier revision of this list named 18 rules; 10 of those were NOT
 # reachable by the shared identity at all — they either bar service-accounts outright
-# (`not startswith(input.principal.id, "service-account-")`, as statement-close/-export do),
+# (`not principal_is_machine`, as statement-close/-export do),
 # gate on a role the shared account does not hold (ROLE_COMPLIANCE / ROLE_CREDIT_RISK /
 # ROLE_LENDING_OFFICER), or are reads. Overstating a debt list is not a safe error: it hides
 # the real entries among noise and invites the whole thing being ignored.
 # 2026-08-07: operator-fx-trigger and operator-fx-approval-decide removed. #3734 gave both
-# the `not startswith(input.principal.id, "service-account-")` guard on 2026-08-05
+# the `not principal_is_machine` guard on 2026-08-05
 # (fx_rest_ext.rego:50 and :96, recorded in docs/threat-models/openbank-fx-service.md), so
 # the debt was paid and only the list lagged. The gate had been reporting both as stale on
 # main ever since, in advisory mode, which is why nobody acted.
 # 2026-08-08: operator-vop-verify removed (#4228). vop_rest_ext.rego now carries the
-# `not startswith(input.principal.id, "service-account-")` guard. It needed no caller audit —
+# `not principal_is_machine` guard. It needed no caller audit —
 # unlike its siblings here, the legitimate M2M caller already had its OWN identity-pinned
 # reason (`m2m-vop-verify`) in the same file, so `opa eval` against vop-opa-bundle.yaml showed
 # the shared account resolving BOTH reasons and the role-only one was pure over-grant. The
@@ -114,7 +114,7 @@ BASELINE: set[str] = set()
 # check below now has nothing to forgive, so the next role-only write rule anyone writes is a
 # hard failure at PR time rather than a line quietly appended here.
 # `operator-year-close-attest` was here and is GONE (#3765): the ledger ext rule now carries
-# `not startswith(input.principal.id, "service-account-")`, so it is no longer role-only and
+# `not principal_is_machine`, so it is no longer role-only and
 # this list must not name it. The removal was surfaced by this script's own stale-entry
 # ratchet, not by anyone remembering — which is the argument for keeping that ratchet.
 # (end of the retired BASELINE commentary — the set above is deliberately empty)
@@ -168,12 +168,13 @@ ROLE_GATE_RE = re.compile(
 READ_NAME_RE = re.compile(r"-read$")
 
 # Ways a rule can bar or pin the caller identity, so the shared service-account cannot reach it.
-# `not startswith(input.principal.id, "service-account-")` is STRONGER than an identity pin — it
+# `not principal_is_machine` is STRONGER than an identity pin — it
 # excludes every service-account at once — and the first version of this script did not recognise
 # it, which is why it wrongly reported operator-statement-close/-export as exposed.
 IDENTITY_PIN_RE = re.compile(
     r"input\.principal\.id\s*=="
-    r"|not\s+startswith\(\s*input\.principal\.id\s*,\s*\"service-account-\""
+    r"|not\s+principal_is_machine\b"
+    r"|input\.principal\.service_account\s*==\s*true"
 )
 
 

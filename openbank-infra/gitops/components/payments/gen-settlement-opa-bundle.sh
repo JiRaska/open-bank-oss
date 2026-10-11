@@ -50,7 +50,7 @@ allowed_reasons contains "operator-settlement-write" if {
 	input.principal.type == "HUMAN"
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	input.action == "settlement.create"
 }
 
@@ -63,7 +63,7 @@ allowed_reasons contains "operator-settlement-approval-decide" if {
 	input.principal.type == "HUMAN"
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	input.action == "settlement.approval.decide"
 }
 
@@ -73,7 +73,7 @@ allowed_reasons contains "operator-settlement-approval-decide" if {
 # ROLE_OPERATOR in at least one realm, so without this veto they could read it. No M2M consumer
 # exists (admin-ui forwards the operator's own token). Identity, never principal.type, decides.
 prohibited if {
-	startswith(input.principal.id, "service-account-")
+	input.principal.service_account == true
 	input.action in {"settlement.approval.read", "settlement.approval.decide"}
 }
 

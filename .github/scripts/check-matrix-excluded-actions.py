@@ -8,7 +8,7 @@ WHY THIS EXISTS (#3765 residual, found while declaring ADR-0285 D6)
 
 Several `rest.rego` rules end with an explicit
 
-    not startswith(input.principal.id, "service-account-")
+    not principal_is_machine
 
 because a client_credentials JWT is classified `HUMAN` by `AuthorizeInterceptor` (a machine
 never yields `principal.type == "SERVICE"` — `rules.yaml: authz_policy`), so the principal
@@ -105,7 +105,7 @@ import yaml
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import gatelib  # noqa: E402
 
-EXCLUSION = re.compile(r'^not\s+startswith\(\s*input\.principal\.id\s*,\s*"service-account-"\s*\)\s*$')
+EXCLUSION = re.compile(r'^not\s+principal_is_machine\s*$')
 RULE_HEAD = re.compile(r'\nallowed_reasons contains\s+"([^"]+)"\s+if\s*\{')
 
 
@@ -226,7 +226,7 @@ def run(root: pathlib.Path, enforce: bool) -> int:
 REGO_CLEAN = """
 allowed_reasons contains "commstyle-publish" if {
 \tinput.principal.type == "HUMAN"
-\tnot startswith(input.principal.id, "service-account-")
+\tnot principal_is_machine
 \tinput.action == "commstyle.publish"
 }
 
@@ -238,7 +238,7 @@ allowed_reasons contains "m2m-sanctions-screening" if {
 
 REGO_SETFORM = """
 allowed_reasons contains "ops-pair" if {
-\tnot startswith(input.principal.id, "service-account-")
+\tnot principal_is_machine
 \tinput.action in {"ops.a", "ops.b"}
 }
 """
@@ -298,14 +298,14 @@ def self_test() -> int:
     # 8. #3765: with matrix-allows itself excluding service accounts, a grant on an SA-excluded
     #    action is NOT a violation (nothing machine-held reaches it), and declarations go stale
     matrix_ex = ('\nallowed_reasons contains "matrix-allows" if {\n\tinput.principal.type == "HUMAN"\n'
-                 '\tnot startswith(input.principal.id, "service-account-")\n\tmatrix_grants(a, r)\n}\n')
+                 '\tnot principal_is_machine\n\tmatrix_grants(a, r)\n}\n')
     v, b, s, _ = analyse(REGO_CLEAN + matrix_ex, rules_bad)
     check(f"an excluded matrix still reported a violation ({v=})", not v and not b and not s)
     v, b, s, _ = analyse(REGO_CLEAN + matrix_ex, rules_declared)
     check(f"a declaration under an excluded matrix was not stale ({s=})", s == ["commstyle.publish"])
     # 9. ...and WITHOUT the exclusion in matrix-allows the violation is back (another rule's
     #    exclusion is not credited to the matrix)
-    matrix_open = matrix_ex.replace('\tnot startswith(input.principal.id, "service-account-")\n', "")
+    matrix_open = matrix_ex.replace('\tnot principal_is_machine\n', "")
     v, _, _, _ = analyse(REGO_CLEAN + matrix_open, rules_bad)
     check("an open matrix hid the violation", "commstyle.publish" in v)
 

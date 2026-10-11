@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: aml-service
     app.kubernetes.io/part-of: aml
   annotations:
-    openbank.tech/policy-checksum: "4643f59423fc8cee"
+    openbank.tech/policy-checksum: "fa8835b660e41ef5"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1907,7 +1907,7 @@ data:
         #   `matrix-allows` (rest.rego) gates on `principal.type == "HUMAN"` and the role alone — it
         #   has no service-account exclusion, and cannot express one. Both of those actions are write
         #   actions whose own rules (`commstyle-publish`, `commstyle-decide-publish-approval`) carry
-        #   an explicit `not startswith(input.principal.id, "service-account-")`, because a
+        #   an explicit `not principal_is_machine` (the verified input.principal.service_account flag), because a
         #   client_credentials JWT is classified HUMAN (rules.yaml: authz_policy) and D6's rule is
         #   that the bank's voice is set by people. Granting either through the matrix would add a
         #   second permit path that drops that exclusion — a silent widening no policy layer can veto
@@ -1930,7 +1930,7 @@ data:
         # #10618 — department roles for the balance-sheet & risk workspace. READ actions only, on
         # purpose: `matrix-allows` has no service-account exclusion, so every WRITE these roles hold
         # (risk.snapshot.create, risk.curve-set.create, lending.ledgerBackfill.*) lives in the
-        # service's own *_rest_ext.rego with `not startswith(input.principal.id, "service-account-")`.
+        # service's own *_rest_ext.rego with `not principal_is_machine` (the verified input.principal.service_account flag).
         # The risk-engine list endpoints reuse the `.read` actions (resource ""), so there is no
         # separate `.list` action to grant. ROLE_TREASURY_DEALER / ROLE_TREASURY_APPROVER have NO entry
         # here on purpose: every treasury action, the reads included, is granted in
