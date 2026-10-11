@@ -47,6 +47,8 @@ from __future__ import annotations
 import argparse
 import pathlib
 import sys
+import tempfile
+from unittest.mock import patch
 
 import yaml
 
@@ -256,14 +258,31 @@ def selftest() -> int:
               f"{BASE_CONFIG.relative_to(REPO)} no longer parses, and every inheriting service "
               "would be flagged for a port that is in fact open.")
         return 1
-    inheritors = [s for s, p in configs.items() if (_load(REPO / s / "src/main/resources/application.yaml")
-                  or {}).get("quarkus", {}).get("management") is None and p["management"] is not None]
-    if not inheritors:
-        print("selftest FAIL: no service resolves its management port from the base, so the "
-              "layering path is untested — it would pass while doing nothing.")
-        return 1
+    # Exercise the real loader independently of whether today's fleet repeats the base value.
+    with tempfile.TemporaryDirectory(prefix="probe-port-layering-") as directory:
+        root = pathlib.Path(directory)
+        fixture_base = root / "openbank-libs-runtime/src/main/resources/application.yaml"
+        fixture_base.parent.mkdir(parents=True)
+        fixture_base.write_text("quarkus:\n  http:\n    port: 8080\n  management:\n    port: 8085\n")
+        for name, content in {
+            "openbank-inherited": "quarkus:\n  http:\n    port: 8140\n",
+            "openbank-overridden": "quarkus:\n  management:\n    port: 8086\n",
+        }.items():
+            path = root / name / "src/main/resources/application.yaml"
+            path.parent.mkdir(parents=True)
+            path.write_text(content)
+        with patch.dict(globals(), REPO=root, BASE_CONFIG=fixture_base):
+            layered = service_ports()
+        expected = {
+            "openbank-inherited": {"http": 8140, "management": 8085},
+            "openbank-overridden": {"http": 8080, "management": 8086},
+        }
+        if layered != expected:
+            print(f"selftest FAIL: config layering returned {layered!r}, expected {expected!r}")
+            return 1
     print(f"selftest OK: {len(cases)} cases, both directions; "
-          f"{len(configs)} service config(s) ({len(inheritors)} inheriting management="f"{base['management']} from the shared base), {len(workloads())} workload(s) parsed.")
+          f"base inheritance and service overrides verified; "
+          f"{len(configs)} service config(s), {len(workloads())} workload(s) parsed.")
     return 0
 
 
