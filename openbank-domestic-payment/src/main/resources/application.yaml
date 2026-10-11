@@ -287,6 +287,15 @@ authz:
       ssl:
         client-auth: required
       insecure-requests: enabled
+      # The mTLS certificate proves the transport peer, while API identity must come from
+      # the OIDC bearer on both listeners. Otherwise Quarkus can treat a trusted certificate
+      # without a bearer as an authenticated API principal (#12511).
+      auth:
+        permission:
+          bearer-only:
+            paths: /api/*
+            policy: permit
+            auth-mechanism: bearer
     # PaymentConfirmationRenderAdapter calls document-service. Production uses a named TLS bucket over
     # document-service's private-CA mTLS listener (8443, client auth REQUIRED), the same shape as
     # notification-service's party-authority bucket. Local/test fixtures speak plain HTTP, so this
