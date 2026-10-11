@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.42.1](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.42.0...tax-reporting-service-v0.42.1) (2026-10-11)
+
+
+### Security
+
+* **tax-reporting:** name the filing read action tax.filing.inspect ([#12547](https://github.com/JiRaska/open-bank-oss/issues/12547)) ([56dc56f](https://github.com/JiRaska/open-bank-oss/commit/56dc56f62611b56124861b4d526e0c391156d848))
+
 ## [0.42.0](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.41.0...tax-reporting-service-v0.42.0) (2026-10-10)
 
 
