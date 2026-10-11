@@ -17,6 +17,7 @@ import jakarta.ws.rs.PUT
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
+import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.config.inject.ConfigProperty
@@ -126,6 +127,60 @@ class CustomerPensionTransferResource(
             upstream.post(
                 "${api()}/transfers/$transferId/consent",
                 party,
+                json(mapOf("scaChallengeId" to challenge.toString())),
+                idempotencyKey,
+            ),
+        )
+    }
+
+    /**
+     * The caller's transfers in either direction — by default only those still pending, so a
+     * receiving provider's request that waits for their consent shows up here.
+     */
+    @GET
+    @Path("/transfers")
+    @Authorize(action = "customer.pension.contract.read", resource = "")
+    @Blocking
+    fun transfers(@QueryParam("direction") direction: String?, @QueryParam("pending") pending: String?): Response {
+        val dir = direction?.trim()?.uppercase()
+        if (dir != null && dir !in DIRECTIONS) return invalid("direction must be IN or OUT")
+        val pendingOnly = when (pending?.trim()?.lowercase()) {
+            null, "", "true" -> true
+            "false" -> false
+            else -> return invalid("pending must be true or false")
+        }
+        val query = buildString {
+            append("?pending=").append(pendingOnly)
+            if (dir != null) append("&direction=").append(dir)
+        }
+        val response = upstream.get("${api()}/transfers$query", party())
+        if (response.status != OK) return PensionFailure.of(response)
+        val list = EdgeJson.parse(response)?.takeIf { it.isArray } ?: return badUpstream()
+        return EdgeJson.ok(list.map { project(it) }, OK)
+    }
+
+    /**
+     * Withdraw a transfer-out — the caller's own request, or their consent to a provider's — before
+     * it is valued. Document-bound like consent: pension-service spends the challenge over
+     * `pension-transfer-withdraw:<transferId>`; without one nothing goes upstream.
+     */
+    @POST
+    @Path("/transfers/{transferId}/withdrawal")
+    @Authorize(action = "customer.pension.transfer.request", resource = "")
+    @Blocking
+    fun withdrawTransferOut(
+        @PathParam("transferId") id: String?,
+        @HeaderParam("Idempotency-Key") key: String?,
+        @HeaderParam(ScaConsume.HEADER) sca: String?,
+    ): Response {
+        val transferId = uuid(id) ?: return transferNotFound()
+        val idempotencyKey = requiredKey(key) ?: return keyRequired()
+        val challenge = ScaConsume.challengeId(sca)
+            ?: return PensionDocuments.required(linking("pension-transfer-withdraw:$transferId"))
+        return transfer(
+            upstream.post(
+                "${api()}/transfers/$transferId/withdrawal",
+                party(),
                 json(mapOf("scaChallengeId" to challenge.toString())),
                 idempotencyKey,
             ),
@@ -246,6 +301,7 @@ class CustomerPensionTransferResource(
         const val BAD_REQUEST = 400
         const val NOT_FOUND = 404
         const val BAD_GATEWAY = 502
+        val DIRECTIONS = setOf("IN", "OUT")
         val TOKEN = Regex("^[A-Za-z0-9_./-]{1,64}$")
         val CAP_GROUP = Regex("^[A-Z0-9_]{1,32}$")
         val NAME = Regex("^[\\p{L}\\p{N} .,&'()-]{1,128}$")

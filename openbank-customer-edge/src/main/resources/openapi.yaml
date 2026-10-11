@@ -994,6 +994,30 @@ paths:
         '409': {description: 'INVALID_CONTRACT_STATE (e.g. a transfer-out is already in progress)'}
         '401': {description: Missing or invalid bearer token}
         '502': {description: Pension service unavailable}
+  /pension/transfers:
+    get:
+      tags: [Pension]
+      operationId: listPensionTransfers
+      summary: 'The caller''s transfers, in and out; by default only those still pending'
+      description: >-
+        Proxies pension-service GET /transfers, which is scoped to the caller's party. A receiving
+        provider's request that waits for the caller's consent is listed here.
+      security:
+        - customerOidc: [pension:read]
+      parameters:
+        - {name: direction, in: query, required: false, schema: {type: string, enum: [IN, OUT]}}
+        - {name: pending, in: query, required: false, schema: {type: boolean, default: true}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/PensionTransfer'}
+        '400': {description: 'Invalid direction or pending'}
+        '401': {description: Missing or invalid bearer token}
+        '502': {description: Pension service unavailable}
   /pension/transfers/{transferId}:
     get:
       tags: [Pension]
@@ -1038,6 +1062,34 @@ paths:
         '403': {description: 'SCA_REQUIRED (no challenge; body carries scaLinking {purpose APPROVAL, approvalRequestId, payloadSha256}), SCA_REJECTED, or PENSION_CHANGE_REFUSED'}
         '404': {description: No such transfer for the caller}
         '409': {description: 'INVALID_CONTRACT_STATE (not awaiting consent)'}
+        '401': {description: Missing or invalid bearer token}
+        '502': {description: Pension service unavailable}
+  /pension/transfers/{transferId}/withdrawal:
+    post:
+      tags: [Pension]
+      operationId: withdrawPensionTransferOut
+      summary: 'Withdraw a transfer-out (or the consent to one) before it is valued'
+      description: >-
+        Proxies pension-service POST /transfers/{id}/withdrawal. Document-bound SCA over
+        pension-transfer-withdraw:<transferId>, payloadSha256 = SHA-256 of that id. Allowed while the
+        transfer is AWAITING_CONSENT or REQUESTED; nothing is valued, sold or paid. A retry answers the
+        same CANCELLED transfer.
+      security:
+        - customerOidc: [pension:write]
+      parameters:
+        - {name: transferId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: X-SCA-Challenge-Id, in: header, required: false, schema: {type: string, format: uuid}, description: 'An approved APPROVAL challenge raised with the scaLinking a request without one returns; forwarded to and spent by pension-service, never by the edge'}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 256}, description: 'Forwarded to pension-service; missing -> 400'}
+      responses:
+        '200':
+          description: OK; the CANCELLED transfer
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PensionTransfer'}
+        '400': {description: 'Missing Idempotency-Key'}
+        '403': {description: 'SCA_REQUIRED (no challenge; body carries scaLinking {purpose APPROVAL, approvalRequestId, payloadSha256}), SCA_REJECTED'}
+        '404': {description: No such transfer for the caller}
+        '409': {description: 'INVALID_CONTRACT_STATE (valuation already began, or not a transfer-out)'}
         '401': {description: Missing or invalid bearer token}
         '502': {description: Pension service unavailable}
   /pension/contracts/{contractId}/tax-years/{year}/external-cap-usage:

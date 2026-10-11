@@ -22,6 +22,123 @@
       }
     },
     {
+      "description": "GET the customer party's pending pension transfers",
+      "providerStates": [
+        {
+          "name": "the customer party has a transfer-out awaiting their consent"
+        }
+      ],
+      "request": {
+        "headers": {
+          "X-Customer-Party-Id": "11111111-1111-4111-8111-111111111111"
+        },
+        "method": "GET",
+        "path": "/api/v2/pension/transfers",
+        "query": {
+          "pending": [
+            "true"
+          ]
+        }
+      },
+      "response": {
+        "body": [
+          {
+            "contractId": "44444444-4444-4444-8444-444444444444",
+            "direction": "OUT",
+            "origin": "RECEIVING_PROVIDER",
+            "status": "AWAITING_CONSENT",
+            "transferId": "55555555-5555-4555-8555-555555555555"
+          }
+        ],
+        "headers": {
+          "Content-Type": "application/json; charset=UTF-8"
+        },
+        "matchingRules": {
+          "body": {
+            "$": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 1
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json(;\\s?charset=[\\w\\-]+)?"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "POST a signed withdrawal of a transfer-out awaiting consent",
+      "providerStates": [
+        {
+          "name": "the customer party has a transfer-out awaiting their consent"
+        }
+      ],
+      "request": {
+        "body": {
+          "scaChallengeId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        },
+        "headers": {
+          "Content-Type": "application/json",
+          "Idempotency-Key": "pact-key",
+          "X-Customer-Party-Id": "11111111-1111-4111-8111-111111111111"
+        },
+        "matchingRules": {
+          "header": {
+            "Idempotency-Key": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": ".+"
+                }
+              ]
+            }
+          }
+        },
+        "method": "POST",
+        "path": "/api/v2/pension/transfers/55555555-5555-4555-8555-555555555555/withdrawal"
+      },
+      "response": {
+        "body": {
+          "contractId": "44444444-4444-4444-8444-444444444444",
+          "direction": "OUT",
+          "status": "CANCELLED",
+          "transferId": "55555555-5555-4555-8555-555555555555"
+        },
+        "headers": {
+          "Content-Type": "application/json; charset=UTF-8"
+        },
+        "matchingRules": {
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json(;\\s?charset=[\\w\\-]+)?"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
       "description": "GET the beneficiary designation of the contract",
       "providerStates": [
         {

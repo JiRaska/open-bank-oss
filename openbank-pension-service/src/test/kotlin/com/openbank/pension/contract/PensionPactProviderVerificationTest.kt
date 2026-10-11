@@ -12,14 +12,22 @@ import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactFilter
 import au.com.dius.pact.provider.junitsupport.loader.PactFolder
+import com.openbank.pension.application.onboarding.TransferRequestRepository
 import com.openbank.pension.application.port.out.FundHolding
 import com.openbank.pension.application.port.out.FundHoldings
 import com.openbank.pension.application.port.out.FundUnitTransaction
+import com.openbank.pension.domain.transfer.Counterparty
+import com.openbank.pension.domain.transfer.TransferDirection
+import com.openbank.pension.domain.transfer.TransferOrigin
+import com.openbank.pension.domain.transfer.TransferRequest
 import com.openbank.pension.infrastructure.fund.InMemoryFundAdministrationAdapter
+import com.openbank.pension.infrastructure.onboarding.temporal.onWorker
 import com.openbank.pension.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.ConfigProvider
 import org.eclipse.microprofile.config.inject.ConfigProperty
@@ -43,13 +51,21 @@ import java.util.UUID
  * same PR as this class (ADR-0334 S6, #12359): `check-pact-provider-replay.py` refuses a provider
  * class no committed pact names, and a committed pact no always-running class replays.
  *
- * Callers are authenticated as the edge relay (`ContractAccessGuard` trusts the party header only
- * from it; the test profile names it `edge`). The missing-identity (401) interaction is replayed by
+ * Callers are authenticated as the edge relay: `ContractAccessGuard` trusts the party header only
+ * from a client_credentials token issued TO `openbank-edge` (`azp`) whose username is that
+ * client's service account — the same claims the relay ITs present. The missing-identity (401) interaction is replayed by
  * [PensionNegativeAuthProviderVerificationTest], which boots without `@TestSecurity`.
  */
 @QuarkusTest
 @QuarkusTestResource(PostgresTestResource::class)
-@TestSecurity(user = "edge", roles = ["ROLE_API"])
+@TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+@OidcSecurity(
+    claims = [
+        Claim(key = "sub", value = "edge-relay-subject"),
+        Claim(key = "azp", value = "openbank-edge"),
+        Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+    ],
+)
 @Provider("openbank-pension-service")
 @PactFolder("../pacts")
 @PactFilter("^(?!" + NEGATIVE_AUTH_STATE + "\$).*\$")
@@ -85,6 +101,32 @@ class PensionPactProviderVerificationTest {
         PactContractSeed.reset()
     }
 
+    @Inject
+    lateinit var transfers: TransferRequestRepository
+
+    /**
+     * A receiving provider asked to move the contract out and waits for the participant's consent:
+     * the pact's literal transfer id, so the list and the withdrawal interactions can name it.
+     */
+    @State(PactContractSeed.AWAITING_CONSENT_STATE)
+    fun transferAwaitingConsent() {
+        PactContractSeed.reset()
+        PactContractSeed.insertActive()
+        val now = Instant.now()
+        val request = TransferRequest.request(
+            direction = TransferDirection.OUT,
+            origin = TransferOrigin.RECEIVING_PROVIDER,
+            contractId = PactContractSeed.CONTRACT,
+            partyId = PactContractSeed.PARTY,
+            counterparty = Counterparty("PF-B", "Fund B", "B-42"),
+            currency = "CZK",
+            signatureRef = null,
+            deadline = LocalDate.now().plusDays(30),
+            now = now,
+        ).copy(id = PactContractSeed.AWAITING_TRANSFER)
+        onWorker { transfers.save(request) }
+    }
+
     /** The overview's valuation and the transactions page read the in-memory unit register (%test). */
     @State(PactContractSeed.UNITS_STATE)
     fun contractWithUnits() {
@@ -103,6 +145,8 @@ internal object PactContractSeed {
     val CONTRACT: UUID = UUID.fromString("44444444-4444-4444-8444-444444444444")
     val PARTY: UUID = UUID.fromString("11111111-1111-4111-8111-111111111111")
     const val UNITS_STATE = "the customer party's active pension contract holds priced fund units"
+    const val AWAITING_CONSENT_STATE = "the customer party has a transfer-out awaiting their consent"
+    val AWAITING_TRANSFER: UUID = UUID.fromString("55555555-5555-4555-8555-555555555555")
     private val FUND: UUID = UUID.fromString("66666666-6666-4666-8666-666666666666")
 
     /** One priced holding and one priced subscription, no pending order: status VALUED. */

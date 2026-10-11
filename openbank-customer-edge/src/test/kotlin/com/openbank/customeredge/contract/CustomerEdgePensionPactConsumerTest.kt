@@ -318,6 +318,50 @@ class CustomerEdgePensionPactConsumerTest {
         .toPact()
 
     @Pact(consumer = "openbank-customer-edge", provider = "openbank-pension-service")
+    fun listPendingTransfers(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(AWAITING_CONSENT_STATE)
+        .uponReceiving("GET the customer party's pending pension transfers")
+        .path("/api/v2/pension/transfers")
+        .query("pending=true")
+        .method("GET")
+        .headers(mapOf("X-Customer-Party-Id" to PARTY_ID))
+        .willRespondWith()
+        .status(200)
+        .body(
+            newJsonArrayMinLike(1) { a ->
+                a.`object` { t ->
+                    t.stringValue("transferId", AWAITING_TRANSFER_ID)
+                    t.stringValue("direction", "OUT")
+                    t.stringValue("origin", "RECEIVING_PROVIDER")
+                    t.stringValue("contractId", CONTRACT_ID)
+                    t.stringValue("status", "AWAITING_CONSENT")
+                }
+            }.build(),
+        )
+        .toPact()
+
+    @Pact(consumer = "openbank-customer-edge", provider = "openbank-pension-service")
+    fun withdrawTransfer(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(AWAITING_CONSENT_STATE)
+        .uponReceiving("POST a signed withdrawal of a transfer-out awaiting consent")
+        .path("/api/v2/pension/transfers/$AWAITING_TRANSFER_ID/withdrawal")
+        .method("POST")
+        .headers(mapOf("Content-Type" to "application/json", "X-Customer-Party-Id" to PARTY_ID))
+        .matchHeader("Idempotency-Key", ".+", "pact-key")
+        .body(newJsonBody { b -> b.stringValue("scaChallengeId", WITHDRAW_CHALLENGE_ID) }.build())
+        .willRespondWith()
+        .status(200)
+        .body(
+            newJsonBody { t ->
+                t.stringValue("transferId", AWAITING_TRANSFER_ID)
+                t.stringValue("direction", "OUT")
+                t.stringValue("contractId", CONTRACT_ID)
+                t.stringValue("status", "CANCELLED")
+            }.build(),
+        )
+        .toPact()
+
+    @Pact(consumer = "openbank-customer-edge", provider = "openbank-pension-service")
     fun unknownTransfer(builder: PactDslWithProvider): RequestResponsePact = builder
         .given(NO_CONTRACT_STATE)
         .uponReceiving("GET a pension transfer the customer party does not hold")
@@ -460,6 +504,24 @@ class CustomerEdgePensionPactConsumerTest {
     }
 
     @Test
+    @PactTestFor(pactMethod = "listPendingTransfers")
+    fun `listing pending transfers matches the provider`(mockServer: MockServer) {
+        val response = transfers(mockServer).transfers(null, null)
+
+        assertThat(response.status).isEqualTo(200)
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "withdrawTransfer")
+    fun `a signed withdrawal matches the provider`(mockServer: MockServer) {
+        val response = transfers(
+            mockServer,
+        ).withdrawTransferOut(AWAITING_TRANSFER_ID, "pact-key", WITHDRAW_CHALLENGE_ID)
+
+        assertThat(response.status).isEqualTo(200)
+    }
+
+    @Test
     @PactTestFor(pactMethod = "unknownTransfer")
     fun `an unknown transfer is NOT_FOUND at the provider and at the edge`(mockServer: MockServer) {
         assertThat(transfers(mockServer).transferStatus(UNKNOWN_ID).status).isEqualTo(404)
@@ -558,6 +620,9 @@ class CustomerEdgePensionPactConsumerTest {
         const val FUTURE_DATE = "2099-01-01"
         const val TRANSFER_CHALLENGE_ID = "88888888-8888-4888-8888-888888888888"
         const val PAST_YEAR = 2025
+        const val AWAITING_TRANSFER_ID = "55555555-5555-4555-8555-555555555555"
+        const val WITHDRAW_CHALLENGE_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        const val AWAITING_CONSENT_STATE = "the customer party has a transfer-out awaiting their consent"
 
         /** pension-service's answer to a non-conservative strategy with no assessment on file. */
         const val STRATEGY_REFUSAL = 403

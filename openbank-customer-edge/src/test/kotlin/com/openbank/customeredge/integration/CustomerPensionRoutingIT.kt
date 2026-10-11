@@ -279,6 +279,77 @@ class CustomerPensionRoutingIT {
     }
 
     @Test
+    fun `pending transfers are listed for the token's own party, projected, and bad filters never go upstream`() {
+        StubUpstreamResource.stub("$API/transfers", body = "[${transfer()}]")
+
+        When { get("/customer/v1/pension/transfers") } Then {
+            statusCode(200)
+            body("[0].transferId", equalTo(TRANSFER))
+            body("[0].status", equalTo("AWAITING_CONSENT"))
+            body("[0].partyId", nullValue())
+            body("[0].failureReason", nullValue())
+        }
+        val read = StubUpstreamResource.requests("$API/transfers").single()
+        assertThat(header(read, "X-Customer-Party-Id")).containsExactly(PARTICIPANT)
+
+        When { get("/customer/v1/pension/transfers?direction=SIDEWAYS") } Then { statusCode(400) }
+        When { get("/customer/v1/pension/transfers?pending=maybe") } Then { statusCode(400) }
+        assertThat(StubUpstreamResource.requests("$API/transfers")).hasSize(1)
+    }
+
+    @Test
+    fun `a withdrawal is bound to that transfer before anything is spent, then forwarded with the key`() {
+        val ref = "pension-transfer-withdraw:$TRANSFER"
+        Given {
+            json()
+            header("Idempotency-Key", "k-withdraw-1")
+        } When {
+            post("/customer/v1/pension/transfers/$TRANSFER/withdrawal")
+        } Then {
+            statusCode(403)
+            body("scaLinking.approvalRequestId", equalTo(ref))
+            body("scaLinking.payloadSha256", equalTo(sha256(ref)))
+        }
+        Given { json() } When { post("/customer/v1/pension/transfers/$TRANSFER/withdrawal") } Then { statusCode(400) }
+        assertThat(StubUpstreamResource.requests("$API/transfers/$TRANSFER/withdrawal")).isEmpty()
+
+        StubUpstreamResource.stub(
+            "$API/transfers/$TRANSFER/withdrawal",
+            body = transfer().replace("AWAITING_CONSENT", "CANCELLED"),
+        )
+        Given {
+            json()
+            header("Idempotency-Key", "k-withdraw-2")
+            header("X-SCA-Challenge-Id", CHALLENGE)
+        } When {
+            post("/customer/v1/pension/transfers/$TRANSFER/withdrawal")
+        } Then {
+            statusCode(200)
+            body("status", equalTo("CANCELLED"))
+        }
+        val call = StubUpstreamResource.requests("$API/transfers/$TRANSFER/withdrawal").single()
+        assertThat(header(call, "Idempotency-Key")).containsExactly("k-withdraw-2")
+        assertThat(header(call, "X-Customer-Party-Id")).containsExactly(PARTICIPANT)
+        assertThat(call.body).contains(CHALLENGE)
+    }
+
+    @Test
+    fun `another party's transfer cannot be withdrawn - pension-service's 404 is ours`() {
+        StubUpstreamResource.stub("$API/transfers/$TRANSFER/withdrawal", status = 404, body = """{"error":"x"}""")
+        Given {
+            json()
+            header("Idempotency-Key", "k-withdraw-3")
+            header("X-SCA-Challenge-Id", CHALLENGE)
+        } When {
+            post("/customer/v1/pension/transfers/$TRANSFER/withdrawal")
+        } Then {
+            statusCode(404)
+            body("error", equalTo("pension transfer not found"))
+        }
+        When { get("/customer/v1/pension/transfers/not-a-uuid/withdrawal") } Then { statusCode(405) }
+    }
+
+    @Test
     fun `a cap declaration is edge-bound SCA, consumed at sca-service, then forwarded with the key`() {
         StubUpstreamResource.stub("$API/contracts/$OWN", body = contract(OWN, PARTICIPANT))
         val usage = """{"usage":{"DPS_DIP_LIFE":"12000.00"}}"""
