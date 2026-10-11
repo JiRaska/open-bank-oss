@@ -172,6 +172,9 @@ data class TransferOutRequest(
 
 data class TransferConsentRequest(val scaChallengeId: String? = null)
 
+/** Single-use challenge signed over `pension-transfer-withdraw:<transferId>`. */
+data class TransferWithdrawalRequest(val scaChallengeId: String? = null)
+
 data class CounterpartyResponseRequest(val accepted: Boolean? = null, val reason: String? = null)
 
 data class IncentiveHistoryDto(val incentiveId: String? = null, val year: Int? = null, val amount: BigDecimal? = null)

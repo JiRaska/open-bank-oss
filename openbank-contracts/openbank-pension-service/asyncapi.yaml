@@ -1,0 +1,62 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+
+asyncapi: 3.0.0
+info:
+  title: OpenBank Pension Service — participant notices
+  version: 1.0.0
+  description: |
+    Participant notices pension-service hands to notification-service (ADR-0334, #12379/#12392).
+    pension-service owns the decision that a notice is due; notification-service owns rendering
+    (cs/en) and delivery. A notice is a delivery COMMAND, not a domain event: nothing else consumes
+    it, and the business step it belongs to has already committed.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+defaultContentType: application/json
+servers:
+  sandbox:
+    host: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+    protocol: kafka-secure
+    description: mTLS Kafka; pension-service publishes with its dedicated KafkaUser (Write ACL).
+channels:
+  notificationRequests:
+    address: openbank.notification.requests
+    description: |
+      notification-service's existing request topic. Record key = partyId, so one participant's
+      notices stay ordered. Retention and partitioning are owned by the topic's KafkaTopic.
+    messages:
+      participantNotice:
+        contentType: application/json
+        description: |
+          Built by ParticipantNotificationPublisher.envelope. Consumed by notification-service's
+          NotificationConsumer as a NotificationRequest (unknown fields such as sourceService are
+          ignored there and read by audit attribution).
+        payload:
+          type: object
+          required: [language, sourceService, partyId, channel, template, recipient, variables]
+          properties:
+            language: {type: string, enum: [CS, EN]}
+            sourceService: {type: string, const: pension-service}
+            partyId: {type: string, format: uuid}
+            channel: {type: string, const: PUSH}
+            template:
+              type: string
+              enum:
+                - PENSION_PAYOUT_ACCOUNT_CHANGED
+                - PENSION_PAYOUT_EXECUTED
+                - PENSION_STRATEGY_CHANGE_EFFECTIVE
+                - PENSION_TRANSFER_STATUS
+                - PENSION_INCENTIVE_RECEIVED
+                - PENSION_INCENTIVE_RETURNED
+            recipient: {type: string, format: uuid, description: The party id; PUSH delivers to its registered devices.}
+            variables:
+              type: object
+              additionalProperties: {type: string}
+operations:
+  publishParticipantNotice:
+    action: send
+    channel:
+      $ref: '#/channels/notificationRequests'
+    messages:
+      - $ref: '#/channels/notificationRequests/messages/participantNotice'

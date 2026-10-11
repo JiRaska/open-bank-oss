@@ -29,11 +29,17 @@ packs are code-reviewed data baked into the image, not runtime input).
 
 - Every route is `@RolesAllowed(API, OPERATOR, ADMIN)` behind Keycloak OIDC; there is no
   anonymous surface.
-- `pension_rest_ext.rego` grants the participant actions (`create`, `submit`, `activate`,
-  `strategy`, `suspend`, `resume`, `terminate`, `inspect`) to `service-account-openbank-edge` only,
+- `pension_rest_ext.rego` grants the participant actions (`strategy`, `suspend`, `resume`,
+  `inspect`, the onboarding steps, `transfer.request-out`/`.consent`/`.withdraw`) to
+  `service-account-openbank-edge` only. The S1 draft routes (`create`, `submit`) and the S1
+  `activate`/`terminate` shortcuts are retired: no route serves them and no rule grants them,
   keyed on `principal.id`, and grants real staff (`HUMAN`, not `service-account-*`) **read only**.
   No action is placed in `rules.yaml: authz.role_action_matrix`, because a matrix line is a grant
   to every service-account holding the role and cannot be vetoed (#3765/#3734).
+- A transfer-out is withdrawable by its participant only before valuation (`AWAITING_CONSENT`
+  or `REQUESTED`): SCA-signed over `pension-transfer-withdraw:<id>`, another party's transfer
+  answers 404, and a concurrent valuation is ordered by the optimistic version, so a withdrawal
+  can never land after units were sold. A receiving provider or staff cannot withdraw for them.
 - `AUTHZ_ENFORCE=true` from the first rollout. Policy tests carry a must-deny for every allow.
 - **No pension action ends in `.read` or `.list`.** Base `rest.rego` grants every such action to
   any HUMAN-classified principal holding `ROLE_OPERATOR`/`ROLE_ADMIN` (`operator-read-any`) or
@@ -64,7 +70,7 @@ can use this evidence.
 
 | Threat | Vector | Mitigation in S1 |
 |---|---|---|
-| **Spoofing** | A caller impersonates the participant to open or terminate a contract | Writes reachable only through the edge principal, which authenticates the human and stamps `X-Customer-Party-Id`; an absent header is a 400 (nullable param + `requireNotNull`, #3104) |
+| **Spoofing** | A caller impersonates the participant to open or terminate a contract | Writes reachable only through the edge principal, which authenticates the human and stamps `X-Customer-Party-Id`; an absent header is a 400 (nullable param + `requireNotNull`, #3104). The header is trusted only from the edge **client** identity — a verified JWT whose `azp` is a configured relay client and whose `preferred_username` is that client's own `service-account-<azp>` — never from the principal name alone, which derives from a username claim (`ContractAccessGuard`; `ContractAccessGuardTest`, `PensionContractApiIT`, falsified by reverting to a name match) |
 | **Spoofing / IDOR** | A customer reads or acts on another participant's contract by id | Every route resolves the caller: a caller without a staff role must carry `X-Customer-Party-Id` and is confined to that party's contracts; someone else's contract answers **404**, identical to an unknown id, so ids cannot be enumerated. Staff may read without the header; every change requires a participant caller. Covered by `PensionContractApiIT` (stranger → 404 on read and every action, owner → 200, operator → 200 read / 400 write), falsified by removing the check |
 | **Tampering** | Retried requests double-create or double-apply | `Idempotency-Key` is required on every POST; create deduplicates per participant (unique index), lifecycle actions are idempotent by state |
 | **Tampering** | Oversized or pathological amounts | Every caller-supplied amount bounded (≤ 1e9, ≤ 4 decimals); list/map inputs capped; codes restricted to `[A-Za-z0-9_-]{1,64}` |

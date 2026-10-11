@@ -53,6 +53,7 @@ dependencies {
     testImplementation(libs.quarkus.test.security)
     // ADR-0334 S8: git-pact provider replay of customer-edge's consumer pact (@PactFolder).
     testImplementation(libs.pact.provider)
+    testImplementation(libs.quarkus.test.security.oidc)
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.rest.assured.kotlin)

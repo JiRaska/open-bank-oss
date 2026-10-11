@@ -11,6 +11,8 @@ import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.RestAssured.given
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
@@ -30,7 +32,14 @@ class PensionDemoBoundaryIT {
     private val company = PensionDemoCompany.current()
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `the deployment uses its own synthetic provider database and persists its provider`() {
         assertThat(boundary.providerEntityId).isEqualTo(company.providerId)
         val response = create(company.providerId, "demo-owned-contract")
@@ -57,7 +66,14 @@ class PensionDemoBoundaryIT {
     }
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `a foreign provider is refused without persisting its contract`() {
         val before = foreignContracts()
         val response = create(company.other.providerId, "demo-wrong-provider")
@@ -66,7 +82,14 @@ class PensionDemoBoundaryIT {
     }
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `a different participant cannot read the synthetic contract`() {
         val response = create(company.providerId, "demo-private-contract")
         assertThat(response.statusCode).describedAs(response.body.asString()).isEqualTo(201)

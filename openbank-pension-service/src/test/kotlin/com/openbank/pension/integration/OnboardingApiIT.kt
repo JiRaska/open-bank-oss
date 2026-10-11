@@ -12,6 +12,8 @@ import com.openbank.pension.testsupport.ProviderFixtures
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.RestAssured.given
 import io.restassured.response.ValidatableResponse
 import jakarta.inject.Inject
@@ -84,7 +86,14 @@ class OnboardingApiIT {
     }
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `creation for another provider is a bad request`() {
         val body = startBody().replace(
             ProviderFixtures.ID.toString(),
@@ -94,7 +103,14 @@ class OnboardingApiIT {
     }
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `a new contract is signed, held in cooling-off, and withdrawn with its contract closed`() {
         val id = readyToSign()
         val contractId: String = call("POST", "$apps/$id/sign", """{"scaChallengeId":"sca-${UUID.randomUUID()}"}""")
@@ -107,7 +123,14 @@ class OnboardingApiIT {
     }
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `steps cannot be skipped and an SCA challenge cannot be spent twice`() {
         val early = start()
         call("POST", "$apps/$early/sign", """{"scaChallengeId":"sca-x"}""").statusCode(409)
@@ -120,7 +143,14 @@ class OnboardingApiIT {
     }
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `another party's application reads as absent, and the party comes only from the header`() {
         val id = start()
         val stranger = UUID.randomUUID()
@@ -140,7 +170,14 @@ class OnboardingApiIT {
     }
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `the customer edge cannot reach operator or provider routes`() {
         call("GET", "/api/v2/pension/operator/onboarding/applications").statusCode(403)
         call(
@@ -166,7 +203,14 @@ class OnboardingApiIT {
     }
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `a transfer-in is sent, and withdrawing before the funds cancels it at the ceding provider`() {
         val id = readyToSign(
             "TRANSFER_IN",
@@ -184,7 +228,14 @@ class OnboardingApiIT {
     }
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `a transfer-out of an inactive or foreign contract is refused`() {
         val body = """{"contractId":"${UUID.randomUUID()}","receivingProviderId":"P2","receivingProviderName":"Other",
             |"receivingContractNumber":"C-1","scaChallengeId":"sca-${UUID.randomUUID()}"}
@@ -199,7 +250,14 @@ class OnboardingApiIT {
     }
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `the edge's transfer-in route starts a TRANSFER_IN application`() {
         val ceding = """, "transferIn": {"providerId":"P1","providerName":"Ceding","contractNumber":"OLD-2"}"""
         call("POST", "/api/v2/pension/contracts/transfers-in", startBody("NEW_CONTRACT", ceding)).statusCode(201)
@@ -211,7 +269,14 @@ class OnboardingApiIT {
     lateinit var activation: OnboardingActivationPort
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `a first contribution reaches the workflow of a signed new contract, and nothing else`() {
         val contractId: String = call(
             "POST",

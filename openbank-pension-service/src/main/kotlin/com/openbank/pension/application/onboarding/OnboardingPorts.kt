@@ -47,6 +47,9 @@ interface TransferRequestRepository {
     suspend fun findById(id: UUID): TransferRequest?
     suspend fun findByContract(contractId: UUID): List<TransferRequest>
     suspend fun findByStatus(status: TransferStatus?, limit: Int): List<TransferRequest>
+
+    /** One participant's transfers, newest first. */
+    suspend fun findByParty(partyId: UUID, limit: Int): List<TransferRequest>
 }
 
 /** The onboarding extension of each loaded jurisdiction pack, by the core pack's pinned key. */

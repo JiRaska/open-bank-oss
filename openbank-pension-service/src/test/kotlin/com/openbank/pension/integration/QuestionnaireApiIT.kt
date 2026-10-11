@@ -11,6 +11,8 @@ import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.RestAssured.given
 import io.restassured.response.ValidatableResponse
 import org.assertj.core.api.Assertions.assertThat
@@ -76,7 +78,14 @@ class QuestionnaireApiIT {
     """.trimIndent()
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     @Suppress("LongMethod") // one journey, read top to bottom
     fun `a DPS participant resumes a draft, reviews a contradiction, and picks a riskier strategy with a warning`() {
         val id = start()
@@ -163,7 +172,14 @@ class QuestionnaireApiIT {
     }
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `a DIP novice gets the appropriateness warning, and a riskier DIP strategy cannot be acknowledged away`() {
         StrategyCatalogWireMockResource.stubApproved()
         val id = start("DIP", "BANK", "1979-03-14")
@@ -209,7 +225,14 @@ class QuestionnaireApiIT {
     }
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `bond-only approved strategy needs no equity competence acknowledgement`() {
         StrategyCatalogWireMockResource.stubApproved(classes = listOf("BOND_FUNDS"))
         val id = start("DIP", "BANK", "1979-03-14")
@@ -224,7 +247,14 @@ class QuestionnaireApiIT {
     }
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `DIP questionnaire cannot persist an assessment from missing or stale approval evidence`() {
         StrategyCatalogWireMockResource.stubApproved()
         val id = start("DIP", "BANK", "1979-03-14")

@@ -162,6 +162,35 @@ test_provider_may_not_consent_for_the_participant if {
 	}
 }
 
+# A participant withdraws their own transfer-out (or consent) through the edge — and only there.
+test_edge_may_withdraw_a_transfer_out if {
+	rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": pension_edge, "roles": ["ROLE_API"]},
+		"action": "pension.transfer.withdraw",
+	}
+}
+
+test_provider_may_not_withdraw_for_the_participant if {
+	not rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": provider, "roles": ["ROLE_API"]},
+		"action": "pension.transfer.withdraw",
+	}
+}
+
+test_operator_may_not_withdraw_for_the_participant if {
+	not rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR", "ROLE_ADMIN"]},
+		"action": "pension.transfer.withdraw",
+	}
+}
+
+test_other_service_account_may_not_withdraw if {
+	not rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR", "ROLE_API"]},
+		"action": "pension.transfer.withdraw",
+	}
+}
+
 test_provider_may_not_act_on_onboarding if {
 	not rest.allow with input as {
 		"principal": {"type": "HUMAN", "id": provider, "roles": ["ROLE_API"]},

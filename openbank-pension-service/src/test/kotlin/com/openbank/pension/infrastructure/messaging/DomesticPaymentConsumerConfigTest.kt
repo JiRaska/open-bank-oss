@@ -53,3 +53,15 @@ class ParticipantNotificationProducerConfigTest {
             .isEqualTo("org.apache.kafka.common.serialization.StringSerializer")
     }
 }
+
+/** client.id must be NESTED to reach the connector (#12586): the dotted one-liner is quoted and inert. */
+class ConsumerClientIdConfigTest {
+    @Test
+    fun `the payout consumer's client id resolves as a connector-visible key`() {
+        val source = YamlConfigSource(
+            requireNotNull(javaClass.classLoader.getResource("application.yaml")) { "application.yaml on classpath" },
+        )
+        assertThat(source.getValue("mp.messaging.incoming.domestic-payment-events-in.client.id"))
+            .isEqualTo("pension-service-domestic-payment-\${quarkus.uuid}")
+    }
+}
