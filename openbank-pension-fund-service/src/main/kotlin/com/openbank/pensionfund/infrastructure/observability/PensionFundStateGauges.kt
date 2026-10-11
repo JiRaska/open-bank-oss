@@ -113,8 +113,11 @@ class PgPensionFundStateSource(private val pool: Pool) : PensionFundStateSource 
                    CASE WHEN n.valuation_date IS NULL THEN NULL ELSE GREATEST(
                        EXTRACT(EPOCH FROM (now() - ((n.valuation_date + 1)::timestamp AT TIME ZONE 'UTC'))), 0
                    ) END::float8 AS nav_age,
-                   (SELECT EXTRACT(EPOCH FROM (now() - min(o.placed_at)))
-                      FROM unit_orders o WHERE o.fund_id = f.id AND o.status = 'PENDING')::float8 AS pending_age
+                   -- placed_at is stamped by the JVM clock and now() by the database (at transaction start),
+                   -- so a just-placed order can read a fraction of a second in the future; an age is never
+                   -- negative. NULL (none pending) also becomes 0, which the mapper reads as "none" anyway.
+                   GREATEST((SELECT EXTRACT(EPOCH FROM (now() - min(o.placed_at)))
+                      FROM unit_orders o WHERE o.fund_id = f.id AND o.status = 'PENDING'), 0)::float8 AS pending_age
               FROM funds f
               LEFT JOIN LATERAL (
                    SELECT valuation_date, net_assets, nav_per_unit FROM fund_navs
@@ -139,7 +142,9 @@ class PgPensionFundStateSource(private val pool: Pool) : PensionFundStateSource 
             "strategy_change" to "strategy_changes",
         )
 
-        private fun age(column: String) = "COALESCE(EXTRACT(EPOCH FROM (now() - min($column))), 0)::float8 AS age"
+        // Clamped like pending_age: rows are stamped by the JVM clock, now() is the database's.
+        private fun age(column: String) =
+            "GREATEST(COALESCE(EXTRACT(EPOCH FROM (now() - min($column))), 0), 0)::float8 AS age"
 
         /** Queues someone works down: size and oldest-item age. The two approval queues are four-eyes. */
         val QUEUES = listOf(

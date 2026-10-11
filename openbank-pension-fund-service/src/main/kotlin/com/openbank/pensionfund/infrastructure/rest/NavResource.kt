@@ -7,6 +7,7 @@ package com.openbank.pensionfund.infrastructure.rest
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import com.openbank.pensionfund.application.usecase.NavService
+import com.openbank.pensionfund.application.usecase.PositionClassificationService
 import com.openbank.pensionfund.domain.model.TransactionCorrection
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
@@ -30,7 +31,18 @@ class NavResource {
     lateinit var navs: NavService
 
     @Inject
+    lateinit var classification: PositionClassificationService
+
+    @Inject
     lateinit var identity: SecurityIdentity
+
+    @GET
+    @Path("/{navId}/positions")
+    @Operation(summary = "The positions a NAV was struck on, each with its effective instrument class")
+    @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN, Roles.AUDITOR)
+    @Authorize(action = "pension-fund.nav.read", resource = "#navId")
+    suspend fun positions(@PathParam("navId") navId: UUID): List<NavPositionResponse> =
+        classification.positions(navId).map(NavPositionResponse::from)
 
     @GET
     @Path("/{navId}")
