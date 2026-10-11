@@ -64,11 +64,25 @@ async function writeCheckpoint(github, repo, workflowId, checkpoint, previousSha
     content,
   }
   if (previousSha) args.sha = previousSha
-  // Contents API SHA is a compare-and-swap. A competing writer fails and must
-  // reread/replay; never overwrite a newer cursor with an older one.
-  const response = await github.rest.repos.createOrUpdateFileContents(args)
-  if (!response.data?.content?.sha) throw new Error('Checkpoint write returned no content SHA')
-  return response.data.content.sha
+  // Contents API SHA is a compare-and-swap for this file. Another workflow may
+  // commit to a DIFFERENT checkpoint file on the same branch at the same time;
+  // retry that branch-head race, but never overwrite a newer same-file cursor.
+  for (let attempt = 0; attempt < 10; attempt++) {
+    try {
+      const response = await github.rest.repos.createOrUpdateFileContents(args)
+      if (!response.data?.content?.sha) throw new Error('Checkpoint write returned no content SHA')
+      return response.data.content.sha
+    } catch (error) {
+      if (![409, 422].includes(error.status)) throw error
+      const current = await readCheckpoint(github, repo, workflowId)
+      if (current.sha !== previousSha) {
+        throw new Error('Checkpoint advanced concurrently; refusing to overwrite a newer cursor')
+      }
+      if (attempt === 9) throw error
+      await new Promise(resolve => setTimeout(resolve, 100 * (attempt + 1)))
+    }
+  }
+  throw new Error('Checkpoint write retry exhausted')
 }
 
 module.exports = {

@@ -49,8 +49,19 @@ async function main() {
   assert.equal(await writeCheckpoint(files, context.repo, 7, cursor, null), 'sha-1')
   assert.deepEqual((await readCheckpoint(files, context.repo, 7)).checkpoint, cursor)
   await assert.rejects(writeCheckpoint(files, context.repo, 7,
-    { ...cursor, run_id: 102 }, 'stale'), /stale SHA/)
+    { ...cursor, run_id: 102 }, 'stale'), /advanced concurrently/)
   assert.deepEqual((await readCheckpoint(files, context.repo, 7)).checkpoint, cursor)
+  const originalWrite = files.rest.repos.createOrUpdateFileContents
+  let branchRace = true
+  files.rest.repos.createOrUpdateFileContents = async args => {
+    if (branchRace) {
+      branchRace = false
+      throw Object.assign(new Error('other workflow updated branch'), { status: 409 })
+    }
+    return originalWrite(args)
+  }
+  assert.equal(await writeCheckpoint(files, context.repo, 7,
+    { ...cursor, run_id: 102 }, 'sha-1'), 'sha-2')
 
   const issues = []
   const github = {
