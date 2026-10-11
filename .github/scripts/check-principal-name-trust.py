@@ -42,7 +42,6 @@ OPT_OUT = "principal-name-trust: allow"
 
 # Known sites, each tied to the issue/PR that removes it. An entry whose file no longer produces a
 # finding is itself reported (stale), so this list can only shrink.
-# Empty since #12447 landed (pension's relay now binds to azp).
 KNOWN_PENDING: dict[str, str] = {}
 SKIP_DIRS = {".git", "build", "node_modules", ".gradle", "worktrees"}
 
