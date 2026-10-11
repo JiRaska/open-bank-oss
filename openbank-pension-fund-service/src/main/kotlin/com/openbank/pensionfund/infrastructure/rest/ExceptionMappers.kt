@@ -44,6 +44,11 @@ class ExceptionMappers {
         ).build()
 
     /** The maker tried to be their own checker: forbidden for this caller, whatever their role. */
+    /** No published NAV backs the period yet: not an error in the request, and never a report of zeroes. */
+    @ServerExceptionMapper
+    fun notReportable(e: com.openbank.pensionfund.domain.model.PeriodNotReportableException): Response =
+        Response.status(Response.Status.CONFLICT).entity(mapOf("error" to e.message)).build()
+
     @ServerExceptionMapper
     fun fourEyes(e: FourEyesViolationException): Response =
         Response.status(Response.Status.FORBIDDEN).entity(mapOf("error" to e.message)).build()
