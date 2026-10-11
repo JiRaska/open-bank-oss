@@ -109,7 +109,9 @@ async function main() {
 
   // #4195 predates this watch: its actual issue body uses the old heading and
   // records both the ledger provider failure and the aggregate all-green job.
-  // A later metadata-only Services CI run succeeds with ledger absent.
+  // Services CI 38169631397 on e6e2e5af succeeded after building consent only.
+  // Main-red watch 38171206078 then falsely closed #4195 although the
+  // ledger provider verification from 38129335305 never ran again.
   const ledger = 'build (openbank-ledger-service) / openbank-ledger-service (contract)'
   const legacy = { number: 2, state: 'open', title: 'main is red: Services CI', body: [
     '<!-- main-red:services-ci -->',
@@ -123,7 +125,12 @@ async function main() {
     'The ledger provider contract is still failing.',
   ].join('\n') }
   issues.push(legacy)
-  await applyVerdict(github, context, verdict(104, 'green', [], ['Detect changed services', 'all-green']))
+  await applyVerdict(github, context, verdict(38169631397, 'green', [], [
+    'Detect changed services',
+    'build (openbank-consent-service) / openbank-consent-service (build)',
+    'build (openbank-consent-service) / openbank-consent-service (contract)',
+    'all-green',
+  ]))
   assert.equal(legacy.state, 'open')
   assert.match(legacy.body, /build \(openbank-ledger-service\) \/ openbank-ledger-service \(contract\)/)
   assert.doesNotMatch(legacy.body, /- `all-green` \[failure\]/)

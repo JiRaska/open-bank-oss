@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Emit the exact watched workflow names for scheduled catch-up dispatch."""
 
 import json
