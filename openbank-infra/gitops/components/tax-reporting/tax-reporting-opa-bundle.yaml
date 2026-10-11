@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: tax-reporting-service
     app.kubernetes.io/part-of: tax-reporting
   annotations:
-    openbank.tech/policy-checksum: "34cfdbffb3e13639"
+    openbank.tech/policy-checksum: "8872c3e35288eda2"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -676,7 +676,7 @@ data:
     # Mounted alongside rest.rego in the same OPA bundle — OPA merges same-package rules.
     #
     # Actions gated (TaxFilingResource):
-    #   tax.filing.read      — GET /api/v1/tax/filings, /overdue, /{period}, /{period}/remittances,
+    #   tax.filing.inspect   — GET /api/v1/tax/filings, /overdue, /{period}, /{period}/remittances,
     #                          /export-capability
     #   tax.filing.assemble  — POST /api/v1/tax/filings/{period}/assemble   (OPEN -> ASSEMBLED)
     #   tax.filing.file      — POST /api/v1/tax/filings/{period}/filed      (ASSEMBLED -> FILED)
@@ -694,12 +694,19 @@ data:
     import rego.v1
 
     # Real staff, reading. A tax return is exactly the artefact an auditor needs to see.
+    #
+    # The new read action deliberately does NOT end in `.read`/`.list`, so neither generic read grant
+    # reaches it. The old tax.filing.read is a temporary compatibility alias for images published
+    # before this rename: rules.yaml still excludes it from operator-read-any, and #12488 excludes
+    # service-accounts from compliance-read-any. Keep both controls until old images have drained.
+    #
+    # Machine exclusion is the id-prefix test; move to `not principal_is_machine` once #12537 lands.
     allowed_reasons contains "staff-tax-filing-read" if {
     	input.principal.type == "HUMAN"
     	not startswith(input.principal.id, "service-account-")
     	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_AUDITOR", "ROLE_VIEWER", "ROLE_COMPLIANCE"}
     	role in input.principal.roles
-    	input.action == "tax.filing.read"
+        input.action in {"tax.filing.inspect", "tax.filing.read"}
     }
 
     # Real operators freeze and file a period. No service-account, whatever roles it holds.
@@ -1666,15 +1673,15 @@ data:
       # An action listed here is served ONLY by its service's identity-scoped rules (staff, and the
       # one named machine caller). Tested must-deny/must-allow in that service's rest_ext test.
       #
-      # This list vetoes operator-read-any ONLY; compliance-read-any (ROLE_COMPLIANCE, every `.read`)
-      # has no such list, and the shared service-account holds ROLE_COMPLIANCE in the CI realm. So an
-      # entry here does NOT keep the shared account out on its own. For a read that must be closed to
-      # it, name the action with a non-read verb (`.inspect`, `.reconstruct`) instead, as
-      # pension-fund.holding.inspect does (#12481).
+      # This list vetoes operator-read-any ONLY. Base compliance-read-any now independently excludes
+      # service-account principals (#12488). For sensitive new reads, use a non-read verb such as
+      # `.inspect` so neither generic read grant can ever admit them.
+      # Keep the old tax.filing.read excluded while previously published tax-service images may still
+      # emit it during the image/OPA-bundle rollout. The tax extension grants that legacy verb to
+      # named staff roles only; removing this entry first would reopen it to every ROLE_OPERATOR
+      # service-account through operator-read-any (#12547). Retire it only after old images are gone.
       operator_read_any_excluded_actions:
-        - tax.filing.read             # §38d withholding returns and the per-remittance audit trail behind
-                                      # them (#5760): real staff only via tax_reporting_rest_ext.rego; no
-                                      # service-account reads them through operator-read-any
+        - tax.filing.read
       role_action_matrix:
         ROLE_OPERATOR:
           grant:
