@@ -116,9 +116,12 @@ PCI_NEGATIVE = re.compile(
     r"Exception: No cardholder data path changed;\s+(?P<reason>\S.*)$"
 )
 PCI_FIELD = re.compile(
-    r"\b(?:pan|masked_?pan|cvv|cvc|card_?number|card_?token|cardholder(?:_?id|_?name|_?data)?|"
-    r"primary_?account_?number|track_?2)\b",
-    re.I,
+    r"(?i:\b(?:pan|masked_?pan|cvv|cvc|card_?number|card_?token|cardholder|"
+    r"primary_?account_?number|track_?2)(?:_[a-z0-9]+)*\b)"
+    r"|\b[a-z]+(?:Pan|PAN|Card|Cvv|Cvc|CVV|CVC)(?:[A-Z][A-Za-z0-9]*)?\b"
+    r"|\b(?:Pan|PAN|Card|Cvv|Cvc|CVV|CVC)(?:[A-Z][A-Za-z0-9]*)?\b"
+    r"|\b(?:pan|card|cardholder|cvv|cvc)[A-Z][A-Za-z0-9_]*\b"
+    r"|\b[a-z0-9_]+_(?i:pan|card|cvv|cvc|track2)(?:_[a-z0-9]+)*\b",
 )
 
 
@@ -167,14 +170,15 @@ PII = re.compile(
     r"email|phone|birth|/pid)", re.I)
 CARDHOLDER = re.compile(r"(card|pci|cardholder|\bpan\b|cvv|emv|tokeni[sz])", re.I)
 
-# The six template boxes, recognised by stable phrases. A box matching none is UNKNOWN → human.
+# Match only the stable leading label. Free-text reasons must not relabel a PCI box as another item.
+# A box matching none is UNKNOWN → human.
 ITEMS = (
-    ("secrets", re.compile(r"secrets", re.I)),
-    ("suppressions", re.compile(r"Suppress|as Any", re.I)),
-    ("dependency", re.compile(r"third-party dependency", re.I)),
-    ("auth", re.compile(r"Auth\s*/\s*crypto", re.I)),
-    ("pii", re.compile(r"PII path", re.I)),
-    ("cardholder", re.compile(r"Cardholder", re.I)),
+    ("secrets", re.compile(r"^No secrets\b", re.I)),
+    ("suppressions", re.compile(r"^No new `@SuppressWarnings`", re.I)),
+    ("dependency", re.compile(r"^No new third-party dependency\b", re.I)),
+    ("auth", re.compile(r"^Auth\s*/\s*crypto\s*/\s*payment code changed\?", re.I)),
+    ("pii", re.compile(r"^PII path changed\?", re.I)),
+    ("cardholder", re.compile(r"^Cardholder data path changed\?", re.I)),
 )
 
 
@@ -185,7 +189,7 @@ def is_inert(path: str) -> bool:
 
 def item_of(text: str) -> str | None:
     for key, rx in ITEMS:
-        if rx.search(text):
+        if rx.match(text):
             return key
     return None
 
@@ -369,6 +373,12 @@ def decide(files: list[str], touched: list[str], added: list[tuple[str, str]],
         if not cat_hits(cat):
             ans[key] = (decl_note + f"; none matches the service's `{cat}` globs, and no non-money-path "
                         f"file in the diff matches a {what} path pattern")
+    # A sensitive field can be added to a generically named file outside the declared cardholder
+    # globs. Do not let the normal declared-path auto-answer return before examining both diff sides.
+    if any(CARDHOLDER.search(f) for f in files) or any(
+        PCI_FIELD.search(line) for _, line in added + (removed or [])
+    ):
+        ans["cardholder"] = None
     return ans
 
 
@@ -684,11 +694,19 @@ def self_test() -> int:
         ("removed SQL cardholder column", negative, [], [], [("src/main/V3.sql", "    masked_pan varchar(19),")], False, False),
         ("added Java cardholder field", negative, [], [("src/main/Card.java", "private String cardNumber;")], [], False, False),
         ("added card token field", negative, [], [("src/main/X.kt", "val cardToken: String")], [], False, False),
+        ("camel encrypted PAN", negative, [], [("src/main/X.kt", "val encryptedPan: String")], [], False, False),
+        ("camel PAN hash", negative, [], [("src/main/X.kt", "val panHash: String")], [], False, False),
+        ("camel primary account number", negative, [], [("src/main/X.kt", "val primaryAccountNumber: String")], [], False, False),
+        ("qualified camel PAN", negative, [], [("src/main/X.kt", "dto.encryptedPan = value")], [], False, False),
+        ("camel cardholder ID", negative, [], [("src/main/X.kt", "val cardholderId: UUID")], [], False, False),
+        ("removed snake PAN hash", negative, [], [], [("src/main/V3.sql", "  pan_hash varchar(64),")], False, False),
         ("removed schema cardholder field", negative, [], [], [("src/main/openapi.yaml", "      cvv:")], False, False),
         ("changed declaration", negative, [], [], [], True, False),
     ]:
         if negative_pci_exception(text, files, added + removed, changed) != accepted:
             print(f"self-test FAIL: {label} PCI exception"); bad += 1
+    if PCI_FIELD.search("class FundNavPositionEntity : PanacheEntityBase"):
+        print("self-test FAIL: Panache framework type was mistaken for PAN data"); bad += 1
     # A box OUTSIDE the section must not count.
     other = "## Security checklist\n- [x] done\n\n## Compliance impact\n- [ ] GDPR\n"
     r3 = unticked(other)
@@ -759,6 +777,11 @@ def self_test() -> int:
         print("self-test FAIL: PCI exception hid an unticked PII box"); bad += 1
     if fixture([f"{svc}/src/main/kotlin/Cardholder.kt"], pci_body) == 0:
         print("self-test FAIL: PCI exception passed a cardholder-named source path"); bad += 1
+    reason_with_other_label = pci_body.replace("fund positions have no", "fund positions contain no secrets and have no")
+    if item_of(negative.replace("fund positions have no", "fund positions contain no secrets and have no")) != "cardholder":
+        print("self-test FAIL: a PCI reason containing 'secrets' reclassified the box"); bad += 1
+    if fixture([f"{svc}/src/main/kotlin/Cardholder.kt"], reason_with_other_label) == 0:
+        print("self-test FAIL: PCI path passed by relabelling a reason as secrets"); bad += 1
 
     # A deletion or a pure rename is a change to an existing PCI path too. The old side must
     # remain visible: `git diff --name-only` with rename detection reports only the new name.
@@ -887,6 +910,9 @@ def self_test() -> int:
     # (g) refactor outside every sensitive glob, declared service → passes with NO checklist.
     if dfixture(decl_rules, refactor, no_checklist) != 0:
         print("self-test FAIL (g): declared-service refactor outside sensitive globs still demanded ticks"); bad += 1
+    generic_pci = {f"{svc}/src/main/kotlin/com/x/domain/Money.kt": "data class Money(val encryptedPan: String)\n"}
+    if dfixture(decl_rules, generic_pci, pci_body) == 0:
+        print("self-test FAIL (g2): PCI field in a generic declared path passed an unticked PCI box"); bad += 1
     # (h) change inside the auth glob → fails without the tick.
     if dfixture(decl_rules, {f"{svc}/src/main/kotlin/com/x/security/Guard.kt": "x\n"}, no_checklist) == 0:
         print("self-test FAIL (h): change inside a declared auth glob passed without a tick"); bad += 1
