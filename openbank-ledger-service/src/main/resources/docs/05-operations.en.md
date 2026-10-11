@@ -87,6 +87,8 @@ _These are design-target SLOs for a production-shaped deployment — they are no
 
 Treat as a P1 accounting-integrity incident. Per-currency balancing (ADR-0025) is enforced at post time, so a non-zero trial balance points to data corruption or a partition-routing miss. Freeze postings, snapshot the journal, and reconcile against `balance-service` before any correcting entry. Corrections are reversal-only — never edit a posted entry.
 
+The synthetic-dimension HTTP integration test now supplies an OIDC `azp`, subject and service-account username for its trusted canary instead of relying on a test role alone. It checks the journal row's synthetic flag and the default, real-only, synthetic-only and all-population trial balances. This is a local test identity and does not establish that the deployed identity provider has issued the same claims or that live trial-balance filtering has been exercised.
+
 ### FX revaluation missed / re-run
 
 The daily run is automated by `FxRevaluationScheduler`. To re-run for a business day: `POST /api/v1/ledger/fx-revaluation?date=YYYY-MM-DD` (operator). It is idempotent (`fx-reval-{date}`) — one entry per day, same-day re-run is a no-op. A missing ČNB rate for a currency skips only that leg (logged WARN).
@@ -110,3 +112,8 @@ The daily run is automated by `FxRevaluationScheduler`. To re-run for a business
 ## Deploy / release
 
 Per-service path-scoped CI (only changed services build). Release axis is owned by **release-please** from Conventional Commits — do not hand-edit `version.txt`/`CHANGELOG.md` (current release `1.2.0`). CD: ArgoCD tracks the deployment manifest image tag. Always take `--ours` for image-tag merge conflicts in GitOps.
+
+
+### FINREP Pact fixture
+
+Broker FINREP verification derives the reporting month from the selected contract requests and uses a dedicated test database. Fixture reset refuses foreign closed-period IDs and retains the immutable evidence trigger. Regression tests cover historical June 2026 and current June 2000 fixtures in both replay orders, including rejection of evidence DELETE. Production frozen-evidence validation is unchanged.

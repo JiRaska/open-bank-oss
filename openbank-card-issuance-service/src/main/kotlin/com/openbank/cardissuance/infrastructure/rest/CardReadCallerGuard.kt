@@ -4,10 +4,11 @@
 
 package com.openbank.cardissuance.infrastructure.rest
 
+import com.openbank.libs.authz.ServiceAccountIdentity
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.ws.rs.ForbiddenException
 
-/** Staff roles the card reads admitted before #10486; a caller holding one needs no identity check. */
+/** Staff roles the card reads admitted before #10486, for verified human sessions only. */
 private val CARD_READ_STAFF_ROLES = setOf("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN")
 
 /**
@@ -35,8 +36,8 @@ internal val CARD_PARTY_LIST_CALLERS = setOf(
  * service account in the realm, would open cardholder data to all of them.
  */
 internal fun requireNamedCardReader(identity: SecurityIdentity, allowed: Set<String>) {
-    if (CARD_READ_STAFF_ROLES.any(identity::hasRole)) return
-    if (identity.principal?.name !in allowed) {
+    if (CARD_READ_STAFF_ROLES.any(identity::hasRole) && ServiceAccountIdentity.isHumanStaff(identity)) return
+    if (!ServiceAccountIdentity.isOneOf(identity, allowed)) {
         throw ForbiddenException("caller is not a named card reader")
     }
 }

@@ -25,21 +25,86 @@ import javax.sql.DataSource
  * FROZEN LINES_V1 evidence equal to it. The month is in 2000 so that no other state or IT sharing
  * this container posts before it (the nostro seed posts in 2026, and would otherwise be an
  * unfrozen month inside the cumulative window). Direct JDBC, as [NostroPactSeed], because a state
- * thread carries no Vert.x context. Idempotent: every insert is `on conflict do nothing`.
+ * thread carries no Vert.x context. The default seed is idempotent (`on conflict do nothing`).
+ * Broker replay derives the month from the selected pact's request paths and uses an explicit
+ * reset in a class-restricted test database. Reset refuses foreign period IDs, retains the
+ * immutable evidence trigger, and commits cleanup and reseeding together.
  */
 object FinrepFrozenMonthPactSeed {
     val REPORTING_MONTH: LocalDate = LocalDate.of(2000, 6, 30)
 
-    fun seed(dataSource: DataSource) = dataSource.connection.use { c ->
-        journal(c)
-        line(c, CASH_LINE_ID, CASH_GL_ID, "D", 1)
-        line(c, DEPOSITS_LINE_ID, DEPOSITS_GL_ID, "C", 2)
-        (1..5).forEach { month -> emptyEvidence(c, month) }
-        evidence(c)
+    internal fun requestPlan(paths: List<String>): Pair<LocalDate, Boolean> {
+        val months = paths.mapNotNull {
+            Regex("/MONTH/(\\d{4}-\\d{2}-\\d{2})/").find(it)?.groupValues?.get(1)
+        }.toSet()
+        require(months.size == 1) { "FINREP pact must declare one unambiguous reporting month in its requests" }
+        return LocalDate.parse(months.single()) to paths.any { it.endsWith("frozen-year-to-date-trial-balance") }
     }
 
-    private fun emptyEvidence(c: Connection, month: Int) {
-        val period = PeriodType.MONTH.of(LocalDate.of(2000, month, 1))
+    fun seed(
+        dataSource: DataSource,
+        reportingMonth: LocalDate = REPORTING_MONTH,
+        yearToDate: Boolean = true,
+        resetFixture: Boolean = false,
+    ) = dataSource.connection.use { c ->
+        require(reportingMonth.dayOfMonth == reportingMonth.lengthOfMonth())
+        c.autoCommit = false
+        try {
+            if (resetFixture) resetOwnedEvidence(c)
+            journal(c, reportingMonth.withDayOfMonth(15))
+            line(c, CASH_LINE_ID, CASH_GL_ID, "D", 1)
+            line(c, DEPOSITS_LINE_ID, DEPOSITS_GL_ID, "C", 2)
+            if (yearToDate) {
+                (1 until reportingMonth.monthValue).forEach { month ->
+                    emptyEvidence(c, reportingMonth.year, month)
+                }
+            }
+            evidence(c, reportingMonth)
+            c.commit()
+        } catch (failure: Throwable) {
+            c.rollback()
+            throw failure
+        }
+    }
+
+    // Remove only rows owned by this fixture, never unrelated journal or closed-period data.
+    private fun resetOwnedEvidence(c: Connection) {
+        val periodIds = (9601..9612).map { UUID.fromString("00000000-0000-0000-0000-%012d".format(it)) }
+        // This reset is only for a dedicated test database. Refuse any foreign evidence before
+        // truncating fixture rows; TRUNCATE leaves the immutable UPDATE/DELETE trigger installed.
+        c.createStatement().use { statement ->
+            statement.execute(
+                "lock table ledger_closed_period, ledger_closed_period_trial_balance_line in access exclusive mode",
+            )
+            statement.executeQuery("select id from ledger_closed_period").use { rows ->
+                while (rows.next()) {
+                    check(rows.getObject(1, UUID::class.java) in periodIds) {
+                        "Cannot reset a database containing foreign closed-period evidence"
+                    }
+                }
+            }
+            statement.execute("truncate table ledger_closed_period_trial_balance_line")
+        }
+        c.prepareStatement("delete from ledger_closed_period where id = ?").use { statement ->
+            periodIds.forEach {
+                statement.setObject(1, it)
+                statement.addBatch()
+            }
+            statement.executeBatch()
+        }
+        c.prepareStatement("delete from journal_lines where id in (?, ?)").use { statement ->
+            statement.setObject(1, CASH_LINE_ID)
+            statement.setObject(2, DEPOSITS_LINE_ID)
+            statement.executeUpdate()
+        }
+        c.prepareStatement("delete from journal_entries where id = ?").use { statement ->
+            statement.setObject(1, JOURNAL_ID)
+            statement.executeUpdate()
+        }
+    }
+
+    private fun emptyEvidence(c: Connection, year: Int, month: Int) {
+        val period = PeriodType.MONTH.of(LocalDate.of(year, month, 1))
         val hash = PeriodTrialBalance(period, emptyList()).contentHash()
         val periodId = UUID.fromString("00000000-0000-0000-0000-%012d".format(9601 + month))
         val computedAt = Timestamp.from(Instant.parse("2000-07-01T00:00:00Z"))
@@ -61,15 +126,15 @@ object FinrepFrozenMonthPactSeed {
         }
     }
 
-    private fun journal(c: Connection) = c.prepareStatement(
+    private fun journal(c: Connection, entryDate: LocalDate) = c.prepareStatement(
         """insert into journal_entries (id, transaction_id, entry_date, value_date, description, status, created_by)
            values (?, ?, ?, ?, 'finrep pact frozen month', 'POSTED', ?)
            on conflict (id, entry_date) do nothing""",
     ).use { s ->
         s.setObject(1, JOURNAL_ID)
         s.setObject(2, TRANSACTION_ID)
-        s.setObject(3, java.sql.Date.valueOf(ENTRY_DATE))
-        s.setObject(4, java.sql.Date.valueOf(ENTRY_DATE))
+        s.setObject(3, java.sql.Date.valueOf(entryDate))
+        s.setObject(4, java.sql.Date.valueOf(entryDate))
         s.setObject(5, SYSTEM_ACTOR_ID)
         s.executeUpdate()
     }
@@ -89,8 +154,8 @@ object FinrepFrozenMonthPactSeed {
         s.executeUpdate()
     }
 
-    private fun evidence(c: Connection) {
-        val period = PeriodType.MONTH.of(REPORTING_MONTH)
+    private fun evidence(c: Connection, reportingMonth: LocalDate) {
+        val period = PeriodType.MONTH.of(reportingMonth)
         val lines = listOf(
             TrialBalanceLine(
                 CASH_GL_ID,
@@ -148,7 +213,6 @@ object FinrepFrozenMonthPactSeed {
         }
     }
 
-    private val ENTRY_DATE: LocalDate = LocalDate.of(2000, 6, 15)
     private val AMOUNT = BigDecimal("100.00")
     private val PERIOD_ID: UUID = UUID.fromString("00000000-0000-0000-0000-000000009601")
     private val JOURNAL_ID: UUID = UUID.fromString("b0000000-0000-0000-0000-000000012497")

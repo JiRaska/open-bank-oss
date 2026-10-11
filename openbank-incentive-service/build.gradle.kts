@@ -30,6 +30,7 @@ dependencies {
 
     testImplementation(libs.quarkus.junit5)
     testImplementation(libs.quarkus.test.security)
+    testImplementation(libs.quarkus.test.security.oidc)
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
     testImplementation(libs.assertj)
     testImplementation(libs.rest.assured.kotlin)

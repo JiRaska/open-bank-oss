@@ -19,6 +19,7 @@ import jakarta.ws.rs.container.ContainerResponseContext
 import jakarta.ws.rs.core.MultivaluedHashMap
 import jakarta.ws.rs.core.SecurityContext
 import org.assertj.core.api.Assertions.assertThat
+import org.eclipse.microprofile.jwt.JsonWebToken
 import org.jboss.logging.MDC
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
@@ -46,10 +47,26 @@ class SyntheticTaintFilterTest {
         testContextScope.close()
     }
 
-    private fun request(header: String?, principal: String?): ContainerRequestContext {
+    private fun request(
+        header: String?,
+        principal: String?,
+        clientId: String? = principal?.removePrefix("service-account-"),
+        username: String? = principal,
+        subjectClaim: String? = "service-account-subject",
+        plainPrincipal: Boolean = false,
+    ): ContainerRequestContext {
         val security = mockk<SecurityContext>(relaxed = true) {
             every { userPrincipal } returns principal?.let { name ->
-                mockk<Principal> { every { getName() } returns name }
+                if (plainPrincipal) {
+                    Principal { name }
+                } else {
+                    mockk<JsonWebToken> {
+                        every { getName() } returns name
+                        every { subject } returns subjectClaim
+                        every { getClaim<String>("azp") } returns clientId
+                        every { getClaim<String>("preferred_username") } returns username
+                    }
+                }
             }
         }
         return mockk(relaxed = true) {
@@ -101,6 +118,22 @@ class SyntheticTaintFilterTest {
     }
 
     @Test
+    fun `a matching name without a verified client JWT cannot taint`() {
+        val name = "service-account-openbank-canary"
+        val attempts = listOf(
+            request("true", name, plainPrincipal = true),
+            request("true", name, clientId = null),
+            request("true", name, clientId = "attacker"),
+            request("true", name, username = "another-user"),
+            request("true", name, subjectClaim = null),
+        )
+        attempts.forEach { req ->
+            filterWith(name).filter(req)
+            verify { req.setProperty(SYNTHETIC_TAINT_PROPERTY, false) }
+        }
+    }
+
+    @Test
     fun `an anonymous caller cannot taint`() {
         val req = request(header = "true", principal = null)
 
@@ -132,9 +165,9 @@ class SyntheticTaintFilterTest {
 
     @Test
     fun `the trusted list is a list, and whitespace around a name does not break it`() {
-        val req = request(header = "true", principal = "canary-b")
+        val req = request(header = "true", principal = "service-account-canary-b")
 
-        filterWith("canary-a, canary-b , canary-c").filter(req)
+        filterWith("service-account-canary-a, service-account-canary-b , service-account-canary-c").filter(req)
 
         verify { req.setProperty(SYNTHETIC_TAINT_PROPERTY, true) }
     }
@@ -152,8 +185,8 @@ class SyntheticTaintFilterTest {
     @Test
     fun `a value that is not an exact true is real even from a trusted principal`() {
         for (value in listOf("1", "yes", "TRUE!", "false", "")) {
-            val req = request(header = value, principal = "canary")
-            filterWith("canary").filter(req)
+            val req = request(header = value, principal = "service-account-canary")
+            filterWith("service-account-canary").filter(req)
             verify { req.setProperty(SYNTHETIC_TAINT_PROPERTY, false) }
         }
     }

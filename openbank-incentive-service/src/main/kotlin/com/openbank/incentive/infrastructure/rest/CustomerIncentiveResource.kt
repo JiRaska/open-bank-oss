@@ -4,6 +4,7 @@ package com.openbank.incentive.infrastructure.rest
 import com.openbank.incentive.application.IncentiveApplication
 import com.openbank.incentive.domain.OfferRef
 import com.openbank.incentive.domain.ReservationStatus
+import com.openbank.libs.authz.ServiceAccountIdentity
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.enterprise.context.ApplicationScoped
@@ -131,10 +132,7 @@ class CustomerIncentiveResource(
         return Response.ok(reservation.toCustomerResponse()).build()
     }
 
-    private fun callerPermitted(): Boolean {
-        val permittedCaller = callerPrincipal.orElse("")
-        return permittedCaller.isNotBlank() && identity.principal?.name == permittedCaller
-    }
+    private fun callerPermitted(): Boolean = isCustomerEdgeCaller(identity, callerPrincipal.orElse(""))
 
     private fun requireTrustedParty(partyId: String?): UUID {
         val trustedParty = requireNotNull(partyId?.let(::parseUuid)) { "X-Customer-Party-Id is required" }
@@ -158,3 +156,11 @@ private fun com.openbank.incentive.domain.PromoReservation.toCustomerResponse() 
     expiresAt,
     status,
 )
+
+/**
+ * #12448: the customer-edge is admitted by its CLIENT identity (`azp` + `service-account-<azp>`),
+ * never by the principal name, which Quarkus takes from a username claim. A blank [configured]
+ * principal admits nobody.
+ */
+internal fun isCustomerEdgeCaller(identity: SecurityIdentity, configured: String): Boolean =
+    ServiceAccountIdentity.isPrincipal(identity, configured)

@@ -110,3 +110,8 @@ Denní běh automatizuje `FxRevaluationScheduler`. Opakování pro obchodní den
 ## Deploy / release
 
 Per-service path-scoped CI (buildují se jen změněné služby). Release osu vlastní **release-please** z Conventional Commits — needitovat ručně `version.txt`/`CHANGELOG.md` (aktuální release `1.2.0`). CD: ArgoCD sleduje tag image v deployment manifestu. U konfliktů tagu image v GitOpsu vždy `--ours`.
+
+
+### FINREP Pact fixture
+
+Broker ověření FINREP odvozuje reportovaný měsíc z požadavků vybraného kontraktu a používá vlastní testovací databázi. Reset fixture odmítne cizí closed-period ID a ponechá zapnutý trigger neměnné evidence. Regresní testy pokrývají historický červen 2026 i současný červen 2000 v obou pořadích, včetně odmítnutí DELETE evidence. Produkční validace frozen evidence se nemění.

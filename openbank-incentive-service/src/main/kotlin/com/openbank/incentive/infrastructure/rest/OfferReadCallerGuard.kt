@@ -4,10 +4,11 @@
 
 package com.openbank.incentive.infrastructure.rest
 
+import com.openbank.libs.authz.ServiceAccountIdentity
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.ws.rs.ForbiddenException
 
-/** The staff role the offer read admitted before #10486; a caller holding it needs no identity check. */
+/** The staff role the offer read admitted before #10486, for verified human sessions only. */
 private const val OFFER_READ_STAFF_ROLE = "ROLE_OPERATOR"
 
 /**
@@ -27,8 +28,8 @@ internal val OFFER_READ_CALLERS = setOf(
  * all of them.
  */
 internal fun requireNamedOfferReader(identity: SecurityIdentity) {
-    if (identity.hasRole(OFFER_READ_STAFF_ROLE)) return
-    if (identity.principal?.name !in OFFER_READ_CALLERS) {
+    if (identity.hasRole(OFFER_READ_STAFF_ROLE) && ServiceAccountIdentity.isHumanStaff(identity)) return
+    if (!ServiceAccountIdentity.isOneOf(identity, OFFER_READ_CALLERS)) {
         throw ForbiddenException("caller is not a named incentive-offer reader")
     }
 }
