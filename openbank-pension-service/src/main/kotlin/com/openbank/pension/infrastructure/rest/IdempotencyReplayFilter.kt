@@ -91,7 +91,15 @@ class IdempotencyReplayFilter {
 
     /** Method, path and the key-sorted JSON body; a non-JSON body is hashed verbatim. */
     private fun fingerprintOf(request: ContainerRequestContext): String {
-        val bytes = request.entityStream?.readAllBytes() ?: ByteArray(0)
+        // readBody buffers the body only for a method that declares an entity parameter. A method
+        // without one ignores any body, so the request it answers is fully named by method + path;
+        // reading the unbuffered stream there would block the IO thread, so it is not read at all.
+        val bytes = if (request.hasEntity()) {
+            runCatching { request.entityStream?.readAllBytes() }.getOrNull()
+        } else {
+            null
+        }
+        if (bytes == null) return RequestFingerprint.of(request.method, request.uriInfo.path, "")
         request.entityStream = ByteArrayInputStream(bytes)
         val raw = String(bytes, StandardCharsets.UTF_8)
         val canonical = if (raw.isBlank()) {
