@@ -14,6 +14,8 @@ import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.quarkus.vertx.VertxContextSupport
 import io.restassured.RestAssured.given
 import io.restassured.path.json.JsonPath
@@ -64,7 +66,14 @@ class PensionLifecycleJourneyE2E {
      * booking and the state-agency claim/receipt (S3).
      */
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `a new DPS contract is onboarded, activated and earns the capped state contribution`() {
         val party = UUID.randomUUID()
         val created = create(party, dps(monthly = 1700))
@@ -115,7 +124,14 @@ class PensionLifecycleJourneyE2E {
      * wiring that would trigger it from here is S3.
      */
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `a strategy change is appended to the history and the earlier election is kept`() {
         val party = UUID.randomUUID()
         val id = activeContract(party, dps(monthly = 1000))
@@ -141,7 +157,14 @@ class PensionLifecycleJourneyE2E {
      * signs under SCA; signing and paying out are journeyed in PensionFullLifecycleJourneyE2E (d1).
      */
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `early termination is quoted from the unit register and returns incentives, without moving the contract`() {
         val party = UUID.randomUUID()
         val id = activeContract(party, dps(monthly = 1700))
@@ -168,7 +191,14 @@ class PensionLifecycleJourneyE2E {
      * designation those payouts will read is stored as submitted.
      */
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `beneficiary designations are stored as submitted for the later death payout`() {
         val party = UUID.randomUUID()
         val beneficiary = UUID.randomUUID()
@@ -188,7 +218,14 @@ class PensionLifecycleJourneyE2E {
 
     /** Scenario (f) — direct DIP creation cannot bypass approved mapping and signed onboarding. */
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `a direct DIP draft is refused before onboarding and leaves no contract`() {
         val party = UUID.randomUUID()
         val created = create(party, dip(providerType = "BANK"))
@@ -203,7 +240,14 @@ class PensionLifecycleJourneyE2E {
 
     /** Scenario (f) — authorisation negatives: another customer sees a 404 on every route, never a 403 or the data. */
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `another customer gets 404 on every route of a contract that is not theirs`() {
         val owner = UUID.randomUUID()
         val stranger = UUID.randomUUID()

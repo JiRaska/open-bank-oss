@@ -13,6 +13,8 @@ import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.RestAssured.given
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
@@ -44,7 +46,14 @@ class DipPublishedCatalogJourneyIT {
     lateinit var secret: String
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     @Suppress("LongMethod") // One ordered two-service publication and suitability proof.
     fun `two human approvals publish DIP strategies consumed by pension suitability`() {
         val maker = humanToken("catalog-maker", "openid profile catalog:read catalog:author")

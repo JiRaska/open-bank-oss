@@ -16,6 +16,8 @@ import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.quarkus.vertx.VertxContextSupport
 import io.restassured.RestAssured.given
 import io.restassured.specification.RequestSpecification
@@ -88,7 +90,14 @@ class PensionIntegrationRoutesIT {
     // ---- Idempotency-Key replay ----------------------------------------------------------------
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `a retried POST with the same key is answered from the first response and creates nothing new`() {
         val key = UUID.randomUUID().toString()
         val first = edge(key = key).body(startBody).post("/api/v2/pension/onboarding/applications")
@@ -108,7 +117,14 @@ class PensionIntegrationRoutesIT {
     }
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `the same key with a different body is refused 409 and never replays the first response`() {
         val key = UUID.randomUUID().toString()
         val first = edge(key = key).body(startBody).post("/api/v2/pension/onboarding/applications")
@@ -125,7 +141,14 @@ class PensionIntegrationRoutesIT {
     }
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `a POST without an Idempotency-Key is refused before anything runs`() {
         edge(key = null).body(startBody).post("/api/v2/pension/onboarding/applications").then().statusCode(400)
         edge(key = null).body("{}").post("/api/v2/pension/simulations").then().statusCode(400)
@@ -134,7 +157,14 @@ class PensionIntegrationRoutesIT {
     // ---- simulation ------------------------------------------------------------------------------
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `a simulation projects every configured strategy and is labelled illustrative`() {
         edge().body(
             """{"jurisdiction":"CZ","productLine":"DPS","strategyCode":"BALANCED","monthlyContribution":1700,
@@ -158,7 +188,14 @@ class PensionIntegrationRoutesIT {
     // ---- operator lists --------------------------------------------------------------------------
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `the customer edge cannot read the operator payout or death-claim queues`() {
         edge().get("/api/v2/pension/operator/payouts").then().statusCode(403)
         edge().get("/api/v2/pension/death-claims").then().statusCode(403)
@@ -197,7 +234,14 @@ class PensionIntegrationRoutesIT {
     }
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `an account change is held, notified and never redirects the signed account or a pending change`() {
         val contract = retiredContract()
         val payout = confirmedPayout(contract, "PHASED_WITHDRAWAL")
@@ -221,7 +265,14 @@ class PensionIntegrationRoutesIT {
     }
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `an account change before the payout is confirmed is refused - the account is part of the signature`() {
         val contract = retiredContract()
         val payout: String = edge().body("""{"form":"PHASED_WITHDRAWAL","months":12}""")
@@ -236,7 +287,14 @@ class PensionIntegrationRoutesIT {
      * account: exactly one wins (optimistic lock), and the stored, signed account is the winner's.
      */
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `concurrent confirmations of one quote - exactly one wins and its signed account is the one stored`() {
         val contract = retiredContract()
         val payout: String = edge().body("""{"form":"PHASED_WITHDRAWAL","months":12}""")
@@ -263,7 +321,14 @@ class PensionIntegrationRoutesIT {
     }
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `a single-payment form has no later payments to redirect`() {
         val contract = retiredContract()
         val payout: String = edge().body("""{"form":"LUMP_SUM"}""")

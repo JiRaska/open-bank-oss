@@ -10,6 +10,8 @@ import com.openbank.pension.testsupport.ProviderFixtures
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.quarkus.vertx.VertxContextSupport
 import io.restassured.RestAssured.given
 import io.smallrye.mutiny.coroutines.asUni
@@ -28,6 +30,9 @@ import java.sql.DriverManager
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
+
+private const val RELAY = "service-account-openbank-edge"
+private const val RELAY_SUB = "5f0c2a8e-7d1b-4c3e-9a6f-2b8d4e1c7a90"
 
 /**
  * Drives the real HTTP routes against a real Postgres. Only this shape proves the routes are
@@ -89,7 +94,14 @@ class PensionContractApiIT {
     }
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `creation for another provider is a bad request`() {
         val body = createBody().replace(
             ProviderFixtures.ID.toString(),
@@ -99,7 +111,14 @@ class PensionContractApiIT {
     }
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `the participant annual-statement read is served at its published path`() {
         val id = create()
         // Not issued yet: the RESOURCE's 404 (its message), which an unregistered route (#3371)
@@ -113,7 +132,14 @@ class PensionContractApiIT {
     }
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `the participant cannot activate or terminate through the retired S1 routes`() {
         val id = create()
         post("$base/$id/submit").statusCode(200).body("status", equalTo("PENDING_ACTIVATION"))
@@ -125,7 +151,14 @@ class PensionContractApiIT {
     }
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `the participant lists exactly its own contracts`() {
         val mine = create()
         val stranger = UUID.randomUUID()
@@ -137,7 +170,14 @@ class PensionContractApiIT {
     }
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `the retired S1 create route cannot open a contract in a riskier strategy than the most conservative`() {
         given().contentType("application/json").header("X-Customer-Party-Id", party.toString())
             .header("Idempotency-Key", UUID.randomUUID().toString())
@@ -147,7 +187,15 @@ class PensionContractApiIT {
     }
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = RELAY, roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(
+                key = "sub",
+                value = RELAY_SUB,
+            ), Claim(key = "azp", value = "openbank-edge"), Claim(key = "preferred_username", value = RELAY),
+        ],
+    )
     fun `the full participant lifecycle runs over real HTTP`() {
         val id = create()
         post("$base/$id/submit").statusCode(200).body("status", equalTo("PENDING_ACTIVATION"))
@@ -177,7 +225,15 @@ class PensionContractApiIT {
     }
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = RELAY, roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(
+                key = "sub",
+                value = RELAY_SUB,
+            ), Claim(key = "azp", value = "openbank-edge"), Claim(key = "preferred_username", value = RELAY),
+        ],
+    )
     fun `an illegal transition is a 409 and an unknown contract a 404`() {
         val id = create()
         post("$base/$id/suspend").statusCode(409)
@@ -185,7 +241,15 @@ class PensionContractApiIT {
     }
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = RELAY, roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(
+                key = "sub",
+                value = RELAY_SUB,
+            ), Claim(key = "azp", value = "openbank-edge"), Claim(key = "preferred_username", value = RELAY),
+        ],
+    )
     fun `a missing header or a provider the pack does not permit is a 400, not a 500`() {
         given().contentType("application/json").header("Idempotency-Key", "k").body(createBody())
             .`when`().post(base).then().statusCode(400)
@@ -199,7 +263,15 @@ class PensionContractApiIT {
     }
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = RELAY, roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(
+                key = "sub",
+                value = RELAY_SUB,
+            ), Claim(key = "azp", value = "openbank-edge"), Claim(key = "preferred_username", value = RELAY),
+        ],
+    )
     fun `another customer's contract is a 404 on read and on every action, and the owner gets 200`() {
         val id = create()
         val stranger = UUID.randomUUID()
@@ -213,14 +285,30 @@ class PensionContractApiIT {
     }
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = RELAY, roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(
+                key = "sub",
+                value = RELAY_SUB,
+            ), Claim(key = "azp", value = "openbank-edge"), Claim(key = "preferred_username", value = RELAY),
+        ],
+    )
     fun `a customer-role caller without the party header is refused`() {
         val id = create()
         read(id, null).statusCode(400)
     }
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = RELAY, roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(
+                key = "sub",
+                value = RELAY_SUB,
+            ), Claim(key = "azp", value = "openbank-edge"), Claim(key = "preferred_username", value = RELAY),
+        ],
+    )
     fun `a retried create with the same Idempotency-Key returns the same contract`() {
         val key = UUID.randomUUID().toString()
         assertThat(create(key)).isEqualTo(create(key))
@@ -243,6 +331,22 @@ class PensionContractApiIT {
         val id = seedContract()
         read(id, null).statusCode(200).body("contractId", equalTo(id))
         post("$base/$id/submit", asParty = null).statusCode(400)
+    }
+
+    @Test
+    @TestSecurity(user = RELAY, roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(
+                key = "sub",
+                value = RELAY_SUB,
+            ), Claim(key = "azp", value = "openbank-admin-ui"), Claim(key = "preferred_username", value = RELAY),
+        ],
+    )
+    fun `the relay's username on a token issued to another client is refused`() {
+        val id = seedContract()
+        read(id, party).statusCode(403)
+        post("$base/$id/submit").statusCode(403)
     }
 
     @Test

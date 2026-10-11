@@ -18,6 +18,8 @@ import com.openbank.pension.testsupport.PensionTemporalTestEnvironment
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.quarkus.vertx.VertxContextSupport
 import io.restassured.RestAssured.given
 import io.restassured.response.ValidatableResponse
@@ -106,7 +108,14 @@ class PensionExitApiIT {
     }
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `a retried termination quote with the same key returns the original notice, not a second one`() {
         val id = activeContract()
         fund.setValue(id, BigDecimal("150000.00"))
@@ -119,7 +128,14 @@ class PensionExitApiIT {
     }
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `early termination pays exactly the signed quote after the notice period, once`() {
         val id = activeContract()
         fund.setValue(id, BigDecimal("150000.00"))
@@ -170,7 +186,14 @@ class PensionExitApiIT {
     }
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `another participant's contract is 404 on every exit route, and a staff-less header-less call is 400`() {
         val id = activeContract()
         fund.setValue(id, BigDecimal("1000"))
@@ -190,7 +213,14 @@ class PensionExitApiIT {
     }
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `a regular payout before the pack's minimum age and duration is refused`() {
         val id = activeContract()
         fund.setValue(id, BigDecimal("1000"))
@@ -202,7 +232,14 @@ class PensionExitApiIT {
     }
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `the customer edge cannot reach the operator death-claim routes`() {
         req().body("""{"contractId":"${UUID.randomUUID()}","dateOfDeath":"2026-01-01","evidenceRef":"x"}""")
             .post("/api/v2/pension/death-claims").then().statusCode(403)

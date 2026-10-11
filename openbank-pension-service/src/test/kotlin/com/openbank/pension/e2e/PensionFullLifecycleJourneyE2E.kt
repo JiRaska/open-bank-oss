@@ -17,6 +17,8 @@ import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.RestAssured.given
 import io.restassured.path.json.JsonPath
 import io.restassured.path.json.config.JsonPathConfig
@@ -149,7 +151,14 @@ class PensionFullLifecycleJourneyE2E {
 
     @Test
     @Order(1)
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `a1 - a new DPS is onboarded through questionnaire, recommendation, KID and SCA signature`() {
         val started = ok(customerPost(customer, "/api/v2/pension/onboarding/applications", dpsStart("1985-05-05")), 201)
         dpsApplication = started.getString("applicationId")
@@ -279,7 +288,14 @@ class PensionFullLifecycleJourneyE2E {
 
     @Test
     @Order(4)
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `a4 - the participant sees the received incentive and the tax year`() {
         val incentives = ok(customerGet(customer, "$FUNDING/$dpsContract/incentives"))
         assertThat(
@@ -304,7 +320,14 @@ class PensionFullLifecycleJourneyE2E {
 
     @Test
     @Order(7)
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `f1 - a DIP is onboarded under MiFID suitability with an ESG preference`() {
         val started = ok(customerPost(dipCustomer, "/api/v2/pension/onboarding/applications", dipStart()), 201)
         dipApplication = started.getString("applicationId")
@@ -366,7 +389,14 @@ class PensionFullLifecycleJourneyE2E {
 
     @Test
     @Order(9)
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `f2b - under MiFID a DIP strategy above the profile is refused even when acknowledged`() {
         // The DIP participant's situation changed: re-assessed to a cautious profile.
         ok(
@@ -397,7 +427,14 @@ class PensionFullLifecycleJourneyE2E {
 
     @Test
     @Order(10)
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `b1 - transfer-in applications are signed for four contracts from another provider`() {
         for (key in listOf("lump", "phased", "death", "annuity")) {
             val started = ok(
@@ -466,7 +503,14 @@ class PensionFullLifecycleJourneyE2E {
 
     @Test
     @Order(12)
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `b3 - the transferred contract is active from its original start date and its strategy can change`() {
         val id = transferContracts.getValue("lump")
         val contract = ok(customerGet(retiree, "/api/v2/pension/contracts/$id"))
@@ -492,7 +536,14 @@ class PensionFullLifecycleJourneyE2E {
 
     @Test
     @Order(13)
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `d1 - early termination pays exactly the quote, returning the received state incentive`() {
         fundValues.setValue(UUID.fromString(dpsContract), BigDecimal("50000.00"))
         val quoted =
@@ -570,7 +621,14 @@ class PensionFullLifecycleJourneyE2E {
 
     @Test
     @Order(15)
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `e1 - a lump sum is paid exactly as quoted once the payout conditions are met`() {
         val id = transferContracts.getValue("lump")
         fundValues.setValue(UUID.fromString(id), BigDecimal("250000.00"))
@@ -609,7 +667,14 @@ class PensionFullLifecycleJourneyE2E {
 
     @Test
     @Order(16)
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `e2 - a phased withdrawal pays every instalment on its due date`() {
         val id = transferContracts.getValue("phased")
         fundValues.setValue(UUID.fromString(id), BigDecimal("120000.00"))
@@ -726,7 +791,14 @@ class PensionFullLifecycleJourneyE2E {
 
     @Test
     @Order(19)
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `f3 - another customer gets 404 on the onboarding, transfer, funding and exit routes of someone else`() {
         val contract = transferContracts.getValue("phased")
         assertThat(customerGet(stranger, "$APPS/$dpsApplication").statusCode).isEqualTo(404)
@@ -798,7 +870,14 @@ class PensionFullLifecycleJourneyE2E {
 
     @Test
     @Order(22)
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `g3 - an annuity payout compares both partners, binds the signed offer and buys exactly that policy`() {
         val id = transferContracts.getValue("annuity")
         fundValues.setValue(UUID.fromString(id), BigDecimal("900000.00"))
@@ -880,7 +959,14 @@ class PensionFullLifecycleJourneyE2E {
 
     @Test
     @Order(5)
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `h1 - the participant changes the contribution schedule and the beneficiaries under SCA`() {
         val contracts = "/api/v2/pension/contracts/$dpsContract"
         val schedule = """{"amount":2000,"frequency":"MONTHLY","dayOfMonth":20}"""
@@ -911,7 +997,14 @@ class PensionFullLifecycleJourneyE2E {
 
     @Test
     @Order(6)
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `h2 - a strategy above a renewed, more cautious profile needs the acknowledged warning and SCA`() {
         // The participant's circumstances changed: they answer again, now a class-3 profile.
         val cautious = ok(
@@ -963,7 +1056,14 @@ class PensionFullLifecycleJourneyE2E {
 
     @Test
     @Order(23)
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `i1 - once the assessment has expired, a strategy change requires re-assessment first`() {
         // The journey's clock has moved more than the pack's 365-day validity since h2.
         val refused = given().contentType(JSON).header(PARTY, customer.toString())
