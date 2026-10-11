@@ -69,6 +69,7 @@
 #   RUN_EVENT          event from the discovery API (`pull_request`, `push`, ...)
 #   RUN_URL            its html_url (for the human-readable notices)
 #   GITHUB_STEP_SUMMARY  optional; the `decide` table is appended here when set
+#   RETRY_DECISIONS_FILE optional; append JSONL decisions, not proof a rerun was accepted
 #   GH_BIN             optional; the `gh` executable (the self-test points it at a stub)
 #   SPOT_KILL_ATTEMPTS      optional; attempts per API call (default 5)
 #   GH_RETRY_MAX_WAIT_SECONDS optional; cap on a single wait (default 600; 0 in tests)
@@ -109,6 +110,13 @@ gh_() { "${GH_BIN}" "$@"; }
 
 decide() { # decide <decision> <human sentence>
   echo "spot-kill-auto-retry run=${RUN_ID} conclusion=${CONCLUSION} decision=$1"
+  if [ -n "${RETRY_DECISIONS_FILE:-}" ]; then
+    # Export only public run identity and the enum decision, never raw API/log prose.
+    if ! jq -cn --arg run_id "$RUN_ID" --arg conclusion "$CONCLUSION" --arg decision "$1" \
+      '{evidence_kind: "decision_only", run_id: $run_id, conclusion: $conclusion, decision: $decision}' >> "$RETRY_DECISIONS_FILE"; then
+      echo "::warning::Could not retain retry decision; consult the job summary."
+    fi
+  fi
   if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
     echo "| \`${CONCLUSION}\` | [${RUN_ID}](${RUN_URL:-}) | \`$1\` | $2 |" >> "${GITHUB_STEP_SUMMARY}"
   fi
