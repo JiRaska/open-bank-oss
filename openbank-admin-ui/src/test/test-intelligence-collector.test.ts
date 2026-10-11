@@ -650,7 +650,7 @@ capabilities:
     expect(report.components[0].testInfrastructure.declared).toEqual(['keycloak'])
     expect(report.components[0].testInfrastructure.observed).toHaveLength(4)
     expect(report.requiredControls).toContainEqual(expect.objectContaining({
-      id: 'openbank-alpha-service:runtime:keycloak', state: 'passed',
+      id: 'openbank-alpha-service:runtime:keycloak', state: 'passed', source: 'test-intelligence-run:v2',
     }))
   })
 

@@ -504,17 +504,10 @@ jobs:
               # retains the latest per-service execution evidence across action
               # layout changes rather than silently falling back to stale JUnit.
               RUN_JSON="$(find "${TMPDIR_ART}" -type f \( -name 'run.json' -o -path '*/test-intelligence/run.json' \) -print -quit)"
-              if [ -z "${RUN_JSON}" ] || ! python3 -c '
-          import json, sys
-          with open(sys.argv[1], encoding="utf-8") as source:
-              envelope = json.load(source)
-          valid = (envelope.get("schemaVersion") == 1
-                   and envelope.get("component") == sys.argv[2]
-                   and isinstance(envelope.get("suites"), list)
-                   and isinstance(envelope.get("run"), dict)
-                   and envelope["run"].get("branch") == "main")
-          sys.exit(0 if valid else 1)
-          ' "${RUN_JSON}" "${svc}"; then
+              # The shared extractor validates complete v1/v2 envelopes and
+              # main provenance before this service-specific identity check.
+              if [ -z "${RUN_JSON}" ] || ! python3 .github/scripts/extract-test-intelligence-envelope.py \
+                  --validate-component "${RUN_JSON}" "${svc}"; then
                 echo "  ${svc}: run envelope is missing or invalid; refusing incomplete Test Intelligence image" >&2
                 exit 1
               fi

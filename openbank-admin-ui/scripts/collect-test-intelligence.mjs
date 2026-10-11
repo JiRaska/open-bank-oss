@@ -713,7 +713,7 @@ function platformCapabilities() {
   }
 }
 
-function requiredControls(components, contracts, mutations, performance, synthetics) {
+function requiredControls(components, contracts, mutations, performance, synthetics, runVersionByComponent = new Map()) {
   const pactParticipants = new Set(contracts.flatMap(item => [item.consumer, item.provider]))
   const mutationParticipants = mutationComponents()
   const mutationByComponent = new Map(mutations.map(item => [item.component, item]))
@@ -758,7 +758,7 @@ function requiredControls(components, contracts, mutations, performance, synthet
           id: `${component.component}:runtime:${resource}`, component: component.component, kind: 'runtime',
           state: starts > 0 && starts === stops ? 'passed' : starts > 0 || stops > 0 ? 'failed' : 'not-run',
           reason: `Declared ${resource} topology requires balanced start and stop proof from the same run.`,
-          source: rows.length ? 'test-intelligence-run:v1' : null,
+          source: rows.length ? `test-intelligence-run:v${runVersionByComponent.get(component.component) ?? 1}` : null,
           observedAt: rows.map(item => item.observedAt).sort().at(-1) ?? null,
         })
       }
@@ -1120,6 +1120,9 @@ async function main() {
   const currentEnvelopes = [...names, ...tooling]
     .map(component => readJson(path.join(repo, component, 'build', 'test-intelligence', 'run.json')))
     .filter(Boolean)
+  const runVersionByComponent = new Map(currentEnvelopes
+    .filter(item => [1, 2].includes(item?.schemaVersion) && item?.component)
+    .map(item => [item.component, item.schemaVersion]))
   const components = await Promise.all(names.map(async component => {
     const envelope = runEnvelope(component)
     return {
@@ -1172,7 +1175,7 @@ async function main() {
     })
   }
   const synthetic = syntheticJourneys()
-  const controls = requiredControls(components, contractEvidence, mutationEvidence, performanceEvidence, synthetic)
+  const controls = requiredControls(components, contractEvidence, mutationEvidence, performanceEvidence, synthetic, runVersionByComponent)
   const capabilities = platformCapabilities()
   const syntheticCoverage = journeyCoverage(synthetic)
   const clientExperience = await clientExperiences()

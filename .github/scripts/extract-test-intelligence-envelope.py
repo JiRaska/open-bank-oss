@@ -30,6 +30,12 @@ def validate(payload: bytes) -> bytes:
     return payload
 
 
+def validate_component(path: Path, component: str) -> None:
+    envelope = json.loads(validate(path.read_bytes()))
+    if envelope["component"] != component:
+        raise ValueError("run envelope component differs from the staged service")
+
+
 def extract(archive: bytes) -> bytes:
     with zipfile.ZipFile(io.BytesIO(archive)) as zipped:
         names = [name for name in zipped.namelist() if ENVELOPE_NAME.search(name)]
@@ -72,6 +78,24 @@ def self_test() -> None:
     for name in ("run.json", "run-chromium.json", "nested/run-security-excellence-firefox.json"):
         assert extract(archive({name: good})) == good
         assert extract(archive({name: v2})) == v2
+    with tempfile.TemporaryDirectory() as staged:
+        path = Path(staged) / "run.json"
+        for payload in (good, v2):
+            path.write_bytes(payload)
+            validate_component(path, "openbank-example-service")
+            try:
+                validate_component(path, "openbank-other-service")
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("wrong service envelope was accepted")
+        path.write_bytes(json.dumps(example | {"schemaVersion": 3}).encode())
+        try:
+            validate_component(path, "openbank-example-service")
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("future schema was accepted by deploy staging")
     for files in (
         {"run.json": good, "run-firefox.json": good},
         {"report.json": good},
@@ -104,6 +128,12 @@ def self_test() -> None:
 if __name__ == "__main__":
     if sys.argv[1:] == ["--self-test"]:
         self_test()
+    elif len(sys.argv) == 4 and sys.argv[1] == "--validate-component":
+        try:
+            validate_component(Path(sys.argv[2]), sys.argv[3])
+        except (OSError, ValueError, UnicodeError, TypeError) as error:
+            print(f"Test Intelligence envelope rejected: {error}", file=sys.stderr)
+            sys.exit(1)
     elif len(sys.argv) == 3 and sys.argv[1] == "--prune-cache":
         try:
             removed = prune_cache(Path(sys.argv[2]))
@@ -118,5 +148,5 @@ if __name__ == "__main__":
             print(f"Test Intelligence envelope rejected: {error}", file=sys.stderr)
             sys.exit(1)
     else:
-        print("usage: extract-test-intelligence-envelope.py ARCHIVE OUTPUT | --prune-cache DIRECTORY", file=sys.stderr)
+        print("usage: extract-test-intelligence-envelope.py ARCHIVE OUTPUT | --prune-cache DIRECTORY | --validate-component PATH COMPONENT", file=sys.stderr)
         sys.exit(2)
