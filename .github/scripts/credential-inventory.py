@@ -26,17 +26,26 @@ MODES:
   --self-test           offline fixtures
 
 Existing undeclared statics are DEBT rendered by --inventory, not PR-blocking findings —
-same staged shape as every ratchet in this repo.
+same staged shape as every ratchet in this repo. Strimzi-issued Kafka certificates are also
+excluded from the static count only when the Kubernetes source, KafkaUser/cluster identity, and
+managed CA configuration are proven from the GitOps manifests; unknown or mixed sources remain
+static.
 """
 
 from __future__ import annotations
 
 import argparse
 import datetime as dt
+from functools import lru_cache
 import re
 import subprocess
 import sys
 from pathlib import Path
+
+try:
+    import yaml
+except ImportError:  # pragma: no cover - the gate runner installs PyYAML
+    yaml = None
 
 GITOPS = Path("openbank-infra/gitops")
 DYNAMIC_KEY = re.compile(r"database/creds/|(^|/)creds/[a-z0-9-]+-db-vault-role")
@@ -49,18 +58,231 @@ DOC_SPLIT = re.compile(r"^---\s*$", re.M)
 
 class Cred:
     def __init__(self, doc: str, file: Path):
+        self.doc = doc
         self.file = file
         self.name = _field(doc, r"name:\s*([a-z0-9.-]+)") or "?"
         self.namespace = _field(doc, r"namespace:\s*([a-z0-9.-]+)") or "?"
         self.keys = re.findall(r"key:\s*([A-Za-z0-9_./-]+)", doc)
         self.dynamic = any(DYNAMIC_KEY.search(k) for k in self.keys)
+        self.operator_managed = False
         ann_block = re.search(r"annotations:\n((?:\s{4,}[^\n]*\n?)*)", doc)
         self.annotations = ann_block.group(1) if ann_block else ""
         self.deadline = _field(self.annotations, re.escape(DEADLINE) + r':\s*"?([^"\n]+)"?')
 
     @property
     def static(self) -> bool:
-        return bool(self.keys) and not self.dynamic
+        return bool(self.keys) and not self.dynamic and not self.operator_managed
+
+
+class _UniqueKeyLoader(getattr(yaml, "CSafeLoader", yaml.SafeLoader) if yaml else object):
+    """Reject duplicate keys so lifecycle proof cannot depend on YAML last-key-wins."""
+
+
+if yaml:
+    def _construct_unique_mapping(loader, node, deep=False):
+        loader.flatten_mapping(node)
+        result = {}
+        for key_node, value_node in node.value:
+            key = loader.construct_object(key_node, deep=deep)
+            if key in result:
+                raise ValueError(f"duplicate YAML key: {key!r}")
+            result[key] = loader.construct_object(value_node, deep=deep)
+        return result
+
+    _UniqueKeyLoader.add_constructor(
+        yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _construct_unique_mapping)
+
+
+def _yaml_documents(paths: list[Path]) -> list[dict] | None:
+    if yaml is None:
+        return None
+    docs: list[dict] = []
+    try:
+        for path in paths:
+            with path.open(encoding="utf-8") as stream:
+                for doc in yaml.load_all(stream, Loader=_UniqueKeyLoader):
+                    if doc is not None:
+                        if not isinstance(doc, dict):
+                            return None
+                        docs.append(doc)
+    except (OSError, TypeError, ValueError, yaml.YAMLError):
+        return None
+    return docs
+
+
+def _source_keys(doc: dict) -> list[str] | None:
+    """Read only the explicit ESO key forms this provenance check understands."""
+    spec = doc.get("spec")
+    if not isinstance(spec, dict):
+        return None
+    keys: list[str] = []
+    data = spec.get("data", [])
+    data_from = spec.get("dataFrom", [])
+    if not isinstance(data, list) or not isinstance(data_from, list):
+        return None
+    for item in data:
+        if not isinstance(item, dict) or set(item) != {"secretKey", "remoteRef"}:
+            return None
+        remote = item["remoteRef"]
+        if not isinstance(remote, dict) or not isinstance(remote.get("key"), str):
+            return None
+        keys.append(remote["key"])
+    for item in data_from:
+        if not isinstance(item, dict) or set(item) != {"extract"}:
+            return None
+        extract = item["extract"]
+        if not isinstance(extract, dict) or not isinstance(extract.get("key"), str):
+            return None
+        keys.append(extract["key"])
+    return keys or None
+
+
+def _positive_duration(value: object) -> bool:
+    """Accept a positive Go-style duration; reject zero and malformed refresh intervals."""
+    if not isinstance(value, str):
+        return False
+    parts = re.findall(r"(\d+(?:\.\d+)?)(ns|us|µs|ms|s|m|h)", value)
+    if not parts or "".join(number + unit for number, unit in parts) != value:
+        return False
+    return any(float(number) > 0 for number, _ in parts)
+
+
+def _yaml_text_documents(text: str) -> list[dict] | None:
+    if yaml is None:
+        return None
+    try:
+        docs = [doc for doc in yaml.load_all(text, Loader=_UniqueKeyLoader) if doc is not None]
+    except (TypeError, ValueError, yaml.YAMLError):
+        return None
+    return docs if all(isinstance(doc, dict) for doc in docs) else None
+
+
+@lru_cache(maxsize=8)
+def _strimzi_inventory_files(root: str) -> tuple[list[dict], list[dict], list[dict]] | None:
+    """Parse source definitions once per inventory run; malformed input invalidates proof."""
+    if yaml is None:
+        return None
+    gitops = Path(root) / GITOPS
+    store_docs = _yaml_documents(sorted((gitops / "components/external-secrets").rglob("*.yaml")))
+    kafka_docs = _yaml_documents(sorted((gitops / "components/kafka").rglob("*.yaml")))
+    # KafkaUser documents live in service components alongside unrelated large manifests.
+    # Parse only files declaring that resource; an unusual representation simply loses the
+    # exemption and remains static.
+    user_paths = [path for path in sorted(gitops.rglob("*.yaml"))
+                  if re.search(r"^kind:\s*KafkaUser\s*$", path.read_text(encoding="utf-8"), re.M)]
+    user_docs = _yaml_documents(user_paths)
+    if store_docs is None or kafka_docs is None or user_docs is None:
+        return None
+    return store_docs, kafka_docs, user_docs
+
+
+def _operator_managed_credential(cred: Cred, root: Path) -> bool:
+    """Prove every ESO source key is a Strimzi-managed Kafka TLS certificate."""
+    parsed = _yaml_text_documents(cred.doc)
+    if parsed is None or len(parsed) != 1:
+        return False
+    external = parsed[0]
+    meta = external.get("metadata")
+    spec = external.get("spec")
+    if not isinstance(meta, dict) or not isinstance(spec, dict):
+        return False
+    namespace = meta.get("namespace")
+    store_ref = spec.get("secretStoreRef")
+    keys = _source_keys(external)
+    refresh_policy = spec.get("refreshPolicy", "Periodic")
+    refresh_interval = spec.get("refreshInterval")
+    if (not isinstance(namespace, str) or not isinstance(store_ref, dict)
+            or store_ref.get("kind") != "ClusterSecretStore"
+            or not isinstance(store_ref.get("name"), str) or not keys
+            or refresh_policy != "Periodic"
+            or ("refreshInterval" in spec and not _positive_duration(refresh_interval))):
+        return False
+
+    evidence = _strimzi_inventory_files(str(root.resolve()))
+    if evidence is None:
+        return False
+    store_docs, kafka_docs, user_docs = evidence
+
+    stores = [d for d in store_docs if d.get("kind") == "ClusterSecretStore"
+              and isinstance(d.get("metadata"), dict)
+              and d["metadata"].get("name") == store_ref["name"]]
+    if len(stores) != 1:
+        return False
+    store_spec = stores[0].get("spec")
+    if not isinstance(store_spec, dict):
+        return False
+    provider = store_spec.get("provider")
+    kubernetes = provider.get("kubernetes") if isinstance(provider, dict) else None
+    if (not isinstance(kubernetes, dict) or set(provider) != {"kubernetes"}
+            or kubernetes.get("remoteNamespace") != "messaging"):
+        return False
+    server = kubernetes.get("server", {})
+    if (not isinstance(server, dict)
+            or ("url" in server and server["url"] != "https://kubernetes.default.svc")):
+        return False
+
+    clusters = [d for d in kafka_docs if d.get("kind") == "Kafka"
+                and isinstance(d.get("metadata"), dict)
+                and d["metadata"].get("namespace") == "messaging"]
+    users = [d for d in user_docs if d.get("kind") == "KafkaUser"
+             and isinstance(d.get("metadata"), dict)
+             and d["metadata"].get("namespace") == "messaging"]
+
+    def cluster_manages(cluster: dict, ca_name: str, *, require_user_operator: bool = False) -> bool:
+        spec = cluster.get("spec")
+        if not isinstance(spec, dict):
+            return False
+        entity = spec.get("entityOperator")
+        if require_user_operator:
+            operator = entity.get("userOperator") if isinstance(entity, dict) else None
+            if (not isinstance(operator, dict)
+                    or ("enabled" in operator and operator["enabled"] is not True)):
+                return False
+        ca = spec.get(ca_name, {})
+        if not isinstance(ca, dict):
+            return False
+        # Strimzi defaults this field to true. Accept that default or an explicit true;
+        # invalid/unknown values do not establish an automated CA lifecycle.
+        return ("generateCertificateAuthority" not in ca
+                or ca["generateCertificateAuthority"] is True)
+
+    def is_managed_key(key: str) -> bool:
+        if not isinstance(key, str):
+            return False
+        for cluster in clusters:
+            cluster_meta = cluster.get("metadata")
+            if not isinstance(cluster_meta, dict):
+                continue
+            cluster_name = cluster_meta.get("name")
+            if not isinstance(cluster_name, str):
+                continue
+            if key == f"{cluster_name}-cluster-ca-cert":
+                matching_clusters = [candidate for candidate in clusters
+                                     if (candidate.get("metadata") or {}).get("name") == cluster_name]
+                return len(matching_clusters) == 1 and cluster_manages(cluster, "clusterCa")
+            named_users = [candidate for candidate in users
+                           if isinstance(candidate.get("metadata"), dict)
+                           and candidate["metadata"].get("name") == key]
+            if len(named_users) != 1:
+                continue
+            user = named_users[0]
+            user_meta = user.get("metadata")
+            labels = user_meta.get("labels") if isinstance(user_meta, dict) else None
+            user_spec = user.get("spec")
+            auth = user_spec.get("authentication") if isinstance(user_spec, dict) else None
+            if (isinstance(labels, dict)
+                    and labels.get("strimzi.io/cluster") == cluster_name
+                    and isinstance(auth, dict) and auth.get("type") == "tls"
+                    and cluster_manages(cluster, "clientsCa", require_user_operator=True)):
+                matching_clusters = [candidate for candidate in clusters
+                                     if (candidate.get("metadata") or {}).get("name") == cluster_name]
+                if len(matching_clusters) == 1:
+                    return True
+        return False
+
+    # A dataFrom extract can contain several credentials. Every source key must be
+    # attributable to Strimzi; one static or unknown key keeps the whole ESO static.
+    return all(is_managed_key(key) for key in keys)
 
 
 def _field(text: str, pattern: str) -> str | None:
@@ -76,7 +298,9 @@ def scan(root: Path) -> list[Cred]:
         text = f.read_text()
         for doc in DOC_SPLIT.split(text):
             if re.search(r"^kind:\s*ExternalSecret\s*$", doc, re.M):
-                out.append(Cred(doc, f))
+                credential = Cred(doc, f)
+                credential.operator_managed = _operator_managed_credential(credential, root)
+                out.append(credential)
     return out
 
 
@@ -94,13 +318,16 @@ def validate_deadline(c: Cred, today: dt.date) -> str | None:
 def inventory(root: Path, today: dt.date) -> tuple[str, int]:
     creds = scan(root)
     statics = [c for c in creds if c.static]
+    operator_managed = [c for c in creds if c.operator_managed]
+    dynamic = [c for c in creds if c.dynamic]
     declared = [c for c in statics if c.deadline and not validate_deadline(c, today)]
     overdue = [c for c in statics if c.deadline and validate_deadline(c, today) and "past" in (validate_deadline(c, today) or "")]
     undeclared = [c for c in statics if not c.deadline]
     lines = [
         "# Long-lived credential inventory", "",
         f"ExternalSecrets: **{len(creds)}** total — {len(statics)} static (long-lived), "
-        f"{len(creds) - len(statics)} dynamic (`database/creds/…`, ADR-0099).", "",
+        f"{len(operator_managed)} operator-managed rotation, {len(dynamic)} dynamic "
+        f"(`database/creds/…`, ADR-0099).", "",
         f"Static credentials with a valid rotation deadline: **{len(declared)}**; "
         f"overdue: **{len(overdue)}**; undeclared (debt): **{len(undeclared)}**.", "",
         "## Static credentials", "",
@@ -113,6 +340,7 @@ def inventory(root: Path, today: dt.date) -> tuple[str, int]:
               "New static ExternalSecrets must carry `openbank.io/rotation-deadline` — enforced "
               "by the `credential-deadline-ratchet` gate._"]
     print(f"credential-inventory: {len(creds)} ExternalSecrets, {len(statics)} static, "
+          f"{len(operator_managed)} operator-managed, {len(dynamic)} dynamic, "
           f"{len(declared)} with deadline, {len(overdue)} overdue, {len(undeclared)} undeclared")
     return "\n".join(lines) + "\n", 1 if overdue else 0
 
@@ -192,6 +420,7 @@ def enforce_new(base: str, today: dt.date) -> int:
             if not re.search(r"^kind:\s*ExternalSecret\s*$", doc, re.M):
                 continue
             c = Cred(doc, f)
+            c.operator_managed = _operator_managed_credential(c, Path("."))
             if not c.static:
                 continue
             violation = validate_deadline(c, today)
@@ -229,6 +458,139 @@ def self_test() -> int:
     doc_bad = doc_ok.replace('"2027-01-01"', '"next quarter"')
     if validate_deadline(Cred(doc_bad, Path("x.yaml")), today) is None:
         print("self-test FAIL: non-date deadline accepted"); bad += 1
+
+    if yaml is None:
+        print("self-test FAIL: PyYAML unavailable for operator lifecycle proof"); bad += 1
+    else:
+        import tempfile
+
+        def lifecycle_fixture(*, store: str = "kafka-messaging-certs",
+                              provider: str = "kubernetes", remote_ns: str = "messaging",
+                              source: str = "pension-service", auth: str = "tls",
+                              cluster_ca: str = "", clients_ca: str = "",
+                              user_operator: bool = True, mixed: bool = False,
+                              cluster_label: str = "openbank-cluster",
+                              malformed_store_spec: bool = False,
+                              server_url: str | None = None,
+                              null_server_url: bool = False,
+                              refresh_policy: str | None = None,
+                              refresh_interval: str | None = "1h",
+                              null_refresh_interval: bool = False) -> bool:
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                gitops = root / GITOPS
+                ext_dir = gitops / "components/external-secrets"
+                kafka_dir = gitops / "components/kafka"
+                user_dir = gitops / "components/pension"
+                for directory in (ext_dir, kafka_dir, user_dir):
+                    directory.mkdir(parents=True, exist_ok=True)
+                server_yaml = ("      server:\n        url: null\n" if null_server_url else
+                               f"      server:\n        url: {server_url}\n"
+                               if server_url is not None else "")
+                store_spec = ("spec: invalid\n" if malformed_store_spec else
+                              "spec:\n  provider:\n"
+                              f"    {provider}:\n      remoteNamespace: {remote_ns}\n" +
+                              server_yaml)
+                (ext_dir / "store.yaml").write_text(
+                    "apiVersion: external-secrets.io/v1\nkind: ClusterSecretStore\n"
+                    "metadata:\n  name: kafka-messaging-certs\n" + store_spec)
+                user_operator_yaml = "    userOperator: {}\n" if user_operator else ""
+                ca_yaml = "" if not cluster_ca else f"  clusterCa:\n    generateCertificateAuthority: {cluster_ca}\n"
+                clients_yaml = "" if not clients_ca else f"  clientsCa:\n    generateCertificateAuthority: {clients_ca}\n"
+                (kafka_dir / "kafka.yaml").write_text(
+                    "apiVersion: kafka.strimzi.io/v1\nkind: Kafka\nmetadata:\n"
+                    "  name: openbank-cluster\n  namespace: messaging\nspec:\n"
+                    "  entityOperator:\n" + user_operator_yaml + ca_yaml + clients_yaml)
+                (user_dir / "kafka-user.yaml").write_text(
+                    "apiVersion: kafka.strimzi.io/v1\nkind: KafkaUser\nmetadata:\n"
+                    "  name: pension-service\n  namespace: messaging\n  labels:\n"
+                    f"    strimzi.io/cluster: {cluster_label}\nspec:\n"
+                    f"  authentication:\n    type: {auth}\n")
+                extra = "\n    - extract:\n        key: static-api-key" if mixed else ""
+                refresh_yaml = ((f"  refreshPolicy: {refresh_policy}\n")
+                                if refresh_policy is not None else "")
+                interval_yaml = ((f"  refreshInterval: {refresh_interval}\n")
+                                 if refresh_interval is not None else "")
+                if null_refresh_interval:
+                    interval_yaml = "  refreshInterval: null\n"
+                (user_dir / "external-secret.yaml").write_text(
+                    "apiVersion: external-secrets.io/v1\nkind: ExternalSecret\nmetadata:\n"
+                    "  name: pension-service-kafka-keystore\n  namespace: pension\nspec:\n"
+                    + refresh_yaml + interval_yaml +
+                    "  secretStoreRef:\n    kind: ClusterSecretStore\n"
+                    f"    name: {store}\n  dataFrom:\n    - extract:\n        key: {source}"
+                    + extra + "\n")
+                credential = Cred((user_dir / "external-secret.yaml").read_text(),
+                                  Path("openbank-infra/gitops/components/pension/external-secret.yaml"))
+                return _operator_managed_credential(credential, root)
+
+        expected_positive = lifecycle_fixture()
+        if not expected_positive:
+            print("self-test FAIL: TLS KafkaUser source with managed Strimzi CAs was not classified")
+            bad += 1
+        documented_defaults = lifecycle_fixture(
+            server_url="https://kubernetes.default.svc", refresh_interval=None)
+        if not documented_defaults:
+            print("self-test FAIL: documented in-cluster API/default refresh was rejected")
+            bad += 1
+        for label, kwargs in (
+            ("wrong store", {"store": "vault-kv"}),
+            ("wrong backend", {"provider": "vault"}),
+            ("malformed store spec", {"malformed_store_spec": True}),
+            ("wrong source namespace", {"remote_ns": "other"}),
+            ("remote Kubernetes API", {"server_url": "https://other-cluster.example"}),
+            ("null Kubernetes API", {"null_server_url": True}),
+            ("unknown source", {"source": "unrelated-static-secret"}),
+            ("external TLS auth", {"auth": "tls-external"}),
+            ("wrong Kafka cluster", {"cluster_label": "other-cluster"}),
+            ("disabled client CA", {"clients_ca": "false"}),
+            ("unknown client CA policy", {"clients_ca": "unknown"}),
+            ("missing user operator", {"user_operator": False}),
+            ("mixed static sources", {"mixed": True}),
+            ("created-once projection", {"refresh_policy": "CreatedOnce"}),
+            ("on-change projection", {"refresh_policy": "OnChange"}),
+            ("zero refresh interval", {"refresh_interval": "0s"}),
+            ("malformed refresh interval", {"refresh_interval": "soon"}),
+            ("null refresh interval", {"null_refresh_interval": True}),
+            ("disabled cluster CA", {"source": "openbank-cluster-cluster-ca-cert",
+                                     "cluster_ca": "false"}),
+        ):
+            if lifecycle_fixture(**kwargs):
+                print(f"self-test FAIL: {label} source incorrectly classified as operator-managed")
+                bad += 1
+        ca_positive = lifecycle_fixture(source="openbank-cluster-cluster-ca-cert")
+        if not ca_positive:
+            print("self-test FAIL: managed Strimzi cluster CA source was not classified")
+            bad += 1
+        prefix_negative = lifecycle_fixture(source="pension-service-user")
+        if prefix_negative:
+            print("self-test FAIL: unconfigured user secret alias was classified")
+            bad += 1
+        malformed = Cred(
+            "kind: ExternalSecret\nmetadata:\n  namespace: pension\nspec:\n"
+            "  secretStoreRef:\n    kind: ClusterSecretStore\n    name: kafka-messaging-certs\n"
+            "  secretStoreRef:\n    kind: ClusterSecretStore\n    name: kafka-messaging-certs\n"
+            "  dataFrom:\n    - extract:\n        key: pension-service\n",
+            Path("fixture.yaml"))
+        if _operator_managed_credential(malformed, Path("/missing/root")):
+            print("self-test FAIL: duplicate-key source evidence was accepted")
+            bad += 1
+        pension_manifest = Path(
+            "openbank-infra/gitops/components/pension/kafka-pension-mtls.yaml")
+        if pension_manifest.is_file():
+            pension_docs = pension_manifest.read_text(encoding="utf-8")
+            real_credentials = [Cred(doc, pension_manifest) for doc in DOC_SPLIT.split(pension_docs)
+                                if re.search(r"^kind:\s*ExternalSecret\s*$", doc, re.M)]
+            for credential in real_credentials:
+                credential.operator_managed = _operator_managed_credential(credential, Path("."))
+            managed_names = {credential.name for credential in real_credentials
+                             if credential.operator_managed}
+            expected_names = {"pension-service-kafka-keystore", "kafka-cluster-ca-truststore"}
+            if not expected_names.issubset(managed_names):
+                print("self-test FAIL: pension KafkaUser/CA ExternalSecrets were not proven "
+                      "operator-managed")
+                bad += 1
+
     # The gate must be unable to pass off "could not look" as "looked and found nothing" —
     # and must not dress it up as a credential finding either. A sha of the right shape that
     # cannot exist stands in for the scrolled-out base seen in CI.
