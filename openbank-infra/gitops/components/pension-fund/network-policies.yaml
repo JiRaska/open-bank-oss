@@ -44,7 +44,7 @@ spec:
     - from:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: tax-reporting
+              kubernetes.io/metadata.name: pension
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: admin-ui

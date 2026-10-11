@@ -27,7 +27,17 @@ class JurisdictionPackRegistry(packs: List<JurisdictionPack>) {
             require(versions.map { it.version }.toSet().size == versions.size) {
                 "duplicate pack version for ${key.jurisdiction}/${key.productLine}"
             }
-            versions.sortedBy { it.version }
+            val sorted = versions.sortedBy { it.version }
+            // Exactly one version is in force on any date: the predecessor's effectiveTo must be the
+            // day before its successor's effectiveFrom. Two versions effective at once would make
+            // the pinned version depend on registry ordering instead of on the calendar.
+            sorted.zipWithNext().forEach { (prev, next) ->
+                require(prev.effectiveTo != null && prev.effectiveTo == next.effectiveFrom.minusDays(1)) {
+                    "${key.jurisdiction}/${key.productLine} v${prev.version} must end the day before " +
+                        "v${next.version} starts (${next.effectiveFrom}), was effectiveTo=${prev.effectiveTo}"
+                }
+            }
+            sorted
         }
 
     fun all(): List<JurisdictionPack> = byKey.values.flatten()
@@ -132,7 +142,7 @@ object PackEvaluator {
         val amount = if (perPeriod < min) {
             BigDecimal.ZERO
         } else {
-            perPeriod.multiply(rule.rate!!).min(rule.amountCap!!)
+            rule.roundDown(IncentiveBand.matched(rule, perPeriod).min(rule.amountCap!!))
         }
         return IncentiveResult(
             rule.id,
@@ -144,7 +154,9 @@ object PackEvaluator {
             if (perPeriod < min) {
                 "contribution below the minimum $min per ${rule.period}"
             } else {
-                "${rule.rate} of the contribution, capped at ${rule.amountCap} per ${rule.period}"
+                "${rule.bands?.let {
+                    "banded"
+                } ?: rule.rate} of the contribution, capped at ${rule.amountCap} per ${rule.period}"
             },
         )
     }
