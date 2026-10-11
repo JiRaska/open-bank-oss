@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: notification-service
     app.kubernetes.io/part-of: notifications
   annotations:
-    openbank.tech/policy-checksum: "3022fe5e2ddf6301"
+    openbank.tech/policy-checksum: "e28575d7258cc969"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -118,7 +118,7 @@ data:
     # gets a rule naming its `service-account-<client>` id in the target service's rest_ext.
     allowed_reasons contains "compliance-read-any" if {
     	input.principal.type == "HUMAN"
-    	not startswith(input.principal.id, "service-account-")
+        not startswith(input.principal.id, "service-account-")
     	"ROLE_COMPLIANCE" in input.principal.roles
     	endswith(input.action, ".read")
     }

@@ -103,7 +103,7 @@ allowed_reasons contains "operator-on-own-tenant" if {
 # gets a rule naming its `service-account-<client>` id in the target service's rest_ext.
 allowed_reasons contains "compliance-read-any" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+    not startswith(input.principal.id, "service-account-")
 	"ROLE_COMPLIANCE" in input.principal.roles
 	endswith(input.action, ".read")
 }

@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: dispute-service
     app.kubernetes.io/part-of: dispute
   annotations:
-    openbank.tech/policy-checksum: "5c8d517d1f641caa"
+    openbank.tech/policy-checksum: "5d30818a17f32dad"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -117,7 +117,7 @@ data:
     # gets a rule naming its `service-account-<client>` id in the target service's rest_ext.
     allowed_reasons contains "compliance-read-any" if {
     	input.principal.type == "HUMAN"
-    	not startswith(input.principal.id, "service-account-")
+        not startswith(input.principal.id, "service-account-")
     	"ROLE_COMPLIANCE" in input.principal.roles
     	endswith(input.action, ".read")
     }

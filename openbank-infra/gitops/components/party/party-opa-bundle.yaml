@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: party-service
     app.kubernetes.io/part-of: party
   annotations:
-    openbank.tech/policy-checksum: "e76759c709beee2d"
+    openbank.tech/policy-checksum: "581095bf5aaa4c4a"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -117,7 +117,7 @@ data:
     # gets a rule naming its `service-account-<client>` id in the target service's rest_ext.
     allowed_reasons contains "compliance-read-any" if {
     	input.principal.type == "HUMAN"
-    	not startswith(input.principal.id, "service-account-")
+        not startswith(input.principal.id, "service-account-")
     	"ROLE_COMPLIANCE" in input.principal.roles
     	endswith(input.action, ".read")
     }

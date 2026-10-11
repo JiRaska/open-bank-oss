@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: sepa-payment
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "1beb21b7dafea2f5"
+    openbank.tech/policy-checksum: "fcf94f70736dd910"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -117,7 +117,7 @@ data:
     # gets a rule naming its `service-account-<client>` id in the target service's rest_ext.
     allowed_reasons contains "compliance-read-any" if {
     	input.principal.type == "HUMAN"
-    	not startswith(input.principal.id, "service-account-")
+        not startswith(input.principal.id, "service-account-")
     	"ROLE_COMPLIANCE" in input.principal.roles
     	endswith(input.action, ".read")
     }
