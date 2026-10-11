@@ -43,6 +43,7 @@ import java.util.UUID
 class DomesticPaymentResource(
     private val paymentUseCase: DomesticPaymentUseCase,
     private val confirmationUseCase: PaymentConfirmationUseCase,
+    private val initiatorScopes: InitiatorScopes,
 ) {
 
     // OIDC identity is taken from the CDI request-scoped SecurityIdentity, NOT the
@@ -68,7 +69,10 @@ class DomesticPaymentResource(
         }
 
     @POST
-    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS")
+    // ROLE_API admits a machine to the method; InitiatorScopes then confines it (ADR-0335 D5): a
+    // declared scoped initiator pays only from its configured account, any other ROLE_API-only
+    // caller from none — independently of the OPA decision.
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS", "ROLE_API")
     @Authorize(action = "domestic-payment.create")
     @Operation(summary = "Create a domestic payment")
     suspend fun createPayment(
@@ -91,7 +95,7 @@ class DomesticPaymentResource(
                 actorId,
                 actorScope,
                 requestContext.getProperty(SYNTHETIC_TAINT_PROPERTY) == true,
-            ),
+            ).copy(initiatorScope = initiatorScopes.of(identity)),
         )
         val responseBody = result.payment.toResponse()
 
