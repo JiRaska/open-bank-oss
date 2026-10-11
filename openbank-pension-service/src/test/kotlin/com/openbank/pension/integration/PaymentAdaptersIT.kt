@@ -9,6 +9,8 @@ import com.openbank.pension.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.RestAssured.given
 import io.restassured.specification.RequestSpecification
 import io.smallrye.reactive.messaging.memory.InMemoryConnector
@@ -40,7 +42,7 @@ class PaymentAdaptersIT {
     @CdiAny
     lateinit var connector: InMemoryConnector
 
-    private val funding = "/api/v1/pension/funding/contracts"
+    private val funding = "/api/v2/pension/funding/contracts"
 
     private fun spec(party: UUID?): RequestSpecification = given().contentType("application/json")
         .header("Idempotency-Key", UUID.randomUUID().toString())
@@ -76,29 +78,43 @@ class PaymentAdaptersIT {
     private fun mandate(owner: UUID, id: String, first: String = "2026-11-01"): String = spec(owner)
         .body(
             """{"kind":"STANDING_ORDER","debtorIban":"CZ6508000000192000145399","amount":1700,"currency":"CZK",""" +
-                """"firstCollection":"$first"}""",
+                """"firstCollection":"$first","scaChallengeId":"sca-${UUID.randomUUID()}"}""",
         )
         .`when`().post("$funding/$id/mandates").then().statusCode(201)
         .body("status", equalTo("ACTIVE"))
         .extract().path("id")
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `a mandate is cancelled only by its own contract, under a fresh SCA challenge`() {
         val owner = UUID.randomUUID()
         val id = seededContract(owner)
         val mandateId = mandate(owner, id)
         assertThat(text("SELECT status FROM pension_payment_mandates WHERE id = '$mandateId'")).isEqualTo("ACTIVE")
 
-        // Someone else's account as the debtor: refused, nothing recorded.
+        // No SCA challenge over the mandate document: refused before any lookup, nothing recorded.
         spec(owner).body(
-            """{"kind":"STANDING_ORDER","debtorIban":"CZ5508000000001234567899","amount":1700,"currency":"CZK",""" +
+            """{"kind":"STANDING_ORDER","debtorIban":"CZ6508000000192000145399","amount":1700,"currency":"CZK",""" +
                 """"firstCollection":"2027-01-01"}""",
         ).`when`().post("$funding/$id/mandates").then().statusCode(403)
         assertThat(text("SELECT count(*) FROM pension_payment_mandates WHERE contract_id = '$id'")).isEqualTo("1")
 
+        // Someone else's account as the debtor: refused, nothing recorded.
+        spec(owner).body(
+            """{"kind":"STANDING_ORDER","debtorIban":"CZ5508000000001234567899","amount":1700,"currency":"CZK",""" +
+                """"firstCollection":"2027-01-01","scaChallengeId":"sca-${UUID.randomUUID()}"}""",
+        ).`when`().post("$funding/$id/mandates").then().statusCode(403)
+        assertThat(text("SELECT count(*) FROM pension_payment_mandates WHERE contract_id = '$id'")).isEqualTo("1")
+
         // No challenge: refused before anything else.
-        spec(owner).body("{}").`when`().post("$funding/$id/mandates/$mandateId/cancel").then().statusCode(400)
+        spec(owner).body("{}").`when`().post("$funding/$id/mandates/$mandateId/cancel").then().statusCode(403)
 
         // Another participant's contract naming this mandate: 404 (their contract is not visible).
         val stranger = UUID.randomUUID()

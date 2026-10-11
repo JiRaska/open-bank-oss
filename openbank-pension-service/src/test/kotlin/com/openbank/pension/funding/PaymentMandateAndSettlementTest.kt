@@ -50,6 +50,11 @@ class PaymentMandateAndSettlementTest {
         override suspend fun markCancelled(id: UUID, at: Instant) {
             rows[id] = rows.getValue(id).copy(status = PaymentMandateStatus.CANCELLED, updatedAt = at)
         }
+
+        override suspend fun list(contractId: UUID?, status: PaymentMandateStatus?, limit: Int) = rows.values
+            .filter { (contractId == null || it.contractId == contractId) && (status == null || it.status == status) }
+            .sortedByDescending { it.createdAt }
+            .take(limit)
     }
 
     private class Port : PaymentMandatePort {
@@ -72,29 +77,89 @@ class PaymentMandateAndSettlementTest {
             if (iban == FOREIGN) null else UUID.nameUUIDFromBytes("$partyId|$iban".toByteArray())
     }
 
+    /** Records what each challenge was spent over; accepts only the challenge id "sca-ok". */
+    private class Sca : com.openbank.pension.application.exit.ScaVerificationPort {
+        val spent = mutableListOf<Pair<String, com.openbank.pension.application.exit.ScaOperation>>()
+        override suspend fun verify(
+            partyId: UUID,
+            challengeId: String,
+            documentSha256: String,
+            operation: com.openbank.pension.application.exit.ScaOperation,
+        ): Boolean {
+            spent += documentSha256 to operation
+            return challengeId == "sca-ok"
+        }
+    }
+
+    private val sca = Sca()
+
     private fun service(port: Port, mandates: Mandates): PaymentMandateService {
         val contributions = mockk<ContributionService>()
         coEvery { contributions.setUpMandate(any()) } answers {
             sentToRail += firstArg<MandateRequest>()
             "rail-${firstArg<MandateRequest>().contractId}"
         }
-        return PaymentMandateService(contributions, port, mandates, accounts, clock)
+        return PaymentMandateService(contributions, port, mandates, accounts, sca, clock)
     }
 
     @Test
     fun `a debtor account the participant does not own is refused and its account id is never caller-chosen`() {
         val svc = service(Port(), Mandates())
         val contract = UUID.randomUUID()
-        assertThatThrownBy { runBlocking { svc.setUp(request(contract).copy(debtorIban = FOREIGN)) } }
+        assertThatThrownBy { runBlocking { svc.setUp(request(contract).copy(debtorIban = FOREIGN), "sca-ok") } }
             .isInstanceOf(com.openbank.pension.application.usecase.ForeignDebtorAccountException::class.java)
         assertThat(sentToRail).isEmpty()
 
         val attacker = UUID.randomUUID()
-        runBlocking { svc.setUp(request(contract).copy(debtorAccountId = attacker)) }
+        runBlocking { svc.setUp(request(contract).copy(debtorAccountId = attacker), "sca-ok") }
         assertThat(sentToRail.single().debtorAccountId).isNotEqualTo(attacker)
     }
 
+    @Test
+    fun `a mandate is set up only under SCA over its exact document, before any account lookup or rail call`() {
+        val svc = service(Port(), Mandates())
+        val contract = UUID.randomUUID()
+        val req = request(contract)
+        listOf(null, " ", "sca-wrong").forEach { challenge ->
+            assertThatThrownBy { runBlocking { svc.setUp(req, challenge) } }
+                .isInstanceOf(com.openbank.pension.application.usecase.MandateSetupScaFailedException::class.java)
+        }
+        assertThat(sentToRail).isEmpty()
+
+        runBlocking { svc.setUp(req, "sca-ok") }
+        val (hash, op) = sca.spent.last()
+        assertThat(op).isEqualTo(com.openbank.pension.application.exit.ScaOperation.MANDATE_SETUP)
+        assertThat(hash).isEqualTo(com.openbank.pension.application.usecase.PaymentMandateSetup.documentHash(req))
+        // The document binds IBAN, contract and amount: a challenge for one never covers another.
+        val doc = com.openbank.pension.application.usecase.PaymentMandateSetup::documentHash
+        assertThat(doc(req.copy(debtorIban = FOREIGN))).isNotEqualTo(hash)
+        assertThat(doc(req.copy(contractId = UUID.randomUUID()))).isNotEqualTo(hash)
+        assertThat(doc(req.copy(amount = BigDecimal("1701")))).isNotEqualTo(hash)
+        assertThat(doc(req.copy(debtorIban = "cz65 0800 0000 1920 0014 5399"))).isEqualTo(hash)
+    }
+
+    @Test
+    fun `cancel and employer enrolment are SCA-bound in the use case, and replays spend nothing`() {
+        val mandates = Mandates()
+        val svc = service(Port(), mandates)
+        val contract = UUID.randomUUID()
+        val created = runBlocking { svc.setUp(request(contract), "sca-ok") }
+        listOf(null, "sca-wrong").forEach { challenge ->
+            assertThatThrownBy { runBlocking { svc.cancel(contract, PARTY, created.id, challenge) } }
+                .isInstanceOf(
+                    com.openbank.pension.application.usecase.MandateCancellationScaFailedException::class.java,
+                )
+        }
+        runBlocking { svc.cancel(contract, PARTY, created.id, "sca-ok") }
+        val spent = sca.spent.size
+        runBlocking { svc.cancel(contract, PARTY, created.id, null) } // already cancelled: no-op, no SCA
+        assertThat(sca.spent).hasSize(spent)
+        assertThat(sca.spent.last().second)
+            .isEqualTo(com.openbank.pension.application.exit.ScaOperation.MANDATE_CANCELLATION)
+    }
+
     private companion object {
+        val PARTY: UUID = UUID.fromString("00000000-0000-4000-8000-00000000b001")
         const val FOREIGN = "CZ5508000000001234567899"
     }
 
@@ -117,19 +182,19 @@ class PaymentMandateAndSettlementTest {
         val mine = UUID.randomUUID()
         val other = UUID.randomUUID()
 
-        val created = runBlocking { svc.setUp(request(mine)) }
-        val again = runBlocking { svc.setUp(request(mine)) }
+        val created = runBlocking { svc.setUp(request(mine), "sca-ok") }
+        val again = runBlocking { svc.setUp(request(mine), "sca-ok") }
         assertThat(again.id).isEqualTo(created.id)
         assertThat(mandates.rows).hasSize(1)
 
         // Another contract naming this mandate id: 404, and nothing reaches the rail.
-        assertThatThrownBy { runBlocking { svc.cancel(other, created.id) } }
+        assertThatThrownBy { runBlocking { svc.cancel(other, PARTY, created.id, "sca-ok") } }
             .isInstanceOf(PaymentMandateNotFoundException::class.java)
         assertThat(port.cancelled).isEmpty()
 
-        val cancelled = runBlocking { svc.cancel(mine, created.id) }
+        val cancelled = runBlocking { svc.cancel(mine, PARTY, created.id, "sca-ok") }
         assertThat(cancelled.status).isEqualTo(PaymentMandateStatus.CANCELLED)
-        runBlocking { svc.cancel(mine, created.id) } // replay: no second downstream call
+        runBlocking { svc.cancel(mine, PARTY, created.id, "sca-ok") } // replay: no second downstream call
         assertThat(port.cancelled).containsExactly(created.externalId)
     }
 
@@ -139,9 +204,11 @@ class PaymentMandateAndSettlementTest {
         val mandates = Mandates()
         val svc = service(port, mandates)
         val contract = UUID.randomUUID()
-        val created = runBlocking { svc.setUp(request(contract)) }
+        val created = runBlocking { svc.setUp(request(contract), "sca-ok") }
 
-        assertThatThrownBy { runBlocking { svc.cancel(contract, created.id) } }.hasMessageContaining("rail down")
+        assertThatThrownBy {
+            runBlocking { svc.cancel(contract, PARTY, created.id, "sca-ok") }
+        }.hasMessageContaining("rail down")
         assertThat(mandates.rows.getValue(created.id).status).isEqualTo(PaymentMandateStatus.ACTIVE)
     }
 

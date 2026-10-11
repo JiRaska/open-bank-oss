@@ -6,8 +6,6 @@ package com.openbank.pension.infrastructure.rest.funding
 
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
-import com.openbank.pension.application.exit.ScaOperation
-import com.openbank.pension.application.exit.ScaVerificationPort
 import com.openbank.pension.application.port.`in`.Caller
 import com.openbank.pension.application.port.out.ContractNotFoundException
 import com.openbank.pension.application.port.out.MandateRequest
@@ -38,7 +36,7 @@ import java.util.UUID
  * Participant-facing funding of one contract (ADR-0334 S3): payment reference, contributions,
  * regular-payment mandate, incentive status, and the tax year.
  *
- * Its own root, NOT under S1's `/api/v1/pension/contracts`: two resource classes sharing a path
+ * Its own root, NOT under S1's `/api/v2/pension/contracts`: two resource classes sharing a path
  * prefix with a template segment compete in JAX-RS class matching, and the loser's routes 404.
  * `@Path` sits directly above `class` (#3371). Every route resolves the contract through
  * S1's shared [ContractAccessGuard] before doing anything else: the party header is trusted only
@@ -46,7 +44,7 @@ import java.util.UUID
  * foreign contract is a 404.
  */
 @Tag(name = "Pension funding", description = "Contributions, state incentives and tax years of a pension contract")
-@Path("/api/v1/pension/funding/contracts/{contractId}")
+@Path("/api/v2/pension/funding/contracts/{contractId}")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN, Roles.COMPLIANCE)
@@ -67,9 +65,6 @@ class ContractFundingResource {
     @Inject
     lateinit var mandateService: PaymentMandateService
 
-    @Inject
-    lateinit var sca: ScaVerificationPort
-
     /** S1's single ownership rule, applied to the contract as S1 stores it — never re-implemented here. */
     private suspend fun visible(caller: Caller, contractId: UUID): PensionContract = guard.requireVisible(
         caller,
@@ -79,7 +74,7 @@ class ContractFundingResource {
     @GET
     @Path("/payment-reference")
     @Operation(summary = "The reference a payer quotes so a payment matches this contract")
-    @Authorize(action = "pension.funding.read", resource = "#contractId")
+    @Authorize(action = "pension.funding.inspect", resource = "#contractId")
     suspend fun reference(
         @PathParam("contractId") contractId: UUID,
         @HeaderParam(ContractAccessGuard.PARTY_HEADER) party: String?,
@@ -91,7 +86,7 @@ class ContractFundingResource {
     @GET
     @Path("/contributions")
     @Operation(summary = "Every contribution credited to the contract, oldest first")
-    @Authorize(action = "pension.funding.read", resource = "#contractId")
+    @Authorize(action = "pension.funding.inspect", resource = "#contractId")
     suspend fun list(
         @PathParam("contractId") contractId: UUID,
         @HeaderParam(ContractAccessGuard.PARTY_HEADER) party: String?,
@@ -127,6 +122,7 @@ class ContractFundingResource {
                 frequency = contract.schedule.frequency,
                 debtorName = body.debtorName?.takeIf { it.isNotBlank() },
             ),
+            body.scaChallengeId,
         )
         return Response.status(Response.Status.CREATED)
             .entity(MandateResponse(mandate.externalId, mandate.id, mandate.status.name))
@@ -151,19 +147,7 @@ class ContractFundingResource {
     ): MandateResponse {
         requireIdempotencyKey(idempotencyKey)
         val contract = visible(guard.actingParticipant(party), contractId)
-        val challenge = requireNotNull(request?.scaChallengeId?.takeIf { it.isNotBlank() }) {
-            "scaChallengeId is required"
-        }
-        if (!sca.verify(
-                contract.participantPartyId,
-                challenge,
-                PaymentMandateCancellation.documentHash(contractId, mandateId),
-                ScaOperation.MANDATE_CANCELLATION,
-            )
-        ) {
-            throw MandateScaFailedException()
-        }
-        val mandate = mandateService.cancel(contractId, mandateId)
+        val mandate = mandateService.cancel(contractId, contract.participantPartyId, mandateId, request?.scaChallengeId)
         return MandateResponse(mandate.externalId, mandate.id, mandate.status.name)
     }
 
@@ -175,16 +159,19 @@ class ContractFundingResource {
         @PathParam("contractId") contractId: UUID,
         @PathParam("employerPartyId") employerPartyId: UUID,
         @HeaderParam(ContractAccessGuard.PARTY_HEADER) party: String?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        request: MandateCancelRequest?,
     ): Response {
-        visible(guard.actingParticipant(party), contractId)
-        contributions.enrolEmployer(contractId, employerPartyId)
+        requireIdempotencyKey(idempotencyKey)
+        val contract = visible(guard.actingParticipant(party), contractId)
+        mandateService.enrolEmployer(contractId, contract.participantPartyId, employerPartyId, request?.scaChallengeId)
         return Response.noContent().build()
     }
 
     @GET
     @Path("/incentives")
     @Operation(summary = "Incentive claims and the per-incentive ledger balance")
-    @Authorize(action = "pension.funding.read", resource = "#contractId")
+    @Authorize(action = "pension.funding.inspect", resource = "#contractId")
     suspend fun incentiveStatus(
         @PathParam("contractId") contractId: UUID,
         @HeaderParam(ContractAccessGuard.PARTY_HEADER) party: String?,
@@ -200,7 +187,7 @@ class ContractFundingResource {
     @GET
     @Path("/tax-years/{year}")
     @Operation(summary = "Contributions by source, incentives and deductible amount for one tax year")
-    @Authorize(action = "pension.funding.read", resource = "#contractId")
+    @Authorize(action = "pension.funding.inspect", resource = "#contractId")
     suspend fun taxYear(
         @PathParam("contractId") contractId: UUID,
         @PathParam("year") year: Int,

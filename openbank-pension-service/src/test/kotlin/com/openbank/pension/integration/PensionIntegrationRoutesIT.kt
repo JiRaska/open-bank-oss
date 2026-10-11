@@ -10,11 +10,14 @@ import com.openbank.pension.infrastructure.exit.stub.StubParticipantNotification
 import com.openbank.pension.infrastructure.fund.InMemoryFundAdministrationAdapter
 import com.openbank.pension.it.PostgresTestResource
 import com.openbank.pension.testsupport.ContractFixtures
+import com.openbank.pension.testsupport.ProviderFixtures
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.quarkus.vertx.VertxContextSupport
 import io.restassured.RestAssured.given
 import io.restassured.specification.RequestSpecification
@@ -79,7 +82,7 @@ class PensionIntegrationRoutesIT {
             .apply { if (key != null) header("Idempotency-Key", key) }
 
     private val startBody = """
-        {"kind":"NEW_CONTRACT","productLine":"DPS","jurisdiction":"CZ","providerEntityId":"${UUID.randomUUID()}",
+        {"kind":"NEW_CONTRACT","productLine":"DPS","jurisdiction":"CZ","providerEntityId":"${ProviderFixtures.ID}",
          "providerType":"PENSION_COMPANY","birthDate":"1990-05-05","residencyCountry":"CZ",
          "schedule":{"amount":1000,"currency":"CZK","frequency":"MONTHLY"}}
     """.trimIndent()
@@ -87,41 +90,86 @@ class PensionIntegrationRoutesIT {
     // ---- Idempotency-Key replay ----------------------------------------------------------------
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `a retried POST with the same key is answered from the first response and creates nothing new`() {
         val key = UUID.randomUUID().toString()
-        val first = edge(key = key).body(startBody).post("/api/v1/pension/onboarding/applications")
+        val first = edge(key = key).body(startBody).post("/api/v2/pension/onboarding/applications")
             .then().statusCode(201).extract()
-        val replay = edge(key = key).body(startBody).post("/api/v1/pension/onboarding/applications")
+        val replay = edge(key = key).body(startBody).post("/api/v2/pension/onboarding/applications")
             .then().statusCode(201).header("Idempotent-Replayed", "true").extract()
         assertThat(replay.path<String>("applicationId")).isEqualTo(first.path<String>("applicationId"))
 
-        val other = edge().body(startBody).post("/api/v1/pension/onboarding/applications")
+        val other = edge().body(startBody).post("/api/v2/pension/onboarding/applications")
             .then().statusCode(201).extract()
         assertThat(other.path<String>("applicationId")).isNotEqualTo(first.path<String>("applicationId"))
 
         // The same key from ANOTHER participant is another scope: it never reads the first response.
         val stranger = edge(asParty = UUID.randomUUID(), key = key).body(startBody)
-            .post("/api/v1/pension/onboarding/applications").then().statusCode(201).extract()
+            .post("/api/v2/pension/onboarding/applications").then().statusCode(201).extract()
         assertThat(stranger.path<String>("applicationId")).isNotEqualTo(first.path<String>("applicationId"))
     }
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
+    fun `the same key with a different body is refused 409 and never replays the first response`() {
+        val key = UUID.randomUUID().toString()
+        val first = edge(key = key).body(startBody).post("/api/v2/pension/onboarding/applications")
+            .then().statusCode(201).extract()
+        // Key order and whitespace do not change the request: still a replay.
+        val reordered = startBody.replace("{\"kind\":\"NEW_CONTRACT\",", "{ ").removeSuffix("}") +
+            ", \"kind\": \"NEW_CONTRACT\"}"
+        edge(key = key).body(reordered).post("/api/v2/pension/onboarding/applications")
+            .then().statusCode(201).header("Idempotent-Replayed", "true")
+            .body("applicationId", equalTo(first.path<String>("applicationId")))
+        val different = startBody.replace("\"amount\":1000", "\"amount\":2000")
+        edge(key = key).body(different).post("/api/v2/pension/onboarding/applications")
+            .then().statusCode(409).body("code", equalTo("IDEMPOTENCY_KEY_REUSED"))
+    }
+
+    @Test
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `a POST without an Idempotency-Key is refused before anything runs`() {
-        edge(key = null).body(startBody).post("/api/v1/pension/onboarding/applications").then().statusCode(400)
-        edge(key = null).body("{}").post("/api/v1/pension/simulations").then().statusCode(400)
+        edge(key = null).body(startBody).post("/api/v2/pension/onboarding/applications").then().statusCode(400)
+        edge(key = null).body("{}").post("/api/v2/pension/simulations").then().statusCode(400)
     }
 
     // ---- simulation ------------------------------------------------------------------------------
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `a simulation projects every configured strategy and is labelled illustrative`() {
         edge().body(
             """{"jurisdiction":"CZ","productLine":"DPS","strategyCode":"BALANCED","monthlyContribution":1700,
                 "employerMonthlyContribution":500,"horizonYears":25}""",
-        ).post("/api/v1/pension/simulations").then().statusCode(200)
+        ).post("/api/v2/pension/simulations").then().statusCode(200)
             .body("illustrative", equalTo(true))
             .body("disclaimer", notNullValue())
             .body("requestedStrategy", equalTo("BALANCED"))
@@ -132,28 +180,35 @@ class PensionIntegrationRoutesIT {
         edge().body(
             """{"jurisdiction":"CZ","productLine":"DPS","strategyCode":"NOPE","monthlyContribution":1,"horizonYears":5}""",
         )
-            .post("/api/v1/pension/simulations").then().statusCode(400)
+            .post("/api/v2/pension/simulations").then().statusCode(400)
         edge().body("""{"jurisdiction":"CZ","productLine":"DPS","monthlyContribution":1,"horizonYears":61}""")
-            .post("/api/v1/pension/simulations").then().statusCode(400)
+            .post("/api/v2/pension/simulations").then().statusCode(400)
     }
 
     // ---- operator lists --------------------------------------------------------------------------
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `the customer edge cannot read the operator payout or death-claim queues`() {
-        edge().get("/api/v1/pension/operator/payouts").then().statusCode(403)
-        edge().get("/api/v1/pension/death-claims").then().statusCode(403)
+        edge().get("/api/v2/pension/operator/payouts").then().statusCode(403)
+        edge().get("/api/v2/pension/death-claims").then().statusCode(403)
     }
 
     @Test
     @TestSecurity(user = "ops", roles = ["ROLE_OPERATOR"])
     fun `staff list payouts by contract and death claims`() {
-        given().get("/api/v1/pension/operator/payouts?limit=5").then().statusCode(200)
-        given().get("/api/v1/pension/operator/payouts?contractId=${UUID.randomUUID()}").then().statusCode(200)
+        given().get("/api/v2/pension/operator/payouts?limit=5").then().statusCode(200)
+        given().get("/api/v2/pension/operator/payouts?contractId=${UUID.randomUUID()}").then().statusCode(200)
             .body("size()", equalTo(0))
-        given().get("/api/v1/pension/death-claims?status=NOTIFIED").then().statusCode(200)
-        given().get("/api/v1/pension/operator/payouts?status=NOPE").then().statusCode(404)
+        given().get("/api/v2/pension/death-claims?status=NOTIFIED").then().statusCode(200)
+        given().get("/api/v2/pension/operator/payouts?status=NOPE").then().statusCode(404)
     }
 
     // ---- payout-account change -------------------------------------------------------------------
@@ -171,19 +226,26 @@ class PensionIntegrationRoutesIT {
     private fun confirmedPayout(contract: UUID, form: String): String {
         val months = if (form == "PHASED_WITHDRAWAL") ""","months":12""" else ""
         val payout: String = edge().body("""{"form":"$form"$months}""")
-            .post("/api/v1/pension/contracts/$contract/exit/payouts/quote").then().statusCode(201)
+            .post("/api/v2/pension/contracts/$contract/exit/payouts/quote").then().statusCode(201)
             .extract().path("payoutId")
         edge().body("""{"scaChallengeId":"sca-${UUID.randomUUID()}","payoutIban":"$IBAN"}""")
-            .post("/api/v1/pension/contracts/$contract/exit/payouts/$payout/confirm").then().statusCode(200)
+            .post("/api/v2/pension/contracts/$contract/exit/payouts/$payout/confirm").then().statusCode(200)
         return payout
     }
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `an account change is held, notified and never redirects the signed account or a pending change`() {
         val contract = retiredContract()
         val payout = confirmedPayout(contract, "PHASED_WITHDRAWAL")
-        val path = "/api/v1/pension/contracts/$contract/exit/payouts/$payout/account"
+        val path = "/api/v2/pension/contracts/$contract/exit/payouts/$payout/account"
 
         edge(key = null).body("""{"scaChallengeId":"sca-${UUID.randomUUID()}","payoutIban":"$OTHER_IBAN"}""").put(path)
             .then().statusCode(200)
@@ -203,14 +265,21 @@ class PensionIntegrationRoutesIT {
     }
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `an account change before the payout is confirmed is refused - the account is part of the signature`() {
         val contract = retiredContract()
         val payout: String = edge().body("""{"form":"PHASED_WITHDRAWAL","months":12}""")
-            .post("/api/v1/pension/contracts/$contract/exit/payouts/quote").then().statusCode(201)
+            .post("/api/v2/pension/contracts/$contract/exit/payouts/quote").then().statusCode(201)
             .extract().path("payoutId")
         edge(key = null).body("""{"scaChallengeId":"sca-${UUID.randomUUID()}","payoutIban":"$OTHER_IBAN"}""")
-            .put("/api/v1/pension/contracts/$contract/exit/payouts/$payout/account").then().statusCode(409)
+            .put("/api/v2/pension/contracts/$contract/exit/payouts/$payout/account").then().statusCode(409)
     }
 
     /**
@@ -218,13 +287,20 @@ class PensionIntegrationRoutesIT {
      * account: exactly one wins (optimistic lock), and the stored, signed account is the winner's.
      */
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `concurrent confirmations of one quote - exactly one wins and its signed account is the one stored`() {
         val contract = retiredContract()
         val payout: String = edge().body("""{"form":"PHASED_WITHDRAWAL","months":12}""")
-            .post("/api/v1/pension/contracts/$contract/exit/payouts/quote").then().statusCode(201)
+            .post("/api/v2/pension/contracts/$contract/exit/payouts/quote").then().statusCode(201)
             .extract().path("payoutId")
-        val confirm = "/api/v1/pension/contracts/$contract/exit/payouts/$payout/confirm"
+        val confirm = "/api/v2/pension/contracts/$contract/exit/payouts/$payout/confirm"
         val pool = java.util.concurrent.Executors.newFixedThreadPool(2)
         val start = java.util.concurrent.CountDownLatch(1)
         val attempts = listOf(IBAN, OTHER_IBAN).map { iban ->
@@ -240,19 +316,26 @@ class PensionIntegrationRoutesIT {
         val winners = results.filter { it.second == 200 }
         assertThat(winners).describedAs("results %s", results).hasSize(1)
         assertThat(results.filter { it.second != 200 }.map { it.second }).allMatch { it == 409 }
-        edge(key = null).get("/api/v1/pension/contracts/$contract/exit/payouts/$payout").then().statusCode(200)
+        edge(key = null).get("/api/v2/pension/contracts/$contract/exit/payouts/$payout").then().statusCode(200)
             .body("payoutAccountLast4", equalTo(winners.single().first.takeLast(4)))
     }
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `a single-payment form has no later payments to redirect`() {
         val contract = retiredContract()
         val payout: String = edge().body("""{"form":"LUMP_SUM"}""")
-            .post("/api/v1/pension/contracts/$contract/exit/payouts/quote").then().statusCode(201)
+            .post("/api/v2/pension/contracts/$contract/exit/payouts/quote").then().statusCode(201)
             .extract().path("payoutId")
         edge(key = null).body("""{"scaChallengeId":"sca-${UUID.randomUUID()}","payoutIban":"$OTHER_IBAN"}""")
-            .put("/api/v1/pension/contracts/$contract/exit/payouts/$payout/account").then().statusCode(409)
+            .put("/api/v2/pension/contracts/$contract/exit/payouts/$payout/account").then().statusCode(409)
     }
 
     private companion object {

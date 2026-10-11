@@ -6,14 +6,11 @@ package com.openbank.pension.infrastructure.rest
 
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
-import com.openbank.pension.application.port.`in`.CreateDraftCommand
 import com.openbank.pension.application.port.`in`.IncentiveEvaluationCommand
 import com.openbank.pension.application.port.`in`.PensionContractUseCase
 import com.openbank.pension.domain.model.ContractStatus
-import com.openbank.pension.domain.model.ContributionSchedule
 import com.openbank.pension.infrastructure.authz.ContractAccessGuard
 import com.openbank.pension.infrastructure.rest.dto.ContractResponse
-import com.openbank.pension.infrastructure.rest.dto.CreateContractRequest
 import com.openbank.pension.infrastructure.rest.dto.ElectStrategyRequest
 import com.openbank.pension.infrastructure.rest.dto.IncentiveEvaluationRequest
 import com.openbank.pension.infrastructure.rest.dto.IncentiveResultResponse
@@ -30,7 +27,6 @@ import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
 import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
-import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import java.math.BigDecimal
@@ -50,7 +46,7 @@ import java.util.UUID
  * refuses a staff write, and OPA grants staff read only).
  */
 @Tag(name = "Pension", description = "Pension contracts, strategy elections and jurisdiction-pack evaluation")
-@Path("/api/v1/pension/contracts")
+@Path("/api/v2/pension/contracts")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)
@@ -62,49 +58,9 @@ class PensionContractResource {
     @Inject
     lateinit var access: ContractAccessGuard
 
-    @POST
-    @Operation(summary = "Create a DRAFT contract under the jurisdiction pack in force today")
-    @Authorize(action = "pension.contract.create")
-    suspend fun create(
-        @HeaderParam("X-Customer-Party-Id") participantPartyId: String?,
-        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
-        request: CreateContractRequest?,
-    ): Response {
-        val participant = requireNotNull(access.actingParticipant(participantPartyId).customerPartyId)
-        val body = requireNotNull(request) { "request body is required" }
-        val schedule = requireNotNull(body.schedule) { "schedule is required" }
-        val contract = contracts.createDraft(
-            CreateDraftCommand(
-                participantPartyId = participant,
-                productLine = requireNotNull(body.productLine) { "productLine is required" },
-                jurisdiction = requireNotNull(body.jurisdiction) { "jurisdiction is required" },
-                providerEntityId = requireNotNull(body.providerEntityId) { "providerEntityId is required" },
-                providerType = requireNotNull(body.providerType) { "providerType is required" },
-                birthDate = requireNotNull(body.birthDate) { "birthDate is required" },
-                residencyCountry = body.residencyCountry,
-                residencyEvidence = body.residencyEvidence.orEmpty().mapIndexed { i, e ->
-                    requireNotNull(e) { "residencyEvidence[$i] must not be null" }
-                }.toSet(),
-                hasGuardian = body.hasGuardian ?: false,
-                schedule = ContributionSchedule(
-                    amount = requireNotNull(schedule.amount) { "schedule.amount is required" },
-                    currency = requireNotNull(schedule.currency) { "schedule.currency is required" },
-                    frequency = requireNotNull(schedule.frequency) { "schedule.frequency is required" },
-                    employerAmount = schedule.employerAmount ?: BigDecimal.ZERO,
-                ),
-                initialStrategy = requireNotNull(body.strategyCode) { "strategyCode is required" },
-                beneficiaries = body.beneficiaries.orEmpty().mapIndexed { i, b ->
-                    requireNotNull(b) { "beneficiaries[$i] must not be null" }.toDomain(i)
-                },
-                idempotencyKey = requireIdempotencyKey(idempotencyKey),
-            ),
-        )
-        return Response.status(Response.Status.CREATED).entity(ContractResponse.from(contract)).build()
-    }
-
     @GET
     @Operation(summary = "The participant's own contracts (edge), or staff: contracts by status, newest first")
-    @Authorize(action = "pension.contract.read")
+    @Authorize(action = "pension.contract.inspect")
     suspend fun list(
         @HeaderParam("X-Customer-Party-Id") party: String?,
         @QueryParam("status") status: ContractStatus?,
@@ -114,26 +70,9 @@ class PensionContractResource {
     @GET
     @Path("/{id}")
     @Operation(summary = "Read one contract with its strategy history")
-    @Authorize(action = "pension.contract.read", resource = "#id")
+    @Authorize(action = "pension.contract.inspect", resource = "#id")
     suspend fun get(@PathParam("id") id: UUID, @HeaderParam("X-Customer-Party-Id") party: String?): ContractResponse =
         ContractResponse.from(contracts.get(access.readerFor(party), id))
-
-    @POST
-    @Path("/{id}/submit")
-    @Operation(summary = "DRAFT -> PENDING_ACTIVATION")
-    @Authorize(action = "pension.contract.submit", resource = "#id")
-    suspend fun submit(
-        @PathParam("id") id: UUID,
-        @HeaderParam("X-Customer-Party-Id") party: String?,
-        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
-    ): ContractResponse = ContractResponse.from(
-        contracts.submit(
-            access.actingParticipant(party).also {
-                requireIdempotencyKey(idempotencyKey)
-            },
-            id,
-        ),
-    )
 
     @PUT
     @Path("/{id}/strategy")
@@ -142,12 +81,27 @@ class PensionContractResource {
     suspend fun electStrategy(
         @PathParam("id") id: UUID,
         @HeaderParam("X-Customer-Party-Id") party: String?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         request: ElectStrategyRequest?,
     ): ContractResponse {
+        requireIdempotencyKey(idempotencyKey)
         val body = requireNotNull(request) { "request body is required" }
         val code = requireNotNull(body.strategyCode) { "strategyCode is required" }
+        val acknowledged = body.acknowledgedWarnings.orEmpty().mapIndexed { i, w ->
+            requireNotNull(w) { "acknowledgedWarnings[$i] must not be null" }
+        }.toSet()
         return ContractResponse.from(
-            contracts.electStrategy(access.actingParticipant(party), id, code, body.effectiveFrom),
+            contracts.electStrategy(
+                com.openbank.pension.application.port.`in`.ElectStrategyCommand(
+                    access.actingParticipant(party),
+                    id,
+                    code,
+                    body.effectiveFrom,
+                    body.scaChallengeId,
+                    acknowledged,
+                    body.language,
+                ),
+            ),
         )
     }
 
@@ -188,7 +142,7 @@ class PensionContractResource {
     @POST
     @Path("/{id}/incentive-evaluation")
     @Operation(summary = "Evaluate the pinned pack's incentives for one contribution amount")
-    @Authorize(action = "pension.contract.read", resource = "#id")
+    @Authorize(action = "pension.contract.inspect", resource = "#id")
     suspend fun evaluateIncentives(
         @PathParam("id") id: UUID,
         @HeaderParam("X-Customer-Party-Id") party: String?,

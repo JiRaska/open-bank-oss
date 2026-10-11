@@ -76,7 +76,7 @@ data class SimulationResponse(
  * pack in force today, clearly labelled illustrative. Reads nothing about the caller and stores
  * nothing, so it needs no party — but it is still only open to the edge relay and staff.
  */
-@Path("/api/v1/pension/simulations")
+@Path("/api/v2/pension/simulations")
 @JaxrsProduces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)

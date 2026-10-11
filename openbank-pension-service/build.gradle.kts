@@ -51,6 +51,7 @@ dependencies {
     testImplementation(libs.quarkus.junit5)
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
     testImplementation(libs.quarkus.test.security)
+    testImplementation(libs.quarkus.test.security.oidc)
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.rest.assured.kotlin)
@@ -61,11 +62,18 @@ dependencies {
     // Consumer pacts for the sca/party/account identity checks (#12377), written to pacts/.
     // #12379: consumer pact for the document-service render call (ADR-0063 P2).
     testImplementation(libs.pact.consumer)
+    testImplementation(libs.wiremock.standalone)
     // RepinCzDpsV1MigrationTest drives Flyway directly (target V11, then V12) against a real Postgres.
     testRuntimeOnly("org.flywaydb:flyway-database-postgresql")
 }
 
 kover {
+    currentProject {
+        instrumentation {
+            // Keep service coverage probes; dependency bytecode is outside this report.
+            includedClasses.add("com.openbank.pension.*")
+        }
+    }
     reports {
         filters {
             excludes {
@@ -94,3 +102,45 @@ tasks.withType<Test>().configureEach {
     // and every class after it simply never reported. Same per-module override as account-service.
     maxHeapSize = "2g"
 }
+
+// The repeatable demo reuses the journey suite in a fresh test JVM/database per synthetic company.
+// No production setting or normal test default is changed.
+tasks.named<Test>("test") {
+    // PensionOpaActionInventoryTest reads the policy test outside this module; declare it, or a
+    // rego-only edit leaves :test UP-TO-DATE and the inventory check never re-runs locally.
+    inputs.file(rootProject.file("openbank-infra/gitops/components/pension/pension_rest_ext_test.rego"))
+        .withPropertyName("pensionRegoTest")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+    // The cross-service journey builds and launches a second Quarkus application separately.
+    exclude("**/DipPublishedCatalogJourneyIT.class")
+    providers.gradleProperty("pensionDemoCompany").orNull?.let {
+        systemProperty("pension.demo.company", it)
+    }
+}
+
+val dipCrossServiceIT = tasks.register<Test>("dipCrossServiceIT") {
+    description = "Verify real product-catalog publication is consumed by pension suitability over HTTP"
+    group = "verification"
+    dependsOn(tasks.named("testClasses"), ":openbank-product-catalog:quarkusBuild")
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    useJUnitPlatform()
+    filter.includeTestsMatching("*DipPublishedCatalogJourneyIT")
+    systemProperty(
+        "openbank.test.catalog.runner",
+        project(":openbank-product-catalog").layout.buildDirectory
+            .file("quarkus-app/quarkus-run.jar").get().asFile.absolutePath,
+    )
+    systemProperty(
+        "openbank.test.dip.fixture",
+        project(":openbank-product-catalog").file(
+            "src/test/resources/retirement-pack/cz-illustrative-offerings.json",
+        ).absolutePath,
+    )
+    systemProperty(
+        "openbank.test.keycloak-dockerfile",
+        rootProject.file("openbank-infra/docker/keycloak/Dockerfile").absolutePath,
+    )
+}
+
+tasks.named("check") { dependsOn(dipCrossServiceIT) }

@@ -68,6 +68,10 @@ class TransferService(
         return saved
     }
 
+    private companion object {
+        const val MAX_LIST = 100
+    }
+
     private fun today(): LocalDate = LocalDate.now(clock)
     private fun now() = clock.instant()
 
@@ -78,6 +82,21 @@ class TransferService(
     }
 
     suspend fun list(status: TransferStatus?, limit: Int): List<TransferRequest> = transfers.findByStatus(status, limit)
+
+    /**
+     * The participant's own transfers in either direction, newest first; `pendingOnly` keeps those
+     * not yet ended (a provider's request awaiting their consent among them).
+     */
+    suspend fun listForParticipant(
+        partyId: UUID,
+        direction: TransferDirection?,
+        pendingOnly: Boolean,
+        limit: Int,
+    ): List<TransferRequest> {
+        require(limit in 1..MAX_LIST) { "limit must be between 1 and $MAX_LIST" }
+        val statuses = if (pendingOnly) TransferStatus.entries.filterNot { it.terminal }.toSet() else null
+        return transfers.findByParty(partyId, direction, statuses, limit)
+    }
 
     // --- transfer-out: entry ------------------------------------------------------------------
 
@@ -139,6 +158,26 @@ class TransferService(
         val saved = persist(transfer.consented(challengeId, now()))
         orchestrator.startTransferOut(saved.id)
         return saved
+    }
+
+    /**
+     * The participant withdraws a transfer-out (their own request, or their consent to a
+     * provider's) before it executes. SCA-signed over THIS transfer. A retry of a completed
+     * withdrawal answers the CANCELLED transfer unchanged and spends no challenge; once valuation
+     * has begun it is refused (409) and the workflow carries on.
+     *
+     * A concurrent valuation loses or wins on the repository's optimistic version: if the
+     * withdrawal lands first, the workflow's valuate step finds CANCELLED and ends without selling.
+     */
+    suspend fun withdrawTransferOut(id: UUID, partyId: UUID, challengeId: String): TransferRequest {
+        val transfer = get(id, partyId)
+        check(transfer.direction == TransferDirection.OUT) { "transfer $id is not a transfer-out" }
+        if (transfer.withdrawnByParticipant) return transfer
+        check(transfer.status == TransferStatus.AWAITING_CONSENT || transfer.status == TransferStatus.REQUESTED) {
+            "transfer $id is ${transfer.status}: it can no longer be withdrawn"
+        }
+        verifyConsent(partyId, challengeId, "pension-transfer-withdraw:$id")
+        return persist(transfer.withdrawn(now()))
     }
 
     /** Binds the challenge to this contract and THIS receiving contract — never reusable elsewhere. */

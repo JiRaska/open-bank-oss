@@ -27,8 +27,9 @@ class PaymentBeans {
         port: PaymentMandatePort,
         mandates: PaymentMandateRepository,
         accounts: ParticipantAccountPort,
+        sca: com.openbank.pension.application.exit.ScaVerificationPort,
         clock: Clock,
-    ): PaymentMandateService = PaymentMandateService(contributions, port, mandates, accounts, clock)
+    ): PaymentMandateService = PaymentMandateService(contributions, port, mandates, accounts, sca, clock)
 
     @Produces
     @ApplicationScoped

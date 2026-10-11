@@ -101,13 +101,13 @@ class DocumentRendering(private val call: DocumentRenderCall) {
                 ),
             )
         } catch (e: WebApplicationException) {
-            log.warnf("document-service refused %s: HTTP %d", templateCode, e.response?.status ?: 0)
+            log.warnf("document-service refused render: HTTP %d", e.response?.status ?: 0)
             unavailable("document-service refused to render $templateCode")
         } catch (e: java.io.IOException) {
-            log.warnf(e, "document-service unreachable rendering %s", templateCode)
+            log.warnf("document-service unreachable while rendering (%s)", e.javaClass.simpleName)
             unavailable("document-service is unreachable")
         } catch (e: jakarta.ws.rs.ProcessingException) {
-            log.warnf(e, "document-service unreachable rendering %s", templateCode)
+            log.warnf("document-service unreachable while rendering (%s)", e.javaClass.simpleName)
             unavailable("document-service is unreachable")
         }
         val id = response.id?.takeIf { it.isNotBlank() }

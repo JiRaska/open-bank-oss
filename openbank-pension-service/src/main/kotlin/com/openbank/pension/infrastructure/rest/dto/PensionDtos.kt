@@ -39,21 +39,16 @@ data class BeneficiaryDto(val name: String? = null, val partyId: UUID? = null, v
     }
 }
 
-data class CreateContractRequest(
-    val productLine: ProductLine? = null,
-    val jurisdiction: String? = null,
-    val providerEntityId: UUID? = null,
-    val providerType: ProviderType? = null,
-    val birthDate: LocalDate? = null,
-    val residencyCountry: String? = null,
-    val residencyEvidence: List<String?>? = null,
-    val hasGuardian: Boolean? = null,
-    val schedule: ScheduleDto? = null,
+data class ElectStrategyRequest(
     val strategyCode: String? = null,
-    val beneficiaries: List<BeneficiaryDto?>? = null,
+    val effectiveFrom: LocalDate? = null,
+    /** Single-use challenge signed over `pension-strategy-change:<StrategyChangeDocument.hash>`. */
+    val scaChallengeId: String? = null,
+    /** Warnings shown and acknowledged for this change (see 409 WARNINGS_REQUIRED). */
+    val acknowledgedWarnings: List<com.openbank.pension.domain.questionnaire.WarningCode?>? = null,
+    /** Language the warnings were shown in (cs / en): the acknowledgement binds that wording. */
+    val language: String? = null,
 )
-
-data class ElectStrategyRequest(val strategyCode: String? = null, val effectiveFrom: LocalDate? = null)
 
 data class IncentiveEvaluationRequest(
     val contribution: BigDecimal? = null,

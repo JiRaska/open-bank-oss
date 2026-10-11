@@ -77,8 +77,16 @@ object WarningPolicy {
         acknowledgements: List<WarningAcknowledgement>,
         assessmentId: UUID,
         strategyCode: String,
+        textFor: (WarningCode, String) -> String,
+        language: String? = null,
     ): Set<WarningCode> = required - acknowledgements
-        .filter { it.assessmentId == assessmentId && it.strategyCode == strategyCode }
+        .filter {
+            it.assessmentId == assessmentId &&
+                it.strategyCode == strategyCode &&
+                it.language in setOf("cs", "en") &&
+                (language == null || it.language == language) &&
+                it.textSha256 == sha256(textFor(it.code, it.language))
+        }
         .map { it.code }
         .toSet()
 
@@ -87,7 +95,7 @@ object WarningPolicy {
 }
 
 /** Why an assessment must be answered again. */
-enum class RefreshReason { EXPIRED, SUPERSEDED, STRATEGY_CHANGE_ABOVE_PROFILE, LIFE_EVENT }
+enum class RefreshReason { EXPIRED, SUPERSEDED, STRATEGY_CHANGE_ABOVE_PROFILE, LIFE_EVENT, NO_ASSESSMENT }
 
 /** Events the participant reports that invalidate the profile (ESMA: keep information up to date). */
 enum class LifeEvent {

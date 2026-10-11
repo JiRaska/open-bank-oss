@@ -4,18 +4,27 @@
 
 package com.openbank.pension.application.usecase
 
+import com.openbank.pension.application.ProviderBoundary
+import com.openbank.pension.application.exit.ScaOperation
+import com.openbank.pension.application.exit.ScaVerificationPort
 import com.openbank.pension.application.port.`in`.Caller
 import com.openbank.pension.application.port.`in`.ContractVisibility
 import com.openbank.pension.application.port.`in`.CreateDraftCommand
+import com.openbank.pension.application.port.`in`.ElectStrategyCommand
 import com.openbank.pension.application.port.`in`.IncentiveEvaluationCommand
 import com.openbank.pension.application.port.`in`.PensionContractUseCase
+import com.openbank.pension.application.port.`in`.StrategyChangeDocument
 import com.openbank.pension.application.port.out.ContractNotFoundException
 import com.openbank.pension.application.port.out.ParticipantNotifier
 import com.openbank.pension.application.port.out.PensionContractRepository
 import com.openbank.pension.application.port.out.PensionMetrics
+import com.openbank.pension.application.port.out.StrategyNotPermittedException
+import com.openbank.pension.application.port.out.StrategySuitabilityPort
+import com.openbank.pension.application.port.out.StrategySuitabilityRequest
 import com.openbank.pension.domain.model.ContractStatus
 import com.openbank.pension.domain.model.Limits
 import com.openbank.pension.domain.model.PensionContract
+import com.openbank.pension.domain.model.ProductLine
 import com.openbank.pension.domain.pack.IncentiveResult
 import com.openbank.pension.domain.pack.JurisdictionPackRegistry
 import com.openbank.pension.domain.pack.PackEvaluator
@@ -32,13 +41,17 @@ class PensionContractService(
     private val packs: JurisdictionPackRegistry,
     private val clock: Clock,
     private val notifier: ParticipantNotifier,
+    /** The one suitability gate for every strategy a contract holds (#12384). */
+    private val suitability: StrategySuitabilityPort,
+    /** Document-bound SCA for a strategy change (ADR-0335 `pension-strategy-change:` namespace). */
+    private val sca: ScaVerificationPort,
+    private val providerBoundary: ProviderBoundary,
     private val metrics: PensionMetrics = PensionMetrics.NONE,
 ) : PensionContractUseCase {
 
     override suspend fun createDraft(command: CreateDraftCommand): PensionContract {
-        command.idempotencyKey?.let { key ->
-            contracts.findByIdempotencyKey(command.participantPartyId, key)?.let { return it }
-        }
+        providerBoundary.requireProvider(command.providerEntityId)
+        replayDraft(command)?.let { return it }
         require(command.beneficiaries.size <= Limits.MAX_BENEFICIARIES) {
             "at most ${Limits.MAX_BENEFICIARIES} beneficiaries"
         }
@@ -63,6 +76,19 @@ class PensionContractService(
             today,
         )
         require(eligibility.eligible) { "participant is not eligible: ${eligibility.reasons.joinToString("; ")}" }
+        // A draft opened outside onboarding has no suitability assessment: the same gate as every
+        // later change decides which strategy it may start with (the most conservative only).
+        suitability.authorize(
+            StrategySuitabilityRequest(
+                contractId = null,
+                jurisdiction = pack.jurisdiction,
+                productLine = command.productLine,
+                packVersion = pack.version,
+                strategyCode = command.initialStrategy,
+                acknowledged = emptySet(),
+                language = null,
+            ),
+        )
         val draft = PensionContract.draft(
             participantPartyId = command.participantPartyId,
             productLine = command.productLine,
@@ -81,8 +107,20 @@ class PensionContractService(
         return contracts.save(draft)
     }
 
-    override suspend fun submit(caller: Caller, id: UUID) =
-        transition(caller, id, ContractStatus.PENDING_ACTIVATION) { it.submit(clock.instant()) }
+    private suspend fun replayDraft(command: CreateDraftCommand): PensionContract? {
+        val key = command.idempotencyKey ?: return null
+        return contracts.findByIdempotencyKey(command.participantPartyId, key)?.also {
+            providerBoundary.requireProvider(it.providerEntityId)
+        }
+    }
+
+    override suspend fun submit(caller: Caller, id: UUID): PensionContract {
+        val contract = get(caller, id)
+        if (contract.productLine == ProductLine.DIP) {
+            throw StrategyNotPermittedException("DIP submission requires the signed onboarding flow")
+        }
+        return transition(caller, id, ContractStatus.PENDING_ACTIVATION) { it.submit(clock.instant()) }
+    }
 
     override suspend fun list(caller: Caller, status: ContractStatus?, limit: Int): List<PensionContract> {
         val page = limit.coerceIn(1, MAX_LIST)
@@ -91,30 +129,64 @@ class PensionContractService(
         return contracts.findByParticipant(party, page).filter { status == null || it.status == status }
     }
 
-    override suspend fun electStrategy(
-        caller: Caller,
-        id: UUID,
-        strategyCode: String,
-        effectiveFrom: LocalDate?,
-    ): PensionContract {
-        val from = effectiveFrom ?: LocalDate.now(clock)
-        val saved = try {
-            transition(caller, id, null) {
-                require(!from.isBefore(LocalDate.now(clock))) { "a strategy change cannot take effect in the past" }
-                it.electStrategy(strategyCode, from, clock.instant())
+    /**
+     * The ONE path that changes a contract's strategy. In order: ownership (someone else's contract
+     * is 404), idempotent replay (the same change already applied answers the contract unchanged,
+     * nothing is signed or sent twice), the suitability gate (current assessment, regime,
+     * acknowledged warnings), then the single-use SCA challenge over the exact change document.
+     */
+    override suspend fun electStrategy(command: ElectStrategyCommand): PensionContract {
+        val today = LocalDate.now(clock)
+        val from = command.effectiveFrom ?: today
+        val (saved, approval) = try {
+            command.caller.requireParticipant()
+            require(!from.isBefore(today)) { "a strategy change cannot take effect in the past" }
+            val contract = get(command.caller, command.contractId)
+            val current = contract.currentStrategy
+            if (current.strategyCode == command.strategyCode && current.effectiveFrom == from) return contract
+            val approval = suitability.authorize(
+                StrategySuitabilityRequest(
+                    contractId = contract.id,
+                    jurisdiction = contract.jurisdiction,
+                    productLine = contract.productLine,
+                    packVersion = contract.packVersion,
+                    strategyCode = command.strategyCode,
+                    acknowledged = command.acknowledgedWarnings,
+                    language = command.language,
+                ),
+            )
+            val challenge = command.scaChallengeId?.takeIf { it.isNotBlank() }
+            val signed = challenge != null &&
+                sca.verify(
+                    contract.participantPartyId,
+                    challenge,
+                    StrategyChangeDocument.hash(contract.id, command.strategyCode, from, command.acknowledgedWarnings),
+                    ScaOperation.STRATEGY_CHANGE,
+                )
+            if (!signed) throw StrategyChangeScaFailedException()
+            val result = transition(command.caller, command.contractId, null) {
+                it.electStrategy(command.strategyCode, from, clock.instant())
             }
+            result to approval
         } catch (e: IllegalArgumentException) {
             metrics.strategyChange("refused")
             throw e
         } catch (e: IllegalStateException) {
             metrics.strategyChange("refused")
             throw e
+        } catch (e: StrategyNotPermittedException) {
+            metrics.strategyChange("refused")
+            throw e
+        } catch (e: StrategyChangeScaFailedException) {
+            metrics.strategyChange("refused")
+            throw e
         }
+        suitability.record(approval)
         metrics.strategyChange("stored")
         // #12379: the participant is told when the new strategy takes effect, after it is stored.
         ParticipantNotices.send(
             notifier,
-            ParticipantNotices.strategyChange(saved.participantPartyId, saved.id, strategyCode, from),
+            ParticipantNotices.strategyChange(saved.participantPartyId, saved.id, command.strategyCode, from),
         )
         return saved
     }
@@ -163,3 +235,7 @@ class PensionContractService(
 }
 
 private const val MAX_LIST = 100
+
+/** 403: the strategy change was not signed by a verified single-use challenge over its document. */
+class StrategyChangeScaFailedException :
+    RuntimeException("strong customer authentication failed for this strategy change")

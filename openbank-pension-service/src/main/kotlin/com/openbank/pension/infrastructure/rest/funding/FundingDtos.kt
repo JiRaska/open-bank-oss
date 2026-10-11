@@ -55,6 +55,8 @@ data class MandateSetupRequest(
     val firstCollection: LocalDate? = null,
     /** Account holder's name; required for a SEPA direct-debit mandate (#12378). */
     val debtorName: String? = null,
+    /** Single-use challenge signed over `pension-mandate-setup:<documentHash>` (ADR-0335). */
+    val scaChallengeId: String? = null,
 )
 
 data class MandateCancelRequest(val scaChallengeId: String? = null)

@@ -24,7 +24,9 @@ import jakarta.ws.rs.Path
 import jakarta.ws.rs.WebApplicationException
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.MethodOrderer
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.TestMethodOrder
 import org.junit.jupiter.api.extension.ExtendWith
 import java.util.UUID
 
@@ -42,6 +44,7 @@ import java.util.UUID
  * - no identity: 401.
  */
 @ExtendWith(PactConsumerTestExt::class)
+@TestMethodOrder(MethodOrderer.MethodName::class)
 @PactTestFor(providerName = PensionScaPactConsumerTest.PROVIDER, pactVersion = PactSpecVersion.V3)
 class PensionScaPactConsumerTest {
 

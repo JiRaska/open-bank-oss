@@ -20,7 +20,9 @@ import com.openbank.pension.infrastructure.identity.PartyRestClient
 import io.restassured.RestAssured.given
 import jakarta.ws.rs.Path
 import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.MethodOrderer
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.TestMethodOrder
 import org.junit.jupiter.api.extension.ExtendWith
 
 /**
@@ -30,6 +32,7 @@ import org.junit.jupiter.api.extension.ExtendWith
  * and an unknown id (404, which the adapter reads as "not known to KYC").
  */
 @ExtendWith(PactConsumerTestExt::class)
+@TestMethodOrder(MethodOrderer.MethodName::class)
 @PactTestFor(providerName = "openbank-party-service", pactVersion = PactSpecVersion.V3)
 class PensionPartyPactConsumerTest {
 

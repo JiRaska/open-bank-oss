@@ -4,8 +4,14 @@
 
 package com.openbank.pension.application.onboarding
 
+import com.openbank.pension.application.ProviderBoundary
 import com.openbank.pension.application.port.out.ActivationOutcome
 import com.openbank.pension.application.port.out.PensionContractRepository
+import com.openbank.pension.application.port.out.ReassessmentRequiredException
+import com.openbank.pension.application.port.out.StrategyApproval
+import com.openbank.pension.application.port.out.StrategyNotPermittedException
+import com.openbank.pension.application.port.out.StrategySuitabilityRequest
+import com.openbank.pension.application.port.out.StrategyWarningsRequiredException
 import com.openbank.pension.domain.model.ContractStatus
 import com.openbank.pension.domain.model.ContributionSchedule
 import com.openbank.pension.domain.model.PensionContract
@@ -25,6 +31,11 @@ import com.openbank.pension.domain.pack.JurisdictionPackRegistry
 import com.openbank.pension.domain.pack.PackEvaluator
 import com.openbank.pension.domain.pack.ProviderType
 import com.openbank.pension.domain.questionnaire.QuestionSetRegistry
+import com.openbank.pension.domain.questionnaire.ReassessmentPolicy
+import com.openbank.pension.domain.questionnaire.RefreshReason
+import com.openbank.pension.domain.questionnaire.StrategyInstrumentDecision
+import com.openbank.pension.domain.questionnaire.StrategyInstrumentGate
+import com.openbank.pension.domain.questionnaire.StrategyInstrumentMappingPort
 import com.openbank.pension.domain.questionnaire.WarningAcknowledgement
 import com.openbank.pension.domain.questionnaire.WarningCode
 import com.openbank.pension.domain.questionnaire.WarningPolicy
@@ -74,7 +85,8 @@ interface TransactionRunner {
  * Every participant-facing method takes the caller's party id and answers "not found" for an
  * application of another party — a foreign id must read as absent, never as someone else's data.
  */
-@Suppress("TooManyFunctions", "LongParameterList")
+// Existing onboarding, reassessment and contract gates share state.
+@Suppress("TooManyFunctions", "LongParameterList", "LargeClass")
 class OnboardingService(
     private val applications: OnboardingApplicationRepository,
     private val assessments: SuitabilityAssessmentRepository,
@@ -90,6 +102,8 @@ class OnboardingService(
     private val tx: TransactionRunner,
     private val clock: Clock,
     private val questionSets: QuestionSetRegistry,
+    private val providerBoundary: ProviderBoundary,
+    private val instrumentMappings: StrategyInstrumentMappingPort? = null,
 ) {
 
     private fun today(): LocalDate = LocalDate.now(clock)
@@ -98,6 +112,7 @@ class OnboardingService(
     // --- client flow ---------------------------------------------------------------------------
 
     suspend fun start(command: StartOnboardingCommand): OnboardingApplication {
+        providerBoundary.requireProvider(command.providerEntityId)
         val pack = packs.resolve(command.jurisdiction, command.productLine, today())
         val onboarding = rules.rules(pack.jurisdiction, pack.productLine, pack.version)
         require(command.providerType in pack.permittedProviderTypes) {
@@ -207,7 +222,8 @@ class OnboardingService(
         build: (OnboardingApplication, OnboardingRules) -> SuitabilityAssessment,
     ): Pair<OnboardingApplication, StrategyRecommendation> {
         val application = live(id, partyId)
-        val assessment = build(application, rulesFor(application))
+        val onboarding = rulesFor(application)
+        val assessment = pinInstrumentMappings(application, onboarding, build(application, onboarding))
         val recommendation = recommend(application, assessment)
         val saved = tx.inTransaction {
             application.assessmentId?.let { previous ->
@@ -217,6 +233,152 @@ class OnboardingService(
             applications.save(application.submitQuestionnaire(assessment.id, recommendation.recommended, now()))
         }
         return saved to recommendation
+    }
+
+    private suspend fun pinInstrumentMappings(
+        application: OnboardingApplication,
+        onboarding: OnboardingRules,
+        built: SuitabilityAssessment,
+    ): SuitabilityAssessment {
+        if (onboarding.questionnaire.appropriatenessTest) {
+            check(built.questionnaire != null) {
+                "the versioned questionnaire is required to assess instrument-class appropriateness"
+            }
+        }
+        return if (onboarding.questionnaire.appropriatenessTest) {
+            val catalog = checkNotNull(instrumentMappings) { "instrument mapping catalog is unavailable" }
+            built.copy(
+                strategyInstrumentMappings = onboarding.strategies.map { strategy ->
+                    val matches = catalog.effectivePublished(
+                        application.jurisdiction,
+                        application.productLine,
+                        strategy.code,
+                        now(),
+                    )
+                    check(matches.size == 1) {
+                        "exactly one published instrument mapping is required for ${strategy.code}"
+                    }
+                    val mapping = matches.single()
+                    check(
+                        mapping.jurisdiction == application.jurisdiction &&
+                            mapping.productLine == application.productLine &&
+                            mapping.strategyCode == strategy.code,
+                    ) { "instrument mapping scope mismatch" }
+                    mapping
+                },
+            )
+        } else {
+            built
+        }
+    }
+
+    /**
+     * Re-assessment of an ACTIVATED application's contract: the same scoring as onboarding, but the
+     * lifecycle stays ACTIVATED. Superseded assessments are kept for audit.
+     */
+    suspend fun reassess(
+        id: UUID,
+        partyId: UUID,
+        build: (OnboardingApplication, OnboardingRules) -> SuitabilityAssessment,
+    ): Pair<OnboardingApplication, StrategyRecommendation> {
+        val application = get(id, partyId)
+        val onboarding = rulesFor(application)
+        val assessment = pinInstrumentMappings(application, onboarding, build(application, onboarding))
+        val recommendation = recommend(application, assessment)
+        val saved = tx.inTransaction {
+            application.assessmentId?.let { previous ->
+                assessments.findById(previous)?.let { assessments.save(it.supersede()) }
+            }
+            assessments.save(assessment)
+            applications.save(application.recordReassessment(assessment.id, recommendation.recommended, now()))
+        }
+        return saved to recommendation
+    }
+
+    /**
+     * The suitability gate for ANY strategy a contract is to hold (StrategySuitabilityPort):
+     * - no onboarding application on record (an S1 draft): no assessment exists, so only the pack's
+     *   most conservative strategy is admissible; anything else is 403 — complete onboarding;
+     * - the assessment in force must be current (expired / superseded / missing -> 409 re-assess);
+     * - every warning WarningPolicy requires must be overridable under the regime (MiFID: a strategy
+     *   above the profile is refused outright, 403) and acknowledged on this request (409 otherwise);
+     *   the acknowledgement is bound to the hash of the exact wording shown.
+     */
+    suspend fun authorizeStrategy(request: StrategySuitabilityRequest): StrategyApproval {
+        val onboarding = rules.rules(request.jurisdiction, request.productLine, request.packVersion)
+        val option = requireNotNull(onboarding.strategy(request.strategyCode)) {
+            "strategy ${request.strategyCode} is not offered under this pack"
+        }
+        val application = request.contractId?.let { applications.findByContract(it) }
+            ?: return conservativeOnly(onboarding, option.riskClass, request)
+        val assessment = assessmentInForce(application)
+        val required = WarningPolicy.required(
+            request.strategyCode,
+            assessmentForChoice(application, assessment, request.strategyCode),
+            recommend(application, assessment),
+        )
+        requireAllowedAndAcknowledged(onboarding, required, request)
+        return StrategyApproval(
+            application.id,
+            warningAcks(application, required, assessment, request.strategyCode, request.language),
+        )
+    }
+
+    /** No assessment on record (an S1 draft): only the pack's most conservative strategy. */
+    private fun conservativeOnly(
+        onboarding: OnboardingRules,
+        riskClass: Int,
+        request: StrategySuitabilityRequest,
+    ): StrategyApproval {
+        if (request.productLine == ProductLine.DIP) {
+            throw StrategyNotPermittedException(
+                "DIP strategy requires an approved instrument mapping and a completed questionnaire",
+            )
+        }
+        if (riskClass > onboarding.strategies.minOf { it.riskClass } || request.acknowledged.isNotEmpty()) {
+            throw StrategyNotPermittedException(
+                "without a suitability assessment only the most conservative strategy may be held; " +
+                    "complete the onboarding questionnaire first",
+            )
+        }
+        return StrategyApproval(null, emptyList())
+    }
+
+    /** The current assessment of [application], or 409 naming why it must be renewed. */
+    private suspend fun assessmentInForce(application: OnboardingApplication): SuitabilityAssessment {
+        val assessment = application.assessmentId?.let { assessments.findById(it) }
+            ?: throw ReassessmentRequiredException(application.id, RefreshReason.NO_ASSESSMENT)
+        val stale = ReassessmentPolicy.refreshReason(assessment, today())
+        if (stale != null) throw ReassessmentRequiredException(application.id, stale)
+        return assessment
+    }
+
+    /** MiFID-forbidden warnings refuse (403); every other required warning must be acknowledged (409). */
+    private fun requireAllowedAndAcknowledged(
+        onboarding: OnboardingRules,
+        required: Set<WarningCode>,
+        request: StrategySuitabilityRequest,
+    ) {
+        val forbidden = required.firstOrNull { !WarningPolicy.overridable(it, onboarding) }
+        if (forbidden != null) {
+            throw StrategyNotPermittedException(
+                "strategy ${request.strategyCode} is not suitable under the " +
+                    "${onboarding.questionnaire.regime} regime ($forbidden)",
+            )
+        }
+        require(required.containsAll(request.acknowledged)) {
+            "warnings ${(request.acknowledged - required).joinToString()} do not apply to ${request.strategyCode}"
+        }
+        val missing = required - request.acknowledged
+        if (missing.isNotEmpty()) throw StrategyWarningsRequiredException(missing)
+    }
+
+    /** Stores an authorized change's acknowledgements on the application (audit). */
+    suspend fun recordStrategyApproval(approval: StrategyApproval) {
+        val id = approval.applicationId ?: return
+        if (approval.acknowledgements.isEmpty()) return
+        val application = applications.findById(id) ?: return
+        applications.save(application.recordPostActivationAcknowledgements(approval.acknowledgements, now()))
     }
 
     /** The assessment in force for one of the caller's applications, or null before the first answer. */
@@ -247,7 +409,11 @@ class OnboardingService(
         val onboarding = rulesFor(application)
         requireNotNull(onboarding.strategy(strategyCode)) { "strategy $strategyCode is not offered under this pack" }
         val assessment = currentAssessment(application)
-        val required = WarningPolicy.required(strategyCode, assessment, recommend(application, assessment))
+        val required = WarningPolicy.required(
+            strategyCode,
+            assessmentForChoice(application, assessment, strategyCode),
+            recommend(application, assessment),
+        )
         require(codes.isNotEmpty()) { "at least one warning code is required" }
         require(required.containsAll(codes)) {
             "warnings ${(codes - required).joinToString()} do not apply to $strategyCode"
@@ -257,13 +423,25 @@ class OnboardingService(
                 "warning $code cannot be overridden under the ${onboarding.questionnaire.regime} regime"
             }
         }
-        val acks = warningAcks(application, codes, assessment.id, strategyCode, language)
+        val acks = warningAcks(application, codes, assessment, strategyCode, language)
         return applications.save(application.acknowledge(acks, now()))
     }
 
     suspend fun recommendation(id: UUID, partyId: UUID): StrategyRecommendation {
         val application = get(id, partyId)
         return recommend(application, currentAssessment(application))
+    }
+
+    /** Strategy-specific warning preview, using the same mapping decision as acknowledgement and choice. */
+    suspend fun requiredWarnings(id: UUID, partyId: UUID, strategyCode: String): Set<WarningCode> {
+        val application = get(id, partyId)
+        require(offers(application, strategyCode)) { "strategy $strategyCode is not offered under this pack" }
+        val assessment = currentAssessment(application)
+        return WarningPolicy.required(
+            strategyCode,
+            assessmentForChoice(application, assessment, strategyCode),
+            recommend(application, assessment),
+        )
     }
 
     /**
@@ -278,23 +456,33 @@ class OnboardingService(
         val recommendation = recommend(application, assessment)
         val code = command.strategyCode ?: recommendation.recommended
         requireNotNull(onboarding.strategy(code)) { "strategy $code is not offered under this pack" }
-        val required = WarningPolicy.required(code, assessment, recommendation)
+        val decision = instrumentDecision(application, assessment, code)
+        val required = WarningPolicy.required(
+            code,
+            if (decision == null) assessment else assessment.copy(appropriate = decision.appropriate),
+            recommendation,
+        )
         if (WarningCode.STRATEGY_ABOVE_PROFILE in required) {
             require(WarningPolicy.overridable(WarningCode.STRATEGY_ABOVE_PROFILE, onboarding)) {
                 "strategy $code is above the suitable risk class ${recommendation.maxRiskClass}"
             }
         }
-        // A warning is acknowledged either beforehand (POST .../warnings/acknowledge, which records
-        // the exact wording) or together with the choice; never skipped (ZDPS § 136(3), MiFID 25(3)).
+        val missing = missingWarnings(application, required, assessment, code, command.language ?: "cs")
         var acknowledged = application
-        val missing = WarningPolicy.missing(required, application.warningAcknowledgements, assessment.id, code)
-        if (missing.isNotEmpty()) {
-            require(command.acknowledgeUnsuitable) {
-                "the choice needs acknowledged warnings: ${missing.joinToString()}"
+        if (missing.isNotEmpty() && command.acknowledgeUnsuitable && application.productLine == ProductLine.DPS) {
+            // Keep the v1 DPS choice contract: its boolean confirms the warning on this request.
+            // Never silently upgrade an earlier acknowledgement of different wording.
+            val stale = application.warningAcknowledgements.any {
+                it.assessmentId == assessment.id && it.strategyCode == code && it.code in missing
             }
-            val acks = warningAcks(application, missing, assessment.id, code, command.language)
-            acknowledged = application.acknowledge(acks, now())
+            check(!stale) { "the choice needs acknowledged warnings: ${missing.joinToString()}" }
+            acknowledged = application.acknowledge(
+                warningAcks(application, missing, assessment, code, command.language),
+                now(),
+            )
         }
+        val stillMissing = missingWarnings(acknowledged, required, assessment, code, command.language ?: "cs")
+        require(stillMissing.isEmpty()) { "the choice needs acknowledged warnings: ${stillMissing.joinToString()}" }
         val document = documents.generate(
             KidRequest(
                 applicationId = id,
@@ -307,7 +495,7 @@ class OnboardingService(
             ),
         )
         val kid = IssuedKid(document.documentId, document.sha256, code, now())
-        return applications.save(acknowledged.issueKid(code, required.isNotEmpty(), kid, now()))
+        return applications.save(acknowledged.issueKid(code, required.isNotEmpty(), kid, now(), decision))
     }
 
     suspend fun acceptKid(id: UUID, partyId: UUID, documentId: String): OnboardingApplication =
@@ -328,6 +516,7 @@ class OnboardingService(
         check(live.status == OnboardingStatus.KID_ACCEPTED) { "the key-information document must be accepted first" }
         val kid = checkNotNull(live.kid)
         requireWarningsAcknowledged(live)
+        requireCurrentInstrumentDecision(live)
         // Bound to THIS application and THIS document; the signer is the acting party (the
         // guardian, for a ward). sca-service spends the challenge, so it cannot sign twice.
         val outcome = signatures.verify(partyId, challengeId, kid.sha256, "pension-onboarding:$id:${kid.documentId}")
@@ -543,16 +732,16 @@ class OnboardingService(
     internal fun warningAcks(
         application: OnboardingApplication,
         codes: Set<WarningCode>,
-        assessmentId: UUID,
+        assessment: SuitabilityAssessment,
         strategyCode: String,
         language: String?,
     ): List<WarningAcknowledgement> {
-        val set = questionSets.questionSet(application.jurisdiction, application.productLine)
+        val set = questionSetFor(application, assessment)
         val lang = if (language?.lowercase()?.startsWith("en") == true) "en" else "cs"
         return codes.map { code ->
             WarningAcknowledgement(
                 code = code,
-                assessmentId = assessmentId,
+                assessmentId = assessment.id,
                 strategyCode = strategyCode,
                 textSha256 = WarningPolicy.sha256(set.warning(code).text.text(lang)),
                 language = lang,
@@ -568,9 +757,83 @@ class OnboardingService(
     private suspend fun requireWarningsAcknowledged(application: OnboardingApplication) {
         val assessment = currentAssessment(application)
         val strategy = checkNotNull(application.chosenStrategy) { "no strategy has been chosen" }
-        val required = WarningPolicy.required(strategy, assessment, recommend(application, assessment))
-        val missing = WarningPolicy.missing(required, application.warningAcknowledgements, assessment.id, strategy)
+        val required = WarningPolicy.required(
+            strategy,
+            assessmentForChoice(application, assessment, strategy),
+            recommend(application, assessment),
+        )
+        val missing = missingWarnings(application, required, assessment, strategy)
         check(missing.isEmpty()) { "warnings must be acknowledged before signing: ${missing.joinToString()}" }
+    }
+
+    private fun missingWarnings(
+        application: OnboardingApplication,
+        required: Set<WarningCode>,
+        assessment: SuitabilityAssessment,
+        strategyCode: String,
+        language: String? = null,
+    ): Set<WarningCode> {
+        val set = questionSetFor(application, assessment)
+        val selectedLanguage = language?.let { if (it.lowercase().startsWith("en")) "en" else "cs" }
+        return WarningPolicy.missing(
+            required,
+            application.warningAcknowledgements,
+            assessment.id,
+            strategyCode,
+            { code, lang -> set.warning(code).text.text(lang) },
+            selectedLanguage,
+        )
+    }
+
+    private fun questionSetFor(application: OnboardingApplication, assessment: SuitabilityAssessment) =
+        assessment.questionnaire?.let { questionSets.questionSet(it.questionSetId, it.questionSetVersion) }
+            ?: questionSets.questionSet(application.jurisdiction, application.productLine)
+
+    private suspend fun assessmentForChoice(
+        application: OnboardingApplication,
+        assessment: SuitabilityAssessment,
+        strategy: String,
+    ): SuitabilityAssessment = instrumentDecision(application, assessment, strategy)?.let {
+        assessment.copy(appropriate = it.appropriate)
+    } ?: assessment
+
+    private suspend fun instrumentDecision(
+        application: OnboardingApplication,
+        assessment: SuitabilityAssessment,
+        strategy: String,
+    ): StrategyInstrumentDecision? {
+        val questionnaire = rulesFor(application).questionnaire
+        if (!questionnaire.appropriatenessTest) return null
+        val pinned = checkNotNull(assessment.strategyInstrumentMappings) {
+            "assessment predates strategy instrument mapping; answer the questionnaire again"
+        }.filter { it.strategyCode == strategy }
+        check(pinned.size == 1) { "assessment has no unique instrument mapping for $strategy" }
+        val current = checkNotNull(instrumentMappings) { "instrument mapping catalog is unavailable" }
+            .effectivePublished(application.jurisdiction, application.productLine, strategy, now())
+        val decision = StrategyInstrumentGate.evaluate(
+            assessment,
+            application.jurisdiction,
+            strategy,
+            pinned,
+            questionnaire.appropriatenessMinScore,
+        )
+        StrategyInstrumentGate.requireCurrent(decision, current)
+        return decision
+    }
+
+    private suspend fun requireCurrentInstrumentDecision(application: OnboardingApplication) {
+        if (!rulesFor(application).questionnaire.appropriatenessTest) return
+        val assessment = currentAssessment(application)
+        val strategy = checkNotNull(application.chosenStrategy)
+        val pinned = checkNotNull(application.strategyInstrumentDecision) {
+            "strategy decision predates instrument mapping; choose the strategy again"
+        }
+        check(pinned.assessmentId == assessment.id && pinned.strategyCode == strategy) {
+            "strategy instrument decision does not match the current assessment"
+        }
+        check(pinned == instrumentDecision(application, assessment, strategy)) {
+            "strategy instrument decision has changed"
+        }
     }
 
     private fun rulesFor(application: OnboardingApplication) =

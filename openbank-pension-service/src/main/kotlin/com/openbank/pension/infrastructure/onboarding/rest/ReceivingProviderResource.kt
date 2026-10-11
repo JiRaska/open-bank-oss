@@ -33,7 +33,7 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag
  * AWAITING_CONSENT and moves only when the participant SCA-consents on `/transfers/{id}/consent`.
  */
 @Tag(name = "Pension provider transfers", description = "Transfer-out requests from a receiving provider")
-@Path("/api/v1/pension/provider/transfers")
+@Path("/api/v2/pension/provider/transfers")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @RolesAllowed(Roles.API)

@@ -76,6 +76,8 @@ data class PartyDto(
     val legalName: String? = null,
     val kycStatus: String? = null,
     val address: PartyAddressDto? = null,
+    /** The participant's notice language (cs / en), when the party record carries one. */
+    val preferredLanguage: String? = null,
 )
 
 /**

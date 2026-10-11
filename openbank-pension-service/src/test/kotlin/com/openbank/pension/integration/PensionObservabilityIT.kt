@@ -36,7 +36,7 @@ class PensionObservabilityIT {
     @Inject
     lateinit var registry: MeterRegistry
 
-    private val ops = "/api/v1/pension/funding/operations"
+    private val ops = "/api/v2/pension/funding/operations"
 
     private fun <T> jdbc(block: (java.sql.Connection) -> T): T {
         val cfg = ConfigProvider.getConfig()

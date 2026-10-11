@@ -41,11 +41,11 @@ object ContractFixtures {
         val draft = contracts.createDraft(
             CreateDraftCommand(
                 participantPartyId = party, productLine = productLine, jurisdiction = "CZ",
-                providerEntityId = UUID.randomUUID(),
+                providerEntityId = ProviderFixtures.ID,
                 providerType = if (productLine == ProductLine.DIP) ProviderType.BANK else ProviderType.PENSION_COMPANY,
                 birthDate = birthDate, residencyCountry = "CZ", residencyEvidence = emptySet(), hasGuardian = false,
                 schedule = ContributionSchedule(BigDecimal("1700"), "CZK", ContributionFrequency.MONTHLY),
-                initialStrategy = "BALANCED",
+                initialStrategy = "CONSERVATIVE",
                 beneficiaries = beneficiaries,
                 idempotencyKey = UUID.randomUUID().toString(),
             ),

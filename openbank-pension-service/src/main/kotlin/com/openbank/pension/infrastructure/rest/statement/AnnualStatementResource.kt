@@ -22,9 +22,12 @@ import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import java.util.UUID
 
+// Its own file on purpose: openapi-route-conformance (and any reader) takes ONE class-level @Path
+// per file, so sharing a file with AnnualStatementOperationsResource made this GET read as served
+// under the operations path and the published route as unserved.
 /** The participant's (or staff's) read of an issued annual statement: its document id and hash. */
 @Tag(name = "Pension")
-@Path("/api/v1/pension/contracts/{contractId}/annual-statements/{year}")
+@Path("/api/v2/pension/contracts/{contractId}/annual-statements/{year}")
 @Produces(MediaType.APPLICATION_JSON)
 @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)
 class AnnualStatementResource {
@@ -39,7 +42,7 @@ class AnnualStatementResource {
 
     @GET
     @Operation(summary = "Read the issued annual statement for a year (404 until issued)")
-    @Authorize(action = "pension.contract.read", resource = "#contractId")
+    @Authorize(action = "pension.contract.inspect", resource = "#contractId")
     suspend fun get(
         @PathParam("contractId") contractId: UUID,
         @PathParam("year") year: Int,

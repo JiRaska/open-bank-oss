@@ -64,7 +64,6 @@ CONFIG = Path("release-please-config.json")
 # Each entry names the overlay it strands, and a stale declaration fails in either direction.
 NO_RELEASE_COMPONENT: dict[str, str] = {
     "openbank-campaign-service": "campaign-service",
-    "openbank-tax-reporting-service": "tax-reporting-service",
 }
 
 # component -> issue that tracks writing its overlay. Reason required; stale either direction.
@@ -77,6 +76,10 @@ NO_OVERLAY_YET: dict[str, str] = {
     "pension-service": "#12350 - new service (ADR-0334 S1), deployed nowhere yet and moving no money "
     "in S1; dispositions are written against its own resolved runtime classpath once it is built, "
     "not copied from a sibling.",
+    "pension-fund-service": "#12350 - new service (ADR-0334 S4), released by #12355 and not yet "
+    "deployed, so nothing is exposed. No VEX overlay is written yet: dispositions must come from "
+    "this service's own resolved runtime classpath, not be copied from a sibling. Delete this "
+    "entry in the PR that writes the overlay.",
     "wealth-service": "#9811 - released in #9771 (ADR-0301 D1) and deployed nowhere, moves no "
     "money and has no ingress, so nothing is exposed while the dispositions are verified "
     "against this service's own resolved runtime classpath rather than copied from a sibling.",

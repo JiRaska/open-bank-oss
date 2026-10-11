@@ -40,6 +40,10 @@ class PensionFundOrdersTest {
         }
 
         override suspend fun strategies() = strategies
+
+        var transactions: List<UnitTransactionDto> = emptyList()
+
+        override suspend fun transactions(contractId: UUID) = transactions
     }
 
     private val balanced = StrategyDto(

@@ -42,6 +42,7 @@ import com.openbank.pension.domain.model.ProductLine
 import com.openbank.pension.domain.pack.JurisdictionPackRegistry
 import com.openbank.pension.infrastructure.pack.JurisdictionPackLoader
 import com.openbank.pension.testsupport.ContractFixtures
+import com.openbank.pension.testsupport.ProviderFixtures
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
@@ -381,6 +382,9 @@ class AnnuityMarketplaceServiceTest {
                     registry,
                     clock,
                     com.openbank.pension.infrastructure.notification.RecordingParticipantNotifier(),
+                    com.openbank.pension.testsupport.RecordingSuitability(),
+                    com.openbank.pension.testsupport.RecordingSca(),
+                    ProviderFixtures.boundary,
                 )
             val id = ContractFixtures.activeContract(
                 contracts,
@@ -586,6 +590,10 @@ class AnnuityMarketplaceServiceTest {
         override suspend fun redeem(contractId: UUID, amount: BigDecimal, currency: String, idempotencyKey: String) =
             Redemption("R", amount)
         override suspend fun reverseRedemption(contractId: UUID, redemption: Redemption, currency: String) = Unit
+        override suspend fun holdings(contractId: UUID) =
+            com.openbank.pension.application.port.out.FundHoldings(emptyList(), emptyList())
+        override suspend fun transactions(contractId: UUID) =
+            emptyList<com.openbank.pension.application.port.out.FundUnitTransaction>()
     }
 
     class Contracts : PensionContractRepository {

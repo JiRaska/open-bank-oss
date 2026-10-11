@@ -18,6 +18,7 @@ import com.openbank.pension.domain.model.PensionContract
 import com.openbank.pension.infrastructure.exit.rest.ExitExceptionMappers
 import com.openbank.pension.infrastructure.pack.JurisdictionPackLoader
 import com.openbank.pension.testsupport.ContractFixtures
+import com.openbank.pension.testsupport.ProviderFixtures
 import io.mockk.coEvery
 import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
@@ -116,6 +117,9 @@ class PayoutAccountChangeRaceTest {
                 packs,
                 clock,
                 com.openbank.pension.infrastructure.notification.RecordingParticipantNotifier(),
+                com.openbank.pension.testsupport.RecordingSuitability(),
+                com.openbank.pension.testsupport.RecordingSca(),
+                ProviderFixtures.boundary,
             )
         val id = ContractFixtures.activeContract(
             useCase,

@@ -8,6 +8,8 @@ import com.openbank.pension.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.RestAssured.given
 import io.restassured.specification.RequestSpecification
 import org.assertj.core.api.Assertions.assertThat
@@ -27,8 +29,8 @@ import java.util.UUID
 @QuarkusTestResource(PostgresTestResource::class)
 class FundingApiIT {
 
-    private val funding = "/api/v1/pension/funding/contracts"
-    private val ops = "/api/v1/pension/funding/operations"
+    private val funding = "/api/v2/pension/funding/contracts"
+    private val ops = "/api/v2/pension/funding/operations"
 
     private fun spec(party: UUID?): RequestSpecification = given().contentType("application/json")
         .header("Idempotency-Key", UUID.randomUUID().toString())
@@ -147,7 +149,14 @@ class FundingApiIT {
     }
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `the edge reaches only its participant's contract and never an operator route`() {
         val owner = UUID.randomUUID()
         val id = seededContract(owner)
@@ -155,7 +164,7 @@ class FundingApiIT {
         spec(
             owner,
         ).body(
-            """{"kind":"STANDING_ORDER","debtorIban":"CZ6508000000192000145399","amount":1700,"currency":"CZK","firstCollection":"2026-11-01"}""",
+            """{"kind":"STANDING_ORDER","debtorIban":"CZ6508000000192000145399","amount":1700,"currency":"CZK","firstCollection":"2026-11-01","scaChallengeId":"sca-${UUID.randomUUID()}"}""",
         )
             .`when`().post("$funding/$id/mandates").then().statusCode(201)
         spec(owner).body("""{"usage":{"retirement-products-deduction":10000}}""")
@@ -179,12 +188,25 @@ class FundingApiIT {
     }
 
     @Test
-    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-relay-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `an employer bulk line only credits a contract that enrolled that employer`() {
         val owner = UUID.randomUUID()
         val id = seededContract(owner)
         val employer = UUID.randomUUID()
-        spec(owner).body("{}").`when`().put("$funding/$id/employers/$employer").then().statusCode(204)
+        // Binding an employer to the contract is SCA-bound like every sibling: no challenge, 403.
+        spec(owner).body("{}")
+            .`when`().put("$funding/$id/employers/$employer").then().statusCode(403)
+        assertThat(rows("SELECT count(*) FROM pension_employer_enrolments WHERE contract_id = '$id'")).isEqualTo(0)
+        spec(owner)
+            .body("""{"scaChallengeId":"sca-${UUID.randomUUID()}"}""")
+            .`when`().put("$funding/$id/employers/$employer").then().statusCode(204)
         assertThat(rows("SELECT count(*) FROM pension_employer_enrolments WHERE contract_id = '$id'")).isEqualTo(1)
     }
 

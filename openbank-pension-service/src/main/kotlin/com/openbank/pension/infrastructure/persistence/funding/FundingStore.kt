@@ -144,8 +144,10 @@ class PgContributions(client: Pool) :
         rows("${Sql.CONTRIBUTION_SELECT} WHERE contract_id = $1 ORDER BY value_date, received_at", Tuple.of(contractId))
             .map { it.toContribution() }
 
-    override suspend fun byContractAndYear(contractId: UUID, taxYear: Int): List<Contribution> =
-        byContractAndRange(contractId, LocalDate.of(taxYear, 1, 1), LocalDate.of(taxYear + 1, 1, 1))
+    override suspend fun byContractAndYear(contractId: UUID, taxYear: Int): List<Contribution> {
+        val (from, toExclusive) = taxYearWindow(taxYear)
+        return byContractAndRange(contractId, from, toExclusive)
+    }
 
     override suspend fun byContractAndRange(
         contractId: UUID,
@@ -155,6 +157,12 @@ class PgContributions(client: Pool) :
         "${Sql.CONTRIBUTION_SELECT} WHERE contract_id = $1 AND value_date >= $2 AND value_date < $3 ORDER BY value_date, received_at",
         Tuple.of(contractId, from, toExclusive),
     ).map { it.toContribution() }
+}
+
+/** Construct the exclusive year bound without wrapping a caller-supplied year. */
+internal fun taxYearWindow(taxYear: Int): Pair<LocalDate, LocalDate> {
+    val from = LocalDate.of(taxYear, 1, 1)
+    return from to from.plusYears(1)
 }
 
 @Singleton

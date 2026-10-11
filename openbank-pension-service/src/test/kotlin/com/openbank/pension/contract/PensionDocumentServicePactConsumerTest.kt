@@ -28,7 +28,10 @@ import io.restassured.RestAssured.given
 import jakarta.ws.rs.Path
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.MethodOrderer
+import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.TestMethodOrder
 import org.junit.jupiter.api.extension.ExtendWith
 import java.util.UUID
 
@@ -53,13 +56,15 @@ import java.util.UUID
 private const val CONSUMER = "openbank-pension-service"
 private const val PROVIDER = "openbank-document-service"
 
+// Pact writes interactions in execution order; keep regenerated files deterministic.
+@TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 @ExtendWith(PactConsumerTestExt::class)
 @PactTestFor(providerName = PROVIDER, pactVersion = PactSpecVersion.V3)
 class PensionDocumentServicePactConsumerTest {
 
     @Pact(consumer = CONSUMER, provider = PROVIDER)
     fun renderKidPact(builder: PactDslWithProvider): RequestResponsePact = builder
-        .given("the canonical document templates are seeded and published")
+        .given("a test-only published pension key-information fixture exists")
         .uponReceiving("POST render the pension key-information document for a strategy choice")
         .path(RENDER_PATH)
         .method("POST")
@@ -101,6 +106,7 @@ class PensionDocumentServicePactConsumerTest {
     }
 
     @Test
+    @Order(1)
     @PactTestFor(pactMethod = "renderKidPact")
     fun `the render answers the stored document's id and hash, which the SCA signature binds`(mockServer: MockServer) {
         assertThat(clientDerivedRenderPath()).isEqualTo(RENDER_PATH)
@@ -119,6 +125,7 @@ class PensionDocumentServicePactConsumerTest {
     }
 
     @Test
+    @Order(2)
     @PactTestFor(pactMethod = "renderUnauthenticatedPact")
     fun `a render with no identity is refused with 401`(mockServer: MockServer) {
         given()

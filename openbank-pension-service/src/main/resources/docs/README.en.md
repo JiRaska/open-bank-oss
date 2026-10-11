@@ -17,16 +17,16 @@ This documentation is published by the service at the management endpoint `/q/op
 
 | Method & path | What it does |
 |---|---|
-| `POST /api/v1/pension/contracts` | Create a DRAFT contract under the pack in force today |
-| `GET /api/v1/pension/contracts/{id}` | Read a contract with its strategy history |
-| `POST /api/v1/pension/contracts/{id}/submit` | DRAFT → PENDING_ACTIVATION |
-| `PUT /api/v1/pension/contracts/{id}/strategy` | Elect or change the strategy (history kept) |
-| `POST /api/v1/pension/contracts/{id}/suspend` / `resume` | Pause / resume contributions |
-| `POST /api/v1/pension/contracts/{id}/incentive-evaluation` | Incentives of the pinned pack for one contribution |
-| `GET /api/v1/pension/contracts` | The participant's own contracts (staff: by status) |
-| `POST /api/v1/pension/simulations` | Illustrative projection per strategy (not advice) |
-| `PUT /api/v1/pension/contracts/{contractId}/exit/payouts/{payoutId}/account` | SCA-bound, held (3 days), notified payout-account change |
-| `GET /api/v1/pension/operator/payouts`, `GET /api/v1/pension/death-claims` | Staff queues |
+| `GET /api/v2/pension/contracts/{id}` | Read a contract with its strategy history |
+| `GET /api/v2/pension/transfers` | The participant's own transfers, in and out (pending by default) |
+| `POST /api/v2/pension/transfers/{id}/withdrawal` | Withdraw a transfer-out (or the consent to one) before it is valued — SCA-signed |
+| `PUT /api/v2/pension/contracts/{id}/strategy` | Elect or change the strategy (history kept) |
+| `POST /api/v2/pension/contracts/{id}/suspend` / `resume` | Pause / resume contributions |
+| `POST /api/v2/pension/contracts/{id}/incentive-evaluation` | Incentives of the pinned pack for one contribution |
+| `GET /api/v2/pension/contracts` | The participant's own contracts (staff: by status) |
+| `POST /api/v2/pension/simulations` | Illustrative projection per strategy (not advice) |
+| `PUT /api/v2/pension/contracts/{contractId}/exit/payouts/{payoutId}/account` | SCA-bound, held (3 days), notified payout-account change |
+| `GET /api/v2/pension/operator/payouts`, `GET /api/v2/pension/death-claims` | Staff queues |
 
 Activation happens only through the onboarding workflow (signed application, cooling-off, first
 contribution or transfer-in); termination is the S5 quote/sign flow under `/exit`. Every POST
@@ -56,3 +56,17 @@ This stage provides server authentication; it does not establish mutual TLS.
 `ServerTlsIT` proves PEM loading, TLS 1.3 negotiation, rejection of an untrusted
 certificate, and continued HTTP service with ephemeral test keys. Deployment
 declarations and this test do not prove that a cluster Certificate is ready.
+
+## Repeatable synthetic demonstration
+
+Run `python3 openbank-pension-service/demo/pension_demo.py run` from the repository root.
+The runbook at `openbank-pension-service/demo/README.md` describes the presenter sequence,
+reset and evidence. The runner creates separate disposable Alpha/Beta pension-service test
+contexts, then verifies the fund service independently, and writes an HTML/JSON report under
+`build/pension-demo/`. Failed, skipped or stale test results cannot produce a passed report.
+
+The Gradle property `-PpensionDemoCompany=alpha|beta` selects only test fixtures; ordinary test
+and runtime defaults remain unchanged. This demonstration needs no real provider identity or
+production ownership approval. It uses synthetic data and simulated external collaborators.
+It does not prove simultaneous deployment isolation with real OIDC/OPA tokens, real settlement
+or a fully connected production money path. Those capabilities remain in #12472 and #12479.
