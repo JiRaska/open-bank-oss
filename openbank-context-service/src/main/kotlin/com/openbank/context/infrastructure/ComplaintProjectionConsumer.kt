@@ -129,7 +129,7 @@ class ComplaintProjectionConsumer(
               AND NOT (EXCLUDED.node_type = 'TRANSACTION' AND context_nodes.source_system = 'domestic-payment')
         """.trimIndent(),
         mapOf(
-            "rowId" to stableId("$bankScope|$projectionGeneration|${node.key}"),
+            "rowId" to UUID.randomUUID(),
             "key" to node.key,
             "bankScope" to bankScope,
             "generation" to projectionGeneration,

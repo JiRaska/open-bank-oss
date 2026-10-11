@@ -111,7 +111,7 @@ class DomesticPaymentProjectionConsumer(
                OR context_nodes.source_version < EXCLUDED.source_version
         """.trimIndent(),
         mapOf(
-            "rowId" to stableId("$bankScope|$projectionGeneration|${node.key}"),
+            "rowId" to UUID.randomUUID(),
             "key" to node.key,
             "bankScope" to bankScope,
             "generation" to projectionGeneration,
@@ -179,7 +179,6 @@ class DomesticPaymentProjectionConsumer(
 
     private fun JsonNode.text(name: String): String = path(name).takeIf { it.isTextual }?.asText()?.trim().orEmpty()
     private fun JsonNode.long(name: String): Long = path(name).takeIf { it.canConvertToLong() }?.asLong() ?: 0
-    private fun stableId(value: String): UUID = UUID.nameUUIDFromBytes(value.toByteArray(StandardCharsets.UTF_8))
 
     private companion object {
         const val CREATED = "DOMESTIC_PAYMENT_CREATED"
