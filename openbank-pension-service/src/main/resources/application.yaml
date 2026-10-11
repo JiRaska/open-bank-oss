@@ -225,7 +225,8 @@ mp:
       domestic-payment-events-in:
         connector: smallrye-kafka
         topic: openbank.domestic.payment.events
-        client.id: pension-service-domestic-payment-${quarkus.uuid}
+        client:
+          id: pension-service-domestic-payment-${quarkus.uuid}
         # group.id / auto.offset.reset ship WITH the consumer in this image, NESTED (the dotted
         # one-liner is quoted by the YAML source and never reaches the connector, #686/#2945). A
         # GitOps msg-override would declare the channel for whatever image is pinned, and an image
