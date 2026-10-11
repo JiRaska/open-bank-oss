@@ -8,10 +8,26 @@ import rego.v1
 
 pension_edge := "service-account-openbank-edge"
 
-test_edge_may_create_a_contract if {
-	rest.allow with input as {
+# The S1 draft path is not a customer flow: contracts are born through onboarding (#12435).
+test_edge_may_not_create_a_contract_through_the_s1_draft_path if {
+	not rest.allow with input as {
 		"principal": {"type": "HUMAN", "id": pension_edge, "roles": ["ROLE_API"]},
 		"action": "pension.contract.create",
+	}
+}
+
+test_edge_may_not_submit_an_s1_draft if {
+	not rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": pension_edge, "roles": ["ROLE_API"]},
+		"action": "pension.contract.submit",
+	}
+}
+
+# Known-positive twin: the edge still starts a contract the real way.
+test_edge_may_start_onboarding if {
+	rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": pension_edge, "roles": ["ROLE_API"]},
+		"action": "pension.onboarding.start",
 	}
 }
 

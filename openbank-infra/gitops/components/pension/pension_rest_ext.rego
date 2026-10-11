@@ -6,8 +6,8 @@
 # Actions gated (pension-service REST resources):
 #   pension.contract.inspect       — GET  /contracts (own list / staff by status), GET /contracts/{id},
 #                                    POST /contracts/{id}/incentive-evaluation
-#   pension.contract.create        — POST /contracts
-#   pension.contract.submit        — POST /contracts/{id}/submit
+#   pension.contract.create        — POST /contracts                 (S1 draft path; NO principal)
+#   pension.contract.submit        — POST /contracts/{id}/submit     (S1 draft path; NO principal)
 #   pension.contract.strategy      — PUT  /contracts/{id}/strategy
 #   pension.contract.suspend       — POST /contracts/{id}/suspend
 #   pension.contract.resume        — POST /contracts/{id}/resume
@@ -24,6 +24,8 @@
 #   pension.simulation.run         — POST /simulations (illustrative projection)                   (S8)
 #   pension.operator.exit-read     — GET  /operator/payouts (staff payout queue)                    (S8)
 #
+# The S1 draft path (create/submit) is granted to no one: a contract is born through onboarding
+# (pension.onboarding.*), and the edge has no route that uses it. Least privilege, #12435.
 # Retired at integration (S8): pension.contract.activate (activation is the onboarding workflow's
 # alone) and pension.contract.terminate (S1's preview; S5's pension.exit.terminate replaces it).
 #
@@ -70,8 +72,6 @@ allowed_reasons contains "edge-service-pension" if {
 	input.principal.id == "service-account-openbank-edge"
 	input.action in {
 		"pension.contract.inspect",
-		"pension.contract.create",
-		"pension.contract.submit",
 		"pension.contract.strategy",
 		"pension.contract.suspend",
 		"pension.contract.resume",
