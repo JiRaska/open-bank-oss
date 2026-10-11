@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.34.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.33.1...ledger-service-v1.34.0) (2026-10-11)
+
+
+### Features
+
+* **ledger:** own OPA action for the frozen trial balance; no heartbeat for switched-off jobs ([#12503](https://github.com/JiRaska/open-bank-oss/issues/12503)) ([fc36337](https://github.com/JiRaska/open-bank-oss/commit/fc36337d81841e7a7df04143a385f94ffc35d38e))
+
 ## [1.33.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.33.0...ledger-service-v1.33.1) (2026-10-10)
 
 
