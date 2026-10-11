@@ -123,3 +123,13 @@ test_absent_service_account_field_denies_every_staff_rule if {
 			with data.rules as excluded
 	}
 }
+
+test_absent_field_non_prefixed_machine_denied_on_every_staff_rule if {
+	every action in {"tax.filing.read", "tax.filing.assemble", "tax.filing.file"} {
+		not rest.allow with input as {
+			"principal": {"type": "HUMAN", "id": "batch-bot", "roles": ["ROLE_OPERATOR", "ROLE_AUDITOR"]},
+			"action": action,
+		}
+			with data.rules as excluded
+	}
+}

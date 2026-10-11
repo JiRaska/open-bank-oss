@@ -1558,3 +1558,18 @@ test_absent_field_keeps_named_client_grants_during_rollout if {
 	impostor := {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"], "service_account": false}
 	not rest.allowed_reasons["edge-service-notification"] with input as {"principal": impostor, "action": "notification.list"}
 }
+
+# The transition never GRANTS a staff rule on an absent field: a machine whose id is not
+# `service-account-*` and that sends no flag (a pre-phase-1 PEP) is a machine, and the
+# legacy prefix stand-in in machine_grant_ok cannot reach it (it needs the prefix).
+test_absent_field_non_prefixed_machine_gets_no_staff_and_no_machine_grant if {
+	bot := {"id": "batch-bot", "type": "HUMAN", "roles": ["ROLE_OPERATOR", "ROLE_ADMIN"]}
+	rest.principal_is_machine with input as {"principal": bot}
+	not rest.machine_grant_ok with input as {"principal": bot}
+	every action in {"account.read", "ledger.create"} {
+		not rest.allowed_reasons["matrix-allows"] with input as {"principal": bot, "action": action}
+			with data.rules.authz as matrix_op_read
+	}
+	not rest.allowed_reasons["operator-mcp-session"] with input as {"principal": bot, "action": "mcp.session.issue"}
+	not rest.allowed_reasons["m2m-sanctions-screening"] with input as {"principal": bot, "action": "sanctions.create"}
+}
