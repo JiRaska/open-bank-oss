@@ -54,9 +54,18 @@ class CatalogPensionOidcApprovalIT {
         assertThat(jwtPayload(unrelated).path("sub").asText()).isNotBlank()
         given().auth().oauth2(unrelated).get("/api/v2/offerings").then().statusCode(200)
         given().auth().oauth2(unrelated).get(path).then().statusCode(403)
+        val unmarked = serviceToken("unmarked-service")
+        assertThat(jwtPayload(unmarked).path("scope").asText().split(' ')).contains("catalog:read")
+        assertThat(jwtPayload(unmarked).has("preferred_username")).isFalse()
+        assertThat(jwtPayload(unmarked).path("realm_access").path("roles").map { it.asText() })
+            .doesNotContain("ROLE_API")
+        given().auth().oauth2(unmarked).get("/api/v2/offerings").then().statusCode(200)
+        given().auth().oauth2(unmarked).get(path).then().statusCode(403)
         val pension = serviceToken("openbank-pension")
         assertThat(jwtPayload(pension).path("sub").asText()).isNotBlank()
         given().auth().oauth2(pension).get(path).then().statusCode(404)
+        val legal = humanToken("legal-reviewer", "openid profile pension:legal-approve")
+        given().auth().oauth2(legal).get(path).then().statusCode(404)
     }
 
     @Test

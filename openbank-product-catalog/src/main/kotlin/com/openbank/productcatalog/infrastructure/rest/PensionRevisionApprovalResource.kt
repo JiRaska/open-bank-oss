@@ -60,18 +60,26 @@ class PensionRevisionApprovalResource(
         return service.pensionApprovals(revisionId).map(::response)
     }
 
-    /** OPA is advisory by default; a catalog-read scope alone must not expose evidence to another service. */
+    /** OPA is advisory by default; a catalog-read scope alone must not expose approval evidence. */
     private fun requirePensionServiceWhenMachine() {
         val token = identity.principal as? JsonWebToken
-        val username = token?.getClaim<String>("preferred_username") ?: identity.principal.name.orEmpty()
-        if (!username.startsWith("service-account-") && "ROLE_API" !in identity.roles) return
-        val serviceToken = token ?: throw CatalogForbiddenException("a verified service JWT is required")
-        if (
-            serviceToken.getClaim<String>("azp") != "openbank-pension" ||
-            username != "service-account-openbank-pension" ||
-            (serviceToken.subject ?: serviceToken.getClaim<String>("sub")).isNullOrBlank()
-        ) {
-            throw CatalogForbiddenException("pension service identity is required for approval evidence")
+            ?: throw CatalogForbiddenException("a verified JWT is required for approval evidence")
+        val client = token.getClaim<String>("azp")
+        val username = token.getClaim<String>("preferred_username").orEmpty()
+        val subject = token.subject ?: token.getClaim<String>("sub")
+        val pensionService = client == "openbank-pension" &&
+            username == "service-account-openbank-pension" &&
+            "ROLE_API" in identity.roles
+        val humanApprover = client == "openbank-admin-ui" &&
+            username.isNotBlank() &&
+            !username.startsWith("service-account-") &&
+            !username.startsWith("agent:") &&
+            subject?.startsWith("agent:") != true &&
+            scopeMapper.roles(token.getClaim<Any?>(scopeClaim), identity.roles).any {
+                it == CatalogRoles.PENSION_LEGAL_APPROVER || it == CatalogRoles.PENSION_PRODUCT_OWNER
+            }
+        if (subject.isNullOrBlank() || (!pensionService && !humanApprover)) {
+            throw CatalogForbiddenException("pension approval evidence reader identity is required")
         }
     }
 

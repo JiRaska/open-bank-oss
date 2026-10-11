@@ -79,7 +79,14 @@ class CatalogScopeAuthorizationTest {
         roles = ["ROLE_PENSION_LEGAL_COUNSEL"],
         augmentors = [CatalogScopeIdentityAugmentor::class],
     )
-    @OidcSecurity(claims = [Claim(key = "scope", value = "pension:legal-approve")])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "scope", value = "pension:legal-approve"),
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = "legal-test-subject"),
+            Claim(key = "preferred_username", value = "pension-legal"),
+        ],
+    )
     fun namedHumanLegalRoleAndScopeDeriveCatalogRead() {
         given().get("/api/v2/offerings").then().statusCode(200)
         given().get(
@@ -127,7 +134,7 @@ class CatalogScopeAuthorizationTest {
         given().get(
             "/api/v2/offerings/00000000-0000-0000-0000-000000000001" +
                 "/revisions/00000000-0000-0000-0000-000000000002/pension-approvals",
-        ).then().statusCode(404)
+        ).then().statusCode(403)
         given().contentType("application/json")
             .body(
                 """
@@ -139,7 +146,11 @@ class CatalogScopeAuthorizationTest {
     }
 
     @Test
-    @TestSecurity(user = "service-account-openbank-pension", augmentors = [CatalogScopeIdentityAugmentor::class])
+    @TestSecurity(
+        user = "service-account-openbank-pension",
+        roles = ["ROLE_API"],
+        augmentors = [CatalogScopeIdentityAugmentor::class],
+    )
     @OidcSecurity(
         claims = [
             Claim(key = "scope", value = "catalog:read"),
