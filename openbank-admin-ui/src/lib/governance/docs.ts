@@ -21,16 +21,7 @@
 
 import { promises as fs } from 'fs'
 import path from 'path'
-
-// ── Money-path services (source: openbank-libs/governance/rules.yaml →
-// money_path_services). Stable governance constant; used only to badge threat
-// models and flag money-path services that are MISSING one (the audit gap). ──
-const MONEY_PATH = new Set([
-  'ledger-service', 'transaction-service', 'account-service', 'balance-service',
-  'sepa-payment', 'sepa-instant', 'domestic-payment', 'clearing-service',
-  'swift-service', 'fx-service', 'lending-service', 'sca-service', 'consent-service',
-  'fraud-service',
-])
+import { loadMoneyPathServices } from './moneyPath'
 
 export type AdrStatus = 'Accepted' | 'Proposed' | 'Superseded' | 'Deprecated' | 'Rejected' | 'Unknown'
 
@@ -149,6 +140,7 @@ function threatService(slug: string): string {
 }
 
 export async function loadThreatModelIndex(): Promise<ThreatModelMeta[]> {
+  const moneyPath = await loadMoneyPathServices()
   const dir = await corpusDir('threat-models')
   if (!dir) return []
   const files = (await fs.readdir(dir)).filter(f => f.endsWith('.md'))
@@ -161,7 +153,7 @@ export async function loadThreatModelIndex(): Promise<ThreatModelMeta[]> {
         service,
         slug,
         title: firstHeading(md, service),
-        moneyPath: MONEY_PATH.has(service),
+        moneyPath: moneyPath.has(service),
       } satisfies ThreatModelMeta
     }),
   )
@@ -169,6 +161,7 @@ export async function loadThreatModelIndex(): Promise<ThreatModelMeta[]> {
 }
 
 export async function loadThreatModel(service: string): Promise<ThreatModelDoc | null> {
+  const moneyPath = await loadMoneyPathServices()
   if (!SLUG_RE.test(service)) return null
   const dir = await corpusDir('threat-models')
   if (!dir) return null
@@ -182,7 +175,7 @@ export async function loadThreatModel(service: string): Promise<ThreatModelDoc |
         service: bare,
         slug: name.replace(/\.md$/, ''),
         title: firstHeading(md, bare),
-        moneyPath: MONEY_PATH.has(bare),
+        moneyPath: moneyPath.has(bare),
         markdown: md,
       }
     } catch {
@@ -194,8 +187,9 @@ export async function loadThreatModel(service: string): Promise<ThreatModelDoc |
 
 /** Money-path services (rules.yaml) that have NO threat model yet — the gap. */
 export async function missingThreatModels(): Promise<string[]> {
+  const moneyPath = await loadMoneyPathServices()
   const present = new Set((await loadThreatModelIndex()).map(m => m.service))
-  return [...MONEY_PATH].filter(s => !present.has(s)).sort()
+  return [...moneyPath].filter(s => !present.has(s)).sort()
 }
 
 // ── Agent charters (docs/agents, ADR-0156) — the narrative companion to the

@@ -108,6 +108,7 @@ RUN set -e; \
     cp /repo/docs/agents/*.md /governance-bundle/agents/ 2>/dev/null || true; \
     cp -R /repo/openbank-libs/governance /governance-src/openbank-libs/governance; \
     test -s /governance-src/openbank-libs/governance/rules.yaml; \
+    cp /governance-src/openbank-libs/governance/rules.yaml /governance-bundle/rules.yaml; \
     test -s /governance-src/openbank-libs/governance/card-capabilities.yaml; \
     cp -R /repo/openbank-libs/governance/prompts/. /governance-bundle/prompts/ 2>/dev/null || true; \
     echo "── governance bundle: $(ls /governance-bundle/adr | wc -l) ADR(s), $(ls /governance-bundle/threat-models | wc -l) threat model(s), $(ls /governance-bundle/agents | wc -l) agent charter(s), $(find /governance-bundle/prompts -name '*.md' | wc -l) prompt(s) ──"; \
