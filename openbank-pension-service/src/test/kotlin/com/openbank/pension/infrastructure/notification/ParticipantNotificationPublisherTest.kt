@@ -104,6 +104,7 @@ class ParticipantNotificationPublisherTest {
         publisher(enabled = true, language = { if (it == party) "EN" else "CS" }).send(notice)
         val envelope: Map<String, Any?> = json.readValue(sent.single().second)
         assertThat(envelope).containsEntry("language", "EN")
+        assertThat(envelope).containsEntry("sourceService", "pension-service")
     }
 
     @Test

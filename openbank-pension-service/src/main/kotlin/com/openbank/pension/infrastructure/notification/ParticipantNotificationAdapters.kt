@@ -113,6 +113,9 @@ class ParticipantNotificationPublisher(
         mapOf(
             // notification-service renders the PENSION_* copy in this language (cs / en, #12409).
             "language" to language,
+            // The producer's own attribution claim (#5256/#6035): audit rows derived from this topic
+            // are chain-hashed and append-only, so they must not rely on topic-name derivation.
+            "sourceService" to SOURCE_SERVICE,
             "partyId" to notification.partyId.toString(),
             "channel" to "PUSH",
             "template" to notification.kind.template,
@@ -131,6 +134,7 @@ class ParticipantNotificationPublisher(
 
     companion object {
         const val METRIC = "openbank.pension.notification.requests"
+        const val SOURCE_SERVICE = "pension-service"
         const val DEFAULT_TIMEOUT_MILLIS = 5_000L
     }
 }
