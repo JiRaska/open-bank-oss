@@ -147,6 +147,14 @@ mp:
       # Keep the plain-HTTP port: with client-auth REQUIRED Quarkus otherwise drops the HTTP
       # listener, and the readiness probe plus admin-ui BFF discovery still use 8117.
       insecure-requests: enabled
+      # A trusted workload certificate proves transport membership only. The API caller must
+      # still present an OIDC bearer so roles and OPA decide the same identity on both ports.
+      auth:
+        permission:
+          bearer-only:
+            paths: /api/*
+            policy: permit
+            auth-mechanism: bearer
     # The onboarding screening reconciler reads party-service's party list. Production uses a named
     # TLS bucket over party-service's private-CA mTLS listener (8443, client auth REQUIRED), the
     # same shape as sca-service and delegation-service. Local/test fixtures speak plain HTTP.
