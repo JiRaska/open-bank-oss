@@ -113,6 +113,17 @@ class StrategyCatalogWireMockResource : QuarkusTestResourceLifecycleManager {
             server.stubFor(get(urlEqualTo("/api/v2/offerings")).atPriority(1).willReturn(okJson("[]")))
         }
 
+        /** Override one exact revision response while retaining the real REST/OIDC client path. */
+        fun stubApprovalEvidence(approvals: String, strategyIndex: Int = 1, revision: Int = 7) {
+            val id = offeringId(strategyIndex)
+            val revisionId = UUID.nameUUIDFromBytes("$id:$revision".toByteArray())
+            server.stubFor(
+                get(urlEqualTo("/api/v2/offerings/$id/revisions/$revisionId/pension-approvals"))
+                    .atPriority(1)
+                    .willReturn(okJson(approvals)),
+            )
+        }
+
         private fun offeringId(index: Int): UUID = UUID.nameUUIDFromBytes("dip-strategy-$index".toByteArray())
     }
 }

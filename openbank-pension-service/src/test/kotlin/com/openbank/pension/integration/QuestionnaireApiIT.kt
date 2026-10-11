@@ -223,6 +223,38 @@ class QuestionnaireApiIT {
         call("POST", "$apps/$id/strategy", "{}").statusCode(200).body("status", equalTo("KID_ISSUED"))
     }
 
+    @Test
+    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    fun `DIP questionnaire cannot persist an assessment from missing or stale approval evidence`() {
+        StrategyCatalogWireMockResource.stubApproved()
+        val id = start("DIP", "BANK", "1979-03-14")
+        val questionnaire = """{"answers":${dipBondCompetentEquityNovice()}}"""
+        val assessments = "select count(*) from pension_suitability_assessments where application_id = ?"
+        val stillUnsigned = "select count(*) from pension_onboarding_applications " +
+            "where application_id = ? and status = 'STARTED'"
+        val digest = "b".repeat(64)
+        val legal = """{"role":"LEGAL_COUNSEL","digest":"$digest","approvedAt":"2026-10-08T10:00:00Z"}"""
+
+        // A maker-edited reviewStatus alone is insufficient when the separate product signoff is absent.
+        StrategyCatalogWireMockResource.stubApprovalEvidence("[$legal]")
+        call("POST", "$apps/$id/questionnaire", questionnaire).statusCode(409)
+        assertThat(count(assessments, id)).isZero()
+        // Saving a resumable draft advances the aggregate version even when scoring is refused.
+        assertThat(count(stillUnsigned, id)).isEqualTo(1)
+
+        // The role exists, but its digest belongs to an earlier composition/revision.
+        val staleProduct = """{"role":"PRODUCT_OWNER","digest":"${"c".repeat(64)}",
+            "approvedAt":"2026-10-08T11:00:00Z"}"""
+        StrategyCatalogWireMockResource.stubApprovalEvidence("[$legal,$staleProduct]")
+        call("POST", "$apps/$id/questionnaire", questionnaire).statusCode(409)
+        assertThat(count(assessments, id)).isZero()
+        assertThat(count(stillUnsigned, id)).isEqualTo(1)
+
+        StrategyCatalogWireMockResource.stubApproved()
+        call("POST", "$apps/$id/questionnaire", questionnaire).statusCode(200)
+        assertThat(count(assessments, id)).isEqualTo(1)
+    }
+
     private fun count(sql: String, id: String): Int {
         val url = ConfigProvider.getConfig().getValue("quarkus.datasource.jdbc.url", String::class.java)
         DriverManager.getConnection(url, "openbank", "openbank_secret").use { conn ->
