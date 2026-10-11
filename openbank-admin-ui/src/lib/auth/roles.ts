@@ -23,6 +23,8 @@ export const ROLES = {
   CATALOG_READ: "CATALOG_SCOPE_READ",
   CATALOG_AUTHOR: "CATALOG_SCOPE_AUTHOR",
   CATALOG_PUBLISH: "CATALOG_SCOPE_PUBLISH",
+  PENSION_LEGAL_APPROVER: "PENSION_LEGAL_APPROVER",
+  PENSION_PRODUCT_OWNER: "PENSION_PRODUCT_OWNER",
   // ADR-0285 D6, phase 2: the write path the phase-1 communication:view comment above
   // anticipated. Maker (drafts/submits a style version) and checker (publishes/retires,
   // decides the commstyle.publish four-eyes queue) — never the same person on the same
@@ -142,6 +144,8 @@ export const PERMISSIONS = {
   "catalog:read":         [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.PAYMENTS, ROLES.CATALOG_READ, ROLES.CATALOG_AUTHOR, ROLES.CATALOG_PUBLISH],
   "catalog:author":       [ROLES.ADMIN, ROLES.OPERATOR, ROLES.CATALOG_AUTHOR],
   "catalog:publish":      [ROLES.ADMIN, ROLES.OPERATOR, ROLES.CATALOG_PUBLISH],
+  "catalog:pension:legal-approve": [ROLES.PENSION_LEGAL_APPROVER],
+  "catalog:pension:product-approve": [ROLES.PENSION_PRODUCT_OWNER],
   // Parties / KYC / Onboarding — party-service's list/search/detail GETs accept
   // VIEWER/OPERATOR/ADMIN/KYC only (PartyResource.kt). Compliance and the
   // split KYC opener/reviewer roles use their own case endpoints and must not

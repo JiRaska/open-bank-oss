@@ -21,7 +21,12 @@ describe('product studio form accessibility contract', () => {
     for (const id of controls) {
       expect(page).toContain(`id="${id}"`)
     }
-    expect(page.match(/htmlFor="studio-[^"]+"/g)).toHaveLength(6)
+    // The approval reason is a seventh labelled control. Check the exact targets so a new
+    // label cannot make the count pass while an existing control loses its association.
+    const labelledControls = controls.filter(id => id !== 'studio-new-spec-code' && id !== 'studio-new-offering-code')
+    labelledControls.push('studio-pension-approval-reason')
+    expect(page.match(/htmlFor="studio-[^"]+"/g)?.map(label => label.slice('htmlFor="'.length, -1)).sort()).toEqual(labelledControls.sort())
+    expect(page).toContain('id="studio-pension-approval-reason"')
     expect(page).toContain('aria-label={t(\'Kód nové specifikace\', \'New specification code\')}')
     expect(page).toContain('aria-label={t(\'Kód nové nabídky\', \'New offer code\')}')
   })

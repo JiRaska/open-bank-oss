@@ -48,6 +48,26 @@ describe('product catalog v2 production client', () => {
     ])
   })
 
+  it('uses the generated role approval route with strong revision precondition', async () => {
+    const fetcher = vi.fn(async () => new Response(JSON.stringify([]), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    })) as unknown as typeof fetch
+    const pathParameters = { offeringId: '20000000-0000-0000-0000-000000000001',
+      revisionId: '30000000-0000-0000-0000-000000000001' }
+    await catalogV2Operation('listPensionRevisionApprovalsV2', { pathParameters }, { fetcher })
+    await catalogV2Operation('approvePensionRevisionV2', {
+      pathParameters: { ...pathParameters, role: 'LEGAL_COUNSEL' },
+      headers: { 'If-Match': '"2"' }, body: { reason: 'Independent legal review' },
+    }, { fetcher })
+    const [readUrl, readOptions] = fetcher.mock.calls[0]
+    const [writeUrl, writeOptions] = fetcher.mock.calls[1]
+    expect(readUrl).toBe(`/api/svc/product-catalog/api/v2/offerings/${pathParameters.offeringId}/revisions/${pathParameters.revisionId}/pension-approvals`)
+    expect(readOptions.method).toBe('GET')
+    expect(writeUrl).toBe(`${readUrl}/LEGAL_COUNSEL`)
+    expect(writeOptions).toMatchObject({ method: 'POST', headers: expect.objectContaining({ 'If-Match': '"2"' }) })
+    expect(writeOptions.body).toBe(JSON.stringify({ reason: 'Independent legal review' }))
+  })
+
   it('drives the production client through the committed provider-replayed Pact interaction', async () => {
     const pact = JSON.parse(await readFile(
       resolve(process.cwd(), '../pacts/openbank-admin-ui-openbank-product-catalog.json'), 'utf8',

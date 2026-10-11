@@ -473,11 +473,20 @@ class AuthorizeInterceptor {
     private fun resolveAttributes(annotation: Authorize): Map<String, Any?> {
         if (annotation.attributes.isEmpty()) return emptyMap()
         val headers = if (httpHeaders.isResolvable) httpHeaders.get() else null
+        val principalName = securityContext.get().userPrincipal?.name
+        val serviceToken = if (principalName?.startsWith("service-account-") == true) {
+            identity.get().principal as? JsonWebToken
+        } else {
+            null
+        }
         return annotation.attributes.mapNotNull { key ->
             val value: Any? = when (key) {
                 "time-of-day" -> Instant.now(clock).toString()
                 "client-ip" -> headers?.getRequestHeader("X-Forwarded-For")?.firstOrNull()
                 "idempotency-key" -> headers?.getRequestHeader("Idempotency-Key")?.firstOrNull()
+                "azp" -> serviceToken?.getClaim<String>("azp")
+                "subject" -> serviceToken?.subject
+                "preferred_username" -> serviceToken?.getClaim<String>("preferred_username")
                 else -> null
             }
             value?.let { key to it }

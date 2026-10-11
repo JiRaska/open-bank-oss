@@ -175,6 +175,8 @@ data class ProductRevision(
     val createdAt: Instant,
     val updatedAt: Instant,
     val revision: Long = 0,
+    val pensionApprovalDigest: String? = null,
+    val pensionApprovedEffectiveTo: Instant? = null,
 ) {
     init {
         require(number > 0) { "revision number must be positive" }

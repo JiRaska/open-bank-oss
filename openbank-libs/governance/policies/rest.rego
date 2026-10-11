@@ -94,6 +94,10 @@ allowed_reasons contains "compliance-read-any" if {
 	input.principal.type == "HUMAN"
 	"ROLE_COMPLIANCE" in input.principal.roles
 	endswith(input.action, ".read")
+
+	# Same exclusion as operator-read-any: the CI realm gives the shared backend client
+	# ROLE_COMPLIANCE as well, so without it an excluded read stayed reachable by every service.
+	not operator_read_any_excluded(input.action)
 }
 
 # AI agents go through this same query when the agent's tool wraps a REST call
@@ -285,6 +289,60 @@ allowed_reasons contains "commstyle-read-publish-approval" if {
 	some role in {"ROLE_COMMS_APPROVER", "ROLE_ADMIN"}
 	role in input.principal.roles
 	input.action == "commstyle.approval.read"
+}
+
+# Pension catalog approval is a distinct human decision, never a generic publish grant.
+# The endpoint checks the requested legal/product role and immutable JWT actor identity.
+allowed_reasons contains "pension-catalog-decide-approval" if {
+	input.principal.type == "HUMAN"
+	not startswith(input.principal.id, "service-account-")
+	input.action == "catalog.pensionApproval.decide"
+	input.resource.id
+	some role in {"PENSION_LEGAL_APPROVER", "PENSION_PRODUCT_OWNER"}
+	role in input.principal.roles
+}
+
+allowed_reasons contains "pension-catalog-read-approval" if {
+	input.principal.type == "HUMAN"
+	not startswith(input.principal.id, "service-account-")
+	input.action == "catalog.pensionApproval.read"
+	input.resource.id
+	"CATALOG_SCOPE_READ" in input.principal.roles
+}
+
+# A named human legal/product reviewer needs the catalog workspace before deciding a revision.
+# The read role is derived from that reviewer's verified realm role by product-catalog; it is
+# never a realm-wide default or an assignable CATALOG_SCOPE_READ role.
+allowed_reasons contains "pension-catalog-human-reviewer-read" if {
+	input.principal.type == "HUMAN"
+	not startswith(input.principal.id, "service-account-")
+	input.action == "catalog.read"
+	"CATALOG_SCOPE_READ" in input.principal.roles
+	some role in {"PENSION_LEGAL_APPROVER", "PENSION_PRODUCT_OWNER"}
+	role in input.principal.roles
+}
+
+# The pension service reads published strategy mappings and their approval evidence with its
+# own client_credentials identity. The scope alone is insufficient for OPA: only this named
+# caller may traverse these catalog reads; approval decisions remain human-only above.
+allowed_reasons contains "pension-catalog-m2m-read" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-pension"
+	"CATALOG_SCOPE_READ" in input.principal.roles
+	input.action == "catalog.read"
+}
+
+allowed_reasons contains "pension-catalog-m2m-read-approval" if {
+    input.principal.type == "HUMAN"
+    input.principal.id == "service-account-openbank-pension"
+    "ROLE_API" in input.principal.roles
+    "CATALOG_SCOPE_READ" in input.principal.roles
+    input.action == "catalog.pensionApproval.read"
+    input.resource.id
+    input.attributes.azp == "openbank-pension"
+    input.attributes.preferred_username == "service-account-openbank-pension"
+    is_string(input.attributes.subject)
+    input.attributes.subject != ""
 }
 
 # Authenticated customers may perform any `customer.*` action (initiate payments, enroll

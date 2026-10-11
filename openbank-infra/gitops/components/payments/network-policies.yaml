@@ -224,6 +224,9 @@ spec:
               kubernetes.io/metadata.name: customer-edge
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: pension
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: security-scanner
         - namespaceSelector:
             matchLabels:
@@ -473,6 +476,9 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: customer-edge
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: pension
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: security-scanner

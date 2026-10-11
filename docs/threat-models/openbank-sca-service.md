@@ -348,3 +348,22 @@ is the **authentication assurance gate** for payments and consent — defeating 
   PENDING approval can never be decided or claimed, so it ages out on the same clock. A still-live
   approval never matches, because the cutoff lies in the past. The outbox events are not touched. A legal hold is `openbank.sca.approval-purge.enabled=false`. **Rollback:** revert
   the binary with four-eyes enforcement off; keep `sca_operator_approvals` and its outbox rows.
+
+
+## Pension integration boundary (ADR-0334/0335, #12435)
+
+**Pension challenge consumption.** This integration adds the `pension` namespace to `sca-service-ingress-allow-list`.
+That grants namespace-wide network reachability to the selected provider pods; it does not
+restrict traffic to one workload and does not grant an application action. The pension REST
+client uses its own `openbank-pension` client-credentials identity for `POST /api/v1/sca/challenges/{id}/consume`.
+
+**Threat and required controls.** Challenge consumption is an authorization boundary. Knowledge of the challenge id does not establish the party, operation or payload binding. A machine caller must not create a staff-role shortcut or bypass dynamic linking and single-use consumption.
+Compromise of any admitted namespace workload is therefore a network threat, while compromise
+of the pension client credential reaches whichever actions its provider authorization permits.
+Keep token validation, identity-scoped authorization and the provider's domain checks enabled.
+
+**Rollout dependency and proof limits.** The integration depends on #12419 for scoped downstream
+authorization; the allow-list change alone does not prove that grant is deployed or correct.
+Review the corresponding provider grant and negative caller/ownership tests before enabling
+this integration. Consumer contracts pin request/response shape; they do not prove a live token
+or account entitlement. No live deployment verification is claimed by this documentation update.

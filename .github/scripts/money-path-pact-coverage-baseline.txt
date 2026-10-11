@@ -10,3 +10,6 @@ openbank-domestic-payment -> openbank-clearing-simulator  # sandbox scheme simul
 openbank-lending-service -> openbank-analytics-sink  # credit-profile read for offers; no provider replay exists yet — #8345
 openbank-sepa-instant -> openbank-clearing-simulator  # sandbox scheme simulator, not a real counterparty — #8345 says this needs a decision, not a reflex pact
 openbank-sepa-payment -> openbank-clearing-simulator  # sandbox scheme simulator, not a real counterparty — #8345 says this needs a decision, not a reflex pact
+openbank-pension-service -> openbank-domestic-payment  # #12378: a committed pact needs a @PactFolder REST replay in domestic-payment (it has message replays only) and the provider does not yet admit service-account-openbank-pension — both provider-side, #12387
+openbank-pension-service -> openbank-sdd-service  # #12378: no @PactFolder provider replay exists in sdd-service and sdd.create/delete deny service-account-openbank-pension — provider-side, #12387
+openbank-pension-service -> openbank-standing-order-service  # #12378: no @PactFolder provider replay exists in standing-order-service; adding one is a provider-side change — #12387

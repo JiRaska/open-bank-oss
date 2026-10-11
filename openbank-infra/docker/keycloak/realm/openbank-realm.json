@@ -41,8 +41,24 @@
         "description": "Machine-to-machine API access"
       },
       {
+        "name": "PENSION_LEGAL_APPROVER",
+        "description": "Named human legal reviewer of pension strategy revisions; no default assignment."
+      },
+      {
+        "name": "PENSION_PRODUCT_OWNER",
+        "description": "Named human product owner reviewer of pension strategy revisions; no default assignment."
+      },
+      {
         "name": "ROLE_DEMO",
         "description": "Demo account — full access except Settings"
+      },
+      {
+        "name": "ROLE_PENSION_LEGAL_COUNSEL",
+        "description": "Individually assigned pension catalog legal reviewer; requires a separate approval scope"
+      },
+      {
+        "name": "ROLE_PENSION_PRODUCT_OWNER",
+        "description": "Individually assigned pension catalog product reviewer; requires a separate approval scope"
       }
     ]
   },
@@ -685,6 +701,24 @@
         "include.in.token.scope": "true",
         "display.on.consent.screen": "false"
       }
+    },
+    {
+      "name": "pension:legal-approve",
+      "description": "Pension catalog legal approval; requires separately assigned legal realm role",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      }
+    },
+    {
+      "name": "pension:product-approve",
+      "description": "Pension catalog product approval; requires separately assigned product realm role",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      }
     }
   ],
   "defaultDefaultClientScopes": [
@@ -1030,6 +1064,25 @@
       "attributes": {}
     },
     {
+      "clientId": "openbank-pension",
+      "name": "OpenBank Pension Service",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "CHANGE_ME_LOCAL_DEV_ONLY",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "protocol": "openid-connect",
+      "defaultClientScopes": [
+        "openid",
+        "basic",
+        "profile",
+        "roles",
+        "catalog:read"
+      ],
+      "attributes": {}
+    },
+    {
       "clientId": "openbank-analytics-sink",
       "name": "OpenBank Analytics Sink",
       "enabled": true,
@@ -1235,9 +1288,14 @@
       "attributes": {},
       "defaultClientScopes": [
         "openid",
+        "basic",
         "profile",
         "email",
         "roles"
+      ],
+      "optionalClientScopes": [
+        "pension:legal-approve",
+        "pension:product-approve"
       ],
       "secret": "changeme_local_admin_ui_dev_only"
     }
@@ -1438,6 +1496,14 @@
       "username": "service-account-openbank-kyb",
       "enabled": true,
       "serviceAccountClientId": "openbank-kyb",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-pension",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-pension",
       "realmRoles": [
         "ROLE_API"
       ]

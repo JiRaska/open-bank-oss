@@ -112,6 +112,12 @@ class CatalogRevisionEntity {
     @Column(name = "content_hash")
     var contentHash: String? = null
 
+    @Column(name = "pension_approval_digest")
+    var pensionApprovalDigest: String? = null
+
+    @Column(name = "pension_approved_effective_to")
+    var pensionApprovedEffectiveTo: Instant? = null
+
     @Column(name = "created_at")
     lateinit var createdAt: Instant
 
@@ -173,6 +179,23 @@ class CatalogApprovalEntity {
 
     @Column(name = "checker_id")
     lateinit var checkerId: String
+    lateinit var reason: String
+
+    @Column(name = "approved_at")
+    lateinit var approvedAt: Instant
+}
+
+@Entity
+@Table(name = "pension_revision_approvals")
+class PensionRevisionApprovalEntity {
+    @Id lateinit var id: UUID
+
+    @Column(name = "revision_id")
+    lateinit var revisionId: UUID
+    lateinit var role: String
+    lateinit var issuer: String
+    lateinit var subject: String
+    lateinit var digest: String
     lateinit var reason: String
 
     @Column(name = "approved_at")

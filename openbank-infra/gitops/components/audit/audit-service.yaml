@@ -31,7 +31,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes (subPath mounts do not hot-reload).
         # Kept in sync by gen-audit-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "11e96417d550b455"
+        openbank.tech/policy-checksum: "b9a604472c9c1ee7"
     spec:
       serviceAccountName: audit-service
       securityContext:
@@ -48,9 +48,24 @@ spec:
           ports:
             - name: http
               containerPort: 8113
+            - name: https
+              containerPort: 8443
             - name: management
               containerPort: 8085
           env:
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
+              value: /mnt/internal-tls/tls.crt
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
+              value: /mnt/internal-tls/tls.key
+            - name: QUARKUS_HTTP_SSL_PORT
+              value: "8443"
+            # Keep old callers working until the separately verified HTTPS cutover.
+            - name: QUARKUS_HTTP_INSECURE_REQUESTS
+              value: enabled
+            - name: QUARKUS_HTTP_SSL_PROTOCOLS
+              value: TLSv1.3
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_RELOAD_PERIOD
+              value: 1h
             - name: QUARKUS_DATASOURCE_JDBC_URL
               value: jdbc:postgresql://audit-db-rw.audit.svc:5432/openbank_audit
             - name: QUARKUS_DATASOURCE_REACTIVE_URL
@@ -151,6 +166,9 @@ spec:
               drop:
                 - ALL
           volumeMounts:
+            - name: internal-tls
+              mountPath: /mnt/internal-tls
+              readOnly: true
             - name: tmp
               mountPath: /tmp
             - name: kafka-keystore
@@ -242,6 +260,9 @@ spec:
               cpu: 100m
               memory: 64Mi
       volumes:
+        - name: internal-tls
+          secret:
+            secretName: audit-service-internal-tls
         - name: tmp
           emptyDir: {}
         - name: opa-tmp
@@ -281,3 +302,6 @@ spec:
     - name: http
       port: 8113
       targetPort: http
+    - name: https
+      port: 8443
+      targetPort: https

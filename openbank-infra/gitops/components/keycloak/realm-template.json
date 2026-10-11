@@ -51,6 +51,14 @@
         "description": "Machine-to-machine API access"
       },
       {
+        "name": "ROLE_PENSION_LEGAL_COUNSEL",
+        "description": "Individually assigned pension catalog legal reviewer; requires a separate approval scope"
+      },
+      {
+        "name": "ROLE_PENSION_PRODUCT_OWNER",
+        "description": "Individually assigned pension catalog product reviewer; requires a separate approval scope"
+      },
+      {
         "name": "ROLE_KYC",
         "description": "KYC officer (legacy — use KYC_OPENER or KYC_REVIEWER for new assignments)"
       },
@@ -97,6 +105,14 @@
       {
         "name": "ROLE_COMMS_APPROVER",
         "description": "Communication Studio checker: publishes and retires style/playbook versions and decides commstyle.publish four-eyes approvals (ADR-0285 D3/D6). Never granted to the same person's own draft (application-layer maker!=checker check)."
+      },
+      {
+        "name": "PENSION_LEGAL_APPROVER",
+        "description": "Named human legal reviewer of one pension strategy revision. Grants catalog read at runtime; no default user or client assignment."
+      },
+      {
+        "name": "PENSION_PRODUCT_OWNER",
+        "description": "Named human product owner reviewer of one pension strategy revision. Grants catalog read at runtime; no default user or client assignment."
       },
       {
         "name": "ROLE_RISK",
@@ -771,6 +787,24 @@
         "include.in.token.scope": "true",
         "display.on.consent.screen": "false"
       }
+    },
+    {
+      "name": "pension:legal-approve",
+      "description": "Pension catalog legal approval; requires separately assigned legal realm role",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      }
+    },
+    {
+      "name": "pension:product-approve",
+      "description": "Pension catalog product approval; requires separately assigned product realm role",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      }
     }
   ],
   "defaultDefaultClientScopes": [
@@ -844,9 +878,14 @@
       },
       "defaultClientScopes": [
         "openid",
+        "basic",
         "profile",
         "email",
         "roles"
+      ],
+      "optionalClientScopes": [
+        "pension:legal-approve",
+        "pension:product-approve"
       ],
       "secret": "__ADMINUI_CLIENT_SECRET__"
     },
@@ -1258,6 +1297,27 @@
         "roles"
       ],
       "secret": "__KYB_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-pension",
+      "name": "OpenBank Pension Service",
+      "description": "Per-service M2M client for pension-service's fund calls and catalog strategy reads (ADR-0334). Holds ROLE_API and the narrow catalog:read scope; OPA grants catalog reads to this identity alone.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "basic",
+        "profile",
+        "roles",
+        "catalog:read"
+      ],
+      "secret": "__PENSION_CLIENT_SECRET__"
     },
     {
       "clientId": "openbank-analytics-sink",
@@ -1869,6 +1929,14 @@
       "username": "service-account-openbank-kyb",
       "enabled": true,
       "serviceAccountClientId": "openbank-kyb",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-pension",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-pension",
       "realmRoles": [
         "ROLE_API"
       ]

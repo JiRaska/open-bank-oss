@@ -50,7 +50,7 @@ import org.junit.jupiter.api.extension.ExtendWith
     initArgs = [ResourceArg(name = "db", value = "openbank_products")],
     restrictToAnnotatedClass = true,
 )
-@TestSecurity(user = "pact-verifier", roles = ["ROLE_OPERATOR"])
+@TestSecurity(user = "pact-verifier", roles = ["ROLE_OPERATOR", "CATALOG_SCOPE_READ"])
 @Provider("openbank-product-catalog")
 @PactBroker
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
@@ -142,4 +142,7 @@ class ProductCatalogPactBrokerProviderVerificationTest {
 
     @State("a published priced loan revision exists for lending originations")
     fun publishedPricedLoanRevisionExists() = catalogFixtures.publishedPricedLoanRevisionExists()
+
+    @State("a published DIP strategy revision has separate legal and product approvals")
+    fun publishedPensionStrategyApprovalsExist() = catalogFixtures.publishedPensionStrategyApprovalsExist()
 }

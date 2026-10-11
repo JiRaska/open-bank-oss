@@ -32,6 +32,7 @@ import io.quarkus.hibernate.reactive.panache.Panache
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.persistence.LockModeType
 import java.math.BigDecimal
 import java.nio.charset.StandardCharsets
 import java.time.LocalDate
@@ -73,6 +74,43 @@ class PanachePensionFundStore(
                     .flatMap { session.flush() }
             }
         }.awaitSuspending()
+    }
+
+    /** The holding row serializes reservations across instances and with settlement writes. */
+    override suspend fun reserveOutgoing(order: UnitOrder): UnitOrder {
+        require(order.isOutgoing && order.status == OrderStatus.PENDING)
+        return Panache.withTransaction {
+            holdings.findById(holdingId(order.contractId, order.fundId), LockModeType.PESSIMISTIC_WRITE)
+                .flatMap { holding ->
+                    orders.find(
+                        "contractId = ?1 and idempotencyKey = ?2",
+                        order.contractId,
+                        order.idempotencyKey,
+                    ).firstResult().flatMap { existing ->
+                        if (existing != null) {
+                            val original = existing.toDomain()
+                            check(original.sameInstructionAs(order)) { "Idempotency-Key reused for a different order" }
+                            Uni.createFrom().item(original)
+                        } else {
+                            reserveAvailable(order, holding)
+                        }
+                    }
+                }
+        }.awaitSuspending()
+    }
+
+    private fun reserveAvailable(order: UnitOrder, holding: UnitHoldingEntity?): Uni<UnitOrder> = orders.find(
+        "contractId = ?1 and fundId = ?2 and status = ?3",
+        order.contractId,
+        order.fundId,
+        OrderStatus.PENDING.name,
+    ).list().flatMap { pending ->
+        val reserved = pending.map { it.toDomain() }.filter { it.isOutgoing }
+            .fold(BigDecimal.ZERO) { total, queued -> total + requireNotNull(queued.units) }
+        check((holding?.units ?: BigDecimal.ZERO) - reserved >= requireNotNull(order.units)) {
+            "Insufficient unreserved units"
+        }
+        orders.persistAndFlush(order.toEntity()).replaceWith(order)
     }
 
     private suspend fun <T> read(block: () -> Uni<T>): T = Panache.withSession { block() }.awaitSuspending()

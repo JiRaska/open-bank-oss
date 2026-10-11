@@ -16,6 +16,8 @@ import com.openbank.pensionfund.domain.model.StrategyChange
 import com.openbank.pensionfund.domain.model.UnitHolding
 import com.openbank.pensionfund.domain.model.UnitOrder
 import com.openbank.pensionfund.domain.model.UnitTransaction
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.util.UUID
@@ -29,6 +31,24 @@ class InMemoryStore : PensionFundStore {
     val transactions = linkedMapOf<UUID, UnitTransaction>()
     val holdings = linkedMapOf<Pair<UUID, UUID>, UnitHolding>()
     val positions = mutableListOf<NavPosition>()
+
+    private val reservationLock = Mutex()
+
+    override suspend fun reserveOutgoing(order: UnitOrder): UnitOrder = reservationLock.withLock {
+        require(order.isOutgoing && order.status == OrderStatus.PENDING)
+        val existing = order.idempotencyKey?.let { orderByIdempotencyKey(order.contractId, it) }
+        if (existing != null) {
+            check(existing.sameInstructionAs(order)) { "Idempotency-Key reused for a different order" }
+            existing
+        } else {
+            val held = holding(order.contractId, order.fundId)?.units ?: BigDecimal.ZERO
+            val reserved = pendingOrders(order.fundId).filter { it.contractId == order.contractId && it.isOutgoing }
+                .fold(BigDecimal.ZERO) { total, queued -> total + requireNotNull(queued.units) }
+            check(held - reserved >= requireNotNull(order.units)) { "Insufficient unreserved units" }
+            orders[order.id] = order
+            order
+        }
+    }
 
     override suspend fun commit(changes: StoreChanges) {
         changes.funds.forEach { funds[it.id] = it }

@@ -1,0 +1,109 @@
+{
+  "consumer": {
+    "name": "openbank-pension-service"
+  },
+  "interactions": [
+    {
+      "description": "POST consume the pension exit challenge the device signed",
+      "providerStates": [
+        {
+          "name": "a COMPLETED APPROVAL SCA challenge bound to a pension operation exists"
+        }
+      ],
+      "request": {
+        "body": {
+          "approvalRequestId": "pension-exit:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "partyId": "7e5a0002-0000-4000-8000-000000000335",
+          "payloadSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/sca/challenges/7e5a0001-0000-4000-8000-000000000335/consume"
+      },
+      "response": {
+        "body": {
+          "consumedAt": "2026-10-10T08:00:00Z",
+          "id": "7e5a0001-0000-4000-8000-000000000335",
+          "partyId": "7e5a0002-0000-4000-8000-000000000335",
+          "purpose": "APPROVAL",
+          "status": "COMPLETED"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.consumedAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "POST consume the pension exit challenge with another payload is a binding mismatch",
+      "providerStates": [
+        {
+          "name": "a COMPLETED APPROVAL SCA challenge bound to a pension operation exists"
+        }
+      ],
+      "request": {
+        "body": {
+          "approvalRequestId": "pension-exit:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "partyId": "7e5a0002-0000-4000-8000-000000000335",
+          "payloadSha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/sca/challenges/7e5a0001-0000-4000-8000-000000000335/consume"
+      },
+      "response": {
+        "status": 409
+      }
+    },
+    {
+      "description": "POST consume with no M2M identity is refused",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "body": {
+          "approvalRequestId": "pension-exit:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "partyId": "7e5a0002-0000-4000-8000-000000000335",
+          "payloadSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/sca/challenges/7e5a0001-0000-4000-8000-000000000335/consume"
+      },
+      "response": {
+        "status": 401
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-sca-service"
+  }
+}

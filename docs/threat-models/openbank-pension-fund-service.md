@@ -1,8 +1,8 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Threat model — openbank-pension-fund-service
 
-- **Status:** bootstrap (ADR-0334 slice S4), sandbox only — no participant-facing caller yet
-- **Last reviewed:** 2026-10-10 (#12425 reporting read model)
+- **Status:** integration (ADR-0334 slices S4/S8), sandbox only — pension-service machine caller
+- **Last reviewed:** 2026-10-10 (#12425 reporting read model and #12435 integration)
 - **Owner:** pension-fund-service CODEOWNERS
 - **Related ADRs:** ADR-0030, ADR-0034, ADR-0315, ADR-0334
 
@@ -39,10 +39,17 @@ contact data.
    so the shared account still read holdings through `compliance-read-any`. Proven both ways by
    `opa test` (must-DENY the shared account under ROLE_OPERATOR, ROLE_COMPLIANCE and ROLE_ADMIN;
    must-ALLOW staff and pension-service's client) and by `opa eval` on the materialised bundle.
-3. Market prices enter through `MarketPricePort`. The shipped adapter (`StubMarketPriceAdapter`)
+3. The integration admits the `pension` namespace in pension-fund's ingress NetworkPolicy.
+   This is network reachability, not authorization: the provider still checks the bearer identity,
+   RBAC and OPA for each request. `PensionFundRestClient` uses `@OidcClientFilter` and the
+   `openbank-pension` client-credentials identity to read holdings, place orders with an
+   `Idempotency-Key`, and read strategies. A caller compromised inside the admitted namespace
+   must not acquire fund-administrator NAV or strategy-change permissions. The exact machine
+   principal grant is a trust boundary; it does not establish participant ownership by itself.
+4. Market prices enter through `MarketPricePort`. The shipped adapter (`StubMarketPriceAdapter`)
    knows no prices, so every position must be priced in the request by the calculating
    administrator; an unpriced position is refused, never valued at an invented number.
-4. `/api/v1/reporting/funds/{fundId}/period-figures` (#12425) is the period-end read model
+5. `/api/v1/reporting/funds/{fundId}/period-figures` (#12425) is the period-end read model
    tax-reporting-service assembles the ČNB returns from. Aggregate only — sums and counts, no
    contract id. `pension-fund.reporting.inspect` is admitted for real staff and for
    tax-reporting-service's OWN client (`service-account-openbank-tax-reporting`, ROLE_API) alone,
@@ -58,10 +65,11 @@ contact data.
 | Elevation — one person calculates and publishes a NAV | `NavRecord.publish` throws `FourEyesViolationException` (403) when the approver is the calculator; DB CHECK `ck_fund_nav_four_eyes`; `PensionFundApiIT` proves the maker gets 403 over real HTTP and a second principal publishes | Identity is the token's principal name; two accounts held by one person defeat any four-eyes control |
 | Elevation — one person changes a strategy | `StrategyChange.approve`/`reject` refuse the submitter (403); DB CHECK `ck_strategy_change_four_eyes`; asserted in `FundStrategyTest` and `PensionFundApiIT` | Same as above |
 | Tampering — a strategy change applied without notice | `StrategyChange.submit` and `approve` require the effective date to leave `openbank.pension-fund.strategy-change.minimum-notice-days` after approval (the participant-notification date); `markApplied` refuses before the effective date (409) | The notice period is a deployment setting until jurisdiction packs (ADR-0334 §3) supply the statutory value; no notification is SENT yet — the date records when it may be, not that it was |
-| Tampering — backward pricing (trading at a known price) | `ForwardPricer.settle` refuses a NAV published at or before the order's placement, or valuing a day before it; publication settles only orders placed before the publication instant; a switch's buy leg waits for the TARGET fund's next NAV (`ForwardPricerTest`, `UnitRegisterFlowTest`) | Placement time is the service clock; a skewed pod clock shifts the cut-off |
+| Tampering — backward pricing (trading at a known price) | `ForwardPricer.settle` refuses a NAV published at or before the order's placement, or valuing a day before it; publication selects orders placed before the publication instant whose UTC placement date is no later than the valuation date; a switch's buy leg waits for the TARGET fund's next NAV (`ForwardPricerTest`, `UnitRegisterFlowTest`) | Placement time is the service clock; a skewed pod clock shifts the cut-off |
 | Tampering — dilution through rounding | Units issued are rounded DOWN, units cancelled for a fee rounded UP, money HALF_EVEN at 2 dp, NAV HALF_EVEN at 6 dp (`Precision`); every amount is a `BigDecimal` with an explicit scale | — |
 | Tampering — lost update on a holding | `unit_holdings.version` optimistic lock (`@Version`): a write from a stale read fails the whole commit with 409 and nothing is applied | Not exercised by a concurrent test; the version check is Hibernate's |
-| Tampering — selling units twice | Placement refuses a redemption or switch beyond units held minus units already queued to leave; settlement re-checks the holding; `unit_holdings.units >= 0` CHECK | Two concurrent placements can each pass the availability check; the settlement re-check and the CHECK constraint then fail the NAV publication rather than over-sell |
+| Tampering — selling units twice | `reserveOutgoing` locks the holding row, rechecks idempotency and queued outgoing units, and inserts the reservation in one transaction. `OutgoingReservationIT` uses concurrent real HTTP requests and a PostgreSQL row lock; settlement also rechecks holdings and the non-negative CHECK remains | Quiesce all older reservation writers before enabling writes on this release; older binaries do not participate in this locking protocol |
+| Tampering — switch changes currency without FX accounting | Placement rejects source/target currency mismatch before persistence; unit and HTTP regressions prove unchanged register state | Cross-currency switching remains unavailable until an approved FX accounting flow exists |
 | Tampering — a wrong NAV stays wrong | A correction is a NEW NAV for the same date that the original's units are re-valued with; its publication (four-eyes) supersedes the original, re-prices every transaction priced at it and adjusts holdings by the unit difference; the partial unique index `uq_fund_navs_published` allows one published NAV per fund and day | The cash difference on redemptions (`amountDelta`) is reported, not paid — compensation payment is a pension-service follow-up; a switch-out correction does not cascade into its already-settled switch-in leg |
 | Tampering — fund assets reach the bank's books | No ledger or treasury client exists in this module; no GL account is referenced anywhere | A future integration must keep fund books on the provider entity's own GL (ADR-0334 §2) |
 | Repudiation | Maker and checker principal names and times are stored on every NAV and strategy change; transactions keep the NAV they were priced at and, after a correction, the NAV they were corrected from | No events are published yet, so nothing reaches the tamper-evident audit trail; the database rows are the only record |
@@ -82,7 +90,7 @@ contact data.
 
 ## Out of scope / follow-ups
 
-Domain events and the audit subscription, the pension-service FundAdministrationPort adapter and
-its machine grant, a real market-data adapter, investment orders and depositary reconciliation,
+Domain events and the audit subscription, live deployment verification of the pension-service
+FundAdministrationPort adapter (consumer/provider Pact tests are present), a real market-data adapter, investment orders and depositary reconciliation,
 limit/concentration checks, scheduled NAV and strategy application, participant notification
 delivery, compensation payments for NAV corrections, fund close/merge with unit migration.
