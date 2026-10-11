@@ -3,6 +3,7 @@ package com.openbank.context.infrastructure
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.domain.identifiers.Ids
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.Tags
 import io.smallrye.mutiny.Uni
@@ -111,7 +112,7 @@ class DomesticPaymentProjectionConsumer(
                OR context_nodes.source_version < EXCLUDED.source_version
         """.trimIndent(),
         mapOf(
-            "rowId" to UUID.randomUUID(),
+            "rowId" to Ids.newId(),
             "key" to node.key,
             "bankScope" to bankScope,
             "generation" to projectionGeneration,
