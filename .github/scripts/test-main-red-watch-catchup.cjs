@@ -100,6 +100,29 @@ async function main() {
   await applyVerdict(github, context, verdict(103, 'green', [], [leaf, 'all-green']))
   assert.equal(issues.length, 1)
 
+  // #4195 predates this watch: its actual issue body uses the old heading and
+  // records both the ledger provider failure and the aggregate all-green job.
+  // A later metadata-only Services CI run succeeds with ledger absent.
+  const ledger = 'build (openbank-ledger-service) / openbank-ledger-service (contract)'
+  const legacy = { number: 2, state: 'open', title: 'main is red: Services CI', body: [
+    '<!-- main-red:services-ci -->',
+    '## `main` is red — nothing else would have told you',
+    '',
+    '### Every failing job in this attempt',
+    '',
+    `- \`${ledger}\` [failure] — \`Provider verification (:openbank-ledger-service:providerPactTest)\` ([log](https://example.invalid/ledger))`,
+    '- `all-green` [failure] — `Verify no service failed` ([log](https://example.invalid/all-green))',
+    '',
+    'The ledger provider contract is still failing.',
+  ].join('\n') }
+  issues.push(legacy)
+  await applyVerdict(github, context, verdict(104, 'green', [], ['Detect changed services', 'all-green']))
+  assert.equal(legacy.state, 'open')
+  assert.match(legacy.body, /build \(openbank-ledger-service\) \/ openbank-ledger-service \(contract\)/)
+  assert.doesNotMatch(legacy.body, /- `all-green` \[failure\]/)
+  await applyVerdict(github, context, verdict(105, 'green', [], [ledger, 'all-green']))
+  assert.equal(legacy.state, 'closed')
+
   // Exercise the workflow entry point, not just the issue reducer: a missing
   // red webhook is recovered from the Actions list and the cursor advances
   // only after the red and subsequent scoped green have been applied.
