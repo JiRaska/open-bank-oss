@@ -54,6 +54,7 @@ class SyntheticTaintFilterTest {
         username: String? = principal,
         subjectClaim: String? = "service-account-subject",
         plainPrincipal: Boolean = false,
+        unreadableClaim: String? = null,
     ): ContainerRequestContext {
         val security = mockk<SecurityContext>(relaxed = true) {
             every { userPrincipal } returns principal?.let { name ->
@@ -65,6 +66,12 @@ class SyntheticTaintFilterTest {
                         every { subject } returns subjectClaim
                         every { getClaim<String>("azp") } returns clientId
                         every { getClaim<String>("preferred_username") } returns username
+                        when (unreadableClaim) {
+                            "sub" -> every { subject } throws IllegalStateException("unreadable subject")
+                            "azp" -> every { getClaim<String>("azp") } throws IllegalStateException("unreadable azp")
+                            "preferred_username" -> every { getClaim<String>("preferred_username") } throws
+                                IllegalStateException("unreadable username")
+                        }
                     }
                 }
             }
@@ -130,6 +137,20 @@ class SyntheticTaintFilterTest {
         attempts.forEach { req ->
             filterWith(name).filter(req)
             verify { req.setProperty(SYNTHETIC_TAINT_PROPERTY, false) }
+        }
+    }
+
+    @Test
+    fun `unreadable service account claims fail to real without rejecting the request`() {
+        val canary = "service-account-openbank-canary"
+        listOf("sub", "azp", "preferred_username").forEach { claim ->
+            val req = request(header = "true", principal = canary, unreadableClaim = claim)
+
+            filterWith(canary).filter(req)
+
+            verify { req.setProperty(SYNTHETIC_TAINT_PROPERTY, false) }
+            verify(exactly = 0) { req.setProperty("openbank.synthetic.baggage-scope", any()) }
+            assertThat(Baggage.current().getEntryValue(SyntheticTaint.BAGGAGE_KEY)).isNull()
         }
     }
 
