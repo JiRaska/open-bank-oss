@@ -111,3 +111,13 @@ Mandátové závady mapuje `MandateNotFoundMapper` (404) a `IllegalMandateTransi
 - **AuthN:** Keycloak OIDC, RS256 JWT bearer token (`auth-server-url .../realms/openbank`, klient `openbank-services`).
 - **AuthZ:** Quarkus `@RolesAllowed`. Mutace vyžadují jednu z `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_PAYMENTS`, `ROLE_API`; read endpointy (`GET` výpis/načtení, `GET refund-assessment`) navíc povolují `ROLE_VIEWER`.
 - CORS je v dodávané konfiguraci omezen na `http://localhost:3000`; bezpečnostní hlavičky (CSP, HSTS, X-Frame-Options DENY, nosniff) jsou nastaveny na každé odpovědi.
+
+### Ověření identity iniciátora mandátu (#12448)
+
+Servisní účet penzijní služby získá pouze rozsah svého konfigurovaného identifikátoru věřitele;
+servisní účet edge si zachovává obecný rozsah mandátů. Obě kladné shody strojových identit
+vyžadují JWT ověřený Quarkus OIDC se `sub`, `azp` rovným očekávanému klientovi
+(`openbank-pension` nebo `openbank-edge`) a odpovídajícím `preferred_username` ve tvaru
+`service-account-<azp>`. Samotné jméno principalu nestačí. Neznámý principal začínající
+`service-account-` je odmítnut i s rolí personálu. Dosavadní cesta operátora a administrátora
+se vyhodnocuje odděleně.

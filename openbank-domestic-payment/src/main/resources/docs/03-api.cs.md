@@ -152,6 +152,15 @@ měny. Odpovědi, události `domestic.payment.*` i potvrzení platby proto nesou
 ukazovaly škálu sloupce (`100.500000`) nebo zápis z požadavku (`100.5`). Hodnoty jsou číselně shodné;
 mění se jen textová podoba.
 
+## Ověření identity penzijního iniciátora platby (#12448)
+
+Penzijní volající získá oprávnění k vymezenému účtu plátce jen tehdy, když ověřený JWT patří
+servisnímu účtu klienta `openbank-pension`: obsahuje `sub`, jeho `azp` označuje tohoto klienta
+a `preferred_username` odpovídá `service-account-openbank-pension`. JWT předtím ověřuje
+Quarkus OIDC. Samotná shoda jména principalu toto oprávnění nezakládá. Chybějící nebo neplatná
+konfigurace účtu nepovolí žádnou platbu v tomto vymezeném rozsahu. Dosavadní rozhodování podle
+rolí personálu zůstává oddělené; běžný volající s `ROLE_API` tento rozsah nezíská.
+
 ## Události
 
 Topic: `openbank.domestic.payment.events` (Kafka, JSON, kanál `events-out`).

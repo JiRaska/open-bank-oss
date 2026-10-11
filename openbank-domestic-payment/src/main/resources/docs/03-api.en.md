@@ -151,6 +151,15 @@ currency's minor-unit scale. Responses, the `domestic.payment.*` events and the 
 therefore carry `100.50` where they previously showed the column scale (`100.500000`) or the request's
 own spelling (`100.5`). The values are numerically equal; only the text representation changes.
 
+## Pension payment initiator identity (#12448)
+
+The pension caller receives a scoped debtor account only when the authenticated JWT is a
+service-account token for client `openbank-pension`: it has a subject, `azp` names that client,
+and `preferred_username` matches `service-account-openbank-pension`. The JWT is verified by
+Quarkus OIDC before this check. A matching principal name by itself cannot grant the scoped
+capability. An invalid or missing configured debtor account permits no scoped payment. Existing
+staff-role handling remains separate; ordinary `ROLE_API` callers do not receive this scope.
+
 ## Events
 
 Topic: `openbank.domestic.payment.events` (Kafka, JSON, channel `events-out`).
