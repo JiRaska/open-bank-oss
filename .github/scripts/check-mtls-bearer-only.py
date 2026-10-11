@@ -76,7 +76,11 @@ def bearer_paths(flat: dict) -> list[str]:
     out = []
     for n in sorted(names):
         mech = str(flat.get(f"{PERMISSION}.{n}.auth-mechanism", "")).strip().lower()
-        if mech == "bearer" and str(flat.get(f"{PERMISSION}.{n}.enabled", "true")).lower() != "false":
+        # A GET-only bearer permission does not protect POST/PUT on the same resource root.
+        # Class-level @Path inspection cannot prove which methods each resource serves, so
+        # only a permission applying to every method can establish root-wide coverage.
+        methods = str(flat.get(f"{PERMISSION}.{n}.methods", "")).strip()
+        if mech == "bearer" and not methods and str(flat.get(f"{PERMISSION}.{n}.enabled", "true")).lower() != "false":
             out += [p for p in str(flat.get(f"{PERMISSION}.{n}.paths", "")).split(",") if p.strip()]
     return out
 
@@ -114,7 +118,7 @@ def findings_for(doc, roots: list[str]) -> list[str]:
         patterns = bearer_paths(flat)
         label = f"profile {name or '(default)'}"
         if not patterns:
-            out.append(f"{label}: client-auth={ca} but no permission sets auth-mechanism: bearer — "
+            out.append(f"{label}: client-auth={ca} but no unrestricted permission sets auth-mechanism: bearer — "
                        "a trusted client certificate alone authenticates (#12511)")
             continue
         uncovered = [r for r in roots if not any(_covers(p, r) for p in patterns)]
@@ -151,6 +155,11 @@ def self_test() -> int:
         '"%prod":\n  quarkus:\n    http:\n      ssl:\n        client-auth: required\n'
         "      auth:\n        permission:\n          x:\n            paths: /api/*\n            auth-mechanism: mtls\n"
     )
+    get_only = yaml.safe_load(
+        '"%prod":\n  quarkus:\n    http:\n      ssl:\n        client-auth: required\n'
+        "      auth:\n        permission:\n          x:\n            paths: /api/*\n"
+        "            methods: GET\n            auth-mechanism: bearer\n"
+    )
     none = yaml.safe_load("quarkus:\n  http:\n    port: 8080\n")
     api = ["/api/v1/sca"]
     checks = [
@@ -160,6 +169,7 @@ def self_test() -> int:
         ("bearer-only not covering /ap2 root flagged", len(findings_for(fixed, ["/ap2/verify"])) == 1),
         ("inherited multi-path bearer-only passes", findings_for(inherited, ["/ap2/verify", "/api/v1/x"]) == []),
         ("auth-mechanism other than bearer flagged", len(findings_for(wrong_mech, api)) == 1),
+        ("GET-only bearer permission does not protect POST", len(findings_for(get_only, api)) == 1),
         ("no client-auth passes", findings_for(none, api) == []),
         ("/api/* does not cover /apix", not _covers("/api/*", "/apix")),
     ]
