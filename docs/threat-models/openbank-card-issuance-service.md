@@ -49,14 +49,15 @@ All mutations require `Idempotency-Key` or `X-Operator-Id` header; resource-leve
 
 | Threat | Vector | Mitigation |
 |---|---|---|
-| **S**poofing | Caller impersonates operator to issue or block a card | OIDC bearer + mTLS; no anonymous mutation; `ROLE_COMPLIANCE` scoped to block only |
+| **S**poofing | Caller impersonates operator to issue or block a card | OIDC bearer + mTLS; no anonymous mutation; `ROLE_COMPLIANCE` is scoped to block/cancel |
 | **T**ampering | Forced lifecycle skip (e.g. PENDING→BLOCKED direct), limit mutation | Domain state-machine guards (`Card.activate/block/suspend/resume`) enforce legal transitions; DB constraints; `version` for optimistic locking (if added — see §5) |
 | **R**epudiation | Operator denies issuing or changing card status | `card.issued.v1` + `card.status_changed.v1` emitted for every mutation through transactional outbox (ADR-0050); `changedBy` field on status-change event carries operator identity |
-| **I**nfo disclosure | Cardholder name / maskedPan / limits leaked via list endpoint | `ROLE_VIEWER` read access; OPA `card.read/list` policy gates on operator; no PII in event subjects; sandbox: maskedPan is synthetic — not a mask of a real PAN |
+| **I**nfo disclosure | Cardholder name / maskedPan / limits leaked via list endpoint | `ROLE_VIEWER` read access; OPA grants `card.read/list` to non-service-account viewers and operators; no PII in event subjects; sandbox: maskedPan is synthetic — not a mask of a real PAN |
 | **I**nfo disclosure | Card enumeration via `GET /party/{partyId}` returns another party's cards | OPA `card.list` resource policy scoped to `#partyId` — operators see all; customer-facing access requires a customer-edge ownership check (see §5) |
 | **I**nfo disclosure | `cardholderName` / `embossedName` in Kafka events observed by unauthorized consumer | Kafka topic ACLs restrict consumption to authorized services; outbox events carry only `partyId`, `accountId`, `cardType`, `network`, `maskedPan`, `previousStatus`/`newStatus`, `changedBy` — no full name in event payload |
 | **D**oS | Mass card issuance churn | Idempotency on `issueCard` (duplicate `idempotencyKey` returns existing card, no second DB write); gateway rate limits; outbox decouples event load |
 | **E**oP | Viewer escalates to issue or block | Distinct roles enforced at JAX-RS layer (`@RolesAllowed`) + OPA; deny-by-default |
+| **E**oP | A backend holding `ROLE_OPERATOR` inherits customer card cancellation or limit changes | Staff-only OPA rules exclude `service-account-` identities. Customer-edge has a separate exact-principal grant for cancel/limits/controls after its ownership/mandate checks; unrelated service accounts receive none (#12328). This becomes an effective denial only after issuer OPA enforcement is enabled. |
 | **T**ampering | Race between `suspend` and `block` on same card | Domain `require` guards throw `IllegalArgumentException` on illegal state; a concurrent block on a SUSPENDED card is valid by design; concurrent suspend+block both succeed on ACTIVE → last writer wins idempotently (both move toward frozen state) — acceptable; optimistic locking would make this exact (see §5) |
 
 ## 4a. Card authorization decision point (D3) — STRIDE supplement

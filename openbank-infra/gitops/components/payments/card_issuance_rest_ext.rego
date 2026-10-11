@@ -10,9 +10,12 @@
 #   card.activate  — activate (#id)
 #   card.block     — block (#id) — ROLE_OPERATOR/ROLE_ADMIN/ROLE_COMPLIANCE (@RolesAllowed is a
 #                    disjunction: ROLE_COMPLIANCE widens the caller set, it does not narrow it)
+#   card.cancel    — cancel (#id) — staff operator/admin/compliance, or named customer-edge
 #   card.suspend   — suspend (#id) — customer-edge calls this on a customer's OWN card
 #                    (self-service freeze, /customer/v1/cards/{id}/freeze)
 #   card.resume    — resume (#id) — same, customer self-service unfreeze
+#   card.limits.update / card.controls.update — staff or named customer-edge after ownership checks
+#   card.category-limits.update — staff only (no customer-edge route currently)
 #
 # Actions gated (CardOutboxAdminResource, #4005):
 #   card.outbox.requeue — requeueDead — ROLE_ADMIN ONLY (not ROLE_OPERATOR)
@@ -45,6 +48,48 @@ allowed_reasons contains "operator-card-write" if {
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
 	input.action in {"card.create", "card.activate", "card.block", "card.suspend", "card.resume"}
+}
+
+# #12328: these additional writes are admitted by the REST resource for staff, but the
+# existing operator-card-write rule also serves machine identities with ROLE_OPERATOR.
+# Extending that rule would grant every such backend card cancellation and limit changes.
+# A Keycloak client_credentials principal is HUMAN in the interceptor, so exclude its
+# service-account username explicitly (the same pattern as operator-mcp-session in rest.rego).
+allowed_reasons contains "staff-card-controls-write" if {
+    input.principal.type == "HUMAN"
+    some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+    role in input.principal.roles
+    not startswith(input.principal.id, "service-account-")
+    input.action in {"card.cancel", "card.limits.update", "card.controls.update", "card.category-limits.update"}
+}
+
+# Compliance may cancel as well as block a card per CardResource's @RolesAllowed. A
+# shared M2M principal with ROLE_COMPLIANCE in the CI realm must not inherit this write.
+allowed_reasons contains "staff-compliance-card-cancel" if {
+    input.principal.type == "HUMAN"
+    "ROLE_COMPLIANCE" in input.principal.roles
+    not startswith(input.principal.id, "service-account-")
+    input.action == "card.cancel"
+}
+
+# Customer-edge already checks card ownership/mandate and step-up where required before
+# forwarding these three self-service writes. Its dedicated machine identity alone can
+# reach them; the shared openbank-services principal does not gain these actions.
+allowed_reasons contains "edge-card-self-service-write" if {
+    input.principal.type == "HUMAN"
+    input.principal.id == "service-account-openbank-edge"
+    "ROLE_OPERATOR" in input.principal.roles
+    input.action in {"card.cancel", "card.limits.update", "card.controls.update"}
+}
+
+# CardResource admits ROLE_VIEWER to list/read, including the staff demo account. Keep
+# that read role scoped to human users; a service account classified HUMAN by the
+# interceptor must not acquire access just by holding ROLE_VIEWER.
+allowed_reasons contains "staff-card-viewer-read" if {
+    input.principal.type == "HUMAN"
+    "ROLE_VIEWER" in input.principal.roles
+    not startswith(input.principal.id, "service-account-")
+    input.action in {"card.list", "card.read"}
 }
 
 # Requeueing dead-lettered outbox rows (CardOutboxAdminResource, #4005) republishes events that
