@@ -101,6 +101,22 @@ allowed_reasons contains "service-sca-shared-client-m2m" if {
 	input.action in {"scaChallenge.read", "scaChallenge.consume"}
 }
 
+# ADR-0335 D1 — pension-service's own Keycloak client (`openbank-pension`, ROLE_API only) is a
+# SCOPED consumer: consume and nothing else. No initiate (customer-edge raises pension challenges),
+# no read, no decide, no verify. This rule admits the identity to the action; WHICH challenges it
+# may spend is decided in sca-service's domain (ConsumerScope.Reserved(PENSION): APPROVAL purpose,
+# device-signed approvalRequestId `pension-<operation>:<ref>`), because the OPA resource is only
+# the challenge id and the device-signed namespace exists nowhere but sca-service's database.
+# The grant is DATA (rules.yaml: scoped_sca_consumers), not a hard-coded identity.
+# Paired with rules.yaml four_eyes.exemptions.scaChallenge.consume (ADR-0280 bar: ceremony-only
+# service account, no human path rides on it).
+allowed_reasons contains "service-sca-scoped-consumer" if {
+	input.principal.type == "HUMAN"
+	some consumer in data.rules.scoped_sca_consumers
+	input.principal.id == consumer.principal
+	input.action in consumer.actions
+}
+
 # Operator-approval queue (ApprovalResource, /api/v1/sca/approvals, #10041 slice 9b): the queue
 # and each record expose the action, the party id and the maker id of every parked four-eyes SCA
 # operation. Base operator-read-any is role-only, and both realm M2M clients
