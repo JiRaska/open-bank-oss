@@ -615,7 +615,7 @@ def self_test() -> int:
             print("self-test FAIL: duplicate-key source evidence was accepted")
             bad += 1
         pension_manifest = Path(
-            "openbank-infra/gitops/components/pension/kafka-pension-mtls.yaml")
+            "openbank-infra/gitops/components/pension/kafka-mtls-externalsecrets.yaml")
         if pension_manifest.is_file():
             pension_docs = pension_manifest.read_text(encoding="utf-8")
             real_credentials = [Cred(doc, pension_manifest) for doc in DOC_SPLIT.split(pension_docs)
