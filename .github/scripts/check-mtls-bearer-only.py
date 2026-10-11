@@ -22,6 +22,7 @@ Usage: check-mtls-bearer-only.py [--enforce] [--self-test] [ROOT]
 """
 from __future__ import annotations
 
+import argparse
 import glob
 import os
 import re
@@ -171,6 +172,19 @@ def self_test() -> int:
                      '@RegisterRestClient\n@Path("/api/v1/remote")\ninterface C\n')
         checks.append(("resource class root found, client interface and method paths ignored",
                        resource_roots(d) == ["/api/v1/r"]))
+    import contextlib
+    import io
+    for bad in ("--selftest", "--enfroce", "--enfor"):
+        with contextlib.redirect_stderr(io.StringIO()):
+            try:
+                parse_args([bad])
+            except SystemExit as exc:
+                rejected = exc.code == 2
+            else:
+                rejected = False
+        checks.append((f"unknown option {bad} rejected", rejected))
+    parsed = parse_args(["--enforce", "fixture-root"])
+    checks.append(("enforcement and explicit root preserved", parsed.enforce and parsed.root == "fixture-root"))
     ok = True
     for label, passed in checks:
         print(f"  {'PASS' if passed else 'FAIL'}: {label}")
@@ -178,12 +192,20 @@ def self_test() -> int:
     return 0 if ok else 1
 
 
+def parse_args(argv: list[str]):
+    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
+    parser.add_argument("--enforce", action="store_true")
+    parser.add_argument("--self-test", action="store_true")
+    parser.add_argument("root", nargs="?", default=".")
+    return parser.parse_args(argv)
+
+
 def main(argv: list[str]) -> int:
-    if "--self-test" in argv:
+    args = parse_args(argv)
+    if args.self_test:
         return self_test()
-    enforce = "--enforce" in argv
-    args = [a for a in argv if not a.startswith("--")]
-    root = args[0] if args else "."
+    enforce = args.enforce
+    root = args.root
     files, result = scan(root)
     baseline_file = os.path.join(root, BASELINE)
     baseline = set()
