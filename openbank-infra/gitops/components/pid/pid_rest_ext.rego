@@ -95,6 +95,6 @@ allowed_reasons contains "customer-eudi-request" if {
 allowed_reasons contains "service-delegation-party-read" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-delegation"
-	principal_is_machine
+	input.principal.service_account == true
 	input.action == "party.read"
 }

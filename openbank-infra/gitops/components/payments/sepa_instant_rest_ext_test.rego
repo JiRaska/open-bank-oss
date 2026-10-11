@@ -20,7 +20,7 @@ rules_mock := {
 	"shared_m2m_write_prohibition": {"reasons": []},
 }
 
-sa(name) := {"type": "HUMAN", "id": sprintf("service-account-openbank-%v", [name]), "roles": ["ROLE_API"]}
+sa(name) := {"service_account": true, "type": "HUMAN", "id": sprintf("service-account-openbank-%v", [name]), "roles": ["ROLE_API"]}
 
 all_actions := {"sctInstPayment.create", "sctInstPayment.read", "sctInstPayment.list", "sctInstPayment.recall"}
 
@@ -53,7 +53,7 @@ test_other_role_api_sa_denied if {
 }
 
 test_operator_still_reads if {
-	d := rest.allow with input as {"principal": {"type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}, "action": "sctInstPayment.read"}
+	d := rest.allow with input as {"principal": {"service_account": false, "type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}, "action": "sctInstPayment.read"}
 		with data.rules as rules_mock
 	d.allow == true
 }

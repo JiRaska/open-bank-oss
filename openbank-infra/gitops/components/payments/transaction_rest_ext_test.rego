@@ -28,7 +28,7 @@ rules_mock := {
 	"shared_m2m_write_prohibition": {"reasons": []},
 }
 
-sa(name) := {"type": "HUMAN", "id": sprintf("service-account-openbank-%v", [name]), "roles": ["ROLE_API"]}
+sa(name) := {"service_account": true, "type": "HUMAN", "id": sprintf("service-account-openbank-%v", [name]), "roles": ["ROLE_API"]}
 
 # caller -> (reason, actions it may perform). The ONLY grants the batch-1/2 identities hold here.
 grants := {
@@ -86,7 +86,7 @@ test_other_role_api_sa_may_not_create if {
 }
 
 test_no_role_principal_may_not_create if {
-	rest.allow == false with input as {"principal": {"type": "HUMAN", "id": "u-nobody", "roles": []}, "action": "transaction.create"}
+	rest.allow == false with input as {"principal": {"service_account": false, "type": "HUMAN", "id": "u-nobody", "roles": []}, "action": "transaction.create"}
 		with data.rules as rules_mock
 }
 
@@ -106,10 +106,10 @@ test_identity_rules_do_not_cross_admit if {
 # The unchanged operator path still admits a staff operator and the shared client (ROLE_OPERATOR)
 # — batch 1 narrows nothing yet; it only adds per-service grants.
 test_operator_path_unchanged if {
-	decision := rest.allow with input as {"principal": {"type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}, "action": "transaction.create"}
+	decision := rest.allow with input as {"principal": {"service_account": false, "type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}, "action": "transaction.create"}
 		with data.rules as rules_mock
 	decision.allow == true
-	"operator-transaction-write" in rest.allowed_reasons with input as {"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}, "action": "transaction.create"}
+	"operator-transaction-write" in rest.allowed_reasons with input as {"principal": {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}, "action": "transaction.create"}
 		with data.rules as rules_mock
 }
 
@@ -170,15 +170,15 @@ test_other_role_api_sa_denied_transaction_reads if {
 sweep_in(principal) := {"principal": principal, "action": "transaction.sweep"}
 
 test_human_operator_may_sweep if {
-	decision := rest.allow with input as sweep_in({"type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]})
+	decision := rest.allow with input as sweep_in({"service_account": false, "type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]})
 		with data.rules as rules_mock
 	decision.allow == true
-	"operator-transaction-sweep" in rest.allowed_reasons with input as sweep_in({"type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]})
+	"operator-transaction-sweep" in rest.allowed_reasons with input as sweep_in({"service_account": false, "type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]})
 		with data.rules as rules_mock
 }
 
 test_human_admin_may_sweep if {
-	"operator-transaction-sweep" in rest.allowed_reasons with input as sweep_in({"type": "HUMAN", "id": "u-admin", "roles": ["ROLE_ADMIN"]})
+	"operator-transaction-sweep" in rest.allowed_reasons with input as sweep_in({"service_account": false, "type": "HUMAN", "id": "u-admin", "roles": ["ROLE_ADMIN"]})
 		with data.rules as rules_mock
 }
 
@@ -194,13 +194,13 @@ test_shared_m2m_identities_may_not_sweep if {
 
 test_human_without_operator_role_may_not_sweep if {
 	every roles in [["ROLE_VIEWER"], ["ROLE_API"], ["ROLE_KYC"], []] {
-		p := {"type": "HUMAN", "id": "u-nobody", "roles": roles}
+		p := {"service_account": false, "type": "HUMAN", "id": "u-nobody", "roles": roles}
 		not "operator-transaction-sweep" in rest.allowed_reasons with input as sweep_in(p)
 			with data.rules as rules_mock
 	}
 }
 
 test_operator_sweep_grant_does_not_leak_to_other_actions if {
-	not "operator-transaction-sweep" in rest.allowed_reasons with input as {"principal": {"type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}, "action": "transaction.create"}
+	not "operator-transaction-sweep" in rest.allowed_reasons with input as {"principal": {"service_account": false, "type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}, "action": "transaction.create"}
 		with data.rules as rules_mock
 }

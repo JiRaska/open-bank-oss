@@ -29,6 +29,7 @@ import data.openbank.rest
 test_anacredit_create_denied_for_shared_service_account if {
 	count(rest.allowed_reasons) == 0 with input as {
 		"principal": {
+			"service_account": true,
 			"type": "HUMAN",
 			"id": "service-account-openbank-services",
 			"roles": ["ROLE_OPERATOR", "ROLE_ADMIN"],
@@ -42,6 +43,7 @@ test_anacredit_create_denied_for_shared_service_account if {
 test_anacredit_create_denied_for_edge_service_account if {
 	count(rest.allowed_reasons) == 0 with input as {
 		"principal": {
+			"service_account": true,
 			"type": "HUMAN",
 			"id": "service-account-openbank-edge",
 			"roles": ["ROLE_OPERATOR"],
@@ -56,14 +58,14 @@ test_anacredit_create_denied_for_edge_service_account if {
 # than `allow` is what distinguishes "still works" from "still works for the right reason".
 test_anacredit_create_allowed_for_human_operator if {
 	rest.allowed_reasons == {"operator-anacredit-create"} with input as {
-		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
 		"action": "anacredit.create",
 	}
 }
 
 test_anacredit_create_allowed_for_human_admin if {
 	"operator-anacredit-create" in rest.allowed_reasons with input as {
-		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_ADMIN"]},
+		"principal": {"service_account": false, "type": "HUMAN", "id": "alice", "roles": ["ROLE_ADMIN"]},
 		"action": "anacredit.create",
 	}
 }
@@ -71,7 +73,7 @@ test_anacredit_create_allowed_for_human_admin if {
 # A principal with an unrelated role gets no allow reason.
 test_anacredit_create_denied_for_unrelated_role if {
 	count(rest.allowed_reasons) == 0 with input as {
-		"principal": {"type": "HUMAN", "id": "bob", "roles": ["ROLE_VIEWER"]},
+		"principal": {"service_account": false, "type": "HUMAN", "id": "bob", "roles": ["ROLE_VIEWER"]},
 		"action": "anacredit.create",
 	}
 }
@@ -80,7 +82,7 @@ test_anacredit_create_denied_for_unrelated_role if {
 # agents.rego/charter_allowed via rest.rego's allow rule, not here).
 test_anacredit_create_denied_for_ai_agent if {
 	count(rest.allowed_reasons) == 0 with input as {
-		"principal": {"type": "AI_AGENT", "id": "agent-1", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "type": "AI_AGENT", "id": "agent-1", "roles": ["ROLE_OPERATOR"]},
 		"action": "anacredit.create",
 	}
 }
@@ -90,7 +92,7 @@ test_anacredit_create_denied_for_ai_agent if {
 # absence of THIS reason is the scoped claim.
 test_other_anacredit_action_not_granted_by_this_extension if {
 	not "operator-anacredit-create" in rest.allowed_reasons with input as {
-		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
 		"action": "anacredit.list",
 	}
 }

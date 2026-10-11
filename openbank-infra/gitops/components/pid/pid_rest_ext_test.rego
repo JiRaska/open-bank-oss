@@ -30,6 +30,7 @@ import data.openbank.rest
 test_party_status_denied_for_shared_service_account if {
 	not "operator-party-status" in rest.allowed_reasons with input as {
 		"principal": {
+			"service_account": true,
 			"type": "HUMAN",
 			"id": "service-account-openbank-services",
 			"roles": ["ROLE_OPERATOR", "ROLE_ADMIN"],
@@ -43,6 +44,7 @@ test_party_status_denied_for_shared_service_account if {
 test_party_status_denied_for_edge_service_account if {
 	not "operator-party-status" in rest.allowed_reasons with input as {
 		"principal": {
+			"service_account": true,
 			"type": "HUMAN",
 			"id": "service-account-openbank-edge",
 			"roles": ["ROLE_OPERATOR"],
@@ -55,21 +57,21 @@ test_party_status_denied_for_edge_service_account if {
 # distinguishes "still works" from "still works for the right reason".
 test_party_status_allowed_for_human_operator if {
 	rest.allowed_reasons == {"operator-party-status"} with input as {
-		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
 		"action": "party.changeStatus",
 	}
 }
 
 test_party_status_allowed_for_human_admin if {
 	"operator-party-status" in rest.allowed_reasons with input as {
-		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_ADMIN"]},
+		"principal": {"service_account": false, "type": "HUMAN", "id": "alice", "roles": ["ROLE_ADMIN"]},
 		"action": "party.changeStatus",
 	}
 }
 
 test_party_status_denied_for_unrelated_role if {
 	count(rest.allowed_reasons) == 0 with input as {
-		"principal": {"type": "HUMAN", "id": "bob", "roles": ["ROLE_VIEWER"]},
+		"principal": {"service_account": false, "type": "HUMAN", "id": "bob", "roles": ["ROLE_VIEWER"]},
 		"action": "party.changeStatus",
 	}
 }
@@ -81,7 +83,7 @@ test_party_status_denied_for_unrelated_role if {
 # the rule does; these tests pin the new name so a silent revert to the old one is caught.
 test_pid_resolve_read_allowed_for_human_operator if {
 	"operator-pid-resolve-read" in rest.allowed_reasons with input as {
-		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
 		"action": "pid.resolve",
 	}
 }
@@ -90,7 +92,7 @@ test_pid_resolve_read_allowed_for_human_operator if {
 # someone reinstated it, and it is why the rename is not merely cosmetic.
 test_old_pid_resolve_reason_name_is_gone if {
 	not "operator-pid-resolve" in rest.allowed_reasons with input as {
-		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
 		"action": "pid.resolve",
 	}
 }
@@ -99,7 +101,7 @@ test_old_pid_resolve_reason_name_is_gone if {
 
 test_identity_family_allowed_for_human_operator if {
 	"operator-identity-write" in rest.allowed_reasons with input as {
-		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
 		"action": "identity.case.decide",
 	}
 }
@@ -108,7 +110,7 @@ test_identity_family_allowed_for_human_operator if {
 # their own rules precisely because operator-identity-write does not cover them.
 test_identity_family_does_not_cover_party_status if {
 	not "operator-identity-write" in rest.allowed_reasons with input as {
-		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
 		"action": "party.changeStatus",
 	}
 }
@@ -117,7 +119,7 @@ test_identity_family_does_not_cover_party_status if {
 # is enforced in the handler, OPA grants the action class only.
 test_customer_eudi_request_allowed_for_authenticated_customer if {
 	"customer-eudi-request" in rest.allowed_reasons with input as {
-		"principal": {"type": "HUMAN", "id": "customer-42", "roles": []},
+		"principal": {"service_account": false, "type": "HUMAN", "id": "customer-42", "roles": []},
 		"action": "identity.eudi.request",
 	}
 }
@@ -125,7 +127,7 @@ test_customer_eudi_request_allowed_for_authenticated_customer if {
 # ...but an unauthenticated principal has an empty id and gets nothing.
 test_customer_eudi_request_denied_for_empty_id if {
 	count(rest.allowed_reasons) == 0 with input as {
-		"principal": {"type": "HUMAN", "id": "", "roles": []},
+		"principal": {"service_account": false, "type": "HUMAN", "id": "", "roles": []},
 		"action": "identity.eudi.request",
 	}
 }
@@ -134,14 +136,14 @@ test_customer_eudi_request_denied_for_empty_id if {
 # agents.rego/charter_allowed via rest.rego's allow rule, not here).
 test_pid_ext_denied_for_ai_agent if {
 	count(rest.allowed_reasons) == 0 with input as {
-		"principal": {"type": "AI_AGENT", "id": "agent-1", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "type": "AI_AGENT", "id": "agent-1", "roles": ["ROLE_OPERATOR"]},
 		"action": "party.changeStatus",
 	}
 }
 
 # --- #10486 batch 6: party.read by named machine identity (ROLE_API only) ---
 
-b6_pid_sa(name) := {"type": "HUMAN", "id": sprintf("service-account-openbank-%v", [name]), "roles": ["ROLE_API"]}
+b6_pid_sa(name) := {"service_account": true, "type": "HUMAN", "id": sprintf("service-account-openbank-%v", [name]), "roles": ["ROLE_API"]}
 
 b6_pid_rules := {
 	"authz": {"role_action_matrix": {}},
@@ -180,7 +182,7 @@ test_b6_other_role_api_sa_denied_party_read if {
 
 test_b6_staff_keep_party_read if {
 	every role in ["ROLE_OPERATOR", "ROLE_ADMIN"] {
-		d := rest.allow with input as {"principal": {"type": "HUMAN", "id": "u-staff", "roles": [role]}, "action": "party.read"}
+		d := rest.allow with input as {"principal": {"service_account": false, "type": "HUMAN", "id": "u-staff", "roles": [role]}, "action": "party.read"}
 			with data.rules as b6_pid_rules
 		d.allow == true
 	}

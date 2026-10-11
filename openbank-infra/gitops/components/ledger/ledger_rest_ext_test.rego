@@ -37,11 +37,11 @@ rules_mock := {
 	"shared_m2m_write_prohibition": {"reasons": []},
 }
 
-operator := {"type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
+operator := {"service_account": false, "type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
 
-edge := {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]}
+edge := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]}
 
-services_m2m := {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
+services_m2m := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
 
 # --- the regressions this file exists to prevent ---
 
@@ -153,13 +153,13 @@ test_extension_is_loaded if {
 # matrix mock grants ROLE_OPERATOR only, so no role-based reason can admit these principals: the
 # identity rule is the whole grant, and everything else must deny.
 
-interest_m2m := {"type": "HUMAN", "id": "service-account-openbank-interest", "roles": ["ROLE_API"]}
+interest_m2m := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-interest", "roles": ["ROLE_API"]}
 
 # Any OTHER service account holding ROLE_API. LedgerResource.postJournal now admits ROLE_API at the
 # RBAC layer, so OPA is the only thing between this principal and a book-of-record write.
-other_role_api_sa := {"type": "HUMAN", "id": "service-account-openbank-mcp-service", "roles": ["ROLE_API"]}
+other_role_api_sa := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-mcp-service", "roles": ["ROLE_API"]}
 
-no_role := {"type": "HUMAN", "id": "u-nobody", "roles": []}
+no_role := {"service_account": false, "type": "HUMAN", "id": "u-nobody", "roles": []}
 
 test_interest_may_create_via_its_identity_rule if {
 	decision := rest.allow with input as {"principal": interest_m2m, "action": "ledger.create"}
@@ -200,9 +200,9 @@ test_interest_identity_rule_does_not_admit_the_shared_client if {
 
 # --- #10486 batch 1: lending-service and clearing-service own identities (ROLE_API only) ---
 
-lending_m2m := {"type": "HUMAN", "id": "service-account-openbank-lending", "roles": ["ROLE_API"]}
+lending_m2m := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-lending", "roles": ["ROLE_API"]}
 
-clearing_m2m := {"type": "HUMAN", "id": "service-account-openbank-clearing", "roles": ["ROLE_API"]}
+clearing_m2m := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-clearing", "roles": ["ROLE_API"]}
 
 test_lending_may_create_via_its_identity_rule if {
 	decision := rest.allow with input as {"principal": lending_m2m, "action": "ledger.create"}
@@ -244,11 +244,11 @@ test_batch1_identity_rules_do_not_cross_admit if {
 
 # --- #10486 batch 2: transaction-service and settlement-service own identities (ROLE_API only) ---
 
-transaction_m2m := {"type": "HUMAN", "id": "service-account-openbank-transaction", "roles": ["ROLE_API"]}
+transaction_m2m := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-transaction", "roles": ["ROLE_API"]}
 
-settlement_m2m := {"type": "HUMAN", "id": "service-account-openbank-settlement", "roles": ["ROLE_API"]}
+settlement_m2m := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-settlement", "roles": ["ROLE_API"]}
 
-other_role_api_sa := {"type": "HUMAN", "id": "service-account-openbank-mcp-service", "roles": ["ROLE_API"]}
+other_role_api_sa := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-mcp-service", "roles": ["ROLE_API"]}
 
 test_transaction_may_create_and_reverse_via_its_identity_rule if {
 	every action in {"ledger.create", "ledger.reverse"} {
@@ -308,7 +308,7 @@ test_batch2_identity_rules_do_not_cross_admit if {
 
 # --- ADR-0315: treasury-service's own identity (ROLE_API only), ledger.create alone ---
 
-treasury_m2m := {"type": "HUMAN", "id": "service-account-openbank-treasury", "roles": ["ROLE_API"]}
+treasury_m2m := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-treasury", "roles": ["ROLE_API"]}
 
 test_treasury_may_create_via_its_identity_rule if {
 	decision := rest.allow with input as {"principal": treasury_m2m, "action": "ledger.create"}

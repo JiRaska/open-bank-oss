@@ -178,6 +178,6 @@ allowed_reasons contains "dispute-staff-write" if {
 allowed_reasons contains "service-agent-dispute-read" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-agent"
-	principal_is_machine
+	input.principal.service_account == true
 	input.action in {"dispute.list", "dispute.read"}
 }

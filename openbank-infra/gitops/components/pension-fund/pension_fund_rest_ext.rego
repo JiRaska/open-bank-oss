@@ -84,7 +84,7 @@ pension_service_account := "service-account-openbank-pension"
 allowed_reasons contains "service-pension-unit-register" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == pension_service_account
-	principal_is_machine
+	input.principal.service_account == true
 	"ROLE_API" in input.principal.roles
 	input.action in {"pension-fund.holding.inspect", "pension-fund.order.place", "pension-fund.fund.read", "pension-fund.strategy.read", "pension-fund.nav.read"}
 }
@@ -98,7 +98,7 @@ tax_reporting_service_account := "service-account-openbank-tax-reporting"
 allowed_reasons contains "service-tax-reporting-fund-aggregates" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == tax_reporting_service_account
-	principal_is_machine
+	input.principal.service_account == true
 	"ROLE_API" in input.principal.roles
 	input.action == "pension-fund.reporting.inspect"
 }

@@ -14,18 +14,18 @@ package openbank.rest
 
 import rego.v1
 
-operator := {"type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
+operator := {"service_account": false, "type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
 
-admin := {"type": "HUMAN", "id": "u-admin", "roles": ["ROLE_ADMIN"]}
+admin := {"service_account": false, "type": "HUMAN", "id": "u-admin", "roles": ["ROLE_ADMIN"]}
 
-viewer := {"type": "HUMAN", "id": "u-view", "roles": ["ROLE_VIEWER"]}
+viewer := {"service_account": false, "type": "HUMAN", "id": "u-view", "roles": ["ROLE_VIEWER"]}
 
-edge := {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_API"]}
+edge := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_API"]}
 
 # The shared backend identity: classified HUMAN and carrying ROLE_OPERATOR in the realm. This is
 # the principal the whole file is shaped around — a role-only write rule would hand it the power
 # to mint payment rights over any customer's account.
-services_m2m := {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
+services_m2m := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
 
 # --- staff: bank-side lifecycle ---
 
@@ -208,7 +208,7 @@ test_backend_service_may_check if {
 
 test_check_is_not_open_to_an_anonymous_caller if {
 	count(allowed_reasons) == 0 with input as {
-		"principal": {"type": "ANONYMOUS", "id": "anonymous", "roles": []},
+		"principal": {"service_account": false, "type": "ANONYMOUS", "id": "anonymous", "roles": []},
 		"action": "delegation.check",
 	}
 }

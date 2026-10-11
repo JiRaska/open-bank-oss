@@ -613,6 +613,25 @@ class AuthorizeInterceptorTest {
     }
 
     @Test
+    fun `a non-JWT identity is sent as a machine (fail closed)`() {
+        every { sc.userPrincipal } returns JavaPrincipal { "alice" }
+        every { identity.principal } returns JavaPrincipal { "alice" }
+        every { identity.roles } returns setOf("ROLE_OPERATOR")
+        val captured = mutableListOf<AuthzQuery>()
+        interceptor.pdp = mockk {
+            every { isResolvable } returns true
+            every { get() } returns object : PolicyDecisionPoint {
+                override suspend fun allow(query: AuthzQuery): AuthzDecision {
+                    captured += query
+                    return AuthzDecision(allow = true, reason = "ok", policyVersion = "test")
+                }
+            }
+        }
+        interceptor.authorize(makeCtx(annotatedMethod))
+        assertThat(captured.single().principal.serviceAccount).isTrue()
+    }
+
+    @Test
     fun `principal type AI_AGENT when sub starts with agent colon`() {
         every { sc.userPrincipal } returns JavaPrincipal { "agent:onboarding" }
         every { identity.principal } returns mockk<JsonWebToken> {

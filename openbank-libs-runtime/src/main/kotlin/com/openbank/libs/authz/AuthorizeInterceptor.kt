@@ -459,12 +459,13 @@ class AuthorizeInterceptor {
     private fun buildQuery(ctx: InvocationContext, annotation: Authorize): AuthzQuery {
         val sc = securityContext.get()
         // The machine flag comes from VERIFIED claims only, never from the name above.
-        val machineClient = ServiceAccountIdentity.machineClientId(identity.get())
+        val machineClient = ServiceAccountIdentity.machineClientId(identity.get().principal)
         val principal = Principal(
             id = sc.userPrincipal?.name ?: "anonymous",
             type = principalType(sc, identity.get()),
             roles = identity.get().roles.toList(),
-            serviceAccount = machineClient != null,
+            // FAIL CLOSED: anything not positively verified as a person is a machine.
+            serviceAccount = !ServiceAccountIdentity.isVerifiedPerson(identity.get()),
             clientId = machineClient?.takeIf { it.isNotEmpty() },
         )
         val resource = annotation.resource.takeIf { it.isNotEmpty() }?.let { expr ->

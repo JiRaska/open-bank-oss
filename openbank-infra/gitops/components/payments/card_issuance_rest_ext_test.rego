@@ -145,7 +145,7 @@ test_card_outbox_requeue_denied_for_ai_agent if {
 
 # --- #10486 batch 6: per-service card READ identities (ROLE_API only) ---
 
-b6_sa(name) := {"type": "HUMAN", "id": sprintf("service-account-openbank-%v", [name]), "roles": ["ROLE_API"]}
+b6_sa(name) := {"service_account": true, "type": "HUMAN", "id": sprintf("service-account-openbank-%v", [name]), "roles": ["ROLE_API"]}
 
 b6_rules := {
 	"authz": {"role_action_matrix": {"ROLE_OPERATOR": {"grant": ["card.create", "card.block"]}}},

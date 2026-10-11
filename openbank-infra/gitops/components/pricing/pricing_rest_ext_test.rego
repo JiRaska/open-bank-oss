@@ -18,18 +18,21 @@ import rego.v1
 import data.openbank.rest
 
 tenant_a_deal_reader := {
+	"service_account": false,
 	"type": "HUMAN",
 	"id": "u-tenant-a",
 	"attributes": {"tenant": "tenant-A", "scopes": ["pricing.deal.read"]},
 }
 
 tenant_a_quoter := {
+	"service_account": false,
 	"type": "HUMAN",
 	"id": "u-tenant-a-quote",
 	"attributes": {"tenant": "tenant-A", "scopes": ["pricing.quote"]},
 }
 
 service_account := {
+	"service_account": true,
 	"type": "HUMAN",
 	"id": "service-account-openbank-services",
 	"attributes": {"tenant": "tenant-A", "scopes": ["pricing.deal.read"]},
@@ -109,6 +112,7 @@ test_service_account_still_denied if {
 test_missing_scope_still_denied if {
 	not rest.allow with input as {
 		"principal": {
+			"service_account": false,
 			"type": "HUMAN",
 			"id": "u-tenant-a-no-scope",
 			"attributes": {"tenant": "tenant-A", "scopes": []},

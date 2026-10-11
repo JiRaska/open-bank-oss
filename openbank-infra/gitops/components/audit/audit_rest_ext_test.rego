@@ -12,17 +12,17 @@ package openbank.rest
 
 import rego.v1
 
-auditor := {"type": "HUMAN", "id": "u-aud", "roles": ["ROLE_AUDITOR"]}
+auditor := {"service_account": false, "type": "HUMAN", "id": "u-aud", "roles": ["ROLE_AUDITOR"]}
 
-admin := {"type": "HUMAN", "id": "u-admin", "roles": ["ROLE_ADMIN"]}
+admin := {"service_account": false, "type": "HUMAN", "id": "u-admin", "roles": ["ROLE_ADMIN"]}
 
-compliance := {"type": "HUMAN", "id": "u-comp", "roles": ["ROLE_COMPLIANCE"]}
+compliance := {"service_account": false, "type": "HUMAN", "id": "u-comp", "roles": ["ROLE_COMPLIANCE"]}
 
-operator := {"type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
+operator := {"service_account": false, "type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
 
 # An M2M identity — classified HUMAN — that even carries an oversight role (ROLE_AUDITOR) must
 # STILL be kept out by the service-account exclusion; that is what makes the exclusion load-bearing.
-service_m2m := {"type": "HUMAN", "id": "service-account-openbank-ledger", "roles": ["ROLE_AUDITOR"]}
+service_m2m := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-ledger", "roles": ["ROLE_AUDITOR"]}
 
 # --- audit.trail.inspect: auditor / admin / compliance allowed ---
 
@@ -63,18 +63,18 @@ test_service_m2m_cannot_read_audit if {
 # The service-account exclusion also holds for the compliance role (operator console roles a
 # realm could hand a client).
 test_service_m2m_compliance_cannot_inspect_trail if {
-	count(allowed_reasons) == 0 with input as {"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_COMPLIANCE"]}, "action": "audit.trail.inspect"}
+	count(allowed_reasons) == 0 with input as {"principal": {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_COMPLIANCE"]}, "action": "audit.trail.inspect"}
 }
 
 test_anonymous_denied if {
-	count(allowed_reasons) == 0 with input as {"principal": {"type": "ANONYMOUS", "id": "anon", "roles": []}, "action": "audit.trail.inspect"}
+	count(allowed_reasons) == 0 with input as {"principal": {"service_account": false, "type": "ANONYMOUS", "id": "anon", "roles": []}, "action": "audit.trail.inspect"}
 }
 
 # --- audit.evidence.reconstruct (ADR-0214 D3, #11900) ---
 
-credit_risk := {"type": "HUMAN", "id": "u-risk", "roles": ["ROLE_CREDIT_RISK"]}
+credit_risk := {"service_account": false, "type": "HUMAN", "id": "u-risk", "roles": ["ROLE_CREDIT_RISK"]}
 
-lending_m2m := {"type": "HUMAN", "id": "service-account-openbank-lending", "roles": ["ROLE_COMPLIANCE", "ROLE_CREDIT_RISK"]}
+lending_m2m := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-lending", "roles": ["ROLE_COMPLIANCE", "ROLE_CREDIT_RISK"]}
 
 test_credit_risk_reads_evidence_bundle if {
 	"evidence-bundle-read" in allowed_reasons with input as {"principal": credit_risk, "action": "audit.evidence.reconstruct"}

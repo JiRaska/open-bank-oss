@@ -84,7 +84,7 @@ allowed_reasons contains "service-aml-case-create-m2m" if {
 		"service-account-openbank-sepa-instant",
 		"service-account-openbank-fx",
 	}
-	principal_is_machine
+	input.principal.service_account == true
 	input.action == "amlCase.create"
 }
 
@@ -94,6 +94,6 @@ allowed_reasons contains "service-aml-case-create-m2m" if {
 allowed_reasons contains "service-agent-aml-case-read" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-agent"
-	principal_is_machine
+	input.principal.service_account == true
 	input.action in {"amlCase.list", "amlCase.read"}
 }

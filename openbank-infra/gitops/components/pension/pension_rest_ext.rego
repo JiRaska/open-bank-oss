@@ -39,7 +39,7 @@ allowed_reasons contains "operator-pension-read" if {
 allowed_reasons contains "edge-service-pension" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-edge"
-	principal_is_machine
+	input.principal.service_account == true
 	input.action in {
 		"pension.contract.read",
 		"pension.contract.create",

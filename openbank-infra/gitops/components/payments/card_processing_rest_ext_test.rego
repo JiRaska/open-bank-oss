@@ -10,13 +10,13 @@ package openbank.rest_test
 import data.openbank.rest
 import rego.v1
 
-operator := {"type": "HUMAN", "roles": ["ROLE_OPERATOR"], "id": "service-account-openbank-services"}
+operator := {"service_account": true, "type": "HUMAN", "roles": ["ROLE_OPERATOR"], "id": "service-account-openbank-services"}
 
-admin := {"type": "HUMAN", "roles": ["ROLE_ADMIN"], "id": "admin@openbank.local"}
+admin := {"service_account": false, "type": "HUMAN", "roles": ["ROLE_ADMIN"], "id": "admin@openbank.local"}
 
-viewer := {"type": "HUMAN", "roles": ["ROLE_VIEWER"], "id": "viewer@openbank.local"}
+viewer := {"service_account": false, "type": "HUMAN", "roles": ["ROLE_VIEWER"], "id": "viewer@openbank.local"}
 
-anonymous := {"type": "ANONYMOUS", "roles": [], "id": ""}
+anonymous := {"service_account": false, "type": "ANONYMOUS", "roles": [], "id": ""}
 
 test_operator_may_authorize if {
 	"operator-cardprocessing-write" in rest.allowed_reasons with input as {"principal": operator, "action": "cardprocessing.authorize"}

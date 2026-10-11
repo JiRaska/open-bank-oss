@@ -52,8 +52,9 @@ data class Principal(
      * PEP from verified claims only — never from [id], which is a name claim. Forwarded to OPA as
      * `input.principal.service_account`; a rego rule that must keep machines out tests this flag,
      * never `startswith(input.principal.id, "service-account-")`.
+     * Defaults to `true` (FAIL CLOSED): a principal is a person only when the PEP has verified it.
      */
-    val serviceAccount: Boolean = false,
+    val serviceAccount: Boolean = true,
     /** The verified client the machine token was issued to (`client_id`/`azp`); `null` for humans. */
     val clientId: String? = null,
 )

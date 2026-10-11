@@ -62,6 +62,15 @@ object ServiceAccountIdentity {
     }
 
     /**
+     * FAIL CLOSED: `true` only when the principal is a verified JWT whose claims positively say
+     * person ([machineClientId] is `null`). Anything else — no identity, anonymous, a non-JWT
+     * principal, unreadable claims — is a machine. This is the value of
+     * `input.principal.service_account`, negated.
+     */
+    fun isVerifiedPerson(identity: SecurityIdentity?): Boolean =
+        identity?.principal is JsonWebToken && machineClientId(identity.principal) == null
+
+    /**
      * The verified client of a MACHINE token, or `null` when the verified token is not one — the
      * value the PEP hands OPA as `input.principal.service_account`/`client_id`.
      *
@@ -75,12 +84,9 @@ object ServiceAccountIdentity {
      *  - `preferred_username` is absent or blank: no username means no human to attribute to.
      * None of these reads the principal NAME Quarkus derives (`upn` first), so a renamed user, a
      * client_id-only token or name-mapper drift cannot make a machine look human.
-     * A non-JWT identity returns `null`: only OIDC bearer tokens authenticate in deployment.
+     * A non-JWT identity returns `null` here; [isVerifiedPerson] still classifies it as a machine.
      * Returns `""` for a machine token that names no client.
      */
-    fun machineClientId(identity: SecurityIdentity?): String? = machineClientId(identity?.principal)
-
-    /** JAX-RS form of [machineClientId]. */
     fun machineClientId(principal: Principal?): String? {
         val jwt = principal as? JsonWebToken ?: return null
         // A claim that cannot be read is not evidence of a human: fail towards machine.

@@ -12,13 +12,13 @@ import rego.v1
 
 import data.openbank.rest
 
-operator := {"type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
+operator := {"service_account": false, "type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
 
-admin := {"type": "HUMAN", "id": "u-admin", "roles": ["ROLE_ADMIN"]}
+admin := {"service_account": false, "type": "HUMAN", "id": "u-admin", "roles": ["ROLE_ADMIN"]}
 
-edge := {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]}
+edge := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]}
 
-shared := {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
+shared := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
 
 # The bundle's role_action_matrix grants ROLE_OPERATOR ALL ten account.* actions — this is what
 # matrix-allows re-admits to both M2M clients without the exclusion + veto pair. Shape mirrors
@@ -113,7 +113,7 @@ test_shared_no_operator_rule_on_update if {
 
 # --- #10486 batch 5: per-service read identities (ROLE_API only, exactly as the realm grants) ---
 
-sa_api(name) := {"type": "HUMAN", "id": sprintf("service-account-openbank-%v", [name]), "roles": ["ROLE_API"]}
+sa_api(name) := {"service_account": true, "type": "HUMAN", "id": sprintf("service-account-openbank-%v", [name]), "roles": ["ROLE_API"]}
 
 b5_rules := {
 	"authz": {"role_action_matrix": {"ROLE_OPERATOR": {"grant": [

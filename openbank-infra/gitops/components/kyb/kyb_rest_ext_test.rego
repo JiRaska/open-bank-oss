@@ -5,11 +5,11 @@ import rego.v1
 
 import data.openbank.rest
 
-edge := {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_API"]}
+edge := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_API"]}
 
-staff := {"type": "HUMAN", "id": "alice", "roles": ["ROLE_KYC"]}
+staff := {"service_account": false, "type": "HUMAN", "id": "alice", "roles": ["ROLE_KYC"]}
 
-shared := {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
+shared := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
 
 test_edge_may_start_a_case if {
 	"edge-service-kyb" in rest.allowed_reasons with input as {"principal": edge, "action": "kyb.case.start"}

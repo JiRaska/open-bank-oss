@@ -8,18 +8,18 @@ package openbank.rest
 
 import rego.v1
 
-admin := {"type": "HUMAN", "id": "u-admin", "roles": ["ROLE_ADMIN"]}
+admin := {"service_account": false, "type": "HUMAN", "id": "u-admin", "roles": ["ROLE_ADMIN"]}
 
-opener := {"type": "HUMAN", "id": "u-open", "roles": ["ROLE_KYC_OPENER"]}
+opener := {"service_account": false, "type": "HUMAN", "id": "u-open", "roles": ["ROLE_KYC_OPENER"]}
 
-reviewer := {"type": "HUMAN", "id": "u-rev", "roles": ["ROLE_KYC_REVIEWER"]}
+reviewer := {"service_account": false, "type": "HUMAN", "id": "u-rev", "roles": ["ROLE_KYC_REVIEWER"]}
 
-compliance := {"type": "HUMAN", "id": "u-comp", "roles": ["ROLE_COMPLIANCE"]}
+compliance := {"service_account": false, "type": "HUMAN", "id": "u-comp", "roles": ["ROLE_COMPLIANCE"]}
 
-operator := {"type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
+operator := {"service_account": false, "type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
 
 # An M2M identity carrying a KYC role must still be excluded.
-service_m2m := {"type": "HUMAN", "id": "service-account-openbank-onboarding", "roles": ["ROLE_KYC_REVIEWER"]}
+service_m2m := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-onboarding", "roles": ["ROLE_KYC_REVIEWER"]}
 
 # --- updateCheck: admin / opener allowed; reviewer NOT (not in the role set) ---
 
@@ -68,5 +68,5 @@ test_service_m2m_cannot_approve if {
 # --- anonymous denied everything ---
 
 test_anonymous_denied if {
-	count(allowed_reasons) == 0 with input as {"principal": {"type": "ANONYMOUS", "id": "anon", "roles": []}, "action": "kyc.case.approve"}
+	count(allowed_reasons) == 0 with input as {"principal": {"service_account": false, "type": "ANONYMOUS", "id": "anon", "roles": []}, "action": "kyc.case.approve"}
 }

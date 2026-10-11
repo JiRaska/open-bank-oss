@@ -64,6 +64,6 @@ allowed_reasons contains "campaign-auditor-read" if {
 allowed_reasons contains "edge-campaign-interaction-validation" if {
     input.principal.type == "HUMAN"
     input.principal.id == "service-account-openbank-edge"
-    principal_is_machine
+    input.principal.service_account == true
     input.action == "campaign.interaction.validate"
 }

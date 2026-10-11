@@ -12,14 +12,14 @@ package openbank.rest
 
 import rego.v1
 
-operator := {"type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
+operator := {"service_account": false, "type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
 
-admin := {"type": "HUMAN", "id": "u-admin", "roles": ["ROLE_ADMIN"]}
+admin := {"service_account": false, "type": "HUMAN", "id": "u-admin", "roles": ["ROLE_ADMIN"]}
 
-viewer := {"type": "HUMAN", "id": "u-view", "roles": ["ROLE_VIEWER"]}
+viewer := {"service_account": false, "type": "HUMAN", "id": "u-view", "roles": ["ROLE_VIEWER"]}
 
 # An M2M identity — classified HUMAN, carries ROLE_OPERATOR — must be kept out by the exclusion.
-service_m2m := {"type": "HUMAN", "id": "service-account-openbank-psd2", "roles": ["ROLE_OPERATOR"]}
+service_m2m := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-psd2", "roles": ["ROLE_OPERATOR"]}
 
 # --- tppRegistry.blacklist: operator/admin allowed ---
 
@@ -46,5 +46,5 @@ test_service_m2m_cannot_blacklist if {
 # --- an unauthenticated/anonymous principal is denied everything ---
 
 test_anonymous_denied if {
-	count(allowed_reasons) == 0 with input as {"principal": {"type": "ANONYMOUS", "id": "anon", "roles": []}, "action": "tppRegistry.blacklist"}
+	count(allowed_reasons) == 0 with input as {"principal": {"service_account": false, "type": "ANONYMOUS", "id": "anon", "roles": []}, "action": "tppRegistry.blacklist"}
 }

@@ -21,7 +21,7 @@ class OpaSidecarPolicyDecisionPointTest {
     private val pdp = OpaSidecarPolicyDecisionPoint(httpClient = httpClient)
 
     private val sampleQuery = AuthzQuery(
-        principal = Principal(id = "user-1", type = "HUMAN", roles = listOf("ROLE_OPERATOR")),
+        principal = Principal(id = "user-1", type = "HUMAN", roles = listOf("ROLE_OPERATOR"), serviceAccount = false),
         action = "party.update",
         resource = ResourceRef(type = "party", id = "p-123"),
     )
@@ -114,6 +114,20 @@ class OpaSidecarPolicyDecisionPointTest {
         val principal = ((serialized.captured as Map<*, *>)["input"] as Map<*, *>)["principal"] as Map<*, *>
         assertThat(principal["service_account"]).isEqualTo(true)
         assertThat(principal["client_id"]).isEqualTo("openbank-batch")
+    }
+
+    @Test
+    fun `a principal built without the flag is sent as a machine (fail closed)`(): Unit = runBlocking {
+        val mapper = spyk(ObjectMapper())
+        val serialized = slot<Any>()
+        every { mapper.writeValueAsString(capture(serialized)) } answers { callOriginal() }
+        stubResponse(200, """{"result":true}""")
+        val subject = OpaSidecarPolicyDecisionPoint(httpClient = httpClient, mapper = mapper)
+
+        subject.allow(sampleQuery.copy(principal = Principal(id = "alice", type = "HUMAN")))
+
+        val principal = ((serialized.captured as Map<*, *>)["input"] as Map<*, *>)["principal"] as Map<*, *>
+        assertThat(principal["service_account"]).isEqualTo(true)
     }
 
     @Test

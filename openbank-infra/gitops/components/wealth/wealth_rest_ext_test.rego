@@ -11,21 +11,21 @@ edge := "service-account-openbank-edge"
 
 test_edge_may_declare_for_the_customer if {
 	rest.allow with input as {
-		"principal": {"type": "HUMAN", "id": edge, "roles": ["ROLE_API"]},
+		"principal": {"service_account": true, "type": "HUMAN", "id": edge, "roles": ["ROLE_API"]},
 		"action": "wealth.holding.declare",
 	}
 }
 
 test_edge_may_read if {
 	rest.allow with input as {
-		"principal": {"type": "HUMAN", "id": edge, "roles": ["ROLE_API"]},
+		"principal": {"service_account": true, "type": "HUMAN", "id": edge, "roles": ["ROLE_API"]},
 		"action": "wealth.holding.read",
 	}
 }
 
 test_operator_may_read if {
 	rest.allow with input as {
-		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
 		"action": "wealth.holding.read",
 	}
 }
@@ -33,14 +33,14 @@ test_operator_may_read if {
 # The point of the narrowing: an operator may LOOK, never act on the customer's property.
 test_operator_may_not_declare if {
 	not rest.allow with input as {
-		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
 		"action": "wealth.holding.declare",
 	}
 }
 
 test_operator_may_not_withdraw if {
 	not rest.allow with input as {
-		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
 		"action": "wealth.holding.withdraw",
 	}
 }
@@ -57,6 +57,7 @@ test_operator_may_not_withdraw if {
 test_shared_service_account_can_read_via_the_base_operator_rule if {
 	rest.allow with input as {
 		"principal": {
+			"service_account": true,
 			"type": "HUMAN",
 			"id": "service-account-openbank-services",
 			"roles": ["ROLE_OPERATOR", "ROLE_API"],
@@ -70,6 +71,7 @@ test_shared_service_account_can_read_via_the_base_operator_rule if {
 test_shared_service_account_is_denied_declare if {
 	not rest.allow with input as {
 		"principal": {
+			"service_account": true,
 			"type": "HUMAN",
 			"id": "service-account-openbank-services",
 			"roles": ["ROLE_OPERATOR", "ROLE_API"],
@@ -81,6 +83,7 @@ test_shared_service_account_is_denied_declare if {
 test_shared_service_account_is_denied_withdraw if {
 	not rest.allow with input as {
 		"principal": {
+			"service_account": true,
 			"type": "HUMAN",
 			"id": "service-account-openbank-services",
 			"roles": ["ROLE_OPERATOR", "ROLE_API"],
@@ -91,7 +94,7 @@ test_shared_service_account_is_denied_withdraw if {
 
 test_anonymous_is_denied if {
 	not rest.allow with input as {
-		"principal": {"type": "ANONYMOUS", "id": "", "roles": []},
+		"principal": {"service_account": false, "type": "ANONYMOUS", "id": "", "roles": []},
 		"action": "wealth.holding.read",
 	}
 }

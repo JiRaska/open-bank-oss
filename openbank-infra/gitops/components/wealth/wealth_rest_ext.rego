@@ -42,7 +42,7 @@ allowed_reasons contains "operator-wealth-read" if {
 allowed_reasons contains "edge-service-wealth" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-edge"
-	principal_is_machine
+	input.principal.service_account == true
 	input.action in {
 		"wealth.holding.read",
 		"wealth.holding.declare",

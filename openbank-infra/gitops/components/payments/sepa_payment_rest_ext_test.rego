@@ -12,13 +12,13 @@ import rego.v1
 
 import data.openbank.rest
 
-operator := {"type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
+operator := {"service_account": false, "type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
 
-payments_desk := {"type": "HUMAN", "id": "u-pay", "roles": ["ROLE_PAYMENTS"]}
+payments_desk := {"service_account": false, "type": "HUMAN", "id": "u-pay", "roles": ["ROLE_PAYMENTS"]}
 
-edge := {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]}
+edge := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]}
 
-shared := {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
+shared := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
 
 # The bundle's role_action_matrix data — grants ROLE_OPERATOR sepaPayment.{approval.decide,
 # create, handleReturn, transitionStatus}, which is what matrix-allows would re-admit to both
@@ -98,9 +98,9 @@ test_shared_no_operator_rule_on_transition if {
 
 # --- #10486 batch 1: standing-order-service's own identity (ROLE_API only) ---
 
-standing_order_m2m := {"type": "HUMAN", "id": "service-account-openbank-standing-order", "roles": ["ROLE_API"]}
+standing_order_m2m := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-standing-order", "roles": ["ROLE_API"]}
 
-other_role_api_sa := {"type": "HUMAN", "id": "service-account-openbank-mcp-service", "roles": ["ROLE_API"]}
+other_role_api_sa := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-mcp-service", "roles": ["ROLE_API"]}
 
 test_standing_order_may_create_via_its_identity_rule if {
 	decision := rest.allow with input as {"principal": standing_order_m2m, "action": "sepaPayment.create"}

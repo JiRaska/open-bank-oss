@@ -66,6 +66,6 @@ allowed_reasons contains "operator-vop-verify" if {
 # per-caller allow-list — is the control that bounds it.
 allowed_reasons contains "m2m-vop-verify" if {
 	input.principal.type == "HUMAN"
-	principal_is_machine
+	input.principal.service_account == true
 	input.action == "vop.verify"
 }

@@ -31,11 +31,11 @@ rules_mock := {
 	"shared_m2m_write_prohibition": {"reasons": []},
 }
 
-operator := {"type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
+operator := {"service_account": false, "type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
 
-edge := {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]}
+edge := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]}
 
-services_m2m := {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
+services_m2m := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
 
 # --- the regressions this file exists to prevent ---
 
@@ -129,7 +129,7 @@ revocation_rules := object.union(rules_mock, {
 # Credential revocation grants are owner scoped and retain the money-path obligation.
 test_customer_can_request_own_device_revocation if {
 	decision := rest.allow with input as {
-		"principal": {"id": "party-owner", "type": "HUMAN", "roles": ["ROLE_CUSTOMER"]},
+		"principal": {"service_account": false, "id": "party-owner", "type": "HUMAN", "roles": ["ROLE_CUSTOMER"]},
 		"action": "device.revoke",
 		"resource": {"id": "party-owner"},
 	}
@@ -139,7 +139,7 @@ test_customer_can_request_own_device_revocation if {
 
 test_customer_cannot_request_foreign_device_revocation if {
 	not rest.allow with input as {
-		"principal": {"id": "party-owner", "type": "HUMAN", "roles": ["ROLE_CUSTOMER"]},
+		"principal": {"service_account": false, "id": "party-owner", "type": "HUMAN", "roles": ["ROLE_CUSTOMER"]},
 		"action": "device.revoke",
 		"resource": {"id": "party-other"},
 	}
@@ -148,7 +148,7 @@ test_customer_cannot_request_foreign_device_revocation if {
 
 test_customer_device_revocation_requires_four_eyes if {
 	rest.four_eyes_required with input as {
-		"principal": {"id": "party-owner", "type": "HUMAN", "roles": ["ROLE_CUSTOMER"]},
+		"principal": {"service_account": false, "id": "party-owner", "type": "HUMAN", "roles": ["ROLE_CUSTOMER"]},
 		"action": "device.revoke",
 		"resource": {"id": "party-owner"},
 	}
@@ -157,7 +157,7 @@ test_customer_device_revocation_requires_four_eyes if {
 
 test_service_principal_cannot_revoke_customer_device_via_self_rule if {
 	not rest.allow with input as {
-		"principal": {"id": "service-account-openbank-services", "type": "HUMAN", "roles": ["ROLE_API"]},
+		"principal": {"service_account": true, "id": "service-account-openbank-services", "type": "HUMAN", "roles": ["ROLE_API"]},
 		"action": "device.revoke",
 		"resource": {"id": "party-owner"},
 	}
@@ -173,7 +173,7 @@ test_operator_may_read_approval_queue if {
 }
 
 test_operator_may_decide_approval if {
-	decision := rest.allow with input as {"principal": operator, "action": "scaChallenge.approval.decide", "resource": {"type": "scaChallenge", "id": "a-1"}}
+	decision := rest.allow with input as {"principal": operator, "action": "scaChallenge.approval.decide", "resource": {"service_account": false, "type": "scaChallenge", "id": "a-1"}}
 		with data.rules as rules_mock
 	decision.allow == true
 }
@@ -189,11 +189,11 @@ test_edge_may_not_read_approval_queue if {
 }
 
 test_shared_m2m_may_not_decide_approval if {
-	rest.allow == false with input as {"principal": services_m2m, "action": "scaChallenge.approval.decide", "resource": {"type": "scaChallenge", "id": "a-1"}}
+	rest.allow == false with input as {"principal": services_m2m, "action": "scaChallenge.approval.decide", "resource": {"service_account": false, "type": "scaChallenge", "id": "a-1"}}
 		with data.rules as rules_mock
 }
 
 test_edge_may_not_decide_approval if {
-	rest.allow == false with input as {"principal": edge, "action": "scaChallenge.approval.decide", "resource": {"type": "scaChallenge", "id": "a-1"}}
+	rest.allow == false with input as {"principal": edge, "action": "scaChallenge.approval.decide", "resource": {"service_account": false, "type": "scaChallenge", "id": "a-1"}}
 		with data.rules as rules_mock
 }

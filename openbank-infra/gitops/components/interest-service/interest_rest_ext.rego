@@ -90,6 +90,6 @@ allowed_reasons contains "interest-oversight-read" if {
 # caller and fails closed for any FUTURE service account too. Keyed on the action set, not a
 # principal allowlist — a new backend client must never silently gain interest writes.
 prohibited if {
-	principal_is_machine
+	input.principal.service_account == true
 	input.action in {"interest.create", "interest.trigger", "interest.delete"}
 }
