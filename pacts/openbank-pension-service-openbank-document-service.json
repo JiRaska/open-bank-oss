@@ -40,7 +40,7 @@
       "description": "POST render the pension key-information document for a strategy choice",
       "providerStates": [
         {
-          "name": "the canonical document templates are seeded and published"
+          "name": "a test-only published pension key-information fixture exists"
         }
       ],
       "request": {

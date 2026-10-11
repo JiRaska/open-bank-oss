@@ -59,7 +59,7 @@ class PensionDocumentServicePactConsumerTest {
 
     @Pact(consumer = CONSUMER, provider = PROVIDER)
     fun renderKidPact(builder: PactDslWithProvider): RequestResponsePact = builder
-        .given("the canonical document templates are seeded and published")
+        .given("a test-only published pension key-information fixture exists")
         .uponReceiving("POST render the pension key-information document for a strategy choice")
         .path(RENDER_PATH)
         .method("POST")
