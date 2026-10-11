@@ -135,6 +135,7 @@ class ListenerAuthParityIT {
             val permission = auth["permission"] as Map<*, *>
             val bearer = permission["bearer-only"] as Map<*, *>
             check(ssl["client-auth"] == "required")
+            check(http["insecure-requests"] == "enabled")
             check(bearer["paths"] == "/api/*")
             check(bearer["policy"] == "permit")
             check(bearer["auth-mechanism"] == "bearer")
@@ -175,7 +176,6 @@ class ListenerAuthParityIT {
                 "quarkus.http.ssl.certificate.trust-store-files" to dir.resolve("client.crt").toString(),
                 "quarkus.http.ssl.protocols" to "TLSv1.3",
                 "quarkus.http.test-ssl-port" to "0",
-                "quarkus.http.insecure-requests" to "enabled",
             ) + bearerFixture()
         }
 
