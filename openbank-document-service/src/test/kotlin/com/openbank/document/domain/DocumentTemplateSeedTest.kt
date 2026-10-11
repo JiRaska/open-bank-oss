@@ -120,11 +120,9 @@ class DocumentTemplateSeedTest {
     )
 
     @TestFactory
-    fun `every seeded template renders without throwing and every token is resolved`() =
+    fun `every seeded template can be previewed and every token is resolved`() =
         DocumentTemplateSeed.templates.map { template ->
             DynamicTest.dynamicTest("${template.code} v${template.version} (${template.locale})") {
-                assertThat(template.status).isEqualTo(TemplateStatus.PUBLISHED)
-
                 val rendered = renderer.renderHtml(template, sampleData)
 
                 assertThat(rendered).isNotBlank()
@@ -257,7 +255,8 @@ class DocumentTemplateSeedTest {
                 val code = "pension-$family-$locale"
                 DynamicTest.dynamicTest(code) {
                     val template = DocumentTemplateSeed.templates.single { it.code == code }
-                    assertThat(template.status).isEqualTo(TemplateStatus.PUBLISHED)
+                    assertThat(template.status).isEqualTo(TemplateStatus.DRAFT)
+                    assertThat(template.renderable()).isFalse()
                     assertThat(template.locale).isEqualTo(locale)
                     assertThat(template.bodyHtml).contains("LEGAL-REVIEW-REQUIRED")
 
