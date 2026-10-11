@@ -87,9 +87,9 @@ bundle := {"version": "v0.0.0-test"}
 # ---------------------------------------------------------------------------------------
 test_default_deny if {
 	not rest.allow with input as {
-		"principal": {"id": "user-1", "type": "HUMAN", "roles": []},
+		"principal": {"service_account": false, "id": "user-1", "type": "HUMAN", "roles": []},
 		"action": "party.update",
-		"resource": {"type": "party", "id": "p-1"},
+		"resource": {"service_account": false, "type": "party", "id": "p-1"},
 	}
 }
 
@@ -98,9 +98,9 @@ test_default_deny if {
 # ---------------------------------------------------------------------------------------
 test_allow_operator_on_own_tenant if {
 	decision := rest.allow with input as {
-		"principal": {"id": "user-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"], "attributes": {"tenant": "t-1"}},
+		"principal": {"service_account": false, "id": "user-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"], "attributes": {"tenant": "t-1"}},
 		"action": "party.update",
-		"resource": {"type": "party", "id": "p-1", "attributes": {"tenant": "t-1"}},
+		"resource": {"service_account": false, "type": "party", "id": "p-1", "attributes": {"tenant": "t-1"}},
 	}
 		with data.openbank.bundle as bundle
 
@@ -112,9 +112,9 @@ test_allow_operator_on_own_tenant if {
 # Cross-tenant access is denied — operator-on-own-tenant rule requires matching tenants.
 test_deny_operator_on_other_tenant if {
 	not rest.allow with input as {
-		"principal": {"id": "user-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"], "attributes": {"tenant": "t-1"}},
+		"principal": {"service_account": false, "id": "user-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"], "attributes": {"tenant": "t-1"}},
 		"action": "party.update",
-		"resource": {"type": "party", "id": "p-1", "attributes": {"tenant": "t-2"}},
+		"resource": {"service_account": false, "type": "party", "id": "p-1", "attributes": {"tenant": "t-2"}},
 	}
 }
 
@@ -123,9 +123,9 @@ test_deny_operator_on_other_tenant if {
 # ---------------------------------------------------------------------------------------
 test_allow_compliance_read_any if {
 	decision := rest.allow with input as {
-		"principal": {"id": "user-c", "type": "HUMAN", "roles": ["ROLE_COMPLIANCE"]},
+		"principal": {"service_account": false, "id": "user-c", "type": "HUMAN", "roles": ["ROLE_COMPLIANCE"]},
 		"action": "party.read",
-		"resource": {"type": "party", "id": "p-1"},
+		"resource": {"service_account": false, "type": "party", "id": "p-1"},
 	}
 		with data.openbank.bundle as bundle
 
@@ -136,9 +136,9 @@ test_allow_compliance_read_any if {
 # Compliance role cannot write — only the *.read suffix is permitted by this rule.
 test_deny_compliance_write if {
 	not rest.allow with input as {
-		"principal": {"id": "user-c", "type": "HUMAN", "roles": ["ROLE_COMPLIANCE"]},
+		"principal": {"service_account": false, "id": "user-c", "type": "HUMAN", "roles": ["ROLE_COMPLIANCE"]},
 		"action": "party.update",
-		"resource": {"type": "party", "id": "p-1"},
+		"resource": {"service_account": false, "type": "party", "id": "p-1"},
 	}
 }
 
@@ -162,9 +162,9 @@ test_allow_party_list_own_devices if {
 # A party may not list another party's devices.
 test_deny_party_list_other_party_devices if {
 	not rest.allow with input as {
-		"principal": {"id": "party-a", "type": "HUMAN", "roles": [], "attributes": {}},
+		"principal": {"service_account": false, "id": "party-a", "type": "HUMAN", "roles": [], "attributes": {}},
 		"action": "device.list",
-		"resource": {"type": "device", "id": "party-b"},
+		"resource": {"service_account": false, "type": "device", "id": "party-b"},
 	}
 }
 
@@ -197,9 +197,9 @@ test_deny_party_self_service_does_not_cover_enroll if {
 # ---------------------------------------------------------------------------------------
 test_allow_operator_list_any_devices if {
 	decision := rest.allow with input as {
-		"principal": {"id": "operator-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"], "attributes": {}},
+		"principal": {"service_account": false, "id": "operator-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"], "attributes": {}},
 		"action": "device.list",
-		"resource": {"type": "device", "id": "any-party-id"},
+		"resource": {"service_account": false, "type": "device", "id": "any-party-id"},
 	}
 		with data.openbank.bundle as bundle
 
@@ -209,9 +209,9 @@ test_allow_operator_list_any_devices if {
 
 test_allow_admin_list_any_devices if {
 	decision := rest.allow with input as {
-		"principal": {"id": "admin-1", "type": "HUMAN", "roles": ["ROLE_ADMIN"], "attributes": {}},
+		"principal": {"service_account": false, "id": "admin-1", "type": "HUMAN", "roles": ["ROLE_ADMIN"], "attributes": {}},
 		"action": "device.list",
-		"resource": {"type": "device", "id": "any-party-id"},
+		"resource": {"service_account": false, "type": "device", "id": "any-party-id"},
 	}
 		with data.openbank.bundle as bundle
 
@@ -222,9 +222,9 @@ test_allow_admin_list_any_devices if {
 # operator-read-any does NOT cover mutation verbs.
 test_deny_operator_read_any_does_not_cover_write if {
 	not rest.allow with input as {
-		"principal": {"id": "operator-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"], "attributes": {}},
+		"principal": {"service_account": false, "id": "operator-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"], "attributes": {}},
 		"action": "device.enroll",
-		"resource": {"type": "device", "id": "any-party-id"},
+		"resource": {"service_account": false, "type": "device", "id": "any-party-id"},
 	}
 }
 
@@ -424,9 +424,9 @@ test_money_path_scopes_supports_multiple_override_prefixes if {
 # ---------------------------------------------------------------------------------------
 test_allow_attributes_surface_four_eyes_required if {
 	decision := rest.allow with input as {
-		"principal": {"id": "op-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"], "attributes": {"tenant": "t-1"}},
+		"principal": {"service_account": false, "id": "op-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"], "attributes": {"tenant": "t-1"}},
 		"action": "ledger.reverse",
-		"resource": {"type": "ledger", "id": "j-1", "attributes": {"tenant": "t-1"}},
+		"resource": {"service_account": false, "type": "ledger", "id": "j-1", "attributes": {"tenant": "t-1"}},
 	}
 		with data.openbank.bundle as bundle
 		with data.rules as rules_real
@@ -438,9 +438,9 @@ test_allow_attributes_surface_four_eyes_required if {
 # Sparse by design: no attributes key content when four-eyes isn't required.
 test_allow_attributes_empty_when_four_eyes_not_required if {
 	decision := rest.allow with input as {
-		"principal": {"id": "op-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"], "attributes": {"tenant": "t-1"}},
+		"principal": {"service_account": false, "id": "op-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"], "attributes": {"tenant": "t-1"}},
 		"action": "party.update",
-		"resource": {"type": "party", "id": "p-1", "attributes": {"tenant": "t-1"}},
+		"resource": {"service_account": false, "type": "party", "id": "p-1", "attributes": {"tenant": "t-1"}},
 	}
 		with data.openbank.bundle as bundle
 		with data.rules as rules_real
@@ -514,9 +514,9 @@ test_prohibited_payment_gate_fail_open if {
 # dedicated deny rule (belt and braces with `prohibited`).
 test_prohibited_flip_is_not_allowed if {
 	not rest.allow with input as {
-		"principal": {"id": "op-1", "type": "HUMAN", "roles": ["ROLE_ADMIN"], "attributes": {}},
+		"principal": {"service_account": false, "id": "op-1", "type": "HUMAN", "roles": ["ROLE_ADMIN"], "attributes": {}},
 		"action": "featureflag.flip",
-		"resource": {"type": "feature-flag", "id": "sca-enforcement-disabled"},
+		"resource": {"service_account": false, "type": "feature-flag", "id": "sca-enforcement-disabled"},
 		"attributes": {"flag": "sca-enforcement-disabled"},
 	}
 		with data.rules as rules_real
@@ -527,9 +527,9 @@ test_prohibited_flip_is_not_allowed if {
 # head blocks every reason, so operator-on-own-tenant cannot grant it.
 test_operator_own_tenant_cannot_flip_prohibited if {
 	not rest.allow with input as {
-		"principal": {"id": "op-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"], "attributes": {"tenant": "t-1"}},
+		"principal": {"service_account": false, "id": "op-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"], "attributes": {"tenant": "t-1"}},
 		"action": "featureflag.flip",
-		"resource": {"type": "feature-flag", "id": "sca-enforcement-disabled", "attributes": {"tenant": "t-1"}},
+		"resource": {"service_account": false, "type": "feature-flag", "id": "sca-enforcement-disabled", "attributes": {"tenant": "t-1"}},
 		"attributes": {"flag": "sca-enforcement-disabled"},
 	}
 		with data.openbank.bundle as bundle
@@ -540,9 +540,9 @@ test_operator_own_tenant_cannot_flip_prohibited if {
 # (the guard only blocks PROHIBITED actions, not all flips) — confirms no over-blocking.
 test_operator_own_tenant_may_flip_non_prohibited if {
 	decision := rest.allow with input as {
-		"principal": {"id": "op-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"], "attributes": {"tenant": "t-1"}},
+		"principal": {"service_account": false, "id": "op-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"], "attributes": {"tenant": "t-1"}},
 		"action": "featureflag.flip",
-		"resource": {"type": "feature-flag", "id": "instant-payments-enabled", "attributes": {"tenant": "t-1"}},
+		"resource": {"service_account": false, "type": "feature-flag", "id": "instant-payments-enabled", "attributes": {"tenant": "t-1"}},
 		"attributes": {"flag": "instant-payments-enabled"},
 	}
 		with data.openbank.bundle as bundle
@@ -561,9 +561,9 @@ test_operator_own_tenant_may_flip_non_prohibited if {
 # ---------------------------------------------------------------------------------------
 test_allow_service_notification_mark_read if {
 	decision := rest.allow with input as {
-		"principal": {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": true, "id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "notification.mark-read",
-		"resource": {"type": "notification", "id": "n-1"},
+		"resource": {"service_account": false, "type": "notification", "id": "n-1"},
 	}
 		with data.openbank.bundle as bundle
 
@@ -573,7 +573,7 @@ test_allow_service_notification_mark_read if {
 
 test_allow_service_notification_list if {
 	decision := rest.allow with input as {
-		"principal": {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": true, "id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "notification.list",
 	}
 		with data.openbank.bundle as bundle
@@ -583,7 +583,7 @@ test_allow_service_notification_list if {
 
 test_allow_service_device_list if {
 	decision := rest.allow with input as {
-		"principal": {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": true, "id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "device.list",
 	}
 		with data.openbank.bundle as bundle
@@ -598,9 +598,9 @@ test_allow_service_device_list if {
 # on "getDocumentContent failed: 403" and onboarding could not complete.
 test_allow_service_document_read_content if {
 	decision := rest.allow with input as {
-		"principal": {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": true, "id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "document.readContent",
-		"resource": {"type": "document", "id": "d-1"},
+		"resource": {"service_account": false, "type": "document", "id": "d-1"},
 	}
 		with data.openbank.bundle as bundle
 
@@ -613,9 +613,9 @@ test_allow_service_document_read_content if {
 # to the edge's client_credentials identity — a real ROLE_OPERATOR session is not it.
 test_deny_operator_document_read_content if {
 	not rest.allow with input as {
-		"principal": {"id": "alice.operator", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "id": "alice.operator", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "document.readContent",
-		"resource": {"type": "document", "id": "d-1"},
+		"resource": {"service_account": false, "type": "document", "id": "d-1"},
 	}
 }
 
@@ -627,9 +627,9 @@ test_deny_operator_document_read_content if {
 # and left this one denied.
 test_allow_service_signature_ceremony_record_decision if {
 	decision := rest.allow with input as {
-		"principal": {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": true, "id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "signatureCeremony.recordDecision",
-		"resource": {"type": "signatureCeremony", "id": "c-1"},
+		"resource": {"service_account": false, "type": "signatureCeremony", "id": "c-1"},
 	}
 		with data.openbank.bundle as bundle
 
@@ -643,9 +643,9 @@ test_allow_service_signature_ceremony_record_decision if {
 # session authenticates through a different client, so it can never match.
 test_deny_operator_signature_ceremony_record_decision if {
 	not rest.allow with input as {
-		"principal": {"id": "alice.operator", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "id": "alice.operator", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "signatureCeremony.recordDecision",
-		"resource": {"type": "signatureCeremony", "id": "c-1"},
+		"resource": {"service_account": false, "type": "signatureCeremony", "id": "c-1"},
 	}
 }
 
@@ -654,9 +654,9 @@ test_deny_operator_signature_ceremony_record_decision if {
 # path partyId the edge injects, revoke is ownership-enforced downstream.
 test_allow_service_consent_list if {
 	decision := rest.allow with input as {
-		"principal": {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": true, "id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "consent.list",
-		"resource": {"type": "party", "id": "p-1"},
+		"resource": {"service_account": false, "type": "party", "id": "p-1"},
 	}
 		with data.openbank.bundle as bundle
 
@@ -666,9 +666,9 @@ test_allow_service_consent_list if {
 
 test_allow_service_consent_revoke if {
 	decision := rest.allow with input as {
-		"principal": {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": true, "id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "consent.revoke",
-		"resource": {"type": "consent", "id": "c-1"},
+		"resource": {"service_account": false, "type": "consent", "id": "c-1"},
 	}
 		with data.openbank.bundle as bundle
 
@@ -682,9 +682,9 @@ test_allow_service_consent_revoke if {
 # what keeps the surface narrow.
 test_allow_service_audit_customer_read if {
 	decision := rest.allow with input as {
-		"principal": {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": true, "id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "audit.customerRead",
-		"resource": {"type": "party", "id": "p-1"},
+		"resource": {"service_account": false, "type": "party", "id": "p-1"},
 	}
 		with data.openbank.bundle as bundle
 
@@ -698,9 +698,9 @@ test_allow_service_audit_customer_read if {
 # so operator-read-any cannot pick it up either.
 test_deny_operator_audit_customer_read if {
 	not rest.allow with input as {
-		"principal": {"id": "alice.operator", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "id": "alice.operator", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "audit.customerRead",
-		"resource": {"type": "party", "id": "p-1"},
+		"resource": {"service_account": false, "type": "party", "id": "p-1"},
 	}
 }
 
@@ -708,9 +708,9 @@ test_deny_operator_audit_customer_read if {
 # auditor/compliance trail (GET /entries/{aggregateId}, /entries/by-actor/{actorId}).
 test_deny_service_audit_read if {
 	not rest.allow with input as {
-		"principal": {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_API"]},
+		"principal": {"service_account": true, "id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_API"]},
 		"action": "audit.trail.inspect",
-		"resource": {"type": "party", "id": "p-1"},
+		"resource": {"service_account": false, "type": "party", "id": "p-1"},
 	}
 }
 
@@ -721,17 +721,17 @@ test_deny_service_audit_read if {
 # ever renamed back to a `.read`, these go red.
 test_deny_service_account_operator_audit_trail_inspect if {
 	not rest.allow with input as {
-		"principal": {"id": "service-account-openbank-services", "type": "HUMAN", "roles": ["ROLE_API", "ROLE_OPERATOR"]},
+		"principal": {"service_account": true, "id": "service-account-openbank-services", "type": "HUMAN", "roles": ["ROLE_API", "ROLE_OPERATOR"]},
 		"action": "audit.trail.inspect",
-		"resource": {"type": "aggregate", "id": "a-1"},
+		"resource": {"service_account": false, "type": "aggregate", "id": "a-1"},
 	}
 }
 
 test_deny_service_account_compliance_audit_trail_inspect if {
 	not rest.allow with input as {
-		"principal": {"id": "service-account-openbank-services", "type": "HUMAN", "roles": ["ROLE_COMPLIANCE"]},
+		"principal": {"service_account": true, "id": "service-account-openbank-services", "type": "HUMAN", "roles": ["ROLE_COMPLIANCE"]},
 		"action": "audit.trail.inspect",
-		"resource": {"type": "aggregate", "id": "a-1"},
+		"resource": {"service_account": false, "type": "aggregate", "id": "a-1"},
 	}
 }
 
@@ -739,9 +739,9 @@ test_deny_service_account_compliance_audit_trail_inspect if {
 # — the edge must not be able to create/activate/validate consents on the customer's behalf.
 test_deny_service_consent_create if {
 	not rest.allow with input as {
-		"principal": {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": true, "id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "consent.create",
-		"resource": {"type": "consent", "id": "c-1"},
+		"resource": {"service_account": false, "type": "consent", "id": "c-1"},
 	}
 }
 
@@ -749,9 +749,9 @@ test_deny_service_consent_create if {
 # pinned to the edge's client_credentials identity, and a human session is a different client.
 test_deny_operator_consent_revoke if {
 	not rest.allow with input as {
-		"principal": {"id": "alice.operator", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "id": "alice.operator", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "consent.revoke",
-		"resource": {"type": "consent", "id": "c-1"},
+		"resource": {"service_account": false, "type": "consent", "id": "c-1"},
 	}
 }
 
@@ -759,9 +759,9 @@ test_deny_operator_consent_revoke if {
 # holds) — operator-read-any also does not cover a write like party.update.
 test_deny_service_outside_notification_family if {
 	not rest.allow with input as {
-		"principal": {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": true, "id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "party.update",
-		"resource": {"type": "party", "id": "p-1"},
+		"resource": {"service_account": false, "type": "party", "id": "p-1"},
 	}
 }
 
@@ -769,7 +769,7 @@ test_deny_service_outside_notification_family if {
 # it is intentionally HUMAN-only, matching what AuthorizeInterceptor actually emits.
 test_deny_service_typed_principal_never_matches if {
 	not rest.allow with input as {
-		"principal": {"id": "service-account-openbank-edge", "type": "SERVICE", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": true, "id": "service-account-openbank-edge", "type": "SERVICE", "roles": ["ROLE_OPERATOR"]},
 		"action": "notification.list",
 	}
 }
@@ -806,7 +806,7 @@ agent_charters_for_rest_bridge := {
 
 test_allow_ai_agent_ledger_list_via_charter_bridge if {
 	decision := rest.allow with input as {
-		"principal": {"id": "agent:ui-assistant", "type": "AI_AGENT", "roles": []},
+		"principal": {"service_account": false, "id": "agent:ui-assistant", "type": "AI_AGENT", "roles": []},
 		"action": "ledger.list",
 		"resource": null,
 	}
@@ -824,7 +824,7 @@ test_allow_ai_agent_ledger_list_via_charter_bridge if {
 # every other agent test sends an explicit `"resource": null` and so never covered this path.
 test_allow_ai_agent_via_charter_bridge_without_resource_key if {
 	decision := rest.allow with input as {
-		"principal": {"id": "agent:ui-assistant", "type": "AI_AGENT", "roles": []},
+		"principal": {"service_account": false, "id": "agent:ui-assistant", "type": "AI_AGENT", "roles": []},
 		"action": "ledger.list",
 	}
 		with data.openbank.bundle as bundle
@@ -837,7 +837,7 @@ test_allow_ai_agent_via_charter_bridge_without_resource_key if {
 # The bridge is read-only -- an AI_AGENT can never reach a write action through it.
 test_deny_ai_agent_ledger_create_via_charter_bridge if {
 	not rest.allow with input as {
-		"principal": {"id": "agent:ui-assistant", "type": "AI_AGENT", "roles": []},
+		"principal": {"service_account": false, "id": "agent:ui-assistant", "type": "AI_AGENT", "roles": []},
 		"action": "ledger.create",
 		"resource": null,
 	}
@@ -847,7 +847,7 @@ test_deny_ai_agent_ledger_create_via_charter_bridge if {
 # An AI_AGENT whose charter holds no matching tool stays denied (deny-by-default holds).
 test_deny_ai_agent_without_matching_charter_tool if {
 	not rest.allow with input as {
-		"principal": {"id": "agent:rca-investigator", "type": "AI_AGENT", "roles": []},
+		"principal": {"service_account": false, "id": "agent:rca-investigator", "type": "AI_AGENT", "roles": []},
 		"action": "ledger.list",
 		"resource": null,
 	}
@@ -861,7 +861,7 @@ test_deny_ai_agent_without_matching_charter_tool if {
 # collides with a read verb today) would otherwise still be granted by rest_action_allowed.
 test_deny_ai_agent_hard_denied_tool_via_bridge if {
 	not rest.allow with input as {
-		"principal": {"id": "agent:ui-assistant", "type": "AI_AGENT", "roles": []},
+		"principal": {"service_account": false, "id": "agent:ui-assistant", "type": "AI_AGENT", "roles": []},
 		"action": "ledger.list",
 		"resource": null,
 	}
@@ -875,7 +875,7 @@ test_deny_ai_agent_hard_denied_tool_via_bridge if {
 # same regression class as the hard-denied case above, at the charter_denied layer instead.
 test_deny_ai_agent_charter_denied_tool_via_bridge if {
 	not rest.allow with input as {
-		"principal": {"id": "agent:ui-assistant", "type": "AI_AGENT", "roles": []},
+		"principal": {"service_account": false, "id": "agent:ui-assistant", "type": "AI_AGENT", "roles": []},
 		"action": "ledger.list",
 		"resource": null,
 	}
@@ -913,7 +913,7 @@ skill_charter_for_attributes_bridge := {
 
 test_allow_ai_agent_run_skill_via_bridge_when_attributes_forwarded if {
 	decision := rest.allow with input as {
-		"principal": {"id": "agent:ledger-domain-engineer", "type": "AI_AGENT", "roles": []},
+		"principal": {"service_account": false, "id": "agent:ledger-domain-engineer", "type": "AI_AGENT", "roles": []},
 		"action": "run.skill",
 		"resource": null,
 		"attributes": {"skill": "ship-check"},
@@ -929,7 +929,7 @@ test_allow_ai_agent_run_skill_via_bridge_when_attributes_forwarded if {
 # input skill_ok evaluates (not merely present).
 test_deny_ai_agent_run_skill_via_bridge_with_unchartered_skill if {
 	not rest.allow with input as {
-		"principal": {"id": "agent:ledger-domain-engineer", "type": "AI_AGENT", "roles": []},
+		"principal": {"service_account": false, "id": "agent:ledger-domain-engineer", "type": "AI_AGENT", "roles": []},
 		"action": "run.skill",
 		"resource": null,
 		"attributes": {"skill": "deploy-prod"},
@@ -942,7 +942,7 @@ test_deny_ai_agent_run_skill_via_bridge_with_unchartered_skill if {
 # else-branch then denies run.skill cleanly instead of disappearing the whole decision.
 test_deny_ai_agent_run_skill_via_bridge_without_attributes_key if {
 	not rest.allow with input as {
-		"principal": {"id": "agent:ledger-domain-engineer", "type": "AI_AGENT", "roles": []},
+		"principal": {"service_account": false, "id": "agent:ledger-domain-engineer", "type": "AI_AGENT", "roles": []},
 		"action": "run.skill",
 		"resource": null,
 	}
@@ -955,9 +955,9 @@ test_deny_ai_agent_run_skill_via_bridge_without_attributes_key if {
 # See also test_deny_operator_read_any_does_not_cover_write above for the same invariant.
 test_deny_human_operator_who_is_not_the_edge if {
 	not rest.allow with input as {
-		"principal": {"id": "operator-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "id": "operator-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "device.enroll",
-		"resource": {"type": "device", "id": "any-party-id"},
+		"resource": {"service_account": false, "type": "device", "id": "any-party-id"},
 	}
 }
 
@@ -965,7 +965,7 @@ test_deny_human_operator_who_is_not_the_edge if {
 # irrelevant to this rule — it gates on identity, not role, and must still allow.
 test_allow_edge_identity_without_explicit_operator_role_check if {
 	decision := rest.allow with input as {
-		"principal": {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": []},
+		"principal": {"service_account": true, "id": "service-account-openbank-edge", "type": "HUMAN", "roles": []},
 		"action": "notification.list",
 	}
 		with data.openbank.bundle as bundle
@@ -981,7 +981,7 @@ test_allow_edge_identity_without_explicit_operator_role_check if {
 # ---------------------------------------------------------------------------------------
 test_allow_m2m_sanctions_create if {
 	decision := rest.allow with input as {
-		"principal": {"id": "service-account-openbank-services", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": true, "id": "service-account-openbank-services", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "sanctions.create",
 		"resource": "",
 	}
@@ -997,7 +997,7 @@ test_allow_m2m_sanctions_create if {
 # pinned edge-service-notification rule above.
 test_allow_m2m_sanctions_create_from_a_different_service_account if {
 	decision := rest.allow with input as {
-		"principal": {"id": "service-account-openbank-kyc", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": true, "id": "service-account-openbank-kyc", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "sanctions.create",
 		"resource": "",
 	}
@@ -1012,7 +1012,7 @@ test_allow_m2m_sanctions_create_from_a_different_service_account if {
 # screening result would defeat the compliance control.
 test_deny_m2m_sanctions_clear_not_covered if {
 	not rest.allow with input as {
-		"principal": {"id": "service-account-openbank-services", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": true, "id": "service-account-openbank-services", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "sanctions.clear",
 		"resource": "",
 	}
@@ -1023,7 +1023,7 @@ test_deny_m2m_sanctions_clear_not_covered if {
 # the role, mirroring the edge-service-notification invariant above.
 test_deny_human_operator_sanctions_create_via_m2m_rule if {
 	not rest.allow with input as {
-		"principal": {"id": "operator-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "id": "operator-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "sanctions.create",
 		"resource": "",
 	}
@@ -1036,7 +1036,7 @@ test_deny_human_operator_sanctions_create_via_m2m_rule if {
 # ---------------------------------------------------------------------------------------
 test_allow_operator_compose_message if {
 	decision := rest.allow with input as {
-		"principal": {"id": "operator-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "id": "operator-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "opsmessage.compose",
 		"resource": "",
 	}
@@ -1048,7 +1048,7 @@ test_allow_operator_compose_message if {
 
 test_allow_admin_compose_message if {
 	rest.allow with input as {
-		"principal": {"id": "admin-1", "type": "HUMAN", "roles": ["ROLE_ADMIN"]},
+		"principal": {"service_account": false, "id": "admin-1", "type": "HUMAN", "roles": ["ROLE_ADMIN"]},
 		"action": "opsmessage.compose",
 		"resource": "",
 	}
@@ -1062,7 +1062,7 @@ test_allow_admin_compose_message if {
 # that specific identity, not just the class of service-account ids.
 test_deny_edge_service_account_compose_message if {
 	not rest.allow with input as {
-		"principal": {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": true, "id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "opsmessage.compose",
 		"resource": "",
 	}
@@ -1072,7 +1072,7 @@ test_deny_edge_service_account_compose_message if {
 # id prefix, not a specific client.
 test_deny_any_service_account_compose_message if {
 	not rest.allow with input as {
-		"principal": {"id": "service-account-openbank-kyc", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": true, "id": "service-account-openbank-kyc", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "opsmessage.compose",
 		"resource": "",
 	}
@@ -1081,7 +1081,7 @@ test_deny_any_service_account_compose_message if {
 # A role that is neither operator nor admin does not gain this action.
 test_deny_viewer_compose_message if {
 	not rest.allow with input as {
-		"principal": {"id": "viewer-1", "type": "HUMAN", "roles": ["ROLE_VIEWER"]},
+		"principal": {"service_account": false, "id": "viewer-1", "type": "HUMAN", "roles": ["ROLE_VIEWER"]},
 		"action": "opsmessage.compose",
 		"resource": "",
 	}
@@ -1092,7 +1092,7 @@ test_deny_viewer_compose_message if {
 # in a comment.
 test_deny_edge_service_notification_does_not_cover_opsmessage if {
 	not rest.allow with input as {
-		"principal": {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": []},
+		"principal": {"service_account": true, "id": "service-account-openbank-edge", "type": "HUMAN", "roles": []},
 		"action": "opsmessage.compose",
 		"resource": "",
 	}
@@ -1101,7 +1101,7 @@ test_deny_edge_service_notification_does_not_cover_opsmessage if {
 # The checker-side decide action gets the identical shape.
 test_allow_operator_decide_message_approval if {
 	decision := rest.allow with input as {
-		"principal": {"id": "operator-2", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "id": "operator-2", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "opsmessage.approval.decide",
 		"resource": "approval-1",
 	}
@@ -1113,7 +1113,7 @@ test_allow_operator_decide_message_approval if {
 
 test_deny_edge_service_account_decide_message_approval if {
 	not rest.allow with input as {
-		"principal": {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": true, "id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "opsmessage.approval.decide",
 		"resource": "approval-1",
 	}
@@ -1154,7 +1154,7 @@ test_four_eyes_not_required_when_actions_key_absent if {
 test_four_eyes_required_for_device_enroll_human if {
 	rest.four_eyes_required with input as {
 		"action": "device.enroll",
-		"principal": {"type": "HUMAN", "id": "operator-1", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "type": "HUMAN", "id": "operator-1", "roles": ["ROLE_OPERATOR"]},
 	}
 		with data.rules as rules_real
 }
@@ -1163,7 +1163,7 @@ test_four_eyes_required_for_device_enroll_human if {
 test_four_eyes_exempt_edge_device_enroll if {
 	not rest.four_eyes_required with input as {
 		"action": "device.enroll",
-		"principal": {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]},
 	}
 		with data.rules as rules_real
 }
@@ -1173,7 +1173,7 @@ test_four_eyes_exempt_edge_device_enroll if {
 test_four_eyes_not_exempt_shared_client_device_enroll if {
 	rest.four_eyes_required with input as {
 		"action": "device.enroll",
-		"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]},
 	}
 		with data.rules as rules_real
 }
@@ -1182,7 +1182,7 @@ test_four_eyes_not_exempt_shared_client_device_enroll if {
 test_four_eyes_exempt_shared_client_consume if {
 	not rest.four_eyes_required with input as {
 		"action": "scaChallenge.consume",
-		"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]},
 	}
 		with data.rules as rules_real
 }
@@ -1190,7 +1190,7 @@ test_four_eyes_exempt_shared_client_consume if {
 test_four_eyes_required_for_consume_human if {
 	rest.four_eyes_required with input as {
 		"action": "scaChallenge.consume",
-		"principal": {"type": "HUMAN", "id": "operator-1", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "type": "HUMAN", "id": "operator-1", "roles": ["ROLE_OPERATOR"]},
 	}
 		with data.rules as rules_real
 }
@@ -1200,7 +1200,7 @@ test_four_eyes_required_for_consume_human if {
 test_four_eyes_actions_entry_without_exemptions_flags_all if {
 	rest.four_eyes_required with input as {
 		"action": "party.merge",
-		"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]},
 	}
 		with data.rules as rules_real
 }
@@ -1210,7 +1210,7 @@ test_four_eyes_actions_entry_without_exemptions_flags_all if {
 test_four_eyes_exemptions_key_absent_is_backward_compatible if {
 	rest.four_eyes_required with input as {
 		"action": "opsmessage.compose",
-		"principal": {"type": "HUMAN", "id": "operator-1", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "type": "HUMAN", "id": "operator-1", "roles": ["ROLE_OPERATOR"]},
 	}
 		with data.rules as {"four_eyes": {"verbs": [], "actions": ["opsmessage.compose"]}}
 }
@@ -1230,9 +1230,9 @@ test_four_eyes_exemptions_key_absent_is_backward_compatible if {
 # The regression itself: a role-only write reason is the ONLY thing admitting this caller.
 test_deny_shared_m2m_write_via_role_only_reason if {
 	not rest.allow with input as {
-		"principal": {"id": "service-account-openbank-services", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": true, "id": "service-account-openbank-services", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "ledger.reverse",
-		"resource": {"type": "ledger", "id": "e-1"},
+		"resource": {"service_account": false, "type": "ledger", "id": "e-1"},
 	}
 		with data.openbank.bundle as bundle
 		with data.rules.shared_m2m_write_prohibition.reasons as ["operator-ledger-write"]
@@ -1243,9 +1243,9 @@ test_deny_shared_m2m_write_via_role_only_reason if {
 # card-issuance-service with exactly this identity and relies on operator-read-any.
 test_allow_shared_m2m_read_still_works if {
 	decision := rest.allow with input as {
-		"principal": {"id": "service-account-openbank-services", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": true, "id": "service-account-openbank-services", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "card.list",
-		"resource": {"type": "card", "id": "p-1"},
+		"resource": {"service_account": false, "type": "card", "id": "p-1"},
 	}
 		with data.openbank.bundle as bundle
 		with rest.allowed_reasons as {"operator-read-any"}
@@ -1257,9 +1257,9 @@ test_allow_shared_m2m_read_still_works if {
 # and enumerates the actions. One such reason is enough, even alongside a role-only one.
 test_allow_shared_m2m_write_via_identity_scoped_reason if {
 	decision := rest.allow with input as {
-		"principal": {"id": "service-account-openbank-services", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": true, "id": "service-account-openbank-services", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "consent.grant",
-		"resource": {"type": "consent", "id": "party-service:marketing-comms"},
+		"resource": {"service_account": false, "type": "consent", "id": "party-service:marketing-comms"},
 	}
 		with data.openbank.bundle as bundle
 		with data.rules.shared_m2m_write_prohibition.reasons as ["operator-consent-write"]
@@ -1272,9 +1272,9 @@ test_allow_shared_m2m_write_via_identity_scoped_reason if {
 # string, which no human user can hold.
 test_allow_human_operator_write_unaffected if {
 	decision := rest.allow with input as {
-		"principal": {"id": "u-op", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "id": "u-op", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "ledger.reverse",
-		"resource": {"type": "ledger", "id": "e-1"},
+		"resource": {"service_account": false, "type": "ledger", "id": "e-1"},
 	}
 		with data.openbank.bundle as bundle
 		with data.rules.shared_m2m_write_prohibition.reasons as ["operator-ledger-write"]
@@ -1290,9 +1290,9 @@ test_allow_human_operator_write_unaffected if {
 # scope, because their callers have not been enumerated.)
 test_deny_shared_m2m_write_regardless_of_role if {
 	not rest.allow with input as {
-		"principal": {"id": "service-account-openbank-services", "type": "HUMAN", "roles": ["ROLE_ADMIN"]},
+		"principal": {"service_account": true, "id": "service-account-openbank-services", "type": "HUMAN", "roles": ["ROLE_ADMIN"]},
 		"action": "ledger.reverse",
-		"resource": {"type": "ledger", "id": "e-1"},
+		"resource": {"service_account": false, "type": "ledger", "id": "e-1"},
 	}
 		with data.openbank.bundle as bundle
 		with data.rules.shared_m2m_write_prohibition.reasons as ["operator-ledger-write"]
@@ -1305,7 +1305,7 @@ test_deny_shared_m2m_write_regardless_of_role if {
 # have 403'd them on an AUTHZ_ENFORCE=true money path.
 test_allow_role_only_write_reason_not_in_the_register if {
 	decision := rest.allow with input as {
-		"principal": {"id": "service-account-openbank-services", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": true, "id": "service-account-openbank-services", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "transaction.create",
 		"resource": "",
 	}
@@ -1320,9 +1320,9 @@ test_allow_role_only_write_reason_not_in_the_register if {
 # undefined collection does not fire, so nothing is newly denied.
 test_allow_when_the_register_key_is_absent if {
 	decision := rest.allow with input as {
-		"principal": {"id": "service-account-openbank-services", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": true, "id": "service-account-openbank-services", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "ledger.reverse",
-		"resource": {"type": "ledger", "id": "e-1"},
+		"resource": {"service_account": false, "type": "ledger", "id": "e-1"},
 	}
 		with data.openbank.bundle as bundle
 		with data.rules as {}
@@ -1334,21 +1334,21 @@ test_allow_when_the_register_key_is_absent if {
 # ADR-0224 D2: the session lifecycle grant is operator/admin-only and only reaches mcp.session.*.
 test_operator_mcp_session_grants_operator if {
 	rest.allowed_reasons["operator-mcp-session"] with input as {
-		"principal": {"id": "op-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "id": "op-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "mcp.session.create",
 	}
 }
 
 test_operator_mcp_session_denies_a_viewer if {
 	not rest.allowed_reasons["operator-mcp-session"] with input as {
-		"principal": {"id": "v-1", "type": "HUMAN", "roles": ["ROLE_VIEWER"]},
+		"principal": {"service_account": false, "id": "v-1", "type": "HUMAN", "roles": ["ROLE_VIEWER"]},
 		"action": "mcp.session.create",
 	}
 }
 
 test_operator_mcp_session_does_not_leak_to_other_domains if {
 	not rest.allowed_reasons["operator-mcp-session"] with input as {
-		"principal": {"id": "op-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "id": "op-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "account.freeze",
 	}
 }
@@ -1357,7 +1357,7 @@ test_operator_mcp_session_does_not_leak_to_other_domains if {
 # reason surfaces, so the retirement triage can count matrix-carried calls.
 test_matrix_allows_grants_a_seeded_read if {
 	decision := rest.allow with input as {
-		"principal": {"id": "op-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "id": "op-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "account.read",
 	}
 		with data.openbank.bundle as bundle
@@ -1365,7 +1365,7 @@ test_matrix_allows_grants_a_seeded_read if {
 
 	decision.allow == true
 	"matrix-allows" in rest.allowed_reasons with input as {
-		"principal": {"id": "op-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "id": "op-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "account.read",
 	}
 		with data.rules.authz as {"role_action_matrix": {"ROLE_OPERATOR": {"grant": ["account.read"]}}}
@@ -1375,7 +1375,7 @@ test_matrix_allows_grants_a_seeded_read if {
 # the matrix is an exact-action gate, not a prefix one.
 test_matrix_allows_does_not_grant_an_unseeded_action if {
 	not rest.allow with input as {
-		"principal": {"id": "op-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "id": "op-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "account.freeze",
 	}
 		with data.openbank.bundle as bundle
@@ -1398,7 +1398,7 @@ test_matrix_allows_never_grants_a_service_account if {
 	}
 	every action in {"account.read", "ledger.create", "opsmessage.compose"} {
 		rest.allowed_reasons["matrix-allows"] with input as {
-			"principal": {"id": "op-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+			"principal": {"service_account": false, "id": "op-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 			"action": action,
 		}
 			with data.rules.authz as matrix
@@ -1409,7 +1409,7 @@ test_matrix_allows_never_grants_a_service_account if {
 # idiom elsewhere keeps the grant.
 test_matrix_allows_exclusion_is_a_prefix if {
 	rest.allowed_reasons["matrix-allows"] with input as {
-		"principal": {"id": "ops-service-account-reviewer", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "id": "ops-service-account-reviewer", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "account.read",
 	}
 		with data.rules.authz as {"role_action_matrix": {"ROLE_OPERATOR": {"grant": ["account.read"]}}}
@@ -1419,13 +1419,13 @@ test_matrix_allows_exclusion_is_a_prefix if {
 # bundle whose rules.yaml predates the key sees no behaviour change.
 test_matrix_allows_absent_role_and_absent_key_are_silent if {
 	not rest.allowed_reasons["matrix-allows"] with input as {
-		"principal": {"id": "op-1", "type": "HUMAN", "roles": ["ROLE_NOPE"]},
+		"principal": {"service_account": false, "id": "op-1", "type": "HUMAN", "roles": ["ROLE_NOPE"]},
 		"action": "account.read",
 	}
 		with data.rules.authz as {"role_action_matrix": {"ROLE_OPERATOR": {"grant": ["account.read"]}}}
 
 	not rest.allowed_reasons["matrix-allows"] with input as {
-		"principal": {"id": "op-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "id": "op-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "account.read",
 	}
 		with data.rules as {}
@@ -1435,7 +1435,7 @@ test_matrix_allows_absent_role_and_absent_key_are_silent if {
 # with an empty own grant list still resolves via the parent.
 test_matrix_inherits_one_level if {
 	rest.allowed_reasons["matrix-allows"] with input as {
-		"principal": {"id": "admin-1", "type": "HUMAN", "roles": ["ROLE_ADMIN"]},
+		"principal": {"service_account": false, "id": "admin-1", "type": "HUMAN", "roles": ["ROLE_ADMIN"]},
 		"action": "account.freeze",
 	}
 		with data.rules.authz as {"role_action_matrix": {
@@ -1446,7 +1446,7 @@ test_matrix_inherits_one_level if {
 
 test_matrix_inheritance_does_not_grant_unlisted if {
 	not rest.allowed_reasons["matrix-allows"] with input as {
-		"principal": {"id": "admin-1", "type": "HUMAN", "roles": ["ROLE_ADMIN"]},
+		"principal": {"service_account": false, "id": "admin-1", "type": "HUMAN", "roles": ["ROLE_ADMIN"]},
 		"action": "account.close",
 	}
 		with data.rules.authz as {"role_action_matrix": {
@@ -1465,9 +1465,9 @@ test_matrix_inheritance_does_not_grant_unlisted if {
 # ---------------------------------------------------------------------------------------
 test_commstyle_publish_allows_human_approver if {
 	decision := rest.allow with input as {
-		"principal": {"id": "user-9", "type": "HUMAN", "roles": ["ROLE_COMMS_APPROVER"]},
+		"principal": {"service_account": false, "id": "user-9", "type": "HUMAN", "roles": ["ROLE_COMMS_APPROVER"]},
 		"action": "commstyle.publish",
-		"resource": {"type": "commstyle", "id": "v-1"},
+		"resource": {"service_account": false, "type": "commstyle", "id": "v-1"},
 	}
 		with data.rules as rules_real
 	decision.allow
@@ -1477,21 +1477,99 @@ test_commstyle_publish_allows_human_approver if {
 test_commstyle_publish_denies_service_account_with_every_role if {
 	not rest.allow with input as {
 		"principal": {
+			"service_account": true,
 			"id": "service-account-openbank-services",
 			"type": "HUMAN",
 			"roles": ["ROLE_COMMS_APPROVER", "ROLE_OPERATOR", "ROLE_ADMIN"],
 		},
 		"action": "commstyle.publish",
-		"resource": {"type": "commstyle", "id": "v-1"},
+		"resource": {"service_account": false, "type": "commstyle", "id": "v-1"},
 	}
 		with data.rules as rules_real
 }
 
 test_commstyle_publish_denies_human_without_approver_role if {
 	not rest.allow with input as {
-		"principal": {"id": "user-9", "type": "HUMAN", "roles": ["ROLE_OPERATOR", "ROLE_COMMS_EDITOR"]},
+		"principal": {"service_account": false, "id": "user-9", "type": "HUMAN", "roles": ["ROLE_OPERATOR", "ROLE_COMMS_EDITOR"]},
 		"action": "commstyle.publish",
-		"resource": {"type": "commstyle", "id": "v-1"},
+		"resource": {"service_account": false, "type": "commstyle", "id": "v-1"},
 	}
 		with data.rules as rules_real
+}
+
+# ---------------------------------------------------------------------------------------
+# Verified machine flag (input.principal.service_account, set by AuthorizeInterceptor from
+# verified JWT claims). The id is a NAME claim; these hold the policy to the flag.
+# ---------------------------------------------------------------------------------------
+matrix_op_read := {"role_action_matrix": {"ROLE_OPERATOR": {"grant": ["account.read", "ledger.create"]}}}
+
+# A machine whose name is NOT `service-account-*` (client_id-only token, renamed account) used
+# to read as staff to every `not startswith(id, ...)` rule. With the flag it gets no staff grant.
+test_machine_with_non_prefixed_id_gets_no_staff_grant if {
+	machine := {"id": "batch-bot", "type": "HUMAN", "roles": ["ROLE_OPERATOR"], "service_account": true, "client_id": "openbank-batch"}
+	every action in {"account.read", "ledger.create"} {
+		not rest.allowed_reasons["matrix-allows"] with input as {"principal": machine, "action": action}
+			with data.rules.authz as matrix_op_read
+	}
+	not rest.allowed_reasons["operator-mcp-session"] with input as {"principal": machine, "action": "mcp.session.issue"}
+}
+
+# Negative control for the test above: the same id with the flag false (a person) keeps it.
+test_verified_human_keeps_staff_grant if {
+	human := {"id": "batch-bot", "type": "HUMAN", "roles": ["ROLE_OPERATOR"], "service_account": false}
+	rest.allowed_reasons["matrix-allows"] with input as {"principal": human, "action": "account.read"}
+		with data.rules.authz as matrix_op_read
+	rest.allowed_reasons["operator-mcp-session"] with input as {"principal": human, "action": "mcp.session.issue"}
+}
+
+# A specific-client grant needs BOTH the client's name and the verified flag: a person whose
+# username is `service-account-openbank-edge` does not get the edge's grants.
+test_specific_client_grant_requires_the_verified_flag if {
+	impostor := {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"], "service_account": false}
+	not rest.allowed_reasons["edge-service-notification"] with input as {"principal": impostor, "action": "notification.list"}
+
+	edge := {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"], "service_account": true, "client_id": "openbank-edge"}
+	rest.allowed_reasons["edge-service-notification"] with input as {"principal": edge, "action": "notification.list"}
+}
+
+# FAIL CLOSED: only an explicit `service_account: false` makes a person. An absent field (a PEP
+# that predates it, a broken or hand-built input) is a machine: no staff grant, and no
+# specific-client grant either (that needs an explicit `true`).
+test_absent_service_account_field_is_never_a_person if {
+	rest.principal_is_machine with input as {"principal": {"id": "alice"}}
+	rest.principal_is_machine with input as {"principal": {"id": "alice", "service_account": null}}
+	rest.principal_is_machine with input as {"principal": {"id": "alice", "service_account": "false"}}
+	rest.principal_is_machine with input as {"principal": {"id": "alice", "service_account": true}}
+	not rest.principal_is_machine with input as {"principal": {"id": "service-account-x", "service_account": false}}
+
+	no_field := {"id": "alice", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]}
+	not rest.allowed_reasons["matrix-allows"] with input as {"principal": no_field, "action": "account.read"}
+		with data.rules.authz as matrix_op_read
+	not rest.allowed_reasons["operator-mcp-session"] with input as {"principal": no_field, "action": "mcp.session.issue"}
+}
+
+# Rollout transition: a PEP not yet on the phase-1 libs sends no field. Named-client grants keep
+# working on the legacy name (that path is unchanged from before), staff grants do not.
+test_absent_field_keeps_named_client_grants_during_rollout if {
+	edge_no_field := {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]}
+	rest.allowed_reasons["edge-service-notification"] with input as {"principal": edge_no_field, "action": "notification.list"}
+
+	# once the field is present it alone decides: a person with that name gets nothing
+	impostor := {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"], "service_account": false}
+	not rest.allowed_reasons["edge-service-notification"] with input as {"principal": impostor, "action": "notification.list"}
+}
+
+# The transition never GRANTS a staff rule on an absent field: a machine whose id is not
+# `service-account-*` and that sends no flag (a pre-phase-1 PEP) is a machine, and the
+# legacy prefix stand-in in machine_grant_ok cannot reach it (it needs the prefix).
+test_absent_field_non_prefixed_machine_gets_no_staff_and_no_machine_grant if {
+	bot := {"id": "batch-bot", "type": "HUMAN", "roles": ["ROLE_OPERATOR", "ROLE_ADMIN"]}
+	rest.principal_is_machine with input as {"principal": bot}
+	not rest.machine_grant_ok with input as {"principal": bot}
+	every action in {"account.read", "ledger.create"} {
+		not rest.allowed_reasons["matrix-allows"] with input as {"principal": bot, "action": action}
+			with data.rules.authz as matrix_op_read
+	}
+	not rest.allowed_reasons["operator-mcp-session"] with input as {"principal": bot, "action": "mcp.session.issue"}
+	not rest.allowed_reasons["m2m-sanctions-screening"] with input as {"principal": bot, "action": "sanctions.create"}
 }

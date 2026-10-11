@@ -12,16 +12,16 @@ package openbank.rest
 
 import rego.v1
 
-operator := {"type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
+operator := {"service_account": false, "type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
 
-admin := {"type": "HUMAN", "id": "u-admin", "roles": ["ROLE_ADMIN"]}
+admin := {"service_account": false, "type": "HUMAN", "id": "u-admin", "roles": ["ROLE_ADMIN"]}
 
-viewer := {"type": "HUMAN", "id": "u-view", "roles": ["ROLE_VIEWER"]}
+viewer := {"service_account": false, "type": "HUMAN", "id": "u-view", "roles": ["ROLE_VIEWER"]}
 
-auditor := {"type": "HUMAN", "id": "u-aud", "roles": ["ROLE_AUDITOR"]}
+auditor := {"service_account": false, "type": "HUMAN", "id": "u-aud", "roles": ["ROLE_AUDITOR"]}
 
 # The customer-edge M2M identity — classified HUMAN, carries ROLE_OPERATOR (see caller audit).
-edge_m2m := {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]}
+edge_m2m := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]}
 
 # --- close-run telemetry reads: viewer/auditor allowed (the gap base rest.rego leaves) ---
 
@@ -84,5 +84,5 @@ test_edge_m2m_cannot_export if {
 # --- an unauthenticated/anonymous principal is denied everything ---
 
 test_anonymous_denied if {
-	count(allowed_reasons) == 0 with input as {"principal": {"type": "ANONYMOUS", "id": "anon", "roles": []}, "action": "statement.close-run.list"}
+	count(allowed_reasons) == 0 with input as {"principal": {"service_account": false, "type": "ANONYMOUS", "id": "anon", "roles": []}, "action": "statement.close-run.list"}
 }

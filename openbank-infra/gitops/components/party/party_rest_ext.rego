@@ -51,6 +51,8 @@ allowed_reasons contains "operator-party-write" if {
 # would over-grant these actions to any operator session.
 #
 #   - customer-edge (client-id "openbank-edge" -> principal.id "service-account-openbank-edge"):
+#       party.create — creates the customer's individual party during onboarding
+#         (OnboardingResource -> UpstreamClient.postAnonymous).
 #       party.consent.update — the app's Profile-screen marketing-consent toggle is forwarded to
 #         party-service through the edge's own M2M token (CustomerEdgeResource, PATCH
 #         /api/v1/parties/{id}/consent).
@@ -63,7 +65,9 @@ allowed_reasons contains "operator-party-write" if {
 allowed_reasons contains "service-edge-party-m2m" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-edge"
+	machine_grant_ok
 	input.action in {
+        "party.create",
 		"party.consent.update",
 		"party:resolve",
 	}
@@ -74,7 +78,7 @@ allowed_reasons contains "service-edge-party-m2m" if {
 # without this rule the new @Authorize would log a "would DENY" for every KYC-created party.
 allowed_reasons contains "kyc-party-create" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	"ROLE_KYC" in input.principal.roles
 	input.action == "party.create"
 }
@@ -91,6 +95,7 @@ allowed_reasons contains "kyc-party-create" if {
 allowed_reasons contains "service-kyb-party-m2m" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-kyb"
+	machine_grant_ok
 	input.action in {
 		"party.create",
 		"party.mandate.grant",
@@ -103,5 +108,6 @@ allowed_reasons contains "service-kyb-party-m2m" if {
 allowed_reasons contains "service-delegation-mandate-read" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-delegation"
+	machine_grant_ok
 	input.action in {"party.mandate.read"}
 }

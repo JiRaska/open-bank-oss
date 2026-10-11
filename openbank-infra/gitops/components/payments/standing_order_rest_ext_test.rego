@@ -29,6 +29,7 @@ import data.openbank.rest
 test_pause_denied_for_shared_service_account if {
 	count(rest.allowed_reasons) == 0 with input as {
 		"principal": {
+			"service_account": true,
 			"type": "HUMAN",
 			"id": "service-account-openbank-services",
 			"roles": ["ROLE_OPERATOR", "ROLE_ADMIN"],
@@ -42,6 +43,7 @@ test_pause_denied_for_shared_service_account if {
 test_pause_denied_for_unrelated_service_account if {
 	count(rest.allowed_reasons) == 0 with input as {
 		"principal": {
+			"service_account": true,
 			"type": "HUMAN",
 			"id": "service-account-openbank-mcp-service",
 			"roles": ["ROLE_OPERATOR"],
@@ -57,6 +59,7 @@ test_pause_denied_for_unrelated_service_account if {
 test_edge_service_account_keeps_m2m_reason_only if {
 	rest.allowed_reasons == {"m2m-standing-order-pause"} with input as {
 		"principal": {
+			"service_account": true,
 			"type": "HUMAN",
 			"id": "service-account-openbank-edge",
 			"roles": ["ROLE_OPERATOR"],
@@ -70,6 +73,7 @@ test_edge_service_account_keeps_m2m_reason_only if {
 test_edge_service_account_gets_nothing_for_other_actions if {
 	count(rest.allowed_reasons) == 0 with input as {
 		"principal": {
+			"service_account": true,
 			"type": "HUMAN",
 			"id": "service-account-openbank-edge",
 			"roles": ["ROLE_OPERATOR"],
@@ -83,7 +87,7 @@ test_edge_service_account_gets_nothing_for_other_actions if {
 # ROLE_OPERATOR alone must grant standingOrder.pause.
 test_standing_order_pause_allowed_for_operator if {
 	"operator-standing-order-pause" in rest.allowed_reasons with input as {
-		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
 		"action": "standingOrder.pause",
 	}
 }
@@ -91,7 +95,7 @@ test_standing_order_pause_allowed_for_operator if {
 # ROLE_ADMIN alone must also grant standingOrder.pause.
 test_standing_order_pause_allowed_for_admin if {
 	"operator-standing-order-pause" in rest.allowed_reasons with input as {
-		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_ADMIN"]},
+		"principal": {"service_account": false, "type": "HUMAN", "id": "alice", "roles": ["ROLE_ADMIN"]},
 		"action": "standingOrder.pause",
 	}
 }

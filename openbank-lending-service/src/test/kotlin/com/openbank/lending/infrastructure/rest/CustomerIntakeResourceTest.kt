@@ -21,6 +21,7 @@ import io.quarkus.security.runtime.QuarkusSecurityIdentity
 import io.smallrye.mutiny.Uni
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.eclipse.microprofile.jwt.JsonWebToken
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.security.Principal
@@ -68,16 +69,38 @@ class CustomerIntakeResourceTest {
         maxTermMonths = 120,
     )
 
-    private fun identity(name: String): SecurityIdentity =
+    /**
+     * #12448: a `service-account-<client>` name becomes that client's OWN verified service-account
+     * token (`azp` = client, `preferred_username` = the name, `sub` set) — the only shape the
+     * resource admits. Any other name stays a plain, non-JWT principal.
+     */
+    private fun identity(name: String): SecurityIdentity = if (name.startsWith("service-account-")) {
+        jwtIdentity(name.removePrefix("service-account-"), name)
+    } else {
         QuarkusSecurityIdentity.builder().setPrincipal(Principal { name }).build()
+    }
+
+    private fun jwtIdentity(azp: String?, username: String?, sub: String? = "sa-subject"): SecurityIdentity =
+        QuarkusSecurityIdentity.builder()
+            .setPrincipal(TestJwt(mapOf("azp" to azp, "preferred_username" to username, "sub" to sub)))
+            .build()
+
+    private class TestJwt(private val claims: Map<String, Any?>) : JsonWebToken {
+        override fun getName(): String = claims["preferred_username"] as? String ?: "anonymous"
+        override fun getClaimNames(): Set<String> = claims.filterValues { it != null }.keys
+
+        @Suppress("UNCHECKED_CAST")
+        override fun <T : Any?> getClaim(claimName: String): T = claims[claimName] as T
+    }
 
     private val store = RecordingIdempotencyStore()
 
     private fun resource(
         config: CustomerIntakeConfig = config(),
         principal: String = edge,
+        who: SecurityIdentity = identity(principal),
         apply: RecordingApply = RecordingApply(),
-    ) = CustomerIntakeResource(apply, config, identity(principal), clock, store, ObjectMapper()) to apply
+    ) = CustomerIntakeResource(apply, config, who, clock, store, ObjectMapper()) to apply
 
     /** Drives the now-suspend endpoint with no replay headers (the pre-ADR-0297 call shape). */
     private fun submit(res: CustomerIntakeResource, party: String?, req: CustomerIntakeRequest) =
@@ -310,5 +333,28 @@ class CustomerIntakeResourceTest {
         override suspend fun release(key: String, requestHash: String) {
             if (markers[key] == requestHash) markers.remove(key)
         }
+    }
+
+    // ── #12448: the edge is identified by its CLIENT, never by its principal name ─
+
+    @Test
+    fun `the edge's principal name on a token issued to another client is refused`() {
+        val (res, _) = resource(who = jwtIdentity("openbank-admin-ui", edge))
+        val status = submit(res, partyId.toString(), request()).status
+        assertThat(status).isEqualTo(403)
+    }
+
+    @Test
+    fun `a human token issued through the edge client is refused`() {
+        val (res, _) = resource(who = jwtIdentity("openbank-edge", "alice"))
+        val status = submit(res, partyId.toString(), request()).status
+        assertThat(status).isEqualTo(403)
+    }
+
+    @Test
+    fun `a non-JWT principal carrying the edge's name is refused`() {
+        val (res, _) = resource(who = QuarkusSecurityIdentity.builder().setPrincipal(Principal { edge }).build())
+        val status = submit(res, partyId.toString(), request()).status
+        assertThat(status).isEqualTo(403)
     }
 }

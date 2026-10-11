@@ -10,16 +10,16 @@ package openbank.rest
 
 import rego.v1
 
-viewer := {"type": "HUMAN", "id": "u-view", "roles": ["ROLE_VIEWER"]}
+viewer := {"service_account": false, "type": "HUMAN", "id": "u-view", "roles": ["ROLE_VIEWER"]}
 
-compliance := {"type": "HUMAN", "id": "u-comp", "roles": ["ROLE_COMPLIANCE"]}
+compliance := {"service_account": false, "type": "HUMAN", "id": "u-comp", "roles": ["ROLE_COMPLIANCE"]}
 
-operator := {"type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
+operator := {"service_account": false, "type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
 
-admin := {"type": "HUMAN", "id": "u-admin", "roles": ["ROLE_ADMIN"]}
+admin := {"service_account": false, "type": "HUMAN", "id": "u-admin", "roles": ["ROLE_ADMIN"]}
 
 # An M2M identity — classified HUMAN, carrying an oversight role — must still be excluded.
-service_m2m := {"type": "HUMAN", "id": "service-account-openbank-onboarding", "roles": ["ROLE_COMPLIANCE"]}
+service_m2m := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-onboarding", "roles": ["ROLE_COMPLIANCE"]}
 
 # --- case oversight read/list: viewer/compliance allowed (the gap base leaves) ---
 
@@ -75,7 +75,7 @@ test_service_m2m_excluded_from_aml_write if {
 # --- anonymous denied ---
 
 test_anonymous_denied if {
-	count(allowed_reasons) == 0 with input as {"principal": {"type": "ANONYMOUS", "id": "anon", "roles": []}, "action": "amlCase.list"}
+	count(allowed_reasons) == 0 with input as {"principal": {"service_account": false, "type": "ANONYMOUS", "id": "anon", "roles": []}, "action": "amlCase.list"}
 }
 
 # --- amlCase.create (#10486 batch 3) ---
@@ -89,7 +89,7 @@ aml_case_openers := [
 
 test_named_openers_create_case_with_role_api_only if {
 	every id in aml_case_openers {
-		allow.allow with input as {"principal": {"type": "HUMAN", "id": id, "roles": ["ROLE_API"]}, "action": "amlCase.create"}
+		allow.allow with input as {"principal": {"service_account": true, "type": "HUMAN", "id": id, "roles": ["ROLE_API"]}, "action": "amlCase.create"}
 	}
 }
 
@@ -103,15 +103,15 @@ test_named_openers_granted_nothing_else if {
 }
 
 test_named_opener_may_not_update_decision if {
-	count(allowed_reasons) == 0 with input as {"principal": {"type": "HUMAN", "id": "service-account-openbank-fx", "roles": ["ROLE_API"]}, "action": "amlCase.updateDecision"}
+	count(allowed_reasons) == 0 with input as {"principal": {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-fx", "roles": ["ROLE_API"]}, "action": "amlCase.updateDecision"}
 }
 
 test_other_role_api_service_account_may_not_create_case if {
-	not allow.allow with input as {"principal": {"type": "HUMAN", "id": "service-account-openbank-mcp-service", "roles": ["ROLE_API"]}, "action": "amlCase.create"}
+	not allow.allow with input as {"principal": {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-mcp-service", "roles": ["ROLE_API"]}, "action": "amlCase.create"}
 }
 
 test_shared_client_with_role_api_only_may_not_create_case if {
-	not allow.allow with input as {"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_API"]}, "action": "amlCase.create"}
+	not allow.allow with input as {"principal": {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_API"]}, "action": "amlCase.create"}
 }
 
 test_staff_create_case if {
@@ -123,7 +123,7 @@ test_viewer_may_not_create_case if {
 }
 
 # #10486 batch 8
-b8agent_sa(id) := {"type": "HUMAN", "id": id, "roles": ["ROLE_API"]}
+b8agent_sa(id) := {"service_account": true, "type": "HUMAN", "id": id, "roles": ["ROLE_API"]}
 
 test_b8agent_own_identity_reads if {
 	every action in {"amlCase.list", "amlCase.read"} {

@@ -24,7 +24,7 @@ import rego.v1
 # Real staff, reading. A tax return is exactly the artefact an auditor needs to see.
 allowed_reasons contains "staff-tax-filing-read" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_AUDITOR", "ROLE_VIEWER", "ROLE_COMPLIANCE"}
 	role in input.principal.roles
 	input.action == "tax.filing.read"
@@ -33,7 +33,7 @@ allowed_reasons contains "staff-tax-filing-read" if {
 # Real operators freeze and file a period. No service-account, whatever roles it holds.
 allowed_reasons contains "operator-tax-filing-lifecycle" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	"ROLE_OPERATOR" in input.principal.roles
 	input.action in {"tax.filing.assemble", "tax.filing.file"}
 }

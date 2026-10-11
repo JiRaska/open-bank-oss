@@ -19,17 +19,17 @@ import rego.v1
 
 # A TPP after EidasMtlsFilter has passed it: eIDAS QWAC identity, no OIDC bearer, so
 # AuthorizeInterceptor builds exactly this principal (id defaults to "anonymous").
-tpp := {"type": "ANONYMOUS", "id": "anonymous", "roles": []}
+tpp := {"service_account": false, "type": "ANONYMOUS", "id": "anonymous", "roles": []}
 
-operator := {"type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
+operator := {"service_account": false, "type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
 
-admin := {"type": "HUMAN", "id": "u-admin", "roles": ["ROLE_ADMIN"]}
+admin := {"service_account": false, "type": "HUMAN", "id": "u-admin", "roles": ["ROLE_ADMIN"]}
 
-viewer := {"type": "HUMAN", "id": "u-view", "roles": ["ROLE_VIEWER"]}
+viewer := {"service_account": false, "type": "HUMAN", "id": "u-view", "roles": ["ROLE_VIEWER"]}
 
 # The shared M2M identity — classified HUMAN, carries ROLE_OPERATOR. No such caller exists for
 # psd2-service today; these are regression guards that none is accidentally admitted.
-services_m2m := {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
+services_m2m := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
 
 # --- the TPP plane: all five actions the 21 annotated endpoints use ---
 
@@ -41,7 +41,7 @@ test_tpp_reads_balances if {
 	"psd2-tpp-eidas-qwac" in allowed_reasons with input as {
 		"principal": tpp,
 		"action": "psd2.read",
-		"resource": {"type": "psd2", "id": "CZ6508000000192000145399"},
+		"resource": {"service_account": false, "type": "psd2", "id": "CZ6508000000192000145399"},
 	}
 }
 
@@ -57,7 +57,7 @@ test_tpp_deletes_consent if {
 	"psd2-tpp-eidas-qwac" in allowed_reasons with input as {
 		"principal": tpp,
 		"action": "psd2.delete",
-		"resource": {"type": "psd2", "id": "c-1"},
+		"resource": {"service_account": false, "type": "psd2", "id": "c-1"},
 	}
 }
 
@@ -104,7 +104,7 @@ test_admin_cannot_delete_consent if {
 	count(allowed_reasons) == 0 with input as {
 		"principal": admin,
 		"action": "psd2.delete",
-		"resource": {"type": "psd2", "id": "c-1"},
+		"resource": {"service_account": false, "type": "psd2", "id": "c-1"},
 	}
 }
 
@@ -123,6 +123,6 @@ test_services_m2m_cannot_delete_consent if {
 	count(allowed_reasons) == 0 with input as {
 		"principal": services_m2m,
 		"action": "psd2.delete",
-		"resource": {"type": "psd2", "id": "c-1"},
+		"resource": {"service_account": false, "type": "psd2", "id": "c-1"},
 	}
 }

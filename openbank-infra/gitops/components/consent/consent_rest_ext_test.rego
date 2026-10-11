@@ -14,23 +14,23 @@ package openbank.rest
 
 import rego.v1
 
-operator := {"type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
+operator := {"service_account": false, "type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
 
-admin := {"type": "HUMAN", "id": "u-admin", "roles": ["ROLE_ADMIN"]}
+admin := {"service_account": false, "type": "HUMAN", "id": "u-admin", "roles": ["ROLE_ADMIN"]}
 
-viewer := {"type": "HUMAN", "id": "u-view", "roles": ["ROLE_VIEWER"]}
+viewer := {"service_account": false, "type": "HUMAN", "id": "u-view", "roles": ["ROLE_VIEWER"]}
 
 # The shared M2M identity — classified HUMAN, carries ROLE_OPERATOR (openbank-realm.json). This
 # is the exact regression consent_rest_ext.rego had until ADR-0206 D5's fix: operator-consent-write
 # was role-only, so this identity could call ANY consent.* action unconditionally despite the
 # rule's own header comment claiming consent.grant/consent.revoke were M2M-unreachable.
-services_m2m := {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
+services_m2m := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
 
-marketing_resource := {"type": "consent", "id": "party-service:marketing-comms"}
+marketing_resource := {"service_account": false, "type": "consent", "id": "party-service:marketing-comms"}
 
-other_resource := {"type": "consent", "id": "some-other-tpp"}
+other_resource := {"service_account": false, "type": "consent", "id": "some-other-tpp"}
 
-credit_resource := {"type": "consent", "id": "openbank"}
+credit_resource := {"service_account": false, "type": "consent", "id": "openbank"}
 
 # --- operators/admins: unrestricted, as before ---
 
@@ -131,7 +131,7 @@ test_services_m2m_cannot_write_suppressions if {
 
 # --- 2026-08-05 (#3734): the edge client (customer-facing M2M, ROLE_OPERATOR) ---
 
-edge := {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]}
+edge := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]}
 
 # After the prefix widening, the edge identity no longer rides operator-consent-write on any
 # consent.* write.

@@ -41,7 +41,7 @@ prohibited if {
 allowed_reasons contains "context-assignment-admin" if {
 	input.principal.type == "HUMAN"
 	"ROLE_ADMIN" in input.principal.roles
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	input.action in {
 		"context.assignment.propose",
 		"context.assignment.read",
@@ -52,7 +52,7 @@ allowed_reasons contains "context-assignment-admin" if {
 
 prohibited if {
 	startswith(input.action, "context.assignment.")
-	startswith(input.principal.id, "service-account-")
+	machine_grant_ok
 }
 
 # Reads remain purpose-bound even if a broad role rule also allows *.read. This is a second
@@ -89,5 +89,5 @@ prohibited if {
 
 prohibited if {
 	startswith(input.action, "context.")
-	startswith(input.principal.id, "service-account-")
+	machine_grant_ok
 }

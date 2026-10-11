@@ -37,7 +37,7 @@ import rego.v1
 # is now load-bearing rather than advisory, which is the point of writing the exclusion down.
 allowed_reasons contains "operator-anacredit-create" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
 	input.action == "anacredit.create"

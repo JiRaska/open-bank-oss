@@ -102,7 +102,7 @@ allowed_reasons contains "operator-transaction-write" if {
 # match that rule, but no in-repo M2M caller ever sweeps -- the endpoint is operator-console-only.
 allowed_reasons contains "operator-transaction-sweep" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
 	input.action == "transaction.sweep"
@@ -137,30 +137,35 @@ allowed_reasons contains "viewer-transaction-read" if {
 allowed_reasons contains "service-account-transaction-create" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-account"
+	machine_grant_ok
 	input.action == "transaction.create"
 }
 
 allowed_reasons contains "service-sdd-transaction-create" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-sdd"
+	machine_grant_ok
 	input.action == "transaction.create"
 }
 
 allowed_reasons contains "service-standing-order-transaction-create" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-standing-order"
+	machine_grant_ok
 	input.action == "transaction.create"
 }
 
 allowed_reasons contains "service-lending-transaction-create" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-lending"
+	machine_grant_ok
 	input.action == "transaction.create"
 }
 
 allowed_reasons contains "service-sepa-payment-transaction-write" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-sepa-payment"
+	machine_grant_ok
 	input.action in {"transaction.create", "transaction.reverse"}
 }
 
@@ -173,24 +178,28 @@ allowed_reasons contains "service-sepa-payment-transaction-write" if {
 allowed_reasons contains "service-domestic-payment-transaction-create" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-domestic-payment"
+	machine_grant_ok
 	input.action == "transaction.create"
 }
 
 allowed_reasons contains "service-sepa-instant-transaction-create" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-sepa-instant"
+	machine_grant_ok
 	input.action == "transaction.create"
 }
 
 allowed_reasons contains "service-swift-transaction-create" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-swift"
+	machine_grant_ok
 	input.action == "transaction.create"
 }
 
 allowed_reasons contains "service-interest-transaction-create" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-interest"
+	machine_grant_ok
 	input.action == "transaction.create"
 }
 
@@ -202,6 +211,7 @@ allowed_reasons contains "service-interest-transaction-create" if {
 allowed_reasons contains "service-party-transaction-read" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-party"
+	machine_grant_ok
 	input.action == "transaction.list"
 }
 
@@ -217,17 +227,20 @@ allowed_reasons contains "service-party-transaction-read" if {
 allowed_reasons contains "service-statement-transaction-search" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-statement"
+	machine_grant_ok
 	input.action == "transaction.search"
 }
 
 allowed_reasons contains "service-agent-transaction-read" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-agent"
+	machine_grant_ok
 	input.action in {"transaction.list", "transaction.read"}
 }
 
 allowed_reasons contains "service-mcp-transaction-read" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-mcp"
+	machine_grant_ok
 	input.action == "transaction.list"
 }

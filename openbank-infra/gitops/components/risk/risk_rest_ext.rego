@@ -36,7 +36,7 @@ import rego.v1
 
 allowed_reasons contains "operator-risk-snapshot-create" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_RISK"}
 	role in input.principal.roles
 	input.action == "risk.snapshot.create"
@@ -44,7 +44,7 @@ allowed_reasons contains "operator-risk-snapshot-create" if {
 
 allowed_reasons contains "operator-risk-curve-set-create" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_RISK"}
 	role in input.principal.roles
 	input.action == "risk.curve-set.create"
@@ -56,6 +56,7 @@ allowed_reasons contains "operator-risk-curve-set-create" if {
 allowed_reasons contains "finrep-m2m-risk-snapshot-read" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-finrep"
+	machine_grant_ok
 	input.action == "risk.snapshot.read"
 }
 
@@ -65,5 +66,6 @@ allowed_reasons contains "finrep-m2m-risk-snapshot-read" if {
 allowed_reasons contains "treasury-m2m-risk-curve-set-read" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-treasury"
+	machine_grant_ok
 	input.action == "risk.curve-set.read"
 }

@@ -29,6 +29,7 @@ import data.openbank.rest
 test_operator_vop_verify_denied_for_shared_service_account if {
 	not "operator-vop-verify" in rest.allowed_reasons with input as {
 		"principal": {
+			"service_account": true,
 			"type": "HUMAN",
 			"id": "service-account-openbank-services",
 			"roles": ["ROLE_OPERATOR"],
@@ -42,6 +43,7 @@ test_operator_vop_verify_denied_for_shared_service_account if {
 test_operator_vop_verify_denied_for_edge_service_account if {
 	not "operator-vop-verify" in rest.allowed_reasons with input as {
 		"principal": {
+			"service_account": true,
 			"type": "HUMAN",
 			"id": "service-account-openbank-edge",
 			"roles": ["ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS", "ROLE_VIEWER"],
@@ -56,6 +58,7 @@ test_operator_vop_verify_denied_for_edge_service_account if {
 test_service_account_keeps_m2m_reason_only if {
 	rest.allowed_reasons == {"m2m-vop-verify"} with input as {
 		"principal": {
+			"service_account": true,
 			"type": "HUMAN",
 			"id": "service-account-openbank-sepa-payment",
 			"roles": ["ROLE_OPERATOR"],
@@ -71,21 +74,21 @@ test_service_account_keeps_m2m_reason_only if {
 
 test_operator_vop_verify_allowed_for_operator if {
 	"operator-vop-verify" in rest.allowed_reasons with input as {
-		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
 		"action": "vop.verify",
 	}
 }
 
 test_operator_vop_verify_allowed_for_admin if {
 	"operator-vop-verify" in rest.allowed_reasons with input as {
-		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_ADMIN"]},
+		"principal": {"service_account": false, "type": "HUMAN", "id": "alice", "roles": ["ROLE_ADMIN"]},
 		"action": "vop.verify",
 	}
 }
 
 test_operator_vop_verify_allowed_for_payments_desk if {
 	"operator-vop-verify" in rest.allowed_reasons with input as {
-		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_PAYMENTS"]},
+		"principal": {"service_account": false, "type": "HUMAN", "id": "alice", "roles": ["ROLE_PAYMENTS"]},
 		"action": "vop.verify",
 	}
 }
@@ -94,7 +97,7 @@ test_operator_vop_verify_allowed_for_payments_desk if {
 # money movement, and it mirrors the resource's own @RolesAllowed.
 test_operator_vop_verify_allowed_for_viewer if {
 	"operator-vop-verify" in rest.allowed_reasons with input as {
-		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_VIEWER"]},
+		"principal": {"service_account": false, "type": "HUMAN", "id": "alice", "roles": ["ROLE_VIEWER"]},
 		"action": "vop.verify",
 	}
 }
@@ -103,14 +106,14 @@ test_operator_vop_verify_allowed_for_viewer if {
 # elsewhere is not a service-account — the exclusion is anchored with startswith, not a substring.
 test_vop_verify_denied_for_unrelated_role if {
 	count(rest.allowed_reasons) == 0 with input as {
-		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_SUPPORT"]},
+		"principal": {"service_account": false, "type": "HUMAN", "id": "alice", "roles": ["ROLE_SUPPORT"]},
 		"action": "vop.verify",
 	}
 }
 
 test_operator_vop_verify_allowed_for_human_id_containing_the_prefix if {
 	"operator-vop-verify" in rest.allowed_reasons with input as {
-		"principal": {"type": "HUMAN", "id": "not-a-service-account-openbank", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "type": "HUMAN", "id": "not-a-service-account-openbank", "roles": ["ROLE_OPERATOR"]},
 		"action": "vop.verify",
 	}
 }
@@ -119,7 +122,7 @@ test_operator_vop_verify_allowed_for_human_id_containing_the_prefix if {
 # agents.rego/charter_allowed via rest.rego's allow rule, not here).
 test_vop_verify_denied_for_ai_agent if {
 	count(rest.allowed_reasons) == 0 with input as {
-		"principal": {"type": "AI_AGENT", "id": "agent:ui-assistant", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "type": "AI_AGENT", "id": "agent:ui-assistant", "roles": ["ROLE_OPERATOR"]},
 		"action": "vop.verify",
 	}
 }
@@ -132,7 +135,7 @@ test_vop_verify_denied_for_ai_agent if {
 
 test_other_vop_action_not_granted_for_human if {
 	count(rest.allowed_reasons) == 0 with input as {
-		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
 		"action": "vop.updateThreshold",
 	}
 }
@@ -140,6 +143,7 @@ test_other_vop_action_not_granted_for_human if {
 test_other_vop_action_not_granted_for_service_account if {
 	count(rest.allowed_reasons) == 0 with input as {
 		"principal": {
+			"service_account": true,
 			"type": "HUMAN",
 			"id": "service-account-openbank-services",
 			"roles": ["ROLE_OPERATOR"],

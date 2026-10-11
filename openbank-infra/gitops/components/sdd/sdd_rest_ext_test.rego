@@ -19,18 +19,18 @@ package openbank.rest
 
 import rego.v1
 
-operator := {"type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
+operator := {"service_account": false, "type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
 
-admin := {"type": "HUMAN", "id": "u-admin", "roles": ["ROLE_ADMIN"]}
+admin := {"service_account": false, "type": "HUMAN", "id": "u-admin", "roles": ["ROLE_ADMIN"]}
 
-viewer := {"type": "HUMAN", "id": "u-view", "roles": ["ROLE_VIEWER"]}
+viewer := {"service_account": false, "type": "HUMAN", "id": "u-view", "roles": ["ROLE_VIEWER"]}
 
-edge := {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_API"]}
+edge := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_API"]}
 
 # The shared backend identity: classified HUMAN and carrying ROLE_OPERATOR in the realm. This is
 # the principal the whole file is shaped around — a role-only write rule would hand it the power
 # to register, amend or cancel a direct-debit mandate on any account.
-services_m2m := {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
+services_m2m := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
 
 # --- staff: back-office mandate lifecycle ---
 
@@ -98,7 +98,7 @@ test_edge_may_not_authorise_collection if {
 
 # --- read-only oversight personas (the AUTHZ_ENFORCE precondition, #3679) ---
 
-compliance := {"type": "HUMAN", "id": "u-comp", "roles": ["ROLE_COMPLIANCE"]}
+compliance := {"service_account": false, "type": "HUMAN", "id": "u-comp", "roles": ["ROLE_COMPLIANCE"]}
 
 test_viewer_may_read_and_list if {
 	"sdd-oversight-read" in allowed_reasons with input as {"principal": viewer, "action": "sdd.read"}

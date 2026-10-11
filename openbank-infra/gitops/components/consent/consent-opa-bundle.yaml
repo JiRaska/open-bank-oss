@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: consent-service
     app.kubernetes.io/part-of: consent
   annotations:
-    openbank.tech/policy-checksum: "1b3a09414c150599"
+    openbank.tech/policy-checksum: "aa216d84ea86b061"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -87,6 +87,41 @@ data:
     # (object.get(data.openbank, ...) would self-reference this package → rego_recursion;
     # the narrow path below does not.)
     default policy_version := "unknown"
+
+    # ---------------------------------------------------------------------------------------
+    # Machine identity: the VERIFIED flag, never the name. `input.principal.id` is a NAME claim
+    # (Quarkus takes it from upn/preferred_username), so `startswith(id, "service-account-")`
+    # lets a machine token whose name is not `service-account-*` (a client_id-only token, a
+    # renamed account, mapper drift) read as a person. The PEP (libs-runtime AuthorizeInterceptor)
+    # derives `input.principal.service_account` from the verified JWT's claims only
+    # (ServiceAccountIdentity.machineClientId) and, when known, `input.principal.client_id`.
+    #
+    # Rules that keep machines OUT test `not principal_is_machine`; rules that grant ONE client test
+    # `machine_named("service-account-<client>")` (the id still names WHICH client, the flag proves
+    # it is one). Never write a bare id-prefix check.
+    #
+    # FAIL CLOSED: only an explicit `service_account == false` from the PEP makes a principal a
+    # person. An absent field (an old or broken PEP, a hand-built input) is a machine, so it
+    # reaches no staff grant. Grants TO machines are below (machine_grant_ok).
+    # ---------------------------------------------------------------------------------------
+    principal_is_machine if not input.principal.service_account == false
+
+    # Grants TO machines (a named client, or any machine). The verified flag decides; only while the
+    # field is ABSENT (a PEP not yet rebuilt on the phase-1 libs-runtime) does the legacy name prefix
+    # stand in, so a named-client or any-machine path that works today keeps working mid-rollout. An
+    # absent field never grants a STAFF rule (principal_is_machine above). Remove the second body once
+    # check-pdp-flag-rollout.sh --live reports the whole fleet current.
+    machine_grant_ok if input.principal.service_account == true
+
+    machine_grant_ok if {
+    	object.get(input.principal, "service_account", null) == null
+    	startswith(input.principal.id, "service-account-")
+    }
+
+    machine_named(name) if {
+    	input.principal.id == name
+    	machine_grant_ok
+    }
 
     policy_version := data.openbank.bundle.version
 
@@ -172,7 +207,7 @@ data:
     # stay empty; remove it and they demand a declared entry per M2M-reachable action again.
     allowed_reasons contains "matrix-allows" if {
     	input.principal.type == "HUMAN"
-    	not startswith(input.principal.id, "service-account-")
+    	not principal_is_machine
     	some role in input.principal.roles
     	matrix_grants(input.action, role)
     }
@@ -228,7 +263,7 @@ data:
     	input.principal.type == "HUMAN"
     	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
     	role in input.principal.roles
-    	not startswith(input.principal.id, "service-account-")
+    	not principal_is_machine
     	startswith(input.action, "mcp.session.")
     }
 
@@ -248,7 +283,7 @@ data:
     	input.principal.type == "HUMAN"
     	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
     	role in input.principal.roles
-    	not startswith(input.principal.id, "service-account-")
+    	not principal_is_machine
     	input.action == "opsmessage.compose"
     }
 
@@ -260,7 +295,7 @@ data:
     	input.principal.type == "HUMAN"
     	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
     	role in input.principal.roles
-    	not startswith(input.principal.id, "service-account-")
+    	not principal_is_machine
     	input.action == "opsmessage.approval.decide"
     }
 
@@ -276,7 +311,7 @@ data:
     	input.principal.type == "HUMAN"
     	some role in {"ROLE_COMMS_APPROVER", "ROLE_ADMIN"}
     	role in input.principal.roles
-    	not startswith(input.principal.id, "service-account-")
+    	not principal_is_machine
     	input.action == "commstyle.publish"
     }
 
@@ -288,7 +323,7 @@ data:
     	input.principal.type == "HUMAN"
     	some role in {"ROLE_COMMS_APPROVER", "ROLE_ADMIN"}
     	role in input.principal.roles
-    	not startswith(input.principal.id, "service-account-")
+    	not principal_is_machine
     	input.action == "commstyle.approval.decide"
     }
 
@@ -358,6 +393,7 @@ data:
     allowed_reasons contains "edge-service-notification" if {
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-edge"
+    	machine_grant_ok
     	some family in {"notification.", "device.", "document.", "signatureCeremony."}
     	startswith(input.action, family)
     }
@@ -374,6 +410,7 @@ data:
     allowed_reasons contains "edge-service-consent" if {
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-edge"
+    	machine_grant_ok
     	input.action in {"consent.list", "consent.revoke"}
     }
 
@@ -386,6 +423,7 @@ data:
     allowed_reasons contains "edge-service-engagement" if {
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-edge"
+    	machine_grant_ok
     	input.action in {"engagement.surface.read", "engagement.surface.recordEvent"}
     }
 
@@ -408,6 +446,7 @@ data:
     allowed_reasons contains "edge-service-audit-customer" if {
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-edge"
+    	machine_grant_ok
     	input.action == "audit.customerRead"
     }
 
@@ -436,7 +475,7 @@ data:
     # staff sessions from this specific carve-out.
     allowed_reasons contains "m2m-sanctions-screening" if {
     	input.principal.type == "HUMAN"
-    	startswith(input.principal.id, "service-account-")
+    	machine_grant_ok
     	input.action == "sanctions.create"
     }
 
@@ -568,6 +607,7 @@ data:
     shared_m2m_identity if {
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-services"
+    	machine_grant_ok
     }
 
     # Which role-only write reasons this prohibition applies to — DATA, not a name pattern.
@@ -659,7 +699,7 @@ data:
     # consent.* write to ROLE_OPERATOR, so matrix-allows admits nothing this exclusion doesn't close.
     allowed_reasons contains "operator-consent-write" if {
     	input.principal.type == "HUMAN"
-    	not startswith(input.principal.id, "service-account-")
+    	not principal_is_machine
     	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
     	role in input.principal.roles
     	startswith(input.action, "consent.")
@@ -690,6 +730,7 @@ data:
     allowed_reasons contains "service-consent-m2m" if {
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-services"
+    	machine_grant_ok
     	input.action in {"consent.read", "consent.validate", "consent.activate", "consent.reject"}
     }
 
@@ -711,6 +752,7 @@ data:
     allowed_reasons contains "service-consent-m2m-marketing" if {
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-services"
+    	machine_grant_ok
     	input.action in {"consent.grant", "consent.revoke"}
     	input.resource.id == "party-service:marketing-comms"
     }
@@ -732,6 +774,7 @@ data:
     allowed_reasons contains "service-consent-m2m-credit" if {
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-edge"
+    	machine_grant_ok
     	input.action in {"consent.grant", "consent.revoke"}
     	input.resource.id == "openbank"
     }
@@ -762,6 +805,7 @@ data:
     allowed_reasons contains "service-suppression-m2m-read" if {
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-services"
+    	machine_grant_ok
     	input.action == "suppression.read"
     }
   agents.rego: |
@@ -1945,7 +1989,7 @@ data:
         #   `matrix-allows` (rest.rego) gates on `principal.type == "HUMAN"` and the role alone — it
         #   has no service-account exclusion, and cannot express one. Both of those actions are write
         #   actions whose own rules (`commstyle-publish`, `commstyle-decide-publish-approval`) carry
-        #   an explicit `not startswith(input.principal.id, "service-account-")`, because a
+        #   an explicit `not principal_is_machine` (the verified input.principal.service_account flag), because a
         #   client_credentials JWT is classified HUMAN (rules.yaml: authz_policy) and D6's rule is
         #   that the bank's voice is set by people. Granting either through the matrix would add a
         #   second permit path that drops that exclusion — a silent widening no policy layer can veto
@@ -1968,7 +2012,7 @@ data:
         # #10618 — department roles for the balance-sheet & risk workspace. READ actions only, on
         # purpose: `matrix-allows` has no service-account exclusion, so every WRITE these roles hold
         # (risk.snapshot.create, risk.curve-set.create, lending.ledgerBackfill.*) lives in the
-        # service's own *_rest_ext.rego with `not startswith(input.principal.id, "service-account-")`.
+        # service's own *_rest_ext.rego with `not principal_is_machine` (the verified input.principal.service_account flag).
         # The risk-engine list endpoints reuse the `.read` actions (resource ""), so there is no
         # separate `.list` action to grant. ROLE_TREASURY_DEALER / ROLE_TREASURY_APPROVER have NO entry
         # here on purpose: every treasury action, the reads included, is granted in

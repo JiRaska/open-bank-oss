@@ -36,11 +36,11 @@ rules_mock := {
 	"shared_m2m_write_prohibition": {"reasons": []},
 }
 
-operator := {"type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
+operator := {"service_account": false, "type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
 
-edge := {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]}
+edge := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]}
 
-services_m2m := {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
+services_m2m := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
 
 # --- the regressions this file exists to prevent ---
 
@@ -100,9 +100,9 @@ test_edge_may_list if {
 # falsifiable. Before the rule existed both resolved false, which is the live 403 demo@ and
 # compliance@ have been getting since 2026-08-07.
 
-viewer := {"type": "HUMAN", "id": "demo@openbank.local", "roles": ["ROLE_VIEWER"]}
+viewer := {"service_account": false, "type": "HUMAN", "id": "demo@openbank.local", "roles": ["ROLE_VIEWER"]}
 
-auditor := {"type": "HUMAN", "id": "aud@openbank.local", "roles": ["ROLE_AUDITOR"]}
+auditor := {"service_account": false, "type": "HUMAN", "id": "aud@openbank.local", "roles": ["ROLE_AUDITOR"]}
 
 test_viewer_may_list if {
 	decision := rest.allow with input as {"principal": viewer, "action": "interest.list"}

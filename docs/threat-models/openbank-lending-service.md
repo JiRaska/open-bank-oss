@@ -932,3 +932,7 @@ than the current reporting date and never replays a past date from current input
 delivers historical-input-backed recovery or a reviewed reconciliation operation, a detected
 prior-date gap stays open and is closed only by a controlled manual correction. The
 historical-replay / reconciliation policy is tracked in #10275.
+
+## Machine-caller identity binding (#12448)
+
+The customer self-service intake, quote, credit-journey and financial-health endpoints admit only customer-edge. That caller is recognised by `ServiceAccountIdentity` (openbank-libs-runtime): a verified JWT whose `azp` is the configured client and whose `preferred_username` is that client's own `service-account-<azp>`. It is never recognised by the principal name, which Quarkus takes from a username claim. A token carrying the edge's username but issued to another client, or a human token issued through the edge client, is refused with 403.

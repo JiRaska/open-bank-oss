@@ -155,7 +155,7 @@ allowed_reasons contains "dispute-staff-write" if {
 	input.principal.type == "HUMAN"
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	input.action in {
 		"dispute.update",
 		"dispute.resolve",
@@ -178,5 +178,6 @@ allowed_reasons contains "dispute-staff-write" if {
 allowed_reasons contains "service-agent-dispute-read" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-agent"
+	machine_grant_ok
 	input.action in {"dispute.list", "dispute.read"}
 }

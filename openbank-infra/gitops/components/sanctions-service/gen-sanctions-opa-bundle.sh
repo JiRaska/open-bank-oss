@@ -58,6 +58,7 @@ allowed_reasons contains "operator-sanctions-write" if {
 allowed_reasons contains "service-agent-sanctions-read" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-agent"
+	machine_grant_ok
 	input.action in {"sanctions.list", "sanctions.read"}
 }
 
@@ -70,7 +71,7 @@ allowed_reasons contains "service-agent-sanctions-read" if {
 # (the CI realm's shared client) gets nothing from this rule.
 allowed_reasons contains "compliance-sanctions-list" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	"ROLE_COMPLIANCE" in input.principal.roles
 	input.action == "sanctions.list"
 }

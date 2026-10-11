@@ -18,7 +18,7 @@ import rego.v1
 # scope-only authorization decision.
 allowed_reasons contains "pricing-oauth-scope" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	object.get(input.principal.attributes, "tenant", "") != ""
 	some scope in object.get(required_scopes, input.action, set())
 	scope in object.get(input.principal.attributes, "scopes", [])
@@ -28,7 +28,7 @@ allowed_reasons contains "pricing-oauth-scope" if {
 
 allowed_reasons contains "pricing-oauth-scope" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	object.get(input.principal.attributes, "tenant", "") != ""
 	some scope in object.get(required_scopes, input.action, set())
 	scope in object.get(input.principal.attributes, "scopes", [])

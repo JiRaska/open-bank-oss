@@ -126,4 +126,9 @@ data class ConsentContext(
     val principalType: String = "AI_AGENT",
     /** Realm roles of the caller (empty for agent tokens — agents are charter-gated, not role-gated). */
     val roles: List<String> = emptyList(),
+    /**
+     * Sent to OPA as `input.principal.service_account`. FAIL CLOSED: only a context whose verified
+     * token positively reads as a person (the OBO staff exchange) sets it `false`.
+     */
+    val serviceAccount: Boolean = true,
 )
