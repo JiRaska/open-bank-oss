@@ -59,3 +59,7 @@ This is invisible to a test that mocks the repository — the fleet has shipped 
 | `purpose` | potentially sensitive free text | operator-entered; may name a customer or a case, so treat as confidential |
 
 No customer identifiers, balances or payment data are stored here: this table describes **who may act**, never what they read. The data the session grants access to lives in the services the MCP tools call.
+
+## Caller identity sent to OPA
+
+Every `tools/list` filter and every tool-call authorization sends the caller to OPA as `input.principal`, including `service_account`. That flag comes from the caller context and fails closed: it is `true` unless the context was built from a verified token that positively reads as a person. Only the on-behalf-of staff exchange (`resolveOboHuman`) can set it to `false`, and only when `ServiceAccountIdentity.machineClientId(jwt)` finds no machine client in that token. Agent sessions therefore always reach OPA as service accounts, so a policy rule written for real staff cannot admit them on role alone.
