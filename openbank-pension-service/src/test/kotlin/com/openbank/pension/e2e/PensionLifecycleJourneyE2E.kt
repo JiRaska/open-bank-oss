@@ -186,21 +186,18 @@ class PensionLifecycleJourneyE2E {
             .containsExactly(BigDecimal("60"), BigDecimal("40"))
     }
 
-    /** Scenario (f) — direct DIP submission cannot bypass the signed onboarding flow. */
+    /** Scenario (f) — direct DIP creation cannot bypass approved mapping and signed onboarding. */
     @Test
     @TestSecurity(user = "edge", roles = ["ROLE_API"])
-    fun `a DIP draft provided by the bank cannot activate without signed onboarding`() {
+    fun `a direct DIP draft is refused before onboarding and leaves no contract`() {
         val party = UUID.randomUUID()
         val created = create(party, dip(providerType = "BANK"))
-        assertThat(created.statusCode).describedAs(created.body.asString()).isEqualTo(201)
-        val id = created.jsonPath().getString("contractId")
-        val contract = read(party, id).jsonPath()
-        assertThat(contract.getString("productLine")).isEqualTo("DIP")
-        assertThat(contract.getString("providerType")).isEqualTo("BANK")
-        assertThat(post(party, "$BASE/$id/submit").statusCode).isEqualTo(403)
-        assertThat(read(party, id).jsonPath().getString("status")).isEqualTo("DRAFT")
+        assertThat(created.statusCode).describedAs(created.body.asString()).isEqualTo(403)
+        val contracts = given().header(PARTY, party.toString()).`when`().get(BASE)
+        assertThat(contracts.statusCode).describedAs(contracts.body.asString()).isEqualTo(200)
+        assertThat(contracts.jsonPath().getList<Any>("$")).isEmpty()
 
-        // The DPS pack does not permit a bank as provider; the DIP pack does.
+        // The DPS pack does not permit a bank as provider; DIP permits banks only after onboarding.
         assertThat(create(party, dps(monthly = 1000, providerType = "BANK")).statusCode).isEqualTo(400)
     }
 
