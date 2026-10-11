@@ -3,6 +3,8 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 import java.util.zip.ZipFile
+import javax.inject.Inject
+import org.gradle.api.file.FileSystemOperations
 
 // Convention plugin applied by every openbank-*-service (and equivalent modules).
 // Centralises the boilerplate that used to be copy-pasted across 31 build.gradle.kts
@@ -12,7 +14,6 @@ import java.util.zip.ZipFile
 plugins {
     id("org.jetbrains.kotlin.jvm")
     id("org.jetbrains.kotlin.plugin.allopen")
-    id("io.quarkus")
     id("org.cyclonedx.bom")
     id("org.jetbrains.kotlinx.kover")
     // Static analysis gate (detekt + ktlint, ratchet via per-module baselines).
@@ -29,6 +30,30 @@ group = "com.openbank"
 // quarkus.application.version at build time, which ServiceInfoResource
 // (/api/v1/info) and the X-API-Version response header report at runtime.
 version = file("version.txt").readText().trim()
+
+// Quarkus captures the application coordinates when its plugin is applied.
+// Set the canonical version first so its model and runner use the same version.
+pluginManager.apply("io.quarkus")
+
+abstract class QuarkusPackagingFileOperations {
+    @get:Inject
+    abstract val fileSystemOperations: FileSystemOperations
+}
+
+// Quarkus 3.38 calls DeleteSpec.delete repeatedly, replacing earlier targets.
+// Its generated staging directory then retains obsolete versioned application JARs.
+// Clear that staging directory before augmentation; keep the cacheable app output
+// and dependency output under Quarkus ownership. This action also changes the task
+// implementation fingerprint, so previously contaminated cache entries are not reused.
+val packagingFileOperations = objects.newInstance<QuarkusPackagingFileOperations>()
+val quarkusGeneratedStaging = layout.buildDirectory.dir("quarkus-build/gen")
+tasks.named("quarkusAppPartsBuild") {
+    doFirst {
+        packagingFileOperations.fileSystemOperations.delete {
+            delete(quarkusGeneratedStaging.get().asFile)
+        }
+    }
+}
 
 // Every service publishes documentation from the same build that produces its JAR.
 // The generated page contains only facts from build inputs. It also supplies an
