@@ -113,9 +113,10 @@ class AccountingDayCutoffRecheckIT {
 
     private fun seedCutoffDay(date: LocalDate, cutoffAt: Instant) = onEventLoop {
         val opened = AccountingDayRecord.open(date, cutoffAt.minus(Duration.ofDays(1)), SEED_ACTOR)
-        accountingDays.saveOpened(opened, outbox(opened))
         val cut = opened.transitionTo(AccountingDayStatus.CUTOFF, SEED_ACTOR, cutoffAt)
-        accountingDays.saveTransition(cut, opened.version, outbox(cut))
+        // Publish the prepared CUTOFF fixture atomically: a live cron must never observe OPEN
+        // between fixture writes and win its version before our transition is seeded.
+        accountingDays.saveOpened(cut, outbox(cut))
     }
 
     private fun seedRun(asOf: LocalDate, runAt: Instant, status: TieOutRunStatus) = onEventLoop {
@@ -140,8 +141,9 @@ class AccountingDayCutoffRecheckIT {
     @Test
     fun `a CUTOFF day whose only OK run predates its cutoff is re-checked and advances`() {
         val cutoffAt = Instant.now().minus(Duration.ofHours(1))
-        seedCutoffDay(STALE_OK_DAY, cutoffAt)
+        // Make the stale evidence visible before the day becomes eligible for a cron tick.
         seedRun(STALE_OK_DAY, cutoffAt.minus(Duration.ofHours(1)), TieOutRunStatus.OK)
+        seedCutoffDay(STALE_OK_DAY, cutoffAt)
 
         val advanced = await { statusOf(STALE_OK_DAY) == AccountingDayStatus.TIED_OUT }
 
@@ -164,13 +166,13 @@ class AccountingDayCutoffRecheckIT {
     @Test
     fun `a CUTOFF day whose post-cutoff run found breaks stays CUTOFF and is not re-run`() {
         val cutoffAt = Instant.now().minus(Duration.ofHours(2))
-        seedCutoffDay(BROKEN_DAY, cutoffAt)
         val breakRun = seedRun(BROKEN_DAY, cutoffAt.plus(Duration.ofMinutes(30)), TieOutRunStatus.BREAK)
+        seedCutoffDay(BROKEN_DAY, cutoffAt)
 
         // A control day seeded alongside proves the ticks ran in the window we observed.
         val control = LocalDate.of(2020, 3, 1)
-        seedCutoffDay(control, cutoffAt)
         seedRun(control, cutoffAt.minus(Duration.ofHours(1)), TieOutRunStatus.OK)
+        seedCutoffDay(control, cutoffAt)
         assertThat(await { statusOf(control) == AccountingDayStatus.TIED_OUT }).isTrue()
 
         assertThat(statusOf(BROKEN_DAY)).isEqualTo(AccountingDayStatus.CUTOFF)
