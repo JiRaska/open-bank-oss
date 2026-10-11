@@ -91,7 +91,11 @@ def _permission_paths(flat: dict, name: str) -> list[str]:
 
 def _specificity(pattern: str) -> tuple[tuple[int, int], ...]:
     """Order path segments as Quarkus does: an earlier literal beats a wildcard."""
-    return tuple((int(part != "*"), len(part.replace("*", ""))) for part in pattern.strip("/").split("/"))
+    parts = pattern.strip("/").split("/")
+    score = tuple((int(part != "*"), len(part.replace("*", ""))) for part in parts)
+    # A trailing wildcard also matches zero segments. For that common request,
+    # /api/v1 is more specific than /api/v1/* despite having fewer segments.
+    return score if parts[-1] == "*" else score + ((2, 0),)
 
 
 def _overlap_witness(pattern: str, root: str) -> str | None:
@@ -247,6 +251,12 @@ def self_test() -> int:
         "          bearer-only:\n            paths: /api/*\n            auth-mechanism: bearer\n"
         "          admin:\n            paths: /api/*/admin\n            policy: authenticated\n"
     )
+    exact_override = yaml.safe_load(
+        '"%prod":\n  quarkus:\n    http:\n      ssl:\n        client-auth: required\n'
+        "      auth:\n        permission:\n"
+        "          bearer-only:\n            paths: /api/v1/*\n            auth-mechanism: bearer\n"
+        "          exact:\n            paths: /api/v1\n            policy: authenticated\n"
+    )
     none = yaml.safe_load("quarkus:\n  http:\n    port: 8080\n")
     api = ["/api/v1/sca"]
     checks = [
@@ -264,6 +274,8 @@ def self_test() -> int:
          len(findings_for(middle_wildcard, ["/api/v1"])) == 1),
         ("middle wildcard on another branch does not overlap a served root",
          findings_for(middle_wildcard, ["/api/v1/accounts"]) == []),
+        ("exact non-bearer path wins over a trailing bearer wildcard at zero segments",
+         len(findings_for(exact_override, ["/api/v1"])) == 1),
         ("non-bearer permission outside served API does not defeat bearer-only",
          findings_for(unrelated, ["/api/v1/accounts"]) == []),
         ("no client-auth passes", findings_for(none, api) == []),
