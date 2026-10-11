@@ -122,6 +122,16 @@ class SuppressionAuthenticationIT {
     }
 
     @Test
+    @TestSecurity(user = "service-account-openbank-services", roles = ["ROLE_API"])
+    fun `the M2M role cannot revoke a suppression`() {
+        When {
+            post("/api/v1/suppressions/${UUID.randomUUID()}/revoke")
+        } Then {
+            statusCode(403)
+        }
+    }
+
+    @Test
     @TestSecurity(user = "it-operator", roles = ["ROLE_OPERATOR"])
     fun `an operator can write a suppression`() {
         Given {
