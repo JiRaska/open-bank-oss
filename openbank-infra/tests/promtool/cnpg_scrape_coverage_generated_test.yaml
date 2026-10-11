@@ -296,6 +296,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="statements",pod="statements-db-2",job="statements-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="tax-reporting",pod="tax-reporting-db-1",job="tax-reporting-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="tax-reporting",pod="tax-reporting-db-2",job="tax-reporting-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-1",job="temporal-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-2",job="temporal-db"}'
@@ -417,6 +421,8 @@ tests:
       - series: 'kube_namespace_created{namespace="security-scanner"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="statements"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="tax-reporting"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="temporal"}'
         values: "1600000000+0x40"
@@ -736,6 +742,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="statements",pod="statements-db-2",job="statements-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="tax-reporting",pod="tax-reporting-db-1",job="tax-reporting-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="tax-reporting",pod="tax-reporting-db-2",job="tax-reporting-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-1",job="temporal-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-2",job="temporal-db"}'
@@ -857,6 +867,8 @@ tests:
       - series: 'kube_namespace_created{namespace="security-scanner"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="statements"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="tax-reporting"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="temporal"}'
         values: "1600000000+0x40"
@@ -1153,6 +1165,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="statements",pod="statements-db-2",job="statements-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="tax-reporting",pod="tax-reporting-db-1",job="tax-reporting-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="tax-reporting",pod="tax-reporting-db-2",job="tax-reporting-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-1",job="temporal-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-2",job="temporal-db"}'
@@ -1276,6 +1292,8 @@ tests:
       - series: 'kube_namespace_created{namespace="security-scanner"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="statements"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="tax-reporting"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="temporal"}'
         values: "1600000000+0x40"
@@ -1576,6 +1594,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="statements",pod="statements-db-2",job="statements-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="tax-reporting",pod="tax-reporting-db-1",job="tax-reporting-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="tax-reporting",pod="tax-reporting-db-2",job="tax-reporting-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-1",job="temporal-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-2",job="temporal-db"}'
@@ -1697,6 +1719,8 @@ tests:
       - series: 'kube_namespace_created{namespace="security-scanner"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="statements"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="tax-reporting"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="temporal"}'
         values: "1600000000+0x40"
@@ -2002,6 +2026,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="statements",pod="statements-db-2",job="statements-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="tax-reporting",pod="tax-reporting-db-1",job="tax-reporting-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="tax-reporting",pod="tax-reporting-db-2",job="tax-reporting-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-1",job="temporal-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-2",job="temporal-db"}'
@@ -2121,6 +2149,8 @@ tests:
       - series: 'kube_namespace_created{namespace="security-scanner"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="statements"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="tax-reporting"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="temporal"}'
         values: "1600000000+0x40"
@@ -2419,6 +2449,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="statements",pod="statements-db-2",job="statements-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="tax-reporting",pod="tax-reporting-db-1",job="tax-reporting-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="tax-reporting",pod="tax-reporting-db-2",job="tax-reporting-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-1",job="temporal-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-2",job="temporal-db"}'
@@ -2538,6 +2572,8 @@ tests:
       - series: 'kube_namespace_created{namespace="security-scanner"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="statements"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="tax-reporting"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="temporal"}'
         values: "1600000000+0x40"
