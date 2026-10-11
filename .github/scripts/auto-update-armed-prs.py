@@ -258,6 +258,21 @@ def self_test() -> int:
                 ok = result == want and (("::error::FAILED" in output.getvalue()) == (status == 403))
                 failures += not ok
                 print(f"{'PASS' if ok else 'FAIL'}  update-branch HTTP {status} -> exit {result}")
+    with patch.dict(globals(), {"required_policy": lambda *_: (["Gitleaks"], True),
+                                "get": fixture_get, "head_checks": lambda *_: {"Gitleaks": "success"}}):
+        for payload, want in ((json.dumps({"message": "merge conflict between base and head"}), 0),
+                              (json.dumps({"message": "Validation Failed"}), 1),
+                              ("not JSON", 1),
+                              ({"message": "merge conflict between base and head"}, 0)):
+            with patch.dict(globals(), {"api": lambda *_args, body=payload: (422, body)}):
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    result = run("example/repo", "main", 5, 0, False, 20)
+                ok = result == want and (("::error::FAILED" in output.getvalue()) == bool(want))
+                if want == 0:
+                    ok = ok and "::warning::SKIP" in output.getvalue() and "merge conflict" in output.getvalue()
+                failures += not ok
+                print(f"{'PASS' if ok else 'FAIL'}  update-branch classified 422 -> exit {result}")
     def capped_get(path: str) -> object:
         if "/pulls/42/commits?" in path:
             return [update, update]
@@ -436,6 +451,18 @@ def branch_update_count(repo: str, number: int, branch: str) -> int:
     )
 
 
+def is_update_merge_conflict(code, data):
+    """Recognize only the explicit API merge-conflict response, including HTTPError text."""
+    if code != 422:
+        return False
+    if isinstance(data, str):
+        try:
+            data = json.loads(data)
+        except json.JSONDecodeError:
+            return False
+    return isinstance(data, dict) and data.get("message") == "merge conflict between base and head"
+
+
 def run(repo: str, branch: str, max_updates: int, debounce: int, dry_run: bool,
         fleet_threshold: int, max_updates_per_pr: int = 2) -> int:
     required, strict = required_policy(repo, branch)
@@ -516,6 +543,10 @@ def run(repo: str, branch: str, max_updates: int, debounce: int, dry_run: bool,
         elif code == 409:
             # A competing update changed the expected head. The next run re-reads it.
             print(f"SKIP   #{n} {sha[:9]}: head changed during update ({code})")
+        elif is_update_merge_conflict(code, data):
+            # A PR can become conflicting between eligibility inspection and this update.
+            # Keep it visible for reconciliation, without declaring the maintenance job broken.
+            print(f"::warning::SKIP #{n} {sha[:9]}: merge conflict; reconcile the PR before updating")
         else:
             failed_updates += 1
             print(f"::error::FAILED #{n} {sha[:9]}: update-branch -> {code}: {data}")
