@@ -131,8 +131,26 @@ def self_test() -> int:
             pass
         else:
             raise AssertionError(f"incomplete API result passed: {invalid!r}")
-    print("SUBJECTS=16")
-    print("select-ci-reconcile-candidates self-test: 16 cases passed, 0 failed")
+    # A newly indexed run can change total_count between pages. The first
+    # snapshot must fail closed; a complete second snapshot must still select
+    # the candidate on its last page rather than silently dropping it.
+    background = [base | {"id": 1000 + i, "name": "Services CI", "conclusion": "success", "run_attempt": 1}
+                  for i in range(100)]
+    candidate = long_run | {"id": 777, "updated_at": "2026-09-11T00:29:00Z"}
+    first_snapshot = [{"total_count": 100, "workflow_runs": background},
+                      {"total_count": 101, "workflow_runs": [candidate]}]
+    second_snapshot = [{"total_count": 101, "workflow_runs": background},
+                       {"total_count": 101, "workflow_runs": [candidate]}]
+    try:
+        flatten_pages(first_snapshot)
+    except ValueError as exc:
+        assert "changed total_count" in str(exc)
+    else:
+        raise AssertionError("changing total_count was treated as a complete snapshot")
+    recovered = select(flatten_pages(second_snapshot), now, 180)
+    assert [x["run_id"] for x in recovered["retry"]] == [777]
+    print("SUBJECTS=17")
+    print("select-ci-reconcile-candidates self-test: 17 cases passed, 0 failed")
     return 0
 
 
