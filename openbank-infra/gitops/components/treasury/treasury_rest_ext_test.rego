@@ -189,14 +189,12 @@ test_nobody_else_may_upload_nostro_statement if {
 
 # --- portfolio (ADR-0337 amendment): the one treasury read a machine reaches ---
 
-portfolio_excluded := {"authz": {"operator_read_any_excluded_actions": ["treasury.portfolio.read"]}}
-
 tax_reporting := {"type": "HUMAN", "id": "service-account-openbank-tax-reporting", "roles": ["ROLE_API"]}
 
-portfolio_allowed(p, a) if rest.allow.allow with input as {"principal": p, "action": a} with data.rules as portfolio_excluded
+portfolio_allowed(p, a) if rest.allow.allow with input as {"principal": p, "action": a} with data.rules as {}
 
 test_tax_reporting_may_read_portfolio if {
-	portfolio_allowed(tax_reporting, "treasury.portfolio.read")
+	portfolio_allowed(tax_reporting, "treasury.portfolio.inspect")
 }
 
 test_tax_reporting_reads_nothing_else if {
@@ -208,31 +206,31 @@ test_tax_reporting_reads_nothing_else if {
 
 # Without ROLE_API (the role the realm grants that client) the identity alone is not enough.
 test_tax_reporting_identity_without_api_role_denied if {
-	not portfolio_allowed({"type": "HUMAN", "id": "service-account-openbank-tax-reporting", "roles": []}, "treasury.portfolio.read")
+	not portfolio_allowed({"type": "HUMAN", "id": "service-account-openbank-tax-reporting", "roles": []}, "treasury.portfolio.inspect")
 }
 
 test_treasury_staff_may_read_portfolio if {
 	every p in [dealer, approver, admin, senior] {
-		portfolio_allowed(p, "treasury.portfolio.read")
+		portfolio_allowed(p, "treasury.portfolio.inspect")
 	}
 }
 
 test_shared_m2m_other_service_account_and_agent_may_not_read_portfolio if {
-	not portfolio_allowed({"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR", "ROLE_API", "ROLE_COMPLIANCE"]}, "treasury.portfolio.read")
-	not portfolio_allowed({"type": "HUMAN", "id": "service-account-openbank-pension", "roles": ["ROLE_API", "ROLE_OPERATOR"]}, "treasury.portfolio.read")
-	not portfolio_allowed(shared_sa, "treasury.portfolio.read")
-	not portfolio_allowed({"type": "AI_AGENT", "id": "agent:treasury-drafter", "roles": ["ROLE_API", "ROLE_TREASURY_DEALER"]}, "treasury.portfolio.read")
-	not portfolio_allowed(nobody, "treasury.portfolio.read")
+	not portfolio_allowed({"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR", "ROLE_API", "ROLE_COMPLIANCE"]}, "treasury.portfolio.inspect")
+	not portfolio_allowed({"type": "HUMAN", "id": "service-account-openbank-pension", "roles": ["ROLE_API", "ROLE_OPERATOR"]}, "treasury.portfolio.inspect")
+	not portfolio_allowed(shared_sa, "treasury.portfolio.inspect")
+	not portfolio_allowed({"type": "AI_AGENT", "id": "agent:treasury-drafter", "roles": ["ROLE_API", "ROLE_TREASURY_DEALER"]}, "treasury.portfolio.inspect")
+	not portfolio_allowed(nobody, "treasury.portfolio.inspect")
 }
 
-# compliance-read-any honours the exclusion too: a client holding ROLE_COMPLIANCE is still a machine.
+# A ROLE_COMPLIANCE holder is not let in by compliance-read-any: the verb is not `.read`.
 test_compliance_role_does_not_reach_portfolio if {
-	not portfolio_allowed({"type": "HUMAN", "id": "service-account-openbank-aml", "roles": ["ROLE_COMPLIANCE"]}, "treasury.portfolio.read")
-	not portfolio_allowed({"type": "HUMAN", "id": "carol", "roles": ["ROLE_COMPLIANCE"]}, "treasury.portfolio.read")
+	not portfolio_allowed({"type": "HUMAN", "id": "service-account-openbank-aml", "roles": ["ROLE_COMPLIANCE"]}, "treasury.portfolio.inspect")
+	not portfolio_allowed({"type": "HUMAN", "id": "carol", "roles": ["ROLE_COMPLIANCE"]}, "treasury.portfolio.inspect")
 }
 
-# The exclusion is what does the work: without it the base rules re-admit the shared account.
-test_without_the_exclusion_the_base_rules_reopen_portfolio if {
+# The verb is what does the work: the same resource named `.read` is reopened by the base rules.
+test_a_read_verb_would_reopen_portfolio_to_the_shared_account if {
 	rest.allow.allow with input as {
 		"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]},
 		"action": "treasury.portfolio.read",

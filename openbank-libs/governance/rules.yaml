@@ -3217,10 +3217,6 @@ authz:
     - tax.filing.read             # §38d withholding returns and the per-remittance audit trail behind
                                   # them (#5760): real staff only via tax_reporting_rest_ext.rego; no
                                   # service-account reads them through operator-read-any
-    - treasury.portfolio.read     # the pension company's own holdings, custodian semt.002 (ADR-0337
-                                  # amendment, PSP 34-12 PS): treasury staff +
-                                  # service-account-openbank-tax-reporting only. Also excluded
-                                  # from compliance-read-any (rest.rego honours this list there).
   role_action_matrix:
     ROLE_OPERATOR:
       grant:

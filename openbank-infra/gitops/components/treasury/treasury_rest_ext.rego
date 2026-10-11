@@ -16,15 +16,15 @@
 #   treasury.nostro.read                      — treasury dealers, approvers and admins (#10896)
 #   treasury.nostro.upload                    — ROLE_TREASURY_APPROVER (a statement upload changes no
 #                                               balance; it is still back-office evidence, #10896)
-#   treasury.portfolio.read                   — treasury dealers, approvers and admins, and
+#   treasury.portfolio.inspect                — treasury dealers, approvers and admins, and
 #                                               tax-reporting's OWN client (ADR-0337 amendment)
 #   treasury.portfolio.upload                 — ROLE_TREASURY_APPROVER (the custodian's semt.002)
 #
-# treasury.portfolio.read is the one treasury read a MACHINE reaches, so it is the one read the base
-# rules must not hand out: it is listed in rules.yaml: authz.operator_read_any_excluded_actions,
-# which base rest.rego honours in BOTH operator-read-any and compliance-read-any. Without that the
-# shared service-account (ROLE_OPERATOR) and any client holding ROLE_COMPLIANCE would read the
-# pension company's own portfolio.
+# treasury.portfolio.inspect is the one treasury read a MACHINE reaches, so it deliberately does not
+# end in `.read`: base rest.rego's operator-read-any and compliance-read-any grant every `.read` to
+# any HUMAN-classified principal holding ROLE_OPERATOR / ROLE_COMPLIANCE, which the shared
+# service-account does in at least one realm. A non-read verb is served ONLY by the identity-scoped
+# rules below (the fleet convention since pension-fund.holding.inspect, #12481).
 #
 # Four-eyes (approver != creator) is enforced in the domain (ADR-0315 D3); these rules decide only
 # WHO may attempt each step. Dealer and approver are separate roles on purpose: a dealer cannot
@@ -71,7 +71,7 @@ allowed_reasons contains "treasury-staff-read" if {
 		"treasury.position.read",
 		"treasury.nostro.read",
 		# ADR-0337 amendment: the custodian's period-end statement of holdings.
-		"treasury.portfolio.read",
+		"treasury.portfolio.inspect",
 		# ADR-0315 D9: the simulated counterparties' SYNTHETIC quotes (GET /quotes).
 		"treasury.quote.read",
 	}
@@ -139,5 +139,5 @@ allowed_reasons contains "service-tax-reporting-portfolio-read" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == treasury_portfolio_reader_account
 	"ROLE_API" in input.principal.roles
-	input.action == "treasury.portfolio.read"
+	input.action == "treasury.portfolio.inspect"
 }

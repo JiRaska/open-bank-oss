@@ -31,7 +31,7 @@ import org.junit.jupiter.api.extension.ExtendWith
  * consumer pact cannot catch a wrong request path — only this replay can (#2269).
  *
  * Replays AS tax-reporting's own client (`service-account-openbank-tax-reporting`, ROLE_API), the
- * one machine identity treasury_rest_ext.rego admits to `treasury.portfolio.read`. The 200
+ * one machine identity treasury_rest_ext.rego admits to `treasury.portfolio.inspect`. The 200
  * interaction and the 409 one (no snapshot for the date) run here; the 401 interaction is replayed by
  * [TreasuryNegativeAuthProviderVerificationTest], which boots without an identity.
  */
