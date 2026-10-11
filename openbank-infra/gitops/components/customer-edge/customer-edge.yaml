@@ -185,9 +185,14 @@ spec:
               value: openbank-edge
             # Declare these callers for derived NetworkPolicies; defaults alone are invisible to the generator.
             - name: AUDIT_SERVICE_URL
-              value: http://audit-service.audit.svc:8113
+              value: https://audit-service.audit.svc:8443
+            # Pension lifecycle (ADR-0334 S6) over pension-service's internal-TLS listener only.
+            # Its 8443 does not request a client certificate (bearer-only: the openbank-edge
+            # client_credentials token is the identity), so the edge verifies the server against the
+            # openbank-ca chain already mounted at /mnt/campaign-tls and the JDK client's hostname
+            # check (dnsNames pension-service.pension.svc). Cleartext 8171 is not used.
             - name: PENSION_SERVICE_URL
-              value: http://pension-service.pension.svc:8171
+              value: https://pension-service.pension.svc:8443
             - name: ACCOUNT_SERVICE_URL
               value: http://account-service.accounts.svc:8100
             # ADR-0104 P2 currency pockets: the edge queries product-catalog (accounts ns,

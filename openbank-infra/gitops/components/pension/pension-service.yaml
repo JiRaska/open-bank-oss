@@ -8,6 +8,10 @@ kind: Deployment
 metadata:
   name: pension-service
   namespace: pension
+  # Admit each declared caller only on the port its URL names: customer-edge reaches the
+  # participant API over internal TLS 8443 and never over cleartext 8171.
+  annotations:
+    openbank.io/port-scoped-ingress: "true"
   labels:
     app.kubernetes.io/name: pension-service
     app.kubernetes.io/part-of: pension
