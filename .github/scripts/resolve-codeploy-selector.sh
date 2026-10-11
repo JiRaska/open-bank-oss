@@ -15,27 +15,27 @@
 # produce exactly that, because it delegated the choice to resolve-can-i-deploy-selector.sh
 # and took whatever came back.
 #
-# That selector is right for the PER-SERVICE path, where `--latest main` is a deliberate,
-# documented fallback (ADR-0092: a service path-scoped CI skipped on this commit has no
-# version, and `--version` would error). Two of its branches emit it:
+# The shared PER-SERVICE selector now asks for an exact version when a known pacticipant
+# has no published version at the image SHA or the broker probe is inconclusive. A missing
+# version fails closed while path-scoped CI catches up; neither case may borrow a verdict
+# from `--latest main` (#12228). Only an `absent` pacticipant may still select that tag,
+# because it has no contracts to verify. The co-deploy matrix must narrow that case too:
 #
 #   absent   the broker has never heard of this pacticipant — no contracts either way
 #   unknown  the broker probe was inconclusive (non-2xx / unreachable / malformed answer)
 #
-# On the per-service path both are harmless-to-benign. In the co-deploy matrix they are not
-# the same defect at all, and only one of them is loud:
+# The historical co-deploy defect was a moving-tag selector. Its two failure modes were:
 #
-#   * `unknown` FAILS OPEN. The broker answers about whatever version currently carries the
+#   * `unknown` FAILED OPEN. The broker answered about whatever version carried the
 #     moving `main` tag for that pacticipant — a later, unrelated build — and can return
-#     GREEN for a pair that is not the pair being deployed. Nothing is red anywhere; the
-#     deploy proceeds on a verdict about a different artifact. This is the #5993 defect: a
-#     control that reports healthy because it structurally cannot report otherwise.
-#   * `absent` fails closed, confusingly: `can-i-deploy --pacticipant <unknown> --latest main`
-#     errors, and the whole set reads as "not mutually deployable" — a contract break that
+#     GREEN for a pair that was not being deployed (#5993). The current shared selector
+#     asks about the exact image SHA; this wrapper REFUSEs if that version is unproven.
+#   * `absent` FAILED CLOSED: `can-i-deploy --pacticipant <unknown> --latest main`
+#     errored, and the whole set read as "not mutually deployable" — a contract break that
 #     does not exist. The per-service path already has the right answer for this case (a
 #     service with NO contracts cannot break any consumer/provider expectation, so it is
-#     trivially deployable, ADR-0092); the co-deploy path had no equivalent, so it is given
-#     one here as SKIP — dropped from the matrix, not silently pinned to a moving tag.
+#     trivially deployable, ADR-0092); this wrapper emits SKIP — dropped from the matrix,
+#     not silently pinned to a moving tag.
 #
 # So this script is the co-deploy-specific NARROWING of the shared selector, not a second
 # copy of it: it delegates the decision and then refuses anything that is not an exact
@@ -72,6 +72,17 @@ resolve_one() { # <svc> <sha>; reads PACT_VERSION_PRESENT
       "the broker has never heard of ${svc} — it publishes no consumer pact and verifies no provider pact, so there is no contract for the matrix to check; it is left OUT of the co-deploy question rather than pinned to the moving main tag (ADR-0092)"
     return 0
   fi
+  case "$present" in
+    yes|no|equivalent:*) ;;
+    *)
+      # Unlike a per-service push, an atomic matrix cannot ask about an unproven
+      # participant and let a later build fill in its version. The probe must
+      # establish a version or a proven equivalent before the whole set proceeds.
+      emit "REFUSE" \
+        "Pact version probe for ${svc} at ${sha} is inconclusive ('${present}') — no exact version is established for the co-deploy matrix (#5993)"
+      return 0
+      ;;
+  esac
   sel_line="$(PACT_VERSION_PRESENT="$present" EVENT_NAME=workflow_dispatch \
     bash "$SHARED" "$svc" "$sha")"
   sel="$(printf '%s' "$sel_line" | cut -f1)"
