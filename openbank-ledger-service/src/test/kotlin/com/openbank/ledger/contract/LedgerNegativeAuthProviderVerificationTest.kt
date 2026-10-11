@@ -50,7 +50,7 @@ import org.junit.jupiter.api.extension.ExtendWith
 @PactFolder("../pacts")
 @PactFilter(NEGATIVE_AUTH_STATE)
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
-class LedgerNegativeAuthPactVerificationTest {
+class LedgerNegativeAuthProviderVerificationTest {
 
     @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
     lateinit var testPort: String
