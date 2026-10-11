@@ -238,6 +238,11 @@ def _operator_managed_credential(cred: Cred, root: Path) -> bool:
             if (not isinstance(operator, dict)
                     or ("enabled" in operator and operator["enabled"] is not True)):
                 return False
+            # This proof matches an unprefixed Secret in the cluster's namespace.
+            # A different watcher or generated name needs its own provenance proof.
+            if (operator.get("watchedNamespace", "messaging") != "messaging"
+                    or operator.get("secretPrefix", "") != ""):
+                return False
         ca = spec.get(ca_name, {})
         if not isinstance(ca, dict):
             return False
@@ -469,6 +474,7 @@ def self_test() -> int:
                               source: str = "pension-service", auth: str = "tls",
                               cluster_ca: str = "", clients_ca: str = "",
                               user_operator: bool = True, mixed: bool = False,
+                              operator_options: str = "",
                               cluster_label: str = "openbank-cluster",
                               malformed_store_spec: bool = False,
                               server_url: str | None = None,
@@ -495,6 +501,8 @@ def self_test() -> int:
                     "apiVersion: external-secrets.io/v1\nkind: ClusterSecretStore\n"
                     "metadata:\n  name: kafka-messaging-certs\n" + store_spec)
                 user_operator_yaml = "    userOperator: {}\n" if user_operator else ""
+                if user_operator and operator_options:
+                    user_operator_yaml = "    userOperator:\n" + operator_options
                 ca_yaml = "" if not cluster_ca else f"  clusterCa:\n    generateCertificateAuthority: {cluster_ca}\n"
                 clients_yaml = "" if not clients_ca else f"  clientsCa:\n    generateCertificateAuthority: {clients_ca}\n"
                 (kafka_dir / "kafka.yaml").write_text(
@@ -533,6 +541,10 @@ def self_test() -> int:
         if not documented_defaults:
             print("self-test FAIL: documented in-cluster API/default refresh was rejected")
             bad += 1
+        if not lifecycle_fixture(operator_options=(
+                "      watchedNamespace: messaging\n      secretPrefix: ''\n")):
+            print("self-test FAIL: explicit same-namespace/unprefixed operator was rejected")
+            bad += 1
         for label, kwargs in (
             ("wrong store", {"store": "vault-kv"}),
             ("wrong backend", {"provider": "vault"}),
@@ -546,6 +558,10 @@ def self_test() -> int:
             ("disabled client CA", {"clients_ca": "false"}),
             ("unknown client CA policy", {"clients_ca": "unknown"}),
             ("missing user operator", {"user_operator": False}),
+            ("different watched namespace", {"operator_options": "      watchedNamespace: other\n"}),
+            ("prefixed user secret", {"operator_options": "      secretPrefix: kafka-\n"}),
+            ("null watched namespace", {"operator_options": "      watchedNamespace: null\n"}),
+            ("null secret prefix", {"operator_options": "      secretPrefix: null\n"}),
             ("mixed static sources", {"mixed": True}),
             ("created-once projection", {"refresh_policy": "CreatedOnce"}),
             ("on-change projection", {"refresh_policy": "OnChange"}),
