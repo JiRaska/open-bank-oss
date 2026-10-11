@@ -4,6 +4,7 @@
 
 package com.openbank.tax.infrastructure.rest
 
+import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import com.openbank.tax.application.port.out.ReturnDataPort
 import com.openbank.tax.application.port.out.ReturnDataUnavailableException
@@ -30,7 +31,6 @@ import jakarta.ws.rs.core.Response.Status.NOT_FOUND
 import jakarta.ws.rs.core.Response.Status.SERVICE_UNAVAILABLE
 import jakarta.ws.rs.ext.ExceptionMapper
 import jakarta.ws.rs.ext.Provider
-import org.eclipse.microprofile.jwt.JsonWebToken
 import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import java.math.BigDecimal
@@ -43,6 +43,14 @@ private const val UNPROCESSABLE = 422
  *
  * Reads are open to auditor/viewer/operator/admin. Every state change is operator-only and
  * four-eyes separated: whoever assembled a return may not approve it.
+ *
+ * `@RolesAllowed` is only the coarse gate. A Keycloak client_credentials token is classified HUMAN
+ * and the shared `service-account-openbank-services` holds ROLE_OPERATOR in some realms, so roles
+ * alone let a machine assemble, approve (as the checker) or submit a regulatory return. Two layers
+ * close that: `@Authorize` actions whose verbs are deliberately NOT `read`/`list` (so the fleet's
+ * generic read-any rules never match; `tax_reporting_rest_ext.rego` grants them to real staff
+ * only), and [TaxReportingActor] here, which refuses a service-account as maker, checker or
+ * submitter even where OPA enforcement is off.
  */
 @Path("/api/v1/statutory-returns")
 @Produces(MediaType.APPLICATION_JSON)
@@ -58,18 +66,21 @@ class StatutoryReturnResource(
 
     @GET
     @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "tax.statutory-return.inspect")
     @Operation(summary = "List return revisions, newest period first")
     suspend fun list(): Response = Response.ok(service.list().map { it.toResponse() }).build()
 
     @GET
     @Path("/catalogues")
     @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "tax.statutory-return.inspect")
     @Operation(summary = "The jurisdiction return catalogues this deployment reports under")
     fun catalogues(): Response = Response.ok(service.catalogues().map { it.toResponse() }).build()
 
     @GET
     @Path("/breaches")
     @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "tax.statutory-return.inspect")
     @Operation(
         summary = "Returns past their statutory deadline without a submitted revision, including never-assembled ones",
     )
@@ -78,6 +89,7 @@ class StatutoryReturnResource(
     @GET
     @Path("/capability")
     @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "tax.statutory-return.inspect")
     @Operation(
         summary = "Whether a data source and a wire renderer are bound; reports the truth rather than implying it",
     )
@@ -93,12 +105,14 @@ class StatutoryReturnResource(
     @GET
     @Path("/{id}")
     @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "tax.statutory-return.inspect")
     @Operation(summary = "Get one return revision")
     suspend fun get(@PathParam("id") id: String): Response = Response.ok(service.get(parseId(id)).toResponse()).build()
 
     @POST
     @Path("/assemble")
     @RolesAllowed(Roles.OPERATOR)
+    @Authorize(action = "tax.statutory-return.assemble")
     @Operation(summary = "Assemble and validate a return from sourced figures (→ ASSEMBLED)")
     suspend fun assemble(request: AssembleReturnRequest): Response {
         val assembled = service.assemble(
@@ -114,6 +128,7 @@ class StatutoryReturnResource(
     @POST
     @Path("/{id}/approve")
     @RolesAllowed(Roles.OPERATOR)
+    @Authorize(action = "tax.statutory-return.approve", resource = "#id")
     @Operation(summary = "Approve and attest the content hash (ASSEMBLED → APPROVED; four-eyes)")
     suspend fun approve(@PathParam("id") id: String): Response =
         Response.ok(service.approve(parseId(id), actingPrincipal()).toResponse()).build()
@@ -121,6 +136,7 @@ class StatutoryReturnResource(
     @POST
     @Path("/{id}/submitted")
     @RolesAllowed(Roles.OPERATOR)
+    @Authorize(action = "tax.statutory-return.submit", resource = "#id")
     @Operation(
         summary = "Record the regulator submission reference (APPROVED → SUBMITTED; refused if content ≠ attestation)",
     )
@@ -130,14 +146,8 @@ class StatutoryReturnResource(
     private fun parseId(value: String): UUID = runCatching { UUID.fromString(value) }.getOrNull()
         ?: throw WebApplicationException("id must be a UUID (got '$value')", Response.Status.BAD_REQUEST)
 
-    private fun actingPrincipal(): String {
-        val principal = identity.principal
-        val subject = (principal as? JsonWebToken)?.subject ?: principal?.name
-        if (subject.isNullOrBlank()) {
-            throw WebApplicationException("Cannot resolve the acting principal", Response.Status.UNAUTHORIZED)
-        }
-        return subject
-    }
+    private fun actingPrincipal(): String =
+        TaxReportingActor.staffSubject(identity, "assemble, approve or submit a statutory return")
 }
 
 data class AssembleReturnRequest(

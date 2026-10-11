@@ -9,7 +9,7 @@ Dokumentaci publikuje služba na management endpointu `/q/openbank/docs` (Docs-a
 - **Stack:** Kotlin / Quarkus 3.x / Hibernate Reactive Panache / PostgreSQL (`pension-fund-db`, CNPG)
 - **Porty:** 8162 (aplikace), 8090 (management)
 - **Události:** zatím žádné
-- **Autentizace:** správu fondů provádějí jen zaměstnanci (`ROLE_OPERATOR`/`ROLE_ADMIN`, nikdy service-account). Číst mohou také `ROLE_AUDITOR` a `ROLE_API`.
+- **Autentizace:** správu fondů provádějí jen zaměstnanci (`ROLE_OPERATOR`/`ROLE_ADMIN`, nikdy service-account). Držby, pokyny a transakce účastníků mohou číst zaměstnanci s `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_AUDITOR` nebo `ROLE_COMPLIANCE` a vlastní klient pension-service s `ROLE_API`. Chrání je akce `pension-fund.holding.inspect` (ne `.read`), takže obecná operátorská ani compliance čtecí práva nepustí sdílený service-account.
 - **Čtyři oči:** kdo NAV spočítá nebo navrhne změnu strategie, ten ji nemůže zveřejnit ani schválit (403). Vynucuje to doména i DB CHECK.
 - **Forward pricing:** pokyn se přijme bez ceny (202). Vypořádá se za PŘÍŠTÍ zveřejněnou NAV fondu.
 
@@ -54,6 +54,20 @@ neposkytuje vzájemné TLS.
 certifikátu a zachování HTTP s dočasnými testovacími klíči. Deklarace ani tento
 test nedokazují připravenost certifikátu v clusteru.
 
+
+## Výkazy za období
+
+`GET /api/v1/reporting/funds/{fundId}/period-figures` vyžaduje datum
+`periodStart` a `periodEnd`. Vrací agregované údaje fondu pro tax-reporting-service:
+rozvahu, výsledek hospodaření od začátku roku, pohyb jednotek, portfolio a toky.
+Přístup vyžaduje povolenou roli a autorizační politiku `pension-fund.reporting.inspect`.
+
+Výpočet používá zveřejněné NAV a transakce oceněné těmito NAV podle data ocenění.
+Období bez zveřejněné NAV není vykazatelné; nejde o nulovou aktivitu. S nově
+vypočtenou NAV se ukládají její pozice. U starších NAV bez zaznamenaných pozic
+jsou údaje portfolia neznámé, nikoli prázdné. Identifikátory podkladových NAV
+a fingerprint určují vstupy výkazu. Tento model poskytuje údaje; nepodává
+regulátorovi statutární výkaz.
 
 ### Výsledovka a klasifikace pozic pro reporting
 

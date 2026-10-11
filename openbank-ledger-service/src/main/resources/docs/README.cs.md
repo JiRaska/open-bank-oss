@@ -24,3 +24,19 @@ Tato dokumentace je publikována přímo službou na management endpointu `/q/op
 - **Outbox:** `ledger_outbox` → Kafka topic `openbank.ledger.journal.posted` (regulatorní dispatch, ADR-0050)
 - **Idempotence:** pole `idempotencyKey` v požadavku na zaúčtování → tabulka `ledger_idempotency` (v DB, ne Redis)
 - **Auth:** Keycloak OIDC (RS256 JWT). Čtení omezeno na `ROLE_API`/`ROLE_AUDITOR`/`ROLE_VIEWER`/`ROLE_OPERATOR`/`ROLE_ADMIN`; účtování/storno/FX revalvace jen `ROLE_OPERATOR`. Žádný endpoint není neautentizovaný (ADR-0018).
+
+
+## Měsíční konečné zůstatky a pohyby
+
+API období rozlišuje dvě účetní veličiny pod `/api/v1/ledger/periods/MONTH/{date}`. Datum vybírá měsíc, do kterého patří; konečné zůstatky se počítají k jeho poslednímu dni.
+
+| Čtení | Veličina a evidence |
+|---|---|
+| `/trial-balance` | Pohyby hlavní knihy za vybraný měsíc |
+| `/frozen-trial-balance` | Zmrazené pohyby vybraného měsíce s ověřeným hashem |
+| `/closing-balance` | Živý kumulativní součet hlavní knihy do konce měsíce |
+| `/frozen-closing-balance` | Kumulativní součet sestavený ze zmrazených měsíčních pohybů s ověřenými hashi |
+
+Čtení konečných zůstatků podporuje `MONTH`. Zmrazený konečný zůstatek vyžaduje evidenci cílového měsíce ve stavu `FROZEN`/`LINES_V1`, ověřuje každý zahrnutý měsíční snapshot a porovnává součet s kumulativní hlavní knihou po účtech a měnách. Neúplná nebo neplatná zmrazená evidence vrací 409. Hlavní kniha slouží jako kontrola sesouhlasení; vrácené částky pocházejí ze zmrazených snapshotů. Starší evidence `HASH_ONLY` neposkytuje potřebné řádky zůstatků.
+
+Rozvahové šablony FINREP a vlastní zdroje COREP používají konečné zůstatky. FINREP F02.00 dál čte pohyby jednoho měsíce. Konzumenti, kteří už sčítají pohyby období, musí zachovat pohybový endpoint; součet kumulativních zůstatků by započetl dřívější aktivitu opakovaně. Živé čtení neosvědčuje zmrazenou uzávěrku.

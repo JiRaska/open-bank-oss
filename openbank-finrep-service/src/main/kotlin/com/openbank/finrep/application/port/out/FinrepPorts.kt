@@ -44,10 +44,23 @@ data class TrialBalanceSnapshot(val lines: List<TrialBalanceLineDto>, val ledger
 data class ClosedPeriodDto(val periodType: String, val to: LocalDate, val status: String, val evidenceState: String)
 
 interface LedgerPort {
+    /** Cumulative frozen closing balance for F01 and COREP stock cells. */
     suspend fun getTrialBalance(asOf: LocalDate): TrialBalanceSnapshot
 
-    /** Mutable period aggregate for an explicitly labelled internal working preview only. */
+    /** Mutable cumulative stock for an explicitly labelled internal working preview only. */
     suspend fun getLiveTrialBalance(asOf: LocalDate): TrialBalanceSnapshot
+
+    /** One frozen MONTH's movements for F02 P&L; never a lifetime closing balance. */
+    suspend fun getFrozenPeriodMovements(asOf: LocalDate): TrialBalanceSnapshot
+
+    /** One mutable MONTH's movements for the F02 internal working preview. */
+    suspend fun getLivePeriodMovements(asOf: LocalDate): TrialBalanceSnapshot
+
+    /** Attested January-to-month-end F02 flow. */
+    suspend fun getYearToDateMovements(asOf: LocalDate): TrialBalanceSnapshot
+
+    /** Mutable January-to-exact-date F02 preview. */
+    suspend fun getLiveYearToDateMovements(asOf: LocalDate): TrialBalanceSnapshot
 
     suspend fun listClosedPeriods(): List<ClosedPeriodDto>
 }
