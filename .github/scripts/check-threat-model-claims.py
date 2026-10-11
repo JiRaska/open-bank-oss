@@ -497,6 +497,7 @@ class Corpus:
         self.blobs: dict[str, str] = {}
         self.code: dict[str, str] = {}
         self._memo: dict[str, bool] = {}
+        self._stub_memo: dict[str, str | None] = {}
         for f in self.files:
             if f.endswith(DOCISH) or not f.endswith(CODEISH) or not is_backend(f):
                 continue
@@ -610,6 +611,13 @@ class Corpus:
         return hit
 
     def stub_site(self, sym: str) -> str | None:
+        # The corpus is a fixed snapshot for this audit. Cache both findings and absence:
+        # repeated claims must not rescan every deployed declaration for the same symbol.
+        if sym not in self._stub_memo:
+            self._stub_memo[sym] = self._find_stub_site(sym)
+        return self._stub_memo[sym]
+
+    def _find_stub_site(self, sym: str) -> str | None:
         """A cited symbol whose own DECLARATION opens with a stub marker.
 
         Anchored on the declaration, not on any mention: `paymentId` appears in hundreds of
@@ -923,6 +931,7 @@ def self_test() -> int:
         def __init__(self, blobs):  # test double: no git, no filesystem
             self.files, self.names, self.paths = [], set(), set()
             self.blobs, self._memo = blobs, {}
+            self._stub_memo = {}
             self.main = {}
             self.config_keys = set()
             for _f, _b in blobs.items():
@@ -945,6 +954,22 @@ def self_test() -> int:
     sub = _FakeCorpus({"openbank-x/src/test/kotlin/B.kt": "class BalanceSecurityContractTest {"})
     case("a SUFFIX of a real class does not resolve", sub.resolve("SecurityContractTest"), False)
     case("the real class still resolves", sub.resolve("BalanceSecurityContractTest"), True)
+
+    # Cache positive and negative results without sharing them across corpus snapshots.
+    from unittest.mock import patch
+    stub = _FakeCorpus({})
+    stub.main = {"openbank-x/src/main/kotlin/A.kt": "class StubGuard {\n// TODO wire real guard\n}"}
+    with patch.object(stub, "_find_stub_site", wraps=stub._find_stub_site) as scan:
+        for _ in range(2):
+            case("a cited stub remains a finding on repeated claims",
+                 stub.stub_site("StubGuard"), "openbank-x/src/main/kotlin/A.kt:1")
+            case("an absent declaration stays absent on repeated claims",
+                 stub.stub_site("MissingGuard"), None)
+        case("each distinct symbol scans the fixed corpus once", scan.call_count, 2)
+    real = _FakeCorpus({})
+    real.main = {"openbank-x/src/main/kotlin/A.kt": "class StubGuard { fun check() = true }"}
+    case("another corpus does not inherit the previous stub finding",
+         real.stub_site("StubGuard"), None)
 
     # (3b) EMBEDDED .rego. A `gen-*opa-bundle*.sh` generator writes its source `.rego` blob into
     #      a ConfigMap under a `<name>.rego: |` key instead of checking it in as its own file
