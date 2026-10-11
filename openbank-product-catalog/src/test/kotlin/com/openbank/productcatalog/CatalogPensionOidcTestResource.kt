@@ -5,6 +5,7 @@
 package com.openbank.productcatalog
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.testing.evidence.TestInfrastructureEvidence
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import org.testcontainers.containers.GenericContainer
 import org.testcontainers.containers.wait.strategy.Wait
@@ -18,6 +19,7 @@ import kotlin.io.path.readText
 /** Isolated Keycloak issuer with synthetic, short-lived service and human credentials. */
 class CatalogPensionOidcTestResource : QuarkusTestResourceLifecycleManager {
     private var container: GenericContainer<*>? = null
+    private var started = false
 
     override fun start(): Map<String, String> {
         val secret = UUID.randomUUID().toString()
@@ -113,6 +115,8 @@ class CatalogPensionOidcTestResource : QuarkusTestResourceLifecycleManager {
         container = keycloak
         try {
             keycloak.start()
+            started = true
+            TestInfrastructureEvidence.record("keycloak", keycloak.dockerImageName, "started")
             val issuer = "http://${keycloak.host}:${keycloak.getMappedPort(8080)}/realms/$REALM"
             return mapOf(
                 "quarkus.oidc.auth-server-url" to issuer,
@@ -126,8 +130,12 @@ class CatalogPensionOidcTestResource : QuarkusTestResourceLifecycleManager {
     }
 
     override fun stop() {
-        container?.stop()
+        container?.let {
+            it.stop()
+            if (started) TestInfrastructureEvidence.record("keycloak", it.dockerImageName, "stopped")
+        }
         container = null
+        started = false
     }
 
     private fun upstreamImage(): String {
