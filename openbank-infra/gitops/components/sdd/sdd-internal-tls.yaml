@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: Apache-2.0
+# Client certificate for sdd-service's east-west mTLS calls (ADR-0335 D6): account-service's
+# private-CA listener (8443, client auth REQUIRED) for the scoped-initiator ownership check.
+# Same shape as aml-internal-tls.yaml.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: sdd-internal-tls
+  namespace: sdd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  secretName: sdd-internal-tls
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  commonName: sdd-service.sdd.svc
+  issuerRef:
+    name: openbank-ca
+    kind: ClusterIssuer
+    group: cert-manager.io

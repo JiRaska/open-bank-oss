@@ -71,3 +71,12 @@ The outbox write for `DEVICE_ENROLLED` is intentionally a **separate transaction
 - **Fail-closed verifier** — `DeviceAssertionVerifier` implementations must return `false` on any malformed key/signature, never throw through to a success path.
 - **Resilience** — outbox publish is wrapped in MicroProfile Fault Tolerance (bulkhead, circuit breaker, retry, timeout).
 - **Observability** — Micrometer/Prometheus metrics, OpenTelemetry traces (OTLP), structured JSON logs with `traceId`/`spanId`.
+
+## Scoped consumers (ADR-0335 D1)
+
+Every consume resolves a `ConsumerScope` from the principal. `service-account-openbank-pension` is
+`Reserved(PENSION)`: it may spend only an `APPROVAL` challenge whose device-signed
+`approvalRequestId` starts with `pension-`. Every other principal is `General` and may spend
+anything except that namespace. A refused attempt answers 403 before the compare-and-consume, so it
+never burns the challenge. `rules.yaml: scoped_sca_consumers` declares the scope, and
+`ConsumerScopesRulesParityTest` holds the code to it. Flyway V17 widens the approval id column.
