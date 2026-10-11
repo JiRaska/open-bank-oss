@@ -125,6 +125,28 @@ class CatalogScopeAuthorizationTest {
     }
 
     @Test
+    @TestSecurity(
+        user = "human-alias",
+        roles = ["ROLE_PENSION_LEGAL_COUNSEL"],
+        augmentors = [CatalogScopeIdentityAugmentor::class],
+    )
+    @OidcSecurity(
+        claims = [
+            Claim(key = "scope", value = "pension:legal-approve"),
+            Claim(key = "preferred_username", value = "service-account-openbank-other"),
+            Claim(key = "upn", value = "human-alias"),
+        ],
+    )
+    fun machineUsernameCannotBeMaskedByHumanDisplayName() {
+        val base = "/api/v2/offerings/00000000-0000-0000-0000-000000000001" +
+            "/revisions/00000000-0000-0000-0000-000000000002/pension-approvals"
+        given().get(base).then().statusCode(403)
+        given().contentType("application/json").header("If-Match", "\"0\"")
+            .body("""{"reason":"review"}""")
+            .post("$base/LEGAL_COUNSEL").then().statusCode(403)
+    }
+
+    @Test
     @TestSecurity(user = "pension-catalog-reader", augmentors = [CatalogScopeIdentityAugmentor::class])
     @OidcSecurity(claims = [Claim(key = "scope", value = "catalog:read")])
     fun readScopeAllowsV2ReadsButNotAuthoring() {

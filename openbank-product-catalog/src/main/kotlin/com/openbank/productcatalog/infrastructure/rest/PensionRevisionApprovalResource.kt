@@ -107,11 +107,15 @@ class PensionRevisionApprovalResource(
         if (requiredRole !in scopeMapper.roles(token.getClaim<Any?>(scopeClaim), identity.roles)) {
             throw CatalogForbiddenException("approval role and scope are required")
         }
-        val approverName = token.name ?: token.getClaim<String>("preferred_username").orEmpty()
+        val username = token.getClaim<String>("preferred_username").orEmpty()
+        val approverName = token.name ?: username
         if (
             approverName.isBlank() ||
             approverName.startsWith("service-account-") ||
             approverName.startsWith("agent:") ||
+            username.isBlank() ||
+            username.startsWith("service-account-") ||
+            username.startsWith("agent:") ||
             token.subject?.startsWith("agent:") == true
         ) {
             throw CatalogForbiddenException("a human pension approver is required")
