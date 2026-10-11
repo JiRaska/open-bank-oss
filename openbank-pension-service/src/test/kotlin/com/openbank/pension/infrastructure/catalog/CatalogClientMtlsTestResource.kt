@@ -142,6 +142,12 @@ private class CatalogTlsFixture(private val scenario: CatalogTlsScenario) {
                 "quarkus.tls.domestic-payment-authority.key-store.pem.client.key" to clientKey.toString(),
                 "quarkus.tls.domestic-payment-authority.trust-store.pem.certs" to serverTrust.toString(),
                 "quarkus.tls.domestic-payment-authority.protocols" to "TLSv1.3",
+                "quarkus.rest-client.pension-fund-service.url" to "https://localhost:${catalog.httpsPort()}",
+                "quarkus.rest-client.pension-fund-service.tls-configuration-name" to "fund-authority",
+                "quarkus.tls.fund-authority.key-store.pem.client.cert" to clientCertificate.toString(),
+                "quarkus.tls.fund-authority.key-store.pem.client.key" to clientKey.toString(),
+                "quarkus.tls.fund-authority.trust-store.pem.certs" to serverTrust.toString(),
+                "quarkus.tls.fund-authority.protocols" to "TLSv1.3",
             )
         }
 
@@ -200,6 +206,7 @@ private class CatalogTlsFixture(private val scenario: CatalogTlsScenario) {
         catalog.start()
         catalogServerStarted = true
         catalog.stubFor(get(urlEqualTo("/api/v2/offerings")).willReturn(okJson("[]")))
+        catalog.stubFor(get(urlEqualTo("/api/v1/strategies")).willReturn(okJson("[]")))
         catalog.stubFor(
             post(urlEqualTo("/api/v1/accounts/ownership-verifications"))
                 .withRequestBody(

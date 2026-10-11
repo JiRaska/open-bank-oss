@@ -263,3 +263,11 @@ verify both provider listeners and the reviewed pension image before changing ca
 and regenerating ingress policies; existing HTTP edges remain until that reviewed cutover.
 Transport identity does not authorize mandate registration, standing orders or payment creation;
 OIDC, request bindings and each provider's business authorization remain independent controls.
+
+The fund adapter additionally prepares `fund-authority` with explicit private-CA
+trust and pension's client-auth identity from `/mnt/fund-tls`. Its provider already
+declares a TLS 1.3 listener and exact Service DNS certificate SANs, but current
+server configuration does not require client certificates. Client preparation does
+not establish server-side mTLS enforcement. Verify TLS readiness and independent
+OIDC/business authorization before the staged HTTPS URL cutover; require provider
+client authentication only with verified compatibility for its other callers.

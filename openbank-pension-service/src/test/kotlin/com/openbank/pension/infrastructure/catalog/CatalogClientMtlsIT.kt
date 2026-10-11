@@ -9,6 +9,7 @@ import com.github.tomakehurst.wiremock.client.WireMock.getRequestedFor
 import com.github.tomakehurst.wiremock.client.WireMock.moreThanOrExactly
 import com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor
 import com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo
+import com.openbank.pension.infrastructure.fund.PensionFundRestClient
 import com.openbank.pension.infrastructure.identity.AccountRestClient
 import com.openbank.pension.infrastructure.identity.OwnershipVerificationRequestDto
 import com.openbank.pension.infrastructure.identity.PartyRestClient
@@ -74,6 +75,10 @@ class CatalogClientMtlsIT {
     @RestClient
     @Inject
     lateinit var domesticPaymentClient: DomesticPaymentRestClient
+
+    @RestClient
+    @Inject
+    lateinit var fundClient: PensionFundRestClient
 
     @Test
     fun `real clients mint OIDC token and succeed with trusted mTLS peer`(): Unit = runBlocking {
@@ -164,6 +169,8 @@ class CatalogClientMtlsIT {
         assertThat(domesticPayment.id).isEqualTo(UUID.fromString(DOMESTIC_PAYMENT_ID))
         assertThat(domesticPayment.status).isEqualTo("RECEIVED")
 
+        assertThat(fundClient.strategies()).isEmpty()
+
         val servers = checkNotNull(CatalogTlsTestState.servers)
         // Reactive and annotation-based filters have separate token caches; cache count is not the transport contract.
         servers.token.verify(moreThanOrExactly(1), postRequestedFor(urlEqualTo("/token")))
@@ -200,6 +207,11 @@ class CatalogClientMtlsIT {
         servers.catalog.verify(
             1,
             postRequestedFor(urlEqualTo("/api/v1/domestic-payments"))
+                .withHeader("Authorization", equalTo("Bearer test-token")),
+        )
+        servers.catalog.verify(
+            1,
+            getRequestedFor(urlEqualTo("/api/v1/strategies"))
                 .withHeader("Authorization", equalTo("Bearer test-token")),
         )
     }

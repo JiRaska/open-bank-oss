@@ -49,6 +49,7 @@ class CatalogClientProdTlsWiringTest {
         val clients = quarkus()["rest-client"] as Map<*, *>
         val buckets = quarkus()["tls"] as Map<*, *>
         mapOf(
+            "fund" to "pension-fund-service",
             "account" to "account-service",
             "party" to "party-service",
             "sca" to "sca-service",

@@ -225,6 +225,9 @@ spec:
             - name: standing-order-tls
               mountPath: /mnt/standing-order-tls
               readOnly: true
+            - name: fund-tls
+              mountPath: /mnt/fund-tls
+              readOnly: true
             - name: sca-tls
               mountPath: /mnt/sca-tls
               readOnly: true
@@ -336,6 +339,10 @@ spec:
         - name: standing-order-tls
           secret:
             secretName: pension-service-client-tls
+        - name: fund-tls
+          secret:
+            secretName: pension-service-client-tls
+
         - name: sca-tls
           secret:
             secretName: pension-service-client-tls

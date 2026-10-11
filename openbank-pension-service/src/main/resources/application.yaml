@@ -400,6 +400,16 @@ authz:
           pem:
             certs: /mnt/standing-order-tls/ca.crt
         protocols: TLSv1.3
+      fund-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/fund-tls/tls.crt
+              key: /mnt/fund-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/fund-tls/ca.crt
+        protocols: TLSv1.3
     rest-client:
       product-catalog:
         tls-configuration-name: catalog-authority
@@ -415,3 +425,5 @@ authz:
         tls-configuration-name: domestic-payment-authority
       standing-order-service:
         tls-configuration-name: standing-order-authority
+      pension-fund-service:
+        tls-configuration-name: fund-authority
