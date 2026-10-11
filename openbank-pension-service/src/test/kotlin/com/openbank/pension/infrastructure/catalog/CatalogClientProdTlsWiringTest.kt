@@ -44,6 +44,24 @@ class CatalogClientProdTlsWiringTest {
         assertThat(bucket["protocols"]).isEqualTo("TLSv1.3")
     }
 
+    @Test
+    fun `identity clients bind their own authority to the outbound client identity`() {
+        val clients = quarkus()["rest-client"] as Map<*, *>
+        val buckets = quarkus()["tls"] as Map<*, *>
+        listOf("account", "party", "sca").forEach { peer ->
+            val client = clients["$peer-service"] as Map<*, *>
+            val name = "$peer-authority"
+            assertThat(client["tls-configuration-name"]).isEqualTo(name)
+            val bucket = buckets[name] as Map<*, *>
+            val key = ((bucket["key-store"] as Map<*, *>)["pem"] as Map<*, *>)["client"] as Map<*, *>
+            val trust = (bucket["trust-store"] as Map<*, *>)["pem"] as Map<*, *>
+            assertThat(key["cert"]).isEqualTo("/mnt/$peer-tls/tls.crt")
+            assertThat(key["key"]).isEqualTo("/mnt/$peer-tls/tls.key")
+            assertThat(trust["certs"]).isEqualTo("/mnt/$peer-tls/ca.crt")
+            assertThat(bucket["protocols"]).isEqualTo("TLSv1.3")
+        }
+    }
+
     private companion object {
         const val BUCKET = "catalog-authority"
     }

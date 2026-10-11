@@ -210,6 +210,15 @@ spec:
               drop:
                 - ALL
           volumeMounts:
+            - name: account-tls
+              mountPath: /mnt/account-tls
+              readOnly: true
+            - name: party-tls
+              mountPath: /mnt/party-tls
+              readOnly: true
+            - name: sca-tls
+              mountPath: /mnt/sca-tls
+              readOnly: true
             - name: catalog-tls
               mountPath: /mnt/catalog-tls
               readOnly: true
@@ -303,6 +312,15 @@ spec:
             - name: opa-tmp
               mountPath: /tmp
       volumes:
+        - name: account-tls
+          secret:
+            secretName: pension-service-client-tls
+        - name: party-tls
+          secret:
+            secretName: pension-service-client-tls
+        - name: sca-tls
+          secret:
+            secretName: pension-service-client-tls
         - name: catalog-tls
           secret:
             secretName: pension-service-client-tls
