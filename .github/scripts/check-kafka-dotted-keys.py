@@ -70,7 +70,16 @@ except ImportError:  # pragma: no cover - reported as exit 2 by main()
 # even when the key does not resolve, so it is not reported.
 CONNECTOR_DEFAULT_OFFSET_RESET = "latest"
 
-WATCHED_KEYS = ("group.id", "auto.offset.reset")
+WATCHED_KEYS = ("group.id", "auto.offset.reset", "client.id")
+
+# `client.id` is watched on BOTH directions (#12350 follow-up): producers carry it as often as
+# consumers, and the dotted leaf is inert the same way. Its fallback is the connector-generated id
+# (`kafka-consumer-<channel>` / `kafka-producer-<channel>`), so a declared per-pod `${quarkus.uuid}`
+# suffix silently never applies. The nested form resolves:
+#     client:
+#       id: <service>-<channel>-${quarkus.uuid}
+# group.id / auto.offset.reset stay incoming-only — they mean nothing on a producer.
+BOTH_DIRECTION_KEYS = ("client.id",)
 
 # Occurrences that exist today. Each entry is (service, CHANNEL, key) -> why it is tolerated.
 # Adding to this list is a deliberate act that needs a reason; see the ratchet note above.
@@ -93,6 +102,64 @@ BASELINE = {
     # Flipping any channel to a real `earliest` remains an owner decision with a replay window,
     # done through a msg-override ConfigMap (config_ordinal=500), never through the YAML key.
     # The historical per-entry notes lived at #2945/#3928 and in git history before this edit.
+    #
+    # client.id (added with the #12350 follow-up): every dotted `client.id` on the tree when the
+    # key became watched. Harmless in effect — the connector-generated id is used instead, which
+    # only loses the per-pod suffix — so it is baselined, one CHANNEL per entry, rather than swept
+    # under a hidden commit type across ~40 services. A sweep converts each to the nested form and
+    # deletes the entry; a NEW dotted client.id fails.
+    ("openbank-account-service", "account-events-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-account-service", "account-outbox-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-account-service", "notification-requests-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-aml-service", "aml-events-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-anacredit-service", "lending-events-in", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-analytics-sink", "analytics-events-in", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-audit-service", "agent-audit-events-in", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-audit-service", "audit-events-in", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-balance-service", "balance-outbox-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-billing-service", "billing-events-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-card-issuance-service", "card-events-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-card-processing-service", "card-processing-events-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-clearing-service", "clearing-events-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-consent-service", "consent-events-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-delegation-service", "delegation-events-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-delegation-service", "spend-reservation-state-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-delegation-service", "approval-events-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-delegation-service", "approval-group-revisions-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-dispute-service", "dispute-outbox-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-document-service", "document-events-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-domestic-payment", "events-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-domestic-payment", "notification-requests-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-engagement-service", "engagement-outbox-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-fraud-service", "fraud-outbox-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-fx-service", "fx-events-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-fx-service", "fx-fixing-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-fx-service", "fx-policy-rate-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-interest-service", "interest-events-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-kyb-service", "kyb-events-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-kyc-service", "kyc-outbox-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-ledger-service", "ledger-events-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-lending-service", "lending-events-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-party-service", "party-outbox-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-pid-service", "party-events-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-pid-service", "pid-events-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-referral-service", "referral-qualified-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-referral-service", "referral-reward-requested-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-referral-service", "referral-reward-outcome-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-sanctions-service", "sanctions-events-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-sca-service", "sca-events-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-sca-service", "notification-requests-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-sdd-service", "sdd-events-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-security-scanner", "ict-incident-outbox-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-sepa-instant", "sct-inst-events-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-sepa-payment", "events-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-standing-order-service", "standing-order-events-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-statement-service", "statement-events-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-swift-service", "swift-events-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-tpp-registry-service", "tpp-events-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-transaction-service", "transaction-events-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-treasury-service", "treasury-events-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
+    ("openbank-wealth-service", "wealth-events-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
 }
 
 
@@ -103,17 +170,31 @@ def app_name(doc):
         return None
 
 
-def incoming_channels(doc):
-    """Yield (channel, config-map) for every mp.messaging.incoming.<channel>."""
+def channels(doc, direction="incoming"):
+    """Yield (channel, config-map) for every mp.messaging.<direction>.<channel>."""
     try:
-        incoming = doc["mp"]["messaging"]["incoming"]
+        section = doc["mp"]["messaging"][direction]
     except (KeyError, TypeError):
         return
-    if not isinstance(incoming, dict):
+    if not isinstance(section, dict):
         return
-    for channel, cfg in incoming.items():
+    for channel, cfg in section.items():
         if isinstance(cfg, dict):
             yield channel, cfg
+
+
+def incoming_channels(doc):
+    """Yield (channel, config-map) for every mp.messaging.incoming.<channel>."""
+    yield from channels(doc, "incoming")
+
+
+def watched_channels(doc):
+    """Yield (direction, channel, cfg, keys): incoming watches every key, outgoing only the
+    BOTH_DIRECTION_KEYS."""
+    for channel, cfg in channels(doc, "incoming"):
+        yield "incoming", channel, cfg, WATCHED_KEYS
+    for channel, cfg in channels(doc, "outgoing"):
+        yield "outgoing", channel, cfg, BOTH_DIRECTION_KEYS
 
 
 def load_overrides(root):
@@ -142,7 +223,7 @@ def load_overrides(root):
         if not name:
             continue
         service = f"openbank-{name.group(1)}"
-        for m in re.finditer(r"mp\.messaging\.incoming\.([\w.-]+?)\.(group\.id|auto\.offset\.reset)\s*=", body):
+        for m in re.finditer(r"mp\.messaging\.(?:incoming|outgoing)\.([\w.-]+?)\.(group\.id|auto\.offset\.reset|client\.id)\s*=", body):
             covered.add((service, m.group(1), m.group(2)))
     return covered
 
@@ -192,8 +273,8 @@ def scan(root):
         doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         name = app_name(doc)
 
-        for channel, cfg in incoming_channels(doc):
-            for key in WATCHED_KEYS:
+        for direction, channel, cfg, keys in watched_channels(doc):
+            for key in keys:
                 if key not in cfg:
                     continue
                 value = str(cfg[key])
@@ -215,7 +296,11 @@ def scan(root):
                     matched.add(bk)
                     continue
 
-                fallback = name if key == "group.id" else CONNECTOR_DEFAULT_OFFSET_RESET
+                fallback = {
+                    "group.id": name,
+                    "auto.offset.reset": CONNECTOR_DEFAULT_OFFSET_RESET,
+                    "client.id": f"kafka-{'consumer' if direction == 'incoming' else 'producer'}-{channel}",
+                }[key]
                 effect = (
                     f"the effective value is the fallback ({fallback!r}) — which happens to equal "
                     f"the declared one, so nothing is broken TODAY and everything breaks on the "
@@ -227,8 +312,12 @@ def scan(root):
                     f"{path}: channel '{channel}' sets `{key}: {value}` as a dotted YAML key with no "
                     f"*-msg-override ConfigMap.\n"
                     f"       That key does not reach the connector (#686), so {effect}.\n"
-                    f"       Fix: add `mp.messaging.incoming.{channel}.{key}={value}` to a "
-                    f"`*-msg-override.yaml` ConfigMap (config_ordinal=500), as transaction-service does.",
+                    + (
+                        f"       Fix: write it NESTED (`client:` / `  id: {value}`) — that form resolves."
+                        if key == "client.id"
+                        else f"       Fix: add `mp.messaging.incoming.{channel}.{key}={value}` to a "
+                        f"`*-msg-override.yaml` ConfigMap (config_ordinal=500), as transaction-service does."
+                    ),
                 )
     return findings, matched
 
@@ -277,6 +366,19 @@ mp:
         auto.offset.reset: latest
       asks-for-non-default-in:
         auto.offset.reset: earliest
+      dotted-client-in:
+        client.id: demo-${quarkus.uuid}
+      nested-client-in:
+        client:
+          id: demo-${quarkus.uuid}
+    outgoing:
+      dotted-client-out:
+        client.id: demo-out-${quarkus.uuid}
+      nested-client-out:
+        client:
+          id: demo-out-${quarkus.uuid}
+      group-on-producer-out:
+        group.id: not-a-producer-key
 """,
         None,
     ),
@@ -289,6 +391,11 @@ SELF_TEST_EXPECT = {
     "differs-in": True,            # differs from the fallback — the loud case
     "asks-for-default-in": False,  # asks for the connector default anyway, so a no-op
     "asks-for-non-default-in": True,
+    "dotted-client-in": True,      # client.id dotted on a consumer — inert
+    "nested-client-in": False,     # nested form resolves
+    "dotted-client-out": True,     # client.id is watched on producers too
+    "nested-client-out": False,
+    "group-on-producer-out": False,  # group.id is only watched on incoming channels
 }
 
 
