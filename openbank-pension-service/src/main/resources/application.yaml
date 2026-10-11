@@ -222,13 +222,21 @@ mp:
         ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
     incoming:
       # #12378: domestic-payment status changes -> payout instruction SETTLED / REJECTED.
-      # group.id / auto.offset.reset are NOT YAML keys here: SmallRye's YAML source quotes a dotted
-      # leaf key and the connector never reads it (#686). They come from the
-      # pension-service-msg-override ConfigMap (override.properties, config_ordinal=500).
       domestic-payment-events-in:
         connector: smallrye-kafka
         topic: openbank.domestic.payment.events
         client.id: pension-service-domestic-payment-${quarkus.uuid}
+        # group.id / auto.offset.reset ship WITH the consumer in this image, NESTED (the dotted
+        # one-liner is quoted by the YAML source and never reaches the connector, #686/#2945). A
+        # GitOps msg-override would declare the channel for whatever image is pinned, and an image
+        # without this connector refuses to boot (SRMSG00071). The group matches the Read ACL in
+        # kafka-pension-mtls.yaml. `latest`: a NEW group starts at the head; the topic only carries
+        # outcomes for payments pension-service itself initiated, all of which post-date it.
+        group:
+          id: pension-service-domestic-payment
+        auto:
+          offset:
+            reset: latest
         value:
           deserializer: org.apache.kafka.common.serialization.StringDeserializer
         # A rethrow parks the record instead of stopping the channel (SmallRye's default `fail`).

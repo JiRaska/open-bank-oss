@@ -131,17 +131,19 @@ spec:
                   optional: false
             - name: PENSION_FUND_SERVICE_URL
               value: http://pension-fund-service.pension-fund.svc:8162
+            # Internal-TLS listeners (8443, client certificate required). Each client presents its
+            # own identity and trusts only its issuer via the per-upstream *-authority TLS bucket
+            # in application.yaml (%prod), hostname verification on. product-catalog keeps
+            # min: 1 replica, so the direct call never meets a scaled-to-zero target.
             - name: PRODUCT_CATALOG_SERVICE_URL
-              value: http://keda-add-ons-http-interceptor-proxy.keda:8080
-            - name: PRODUCT_CATALOG_HOST_OVERRIDE
-              value: product-catalog.accounts.svc
+              value: https://product-catalog.accounts.svc:8443
             # #12378 payment adapters (pension-service's own OIDC client).
             - name: STANDING_ORDER_SERVICE_URL
-              value: http://standing-order-service.payments.svc:8121
+              value: https://standing-order-service.payments.svc:8443
             - name: SDD_SERVICE_URL
-              value: http://sdd-service.sdd.svc:8129
+              value: https://sdd-service.sdd.svc:8443
             - name: DOMESTIC_PAYMENT_URL
-              value: http://domestic-payment.payments.svc:8116
+              value: https://domestic-payment.payments.svc:8443
             # Kafka mTLS (ADR-0137, kafka-pension-mtls.yaml) — consumes domestic-payment status,
             # publishes participant notices, and writes its own dead-letter topic.
             - name: KAFKA_BOOTSTRAP_SERVERS
@@ -168,17 +170,13 @@ spec:
                 secretKeyRef:
                   name: kafka-cluster-ca-truststore
                   key: ca.password
-            # issue #686: group.id / auto.offset.reset come from the pension-service-msg-override
-            # ConfigMap (a properties file), never dotted YAML keys or env vars.
-            - name: QUARKUS_CONFIG_LOCATIONS
-              value: /mnt/msg-config/override.properties
             # Identity and SCA checks (#12377), authenticated as openbank-pension.
             - name: SCA_SERVICE_URL
-              value: http://sca-service.sca.svc:8110
+              value: https://sca-service.sca.svc:8443
             - name: PARTY_SERVICE_URL
-              value: http://party-service.party.svc:8111
+              value: https://party-service.party.svc:8443
             - name: ACCOUNT_SERVICE_URL
-              value: http://account-service.accounts.svc:8100
+              value: https://account-service.accounts.svc:8443
             # OPA sidecar enforced from the first rollout: pension_rest_ext.rego grants the
             # participant actions to the edge principal only, and no service-account reaches a
             # write by any rule.
@@ -244,9 +242,6 @@ spec:
               readOnly: true
             - name: kafka-truststore
               mountPath: /mnt/kafka-truststore
-              readOnly: true
-            - name: msg-override
-              mountPath: /mnt/msg-config
               readOnly: true
         # OPA policy decision point (ADR-0034). Co-located sidecar the app reaches on
         # localhost:8181 (AuthorizeInterceptor default). Bundle mounted read-only from the
@@ -365,9 +360,6 @@ spec:
         - name: kafka-truststore
           secret:
             secretName: kafka-cluster-ca-truststore
-        - name: msg-override
-          configMap:
-            name: pension-service-msg-override
 ---
 apiVersion: v1
 kind: Service
