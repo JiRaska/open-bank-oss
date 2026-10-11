@@ -7,10 +7,13 @@
 # window, because each one makes every open PR `behind` under the strict up-to-date rule and
 # restarts its required checks. A deploy they DEFER stays open and unarmed — this workflow is
 # what lands it. A workflow_run trigger handles new PRs and the schedule recovers missed runs.
-# Each run picks the OLDEST deferred deploy PR once the window has elapsed
-# and nothing else is armed, re-runs supersede-deploy-prs.sh on it (ancestry + coverage — a
-# rollback PR is refused, never armed), and arms auto-merge with the same App token the deploy
-# workflows use. A successful manual dispatch of either producer expedites only its matching PR.
+# Each run holds Admin UI deploy PRs until #12211 proves image provenance, and selects the
+# newest eligible service PR after the window while nothing else is armed. It retires fully
+# main-covered deferred service PRs with the App token after a second live proof, then re-runs
+# supersede-deploy-prs.sh (ancestry + coverage — a rollback PR is refused) and verifies
+# current policy, checks, signatures and exact SHAs.
+# A CLEAN PR merges normally; pending checks or reviews arm auto-merge with the GitOps App token.
+# A successful manual dispatch of either producer expedites only its matching PR.
 
 name: Deploy window flush
 
@@ -31,7 +34,7 @@ concurrency:
 
 jobs:
   flush:
-    name: Arm the oldest deferred deploy PR
+    name: Flush an eligible deferred deploy PR
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # Read-only GITHUB_TOKEN: every write (arming auto-merge, closing a superseded PR) goes through
@@ -62,17 +65,43 @@ jobs:
           echo "::error::GITOPS_APP_ID/GITOPS_APP_PRIVATE_KEY unavailable - refusing to arm deploy PRs with GITHUB_TOKEN (its merge would trigger no workflows)."
           exit 1
 
-      - name: Pick the deferred deploy PR to arm
+      - name: Pick an eligible deferred deploy PR
         id: pick
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
         run: |
           set -euo pipefail
+          # Capture main before the decision reads commit history. A later main update
+          # invalidates this selection even if the selected PR itself did not move.
+          selected_main="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq .object.sha)"
+          echo "selected_main=$selected_main" >> "$GITHUB_OUTPUT"
+          git fetch --depth=100 origin main
+          if [ "$(git rev-parse origin/main)" != "$selected_main" ]; then
+            echo "::error::main moved during deploy selection; retry on the next tick"
+            exit 1
+          fi
+          git reset --hard origin/main
           d="$RUNNER_TEMP/deploy-window"
           bash .github/scripts/deploy-window-inputs.sh "$d"
-          python3 .github/scripts/deploy-window.py flush --prs-json "$d/prs.json" \
+          python3 .github/scripts/deploy-window.py flush-reviewed --prs-json "$d/prs.json" \
             --commits-json "$d/commits.json" --event-json "$GITHUB_EVENT_PATH" \
+            --root . --repo "$GITHUB_REPOSITORY" --selected-main "$selected_main" \
             --now "$(date -u +%s)" | tee -a "$GITHUB_OUTPUT"
+          arm="$(sed -n 's/^arm=//p' "$GITHUB_OUTPUT" | tail -1)"
+          if [ -n "$arm" ]; then
+            echo "selected_head=$(gh pr view "$arm" --repo "$GITHUB_REPOSITORY" --json headRefOid --jq .headRefOid)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Retire deferred service PRs fully covered by main
+        if: steps.pick.outputs.retire != ''
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          RETIRE: ${{ steps.pick.outputs.retire }}
+          SELECTED_MAIN: ${{ steps.pick.outputs.selected_main }}
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/deploy-window.py retire-covered --numbers "$RETIRE" \
+            --selected-main "$SELECTED_MAIN" --root . --repo "$GITHUB_REPOSITORY"
 
       - name: Verify deferred GitOps image source freshness
         if: steps.pick.outputs.arm != '' && startsWith(steps.pick.outputs.arm_head, 'chore/gitops-auto-deploy-')
@@ -101,27 +130,14 @@ jobs:
           esac
           bash .github/scripts/supersede-deploy-prs.sh "$prefix" "$ARM"
 
-      - name: Enable auto-merge
+      - name: Arm or merge the verified deploy PR
         if: steps.pick.outputs.arm != ''
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           ARM: ${{ steps.pick.outputs.arm }}
+          SELECTED_MAIN: ${{ steps.pick.outputs.selected_main }}
+          SELECTED_HEAD: ${{ steps.pick.outputs.selected_head }}
         run: |
           set -euo pipefail
-          # Re-read the hold state AT arm time (issue #11503): the pick and the supersede step
-          # above run minutes earlier, and an owner draft or `blocked` label applied since then —
-          # or a hold the supersede step just transferred onto this PR — must still win.
-          state="$(gh pr view "$ARM" --repo "$GITHUB_REPOSITORY" --json isDraft,labels \
-            --jq 'if .isDraft or ([.labels[].name] | index("blocked")) then "held" else "free" end')"
-          if [ "$state" != "free" ]; then
-            echo "::error::deploy PR #${ARM} is draft or labelled blocked (deployment hold) - refusing to arm auto-merge."
-            exit 1
-          fi
-          id="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${ARM}" --jq .node_id)"
-          # shellcheck disable=SC2016  # $id is a GraphQL variable, not a shell one
-          gh api graphql -f query='mutation($id: ID!) {
-            enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: SQUASH }) {
-              pullRequest { number }
-            }
-          }' -f id="$id" >/dev/null
-          echo "auto-merge armed on deferred deploy PR #${ARM}"
+          python3 .github/scripts/deploy-window-mutate.py --number "$ARM" \
+            --selected-main "$SELECTED_MAIN" --selected-head "$SELECTED_HEAD"

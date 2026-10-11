@@ -29,6 +29,38 @@ concurrency:
   cancel-in-progress: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
 
 jobs:
+  # Refuse a newly opened over-cap autonomous PR before allocating scanners.
+  # Policy comes from current main, not the PR's possibly stale or untrusted base.
+  agent-admission:
+    name: Security agent PR admission
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      proceed: ${{ steps.admit.outputs.proceed }}
+    steps:
+      - if: github.event_name == 'pull_request'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - id: admit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" != 'pull_request' ]; then
+            echo 'proceed=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          python3 -m venv "$RUNNER_TEMP/agent-admission-venv"
+          "$RUNNER_TEMP/agent-admission-venv/bin/python" -m pip install --quiet --require-hashes -r .github/workflows/requirements/public-readiness.txt
+          gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/pulls?state=open&per_page=100" > "$RUNNER_TEMP/agent-prs.json"
+          "$RUNNER_TEMP/agent-admission-venv/bin/python" .github/scripts/agent-admission.py "$RUNNER_TEMP/agent-prs.json" --current-pr "$PR_NUMBER" >> "$GITHUB_OUTPUT"
+
   # ---------------------------------------------------------------------------
   # Decide whether the (heavy) SBOM jobs need to run this push.
   # ---------------------------------------------------------------------------
@@ -39,6 +71,8 @@ jobs:
   # dependency-affecting file changed; schedule/manual always run (audit posture).
   detect-deps:
     name: Detect dependency changes
+    needs: agent-admission
+    if: needs.agent-admission.outputs.proceed == 'true'
     # Pure checkout + git diff, no self-hosted-specific tooling. The repo is public, so
     # GitHub-hosted minutes are free/unlimited — offload this off the Hetzner/ARC pool.
     runs-on: ubuntu-latest
@@ -256,6 +290,8 @@ jobs:
   # ---------------------------------------------------------------------------
   trivy:
     name: Trivy
+    needs: agent-admission
+    if: needs.agent-admission.outputs.proceed == 'true'
     runs-on: ubuntu-latest  # public repo => hosted runners free+unlimited (FinOps: hosted-first)
     permissions:
       contents: read

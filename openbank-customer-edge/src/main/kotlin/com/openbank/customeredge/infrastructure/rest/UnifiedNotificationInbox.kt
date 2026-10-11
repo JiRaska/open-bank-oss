@@ -27,6 +27,7 @@ internal class UnifiedNotificationInbox(
     private val mapper: ObjectMapper,
     private val serviceUrl: String,
     private val aggregateTimeoutNanos: Long = TimeUnit.SECONDS.toNanos(UNIFIED_NOTIFICATION_TIMEOUT_SECONDS),
+    private val nanoTime: () -> Long = System::nanoTime,
 ) {
     private data class Item(val node: ObjectNode, val createdAt: Instant)
     private data class PartyPage(val items: List<Item>, val total: Long, val unread: Long)
@@ -35,7 +36,7 @@ internal class UnifiedNotificationInbox(
         // Synthetic taint lives in request-thread MDC/baggage. Keep those reads on the caller
         // thread so the existing UpstreamClient propagates the trusted taint to every service.
         val synthetic = currentRequestIsSynthetic()
-        val deadline = System.nanoTime() + aggregateTimeoutNanos
+        val deadline = nanoTime() + aggregateTimeoutNanos
         val futures = mutableListOf<Future<PartyPage>>()
         return try {
             val pages = if (synthetic) {
@@ -156,12 +157,12 @@ internal class UnifiedNotificationInbox(
         return PartyPage(items, page.path("total").asLong(), page.path("unreadCount").asLong())
     }
 
+    private fun remaining(deadline: Long): Long = (deadline - nanoTime()).coerceAtLeast(0)
+
     private companion object {
         const val MAX_CONCURRENT_FEEDS = 16
         const val MAX_QUEUED_FEEDS = 128
         const val HTTP_OK = 200
-
-        fun remaining(deadline: Long): Long = (deadline - System.nanoTime()).coerceAtLeast(0)
 
         // Each request submits at most 16 tasks. A full queue waits within the aggregate
         // deadline rather than running an upstream read on the HTTP request thread.

@@ -32,6 +32,7 @@ import java.util.UUID
 @QuarkusTestResource(
     value = PostgresTestResource::class,
     initArgs = [ResourceArg(name = "db", value = "openbank_context_audit_relay_it")],
+    restrictToAnnotatedClass = true,
 )
 @QuarkusTestResource(ContextMessagingTestResource::class)
 class ContextAuditCommitmentRelayIT {

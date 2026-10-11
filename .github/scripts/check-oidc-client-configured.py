@@ -101,7 +101,7 @@ def workload_env(root: pathlib.Path):
     index = {}
     for p in sorted((root / "openbank-infra/gitops").rglob("*.yaml")):
         try:
-            docs = list(yaml.safe_load_all(p.read_text()))
+            docs = gatelib.load_yaml_all(p)
         except yaml.YAMLError:
             continue
         for d in docs:

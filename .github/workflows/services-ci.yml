@@ -2,8 +2,9 @@
 #
 #  changes  -> works out which Gradle modules a push/PR actually touched and emits
 #              a JSON matrix. Shared changes (openbank-libs, version catalog, root
-#              build, the reusable workflow itself) fan out to EVERY module because
-#              everything depends on them. Pushes to main always build everything.
+#              build) fan out to EVERY module because everything depends on them.
+#              Main pushes are also path-scoped; unattributable changes fall back
+#              to the full fleet. A CI recipe change uses one canary module.
 #  build    -> calls the reusable _service-ci.yml once per changed module (matrix),
 #              so each service reports its own green/red status check.
 #
@@ -127,6 +128,10 @@ jobs:
           # shellcheck source=.github/scripts/service-ci-pact-modules.sh
           source .github/scripts/service-ci-pact-modules.sh
           pact_build_modules_self_test
+          python3 .github/scripts/test-service-ci-job-roster.py
+          python3 .github/scripts/test-service-ci-path-selection.py
+          # Validate the shared image-preparation logic once before matrix fan-out.
+          python3 .github/scripts/tests/test_prewarm_ci_postgres.py
           python3 .github/scripts/coverage-floor-only-diff.py --self-test
 
           if [ "${{ github.event_name }}" = "schedule" ] \
@@ -179,7 +184,7 @@ jobs:
                 echo "Decision: shared domain build script changes only its raised coverage floor."
                 FILES_GLOBAL=$(grep -vFx 'openbank-libs-domain/build.gradle.kts' <<< "$FILES_GLOBAL" || true)
               fi
-              if grep -qE '^(openbank-libs/|openbank-libs-domain/|openbank-libs-runtime/|openbank-libs-testing/|gradle/|settings\.gradle\.kts|build\.gradle\.kts|gradle\.properties|build-logic/)' <<< "$FILES_GLOBAL"; then
+              if grep -qE '^(openbank-libs[^/]*/|gradle/|settings\.gradle\.kts|build\.gradle\.kts|gradle\.properties|build-logic/)' <<< "$FILES_GLOBAL"; then
                 echo "Decision: code-global change -> full-fleet."
                 CHANGED="$ALL"
               else
@@ -221,6 +226,8 @@ jobs:
                      && ! grep -qE '(^| )openbank-client-product-catalog( |$)' <<< " $CHANGED "; then
                     CHANGED="$CHANGED openbank-client-product-catalog"
                   fi
+                  CHANGED="$CHANGED $(python3 .github/scripts/derive-fleet-scanning-test-modules.py \
+                    --expand "$CHANGED" --input-paths-stdin <<< "$FILES_GLOBAL")"
                   # Recipe-only change -> one canary (same as the PR path).
                   if [ -z "${CHANGED// /}" ] \
                      && grep -qE '^(\.github/workflows/(services-ci|_service-ci)\.yml|\.github/scripts/(service-ci-pact-modules\.sh|service-ci-library-dependents\.py|(test-)?await-admin-ui-pact-publication\.py))$' <<< "$FILES"; then
@@ -299,7 +306,7 @@ jobs:
               echo "Decision: shared domain build script changes only its raised coverage floor."
               FILES_GLOBAL=$(grep -vFx 'openbank-libs-domain/build.gradle.kts' <<< "$FILES_GLOBAL" || true)
             fi
-            if grep -qE '^(openbank-libs/|openbank-libs-domain/|openbank-libs-runtime/|openbank-libs-testing/|gradle/|settings\.gradle\.kts|build\.gradle\.kts|gradle\.properties|build-logic/)' <<< "$FILES_GLOBAL"; then
+            if grep -qE '^(openbank-libs[^/]*/|gradle/|settings\.gradle\.kts|build\.gradle\.kts|gradle\.properties|build-logic/)' <<< "$FILES_GLOBAL"; then
               echo "Decision: code-global change -> build all modules."
               CHANGED="$ALL"
             else
@@ -364,11 +371,9 @@ jobs:
                  && ! grep -qE '(^| )openbank-client-product-catalog( |$)' <<< " $CHANGED "; then
                 CHANGED="$CHANGED openbank-client-product-catalog"
               fi
-              # Tests reading OTHER modules' trees escape the fan-out above (#10010 -> #11513).
-              # Derived from test sources; rationale in the script header.
-              if [ -n "${CHANGED// /}" ]; then
-                CHANGED="$CHANGED $(python3 .github/scripts/derive-fleet-scanning-test-modules.py --expand "$CHANGED")"
-              fi
+              # Derive cross-module test readers from filtered inputs (#11513, #11560).
+              CHANGED="$CHANGED $(python3 .github/scripts/derive-fleet-scanning-test-modules.py \
+                --expand "$CHANGED" --input-paths-stdin <<< "$FILES_GLOBAL")"
               # A change to the CI recipe itself (services-ci / _service-ci) can NOT
               # alter any service's compile/test inputs, so it does NOT warrant a
               # 28-module fan-out -- that is what turned the trivial #547 cache-flag
@@ -387,8 +392,13 @@ jobs:
             fi
           fi
 
-          # grep -v exits 1 when CHANGED is empty (PR touched no service module);
-          # `|| true` stops `set -e` from aborting — empty is valid (build nothing).
+          if [ "${{ github.event_name }}" = "pull_request" ] \
+             && service_ci_has_unowned_input "$ALL" <<< "$FILES"; then
+            CHANGED="$ALL"
+            echo "Decision: unowned PR input -> full-fleet."
+          fi
+
+          # Empty selection is valid; tolerate grep exit 1.
           CHANGED=$(echo "$CHANGED" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ' || true)
           # Emit both module-plan formats from the same validated changed-file set.
           printf '%s\n' "${FILES:-}" | python3 .github/scripts/derive-verification-modules.py >> "$GITHUB_OUTPUT"
@@ -591,9 +601,23 @@ jobs:
           JOB_FILE: ${{ runner.temp }}/service-ci-jobs.ndjson
         run: |
           set -euo pipefail
-          gh api --paginate \
-            "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}/jobs?per_page=100" \
-            --jq '.jobs[] | {name,conclusion}' > "$JOB_FILE"
+          # A transient Jobs API 502 made run 37789735793 red after all 79 builds
+          # passed. Fetch into a temporary file on EACH attempt: pagination may have
+          # emitted partial output before failing, and a retry must never duplicate it.
+          for attempt in 1 2 3; do
+            if gh api --paginate \
+              "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}/jobs?per_page=100" \
+              --jq '.jobs[] | {name,conclusion}' > "${JOB_FILE}.pending" 2> "${JOB_FILE}.error"; then
+              mv "${JOB_FILE}.pending" "$JOB_FILE"
+              rm -f "${JOB_FILE}.error"
+              break
+            fi
+            if [ "$attempt" -eq 3 ] || ! grep -qiE 'HTTP 5[0-9][0-9]' "${JOB_FILE}.error"; then
+              cat "${JOB_FILE}.error" >&2
+              exit 1
+            fi
+            sleep $(( attempt * 5 ))
+          done
           python3 - <<'PY'
           import json
           import os

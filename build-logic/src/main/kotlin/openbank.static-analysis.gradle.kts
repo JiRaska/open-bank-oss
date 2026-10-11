@@ -153,6 +153,13 @@ configurations.named("ktlint") {
     resolutionStrategy.force("ch.qos.logback:logback-core:1.5.38")
 }
 
+// Cached worker errors contain absolute source paths. After a cache restore in another
+// checkout, an incremental edit otherwise retains old paths and bypasses the matching baseline.
+// Keep worker caches reusable at the same location without weakening the baseline ratchet.
+tasks.withType<org.jlleitschuh.gradle.ktlint.tasks.BaseKtLintCheckTask>().configureEach {
+    inputs.property("openbankLintCheckout", layout.projectDirectory.asFile.absolutePath)
+}
+
 ktlint {
     // The baseline freezes pre-existing violations per module; regenerate with
     // ./gradlew ktlintGenerateBaseline.

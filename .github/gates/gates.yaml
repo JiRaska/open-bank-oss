@@ -1121,6 +1121,8 @@ gates:
       - "openbank-infra/gitops/apps/loki.yaml"
       - ".github/scripts/check-loki-rules.py"
     run: |
+      # Offline image recovery regressions are cheap and run even when rule loading is scoped out.
+      python3 .github/scripts/tests/test_loki_image_selection.py
       # $BASE_REF is exported by the shard in ci.yml. A ${{ }} expression cannot appear in
       # this file: nothing expands it outside the workflow, so bash sees the literal text
       # and dies with "bad substitution" (run-gates.py now refuses to load one at all).

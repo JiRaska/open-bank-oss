@@ -43,14 +43,24 @@ def authored_docs_at_head(repo: Path, head: str) -> set[str]:
     return docs
 
 
-def missing_updates(repo: Path, paths: dict[str, str], head_files: set[str]) -> list[str]:
+def runnable_modules_at_head(repo: Path, head: str) -> list[str]:
+    paths = subprocess.check_output(
+        ["git", "ls-tree", "-r", "--name-only", "-z", head, "--"], cwd=repo, text=True,
+    ).split("\0")
+    modules = []
+    for path in paths:
+        if not re.fullmatch(r"openbank-[^/]+/build\.gradle\.kts", path):
+            continue
+        build = subprocess.check_output(["git", "show", f"{head}:{path}"], cwd=repo, text=True)
+        if re.search(r'^\s*(?:plugins\s*\{\s*)?id\(["\']openbank\.quarkus-service["\']\)', build, re.MULTILINE) and (
+            'project(":openbank-libs-runtime")' in build or 'project(":openbank-libs")' in build
+        ):
+            modules.append(path.split("/")[0])
+    return sorted(modules)
+
+
+def missing_updates(paths: dict[str, str], head_files: set[str], modules: list[str]) -> list[str]:
     failures = []
-    modules = sorted(
-        path.parent.name
-        for path in repo.glob("openbank-*/build.gradle.kts")
-        if re.search(r'^\s*(?:plugins\s*\{\s*)?id\(["\']openbank\.quarkus-service["\']\)', path.read_text(), re.MULTILINE)
-        and ("project(\":openbank-libs-runtime\")" in path.read_text() or "project(\":openbank-libs\")" in path.read_text())
-    )
     for module in modules:
         prefix = f"{module}/"
         code_changed = any(
@@ -89,7 +99,7 @@ def main() -> int:
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[2]
     try:
-        failures = missing_updates(repo, changed_paths(repo, args.base, args.head), authored_docs_at_head(repo, args.head))
+        failures = missing_updates(changed_paths(repo, args.base, args.head), authored_docs_at_head(repo, args.head), runnable_modules_at_head(repo, args.head))
     except subprocess.CalledProcessError as exc:
         print(f"Cannot compare service documentation with {args.base}: {exc}", file=sys.stderr)
         return 2

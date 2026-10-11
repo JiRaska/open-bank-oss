@@ -56,12 +56,12 @@
 # makes reconcile, the only mechanism for re-driving a service that missed its push deploy, unable
 # to deploy anything, exactly when it is most needed.
 #
-# So before reporting `no` on a non-push event, ask a narrower question: is the commit that DOES
-# have a published version byte-identical to this one in everything this service is built from? If
-# pact-version-tree-equivalent.sh proves it from git — same tree objects, and an ancestor — then the
-# published verdict is not about a different commit in any sense that can reach the artifact, and
-# the caller may ask the broker about that version by number. If it cannot prove it, the answer
-# stays `no` and #3318's refusal stands untouched.
+# So before reporting `no` on a non-push event, ask whether the published version has identical
+# Pact inputs. pact-version-tree-equivalent.sh proves this from git tree objects and ancestry;
+# its contract mode excludes only release-please version.txt and CHANGELOG.md. Those change the
+# image version but not the Pact artefacts (the same boundary used by
+# resolve-record-deployment-version.sh). Image-source freshness remains a separate strict gate.
+# If the proof fails, the answer stays `no` and #3318's refusal stands untouched.
 #
 # EVERY failure here degrades to `no`: an unreachable broker, a non-2xx, an answer that is not a
 # 40-hex sha, a missing script, a non-zero exit. A reconcile that cannot VERIFY must not deploy.
@@ -116,12 +116,12 @@ STUB
     && git add -A && git commit -qm change ) >/dev/null 2>&1
   head_sha="$(git -C "$repo" rev-parse HEAD)"
   fails=0
-  probe_selftest_case() { # <label> <expected> <STUB_MODE> [STUB_SHA]
-    local label="$1" want="$2" mode="$3" sha="${4:-}" got
+  probe_selftest_case() { # <label> <expected> <STUB_MODE> [STUB_SHA] [TARGET_SHA]
+    local label="$1" want="$2" mode="$3" sha="${4:-}" target="${5:-$head_sha}" got
     got="$(cd "$repo" && PATH="$self_tmp:$PATH" STUB_MODE="$mode" STUB_SHA="$sha" \
       EVENT_NAME=workflow_dispatch \
       PACT_BROKER_URL=http://stub PACT_BROKER_USERNAME=u PACT_BROKER_PASSWORD=p \
-      bash "$me_abs" openbank-demo-service "$head_sha" 2>/dev/null)"
+      bash "$me_abs" openbank-demo-service "$target" 2>/dev/null)"
     if [ "$got" = "$want" ]; then echo "  ok   ${label} → ${got}"
     else echo "  FAIL ${label}: want '${want}', got '${got}'"; fails=$((fails + 1)); fi
   }
@@ -136,6 +136,13 @@ STUB
   probe_selftest_case "well-formed sha, trees differ"            no ok "$older_sha"
   # ...and the one case that may pass: the same commit is trivially equivalent to itself.
   probe_selftest_case "well-formed sha, trees identical" "equivalent:${head_sha}" ok "$head_sha"
+  ( cd "$repo" && printf '1.2.3\n' > openbank-demo-service/version.txt \
+    && printf 'release\n' > openbank-demo-service/CHANGELOG.md \
+    && git add openbank-demo-service/version.txt openbank-demo-service/CHANGELOG.md \
+    && git commit -qm release ) >/dev/null 2>&1
+  release_sha="$(git -C "$repo" rev-parse HEAD)"
+  probe_selftest_case "release-only image change keeps Pact identity" \
+    "equivalent:${head_sha}" ok "$head_sha" "$release_sha"
   if [ "$fails" -ne 0 ]; then echo "FAILED: ${fails} case(s)"; exit 1; fi
   echo "PASS: every unverifiable broker answer degrades to 'no'; only a git-proven equivalence does not"
   exit 0
@@ -206,8 +213,10 @@ latest_main_version() {
   printf '%s' "$num"
 }
 
-# Can the published verdict be transferred to the sha being deployed? Only when git proves the two
-# commits identical in every build input of this service. Anything short of a clean exit 0 from the
+# Can the published Pact verdict be transferred to the sha being deployed? Only when git proves
+# the two commits identical in every contract input of this service. Release metadata can change
+# the image version without changing Pact artefacts; image freshness is checked separately.
+# Anything short of a clean exit 0 from the
 # checker — and that includes the script being absent — leaves `present` as it was.
 try_equivalence() {
   local pact_sha out here
@@ -215,7 +224,7 @@ try_equivalence() {
   [ -x "$here/pact-version-tree-equivalent.sh" ] || [ -f "$here/pact-version-tree-equivalent.sh" ] || return 0
   pact_sha="$(latest_main_version)"
   [ -n "$pact_sha" ] || { echo "    no main-tagged version to compare ${SVC} against" >&2; return 0; }
-  if out="$(bash "$here/pact-version-tree-equivalent.sh" "$SVC" "$pact_sha" "$SHA" 2>&1)"; then
+  if out="$(bash "$here/pact-version-tree-equivalent.sh" --contract-inputs "$SVC" "$pact_sha" "$SHA" 2>&1)"; then
     echo "    ${SVC}: ${out}" >&2
     printf 'equivalent:%s' "$pact_sha"
   else

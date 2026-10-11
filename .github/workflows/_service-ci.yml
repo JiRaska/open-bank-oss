@@ -150,6 +150,13 @@ jobs:
             echo "fs.aio-max-nr already ${cur} (>= 1048576)"
           fi
 
+      - name: Prepare declared PostgreSQL test image
+        timeout-minutes: 4
+        env:
+          CI_TEST_MODULE: ${{ inputs.service }}
+        run: |
+          bash .github/scripts/prewarm-ci-postgres.sh "$CI_TEST_MODULE"
+
       # Most modules pin kotlin { jvmToolchain(25) }; a few use 21. Installing both
       # lets Gradle's toolchain resolution pick the right one with zero Foojay
       # downloads at build time (faster, fewer billed minutes).

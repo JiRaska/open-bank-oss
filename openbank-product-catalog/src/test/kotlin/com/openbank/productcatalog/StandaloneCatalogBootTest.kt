@@ -52,6 +52,7 @@ abstract class StandaloneCatalogBootContract {
 @QuarkusTestResource(
     value = PostgresTestResource::class,
     initArgs = [ResourceArg(name = "db", value = "openbank_catalog_standalone_empty")],
+    restrictToAnnotatedClass = true,
 )
 @TestProfile(EmptyStandaloneProfile::class)
 @TestSecurity(user = "standalone-operator", roles = ["ROLE_OPERATOR"])
@@ -74,6 +75,7 @@ class EmptyStandaloneCatalogBootTest : StandaloneCatalogBootContract() {
 @QuarkusTestResource(
     value = PostgresTestResource::class,
     initArgs = [ResourceArg(name = "db", value = "openbank_catalog_standalone_insurance")],
+    restrictToAnnotatedClass = true,
 )
 @TestProfile(InsuranceStandaloneProfile::class)
 @TestSecurity(user = "standalone-operator", roles = ["ROLE_OPERATOR"])
@@ -94,6 +96,7 @@ class InsuranceStandaloneCatalogBootTest : StandaloneCatalogBootContract() {
 @QuarkusTestResource(
     value = PostgresTestResource::class,
     initArgs = [ResourceArg(name = "db", value = "openbank_catalog_standalone_banking")],
+    restrictToAnnotatedClass = true,
 )
 @TestProfile(BankingStandaloneProfile::class)
 @TestSecurity(user = "standalone-bank-author", roles = [CatalogRoles.READ, CatalogRoles.AUTHOR])

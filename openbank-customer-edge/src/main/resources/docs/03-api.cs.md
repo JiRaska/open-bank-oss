@@ -71,6 +71,8 @@ Všechny cesty jsou pod `/customer/v1`. Scopy jsou OAuth scopy deklarované v `o
 
 Bez `partyId` se spojí notifikace přihlášené osoby a všech firem z aktuálního seznamu mandátů. Každá položka nese své původní `partyId`; při otevření nebo označení firemní položky jako přečtené jej předejte příslušnému endpointu. Výslovný filtr `partyId` musí patřit osobě nebo platnému mandátu. Odpověď obsahuje posledních 1–100 položek s `page: 0`; starší historii poskytuje dosavadní seznam vybraného profilu. `total` a `unreadCount` jsou součty odpovědí jednotlivých profilů pozorovaných během požadavku, nikoli atomický snímek při souběžných zápisech. Nedostupný seznam mandátů vrací 503, cizí filtr 403 a selhání či nesoulad profilu v některém feedu 502 bez částečných položek.
 
+Upstream čtení sdílejí jeden souhrnný limit měřený monotónním časem; další čtení dostane jen zbývající čas a po vypršení limitu se vrátí 502 bez částečného seznamu.
+
 ## Vybrané requesty
 
 ### Iniciace tuzemské platby (obohaceno)

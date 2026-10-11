@@ -58,7 +58,6 @@ TEST_BLOCK = re.compile(r'^"?%test"?\s*:\s*\n(.*?)(?=^\S|\Z)', re.M | re.S)
 # Services with a @Scheduled method that disable the scheduler in tests and do not re-enable it
 # anywhere. Measured 2026-07-26 (#2204). This list may only SHRINK.
 BASELINE = {
-    "openbank-aml-service",
     "openbank-card-issuance-service",
     "openbank-interest-service",
     "openbank-onboarding-service",

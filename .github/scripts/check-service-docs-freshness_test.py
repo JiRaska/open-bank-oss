@@ -96,6 +96,8 @@ class ServiceDocsFreshnessTest(unittest.TestCase):
 
         cls.git("checkout", "main")
         cls.write("openbank-beta-service/src/main/App.kt", "unrelated main change\n")
+        cls.write("openbank-new-service/build.gradle.kts", 'plugins { id("openbank.quarkus-service") }\ndependencies { implementation(project(":openbank-libs-runtime")) }\n')
+        cls.git("add", "--", "openbank-new-service/build.gradle.kts")
         cls.commit("main advances after PR opens")
         cls.git("merge", "--no-ff", "documented-pr", "-m", "synthetic PR merge")
 
@@ -139,6 +141,7 @@ class ServiceDocsFreshnessTest(unittest.TestCase):
         wrong_head = self.gate("--head", "HEAD")
         self.assertEqual(1, wrong_head.returncode)
         self.assertIn("openbank-beta-service", wrong_head.stderr)
+        self.assertIn("openbank-new-service", wrong_head.stderr)
 
     def test_undocumented_service_change_fails(self):
         result = self.gate("--head", self.undocumented)

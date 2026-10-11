@@ -218,7 +218,7 @@ jobs:
           [ -n "${GITHUB_DEPENDENCY_GRAPH_SHA:-}" ] || { echo "::error::setup-gradle did not export GITHUB_DEPENDENCY_GRAPH_SHA; the resolution guard test cannot run."; exit 1; }
           python3 .github/scripts/tests/test_dependency_resolution_guard.py
 
-      # Bound retained Gradle resolution state to four modules per process. The
+      # Bound retained Gradle resolution state to eight modules per process. The
       # resolver rejects unresolved dependencies and records each intended project.
       # Only a complete, matching set becomes the single snapshot we publish.
       - name: Resolve and validate fleet dependency graph
@@ -307,7 +307,7 @@ jobs:
           Run: ${RUN_URL}
 
           Check the failed shard log and its project receipts first. The generator resolves
-          at most four fleet modules per process and rejects missing dependencies, incomplete
+          at most eight fleet modules per process and rejects missing dependencies, incomplete
           project coverage, inconsistent commit identity and conflicting graph entries.
           A timeout, resource failure or API failure remains a failed submission.
 

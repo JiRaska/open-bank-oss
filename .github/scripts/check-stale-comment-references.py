@@ -175,12 +175,12 @@ def c_comments(text: str) -> list[tuple[int, str]]:
             i += 1
             continue
         if depth:
-            if text.startswith("/*", i):
+            if ch == "/" and text.startswith("/*", i):
                 depth += 1
                 buf.append("/*")
                 i += 2
                 continue
-            if text.startswith("*/", i):
+            if ch == "*" and text.startswith("*/", i):
                 depth -= 1
                 i += 2
                 if depth == 0:
@@ -201,13 +201,13 @@ def c_comments(text: str) -> list[tuple[int, str]]:
             in_str = ch
             i += 1
             continue
-        if text.startswith("//", i):
+        if ch == "/" and text.startswith("//", i):
             j = text.find("\n", i)
             j = n if j < 0 else j
             out.append((line_no, text[i + 2:j]))
             i = j
             continue
-        if text.startswith("/*", i):
+        if ch == "/" and text.startswith("/*", i):
             depth = 1
             start = line_no
             buf = []
@@ -365,10 +365,12 @@ class Finding:
 
 
 def scan_text(path: str, text: str, top_level: set[str], resolvable,
-              slug_state: dict[str, tuple[str, str]] | None = None) -> list[Finding]:
+              slug_state: dict[str, tuple[str, str]] | None = None,
+              parsed_comments: list[tuple[int, str]] | None = None) -> list[Finding]:
     """Pure core, shared by the repo scan and the self-test."""
     out: list[Finding] = []
-    for line, comment in comments_of(path, text):
+    comments = comments_of(path, text) if parsed_comments is None else parsed_comments
+    for line, comment in comments:
         if WAIVER.search(comment):
             continue
         for cand in path_candidates(comment, top_level):
@@ -419,13 +421,14 @@ def run(root: Path, want_network: bool) -> list[Finding]:
             text = (root / f).read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
-        for line, comment in comments_of(f, text):
+        comments = comments_of(f, text)
+        for line, comment in comments:
             if WAIVER.search(comment):
                 continue
             for m in REPO_SLUG.finditer(comment):
                 slugs.add(m.group(1))
                 hits.append((f, line, m.group(1)))
-        raw.extend(scan_text(f, text, top_level, resolvable))
+        raw.extend(scan_text(f, text, top_level, resolvable, parsed_comments=comments))
 
     # R1: drop build outputs git already knows about.
     ignored = gitignored(root, sorted({x.ref for x in raw if x.rule == "path"}))

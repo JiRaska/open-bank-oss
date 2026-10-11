@@ -190,6 +190,16 @@ add_hold_entries() {
   ' <<<"$text"
 }
 
+# Encode rules.yaml from stdin. The file is larger than Linux's per-argument limit once base64
+# encoded, so its content must flow through stdin to gh api --input - instead of -f content=... .
+hold_commit_payload() {
+  local pr="$1" sha="$2" branch="$3"
+  base64 | tr -d '\n' | jq -Rs \
+    --arg message "chore(gitops): inherit deploy hold from #$pr (issue #11503)" \
+    --arg sha "$sha" --arg branch "$branch" \
+    '{message: $message, content: ., sha: $sha, branch: $branch}'
+}
+
 # Live: record the hold on #KEEP's branch (signed API commit), then draft + label + comment.
 inherit_hold() {
   local n="$1" keep="$2" services branch blob sha rules new
@@ -211,10 +221,8 @@ inherit_hold() {
   # shellcheck disable=SC2086
   new="$(add_hold_entries "$n" "$keep" $services <<<"$rules")" || return 1
   if [ "$new" != "$rules" ]; then
-    gh api -X PUT "repos/$REPO/contents/$RULES_PATH" \
-      -f message="chore(gitops): inherit deploy hold from #$n (issue #11503)" \
-      -f content="$(printf '%s\n' "$new" | base64 | tr -d '\n')" \
-      -f sha="$sha" -f branch="$branch" >/dev/null || return 1
+    printf '%s\n' "$new" | hold_commit_payload "$n" "$sha" "$branch" \
+      | gh api -X PUT "repos/$REPO/contents/$RULES_PATH" --input - >/dev/null || return 1
   fi
   gh pr ready "$keep" --repo "$REPO" --undo || return 1
   gh pr edit "$keep" --repo "$REPO" --add-label blocked || return 1
@@ -533,11 +541,25 @@ HOOK
     echo "self-test case 10 OK (durable deploy_holds entry inserted; no block -> refused)"
   fi
 
+  # case 11 — the live hold transfer must serialize a full rules.yaml without putting its
+  # base64 content in an argv element (the hosted failure was "Argument list too long").
+  local large_rules payload
+  large_rules="$(awk 'BEGIN { for (i = 0; i < 150000; i++) printf "x" }')"
+  payload="$(printf '%s\n' "$large_rules" | hold_commit_payload 11491 blob-sha deploy-branch)" && rc=0 || rc=$?
+  if [ "$rc" -ne 0 ] || ! jq -e \
+    '.message == "chore(gitops): inherit deploy hold from #11491 (issue #11503)" and .sha == "blob-sha" and .branch == "deploy-branch"' \
+    <<<"$payload" >/dev/null \
+    || ! cmp -s <(printf '%s\n' "$large_rules") <(jq -r .content <<<"$payload" | base64 --decode); then
+    echo "SELF-TEST FAIL case 11: large rules.yaml hold payload did not round-trip"; ok=1
+  else
+    echo "self-test case 11 OK (large hold payload uses stdin and round-trips)"
+  fi
+
   if [ "$ok" -ne 0 ]; then
     echo "self-test: FAILED"
     return 1
   fi
-  echo "self-test: all 10 cases OK"
+  echo "self-test: all 11 cases OK"
   return 0
 }
 
@@ -546,9 +568,21 @@ if [ "${1:-}" = "--self-test" ]; then
   exit $?
 fi
 
+REPO="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY must be set}"
+
+# The deploy-window flusher also needs the same ancestry and file-coverage verdicts when
+# comparing a deferred PR's image pins with main. Keep one fail-closed classifier (#12182).
+if [ "${1:-}" = "--classify" ]; then
+  classify "${2:?keep source required}" "${3:?proposed source required}"
+  exit 0
+fi
+if [ "${1:-}" = "--classify-coverage" ]; then
+  classify_coverage "${2:?main files required}" "${3:?PR files required}"
+  exit 0
+fi
+
 PREFIX="${1:?usage: supersede-deploy-prs.sh <branch-prefix> <keep-pr-number> | --self-test}"
 KEEP="${2:?usage: supersede-deploy-prs.sh <branch-prefix> <keep-pr-number> | --self-test}"
-REPO="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY must be set}"
 
 # The sha THIS run's deploy PR pins. Without it nothing can be classified, and "cannot classify"
 # must mean "close nothing" — never "close everything", which is the pre-#6231 behaviour.

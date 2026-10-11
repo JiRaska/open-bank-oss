@@ -105,7 +105,7 @@ class RunnerTests(unittest.TestCase):
     def run_case(self, case):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            for i in range(5):
+            for i in range(9):
                 module = root / f'openbank-test-{i}'
                 module.mkdir()
                 (module / 'build.gradle.kts').write_text('')
@@ -167,7 +167,9 @@ class RunnerTests(unittest.TestCase):
                     result = subject.generate(root, output, env)
                     self.assertEqual(result['sha'], SHA)
                     self.assertEqual(len(calls), 2)
-                    self.assertEqual(timeouts, [240, 10] if case == 'budget-truncated' else [240, 180])
+                    self.assertEqual([sum(arg.endswith(':ForceDependencyResolutionPlugin_resolveProjectDependencies')
+                                          for arg in call) for call in calls], [9, 1])
+                    self.assertEqual(timeouts, [360, 10] if case == 'budget-truncated' else [360, 240])
                     self.assertTrue((output / 'merged.json').is_file())
                     self.assertTrue(all('--continue' not in cmd for cmd in calls))
                 else:
@@ -178,7 +180,7 @@ class RunnerTests(unittest.TestCase):
                         self.assertEqual(len(calls), 1, 'reject the first bad shard before resolving the fleet')
                     if case == 'budget-expired':
                         self.assertEqual(len(calls), 1)
-                        self.assertEqual(timeouts, [240])
+                        self.assertEqual(timeouts, [360])
 
     def test_real_failed_process_is_not_accepted(self):
         with tempfile.TemporaryDirectory() as directory:

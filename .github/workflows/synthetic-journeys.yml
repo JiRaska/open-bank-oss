@@ -42,8 +42,21 @@ jobs:
     name: public-edge / exact runtime artifact
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      K6_IMAGE: docker.io/grafana/k6:2.3.0@sha256:9c2dee7f8ed74d317e4027c06a10f169b625638189de8d4555d0b3486a5aeb34
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Pull the pinned runtime engine
+        run: |
+          set -euo pipefail
+          mirror="${K6_IMAGE/docker.io/mirror.gcr.io}"
+          if docker pull "$mirror"; then
+            echo "K6_IMAGE=$mirror" >> "$GITHUB_ENV"
+          else
+            # Same content digest from the original registry; neither failure is ignored.
+            docker pull "$K6_IMAGE"
+          fi
 
       - name: Install PyYAML
         run: bash .github/scripts/install-pyyaml-hash-pinned.sh
@@ -66,7 +79,7 @@ jobs:
             docker run --rm \
               --user "$(id -u):$(id -g)" \
               --volume "$PWD/synthetic-evidence:/evidence" \
-              docker.io/grafana/k6:2.3.0@sha256:9c2dee7f8ed74d317e4027c06a10f169b625638189de8d4555d0b3486a5aeb34 \
+              "$K6_IMAGE" \
               inspect "/evidence/${journey}.js"
           done < <(python3 .github/scripts/check-journey-catalog.py --root . --active-ids)
           # public-edge is internet-reachable and therefore gets an actual CI execution;
@@ -85,7 +98,7 @@ jobs:
             --env API_BASE=http://127.0.0.1:9 \
             --env CUSTOMER_BASE=http://127.0.0.1:9 \
             --env ADMIN_BASE=http://127.0.0.1:9 \
-            docker.io/grafana/k6:2.3.0@sha256:9c2dee7f8ed74d317e4027c06a10f169b625638189de8d4555d0b3486a5aeb34 \
+            "$K6_IMAGE" \
             run --quiet \
             --summary-export /evidence/public-edge-negative-summary.json \
             /evidence/journey.js
@@ -106,7 +119,7 @@ jobs:
           docker run --rm \
             --user "$(id -u):$(id -g)" \
             --volume "$PWD/synthetic-evidence:/evidence" \
-            docker.io/grafana/k6:2.3.0@sha256:9c2dee7f8ed74d317e4027c06a10f169b625638189de8d4555d0b3486a5aeb34 \
+            "$K6_IMAGE" \
             run --quiet --summary-export /evidence/summary.json /evidence/journey.js
 
       - name: Build synthetic Test Intelligence envelope

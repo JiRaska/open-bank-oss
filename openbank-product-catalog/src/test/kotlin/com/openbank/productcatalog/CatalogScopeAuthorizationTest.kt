@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test
 @QuarkusTestResource(
     value = PostgresTestResource::class,
     initArgs = [ResourceArg(name = "db", value = "openbank_products_scope")],
+    restrictToAnnotatedClass = true,
 )
 class CatalogScopeAuthorizationTest {
     @Test

@@ -25,6 +25,7 @@ import kotlinx.coroutines.async
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.eclipse.microprofile.config.ConfigProvider
+import org.eclipse.microprofile.reactive.messaging.Message
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.hasEntry
 import org.junit.jupiter.api.Test
@@ -34,6 +35,8 @@ import java.time.Instant
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.TimeUnit
 import jakarta.enterprise.inject.Any as AnyQualifier
 
 @QuarkusTest
@@ -43,6 +46,8 @@ import jakarta.enterprise.inject.Any as AnyQualifier
 )
 @QuarkusTestResource(ContextMessagingTestResource::class)
 class ContextApiIT {
+    private val railDeliveries = ProjectionDeliveries()
+
     @Inject
     @AnyQualifier
     lateinit var connector: InMemoryConnector
@@ -105,7 +110,7 @@ class ContextApiIT {
         val transactions = connector.source<String>("transaction-events-in")
         val ledger = connector.source<String>("ledger-events-in")
         val clearing = connector.source<String>("clearing-events-in")
-        val sepaReturns = connector.source<String>("sepa-payment-events-in")
+        val sepaReturns = connector.source<Message<String>>("sepa-payment-events-in")
         val reversalId = UUID.randomUUID()
         listOf(source, payments, transactions, ledger, clearing, sepaReturns)
             .forEach { it.runOnVertxContext(true) }
@@ -561,14 +566,8 @@ class ContextApiIT {
             }
         }
 
-    private fun awaitCount(table: String, column: String, value: Any, expected: Int) {
-        val deadline = System.nanoTime() + java.time.Duration.ofSeconds(5).toNanos()
-        while (System.nanoTime() < deadline) {
-            if (count(table, "$column = ?", value) == expected) return
-            Thread.sleep(25)
-        }
-        assertThat(count(table, "$column = ?", value)).isEqualTo(expected)
-    }
+    private fun awaitCount(table: String, column: String, value: Any, expected: Int) =
+        awaitProjectionCount(table, column, value, expected, ::count)
 
     private fun complaintEvent(
         complaintId: UUID,
@@ -615,12 +614,12 @@ class ContextApiIT {
 
     private fun sendRailEvidence(
         clearing: InMemorySource<String>,
-        sepaReturns: InMemorySource<String>,
+        sepaReturns: InMemorySource<Message<String>>,
         paymentId: UUID,
         reversalId: UUID,
     ): UUID = UUID.randomUUID().also { itemId ->
         clearing.send(clearingItemSettledEvent(itemId, UUID.randomUUID(), paymentId))
-        sepaReturns.send(sepaReturnedEvent(paymentId, reversalId))
+        railDeliveries.send(sepaReturns, sepaReturnedEvent(paymentId, reversalId))
     }
 
     private fun seedUnrelatedComplaint(paymentId: UUID): String =
@@ -644,6 +643,8 @@ class ContextApiIT {
         awaitCount("context_projection_events", "aggregate_ref", "booking-transaction:$bookingTransactionId", 1)
         awaitCount("context_projection_events", "aggregate_ref", "ledger-booking:$journalId", 1)
         awaitCount("context_projection_events", "aggregate_ref", "clearing-item:$clearingItemId", 1)
+        // Preserve concurrent sends, but surface a consumer nack before checking its persisted row.
+        railDeliveries.await()
         awaitCount("context_projection_events", "aggregate_ref", "return-evidence:sepa:$paymentId:4", 1)
         assertThat(count("context_nodes", "node_key = ?", "reversal-transaction:$reversalId")).isEqualTo(1)
         assertThat(count("context_nodes", "node_key LIKE ?", "%$complaintId%")).isZero()
@@ -705,6 +706,45 @@ class ContextApiIT {
         // Lifecycle fixtures add seconds per revision; keep every event before the default asOf query.
         val NOW: Instant = Instant.now().minusSeconds(60)
     }
+}
+
+private fun awaitProjectionCount(
+    table: String,
+    column: String,
+    value: Any,
+    expected: Int,
+    count: (String, String, Any) -> Int,
+) {
+    val deadline = System.nanoTime() + java.time.Duration.ofSeconds(5).toNanos()
+    while (System.nanoTime() < deadline) {
+        if (count(table, "$column = ?", value) == expected) return
+        Thread.sleep(25)
+    }
+    assertThat(count(table, "$column = ?", value)).isEqualTo(expected)
+}
+
+private class ProjectionDeliveries {
+    private val pending = mutableListOf<CompletableFuture<Void>>()
+
+    fun send(source: InMemorySource<Message<String>>, payload: String) {
+        val delivered = CompletableFuture<Void>()
+        pending.add(delivered)
+        source.send(
+            Message.of(
+                payload,
+                {
+                    delivered.complete(null)
+                    CompletableFuture.completedFuture<Void>(null)
+                },
+                { failure ->
+                    delivered.completeExceptionally(failure)
+                    CompletableFuture.completedFuture<Void>(null)
+                },
+            ),
+        )
+    }
+
+    fun await() = pending.forEach { it.get(5, TimeUnit.SECONDS) }
 }
 
 class ContextMessagingTestResource : QuarkusTestResourceLifecycleManager {

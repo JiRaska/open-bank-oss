@@ -39,7 +39,9 @@ AND a machine-readable JSON payload in an HTML comment, so `list-recorded-flakes
 the population back out without re-parsing markdown prose.
 
 USAGE (invoked from the workflow; every subcommand is offline and side-effect-free)
-    record-rerun-flake.py classify   --jobs-file prev-jobs.json
+    record-rerun-flake.py flatten-jobs --pages-file prev-job-pages.json
+    record-rerun-flake.py classify --jobs-file prev-jobs.json \
+        --changes-log changes.log --all-green-log all-green.log
     record-rerun-flake.py parse-junit --path <dir-or-file>
     record-rerun-flake.py render     --record run.json --tests tests.json --job job.json
     record-rerun-flake.py --self-test
@@ -77,17 +79,68 @@ def has_spot_kill_signature(job: dict) -> bool:
     return cancelled > 0 and failed == 0
 
 
-def find_flake_candidates(prev_jobs: list[dict]) -> list[dict]:
+def flatten_job_pages(pages: list[dict]) -> list[dict]:
+    """Require a complete, unique attempt-scoped Jobs API inventory before classification."""
+    if not pages or not isinstance(pages[0], dict):
+        raise ValueError("no Jobs API pages")
+    expected = pages[0].get("total_count")
+    if not isinstance(expected, int) or isinstance(expected, bool) or expected < 0:
+        raise ValueError("invalid Jobs API total_count")
+    jobs: list[dict] = []
+    for page in pages:
+        if not isinstance(page, dict) or page.get("total_count") != expected:
+            raise ValueError("inconsistent Jobs API page total_count")
+        batch = page.get("jobs")
+        if not isinstance(batch, list) or not all(isinstance(job, dict) for job in batch):
+            raise ValueError("malformed Jobs API page")
+        jobs.extend(batch)
+    ids = [job.get("id") for job in jobs]
+    if len(jobs) != expected or any(not isinstance(id_, int) for id_ in ids) or len(set(ids)) != len(ids):
+        raise ValueError("incomplete or duplicate Jobs API inventory")
+    return jobs
+
+
+LOG_PREFIX = r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z "
+ADMISSION_REFUSAL = re.compile(
+    LOG_PREFIX + r"Agent PRs: (\d+)/(\d+); finish existing work before opening another PR\r?$",
+    re.MULTILINE,
+)
+ALL_GREEN_REFUSAL = "Agent PR admission refused or failed; service builds did not run."
+ALL_GREEN_REFUSAL_LINE = re.compile(LOG_PREFIX + re.escape(ALL_GREEN_REFUSAL) + r"\r?$", re.MULTILINE)
+
+
+def is_policy_admission_refusal(prev_jobs: list[dict], changes_log: str, all_green_log: str) -> bool:
+    """Exclude an aggregate only when job states and both prior-attempt logs prove refusal."""
+    changes = [job for job in prev_jobs if job.get("name") == "Detect changed services"]
+    aggregate = [job for job in prev_jobs if job.get("name") == "all-green"]
+    if len(changes) != 1 or len(aggregate) != 1:
+        return False
+    if changes[0].get("conclusion") != "success" or aggregate[0].get("conclusion") != "failure":
+        return False
+    if not any(step.get("name") == "Verify no service failed" and step.get("conclusion") == "failure"
+               for step in aggregate[0].get("steps") or []):
+        return False
+    # Actions prints the whole shell step before execution. Match the emitted line,
+    # not an `echo` command in an unexecuted branch of that script.
+    if not ALL_GREEN_REFUSAL_LINE.search(all_green_log):
+        return False
+    return any(int(count) > int(limit) for count, limit in ADMISSION_REFUSAL.findall(changes_log))
+
+
+def find_flake_candidates(prev_jobs: list[dict], changes_log: str = "", all_green_log: str = "") -> list[dict]:
     """Jobs from the PRIOR attempt that failed for a real reason (not a spot kill).
 
     Called once the run's FINAL attempt has concluded `success` -- by construction, every job
     returned here went from a genuine failure to a green run. That transition is the flake
     signal; this function only identifies which prior-attempt jobs qualify.
     """
+    admission_refusal = is_policy_admission_refusal(prev_jobs, changes_log, all_green_log)
     return [
         j
         for j in prev_jobs
-        if (j.get("conclusion") or "").lower() == "failure" and not has_spot_kill_signature(j)
+        if (j.get("conclusion") or "").lower() == "failure"
+        and not has_spot_kill_signature(j)
+        and not (admission_refusal and j.get("name") == "all-green")
     ]
 
 
@@ -238,6 +291,11 @@ def main(argv: list[str]) -> int:
 
     p_classify = sub.add_parser("classify")
     p_classify.add_argument("--jobs-file", required=True, type=Path)
+    p_classify.add_argument("--changes-log", type=Path)
+    p_classify.add_argument("--all-green-log", type=Path)
+
+    p_flatten = sub.add_parser("flatten-jobs")
+    p_flatten.add_argument("--pages-file", required=True, type=Path)
 
     p_junit = sub.add_parser("parse-junit")
     p_junit.add_argument("--path", required=True, type=Path)
@@ -261,7 +319,14 @@ def main(argv: list[str]) -> int:
 
     if args.cmd == "classify":
         jobs = json.loads(args.jobs_file.read_text(encoding="utf-8"))
-        print(json.dumps(find_flake_candidates(jobs), indent=2))
+        changes_log = args.changes_log.read_text(errors="replace") if args.changes_log and args.changes_log.exists() else ""
+        all_green_log = args.all_green_log.read_text(errors="replace") if args.all_green_log and args.all_green_log.exists() else ""
+        print(json.dumps(find_flake_candidates(jobs, changes_log, all_green_log), indent=2))
+        return 0
+
+    if args.cmd == "flatten-jobs":
+        pages = json.loads(args.pages_file.read_text(encoding="utf-8"))
+        print(json.dumps(flatten_job_pages(pages), indent=2))
         return 0
 
     if args.cmd == "parse-junit":
@@ -307,6 +372,22 @@ def self_test() -> int:
         print(f"  [{'ok ' if cond else 'FAIL'}] {label}")
 
     print("has_spot_kill_signature / find_flake_candidates")
+    pages = [
+        {"total_count": 158, "jobs": [{"id": i} for i in range(100)]},
+        {"total_count": 158, "jobs": [{"id": i} for i in range(100, 158)]},
+    ]
+    check("all 158 jobs survive both API pages", len(flatten_job_pages(pages)) == 158)
+    for label, invalid in [
+        ("missing page", pages[:1]),
+        ("duplicate job", [pages[0], {"total_count": 158, "jobs": [{"id": 0} for _ in range(58)]}]),
+        ("inconsistent total", [pages[0], {"total_count": 159, "jobs": pages[1]["jobs"]}]),
+    ]:
+        try:
+            flatten_job_pages(invalid)
+        except ValueError:
+            check(f"{label} fails closed", True)
+        else:
+            check(f"{label} fails closed", False)
     spot_killed = _job(
         "build (openbank-billing-service)",
         "failure",
@@ -337,6 +418,28 @@ def self_test() -> int:
         "the green job",
         names == {genuine["name"], mixed_but_still_genuine["name"]},
     )
+    changes = _job("Detect changed services", "success", [("Detect", "success")])
+    aggregate = _job("all-green", "failure", [("Verify no service failed", "failure")])
+    refusal = "2026-10-07T11:31:14.599Z Agent PRs: 4/3; finish existing work before opening another PR"
+    gate_refusal = "2026-10-07T11:31:21.009Z " + ALL_GREEN_REFUSAL
+    check("4/3 refusal excludes only proven aggregate",
+          find_flake_candidates([changes, aggregate, genuine], refusal, gate_refusal) == [genuine])
+    check("missing either log retains the aggregate",
+          find_flake_candidates([changes, aggregate], "", gate_refusal) == [aggregate]
+          and find_flake_candidates([changes, aggregate], refusal, "") == [aggregate])
+    check("unexecuted echo and PR-body text do not prove refusal",
+          find_flake_candidates([changes, aggregate], refusal,
+                                '2026-10-07T11:31:20.834Z echo "' + ALL_GREEN_REFUSAL + '"') == [aggregate]
+          and find_flake_candidates([changes, aggregate],
+                                    '2026-10-07T11:31:14.599Z PR_BODY: Agent PRs: 4/3; '
+                                    'finish existing work before opening another PR', gate_refusal) == [aggregate])
+    check("3/3 capacity does not prove refusal",
+          find_flake_candidates([changes, aggregate], "2026-10-07T11:31:14.599Z Agent PRs: 3/3; capacity available",
+                                gate_refusal) == [aggregate])
+    check("genuine failed build and unrelated aggregate remain visible",
+          find_flake_candidates([changes, aggregate, genuine], refusal,
+                                "2026-10-07T11:31:21.009Z One or more service builds failed.")
+          == [aggregate, genuine])
 
     print("extract_service")
     check(

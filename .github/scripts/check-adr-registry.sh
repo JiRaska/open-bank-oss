@@ -214,6 +214,30 @@ if [ "${1:-}" = "--self-test" ]; then
   d=$(mkdir_fixture placeholder); fm 0001 0001 tags="[TODO-pick-from-tags.txt]" > "$d/0001-first.md"
   expect "the scaffold placeholder tag is caught" "$d" 1
 
+  # Literal marker scanning must retain every marker, including shell metacharacters.
+  marker_case=0
+  while IFS= read -r marker; do
+    marker_case=$((marker_case + 1))
+    d=$(mkdir_fixture "literal-marker-$marker_case")
+    fm 0001 0001 > "$d/0001-first.md"
+    printf '\nprefix %s suffix\n' "$marker" >> "$d/0001-first.md"
+    expect "literal scaffold marker $marker_case is caught" "$d" 1 "unfilled scaffold placeholder"
+  done <<'TEST_MARKERS'
+TODO-pick-from-tags.txt
+summary: "TODO
+authors: [<name>]
+<Short noun phrase>
+<req refs>
+What forces are at play (technical, business, regulatory)?
+State the decision clearly in active voice
+- **Option A** — short description
+TEST_MARKERS
+  for section in Context Consequences Alternatives Compliance; do
+    d=$(mkdir_fixture "inline-section-$section")
+    fm 0001 0001 | sed "s/^## $section/prose ## $section/" > "$d/0001-first.md"
+    expect "inline $section is not an anchored section" "$d" 1 "missing a '## $section"
+  done
+
   # SUPERSESSION must be declared on BOTH sides. Declared one way only, the superseded ADR
   # still reads as live to anyone who opens it — the reader has no way to know.
   d=$(mkdir_fixture halfsuper)
@@ -232,7 +256,7 @@ if [ "${1:-}" = "--self-test" ]; then
   expect "an empty ADR directory is an error" "$d" 1
 
   if [ "$fails" -gt 0 ]; then echo "self-test FAILED ($fails case(s))" >&2; exit 1; fi
-  echo "self-test ok: ADR registry integrity is falsifiable (25 cases)"
+  echo "self-test ok: ADR registry integrity is falsifiable (schema, literal-marker and anchored-section cases)"
   exit 0
 fi
 
@@ -258,7 +282,7 @@ fi
 # Collect the NNNN prefix of every ADR; any number appearing >1 is a collision.
 dupes=$(
   for f in "${adrs[@]}"; do
-    base=$(basename "$f")
+    base=${f##*/}
     echo "${base%%-*}"
   done | sort | uniq -d
 )
@@ -277,7 +301,7 @@ fi
 # A bare title ("# OSS-readiness ...") or an incidental number ("# PostgreSQL 18
 # — ...") has no anchored ADR number, so it is skipped (no false positive).
 for f in "${adrs[@]}"; do
-  base=$(basename "$f")
+  base=${f##*/}
   fnum=$((10#${base%%-*}))
   h1=$(grep -m1 '^# ' "$f" || true)
   hnum=""
@@ -348,7 +372,7 @@ declared_supby=""   # "NNNN>TTTT" pairs: NNNN declares it is superseded by TTTT
 declared_sup=""     # "NNNN>TTTT" pairs: NNNN declares it supersedes TTTT
 
 for f in "${adrs[@]}"; do
-  base=$(basename "$f")
+  base=${f##*/}
   num=${base%%-*}
 
   # Capture fm_extract's OWN status. `if ! fm=$(...); then case "$?"` cannot: inside
@@ -468,9 +492,12 @@ for f in "${adrs[@]}"; do
   # DIGEST.md tier rests on, so the placeholder would have been published as this
   # ADR's entry in the decision history. Same for the TEMPLATE.md body prompts.
   # These markers exist only in the scaffolding, so they cannot false-positive.
+  # Read once; quoted pattern operands retain grep -F literal substring semantics.
+  # Bash 3.2 supports this built-in file read and requires no process per marker.
+  adr_text=$(<"$f")
   while IFS= read -r marker; do
     [[ -z "$marker" ]] && continue
-    if grep -qF -- "$marker" "$f"; then
+    if [[ "$adr_text" == *"$marker"* ]]; then
       err "$base: still contains the unfilled scaffold placeholder \"$marker\" — write the ADR before merging it."
     fi
   done <<'MARKERS'
@@ -489,9 +516,9 @@ MARKERS
   # records (ADR-0001) and some are a pointer to their successor and nothing else
   # — retro-fitting sections into them would be rewriting history, not fixing it.
   if [[ "$decision" != "superseded" ]]; then
-    grep -q '^## Context' "$f"                        || err "$base: missing a '## Context' section."
+    [[ $'\n'$adr_text == *$'\n## Context'* ]]                        || err "$base: missing a '## Context' section."
     grep -qiE '^## (The )?Decision' "$f"              || err "$base: missing a '## Decision' section."
-    grep -q '^## Consequences' "$f"                   || err "$base: missing a '## Consequences' section."
+    [[ $'\n'$adr_text == *$'\n## Consequences'* ]]                   || err "$base: missing a '## Consequences' section."
     # GRADUATED to blocking (ADR-0144 gate-graduation). These were advisory while 32
     # and 42 pre-schema ADRs respectively lacked them; that backlog is now closed, so
     # the rule enforces instead of nagging — an advisory rule nobody can ever act on
@@ -502,8 +529,8 @@ MARKERS
     # rejected option, and a compliance row must not carry an article or requirement
     # number that does not appear in the ADR's own text. A confident fabrication in
     # this directory is read by auditors as a claim about the platform.
-    grep -q '^## Alternatives' "$f" || err "$base: missing a '## Alternatives considered' section (see TEMPLATE.md; if none was recorded, say so explicitly)."
-    grep -q '^## Compliance'   "$f" || err "$base: missing a '## Compliance impact' section (see TEMPLATE.md; 'not applicable — <reason>' is a valid and common answer)."
+    [[ $'\n'$adr_text == *$'\n## Alternatives'* ]] || err "$base: missing a '## Alternatives considered' section (see TEMPLATE.md; if none was recorded, say so explicitly)."
+    [[ $'\n'$adr_text == *$'\n## Compliance'* ]] || err "$base: missing a '## Compliance impact' section (see TEMPLATE.md; 'not applicable — <reason>' is a valid and common answer)."
   fi
 done
 
