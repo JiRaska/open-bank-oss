@@ -14,6 +14,12 @@ import com.openbank.pension.infrastructure.identity.OwnershipVerificationRequest
 import com.openbank.pension.infrastructure.identity.PartyRestClient
 import com.openbank.pension.infrastructure.identity.ScaConsumeRequestDto
 import com.openbank.pension.infrastructure.identity.ScaConsumeRestClient
+import com.openbank.pension.infrastructure.payments.CreateDomesticPaymentDto
+import com.openbank.pension.infrastructure.payments.CreateStandingOrderDto
+import com.openbank.pension.infrastructure.payments.DomesticPaymentRestClient
+import com.openbank.pension.infrastructure.payments.RegisterSddMandateDto
+import com.openbank.pension.infrastructure.payments.SddMandateRestClient
+import com.openbank.pension.infrastructure.payments.StandingOrderRestClient
 import com.openbank.pension.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
@@ -25,6 +31,8 @@ import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.catchThrowable
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.junit.jupiter.api.Test
+import java.math.BigDecimal
+import java.time.LocalDate
 import java.util.UUID
 import javax.net.ssl.SSLHandshakeException
 import javax.net.ssl.SSLPeerUnverifiedException
@@ -54,6 +62,18 @@ class CatalogClientMtlsIT {
     @RestClient
     @Inject
     lateinit var scaClient: ScaConsumeRestClient
+
+    @RestClient
+    @Inject
+    lateinit var standingOrderClient: StandingOrderRestClient
+
+    @RestClient
+    @Inject
+    lateinit var sddClient: SddMandateRestClient
+
+    @RestClient
+    @Inject
+    lateinit var domesticPaymentClient: DomesticPaymentRestClient
 
     @Test
     fun `real clients mint OIDC token and succeed with trusted mTLS peer`(): Unit = runBlocking {
@@ -85,6 +105,65 @@ class CatalogClientMtlsIT {
         assertThat(challenge.purpose).isEqualTo("APPROVAL")
         assertThat(challenge.status).isEqualTo("COMPLETED")
 
+        val standingOrder = standingOrderClient.create(
+            CreateStandingOrderDto(
+                idempotencyKey = "tls-it-standing-order",
+                partyId = UUID.fromString(PARTY_ID),
+                debitAccountId = UUID.fromString(ACCOUNT_ID),
+                debtorIban = IBAN,
+                debtorName = "TLS fixture debtor",
+                creditorIban = IBAN,
+                creditorName = "TLS fixture creditor",
+                creditorBic = "TESTCZPP",
+                amountMinorUnits = 100,
+                currency = "CZK",
+                frequency = "MONTHLY",
+                paymentType = "DOMESTIC",
+                remittanceInfo = "TLS transport fixture",
+                startDate = LocalDate.of(2030, 1, 1),
+                endDate = null,
+            ),
+        )
+        assertThat(standingOrder.id).isEqualTo(UUID.fromString(STANDING_ORDER_ID))
+        assertThat(standingOrder.status).isEqualTo("ACTIVE")
+
+        val mandate = sddClient.register(
+            RegisterSddMandateDto(
+                partyId = UUID.fromString(PARTY_ID),
+                accountId = UUID.fromString(ACCOUNT_ID),
+                debtorIban = IBAN,
+                creditorIdentifier = "CZ0000000000",
+                umr = "TLS-IT-MANDATE-001",
+                scheme = "CORE",
+                sequenceType = "FRST",
+                creditorName = "TLS fixture creditor",
+                debtorName = "TLS fixture debtor",
+                signatureDate = LocalDate.of(2030, 1, 1),
+            ),
+        )
+        assertThat(mandate.id).isEqualTo(UUID.fromString(MANDATE_ID))
+        assertThat(mandate.status).isEqualTo("PENDING")
+
+        val domesticPayment = domesticPaymentClient.create(
+            "tls-it-domestic-payment",
+            CreateDomesticPaymentDto(
+                debtorAccountId = UUID.fromString(ACCOUNT_ID),
+                debtorAccountNumber = IBAN,
+                debtorBankCode = "0000",
+                debtorName = "TLS fixture debtor",
+                creditorAccountNumber = IBAN,
+                creditorBankCode = "0000",
+                creditorName = "TLS fixture creditor",
+                amount = BigDecimal.ONE,
+                currency = "CZK",
+                priority = "STANDARD",
+                messageForPayee = "TLS transport fixture",
+                endToEndId = "TLS-IT-DOMESTIC-001",
+            ),
+        )
+        assertThat(domesticPayment.id).isEqualTo(UUID.fromString(DOMESTIC_PAYMENT_ID))
+        assertThat(domesticPayment.status).isEqualTo("RECEIVED")
+
         val servers = checkNotNull(CatalogTlsTestState.servers)
         // Reactive and annotation-based filters have separate token caches; cache count is not the transport contract.
         servers.token.verify(moreThanOrExactly(1), postRequestedFor(urlEqualTo("/token")))
@@ -108,6 +187,21 @@ class CatalogClientMtlsIT {
             postRequestedFor(urlEqualTo("/api/v1/sca/challenges/$CHALLENGE_ID/consume"))
                 .withHeader("Authorization", equalTo("Bearer test-token")),
         )
+        servers.catalog.verify(
+            1,
+            postRequestedFor(urlEqualTo("/api/v1/standing-orders"))
+                .withHeader("Authorization", equalTo("Bearer test-token")),
+        )
+        servers.catalog.verify(
+            1,
+            postRequestedFor(urlEqualTo("/api/v1/sdd/mandates"))
+                .withHeader("Authorization", equalTo("Bearer test-token")),
+        )
+        servers.catalog.verify(
+            1,
+            postRequestedFor(urlEqualTo("/api/v1/domestic-payments"))
+                .withHeader("Authorization", equalTo("Bearer test-token")),
+        )
     }
 
     private companion object {
@@ -119,6 +213,9 @@ class CatalogClientMtlsIT {
         const val CHALLENGE_ID = "7e5a0001-0000-4000-8000-000000000335"
         const val SIGNED_HASH = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
         const val ACCOUNT_PATH = "/api/v1/accounts/ownership-verifications"
+        const val STANDING_ORDER_ID = "22222222-3333-4444-8555-666666666666"
+        const val MANDATE_ID = "33333333-4444-4555-8666-777777777777"
+        const val DOMESTIC_PAYMENT_ID = "44444444-5555-4666-8777-888888888888"
     }
 }
 

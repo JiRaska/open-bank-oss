@@ -5,6 +5,7 @@
 package com.openbank.pension.infrastructure.catalog
 
 import com.github.tomakehurst.wiremock.WireMockServer
+import com.github.tomakehurst.wiremock.client.WireMock.equalTo
 import com.github.tomakehurst.wiremock.client.WireMock.equalToJson
 import com.github.tomakehurst.wiremock.client.WireMock.get
 import com.github.tomakehurst.wiremock.client.WireMock.okJson
@@ -123,6 +124,24 @@ private class CatalogTlsFixture(private val scenario: CatalogTlsScenario) {
                 "quarkus.tls.sca-authority.key-store.pem.client.key" to clientKey.toString(),
                 "quarkus.tls.sca-authority.trust-store.pem.certs" to serverTrust.toString(),
                 "quarkus.tls.sca-authority.protocols" to "TLSv1.3",
+                "quarkus.rest-client.standing-order-service.url" to "https://localhost:${catalog.httpsPort()}",
+                "quarkus.rest-client.standing-order-service.tls-configuration-name" to "standing-order-authority",
+                "quarkus.tls.standing-order-authority.key-store.pem.client.cert" to clientCertificate.toString(),
+                "quarkus.tls.standing-order-authority.key-store.pem.client.key" to clientKey.toString(),
+                "quarkus.tls.standing-order-authority.trust-store.pem.certs" to serverTrust.toString(),
+                "quarkus.tls.standing-order-authority.protocols" to "TLSv1.3",
+                "quarkus.rest-client.sdd-service.url" to "https://localhost:${catalog.httpsPort()}",
+                "quarkus.rest-client.sdd-service.tls-configuration-name" to "sdd-authority",
+                "quarkus.tls.sdd-authority.key-store.pem.client.cert" to clientCertificate.toString(),
+                "quarkus.tls.sdd-authority.key-store.pem.client.key" to clientKey.toString(),
+                "quarkus.tls.sdd-authority.trust-store.pem.certs" to serverTrust.toString(),
+                "quarkus.tls.sdd-authority.protocols" to "TLSv1.3",
+                "quarkus.rest-client.domestic-payment.url" to "https://localhost:${catalog.httpsPort()}",
+                "quarkus.rest-client.domestic-payment.tls-configuration-name" to "domestic-payment-authority",
+                "quarkus.tls.domestic-payment-authority.key-store.pem.client.cert" to clientCertificate.toString(),
+                "quarkus.tls.domestic-payment-authority.key-store.pem.client.key" to clientKey.toString(),
+                "quarkus.tls.domestic-payment-authority.trust-store.pem.certs" to serverTrust.toString(),
+                "quarkus.tls.domestic-payment-authority.protocols" to "TLSv1.3",
             )
         }
 
@@ -240,6 +259,91 @@ private class CatalogTlsFixture(private val scenario: CatalogTlsScenario) {
                             }
                         """.trimIndent(),
                     ),
+                ),
+        )
+        catalog.stubFor(
+            post(urlEqualTo("/api/v1/standing-orders"))
+                .withRequestBody(
+                    equalToJson(
+                        """
+                            {
+                              "idempotencyKey": "tls-it-standing-order",
+                              "partyId": "d1d1d1d1-e2e2-4f4f-8a8a-b1b1b1b1b1b1",
+                              "debitAccountId": "11111111-2222-4333-8444-555555555555",
+                              "debtorIban": "CZ0000000000000000000000",
+                              "debtorName": "TLS fixture debtor",
+                              "creditorIban": "CZ0000000000000000000000",
+                              "creditorName": "TLS fixture creditor",
+                              "creditorBic": "TESTCZPP",
+                              "amountMinorUnits": 100,
+                              "currency": "CZK",
+                              "frequency": "MONTHLY",
+                              "paymentType": "DOMESTIC",
+                              "remittanceInfo": "TLS transport fixture",
+                              "startDate": "2030-01-01"
+                            }
+                        """.trimIndent(),
+                        true,
+                        true,
+                    ),
+                )
+                .willReturn(
+                    okJson("""{"id":"22222222-3333-4444-8555-666666666666","status":"ACTIVE"}"""),
+                ),
+        )
+        catalog.stubFor(
+            post(urlEqualTo("/api/v1/sdd/mandates"))
+                .withRequestBody(
+                    equalToJson(
+                        """
+                            {
+                              "partyId": "d1d1d1d1-e2e2-4f4f-8a8a-b1b1b1b1b1b1",
+                              "accountId": "11111111-2222-4333-8444-555555555555",
+                              "debtorIban": "CZ0000000000000000000000",
+                              "creditorIdentifier": "CZ0000000000",
+                              "umr": "TLS-IT-MANDATE-001",
+                              "scheme": "CORE",
+                              "sequenceType": "FRST",
+                              "creditorName": "TLS fixture creditor",
+                              "debtorName": "TLS fixture debtor",
+                              "signatureDate": "2030-01-01"
+                            }
+                        """.trimIndent(),
+                        true,
+                        true,
+                    ),
+                )
+                .willReturn(
+                    okJson("""{"id":"33333333-4444-4555-8666-777777777777","status":"PENDING"}"""),
+                ),
+        )
+        catalog.stubFor(
+            post(urlEqualTo("/api/v1/domestic-payments"))
+                .withHeader("Idempotency-Key", equalTo("tls-it-domestic-payment"))
+                .withRequestBody(
+                    equalToJson(
+                        """
+                            {
+                              "debtorAccountId": "11111111-2222-4333-8444-555555555555",
+                              "debtorAccountNumber": "CZ0000000000000000000000",
+                              "debtorBankCode": "0000",
+                              "debtorName": "TLS fixture debtor",
+                              "creditorAccountNumber": "CZ0000000000000000000000",
+                              "creditorBankCode": "0000",
+                              "creditorName": "TLS fixture creditor",
+                              "amount": 1,
+                              "currency": "CZK",
+                              "priority": "STANDARD",
+                              "messageForPayee": "TLS transport fixture",
+                              "endToEndId": "TLS-IT-DOMESTIC-001"
+                            }
+                        """.trimIndent(),
+                        true,
+                        true,
+                    ),
+                )
+                .willReturn(
+                    okJson("""{"id":"44444444-5555-4666-8777-888888888888","status":"RECEIVED"}"""),
                 ),
         )
         return CatalogTlsServers(tokenServer, catalog)
