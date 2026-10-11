@@ -187,3 +187,14 @@ during rollout. First publish a compatible signed provider image, then configure
 private-CA listener and certificate rotation, and finally switch pension callers to HTTPS.
 OIDC and policy checks continue to authorize business operations independently of TLS trust.
 Roll back caller URLs before removing the provider listener or reverting its image.
+
+## Verified mandate initiator identity (#12448, PR #12538)
+
+- **Spoofing / Elevation of privilege:** `MandateInitiatorScopes` recognises the pension scoped
+  initiator and customer-edge only through `ServiceAccountIdentity.isPrincipal` (verified JWT,
+  `azp` = the client, `preferred_username` = `service-account-<azp>`), never the principal
+  name, which Quarkus takes from a username claim.
+- `ROLE_OPERATOR` / `ROLE_ADMIN` grant general mandate initiation only with a verified
+  interactive human token (`ServiceAccountIdentity.isHumanStaff`); any other caller, including a
+  machine token holding those roles, is `Denied`.
+- **Rollback:** reverting the class restores name-based matching; no schema or data change.
