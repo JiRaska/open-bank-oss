@@ -75,6 +75,9 @@
 #         is the step-up flow disappearing, i.e. MFA silently gone after a rebuild. The boot test
 #         cannot see it; only this rule can.
 #
+#     R11 repeated clientId or username across array entries. Independent additions can
+#         merge cleanly at different positions; duplicate JSON-key detection cannot see them.
+#
 #   Measured on the pre-fix templates: 12 findings, covering R1 (×5), R2, R3 (×2), R7, R8 and R9.
 #   Each was independently confirmed against the real container — the customers realm needed all
 #   four import-blockers removed before `Realm 'openbank-customers' imported` appeared.
@@ -95,6 +98,7 @@
 #   python3 .github/scripts/check-realm-template-importable.py --self-test
 
 import argparse
+from collections import Counter
 import glob
 import json
 import sys
@@ -158,6 +162,18 @@ def check_realm(name, realm):
     findings = []
     clients = realm.get("clients", []) or []
     users = realm.get("users", []) or []
+
+    # A clean text merge can append the same identity at two array positions.
+    # JSON key uniqueness cannot detect that; identity uniqueness must be checked separately.
+    for collection, key in ((clients, "clientId"), (users, "username")):
+        counts = Counter(item.get(key) for item in collection
+                         if isinstance(item.get(key), str) and item.get(key))
+        for identity, count in counts.items():
+            if count > 1:
+                findings.append(
+                    f"[{name}] duplicate `{key}` identity `{identity}` occurs {count} times (R11) "
+                    "— reconcile the entries into one reviewed identity before import."
+                )
 
     for path, key in _walk_prose_keys(realm):
         findings.append(
@@ -440,6 +456,15 @@ def self_test():
     f, _ = check_realm("t", d)
     cases.append(("R10 dangling sub-flow flagged", any("R10" in x and "sub-flow" in x for x in f), f))
 
+    for collection, key in (("clients", "clientId"), ("users", "username")):
+        d = _clean()
+        d[collection].append(copy.deepcopy(d[collection][0]))
+        f, _ = check_realm("t", d)
+        cases.append((f"R11 duplicate {key} flagged", any("R11" in x for x in f), f))
+        d[collection][-1][key] += "-distinct"
+        f, _ = check_realm("t", d)
+        cases.append((f"R11 distinct {key} passes", not any("R11" in x for x in f), f))
+
     bad = 0
     for label, passed, detail in cases:
         print(f"  {'PASS' if passed else 'FAIL'}  {label}")
@@ -467,7 +492,7 @@ def main():
     findings, n_clients, n_users = run(paths)
     print(
         f"realm-template-importable: compared {len(paths)} template(s), "
-        f"{n_clients} client(s), {n_users} user(s) against 9 rules."
+        f"{n_clients} client(s), {n_users} user(s) against 11 rules."
     )
     for p in paths:
         print(f"  - {p}")
