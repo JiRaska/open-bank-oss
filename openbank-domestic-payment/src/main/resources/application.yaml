@@ -283,6 +283,10 @@ authz:
     enforce: "${AUTHZ_FOUR_EYES_ENFORCE:false}"
 "%prod":
   quarkus:
+    http:
+      ssl:
+        client-auth: required
+      insecure-requests: enabled
     # PaymentConfirmationRenderAdapter calls document-service. Production uses a named TLS bucket over
     # document-service's private-CA mTLS listener (8443, client auth REQUIRED), the same shape as
     # notification-service's party-authority bucket. Local/test fixtures speak plain HTTP, so this
