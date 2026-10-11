@@ -209,4 +209,7 @@ environment variable cannot upgrade an image built without it. Preserve the HTTP
 during rollout. First publish a compatible signed provider image, then configure the
 private-CA listener and certificate rotation, and finally switch pension callers to HTTPS.
 OIDC and policy checks continue to authorize business operations independently of TLS trust.
+The production `/api/*` permission selects the bearer mechanism explicitly: a client certificate
+alone may establish transport trust but must receive 401, not become an API identity. The listener
+parity test covers no certificate, certificate without bearer, and certificate with valid bearer.
 Roll back caller URLs before removing the provider listener or reverting its image.

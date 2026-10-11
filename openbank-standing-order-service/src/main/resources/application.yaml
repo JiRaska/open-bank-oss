@@ -214,3 +214,11 @@ authz:
       ssl:
         client-auth: required
       insecure-requests: enabled
+      # A trusted client certificate authenticates the transport only. The API identity used by
+      # @RolesAllowed and OPA must still come from OIDC, on both HTTP and mTLS listeners (#12511).
+      auth:
+        permission:
+          bearer-only:
+            paths: /api/*
+            policy: permit
+            auth-mechanism: bearer
