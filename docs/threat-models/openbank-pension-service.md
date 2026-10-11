@@ -29,11 +29,17 @@ packs are code-reviewed data baked into the image, not runtime input).
 
 - Every route is `@RolesAllowed(API, OPERATOR, ADMIN)` behind Keycloak OIDC; there is no
   anonymous surface.
-- `pension_rest_ext.rego` grants the participant actions (`create`, `submit`, `activate`,
-  `strategy`, `suspend`, `resume`, `terminate`, `inspect`) to `service-account-openbank-edge` only,
+- `pension_rest_ext.rego` grants the participant actions (`strategy`, `suspend`, `resume`,
+  `inspect`, the onboarding steps, `transfer.request-out`/`.consent`/`.withdraw`) to
+  `service-account-openbank-edge` only. The S1 draft routes (`create`, `submit`) and the S1
+  `activate`/`terminate` shortcuts are retired: no route serves them and no rule grants them,
   keyed on `principal.id`, and grants real staff (`HUMAN`, not `service-account-*`) **read only**.
   No action is placed in `rules.yaml: authz.role_action_matrix`, because a matrix line is a grant
   to every service-account holding the role and cannot be vetoed (#3765/#3734).
+- A transfer-out is withdrawable by its participant only before valuation (`AWAITING_CONSENT`
+  or `REQUESTED`): SCA-signed over `pension-transfer-withdraw:<id>`, another party's transfer
+  answers 404, and a concurrent valuation is ordered by the optimistic version, so a withdrawal
+  can never land after units were sold. A receiving provider or staff cannot withdraw for them.
 - `AUTHZ_ENFORCE=true` from the first rollout. Policy tests carry a must-deny for every allow.
 - **No pension action ends in `.read` or `.list`.** Base `rest.rego` grants every such action to
   any HUMAN-classified principal holding `ROLE_OPERATOR`/`ROLE_ADMIN` (`operator-read-any`) or
