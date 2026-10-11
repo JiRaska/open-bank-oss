@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 
-package com.openbank.ledger.contract
+package com.openbank.ledger.fixtures
 
+import com.openbank.ledger.contract.FinrepFrozenMonthPactSeed
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.time.LocalDate
 
-class FinrepFrozenMonthPactSeedPlanTest {
+class FinrepFrozenMonthSeedPlanTest {
     @Test
     fun `legacy requests select one frozen month`() {
         assertThat(
