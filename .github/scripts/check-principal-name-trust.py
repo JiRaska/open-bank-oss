@@ -34,7 +34,7 @@ import tempfile
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import gatelib  # noqa: E402  (path shim above must run first)
 
-NAME = r"(?:\b(?:user)?[Pp]rincipal\s*(?:\?|!!)?\s*\.\s*(?:name|getName\(\))\b)"
+NAME = r"(?:\b(?:user)?[Pp]rincipal\s*(?:\?|!!)?\s*\.\s*(?:name\b|getName\(\)))"
 CMP = r"(?:==|!=|!in\b|\bin\b|\.equals\()"
 DIRECT = re.compile(rf"{NAME}\s*\)?\s*{CMP}|{CMP}\s*\(?\s*[\w.]*?{NAME}")
 ALIAS = re.compile(rf"\bva[lr]\s+(\w+)(?:\s*:\s*[\w?]+)?\s*=\s*[\w.()?!]*?{NAME}\s*(?:$|\?:|\.orEmpty\(\)|\.trim\(\)|;)")
@@ -108,6 +108,8 @@ SELF_TEST = [
      "val principal = identity.principal?.name\nif (principal == null || principal !in trustedRelays) deny()\n", True),
     ("userPrincipal via SecurityContext is flagged", "svc/src/main/kotlin/A.kt",
      'if (ctx.userPrincipal?.name == "service-account-x") ok()\n', True),
+    ("getName() accessor is flagged", "svc/src/main/kotlin/A.kt",
+     'if (identity.principal.getName() == "service-account-x") ok()\n', True),
     ("the helper is clean", "svc/src/main/kotlin/A.kt",
      "if (!ServiceAccountIdentity.isOneOf(identity, CALLERS)) throw ForbiddenException()\n", False),
     ("reading the name for attribution is clean", "svc/src/main/kotlin/A.kt",
