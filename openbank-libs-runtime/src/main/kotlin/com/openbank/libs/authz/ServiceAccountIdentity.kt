@@ -71,8 +71,10 @@ object ServiceAccountIdentity {
         identity?.principal is JsonWebToken && machineClientId(identity.principal) == null
 
     /**
-     * The verified client of a MACHINE token, or `null` when the verified token is not one — the
-     * value the PEP hands OPA as `input.principal.service_account`/`client_id`.
+     * The client hinted by a MACHINE token, or `null` when the token is not one. This broad
+     * classifier drives `input.principal.service_account`; it is NOT safe to use as the
+     * `input.principal.client_id` proof for a named-client grant. That value must come from
+     * [verifiedClientId], which binds `azp` to the service-account username.
      *
      * Broader than [verifiedClientId] on purpose: that one answers "is this exactly client C's own
      * service-account" (for granting a SPECIFIC client), this one answers "is this a machine at

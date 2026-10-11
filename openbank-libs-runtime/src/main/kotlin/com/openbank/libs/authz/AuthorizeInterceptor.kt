@@ -459,14 +459,17 @@ class AuthorizeInterceptor {
     private fun buildQuery(ctx: InvocationContext, annotation: Authorize): AuthzQuery {
         val sc = securityContext.get()
         // The machine flag comes from VERIFIED claims only, never from the name above.
-        val machineClient = ServiceAccountIdentity.machineClientId(identity.get().principal)
+        // A malformed or unreadable claim is never proof of a named client.
+        val verifiedClient = runCatching { ServiceAccountIdentity.verifiedClientId(identity.get()) }.getOrNull()
         val principal = Principal(
             id = sc.userPrincipal?.name ?: "anonymous",
             type = principalType(sc, identity.get()),
             roles = identity.get().roles.toList(),
             // FAIL CLOSED: anything not positively verified as a person is a machine.
             serviceAccount = !ServiceAccountIdentity.isVerifiedPerson(identity.get()),
-            clientId = machineClient?.takeIf { it.isNotEmpty() },
+            // A named machine grant must bind to the token's azp AND matching
+            // service-account username, never to the optional client_id session note alone.
+            clientId = verifiedClient,
         )
         val resource = annotation.resource.takeIf { it.isNotEmpty() }?.let { expr ->
             extractResource(ctx, annotation, expr)
