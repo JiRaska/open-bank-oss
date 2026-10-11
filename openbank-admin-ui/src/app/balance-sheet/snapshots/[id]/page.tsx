@@ -25,7 +25,7 @@ import Link from 'next/link'
 import { ArrowLeft, Scale } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { PageHeader, StatCard, StatusBadge } from '@/components/ui'
+import { HumanReference, PageHeader, StatCard, StatusBadge } from '@/components/ui'
 import type { Tone } from '@/components/ui/tone'
 import { ProvenanceBadge } from '@/components/balance-sheet/ProvenanceBadge'
 import { RequestedByBadge } from '@/components/balance-sheet/RequestedByBadge'
@@ -127,12 +127,16 @@ function SnapshotDetail({ id }: { id: string }) {
     <div>
       <PageHeader
         title={t(`Snímek rozvahy k ${run.asOf}`, `Balance-sheet snapshot as of ${run.asOf}`)}
-        subtitle={t(`Běh ${run.id} · hash vstupů ${run.inputHash.slice(0, 12)}…`, `Run ${run.id} · input hash ${run.inputHash.slice(0, 12)}…`)}
+        subtitle={t(`Zaznamenáno ${new Date(run.recordedAt).toLocaleString(locale)}`, `Recorded ${new Date(run.recordedAt).toLocaleString(locale)}`)}
         icon={<Scale size={20} aria-hidden="true" />}
         actions={back}
       />
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+        <HumanReference label={t('Běh snímku', 'Snapshot run')} reference={run.id} copyLabel={t('Kopírovat ID běhu', 'Copy run ID')} />
+        <span className="mono" title={run.inputHash} style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+          {t('Hash vstupů', 'Input hash')}: {run.inputHash.slice(0, 12)}…
+        </span>
         <StatusBadge status={run.status} tone={tied ? 'success' : 'danger'} label={tied ? t('Odsouhlaseno s hlavní knihou', 'Tied out to the ledger') : t('Neodsouhlaseno s hlavní knihou', 'Did not tie out to the ledger')} />
         <ProvenanceBadge provenance={run.provenance} />
         {tied && (
