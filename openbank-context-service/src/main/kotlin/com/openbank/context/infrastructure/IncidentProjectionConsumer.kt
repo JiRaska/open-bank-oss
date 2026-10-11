@@ -176,7 +176,7 @@ class IncidentProjectionConsumer(
             WHERE context_nodes.source_version < EXCLUDED.source_version
         """.trimIndent(),
         mapOf(
-            "id" to incidentStableId("$bankScope|$projectionGeneration|$key"),
+            "id" to UUID.randomUUID(),
             "key" to key,
             "bankScope" to bankScope,
             "generation" to projectionGeneration,

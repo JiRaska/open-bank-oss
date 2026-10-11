@@ -218,7 +218,7 @@ private data class RailNode(
     val version: Long,
 ) {
     fun values(bankScope: String, generation: Long, recordedAt: Instant): Map<String, Any> = mapOf(
-        "rowId" to railStableId("$bankScope|$generation|$key"),
+        "rowId" to UUID.randomUUID(),
         "key" to key,
         "bankScope" to bankScope,
         "generation" to generation,
