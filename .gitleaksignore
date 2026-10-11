@@ -29,3 +29,9 @@ cae11688fbd8ab870c3f60da4ff8beb3b5679fc0:pacts/openbank-pension-service-openbank
 cf3e065ac99ab8c2d8d715fa1de5955e9c3edc1b:pacts/openbank-pension-service-openbank-account-service.json:iban-real:74
 e4d465c0f7c06f8143ea237b3f8672f585ca113a:openbank-pension-service/src/main/kotlin/com/openbank/pension/infrastructure/payments/ParticipantAccountAdapters.kt:iban-real:43
 b046cb5ede0bc7f535de8165d02083a3a5c49e9c:pacts/openbank-pension-service-openbank-account-service.json:iban-real:37
+# FALSE POSITIVE (#12419): iban-real matched a made-up "unknown IBAN" (bank 0800, all-zero account
+# digits) in the sdd->account consumer pact. The test now uses a safelisted IBAN; these entries only
+# cover intermediate commits still in the PR's history (squash-merged, never on main). The second
+# entry is this comment's own earlier wording, which quoted the literal.
+ed2bf55aedcbc9f9e99859b0d68f6c77351b9d03:pacts/openbank-sdd-service-openbank-account-service.json:iban-real:45
+2289fa6593d058647e8a28338721a5a3925a722f:.gitleaksignore:iban-real:10

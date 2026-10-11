@@ -71,6 +71,10 @@ quarkus:
     transaction-service:
       url: ${TRANSACTION_SERVICE_URL:http://localhost:8102}
       scope: jakarta.inject.Singleton
+    # ADR-0335 D6: ownership verification for a scoped mandate initiator, as service-account-openbank-sdd.
+    account-service:
+      url: ${ACCOUNT_SERVICE_URL:http://localhost:8100}
+      scope: jakarta.inject.Singleton
   shutdown:
     timeout: 30S
   log:
@@ -198,3 +202,22 @@ mp:
         topic: openbank.sdd.event
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
         key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+
+"%prod":
+  quarkus:
+    # ADR-0335 D6: account-service's private-CA mTLS listener (8443, client auth REQUIRED), same
+    # shape as aml-service's account-authority. Local/test fixtures speak plain HTTP.
+    tls:
+      account-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/account-tls/tls.crt
+              key: /mnt/account-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/account-tls/ca.crt
+        protocols: TLSv1.3
+    rest-client:
+      account-service:
+        tls-configuration-name: account-authority
