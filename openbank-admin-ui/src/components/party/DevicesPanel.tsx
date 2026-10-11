@@ -14,7 +14,7 @@ import type { DeviceFact } from '@/lib/context/customerGraph'
 
 // Reads notification-service's `GET /api/v1/devices?partyId=` (DeviceResource, ROLE_VIEWER-readable)
 // through the ADR-0056 BFF proxy — same operator-token relay + backend RBAC as AdverseStatePanel, no
-// new BFF route needed since notification-service is already in the proxy's SERVICE_MAP.
+// new BFF route needed since notification-service is already in the proxy's derived allowlist.
 //
 // DeviceResource deliberately never returns the push token itself (PII-adjacent, write-only) — only
 // platform/appVersion/osVersion/status and three timestamps. There is no "last login" anywhere in the
