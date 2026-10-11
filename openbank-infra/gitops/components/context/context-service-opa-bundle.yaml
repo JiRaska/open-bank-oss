@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: context-service
     app.kubernetes.io/part-of: context
   annotations:
-    openbank.tech/policy-checksum: "307bae50938c915d"
+    openbank.tech/policy-checksum: "16c50936c56ba9ee"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1284,10 +1284,10 @@ data:
       # entry here does NOT keep the shared account out on its own. For a read that must be closed to
       # it, name the action with a non-read verb (`.inspect`, `.reconstruct`) instead, as
       # pension-fund.holding.inspect does (#12481).
-      operator_read_any_excluded_actions:
-        - tax.filing.read             # §38d withholding returns and the per-remittance audit trail behind
-                                      # them (#5760): real staff only via tax_reporting_rest_ext.rego; no
-                                      # service-account reads them through operator-read-any
+      # Empty since tax.filing.read was renamed tax.filing.inspect: its entry here never kept the
+      # shared service-account out (compliance-read-any still admitted it). Kept as a key so a
+      # future entry has a home, but prefer the non-read verb.
+      operator_read_any_excluded_actions: []
       role_action_matrix:
         ROLE_OPERATOR:
           grant:

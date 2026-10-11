@@ -4,7 +4,7 @@
 # Mounted alongside rest.rego in the same OPA bundle — OPA merges same-package rules.
 #
 # Actions gated (TaxFilingResource):
-#   tax.filing.read      — GET /api/v1/tax/filings, /overdue, /{period}, /{period}/remittances,
+#   tax.filing.inspect   — GET /api/v1/tax/filings, /overdue, /{period}, /{period}/remittances,
 #                          /export-capability
 #   tax.filing.assemble  — POST /api/v1/tax/filings/{period}/assemble   (OPEN -> ASSEMBLED)
 #   tax.filing.file      — POST /api/v1/tax/filings/{period}/filed      (ASSEMBLED -> FILED)
@@ -22,12 +22,22 @@ package openbank.rest
 import rego.v1
 
 # Real staff, reading. A tax return is exactly the artefact an auditor needs to see.
+#
+# The read action deliberately does NOT end in `.read`/`.list`. It used to be `tax.filing.read`,
+# vetoed for operator-read-any by rules.yaml authz.operator_read_any_excluded_actions — but base
+# rest.rego's compliance-read-any grants every `.read` to any HUMAN principal holding
+# ROLE_COMPLIANCE, and that list does not veto it. Keycloak service-accounts are classified HUMAN
+# and the shared one holds ROLE_COMPLIANCE in at least one realm, so every backend service could
+# read §38d returns (per-taxpayer data). A non-read verb is reachable only through the rule below
+# (same remedy as pension-fund.holding.inspect, audit.evidence.reconstruct).
+#
+# Machine exclusion is the id-prefix test; move to `not principal_is_machine` once #12537 lands.
 allowed_reasons contains "staff-tax-filing-read" if {
 	input.principal.type == "HUMAN"
 	not startswith(input.principal.id, "service-account-")
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_AUDITOR", "ROLE_VIEWER", "ROLE_COMPLIANCE"}
 	role in input.principal.roles
-	input.action == "tax.filing.read"
+	input.action == "tax.filing.inspect"
 }
 
 # Real operators freeze and file a period. No service-account, whatever roles it holds.

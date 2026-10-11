@@ -6,12 +6,10 @@ package openbank.rest_test
 import data.openbank.rest
 import rego.v1
 
-excluded := {"authz": {"operator_read_any_excluded_actions": ["tax.filing.read"]}}
-
 test_auditor_may_read_filings if {
 	rest.allow with input as {
 		"principal": {"type": "HUMAN", "id": "audrey", "roles": ["ROLE_AUDITOR"]},
-		"action": "tax.filing.read",
+		"action": "tax.filing.inspect",
 	}
 }
 
@@ -54,28 +52,62 @@ test_service_account_with_operator_may_not_assemble if {
 	}
 }
 
-# tax.filing.read is in rules.yaml authz.operator_read_any_excluded_actions, so a service-account
-# holding ROLE_OPERATOR cannot read a return through base operator-read-any either.
-test_service_account_with_operator_may_not_read if {
+# tax.filing.inspect is deliberately NOT a `.read`: base compliance-read-any grants every `.read`
+# to any HUMAN holding ROLE_COMPLIANCE (and operator-read-any every `.read`/`.list` to
+# ROLE_OPERATOR/ROLE_ADMIN), and Keycloak service-accounts are classified HUMAN. These run with the
+# REAL data.rules (no exclusion list override), so renaming the action back to `.read` reddens them.
+test_shared_service_account_may_not_inspect_with_any_staff_role if {
+	every role in ["ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE", "ROLE_AUDITOR", "ROLE_VIEWER"] {
+		not rest.allow with input as {
+			"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_API", role]},
+			"action": "tax.filing.inspect",
+		}
+	}
+}
+
+test_shared_service_account_with_every_role_may_not_inspect if {
 	not rest.allow with input as {
-		"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_API", "ROLE_OPERATOR"]},
-		"action": "tax.filing.read",
+		"principal": {
+			"type": "HUMAN", "id": "service-account-openbank-services",
+			"roles": ["ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE", "ROLE_AUDITOR"],
+		},
+		"action": "tax.filing.inspect",
 	}
-		with data.rules as excluded
 }
 
-# Staff still read with the exclusion in force.
-test_auditor_reads_with_exclusion_in_force if {
-	rest.allow with input as {
-		"principal": {"type": "HUMAN", "id": "audrey", "roles": ["ROLE_AUDITOR"]},
-		"action": "tax.filing.read",
+test_another_service_account_may_not_inspect if {
+	not rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "service-account-openbank-ledger", "roles": ["ROLE_COMPLIANCE", "ROLE_OPERATOR"]},
+		"action": "tax.filing.inspect",
 	}
-		with data.rules as excluded
 }
 
-test_anonymous_may_not_read if {
+test_ai_agent_may_not_inspect if {
+	not rest.allow with input as {
+		"principal": {"type": "AI_AGENT", "id": "agent-compliance-copilot", "roles": ["ROLE_COMPLIANCE", "ROLE_OPERATOR"]},
+		"action": "tax.filing.inspect",
+	}
+}
+
+test_customer_may_not_inspect if {
+	not rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "carol", "roles": ["ROLE_CUSTOMER"]},
+		"action": "tax.filing.inspect",
+	}
+}
+
+test_staff_may_inspect_with_each_staff_role if {
+	every role in ["ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_AUDITOR", "ROLE_VIEWER", "ROLE_COMPLIANCE"] {
+		rest.allow with input as {
+			"principal": {"type": "HUMAN", "id": "audrey", "roles": [role]},
+			"action": "tax.filing.inspect",
+		}
+	}
+}
+
+test_anonymous_may_not_inspect if {
 	not rest.allow with input as {
 		"principal": {"type": "ANONYMOUS", "id": "", "roles": []},
-		"action": "tax.filing.read",
+		"action": "tax.filing.inspect",
 	}
 }

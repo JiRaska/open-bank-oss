@@ -60,14 +60,14 @@ class TaxFilingResource(private val taxFilingService: TaxFilingService, private 
 
     @GET
     @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
-    @Authorize(action = "tax.filing.read")
+    @Authorize(action = "tax.filing.inspect")
     @Operation(summary = "List filing periods, newest first")
     suspend fun list(): Response = Response.ok(taxFilingService.list().map { it.toResponse() }).build()
 
     @GET
     @Path("/overdue")
     @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
-    @Authorize(action = "tax.filing.read")
+    @Authorize(action = "tax.filing.inspect")
     @Operation(
         summary = "Filings past their §38d deadline and not yet filed — the thing worth alerting on",
     )
@@ -76,7 +76,7 @@ class TaxFilingResource(private val taxFilingService: TaxFilingService, private 
     @GET
     @Path("/{period}")
     @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
-    @Authorize(action = "tax.filing.read")
+    @Authorize(action = "tax.filing.inspect")
     @Operation(summary = "Get one filing period (YYYY-MM)")
     suspend fun get(@PathParam("period") period: String): Response =
         Response.ok(taxFilingService.get(parsePeriod(period)).toResponse()).build()
@@ -84,7 +84,7 @@ class TaxFilingResource(private val taxFilingService: TaxFilingService, private 
     @GET
     @Path("/{period}/remittances")
     @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
-    @Authorize(action = "tax.filing.read")
+    @Authorize(action = "tax.filing.inspect")
     @Operation(summary = "The remittance batches making up a period — the audit trail behind the total")
     suspend fun remittances(@PathParam("period") period: String): Response =
         Response.ok(taxFilingService.remittancesFor(parsePeriod(period)).map { it.toResponse() }).build()
@@ -115,7 +115,7 @@ class TaxFilingResource(private val taxFilingService: TaxFilingService, private 
     @GET
     @Path("/export-capability")
     @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
-    @Authorize(action = "tax.filing.read")
+    @Authorize(action = "tax.filing.inspect")
     @Operation(
         summary = "Whether EPO XML rendering is available; reports the truth rather than implying it",
     )
