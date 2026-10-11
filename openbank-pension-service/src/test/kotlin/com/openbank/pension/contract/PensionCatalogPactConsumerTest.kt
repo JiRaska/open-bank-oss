@@ -23,7 +23,9 @@ import io.restassured.RestAssured.given
 import jakarta.ws.rs.Path
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.MethodOrderer
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.TestMethodOrder
 import org.junit.jupiter.api.extension.ExtendWith
 import java.time.Instant
 import java.time.OffsetDateTime
@@ -31,6 +33,7 @@ import java.util.UUID
 
 /** Published strategy evidence consumed by pension before accepting a DIP selection. */
 @ExtendWith(PactConsumerTestExt::class)
+@TestMethodOrder(MethodOrderer.MethodName::class)
 @PactTestFor(providerName = "openbank-product-catalog", pactVersion = PactSpecVersion.V3)
 class PensionCatalogPactConsumerTest {
     private val mapper = jacksonObjectMapper()

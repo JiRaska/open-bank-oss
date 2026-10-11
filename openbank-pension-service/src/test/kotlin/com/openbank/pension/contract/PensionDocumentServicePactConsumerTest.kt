@@ -28,7 +28,9 @@ import io.restassured.RestAssured.given
 import jakarta.ws.rs.Path
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.MethodOrderer
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.TestMethodOrder
 import org.junit.jupiter.api.extension.ExtendWith
 import java.util.UUID
 
@@ -54,6 +56,7 @@ private const val CONSUMER = "openbank-pension-service"
 private const val PROVIDER = "openbank-document-service"
 
 @ExtendWith(PactConsumerTestExt::class)
+@TestMethodOrder(MethodOrderer.MethodName::class)
 @PactTestFor(providerName = PROVIDER, pactVersion = PactSpecVersion.V3)
 class PensionDocumentServicePactConsumerTest {
 

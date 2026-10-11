@@ -29,7 +29,9 @@ import io.restassured.RestAssured.given
 import jakarta.ws.rs.Path
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.MethodOrderer
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.TestMethodOrder
 import org.junit.jupiter.api.extension.ExtendWith
 import java.math.BigDecimal
 import java.time.Clock
@@ -50,6 +52,7 @@ import java.util.UUID
  * One class for the whole pair: `pact.writer.overwrite=true` makes each class rewrite the file.
  */
 @ExtendWith(PactConsumerTestExt::class)
+@TestMethodOrder(MethodOrderer.MethodName::class)
 @PactTestFor(providerName = "openbank-pension-fund-service", pactVersion = PactSpecVersion.V3)
 class PensionFundPactConsumerTest {
 
