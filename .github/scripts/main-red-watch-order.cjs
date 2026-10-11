@@ -16,7 +16,7 @@ async function unprocessedAttempts(checkpoint, fetchPage, options = {}) {
   const maxAttempts = options.maxAttempts ?? 25
   const eventRunId = options.eventRunId
   if (!Number.isSafeInteger(checkpoint?.run_id) || checkpoint.run_id < 1 ||
-      !Number.isSafeInteger(checkpoint.attempt) || checkpoint.attempt < 1 ||
+      !Number.isSafeInteger(checkpoint.attempt) || checkpoint.attempt < 0 ||
       !Number.isSafeInteger(eventRunId) || eventRunId < 1 ||
       !Number.isSafeInteger(maxPages) || maxPages < 1 ||
       !Number.isSafeInteger(maxAttempts) || maxAttempts < 1) {

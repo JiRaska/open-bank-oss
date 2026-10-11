@@ -1,0 +1,150 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+
+const assert = require('node:assert/strict')
+const { applyVerdict, runCatchup, waitForIndex } = require('./main-red-watch-catchup.cjs')
+const { parseCheckpoint, readCheckpoint, writeCheckpoint } = require('./main-red-watch-checkpoint.cjs')
+const { LatestRunLagError } = require('./main-red-watch-order.cjs')
+
+const context = { repo: { owner: 'o', repo: 'r' }, workflow: 'main red watch', runId: 900 }
+const leaf = 'build (openbank-document-service) / openbank-document-service (contract)'
+const failed = job => ({ job, conclusion: 'failure', steps: ['Provider verification'], job_url: 'https://example.invalid/log' })
+const verdict = (run_id, status, failing, successful_jobs = []) => ({
+  run_id, attempt: 1, status, failing, successful_jobs, workflow: 'Services CI',
+  head_sha: 'abc123456789', html_url: 'https://example.invalid/run',
+})
+
+async function main() {
+  let indexReads = 0
+  const sleeps = []
+  assert.equal(await waitForIndex(async () => {
+    if (++indexReads === 1) throw new LatestRunLagError('not indexed yet')
+    return 42
+  }, async ms => sleeps.push(ms)), 42)
+  assert.deepEqual(sleeps, [1000])
+  await assert.rejects(waitForIndex(async () => { throw new Error('permission denied') },
+    async () => { throw new Error('unexpected wait') }), /permission denied/)
+  assert.throws(() => parseCheckpoint({ version: 1, workflow_id: 7, run_id: 100, attempt: -1 }, 7), /Malformed/)
+  assert.throws(() => parseCheckpoint({ version: 1, workflow_id: 8, run_id: 100, attempt: 1 }, 7), /Malformed/)
+
+  let content = null
+  let currentSha = null
+  const files = {
+    rest: { repos: {
+      getContent: async () => {
+        if (!content) throw Object.assign(new Error('missing'), { status: 404 })
+        return { data: { type: 'file', sha: currentSha, encoding: 'base64', content } }
+      },
+      createOrUpdateFileContents: async args => {
+        if ((args.sha || null) !== currentSha) throw Object.assign(new Error('stale SHA'), { status: 409 })
+        currentSha = `sha-${Number((currentSha || 'sha-0').split('-')[1]) + 1}`
+        content = args.content
+        return { data: { content: { sha: currentSha } } }
+      },
+    } },
+  }
+  assert.deepEqual(await readCheckpoint(files, context.repo, 7), { checkpoint: null, sha: null })
+  const cursor = { version: 1, workflow_id: 7, run_id: 101, attempt: 1 }
+  assert.equal(await writeCheckpoint(files, context.repo, 7, cursor, null), 'sha-1')
+  assert.deepEqual((await readCheckpoint(files, context.repo, 7)).checkpoint, cursor)
+  await assert.rejects(writeCheckpoint(files, context.repo, 7,
+    { ...cursor, run_id: 102 }, 'stale'), /stale SHA/)
+  assert.deepEqual((await readCheckpoint(files, context.repo, 7)).checkpoint, cursor)
+
+  const issues = []
+  const github = {
+    paginate: async (_method, args) => issues.filter(i => i.state === args.state),
+    rest: { issues: {
+      listForRepo: async () => {},
+      create: async args => {
+        const issue = { number: issues.length + 1, state: 'open', title: args.title, body: args.body }
+        issues.push(issue)
+        return { data: issue }
+      },
+      update: async args => {
+        const issue = issues.find(i => i.number === args.issue_number)
+        Object.assign(issue, args)
+        if (args.state === 'closed') issue.closed_at = new Date().toISOString()
+        return { data: issue }
+      },
+      createComment: async () => ({ data: {} }),
+    } },
+  }
+  // The red event's own watcher was replaced before it created an issue. A
+  // later green event replays red 101 first, then scoped green 102. The issue
+  // survives until the former failing leaf really runs successfully.
+  await applyVerdict(github, context, verdict(101, 'red', [failed(leaf), failed('all-green')]))
+  assert.equal(issues.length, 1)
+  assert.equal(issues[0].state, 'open')
+  await applyVerdict(github, context, verdict(101, 'red', [failed(leaf), failed('all-green')]))
+  assert.equal(issues.length, 1)
+  await applyVerdict(github, context, verdict(102, 'green', [], ['all-green']))
+  assert.equal(issues[0].state, 'open')
+  assert.match(issues[0].body, /openbank-document-service/)
+  await applyVerdict(github, context, verdict(103, 'green', [], [leaf, 'all-green']))
+  assert.equal(issues[0].state, 'closed')
+  // A repeated green after issue mutation but before cursor persistence must
+  // be idempotent, and must not create another issue.
+  await applyVerdict(github, context, verdict(103, 'green', [], [leaf, 'all-green']))
+  assert.equal(issues.length, 1)
+
+  // Exercise the workflow entry point, not just the issue reducer: a missing
+  // red webhook is recovered from the Actions list and the cursor advances
+  // only after the red and subsequent scoped green have been applied.
+  const entryIssues = []
+  const sourceRuns = [102, 101, 100].map(id => ({ id, run_attempt: 1, status: 'completed' }))
+  let entryContent = Buffer.from(JSON.stringify({ version: 1, workflow_id: 7, run_id: 100, attempt: 1 })).toString('base64')
+  let entrySha = 'initial'
+  const entryGithub = {
+    paginate: async (_method, args) => entryIssues.filter(i => i.state === args.state),
+    rest: {
+      git: { getRef: async () => ({ data: { object: { sha: 'main-sha' } } }) },
+      actions: { listWorkflowRuns: async () => ({ data: {
+        total_count: sourceRuns.length, workflow_runs: sourceRuns,
+      } }) },
+      repos: {
+        getContent: async () => ({ data: { type: 'file', sha: entrySha,
+          encoding: 'base64', content: entryContent } }),
+        createOrUpdateFileContents: async args => {
+          assert.equal(args.sha, entrySha)
+          entryContent = args.content
+          entrySha = 'updated'
+          return { data: { content: { sha: entrySha } } }
+        },
+      },
+      issues: {
+        listForRepo: async () => {},
+        create: async args => {
+          const issue = { number: entryIssues.length + 1, state: 'open', body: args.body, title: args.title }
+          entryIssues.push(issue)
+          return { data: issue }
+        },
+        update: async args => {
+          const issue = entryIssues.find(i => i.number === args.issue_number)
+          Object.assign(issue, args)
+          return { data: issue }
+        },
+        createComment: async () => ({ data: {} }),
+      },
+    },
+  }
+  const entryContext = { ...context, payload: { workflow_run: {
+    id: 102, workflow_id: 7, head_branch: 'main', event: 'push',
+  } } }
+  const seen = []
+  await runCatchup({ github: entryGithub, context: entryContext,
+    core: { info: () => {}, warning: () => {} },
+    classify: async (_repo, id, attempt) => {
+      seen.push(`${id}/${attempt}`)
+      return id === 101 ? verdict(101, 'red', [failed(leaf)]) : verdict(102, 'green', [], ['all-green'])
+    },
+  })
+  assert.deepEqual(seen, ['101/1', '102/1'])
+  assert.equal(entryIssues.length, 1)
+  assert.equal(entryIssues[0].state, 'open')
+  assert.equal(JSON.parse(Buffer.from(entryContent, 'base64')).run_id, 102)
+  console.log('main-red-watch durable checkpoint and replaced-event recovery: passed')
+}
+
+main().catch(error => { console.error(error); process.exitCode = 1 })
