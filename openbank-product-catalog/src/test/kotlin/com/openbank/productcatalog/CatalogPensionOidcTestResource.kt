@@ -24,86 +24,7 @@ class CatalogPensionOidcTestResource : QuarkusTestResourceLifecycleManager {
 
     override fun start(): Map<String, String> {
         val secret = UUID.randomUUID().toString()
-        val realm = mapOf(
-            "realm" to REALM,
-            "enabled" to true,
-            "roles" to mapOf(
-                "realm" to listOf(
-                    mapOf("name" to "ROLE_API"),
-                    mapOf("name" to "ROLE_PENSION_LEGAL_COUNSEL"),
-                    mapOf("name" to "ROLE_PENSION_PRODUCT_OWNER"),
-                ),
-            ),
-            "clientScopes" to listOf(
-                mapOf(
-                    "name" to "basic",
-                    "protocol" to "openid-connect",
-                    "protocolMappers" to listOf(
-                        mapOf(
-                            "name" to "sub",
-                            "protocol" to "openid-connect",
-                            "protocolMapper" to "oidc-sub-mapper",
-                            "consentRequired" to false,
-                            "config" to mapOf("access.token.claim" to "true"),
-                        ),
-                    ),
-                ),
-                mapOf(
-                    "name" to "profile",
-                    "protocol" to "openid-connect",
-                    "protocolMappers" to listOf(
-                        mapOf(
-                            "name" to "username",
-                            "protocol" to "openid-connect",
-                            "protocolMapper" to "oidc-usermodel-attribute-mapper",
-                            "consentRequired" to false,
-                            "config" to mapOf(
-                                "user.attribute" to "username",
-                                "access.token.claim" to "true",
-                                "claim.name" to "preferred_username",
-                                "jsonType.label" to "String",
-                            ),
-                        ),
-                    ),
-                ),
-                mapOf(
-                    "name" to "roles",
-                    "protocol" to "openid-connect",
-                    "protocolMappers" to listOf(
-                        mapOf(
-                            "name" to "realm roles",
-                            "protocol" to "openid-connect",
-                            "protocolMapper" to "oidc-usermodel-realm-role-mapper",
-                            "consentRequired" to false,
-                            "config" to mapOf(
-                                "access.token.claim" to "true",
-                                "claim.name" to "realm_access.roles",
-                                "jsonType.label" to "String",
-                                "multivalued" to "true",
-                            ),
-                        ),
-                    ),
-                ),
-            ) + listOf("catalog:read", "pension:legal-approve", "pension:product-approve")
-                .map { mapOf("name" to it, "protocol" to "openid-connect") },
-            "clients" to listOf(
-                client("openbank-pension", secret, catalogRead = true),
-                client("unrelated-service", secret, catalogRead = true),
-                client("unmarked-service", secret, catalogRead = true).toMutableMap().apply {
-                    put("defaultClientScopes", listOf("basic", "catalog:read"))
-                },
-                adminClient(secret),
-            ),
-            "users" to listOf(
-                serviceUser("openbank-pension"),
-                serviceUser("unrelated-service"),
-                serviceUser("unmarked-service").toMutableMap().apply {
-                    put("realmRoles", emptyList<String>())
-                },
-                humanUser("legal-reviewer", secret, "ROLE_PENSION_LEGAL_COUNSEL"),
-                humanUser("product-reviewer", secret, "ROLE_PENSION_PRODUCT_OWNER"),
-            ),
-        )
+        val realm = testRealm(secret)
         val keycloak = GenericContainer(DockerImageName.parse(upstreamImage()))
             .withExposedPorts(8080)
             .withCommand("start-dev", "--import-realm")
@@ -129,6 +50,89 @@ class CatalogPensionOidcTestResource : QuarkusTestResourceLifecycleManager {
             throw failure
         }
     }
+
+    private fun testRealm(secret: String) = mapOf(
+        "realm" to REALM,
+        "enabled" to true,
+        "roles" to mapOf(
+            "realm" to listOf(
+                mapOf("name" to "ROLE_API"),
+                mapOf("name" to "ROLE_PENSION_LEGAL_COUNSEL"),
+                mapOf("name" to "ROLE_PENSION_PRODUCT_OWNER"),
+            ),
+        ),
+        "clientScopes" to testClientScopes(),
+        "clients" to listOf(
+            client("openbank-pension", secret, catalogRead = true),
+            client("unrelated-service", secret, catalogRead = true),
+            client("unmarked-service", secret, catalogRead = true).toMutableMap().apply {
+                put("defaultClientScopes", listOf("basic", "catalog:read"))
+            },
+            adminClient(secret),
+        ),
+        "users" to listOf(
+            serviceUser("openbank-pension"),
+            serviceUser("unrelated-service"),
+            serviceUser("unmarked-service").toMutableMap().apply {
+                put("realmRoles", emptyList<String>())
+            },
+            humanUser("legal-reviewer", secret, "ROLE_PENSION_LEGAL_COUNSEL"),
+            humanUser("product-reviewer", secret, "ROLE_PENSION_PRODUCT_OWNER"),
+        ),
+    )
+
+    private fun testClientScopes() = listOf(
+        mapOf(
+            "name" to "basic",
+            "protocol" to "openid-connect",
+            "protocolMappers" to listOf(
+                mapOf(
+                    "name" to "sub",
+                    "protocol" to "openid-connect",
+                    "protocolMapper" to "oidc-sub-mapper",
+                    "consentRequired" to false,
+                    "config" to mapOf("access.token.claim" to "true"),
+                ),
+            ),
+        ),
+        mapOf(
+            "name" to "profile",
+            "protocol" to "openid-connect",
+            "protocolMappers" to listOf(
+                mapOf(
+                    "name" to "username",
+                    "protocol" to "openid-connect",
+                    "protocolMapper" to "oidc-usermodel-attribute-mapper",
+                    "consentRequired" to false,
+                    "config" to mapOf(
+                        "user.attribute" to "username",
+                        "access.token.claim" to "true",
+                        "claim.name" to "preferred_username",
+                        "jsonType.label" to "String",
+                    ),
+                ),
+            ),
+        ),
+        mapOf(
+            "name" to "roles",
+            "protocol" to "openid-connect",
+            "protocolMappers" to listOf(
+                mapOf(
+                    "name" to "realm roles",
+                    "protocol" to "openid-connect",
+                    "protocolMapper" to "oidc-usermodel-realm-role-mapper",
+                    "consentRequired" to false,
+                    "config" to mapOf(
+                        "access.token.claim" to "true",
+                        "claim.name" to "realm_access.roles",
+                        "jsonType.label" to "String",
+                        "multivalued" to "true",
+                    ),
+                ),
+            ),
+        ),
+    ) + listOf("catalog:read", "pension:legal-approve", "pension:product-approve")
+        .map { mapOf("name" to it, "protocol" to "openid-connect") }
 
     override fun stop() {
         container?.let {

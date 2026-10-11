@@ -96,33 +96,8 @@ class PensionRevisionApprovalResource(
         @HeaderParam("If-Match") ifMatch: String?,
         request: PensionApprovalRequest,
     ): Response {
-        val requiredRole = when (role) {
-            PensionApprovalRole.LEGAL_COUNSEL -> CatalogRoles.PENSION_LEGAL_APPROVER
-            PensionApprovalRole.PRODUCT_OWNER -> CatalogRoles.PENSION_PRODUCT_OWNER
-        }
-        val token = identity.principal as? JsonWebToken
-            ?: throw CatalogForbiddenException("a verified JWT principal is required")
-        // Raw realm roles can reach @RolesAllowed. Derive the decision again from the verified
-        // realm assignment and the independent approval scope on this exact JWT.
-        if (requiredRole !in scopeMapper.roles(token.getClaim<Any?>(scopeClaim), identity.roles)) {
-            throw CatalogForbiddenException("approval role and scope are required")
-        }
-        if (token.getClaim<String>("azp") != "openbank-admin-ui") {
-            throw CatalogForbiddenException("the Admin UI client is required for human pension approval")
-        }
-        val username = token.getClaim<String>("preferred_username").orEmpty()
-        val approverName = token.name ?: username
-        if (
-            approverName.isBlank() ||
-            approverName.startsWith("service-account-") ||
-            approverName.startsWith("agent:") ||
-            username.isBlank() ||
-            username.startsWith("service-account-") ||
-            username.startsWith("agent:") ||
-            token.subject?.startsWith("agent:") == true
-        ) {
-            throw CatalogForbiddenException("a human pension approver is required")
-        }
+        val token = requireApprovalToken(role)
+        val approverName = requireHumanApprover(token)
         requireOwner(offeringId, revisionId)
         val issuer = token.issuer?.takeIf(String::isNotBlank)
             ?: throw CatalogForbiddenException("token issuer is required")
@@ -141,6 +116,43 @@ class PensionRevisionApprovalResource(
         )
         return Response.status(Response.Status.CREATED).entity(response(approved)).build()
     }
+
+    @Suppress("ThrowsCount")
+    private fun requireApprovalToken(role: PensionApprovalRole): JsonWebToken {
+        val requiredRole = when (role) {
+            PensionApprovalRole.LEGAL_COUNSEL -> CatalogRoles.PENSION_LEGAL_APPROVER
+            PensionApprovalRole.PRODUCT_OWNER -> CatalogRoles.PENSION_PRODUCT_OWNER
+        }
+        val token = identity.principal as? JsonWebToken
+            ?: throw CatalogForbiddenException("a verified JWT principal is required")
+        // Raw realm roles can reach @RolesAllowed. Derive the decision again from the verified
+        // realm assignment and the independent approval scope on this exact JWT.
+        if (requiredRole !in scopeMapper.roles(token.getClaim<Any?>(scopeClaim), identity.roles)) {
+            throw CatalogForbiddenException("approval role and scope are required")
+        }
+        if (token.getClaim<String>("azp") != "openbank-admin-ui") {
+            throw CatalogForbiddenException("the Admin UI client is required for human pension approval")
+        }
+        return token
+    }
+
+    private fun requireHumanApprover(token: JsonWebToken): String {
+        val username = token.getClaim<String>("preferred_username").orEmpty()
+        val approverName = token.name ?: username
+        if (username.isBlank() || approverName.isBlank()) {
+            throw CatalogForbiddenException("a human pension approver is required")
+        }
+        if (
+            isMachineIdentity(username) ||
+            isMachineIdentity(approverName) ||
+            token.subject?.startsWith("agent:") == true
+        ) {
+            throw CatalogForbiddenException("a human pension approver is required")
+        }
+        return approverName
+    }
+
+    private fun isMachineIdentity(name: String) = name.startsWith("service-account-") || name.startsWith("agent:")
 
     private suspend fun requireOwner(offeringId: UUID, revisionId: UUID) {
         val revision = service.findRevision(revisionId)
