@@ -120,4 +120,76 @@ class ServiceAccountIdentityTest {
                 .describedAs(clientId).isFalse()
         }
     }
+
+    private fun claims(vararg pairs: Pair<String, String?>) = QuarkusSecurityIdentity.builder()
+        .setPrincipal(
+            mockk<JsonWebToken> {
+                val m = pairs.toMap()
+                every { name } returns (m["preferred_username"] ?: "anon")
+                every { subject } returns "5f0c2a8e"
+                every { getClaim<Any?>(any<String>()) } answers { m[firstArg<String>()] }
+            },
+        ).build()
+
+    @Test
+    fun `a client_id-only machine token is a machine even with no service-account name`() {
+        val id = claims("client_id" to "openbank-batch", "azp" to "openbank-batch")
+        assertThat(ServiceAccountIdentity.machineClientId(id.principal)).isEqualTo("openbank-batch")
+        // the narrow, client-granting check still refuses it: it does not carry the SA username
+        assertThat(ServiceAccountIdentity.verifiedClientId(id)).isNull()
+    }
+
+    @Test
+    fun `a renamed service-account is still a machine via its client_id note`() {
+        val id = claims("client_id" to "openbank-edge", "azp" to "openbank-edge", "preferred_username" to "alice")
+        assertThat(ServiceAccountIdentity.machineClientId(id.principal)).isEqualTo("openbank-edge")
+    }
+
+    @Test
+    fun `a conventional service-account token is a machine`() {
+        val id = claims("azp" to "openbank-edge", "preferred_username" to edge)
+        assertThat(ServiceAccountIdentity.machineClientId(id.principal)).isEqualTo("openbank-edge")
+    }
+
+    @Test
+    fun `a token with no username is a machine, never a human`() {
+        assertThat(ServiceAccountIdentity.machineClientId(claims("azp" to "x").principal)).isEqualTo("x")
+        assertThat(ServiceAccountIdentity.machineClientId(claims().principal)).isEqualTo("")
+    }
+
+    @Test
+    fun `a human staff login is not a machine`() {
+        val id = claims("azp" to "openbank-admin-ui", "preferred_username" to "alice")
+        assertThat(ServiceAccountIdentity.machineClientId(id.principal)).isNull()
+    }
+
+    @Test
+    fun `a non-JWT principal is not classified`() {
+        val id = QuarkusSecurityIdentity.builder().setPrincipal(java.security.Principal { edge }).build()
+        assertThat(ServiceAccountIdentity.machineClientId(id.principal)).isNull()
+    }
+
+    @Test
+    fun `an undeterminable identity is never a verified person`() {
+        assertThat(ServiceAccountIdentity.isVerifiedPerson(null)).isFalse()
+        val nonJwt = QuarkusSecurityIdentity.builder().setPrincipal(java.security.Principal { "alice" }).build()
+        assertThat(ServiceAccountIdentity.isVerifiedPerson(nonJwt)).isFalse()
+        val unreadable = QuarkusSecurityIdentity.builder().setPrincipal(
+            mockk<JsonWebToken> {
+                every { name } returns "alice"
+                every { subject } returns "5f0c2a8e"
+                every { getClaim<Any?>(any<String>()) } throws IllegalStateException("claims unreadable")
+            },
+        ).build()
+        assertThat(ServiceAccountIdentity.isVerifiedPerson(unreadable)).isFalse()
+        assertThat(
+            ServiceAccountIdentity.isVerifiedPerson(
+                claims(
+                    "azp" to "openbank-admin-ui",
+                    "preferred_username" to "alice",
+                ),
+            ),
+        )
+            .isTrue()
+    }
 }

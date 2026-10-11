@@ -4,6 +4,7 @@
 // See LICENSES/AGPL-3.0-only.txt or https://www.gnu.org/licenses/agpl-3.0.html for details.
 package com.openbank.mcp.infrastructure.mcp
 
+import com.openbank.libs.authz.ServiceAccountIdentity
 import com.openbank.mcp.application.port.out.ConsentContext
 import com.openbank.mcp.infrastructure.persistence.AgentSessionRepository
 import jakarta.enterprise.context.ApplicationScoped
@@ -115,6 +116,7 @@ class CallerContextResolver @Inject constructor(
             sessionId = jti,
             principalType = "HUMAN",
             roles = bounded,
+            serviceAccount = ServiceAccountIdentity.machineClientId(jwt) != null,
         )
     }
 
