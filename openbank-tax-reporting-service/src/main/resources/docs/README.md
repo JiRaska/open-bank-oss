@@ -14,6 +14,12 @@ Bearer tokens are validated against the identity provider. Reads and state chang
 
 Withholding-remitted events feed the monthly totals. Events with an unexpected type are ignored. Target events that cannot be decoded are counted as malformed and sent to the configured dead-letter topic with their original Kafka key, value, and headers. If a valid remittance cannot be recorded, the write is retried and a persistent failure is also sent there. Both the malformed count and dead-letter backlog need investigation before filing: an affected remittance is absent from the period total until corrected or replayed. The source consumer starts at the latest offset and is not a historical backfill mechanism. A successful application rollout by itself does not prove that a return is complete or submitted.
 
+## Catalogue-defined statutory returns
+
+`/api/v1/statutory-returns/catalogues` exposes the versioned jurisdiction catalogue. The new pension ČNB PSP/PEF definitions specify reporting scope, period, deadline, required figures, and arithmetic checks. An operator can assemble a completed period, a different operator can approve its content hash, and a submitted return records the external submission reference. Corrections create another revision. `/breaches` includes due returns that were never assembled when a reporting start and the reporting entities are configured, and treats an overdue outstanding correction as a breach even if an earlier revision was submitted. Without the reporting start or fund roster it returns unavailable rather than zero. The hourly deadline sweep publishes the overdue count and a workflow liveness signal only after the complete check succeeds.
+
+`/capability` is authoritative for the current deployment. The pension data adapter and regulator wire renderer are presently unavailable: assembly fails rather than inventing figures, and this service does not claim to have transmitted a regulator file. Pension source read models and verified cell-level rendering are tracked separately. The configured reporting entity IDs and reporting start must be supplied before never-assembled pension returns can be monitored.
+
 ## Build identity
 
 The generated `00-build` page in this same documentation index reports the release version, full source commit, and API contract version packaged in the running image. The index is available at `/q/openbank/docs`.

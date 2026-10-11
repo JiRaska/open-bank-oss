@@ -16,6 +16,7 @@ import com.openbank.ledger.domain.model.ClosedPeriodRecord
 import com.openbank.ledger.domain.model.ClosedPeriodVerification
 import com.openbank.ledger.domain.model.PeriodTrialBalance
 import com.openbank.ledger.domain.model.PeriodType
+import com.openbank.ledger.domain.model.YearToDateTrialBalance
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import io.quarkus.security.identity.SecurityIdentity
@@ -36,6 +37,7 @@ import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import java.math.BigDecimal
 import java.time.LocalDate
+import java.time.YearMonth
 import java.util.UUID
 
 /**
@@ -54,6 +56,8 @@ import java.util.UUID
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @Tag(name = "ClosedPeriod", description = "Statutory GL period freeze — attested, immutable trial balance")
+// One REST surface per close lifecycle; splitting the period routes would scatter one contract.
+@Suppress("TooManyFunctions")
 class ClosedPeriodResource(private val closedPeriodUseCase: ClosedPeriodUseCase) {
 
     @Inject
@@ -77,6 +81,60 @@ class ClosedPeriodResource(private val closedPeriodUseCase: ClosedPeriodUseCase)
     suspend fun frozenTrialBalance(@PathParam("type") type: String, @PathParam("date") date: String): Response {
         val tb = closedPeriodUseCase.getFrozenTrialBalance(GetPeriodTrialBalanceQuery(period(type, date)))
         return Response.ok(tb.toResponse()).build()
+    }
+
+    @GET
+    @Path("/{type}/{date}/closing-balance")
+    @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "ledger.read", resource = "#date")
+    @Operation(summary = "Cumulative balance at the end of the MONTH containing the date (computed on demand)")
+    suspend fun closingBalance(@PathParam("type") type: String, @PathParam("date") date: String): Response {
+        val tb = closedPeriodUseCase.getClosingBalance(GetPeriodTrialBalanceQuery(period(type, date)))
+        return Response.ok(tb.toResponse()).build()
+    }
+
+    @GET
+    @Path("/{type}/{date}/frozen-closing-balance")
+    @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "ledger.read", resource = "#date")
+    @Operation(
+        summary = "Cumulative balance at the end of a FROZEN MONTH, summed from FROZEN LINES_V1 evidence (fail-closed)",
+    )
+    suspend fun frozenClosingBalance(@PathParam("type") type: String, @PathParam("date") date: String): Response {
+        val tb = closedPeriodUseCase.getFrozenClosingBalance(GetPeriodTrialBalanceQuery(period(type, date)))
+        return Response.ok(tb.toResponse()).build()
+    }
+
+    @GET
+    @Path("/{type}/{date}/frozen-year-to-date-trial-balance")
+    @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "ledger.read", resource = "#date")
+    @Operation(summary = "January-to-month-end flow reconciled to frozen monthly evidence")
+    suspend fun frozenYearToDate(@PathParam("type") type: String, @PathParam("date") date: String): Response {
+        val requested = parseDate(date, "date")
+        val target = period(type, date)
+        if (target.type != PeriodType.MONTH || requested != YearMonth.from(requested).atEndOfMonth()) {
+            throw WebApplicationException(
+                "Frozen year-to-date reporting requires a month-end date",
+                Response.Status.BAD_REQUEST,
+            )
+        }
+        return Response.ok(
+            closedPeriodUseCase.getFrozenYearToDateTrialBalance(GetPeriodTrialBalanceQuery(target)).toResponse(),
+        ).build()
+    }
+
+    @GET
+    @Path("/{type}/{date}/year-to-date-trial-balance")
+    @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "ledger.read", resource = "#date")
+    @Operation(summary = "Mutable January-to-date flow for working previews")
+    suspend fun liveYearToDate(@PathParam("type") type: String, @PathParam("date") date: String): Response {
+        val requested = parseDate(date, "date")
+        if (period(type, date).type != PeriodType.MONTH) {
+            throw WebApplicationException("Year-to-date trial balance requires MONTH", Response.Status.BAD_REQUEST)
+        }
+        return Response.ok(closedPeriodUseCase.getLiveYearToDateTrialBalance(requested).toResponse()).build()
     }
 
     @GET
@@ -174,6 +232,19 @@ data class PeriodTrialBalanceResponse(
     val lines: List<PeriodTrialBalanceLineResponse>,
 )
 
+data class YearToDateTrialBalanceResponse(
+    val period: String,
+    val from: String,
+    val to: String,
+    val totalDebit: BigDecimal,
+    val totalCredit: BigDecimal,
+    val balanced: Boolean,
+    val accountCount: Int,
+    val lines: List<PeriodTrialBalanceLineResponse>,
+    val sourcePeriods: List<String>,
+    val sourceContentHashes: List<String>,
+)
+
 data class PeriodTrialBalanceLineResponse(
     val code: String,
     val type: String,
@@ -231,6 +302,22 @@ private fun PeriodTrialBalance.toResponse() = PeriodTrialBalanceResponse(
         )
     },
 )
+
+private fun YearToDateTrialBalance.toResponse(): YearToDateTrialBalanceResponse {
+    val base = balance.toResponse()
+    return YearToDateTrialBalanceResponse(
+        period = base.period,
+        from = from.toString(),
+        to = to.toString(),
+        totalDebit = base.totalDebit,
+        totalCredit = base.totalCredit,
+        balanced = base.balanced,
+        accountCount = base.accountCount,
+        lines = base.lines,
+        sourcePeriods = sourcePeriods,
+        sourceContentHashes = sourceContentHashes,
+    )
+}
 
 private fun ClosedPeriodRecord.toResponse() = ClosedPeriodResponse(
     id = id,
