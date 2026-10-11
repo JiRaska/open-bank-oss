@@ -71,7 +71,9 @@ object PensionFundPactStates {
                 funds = listOf(fund),
                 navs = listOf(nav),
                 transactions = listOf(subscription),
-                navPositions = listOf(NavPosition(navId, "CZ-BOND-1", BigDecimal("10"), BigDecimal("100"))),
+                navPositions = listOf(
+                    NavPosition(UUID.randomUUID(), navId, "CZ-BOND-1", BigDecimal("10"), BigDecimal("100")),
+                ),
             ),
         )
     }
