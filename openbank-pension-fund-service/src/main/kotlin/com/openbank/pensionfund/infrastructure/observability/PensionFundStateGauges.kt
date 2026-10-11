@@ -247,6 +247,8 @@ class PensionFundStateGaugeRefresher(
         concurrentExecution = Scheduled.ConcurrentExecution.SKIP,
     )
     suspend fun refresh() {
+        // observed-by: WorkflowLivenessStale — no recordSuccess() on failure, so the liveness age
+        // gauge goes stale at 2x INTERVAL and alerts; a gauge refresh has no message to dead-letter.
         runCatching { publisher.publish(source.snapshot()) }
             .onSuccess { liveness?.recordSuccess() }
             .onFailure { log.warnf(it, "pension-fund state gauges not refreshed; the previous values stay published") }
