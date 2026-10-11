@@ -207,3 +207,10 @@ opa:
   timeout-ms: "${OPA_TIMEOUT_MS:500}"
 authz:
   enforce: "${AUTHZ_ENFORCE:true}"
+
+"%prod":
+  quarkus:
+    http:
+      ssl:
+        client-auth: required
+      insecure-requests: enabled

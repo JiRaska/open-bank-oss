@@ -225,7 +225,7 @@ class PensionProvidersStub : QuarkusTestResourceLifecycleManager {
             "$FUNDS?periodStart=2025-01-01&periodEnd=2025-03-31" to "fund-loss-quarter-2025-q1.json",
             "/api/v1/reporting/funds/$FUND2/period-figures?periodStart=2025-01-01&periodEnd=2025-03-31" to
                 "fund-unclassified-quarter-2025-q1.json",
-            "/api/v1/pension/reporting/participant-aggregates?periodStart=2009-01-01&periodEnd=2009-03-31" to
+            "/api/v2/pension/reporting/participant-aggregates?periodStart=2009-01-01&periodEnd=2009-03-31" to
                 "participants-2009-q1.json",
             // pension-service's ParticipantReportingApiIT books nothing after March 2009, so the
             // year answer is the same YTD figures re-dated to the year end (PSP 40-01).

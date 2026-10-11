@@ -11,9 +11,12 @@ test.beforeEach(async ({ context, baseURL, page }) => {
     body: JSON.stringify({ services: [] }),
   }))
   await page.route('**/api/catalog/services', route => route.fulfill({
-    status: 503,
+    status: 200,
     contentType: 'application/json',
-    body: '{"error":"temporarily unavailable"}',
+    body: JSON.stringify({ available: true, services: [{
+      name: 'openbank-account-service', short: 'account-service', kind: 'service',
+      runnable: true, port: 8081, apiVersion: '1.0.0', apiTitle: 'Account Service',
+    }] }),
   }))
   await page.route('**/api/catalog/openapi/**', route => route.fulfill({
     status: 200,
@@ -50,6 +53,10 @@ test('nested service links keep native keyboard activation', async ({ page }) =>
   const changelog = service.getByRole('link', { name: 'Changelog' })
   const href = await changelog.getAttribute('href')
   expect(href).toBeTruthy()
+  // Exercise native activation independently of destination-page compilation.
+  await page.route(`**${href}`, route => route.fulfill({
+    status: 200, contentType: 'text/html', body: '<h1>Changelog destination</h1>',
+  }))
   await changelog.focus()
   await Promise.all([
     page.waitForURL(url => url.pathname === href, { waitUntil: 'commit', timeout: 15_000 }),

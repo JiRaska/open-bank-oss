@@ -12,7 +12,7 @@
       ],
       "request": {
         "method": "GET",
-        "path": "/api/v1/pension/reporting/participant-aggregates",
+        "path": "/api/v2/pension/reporting/participant-aggregates",
         "query": {
           "periodEnd": [
             "2026-09-30"
@@ -35,7 +35,7 @@
       ],
       "request": {
         "method": "GET",
-        "path": "/api/v1/pension/reporting/participant-aggregates",
+        "path": "/api/v2/pension/reporting/participant-aggregates",
         "query": {
           "periodEnd": [
             "2026-09-30"
