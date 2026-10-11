@@ -1495,7 +1495,8 @@ jobs:
   deploy-signal:
     name: Deploy signal
     needs: [changes, build-push, gitops-pr]
-    if: always() && needs.changes.outputs.any == 'true' && needs.build-push.result == 'success'
+    # Successful GitOps has no failure to report; avoid allocating a runner for that no-op.
+    if: always() && needs.changes.outputs.any == 'true' && needs.build-push.result == 'success' && needs.gitops-pr.result != 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
