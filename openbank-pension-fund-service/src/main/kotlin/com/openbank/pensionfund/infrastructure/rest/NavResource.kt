@@ -53,7 +53,7 @@ class NavResource {
 
     @POST
     @Path("/{navId}/approve")
-    @Operation(summary = "Publish a calculated NAV (checker): settles queued orders, or re-prices for a correction")
+    @Operation(summary = "Publish a calculated NAV (checker): correction publication requires durable compensation")
     @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "pension-fund.nav.approve", resource = "#navId")
     suspend fun approve(@PathParam("navId") navId: UUID): NavPublicationResponse {

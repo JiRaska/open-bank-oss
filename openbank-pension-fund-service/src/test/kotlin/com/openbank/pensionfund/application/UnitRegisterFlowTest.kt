@@ -145,7 +145,7 @@ class UnitRegisterFlowTest {
     }
 
     @Test
-    fun `a nav correction supersedes the original and re-prices its transactions`(): Unit = runBlocking {
+    fun `a nav correction cannot publish before durable compensation exists`(): Unit = runBlocking {
         val fund = admin.createFund(definition("CZ0000000060"))
         register.place(PlaceOrderCommand(contract, fund.id, OrderType.SUBSCRIBE, BigDecimal("1000"), null, null, key()))
         later()
@@ -165,11 +165,17 @@ class UnitRegisterFlowTest {
         assertThat(correction.correctsNavId).isEqualTo(wrong)
         assertThat(correction.navPerUnit).isEqualByComparingTo("2.5")
         later()
-        val publication = navs.publish(correction.id, "checker")
-        assertThat(publication.corrections.single().unitsDelta).isEqualByComparingTo("-100")
-        assertThat(store.navs.getValue(wrong).status).isEqualTo(NavStatus.SUPERSEDED)
+        val originalTransactions = store.transactions.toMap()
+        val originalHoldings = store.holdings.toMap()
+        assertThatThrownBy { runBlocking { navs.publish(correction.id, "checker") } }
+            .isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("durable compensation accounting")
+        assertThat(store.navs.getValue(wrong).status).isEqualTo(NavStatus.PUBLISHED)
+        assertThat(store.navs.getValue(correction.id).status).isEqualTo(NavStatus.CALCULATED)
+        assertThat(store.transactions).isEqualTo(originalTransactions)
+        assertThat(store.holdings).isEqualTo(originalHoldings)
         assertThat(store.navs.getValue(first).status).isEqualTo(NavStatus.PUBLISHED)
-        assertThat(register.valuation(contract).holdings.single().units).isEqualByComparingTo("1400")
+        assertThat(register.valuation(contract).holdings.single().units).isEqualByComparingTo("1500")
     }
 
     @Test

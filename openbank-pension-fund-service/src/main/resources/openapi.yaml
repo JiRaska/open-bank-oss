@@ -144,7 +144,7 @@ paths:
     post:
       tags: [NAV]
       operationId: approveNav
-      summary: Publish a calculated NAV (checker); settles queued orders, or re-prices for a correction
+      summary: Publish a calculated NAV (checker); correction publication remains disabled until durable compensation accounting exists
       responses:
         '200': { description: Published, content: { application/json: { schema: { $ref: '#/components/schemas/NavPublication' } } } }
         '403': { $ref: '#/components/responses/FourEyes' }

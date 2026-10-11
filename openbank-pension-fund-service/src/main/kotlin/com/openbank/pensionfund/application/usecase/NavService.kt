@@ -34,7 +34,7 @@ data class NavPublication(val nav: NavRecord, val settledOrders: Int, val correc
 /**
  * NAV lifecycle: calculate (maker) → publish (checker). Publishing an ordinary NAV settles every
  * order queued for the fund before that moment; publishing a CORRECTION supersedes the original
- * and re-prices every transaction that settled at it, adjusting holdings by the difference.
+ * and eventually re-prices transactions through durable compensation accounting (#12473).
  */
 @ApplicationScoped
 class NavService(private val store: PensionFundStore, private val prices: MarketPricePort, private val clock: Clock) {
@@ -112,7 +112,7 @@ class NavService(private val store: PensionFundStore, private val prices: Market
 
     suspend fun publish(id: UUID, actor: String): NavPublication {
         val published = nav(id).publish(actor, clock.instant())
-        return if (published.isCorrection) publishCorrection(published) else publishAndSettle(published)
+        return if (published.isCorrection) publishCorrection() else publishAndSettle(published)
     }
 
     private suspend fun publishAndSettle(nav: NavRecord): NavPublication {
@@ -143,26 +143,10 @@ class NavService(private val store: PensionFundStore, private val prices: Market
         return NavPublication(nav, pending.size, emptyList())
     }
 
-    private suspend fun publishCorrection(correction: NavRecord): NavPublication {
-        val originalId = checkNotNull(correction.correctsNavId)
-        val original = nav(originalId)
-        check(original.status == NavStatus.PUBLISHED) { "NAV $originalId is no longer the published one" }
-        val corrections = store.transactionsPricedAt(originalId).map { ForwardPricer.reprice(it, correction) }
-        val holdings = mutableMapOf<Pair<UUID, UUID>, UnitHolding>()
-        corrections.filter { it.unitsDelta.signum() != 0 }.forEach { c ->
-            val key = c.transaction.contractId to c.transaction.fundId
-            val holding = holdings[key] ?: checkNotNull(store.holding(key.first, key.second)) {
-                "transaction ${c.transaction.id} has no holding to correct"
-            }
-            holdings[key] = holding.plus(c.unitsDelta)
-        }
-        store.commit(
-            StoreChanges(
-                navs = listOf(original.supersede(), correction),
-                transactions = corrections.map { it.transaction },
-                holdings = holdings.values.toList(),
-            ),
-        )
-        return NavPublication(correction, 0, corrections)
+    private fun publishCorrection(): Nothing {
+        // A NAV correction cannot be published until its immutable journal and cash/unit
+        // obligations are committed atomically. Repricing the existing transaction in place
+        // erases the original instruction and can report success without a payable (#12473).
+        error("NAV correction publication requires durable compensation accounting (#12473)")
     }
 }
