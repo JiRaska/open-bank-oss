@@ -167,7 +167,7 @@ def regenerate(modules: list[str]) -> None:
         env = dict(os.environ)
         env["GRADLE_OPTS"] = GRADLE_LAUNCHER_OPTS
         result = subprocess.run(
-            ["./gradlew", "--write-verification-metadata", "sha256",
+            ["./gradlew", "--configure-on-demand", "--write-verification-metadata", "sha256",
              # Without this the check is vacuous on CI. A warm Gradle cache does not
              # re-resolve metadata artifacts, so nothing gets re-hashed and the run
              # reports "no gaps" even when an entry is demonstrably missing — measured:
