@@ -66,3 +66,31 @@ allowed_reasons contains "operator-statutory-return-lifecycle" if {
 	"ROLE_OPERATOR" in input.principal.roles
 	input.action in {"tax.statutory-return.assemble", "tax.statutory-return.approve", "tax.statutory-return.submit"}
 }
+
+# ---------------------------------------------------------------------------------------
+# Corporate register (CorporateRegisterResource) — operator-maintained figures that feed
+# ČNB PSP 32-04, 50-04 and 40-01.
+#   tax.corporate-register.inspect  — GET /api/v1/corporate-register, /effective
+#   tax.corporate-register.propose  — POST /api/v1/corporate-register        (maker)
+#   tax.corporate-register.approve  — POST /{id}/approve                     (checker)
+#   tax.corporate-register.reject   — POST /{id}/reject                      (checker)
+#
+# Same shape as the statutory returns above: `inspect`, not `read`, so no base read-any rule
+# matches; maker != checker is enforced in the domain (CorporateRegisterEntry) on the acting
+# subject, and this policy guarantees that subject is never a machine.
+# ---------------------------------------------------------------------------------------
+
+allowed_reasons contains "staff-corporate-register-inspect" if {
+	input.principal.type == "HUMAN"
+	not startswith(input.principal.id, "service-account-")
+	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_AUDITOR", "ROLE_VIEWER", "ROLE_COMPLIANCE"}
+	role in input.principal.roles
+	input.action == "tax.corporate-register.inspect"
+}
+
+allowed_reasons contains "operator-corporate-register-change" if {
+	input.principal.type == "HUMAN"
+	not startswith(input.principal.id, "service-account-")
+	"ROLE_OPERATOR" in input.principal.roles
+	input.action in {"tax.corporate-register.propose", "tax.corporate-register.approve", "tax.corporate-register.reject"}
+}

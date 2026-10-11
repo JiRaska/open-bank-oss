@@ -133,3 +133,57 @@ test_ai_agent_denied_every_statutory_return_action if {
 		not rest.allow with input as {"principal": {"type": "AI_AGENT", "id": "agent-x", "roles": ["ROLE_OPERATOR"]}, "action": action}
 	}
 }
+
+# --- corporate register (PSP 32-04, 50-04, 40-01) ------------------------------------------
+
+cr_actions := {
+	"tax.corporate-register.inspect",
+	"tax.corporate-register.propose",
+	"tax.corporate-register.approve",
+	"tax.corporate-register.reject",
+}
+
+cr_changes := {"tax.corporate-register.propose", "tax.corporate-register.approve", "tax.corporate-register.reject"}
+
+test_human_operator_may_do_every_corporate_register_action if {
+	every action in cr_actions {
+		rest.allow with input as {"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]}, "action": action}
+	}
+}
+
+test_oversight_roles_may_inspect_but_not_change_the_corporate_register if {
+	every role in ["ROLE_ADMIN", "ROLE_AUDITOR", "ROLE_VIEWER", "ROLE_COMPLIANCE"] {
+		rest.allow with input as {"principal": {"type": "HUMAN", "id": "audrey", "roles": [role]}, "action": "tax.corporate-register.inspect"}
+	}
+	every role in ["ROLE_ADMIN", "ROLE_AUDITOR", "ROLE_VIEWER", "ROLE_COMPLIANCE", "ROLE_API"] {
+		every action in cr_changes {
+			not rest.allow with input as {"principal": {"type": "HUMAN", "id": "audrey", "roles": [role]}, "action": action}
+		}
+	}
+}
+
+test_shared_service_account_denied_every_corporate_register_action_with_any_role if {
+	every role in ["ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE", "ROLE_AUDITOR", "ROLE_VIEWER", "ROLE_API"] {
+		every action in cr_actions {
+			not rest.allow with input as {
+				"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": [role, "ROLE_OPERATOR", "ROLE_ADMIN"]},
+				"action": action,
+			}
+		}
+	}
+}
+
+test_other_service_account_denied_every_corporate_register_action if {
+	every action in cr_actions {
+		not rest.allow with input as {
+			"principal": {"type": "HUMAN", "id": "service-account-openbank-pension", "roles": ["ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE"]},
+			"action": action,
+		}
+	}
+}
+
+test_ai_agent_denied_every_corporate_register_action if {
+	every action in cr_actions {
+		not rest.allow with input as {"principal": {"type": "AI_AGENT", "id": "agent-x", "roles": ["ROLE_OPERATOR"]}, "action": action}
+	}
+}

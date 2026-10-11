@@ -4,6 +4,7 @@
 
 package com.openbank.tax.infrastructure.rest
 
+import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import com.openbank.tax.application.usecase.CorporateRegisterEntryNotFoundException
 import com.openbank.tax.application.usecase.CorporateRegisterService
@@ -26,7 +27,6 @@ import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.ext.ExceptionMapper
 import jakarta.ws.rs.ext.Provider
-import org.eclipse.microprofile.jwt.JsonWebToken
 import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import java.math.BigDecimal
@@ -39,6 +39,13 @@ import java.util.UUID
  * The corporate register (#12425): figures no system produces, maintained by operators four-eyes
  * and read by the ČNB returns (PSP 32-04, 50-04, 40-01). Reads are open to oversight roles; every
  * change is operator-only, and the proposer of an entry can never decide it.
+ *
+ * `@RolesAllowed` is only the coarse gate: a Keycloak client_credentials token is classified HUMAN
+ * and the shared `service-account-openbank-services` holds ROLE_OPERATOR in some realms. As on
+ * [StatutoryReturnResource], `@Authorize` actions use verbs that are NOT `read`/`list` (so the
+ * fleet's generic read-any rules never match; `tax_reporting_rest_ext.rego` grants them to real
+ * staff only), and [TaxReportingActor] refuses a service-account as maker or checker even where
+ * OPA enforcement is off. Maker != checker stays in the domain (CorporateRegisterEntry).
  */
 @Path("/api/v1/corporate-register")
 @Produces(MediaType.APPLICATION_JSON)
@@ -49,6 +56,7 @@ class CorporateRegisterResource(private val service: CorporateRegisterService) {
 
     @GET
     @RolesAllowed(Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "tax.corporate-register.inspect")
     @Operation(summary = "Every register entry of an entity, any status — the audit trail")
     suspend fun list(@QueryParam("entityId") entityId: String?): Response {
         val entity = requireNotNull(entityId) { "query parameter 'entityId' is required" }
@@ -58,6 +66,7 @@ class CorporateRegisterResource(private val service: CorporateRegisterService) {
     @GET
     @Path("/effective")
     @RolesAllowed(Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "tax.corporate-register.inspect")
     @Operation(summary = "The approved figure of each fact effective for a period (absent = none approved)")
     suspend fun effective(
         @QueryParam("entityId") entityId: String?,
@@ -77,6 +86,7 @@ class CorporateRegisterResource(private val service: CorporateRegisterService) {
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
     @RolesAllowed(Roles.OPERATOR)
+    @Authorize(action = "tax.corporate-register.propose")
     @Operation(summary = "Propose a figure (maker); it feeds no return until another operator approves it")
     suspend fun propose(request: ProposeCorporateFactRequest?): Response {
         val body = requireNotNull(request) { "request body is required" }
@@ -99,6 +109,7 @@ class CorporateRegisterResource(private val service: CorporateRegisterService) {
     @POST
     @Path("/{id}/approve")
     @RolesAllowed(Roles.OPERATOR)
+    @Authorize(action = "tax.corporate-register.approve", resource = "#id")
     @Operation(summary = "Approve a proposed figure (checker; never the proposer)")
     suspend fun approve(@PathParam("id") id: String): Response =
         Response.ok(service.approve(parseId(id), actingPrincipal()).toResponse()).build()
@@ -106,6 +117,7 @@ class CorporateRegisterResource(private val service: CorporateRegisterService) {
     @POST
     @Path("/{id}/reject")
     @RolesAllowed(Roles.OPERATOR)
+    @Authorize(action = "tax.corporate-register.reject", resource = "#id")
     @Operation(summary = "Reject a proposed figure (checker; never the proposer)")
     suspend fun reject(@PathParam("id") id: String): Response =
         Response.ok(service.reject(parseId(id), actingPrincipal()).toResponse()).build()
@@ -122,14 +134,8 @@ class CorporateRegisterResource(private val service: CorporateRegisterService) {
     private fun parseId(value: String): UUID = runCatching { UUID.fromString(value) }.getOrNull()
         ?: throw WebApplicationException("id must be a UUID (got '$value')", Response.Status.BAD_REQUEST)
 
-    private fun actingPrincipal(): String {
-        val principal = identity.principal
-        val subject = (principal as? JsonWebToken)?.subject ?: principal?.name
-        if (subject.isNullOrBlank()) {
-            throw WebApplicationException("Cannot resolve the acting principal", Response.Status.UNAUTHORIZED)
-        }
-        return subject
-    }
+    private fun actingPrincipal(): String =
+        TaxReportingActor.staffSubject(identity, "propose, approve or reject a corporate-register figure")
 }
 
 data class ProposeCorporateFactRequest(

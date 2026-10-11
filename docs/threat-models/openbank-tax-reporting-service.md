@@ -45,9 +45,15 @@ NetworkPolicy admits admin-ui and the platform scrapers only, no ingress); servi
   service-account included) can never grant them. The extension grants inspect to real staff and
   the lifecycle to a real operator, both excluding `service-account-*` and requiring a HUMAN
   principal (so no AI agent). Independently of OPA, the resource refuses a service-account token
-  as maker, checker or submitter (`StatutoryReturnActor`: the `service-account-` username, the
+  as maker, checker or submitter (`TaxReportingActor`: the `service-account-` username, the
   `service-account-<azp>` shape, or a `client_id` claim), and `StatutoryReturn.approve` refuses a
   checker who is the maker.
+- `CorporateRegisterResource` (the operator-maintained figures feeding PSP 32-04, 50-04 and 40-01)
+  follows the same pattern: `tax.corporate-register.inspect` for the reads (real staff only) and
+  `.propose` / `.approve` / `.reject` for changes (a real operator only), all excluding
+  `service-account-*` and requiring a HUMAN principal. The resource refuses a service-account
+  token as maker or checker through the same `TaxReportingActor`, and `CorporateRegisterEntry`
+  refuses a checker who is the proposer.
 - `AUTHZ_ENFORCE=true` from the first rollout. Every allow test has a matching must-deny.
 
 ## 4. STRIDE
