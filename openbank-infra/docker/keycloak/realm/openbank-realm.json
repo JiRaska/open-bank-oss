@@ -1291,6 +1291,10 @@
         "email",
         "roles"
       ],
+      "optionalClientScopes": [
+        "pension:legal-approve",
+        "pension:product-approve"
+      ],
       "secret": "changeme_local_admin_ui_dev_only"
     }
   ],

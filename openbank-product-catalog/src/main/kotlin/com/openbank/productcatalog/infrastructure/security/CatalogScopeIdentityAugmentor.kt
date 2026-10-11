@@ -66,7 +66,8 @@ class CatalogScopeIdentityAugmentor(
     override fun augment(identity: SecurityIdentity, context: AuthenticationRequestContext): Uni<SecurityIdentity> {
         val token = identity.principal as? JsonWebToken ?: return Uni.createFrom().item(identity)
         val roles = mapper.roles(token.getClaim<Any?>(scopeClaim), identity.roles).toMutableSet()
-        val name = token.name
+        // Keycloak access tokens commonly omit upn; JsonWebToken.name can be null.
+        val name = token.name ?: token.getClaim<String>("preferred_username").orEmpty()
         val humanApprover =
             name.isNotBlank() &&
                 !name.startsWith("service-account-") &&

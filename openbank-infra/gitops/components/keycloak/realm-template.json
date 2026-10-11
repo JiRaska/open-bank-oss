@@ -882,6 +882,10 @@
         "email",
         "roles"
       ],
+      "optionalClientScopes": [
+        "pension:legal-approve",
+        "pension:product-approve"
+      ],
       "secret": "__ADMINUI_CLIENT_SECRET__"
     },
     {

@@ -23,6 +23,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.hasItem
+import org.hamcrest.Matchers.nullValue
 import org.junit.jupiter.api.MethodOrderer
 import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
@@ -308,6 +309,7 @@ class RetirementCatalogPackResourceTest {
             statusCode(200)
             body("content.attributes.instrumentClasses", equalTo(listOf("BOND_FUNDS", "EQUITY_FUNDS")))
             body("pensionApprovalDigest", equalTo(digest))
+            body("pensionApprovedEffectiveTo", nullValue())
         }
     }
 
