@@ -95,7 +95,7 @@ class PensionRevisionApprovalResource(
         requireOwner(offeringId, revisionId)
         val issuer = token.issuer?.takeIf(String::isNotBlank)
             ?: throw CatalogForbiddenException("token issuer is required")
-        val subject = token.subject?.takeIf(String::isNotBlank)
+        val subject = (token.subject ?: token.getClaim<String>("sub"))?.takeIf(String::isNotBlank)
             ?: throw CatalogForbiddenException("token subject is required")
         val revision = ifMatch?.let { STRONG_ETAG.matchEntire(it)?.groupValues?.get(1)?.toLongOrNull() }
             ?: throw CatalogPreconditionRequiredException("a strong If-Match revision is required")
