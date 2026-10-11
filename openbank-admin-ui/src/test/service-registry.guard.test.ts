@@ -4,73 +4,47 @@
 
 // ── Admin-UI service-registry drift rule (enforced) ────────────────────────
 //
-// Why this guard exists: the admin-ui carries three hand-maintained service
-// registries that must agree with each other AND with the deployed fleet:
+// The SET of services the console knows is DERIVED, not typed: scripts/generate-catalog.mjs walks
+// the monorepo (every module applying the `openbank.quarkus-service` convention plugin, with the
+// port from its own application.yaml) and `buildRegistry` / `buildProxyAllowlist`
+// (src/lib/services/registry.ts) turn that into the registry, the health/config probe lists, the
+// service-map nodes and the /api/svc BFF allowlist. This file used to cross-check three hand-kept
+// registries against each other; those no longer exist, so the checks that remain are about the
+// parts that are still authored (SERVICE_OVERRIDES: labels, groups, naming exceptions) and about
+// the derivation staying total:
 //
-//   1. SERVICE_REGISTRY  (src/lib/services/registry.ts)
-//        id → { container, port }. Drives docs + per-service health.
-//   2. SERVICE_MAP       (src/app/api/svc/[service]/[...path]/route.ts)
-//        BFF off-cluster fallback. Its KEY is the `/api/svc/<key>` segment,
-//        which IN-CLUSTER is looked up verbatim against real k8s workload names.
-//   3. STATIC_CANDIDATES (src/app/services/page.tsx)
-//        the cards rendered on /services.
+//   - the derived set is exactly the runnable modules on disk (it cannot go stale or short);
+//   - every override names a real runnable module and a real gitops workload;
+//   - nobody reintroduces a hand-typed fleet list (negative-tested scan below).
 //
-// They drifted apart silently, because every failure mode here is quiet:
-//   • SERVICE_MAP key `sepa-instant-service` did not match the real Deployment
-//     (`sepa-instant`), so in-cluster discovery missed → 404 `Unknown service`
-//     → the payments SCT-Inst panel rendered `not_deployed` forever. Off-cluster
-//     it worked, so it looked fine locally.
-//   • `container: 'openbank-sepa-instant-service'` named a directory that does
-//     not exist. docs.ts derives the k8s name as `container.replace(/^openbank-/,'')`,
-//     so docs resolved to a non-existent Service — again, silently.
-//   • 7 STATIC_CANDIDATES had no SERVICE_REGISTRY entry, so their docs link
-//     404'd. They were added on the strength of a comment promising an
-//     `openbank-<id>-service` → `openbank-<id>` fallback that docs.ts never had.
+// None of the original failure modes throw: `sepa-instant-service` (a key matching no Deployment)
+// left a payments panel on `not_deployed` for weeks; an invented `container` resolved docs to a
+// non-existent Service. Hence a test that re-derives the truth from the repo and gitops.
 //
-// None of these throw. Nothing goes red. The UI just quietly lies. Hence this
-// test: it re-derives the truth from the repo (module directories) and from
-// openbank-infra/gitops (real workload names) and fails CI on any drift.
-//
-// If this test flags your change: fix the registry entry — do not add to an
-// allowlist unless your service genuinely matches the documented exception.
+// If this test flags your change: fix the source (the module, or SERVICE_OVERRIDES) - do not add
+// to an allowlist unless your service genuinely matches the documented exception.
 
 import { describe, it, expect } from 'vitest'
 import { readFileSync, readdirSync, existsSync, statSync } from 'fs'
 import path from 'path'
 
-import { SERVICE_REGISTRY, k8sNameOf } from '@/lib/services/registry'
+import {
+  SERVICE_OVERRIDES,
+  buildProxyAllowlist,
+  isBffExposed,
+  buildRegistry,
+  k8sNameOf,
+  type CatalogFleetModule,
+} from '@/lib/services/registry'
 
 const ADMIN_UI = path.resolve(__dirname, '../..')
 const REPO = path.resolve(ADMIN_UI, '..')
 const GITOPS = path.join(REPO, 'openbank-infra', 'gitops')
 const GITOPS_APPS = path.join(GITOPS, 'apps')
 
-const BFF_ROUTE = path.join(ADMIN_UI, 'src/app/api/svc/[service]/[...path]/route.ts')
 const SERVICES_PAGE = path.join(ADMIN_UI, 'src/app/services/page.tsx')
-const DOCS_API_PAGE = path.join(ADMIN_UI, 'src/app/docs/api/page.tsx')
 
 // ── Exceptions (tight, documented, code-backed — NOT an escape hatch) ───────
-
-// `libs` is the single docs id with no SERVICE_REGISTRY entry, because it is not
-// a running service: docs.ts special-cases `id === 'libs'` and reads the
-// image-baked bundle (openbank-libs/docs) instead of fetching /q/openbank/docs.
-// See loadDocsIndex/loadDocsDocument in src/lib/services/docs.ts.
-const BUNDLE_ONLY_DOCS_IDS = new Set(['libs'])
-
-// Registry entries for real, buildable services that are NOT yet onboarded to
-// GitOps. Their registry entry is the off-cluster/local-dev target and the docs
-// backlog marker; in-cluster they resolve to null and degrade to "not deployed",
-// which is honest. Remove an id from here once its Deployment lands.
-const NOT_YET_DEPLOYED = new Set(['openbank-analytics-sink'])
-
-// BFF SERVICE_MAP keys for a service whose gitops workload has not landed yet. Off-cluster the
-// entry already routes; in-cluster the key resolves to nothing and the page degrades to
-// "not deployed", which is honest. Each key must still name a real module directory. Remove a
-// key once its workload lands (deliberately not asserted: the gitops PR may not run this suite,
-// and a stale-exemption failure would then redden main unseen).
-// Empty: treasury-service (ADR-0315) was the bridged key until its workload landed with the
-// service's own gitops component (#10618).
-const SERVICE_MAP_NOT_YET_DEPLOYED = new Set<string>()
 
 // ── Truth sources, re-derived from the repo ────────────────────────────────
 
@@ -209,22 +183,6 @@ const DISCOVERY_EXEMPT_NAMESPACES = new Set<string>([
   'argocd', 'external-secrets', 'vault', 'cnpg-system', 'keda', 'iam',
 ])
 
-/** BFF SERVICE_MAP keys, read from the route source. */
-function serviceMapKeys(): string[] {
-  const src = readFileSync(BFF_ROUTE, 'utf-8')
-  const block = src.match(/const SERVICE_MAP[^=]*=\s*\{([\s\S]*?)\n\}/)
-  expect(block, 'SERVICE_MAP literal not found in the BFF route').toBeTruthy()
-  return [...block![1].matchAll(/^\s*'([a-z0-9-]+)':/gm)].map(m => m[1])
-}
-
-/** STATIC_CANDIDATES ids, read from the /services page source. */
-function staticCandidateIds(): string[] {
-  const src = readFileSync(SERVICES_PAGE, 'utf-8')
-  const block = src.match(/const STATIC_CANDIDATES\s*=\s*\[([\s\S]*?)\n\]\s*as const/)
-  expect(block, 'STATIC_CANDIDATES literal not found in the /services page').toBeTruthy()
-  return [...block![1].matchAll(/\{\s*id:\s*'([a-z0-9-]+)'/g)].map(m => m[1])
-}
-
 /** Catalog `short` names (generated by `pretest` → scripts/generate-catalog.mjs). */
 function catalogShorts(): Set<string> {
   const raw = readFileSync(path.join(ADMIN_UI, 'catalog.json'), 'utf-8')
@@ -239,117 +197,140 @@ function catalogNames(): Set<string> {
   return new Set(parsed.services.map(s => s.name))
 }
 
-/**
- * `SERVICES` entries from the /docs/api page, as `{ specId, k8sName }`. `specId` doubles as the
- * key into the code-derived catalog (`catalog[svc.specId]`, keyed by module directory name) AND,
- * absent a `k8sName` override, the source `k8sName()` derives the BFF workload name from — so a
- * `specId` that only satisfies one of those two readers is exactly the drift this guards against.
- */
-function docsApiSpecEntries(): { id: string; specId: string; k8sName: string | null }[] {
-  const src = readFileSync(DOCS_API_PAGE, 'utf-8')
-  const block = src.match(/const SERVICES: Service\[\] = \[([\s\S]*?)\n\]/)
-  expect(block, 'SERVICES literal not found in the /docs/api page').toBeTruthy()
-  const out: { id: string; specId: string; k8sName: string | null }[] = []
-  for (const line of block![1].split('\n')) {
-    const id = line.match(/id:\s*'([a-z0-9-]+)'/)?.[1]
-    const specId = line.match(/specId:\s*'([a-z0-9-]+)'/)?.[1]
-    if (!id || !specId) continue // the `catalog` entry has `specId: null` — nothing to check
-    const k8sName = line.match(/k8sName:\s*'([a-z0-9-]+)'/)?.[1] ?? null
-    out.push({ id, specId, k8sName })
-  }
-  expect(out.length, 'no specId entries parsed out of the /docs/api SERVICES literal').toBeGreaterThan(0)
-  return out
+function catalogModules(): CatalogFleetModule[] {
+  const raw = readFileSync(path.join(ADMIN_UI, 'catalog.json'), 'utf-8')
+  return (JSON.parse(raw) as { services: CatalogFleetModule[] }).services
 }
+
+const REGISTRY = buildRegistry(catalogModules())
+const ALLOWLIST = buildProxyAllowlist(REGISTRY)
 
 // ── The rules ──────────────────────────────────────────────────────────────
 
 describe('service registry drift guard', () => {
-  it('every /services card resolves to a SERVICE_REGISTRY entry (no dead cards)', () => {
-    const known = new Set(SERVICE_REGISTRY.map(s => s.id))
-    const dead = staticCandidateIds()
-      .filter(id => !BUNDLE_ONLY_DOCS_IDS.has(id))
-      .filter(id => !known.has(id))
-    expect(
-      dead,
-      `STATIC_CANDIDATES ids with no SERVICE_REGISTRY entry — each renders a card whose `
-      + `docs link 404s with "Unknown service". Add a registry entry (id/container/port) `
-      + `or drop the card: ${dead.join(', ')}`,
-    ).toEqual([])
+  it('the derived registry is exactly the runnable modules on disk', () => {
+    // The whole point: nothing here is typed, so the count must equal what the repo contains.
+    // A module is runnable when its build applies the `openbank.quarkus-service` convention plugin
+    // and a runtime libs dependency (the same predicate generate-catalog.mjs uses). Recomputed here
+    // straight from the build scripts, not from catalog.json, so a generator that stops emitting
+    // modules is caught too.
+    const onDisk = [...moduleDirs()]
+      .filter(dir => {
+        const gradle = path.join(REPO, dir, 'build.gradle.kts')
+        if (!existsSync(gradle)) return false
+        const src = readFileSync(gradle, 'utf-8')
+        const viaConvention = /^\s*(?:plugins\s*\{\s*)?id\(["']openbank\.quarkus-service["']\)/m.test(src)
+          && (src.includes('project(":openbank-libs-runtime")') || src.includes('project(":openbank-libs")'))
+        return viaConvention || /^\s*alias\(libs\.plugins\.quarkus\)/m.test(src)
+      })
+      .sort()
+    expect(onDisk.length, 'no runnable modules found on disk - the predicate has drifted').toBeGreaterThan(40)
+    expect(REGISTRY.map(s => s.container).sort()).toEqual(onDisk)
+    // Every one of them carries a real port from its own application.yaml.
+    const noPort = catalogModules().filter(m => m.runnable === true && typeof m.port !== 'number').map(m => m.name)
+    expect(noPort, `runnable modules with no readable quarkus.http.port: ${noPort.join(', ')}`).toEqual([])
   })
 
-  it('every SERVICE_REGISTRY container is a real openbank-* module directory', () => {
+  it('the derived registry also covers every module that has a version.txt and a quarkus service build', () => {
+    // Cross-check against the release axis: a released service (version.txt + runnable build) that
+    // is missing from the registry would be invisible to health, config, the map and the BFF.
+    const released = [...moduleDirs()]
+      .filter(dir => existsSync(path.join(REPO, dir, 'version.txt')))
+      .filter(dir => REGISTRY.some(s => s.container === dir))
+    expect(released.length).toBeGreaterThan(40)
+    const catalogRunnable = catalogModules().filter(m => m.runnable === true).map(m => m.name).sort()
+    expect(REGISTRY.map(s => s.container).sort()).toEqual(catalogRunnable)
+  })
+
+  it('/services hand-lists only the libs documentation bundle (every service card is derived)', () => {
+    const src = readFileSync(SERVICES_PAGE, 'utf-8')
+    const block = src.match(/const STATIC_CANDIDATES\s*=\s*\[([\s\S]*?)\n\]\s*as const/)
+    expect(block, 'STATIC_CANDIDATES literal not found in the /services page').toBeTruthy()
+    const ids = [...block![1].matchAll(/\{\s*id:\s*'([a-z0-9-]+)'/g)].map(m => m[1])
+    expect(ids, 'only `libs` (a doc bundle, no runtime module) may be hand-listed').toEqual(['libs'])
+  })
+
+  it('every registry container is a real openbank-* module directory', () => {
     const dirs = moduleDirs()
-    const bogus = SERVICE_REGISTRY
-      .filter(s => !dirs.has(s.container))
-      .map(s => `${s.id} → ${s.container}`)
+    const bogus = REGISTRY.filter(s => !dirs.has(s.container)).map(s => `${s.id} -> ${s.container}`)
+    expect(bogus).toEqual([])
+  })
+
+  it('every SERVICE_OVERRIDES key is a runnable catalog module (an override cannot outlive its module)', () => {
+    const runnable = new Set(catalogModules().filter(m => m.runnable === true).map(m => m.name))
+    const stale = Object.keys(SERVICE_OVERRIDES).filter(k => !runnable.has(k))
     expect(
-      bogus,
-      `SERVICE_REGISTRY containers naming a directory that does not exist. docs.ts derives `
-      + `the k8s Service name from this field, so a wrong value silently resolves to nothing `
-      + `and the page renders "not deployed" forever: ${bogus.join(', ')}`,
+      stale,
+      `SERVICE_OVERRIDES names modules that are not runnable catalog modules (renamed or deleted?): ${stale.join(', ')}`,
     ).toEqual([])
   })
 
-  it('every SERVICE_REGISTRY entry resolves to a real gitops workload', () => {
-    // k8sNameOf() is what docs.ts actually calls to reach a service in-cluster,
-    // so this asserts the real resolution path, not a re-derivation of it.
+  it('every k8sName override resolves to a real gitops workload', () => {
+    // k8sNameOf() is what docs.ts and the BFF actually call to reach a service in-cluster. A
+    // module with NO override is allowed to have no workload (not deployed yet - the console says
+    // so honestly); an override exists precisely because the workload name differs, so it must hit.
     const workloads = gitopsWorkloadNames()
-    const undeployed = SERVICE_REGISTRY
-      .filter(s => !NOT_YET_DEPLOYED.has(s.container))
+    const missing = REGISTRY
+      .filter(s => s.k8sName)
       .filter(s => !workloads.has(k8sNameOf(s)))
-      .map(s => `${s.id} → ${k8sNameOf(s)}`)
-    expect(
-      undeployed,
-      `SERVICE_REGISTRY entries whose k8s name matches no Deployment/Service/Rollout in `
-      + `openbank-infra/gitops. Either the container/k8sName is wrong, or the service is not `
-      + `deployed yet and belongs in NOT_YET_DEPLOYED: ${undeployed.join(', ')}`,
-    ).toEqual([])
+      .map(s => `${s.id} -> ${k8sNameOf(s)}`)
+    expect(missing).toEqual([])
   })
 
   it('k8sName is only set where it actually differs from the directory', () => {
-    // The override exists for one genuine mismatch. If it starts getting set
-    // redundantly it stops signalling anything, so keep it load-bearing.
-    const redundant = SERVICE_REGISTRY
+    const redundant = REGISTRY
       .filter(s => s.k8sName && s.k8sName === s.container.replace(/^openbank-/, ''))
       .map(s => s.id)
-    expect(
-      redundant,
-      `k8sName equals the default derivation — drop the field: ${redundant.join(', ')}`,
-    ).toEqual([])
+    expect(redundant, `k8sName equals the default derivation - drop the field: ${redundant.join(', ')}`).toEqual([])
   })
 
-  it('every BFF SERVICE_MAP key matches a real gitops workload', () => {
-    // This is the class of bug that broke sepa-instant: in-cluster the key IS the
-    // workload name, so a key that matches nothing 404s no matter what the
-    // off-cluster container/port say.
-    const workloads = gitopsWorkloadNames()
-    const bogus = serviceMapKeys().filter(k => !workloads.has(k) && !SERVICE_MAP_NOT_YET_DEPLOYED.has(k))
-    expect(
-      bogus,
-      `SERVICE_MAP keys matching no Deployment/Service/Rollout in openbank-infra/gitops. `
-      + `In-cluster the key is looked up verbatim against discovery, so these 404 with `
-      + `"Unknown service" and every caller of /api/svc/<key> degrades to "not deployed": `
-      + `${bogus.join(', ')}`,
-    ).toEqual([])
-  })
-
-  it('a not-yet-deployed SERVICE_MAP exemption names a real module and a real SERVICE_MAP key', () => {
-    const dirs = moduleDirs()
-    const keys = new Set(serviceMapKeys())
-    for (const key of SERVICE_MAP_NOT_YET_DEPLOYED) {
-      expect(keys.has(key), `${key} is exempted but not in SERVICE_MAP — drop the exemption`).toBe(true)
-      expect(dirs.has(`openbank-${key}`), `${key} names no openbank-* module directory`).toBe(true)
+  it('the BFF allowlist is exactly the derived registry (an allowlist, never a pass-through)', () => {
+    // /api/svc/<key> is a security boundary: the key selects an upstream host. It must be a closed
+    // set built from catalog modules - no key outside it resolves, and the host is the module's
+    // own container name, never a caller-supplied value.
+    expect(Object.keys(ALLOWLIST).sort()).toEqual(REGISTRY.filter(isBffExposed).map(s => k8sNameOf(s)).sort())
+    for (const [key, target] of Object.entries(ALLOWLIST)) {
+      expect(key, 'allowlist keys are plain DNS-label workload names').toMatch(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/)
+      expect(target.container).toMatch(/^openbank-[a-z0-9-]+$/)
+      expect(Number.isInteger(target.port) && target.port > 0 && target.port < 65536).toBe(true)
+    }
+    for (const hostile of ['../etc', 'localhost', 'evil.example.com', 'openbank-account-service/../x', '__proto__', 'constructor', '']) {
+      expect(Object.hasOwn(ALLOWLIST, hostile), `${hostile} must not be allowlisted`).toBe(false)
     }
   })
 
-  it('every svcUrl() key exists in SERVICE_MAP (no caller pointing at an unknown service)', () => {
-    // The OTHER direction of the check above, and the one that was missing: that guard proves no
-    // SERVICE_MAP key is dead, but nothing proved every CALLER has a key. A page calling
-    // svcUrl('campaign-service', …) with no such key gets "Unknown service" from the proxy and
-    // renders as "not responding" — a deployed, healthy service that looks down. That is exactly
-    // what shipped with the campaign console (#2749): unit tests stubbed `fetch`, so the proxy was
-    // never on the path they exercised.
-    const keys = new Set(serviceMapKeys())
+  it('the BFF never exposes agents, sinks, simulators or libs (unless explicitly overridden)', () => {
+    const exposed = new Set(Object.values(ALLOWLIST).map(t => t.container))
+    const leaked = REGISTRY
+      .filter(s => /(-agent|-sink|-simulator)$|^openbank-libs/.test(s.container))
+      .filter(s => exposed.has(s.container) && SERVICE_OVERRIDES[s.container]?.exposeViaBff !== true)
+    expect(leaked.map(s => s.container)).toEqual([])
+    for (const name of ['openbank-devops-agent', 'openbank-finops-agent', 'openbank-analytics-sink', 'openbank-clearing-simulator',
+      'openbank-release-steward', 'openbank-governance-auditor', 'openbank-mcp-service']) {
+      expect(exposed.has(name), `${name} must not be BFF-exposed`).toBe(false)
+    }
+    // Every module the old hand-kept BFF map served remains reachable.
+    for (const key of ['account-service', 'ledger-service', 'product-catalog', 'security-scanner-service', 'sepa-instant', 'kyb-service', 'risk-engine']) {
+      expect(Object.hasOwn(ALLOWLIST, key), key).toBe(true)
+    }
+    expect(REGISTRY.filter(isBffExposed).length).toBe(Object.keys(ALLOWLIST).length)
+  })
+
+  it('duplicate registry ids / BFF keys throw at build instead of silently overwriting', () => {
+    const mod = (name: string, port: number): CatalogFleetModule =>
+      ({ name, short: name.replace(/^openbank-/, ''), kind: 'service', runnable: true, port })
+    // Same short name cannot occur on disk, so force the collision through two modules mapping to one id.
+    expect(() => buildRegistry([mod('openbank-dup-service', 1), mod('openbank-dup-service', 2)])).toThrow(/duplicate registry id/)
+    const entry = { id: 'a', label: 'A', group: 'core' as const, container: 'openbank-a-service', port: 1 }
+    expect(() => buildProxyAllowlist([entry, { ...entry, id: 'b', container: 'openbank-b-service', k8sName: 'a-service' }])).toThrow(/duplicate BFF allowlist key/)
+  })
+
+  it('every svcUrl() key exists in the BFF allowlist (no caller pointing at an unknown service)', () => {
+    // A page calling svcUrl('campaign-service', ...) with no such key gets "Unknown service" from
+    // the proxy and renders as "not responding" - a deployed, healthy service that looks down.
+    // That is exactly what shipped with the campaign console (#2749): unit tests stubbed `fetch`,
+    // so the proxy was never on the path they exercised.
+    const keys = new Set(Object.keys(ALLOWLIST))
     const callers: { file: string; key: string }[] = []
     const walkDir = (dir: string): string[] =>
       readdirSync(dir, { withFileTypes: true }).flatMap(e => {
@@ -362,11 +343,11 @@ describe('service registry drift guard', () => {
         callers.push({ file: path.relative(ADMIN_UI, file), key: m[1] })
       }
     }
-    expect(callers.length, 'no svcUrl() callers found — the matcher has drifted').toBeGreaterThan(0)
+    expect(callers.length, 'no svcUrl() callers found - the matcher has drifted').toBeGreaterThan(0)
     const unknown = callers.filter(c => !keys.has(c.key))
     expect(
-      unknown.map(c => `${c.file} → ${c.key}`),
-      'svcUrl() callers naming a key SERVICE_MAP does not define. The proxy answers '
+      unknown.map(c => `${c.file} -> ${c.key}`),
+      'svcUrl() callers naming a key the allowlist does not derive. The proxy answers '
       + '"Unknown service" and the page degrades to "not responding" on a healthy service.',
     ).toEqual([])
   })
@@ -470,33 +451,11 @@ describe('service registry drift guard', () => {
     ).toEqual([])
   })
 
-  it('SERVICE_MAP containers agree with SERVICE_REGISTRY on the module directory', () => {
-    const dirs = moduleDirs()
-    const src = readFileSync(BFF_ROUTE, 'utf-8')
-    const block = src.match(/const SERVICE_MAP[^=]*=\s*\{([\s\S]*?)\n\}/)!
-    const bogus = [...block[1].matchAll(/^\s*'([a-z0-9-]+)':\s*\{\s*container:\s*'([a-z0-9-]+)'/gm)]
-      .filter(m => !dirs.has(m[2]))
-      .map(m => `${m[1]} → ${m[2]}`)
-    expect(
-      bogus,
-      `SERVICE_MAP containers naming a directory that does not exist: ${bogus.join(', ')}`,
-    ).toEqual([])
-  })
-
-  it('registry ports are unique', () => {
-    const byPort = new Map<number, string[]>()
-    for (const s of SERVICE_REGISTRY) {
-      byPort.set(s.port, [...(byPort.get(s.port) ?? []), s.id])
-    }
-    const clashes = [...byPort.entries()]
-      .filter(([, ids]) => ids.length > 1)
-      .map(([port, ids]) => `${port}: ${ids.join(' + ')}`)
-    expect(clashes, `two services share a port: ${clashes.join(', ')}`).toEqual([])
-  })
-
-  it('registry ids are unique', () => {
-    const ids = SERVICE_REGISTRY.map(s => s.id)
-    expect(ids.length, 'duplicate id in SERVICE_REGISTRY').toBe(new Set(ids).size)
+  it('registry ids and k8s names are unique', () => {
+    const ids = REGISTRY.map(s => s.id)
+    expect(ids.length, 'duplicate id in the derived registry').toBe(new Set(ids).size)
+    const keys = REGISTRY.map(s => k8sNameOf(s))
+    expect(keys.length, 'duplicate k8s name in the derived registry').toBe(new Set(keys).size)
   })
 
   it('the /services fleet-count exclusion list only names real catalog modules', () => {
@@ -517,54 +476,11 @@ describe('service registry drift guard', () => {
     ).toEqual([])
   })
 
-  it('every /docs/api SERVICES specId resolves to a real code-derived catalog entry', () => {
-    // The page looks up `catalog[svc.specId]` (keyed by full module directory name, e.g.
-    // "openbank-security-scanner") to overlay release/API version, money-path and gap facts.
-    // specId `openbank-security-scanner-service` names no such directory, so that card silently
-    // rendered with no version/API metadata forever — nothing threw, the lookup just missed.
-    const names = catalogNames()
-    const orphaned = docsApiSpecEntries()
-      .filter(s => !names.has(s.specId))
-      .map(s => `${s.id} → specId '${s.specId}'`)
-    expect(
-      orphaned,
-      `/docs/api specId names no catalog module, so the card never overlays real version/API `
-      + `data: ${orphaned.join(', ')}`,
-    ).toEqual([])
-  })
-
-  it('every /docs/api SERVICES entry resolves to a real gitops workload', () => {
-    // The health check calls svcUrl(k8sName(svc), …); k8sName() derives from specId unless a
-    // `k8sName` override is set. Fixing the specId above to match the catalog directory must not
-    // silently break this — the two readers want different strings for security-scanner, which is
-    // exactly why the override field exists.
-    const workloads = gitopsWorkloadNames()
-    const undeployed = docsApiSpecEntries()
-      .map(s => ({ id: s.id, k8s: s.k8sName ?? s.specId.replace(/^openbank-/, '') }))
-      .filter(s => !workloads.has(s.k8s))
-      .map(s => `${s.id} → ${s.k8s}`)
-    expect(
-      undeployed,
-      `/docs/api entries whose derived k8s name matches no Deployment/Service/Rollout in `
-      + `openbank-infra/gitops — the health probe 404s and the card reads "not deployed" `
-      + `forever: ${undeployed.join(', ')}`,
-    ).toEqual([])
-  })
-
-  it('the exception allowlists stay tight', () => {
-    // A guard is only worth as much as its exceptions. If these grow, the rules
-    // above have stopped meaning anything — re-read the rationale, don't bump.
-    expect(BUNDLE_ONLY_DOCS_IDS.size, 'only `libs` is bundle-only in docs.ts').toBe(1)
-    expect(
-      NOT_YET_DEPLOYED.size,
-      'NOT_YET_DEPLOYED should shrink as services onboard to GitOps, never grow casually',
-    ).toBeLessThanOrEqual(1)
-    expect(
-      SERVICE_MAP_NOT_YET_DEPLOYED.size,
-      'SERVICE_MAP_NOT_YET_DEPLOYED is a bridge for one service whose workload is in flight, not a parking lot',
-    ).toBeLessThanOrEqual(1)
-    for (const container of NOT_YET_DEPLOYED) {
-      expect(existsSync(path.join(REPO, container)), `${container} must still be a real module`).toBe(true)
+  it('SERVICE_OVERRIDES stays presentation-only', () => {
+    // Overrides carry label/group/id/k8sName. If they start carrying ports or other facts, the
+    // list has become a second source of truth again - derive the fact in generate-catalog.mjs.
+    for (const [name, o] of Object.entries(SERVICE_OVERRIDES)) {
+      expect(Object.keys(o).filter(k => !['label', 'group', 'id', 'k8sName', 'exposeViaBff'].includes(k)), name).toEqual([])
     }
   })
 })
