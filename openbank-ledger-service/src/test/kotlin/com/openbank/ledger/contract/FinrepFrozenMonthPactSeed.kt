@@ -55,15 +55,19 @@ object FinrepFrozenMonthPactSeed {
             line(c, CASH_LINE_ID, CASH_GL_ID, "D", 1)
             line(c, DEPOSITS_LINE_ID, DEPOSITS_GL_ID, "C", 2)
             if (yearToDate) {
-                (1 until reportingMonth.monthValue).forEach { month ->
-                    emptyEvidence(c, reportingMonth.year, month)
-                }
+                seedPriorMonths(c, reportingMonth)
             }
             evidence(c, reportingMonth)
             c.commit()
         } catch (failure: Throwable) {
             c.rollback()
             throw failure
+        }
+    }
+
+    private fun seedPriorMonths(c: Connection, reportingMonth: LocalDate) {
+        for (month in 1 until reportingMonth.monthValue) {
+            emptyEvidence(c, reportingMonth.year, month)
         }
     }
 
