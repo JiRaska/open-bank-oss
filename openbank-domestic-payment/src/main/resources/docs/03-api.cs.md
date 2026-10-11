@@ -19,6 +19,8 @@ Všechny endpointy vyžadují **Keycloak Bearer token** (realm `openbank`, RS256
 | `GET /domestic-payments` | `ROLE_VIEWER`, `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_PAYMENTS`, `ROLE_API` |
 | `PATCH /domestic-payments/{paymentId}/status` | `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_PAYMENTS` + `@Authorize(action="domesticPayment.transitionStatus")` (OPA, ADR-0034) |
 
+Při vytvoření platby následuje po kontrole role a OPA kontrola rozsahu iniciátora (ADR-0335 D5). Účet služby penzijního klienta se rozpozná pouze z ověřeného JWT s neprázdným subjektem, `azp` odpovídajícím tomuto klientovi a `preferred_username` odpovídajícím `service-account-<azp>`; smí odepisovat jen z nakonfigurovaného penzijního účtu. Účet služby edge klienta potřebuje pro obecný rozsah také `ROLE_OPERATOR`. Zaměstnanecký token získá obecný rozsah jen s povolenou rolí a ověřenými údaji interaktivního uživatele. Samotná role, uživatelské jméno podobné účtu služby ani neznámý strojový klient obecné vytvoření platby nepovolují.
+
 OIDC je vypnuté pouze v profilech `%dev` a `%test`.
 
 ## Idempotence
