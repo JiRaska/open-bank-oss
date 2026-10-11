@@ -9,8 +9,6 @@
 # first, BACKWARD compatibility enforced at the registry, producers before consumers.
 #
 # Regenerate deliberately, never as a way to make a red build green.
-openbank-account-service:openbank.accounts.account.created
-openbank-account-service:openbank.notification.requests
 openbank-aml-service:openbank.aml.events
 openbank-balance-service:openbank.balance.events
 openbank-card-issuance-service:openbank.cards.events

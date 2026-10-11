@@ -1,0 +1,112 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+
+asyncapi: 3.0.0
+info:
+  title: OpenBank Account Service — events
+  version: 1.0.0
+  description: |
+    Account creation, lifecycle changes and approved savings withdrawals use separate topics.
+    This contract describes the staged producer candidate for issue #9073; deploy it only after
+    the new topics, Read ACLs and audit/analytics subscriptions are verified. The legacy
+    account.created topic contains older mixed events until its retention window expires.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+defaultContentType: application/json
+channels:
+  accountCreated:
+    address: openbank.accounts.account.created
+    description: Direct emitter; AccountCreated only after the #9073 producer cutover.
+    messages:
+      AccountCreated:
+        $ref: '#/components/messages/AccountCreated'
+  accountStatus:
+    address: openbank.accounts.account.status-changed
+    description: Direct emitter; AccountStatusChanged and AccountClosed.
+    messages:
+      AccountStatusChanged:
+        $ref: '#/components/messages/AccountStatusChanged'
+      AccountClosed:
+        $ref: '#/components/messages/AccountClosed'
+  savingsWithdrawalApproved:
+    address: openbank.accounts.savings-withdrawal.approved
+    description: Transactional outbox relay; this event alone does not execute a payment.
+    messages:
+      SavingsWithdrawalApproved:
+        $ref: '#/components/messages/SavingsWithdrawalApproved'
+  notificationRequests:
+    address: openbank.notification.requests
+    description: |
+      Existing notification-service command produced by KafkaNotificationRequestPublisher.
+      This map-shaped command has no account DomainEvent eventType literal; its delivery
+      contract is owned by notification-service.
+components:
+  messages:
+    AccountCreated:
+      name: AccountCreated
+      payload:
+        $ref: '#/components/schemas/AccountCreatedPayload'
+    AccountStatusChanged:
+      name: AccountStatusChanged
+      payload:
+        $ref: '#/components/schemas/AccountStatusChangedPayload'
+    AccountClosed:
+      name: AccountClosed
+      payload:
+        $ref: '#/components/schemas/AccountClosedPayload'
+    SavingsWithdrawalApproved:
+      name: SavingsWithdrawalApproved
+      description: Body eventType plus ce-type, ce-id and idempotency-key outbox headers.
+      payload:
+        $ref: '#/components/schemas/SavingsWithdrawalApprovedPayload'
+  schemas:
+    DomainEventEnvelope:
+      type: object
+      required: [eventId, aggregateId, aggregateType, eventType, version, occurredAt]
+      properties:
+        eventId: { type: string, format: uuid }
+        aggregateId: { type: string, format: uuid }
+        aggregateType: { type: string }
+        eventType: { type: string }
+        version: { type: integer, format: int64 }
+        occurredAt: { type: string, format: date-time }
+    AccountCreatedPayload:
+      allOf:
+        - $ref: '#/components/schemas/DomainEventEnvelope'
+        - type: object
+          properties:
+            accountNumber: { type: string }
+            accountType: { type: string }
+            partyId: { type: string, format: uuid }
+            productId: { type: string, format: uuid }
+            currency: { type: string }
+            sourceService: { type: string, const: account-service }
+    AccountStatusChangedPayload:
+      allOf:
+        - $ref: '#/components/schemas/DomainEventEnvelope'
+        - type: object
+          properties:
+            previousStatus: { type: string }
+            newStatus: { type: string }
+            reason: { type: [string, 'null'] }
+            sourceService: { type: string, const: account-service }
+    AccountClosedPayload:
+      allOf:
+        - $ref: '#/components/schemas/DomainEventEnvelope'
+        - type: object
+          properties:
+            reason: { type: [string, 'null'] }
+            sourceService: { type: string, const: account-service }
+    SavingsWithdrawalApprovedPayload:
+      allOf:
+        - $ref: '#/components/schemas/DomainEventEnvelope'
+        - type: object
+          properties:
+            accountId: { type: string, format: uuid }
+            delegatePartyId: { type: string, format: uuid }
+            amountMinor: { type: integer, format: int64 }
+            currency: { type: string }
+            approvalId: { type: string }
+            scaSessionId: { type: string, format: uuid }
+            sourceService: { type: string, const: account-service }

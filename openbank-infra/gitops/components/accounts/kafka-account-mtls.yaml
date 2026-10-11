@@ -1,7 +1,9 @@
 # Kafka mTLS identity + cert projection for account-service (ADR-0137, #2665 Tier 1).
 #
 # account-service topics:
-#   Produces: openbank.accounts.account.created (two channels: account-events-out + account-outbox-out)
+#   Produces: openbank.accounts.account.created (account-events-out)
+#             openbank.accounts.account.status-changed (account-status-events-out)
+#             openbank.accounts.savings-withdrawal.approved (account-outbox-out)
 #             openbank.notification.requests (notification-requests-out)
 #             openbank.dlq.account.party-events-in       (SmallRye DLQ for party-events-in)
 #             openbank.dlq.account.delegation-events-in  (SmallRye DLQ for delegation-events-in)
@@ -27,6 +29,18 @@ spec:
       - resource:
           type: topic
           name: openbank.accounts.account.created
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.accounts.account.status-changed
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.accounts.savings-withdrawal.approved
           patternType: literal
         operations: [Write, Describe]
         host: "*"
