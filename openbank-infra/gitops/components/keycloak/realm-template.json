@@ -1312,6 +1312,7 @@
       "bearerOnly": false,
       "defaultClientScopes": [
         "openid",
+        "basic",
         "profile",
         "roles",
         "catalog:read"

@@ -85,7 +85,7 @@ class CatalogPensionOidcTestResource : QuarkusTestResourceLifecycleManager {
                 .map { mapOf("name" to it, "protocol" to "openid-connect") },
             "clients" to listOf(
                 client("openbank-pension", secret, catalogRead = true),
-                client("unrelated-service", secret, catalogRead = false),
+                client("unrelated-service", secret, catalogRead = true),
                 adminClient(secret),
             ),
             "users" to listOf(
@@ -136,7 +136,8 @@ class CatalogPensionOidcTestResource : QuarkusTestResourceLifecycleManager {
         "secret" to secret,
         "publicClient" to false,
         "serviceAccountsEnabled" to true,
-        "defaultClientScopes" to listOf("profile", "roles") + if (catalogRead) listOf("catalog:read") else emptyList(),
+        "defaultClientScopes" to listOf("basic", "profile", "roles") +
+            if (catalogRead) listOf("catalog:read") else emptyList(),
     )
 
     private fun serviceUser(id: String) = mapOf(
