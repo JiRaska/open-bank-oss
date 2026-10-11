@@ -1534,14 +1534,15 @@ jobs:
   # `Docker push` no longer exits non-zero when one service fails, because a job failure skips
   # every dependent job and so stranded the deploy of every HEALTHY service in the same run
   # (#9714: 2.5 days, 76 of 100 runs, nothing deployed, one undeclared ECR repository). The
-  # failure has to stay just as visible, so it lands here instead — after gitops-pr and
-  # deploy-signal have done their work for the services that did push.
+  # failure stays visible in this independent job. It depends only on build-push:
+  # healthy-service deployment does not depend on this report, so both can proceed
+  # concurrently. Waiting for deployment first adds another runner queue boundary.
   #
   # `always()` is load-bearing: without it this job is skipped whenever an earlier job fails,
   # which is exactly the case it exists to report.
   push-failures:
     name: Push failures
-    needs: [build-push, gitops-pr, deploy-signal]
+    needs: [build-push]
     if: >-
       ${{ always() && (
         (needs.build-push.outputs.failed_services != '' &&
@@ -1566,7 +1567,7 @@ jobs:
             echo "Push failed: \`${FAILED_SERVICES:-[]}\`"
             echo "Blocked by fixable CRITICAL CVEs: \`${CVE_BLOCKED:-[]}\`"
             echo "Pushed: \`${PUSHED_SERVICES:-[]}\`"
-            echo "Deployed: \`${DEPLOYABLE:-[]}\`"
+            echo "Build candidates for deployment: \`${DEPLOYABLE:-[]}\`"
             echo
             echo "These services are running whatever image they ran before this commit."
             echo "A missing ECR repository is the recurring cause — the repository set is"
