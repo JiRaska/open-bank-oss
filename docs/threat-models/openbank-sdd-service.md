@@ -195,3 +195,13 @@ service account and authenticated human operators retain their existing general 
 An undeclared service account, anonymous principal or ordinary customer is denied before
 ownership checks, mandate listing or mutation. Operator roles do not elevate undeclared
 machine identities.
+
+### Provider TLS build and rollout
+
+The production build requires client certificates for an HTTPS listener when its server
+key material is configured. This property is fixed at build time; setting only a runtime
+environment variable cannot upgrade an image built without it. Preserve the HTTP listener
+during rollout. First publish a compatible signed provider image, then configure the
+private-CA listener and certificate rotation, and finally switch pension callers to HTTPS.
+OIDC and policy checks continue to authorize business operations independently of TLS trust.
+Roll back caller URLs before removing the provider listener or reverting its image.
