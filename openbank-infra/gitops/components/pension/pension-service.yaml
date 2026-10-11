@@ -216,6 +216,15 @@ spec:
             - name: party-tls
               mountPath: /mnt/party-tls
               readOnly: true
+            - name: sdd-tls
+              mountPath: /mnt/sdd-tls
+              readOnly: true
+            - name: domestic-payment-tls
+              mountPath: /mnt/domestic-payment-tls
+              readOnly: true
+            - name: standing-order-tls
+              mountPath: /mnt/standing-order-tls
+              readOnly: true
             - name: sca-tls
               mountPath: /mnt/sca-tls
               readOnly: true
@@ -316,6 +325,15 @@ spec:
           secret:
             secretName: pension-service-client-tls
         - name: party-tls
+          secret:
+            secretName: pension-service-client-tls
+        - name: sdd-tls
+          secret:
+            secretName: pension-service-client-tls
+        - name: domestic-payment-tls
+          secret:
+            secretName: pension-service-client-tls
+        - name: standing-order-tls
           secret:
             secretName: pension-service-client-tls
         - name: sca-tls

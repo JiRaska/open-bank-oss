@@ -45,11 +45,18 @@ class CatalogClientProdTlsWiringTest {
     }
 
     @Test
-    fun `identity clients bind their own authority to the outbound client identity`() {
+    fun `identity and payment clients bind their authorities to the outbound client identity`() {
         val clients = quarkus()["rest-client"] as Map<*, *>
         val buckets = quarkus()["tls"] as Map<*, *>
-        listOf("account", "party", "sca").forEach { peer ->
-            val client = clients["$peer-service"] as Map<*, *>
+        mapOf(
+            "account" to "account-service",
+            "party" to "party-service",
+            "sca" to "sca-service",
+            "sdd" to "sdd-service",
+            "domestic-payment" to "domestic-payment",
+            "standing-order" to "standing-order-service",
+        ).forEach { (peer, configKey) ->
+            val client = clients[configKey] as Map<*, *>
             val name = "$peer-authority"
             assertThat(client["tls-configuration-name"]).isEqualTo(name)
             val bucket = buckets[name] as Map<*, *>

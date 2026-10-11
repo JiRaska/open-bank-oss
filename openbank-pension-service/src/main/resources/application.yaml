@@ -370,6 +370,36 @@ authz:
           pem:
             certs: /mnt/sca-tls/ca.crt
         protocols: TLSv1.3
+      sdd-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/sdd-tls/tls.crt
+              key: /mnt/sdd-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/sdd-tls/ca.crt
+        protocols: TLSv1.3
+      domestic-payment-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/domestic-payment-tls/tls.crt
+              key: /mnt/domestic-payment-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/domestic-payment-tls/ca.crt
+        protocols: TLSv1.3
+      standing-order-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/standing-order-tls/tls.crt
+              key: /mnt/standing-order-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/standing-order-tls/ca.crt
+        protocols: TLSv1.3
     rest-client:
       product-catalog:
         tls-configuration-name: catalog-authority
@@ -379,3 +409,9 @@ authz:
         tls-configuration-name: party-authority
       sca-service:
         tls-configuration-name: sca-authority
+      sdd-service:
+        tls-configuration-name: sdd-authority
+      domestic-payment:
+        tls-configuration-name: domestic-payment-authority
+      standing-order-service:
+        tls-configuration-name: standing-order-authority

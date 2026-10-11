@@ -253,3 +253,13 @@ Each client must be verified through its actual REST interface with client authe
 OIDC before cutover. Keep the current URLs until the reviewed configuration image is delivered.
 The shared CA identifies transport peers; account ownership, party validation and SCA consumption
 continue to enforce their existing business authorization and participant constraints.
+
+Payment clients additionally prepare separate `sdd-authority`, `domestic-payment-authority`
+and `standing-order-authority` TLS buckets using pension's dedicated client-auth identity
+and explicit CA trust from their own read-only mount aliases. The provider manifests prepare
+parallel required-client-auth listeners with distinct server identities. No source expansion
+proves those listeners have issued certificates or are serving in the deployment. Deliver and
+verify both provider listeners and the reviewed pension image before changing caller URLs
+and regenerating ingress policies; existing HTTP edges remain until that reviewed cutover.
+Transport identity does not authorize mandate registration, standing orders or payment creation;
+OIDC, request bindings and each provider's business authorization remain independent controls.
