@@ -82,10 +82,10 @@ def _normalize_pattern(pattern: str) -> str:
 def _matches_permission(pattern: str, path: str, *, conservative: bool = False) -> bool:
     """Match one concrete path; unknown wildcard syntax is never trusted for bearer coverage."""
     pattern = _normalize_pattern(pattern)
-    # Quarkus does not erase the terminal slash on an exact permission: the
-    # exact `/api/v1/` must not protect a request for `/api/v1`.
+    # An exact slashless path also matches its slash-suffixed request, but an
+    # exact slash-suffixed path does not match the slashless request.
     if "*" not in pattern:
-        return pattern == path
+        return pattern == path or (not pattern.endswith("/") and path == pattern + "/")
     parts = pattern.strip("/").split("/")
     actual = path.strip("/").split("/")
     for i, part in enumerate(parts):
@@ -125,7 +125,7 @@ def _specificity(pattern: str) -> tuple[tuple[int, int], ...]:
     score = tuple((int(part != "*"), len(part.replace("*", ""))) for part in parts)
     # A trailing wildcard also matches zero segments. For that common request,
     # /api/v1 is more specific than /api/v1/* despite having fewer segments.
-    return score if parts[-1] == "*" else score + ((2, 0),)
+    return score if parts[-1] == "*" else score + ((2, int(pattern.endswith("/"))),)
 
 
 def _overlap_witness(pattern: str, root: str, probe: str) -> str | None:
@@ -136,7 +136,9 @@ def _overlap_witness(pattern: str, root: str, probe: str) -> str | None:
     """
     pattern = _normalize_pattern(pattern)
     if "*" not in pattern:
-        return pattern if pattern == root or pattern.startswith(root.rstrip("/") + "/") else None
+        if _matches_permission(pattern, root):
+            return root
+        return pattern if pattern.startswith(root.rstrip("/") + "/") else None
     parts = pattern.strip("/").split("/")
     root_parts = root.strip("/").split("/")
     candidate = []
@@ -333,6 +335,12 @@ def self_test() -> int:
         "          slashless:\n            paths: /api/v1\n            auth-mechanism: bearer\n"
         "          slash:\n            paths: /api/v1/\n            policy: authenticated\n"
     )
+    slashless_override = yaml.safe_load(
+        '"%prod":\n  quarkus:\n    http:\n      ssl:\n        client-auth: required\n'
+        "      auth:\n        permission:\n"
+        "          broad:\n            paths: /api/*\n            auth-mechanism: bearer\n"
+        "          exact:\n            paths: /api/v1\n            policy: authenticated\n"
+    )
     attached_wildcard = yaml.safe_load(
         '"%prod":\n  quarkus:\n    http:\n      ssl:\n        client-auth: required\n'
         "      auth:\n        permission:\n"
@@ -366,12 +374,18 @@ def self_test() -> int:
          len(findings_for(exact_bearer, ["/api/v1/secure"])) == 1),
         ("trailing-slash bearer does not protect the slashless exact path",
          len(findings_for(trailing_slash_bearer, ["/api/v1"])) == 1),
-        ("slashless bearer does not protect the trailing-slash exact path",
+        ("trailing-slash non-bearer wins over slashless bearer on slash request",
          len(findings_for(trailing_slash_override, ["/api/v1/"])) == 1),
+        ("slashless non-bearer also shadows broad bearer on slash request",
+         len(findings_for(slashless_override, ["/api/v1/"])) == 1),
+        ("slashless non-bearer does not overlap another root",
+         findings_for(slashless_override, ["/api/v2/"]) == []),
         ("exact trailing-slash path does not match the slashless request",
          not _matches_permission("/api/v1/", "/api/v1")),
         ("exact trailing-slash path matches its own request",
          _matches_permission("/api/v1/", "/api/v1/")),
+        ("exact slashless path matches its trailing-slash request",
+         _matches_permission("/api/v1", "/api/v1/")),
         ("attached trailing wildcard shadows broad bearer on a served descendant",
          len(findings_for(attached_wildcard, ["/api/v1/secure"])) == 1),
         ("non-bearer permission outside served API does not defeat bearer-only",
