@@ -1,0 +1,86 @@
+# Single-owner Postgres for tax-reporting-service, reconciled by the cluster-wide CNPG operator. CNPG
+# generates the `tax-reporting-db-app` secret (username/password for the `openbank` owner) and a
+# `tax-reporting-db-rw` Service — both consumed by the tax-reporting-service Deployment for the reactive
+# datasource and Flyway migrations. Two instances: the filing records are statutory evidence
+# (governance.yaml: 10-year retention). Not money-path, so it stays on the spot pool and is NOT a
+# target of the stateful-on-demand Kyverno policy (check-stateful-not-on-spot.py derives that set).
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: tax-reporting-db
+  namespace: tax-reporting
+spec:
+  monitoring:
+    enablePodMonitor: true
+  instances: 2
+  # ADR-0325: an update (image bump, config change) promotes the already-updated
+  # standby first and only then restarts the old primary. CNPG's default,
+  # `restart`, restarts the primary IN PLACE; on a single-instance cluster the
+  # operator has no standby and restarts either way, so this is free there.
+  primaryUpdateMethod: switchover
+  primaryUpdateStrategy: unsupervised
+  # ADR-0325 fleet wave: required anti-affinity + zone spread. Changes the pod spec, so CNPG
+  # rolls the standby first and then performs ONE switchover (a write pause of seconds).
+  affinity:
+    enablePodAntiAffinity: true
+    topologyKey: kubernetes.io/hostname
+    podAntiAffinityType: required
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          cnpg.io/cluster: tax-reporting-db
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.6
+  storage:
+    storageClass: gp3
+    size: 2Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  postgresql:
+    parameters:
+      wal_keep_size: "64MB"
+  bootstrap:
+    initdb:
+      database: openbank_tax_reporting
+      owner: openbank
+  # WAL archiving + base backups to S3. The §38d filing and its observed remittances are the
+  # audit trail behind a tax return; governance.yaml sets retention at 10 years. Credentials from
+  # EKS Pod Identity on the tax-reporting-db ServiceAccount (db-backups.tf, applied BEFORE this
+  # cluster exists — Pod Identity injects at admission, #12455).
+  #
+  # A backup that has never been configured reports the SAME success as one that works: CNPG's
+  # archiver is a no-op with a success exit code when no barmanObjectStore exists, and both the
+  # ContinuousArchiving condition and pg_stat_archiver agree with it. Verify by listing the
+  # objects (`aws s3 ls`), never by reading a condition.
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://openbank-sandbox-db-backups/tax-reporting-db
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: tax-reporting-db-daily
+  namespace: tax-reporting
+spec:
+  # CNPG reads this only at creation: without it the cluster has no recovery
+  # point until the first scheduled run, while Ready and ContinuousArchiving
+  # both read True. Adding it to a cluster that already exists is inert.
+  immediate: true
+  schedule: "0 55 4 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: tax-reporting-db
