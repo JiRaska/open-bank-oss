@@ -245,3 +245,11 @@ after deployment. Rollback of the cutover restores the prior URL and generated p
 it restores the former transport/routing limitations and is not a security completion claim.
 The additive client identity and listener compatibility can remain during rollback. Other
 plaintext integrations, including pension-fund, are separate remaining transport risks.
+
+The same expansion sequence prepares account, party and SCA clients using their own named TLS
+authorities and mount paths for the dedicated outbound pension identity. Their existing 8443
+listeners and ingress policies already admit pension; this does not establish deployed reachability.
+Each client must be verified through its actual REST interface with client authentication and
+OIDC before cutover. Keep the current URLs until the reviewed configuration image is delivered.
+The shared CA identifies transport peers; account ownership, party validation and SCA consumption
+continue to enforce their existing business authorization and participant constraints.
