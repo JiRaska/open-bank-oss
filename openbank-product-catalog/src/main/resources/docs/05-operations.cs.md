@@ -62,6 +62,16 @@ Produkční databázové přihlašovací údaje jsou secrety a musí je dodat de
 Standalone při startu odmítá plaintext OIDC issuer. Legacy `/api/v1` navíc vyžaduje banking pack i
 explicitně zapnutý compatibility flag.
 
+### Autentizace produkčních listenerů
+
+V produkčním profilu vyžaduje TLS listener na portu 8443 důvěryhodný klientský certifikát;
+obyčejný HTTP aplikační listener zůstává dostupný pro nakonfigurované volající uvnitř clusteru.
+Pro `/api/*` na obou listenerech musí volající navíc předložit OIDC bearer token. Klientský
+certifikát naváže TLS spojení, ale sám o sobě neautentizuje požadavek na API. Nastavení
+`bearer-only` vybírá autentizační mechanismus; role a scopes endpointu i samostatně
+nakonfigurované autorizační kontroly platí dál. Úspěšný mTLS handshake ani toto nastavení
+cesty nedokazují, že byla vynucena konkrétní autorizační politika.
+
 ## Health checky
 
 - **Liveness:** `:8085/q/health/live` — JVM + ArC běží.
@@ -88,6 +98,8 @@ _Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v je
 - **Zastaralé nebo špatné ceny v admin UI** — UI musí číst `GET /api/v1/fees`; ověř, že nespadá na napevno zadrátovaný seznam. Zkontroluj `fees[]` a `status` produktu přes `GET /api/v1/products/{id}`.
 - **Požadován zákaznický seznam** — ve v1 veřejná projekce neexistuje. Nevystavuj autentizovaný operátorský seznam; použij až publikovanou projekci v2.
 - **Stav chybí po restartu** — jde o incident: stav je v PostgreSQL. Ověř cílovou databázi, historii Flyway a obnovu; seeder nikdy nepřepisuje neprázdné úložiště.
+- **Certifikát přijat, ale API vrací 401** — přilož také platný OIDC bearer token. Token a issuer
+  kontroluj odděleně od TLS certifikátu; samotný certifikát není identitou pro API.
 - **Duplicitní code při create** — `409`; zvol unikátní `code`.
 - **Standalone consumer zaostává** — pokračuj na `GET /api/v2/events` od posledního potvrzeného
   opaque cursoru; zpracování musí být idempotentní podle event `id`.
