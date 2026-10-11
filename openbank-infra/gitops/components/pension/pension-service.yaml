@@ -32,7 +32,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-pension-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "a8159d516de4aff0"
+        openbank.tech/policy-checksum: "399753f0d8121384"
       labels:
         app.kubernetes.io/name: pension-service
         app.kubernetes.io/part-of: pension
@@ -129,12 +129,12 @@ spec:
                   name: pension-service-m2m-oidc
                   key: OIDC_PENSION_CLIENT_SECRET
                   optional: false
-            - name: PENSION_FUND_SERVICE_URL
-              value: http://pension-fund-service.pension-fund.svc:8162
             # Internal-TLS listeners (8443, client certificate required). Each client presents its
             # own identity and trusts only its issuer via the per-upstream *-authority TLS bucket
             # in application.yaml (%prod), hostname verification on. product-catalog keeps
             # min: 1 replica, so the direct call never meets a scaled-to-zero target.
+            - name: PENSION_FUND_SERVICE_URL
+              value: https://pension-fund-service.pension-fund.svc:8443
             - name: PRODUCT_CATALOG_SERVICE_URL
               value: https://product-catalog.accounts.svc:8443
             # #12378 payment adapters (pension-service's own OIDC client).
