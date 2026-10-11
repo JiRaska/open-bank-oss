@@ -10,6 +10,7 @@ import math
 import os
 import re
 import sys
+import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import xml.etree.ElementTree as ET
@@ -893,6 +894,10 @@ def main() -> None:
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
     if args.self_test:
+        subprocess.run(
+            [sys.executable, str(Path(__file__).with_name("test-keycloak-test-intelligence.py"))],
+            check=True,
+        )
         with tempfile.TemporaryDirectory() as directory:
             service = Path(directory)
             runtime = service / "build/test-intelligence/runtime"
