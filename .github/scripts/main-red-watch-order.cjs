@@ -143,6 +143,14 @@ function failureName(line) {
   return line.match(/^- `([^`]+)` \[(?:failure|timed_out)\](?: |$)/)?.[1]
 }
 
+function failureSteps(line) {
+  const detail = line.split(' — ')[1]
+  if (!detail || detail.startsWith('_no step-level failure reported_')) return null
+  const beforeLog = detail.split(' ([log](')[0]
+  const names = [...beforeLog.matchAll(/`([^`]+)`/g)].map(match => match[1])
+  return names.length && names.every(name => name.trim()) ? names : null
+}
+
 /** Keep failures until the same named job has actually succeeded in a later attempt. */
 function remainingFailureLines(issueBody, successfulJobs) {
   if (typeof issueBody !== 'string' || !Array.isArray(successfulJobs)) return null
@@ -150,8 +158,14 @@ function remainingFailureLines(issueBody, successfulJobs) {
   if (!section) return null
   const lines = section[2].split(/\r?\n/).filter(Boolean)
   if (!lines.length || lines.some(line => !failureName(line))) return null
-  const passed = new Set(successfulJobs)
-  return lines.filter(line => !passed.has(failureName(line)))
+  if (successfulJobs.some(job => !job || typeof job.job !== 'string' ||
+      !Array.isArray(job.steps) || job.steps.some(step => typeof step !== 'string'))) return null
+  return lines.filter(line => {
+    const failedSteps = failureSteps(line)
+    if (!failedSteps) return true // No step identity cannot prove recovery.
+    return !successfulJobs.some(job => job.job === failureName(line) &&
+      failedSteps.every(step => job.steps.includes(step)))
+  })
 }
 
 function failedJobsCovered(issueBody, successfulJobs) {

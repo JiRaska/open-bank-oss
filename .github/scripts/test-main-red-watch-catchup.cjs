@@ -9,9 +9,16 @@ const { LatestRunLagError } = require('./main-red-watch-order.cjs')
 
 const context = { repo: { owner: 'o', repo: 'r' }, workflow: 'main red watch', runId: 900 }
 const leaf = 'build (openbank-document-service) / openbank-document-service (contract)'
-const failed = job => ({ job, conclusion: 'failure', steps: ['Provider verification'], job_url: 'https://example.invalid/log' })
+const failed = job => ({ job, conclusion: 'failure',
+  steps: [job === 'all-green' ? 'Verify no service failed' : 'Provider verification'],
+  job_url: 'https://example.invalid/log' })
+const succeeded = (job, steps) => ({ job, steps })
+const greenJob = job => succeeded(job, [job === 'all-green' ? 'Verify no service failed' :
+  job.includes('ledger') ? 'Provider verification (:openbank-ledger-service:providerPactTest)' : 'Provider verification'])
 const verdict = (run_id, status, failing, successful_jobs = []) => ({
-  run_id, attempt: 1, status, failing, successful_jobs, workflow: 'Services CI',
+  run_id, attempt: 1, status, failing,
+  successful_jobs: successful_jobs.map(job => typeof job === 'string' ? greenJob(job) : job),
+  workflow: 'Services CI',
   head_sha: 'abc123456789', html_url: 'https://example.invalid/run',
 })
 
@@ -120,7 +127,17 @@ async function main() {
   assert.equal(legacy.state, 'open')
   assert.match(legacy.body, /build \(openbank-ledger-service\) \/ openbank-ledger-service \(contract\)/)
   assert.doesNotMatch(legacy.body, /- `all-green` \[failure\]/)
-  await applyVerdict(github, context, verdict(105, 'green', [], [ledger, 'all-green']))
+  // A reused job name can succeed after its provider step is skipped or absent.
+  // The exact legacy failure must survive both outcomes.
+  await applyVerdict(github, context, verdict(105, 'green', [], [
+    succeeded(ledger, ['Setup']), greenJob('all-green'),
+  ]))
+  assert.equal(legacy.state, 'open')
+  await applyVerdict(github, context, verdict(106, 'green', [], [
+    succeeded(ledger, []), greenJob('all-green'),
+  ]))
+  assert.equal(legacy.state, 'open')
+  await applyVerdict(github, context, verdict(107, 'green', [], [ledger, 'all-green']))
   assert.equal(legacy.state, 'closed')
 
   // Exercise the workflow entry point, not just the issue reducer: a missing

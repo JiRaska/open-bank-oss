@@ -33,6 +33,7 @@ const issue = [
   '',
   'Read this as an incident.',
 ].join('\n')
+const passed = (job, step) => ({ job, steps: [step] })
 async function main() {
   const listed = (runs, total = runs.length) => ({ total_count: total, workflow_runs: runs })
   const completed = (id, run_attempt = 1) => ({ id, run_attempt, status: 'completed' })
@@ -81,26 +82,30 @@ async function main() {
     { eventRunId: 102 }), /malformed/)
 
   const leaf = 'build (openbank-document-service) / openbank-document-service (contract)'
-  assert.equal(failedJobsCovered(issue, ['all-green']), false) // unrelated six-job green run
-  assert.equal(failedJobsCovered(issue, [leaf]), false) // aggregate did not complete
-  assert.equal(failedJobsCovered(issue, [leaf, 'all-green']), true)
-  assert.equal(failedJobsCovered('legacy issue without a job list', [leaf, 'all-green']), false)
-  assert.equal(failedJobsCovered(issue.replace('[failure]', '[unknown]'), [leaf, 'all-green']), false)
-  assert.equal(failedJobsCovered(issue.replace('- `all-green`', 'unparseable job\n- `all-green`'), [leaf, 'all-green']), false)
+  const recovered = [passed(leaf, 'Provider verification'), passed('all-green', 'Verify no service failed')]
+  assert.equal(failedJobsCovered(issue, [recovered[1]]), false) // unrelated six-job green run
+  assert.equal(failedJobsCovered(issue, [recovered[0]]), false) // aggregate did not complete
+  assert.equal(failedJobsCovered(issue, recovered), true)
+  assert.equal(failedJobsCovered('legacy issue without a job list', recovered), false)
+  assert.equal(failedJobsCovered(issue.replace('[failure]', '[unknown]'), recovered), false)
+  assert.equal(failedJobsCovered(issue.replace('- `all-green`', 'unparseable job\n- `all-green`'), recovered), false)
   assert.equal(failedJobsCovered(issue, null), false)
+  assert.equal(failedJobsCovered(issue, [passed(leaf, 'Setup'), recovered[1]]), false)
+  assert.equal(failedJobsCovered(issue, [{ job: leaf, steps: [] }, recovered[1]]), false)
+  assert.equal(failedJobsCovered(issue, [{ job: leaf, steps: ['Provider verification skipped'] }, recovered[1]]), false)
 
   // Red R1 fails A. Red R2 fails B without running A. Green R3 runs B only.
   // A must survive both the red refresh and the partial green.
   const a = '- `A` [failure] — `Test A`'
   const b = '- `B` [failure] — `Test B`'
   const r1 = ['<!-- main-red:services-ci -->', '### Unresolved failing jobs', '', a, '', 'Context.'].join('\n')
-  const r2 = withFailureLines(r1, mergeFailureLines(remainingFailureLines(r1, ['C']), [b]))
+  const r2 = withFailureLines(r1, mergeFailureLines(remainingFailureLines(r1, [passed('C', 'Test C')]), [b]))
   assert.deepEqual(remainingFailureLines(r2, []), [a, b])
-  assert.equal(failedJobsCovered(r2, ['B']), false)
-  const r3 = withFailureLines(r2, remainingFailureLines(r2, ['B']))
+  assert.equal(failedJobsCovered(r2, [passed('B', 'Test B')]), false)
+  const r3 = withFailureLines(r2, remainingFailureLines(r2, [passed('B', 'Test B')]))
   assert.deepEqual(remainingFailureLines(r3, []), [a])
-  assert.equal(failedJobsCovered(r3, ['A']), true)
-  assert.equal(remainingFailureLines(r3, ['A']).length, 0)
+  assert.equal(failedJobsCovered(r3, [passed('A', 'Test A')]), true)
+  assert.equal(remainingFailureLines(r3, [passed('A', 'Test A')]).length, 0)
   assert.equal(mergeFailureLines([a], ['- `A` [timed_out] — latest failure'])[0], '- `A` [timed_out] — latest failure')
   assert.throws(() => withFailureLines('malformed issue', [a]), /malformed/)
   // A newer green that built B only must not erase a slow red A completion.
@@ -114,7 +119,7 @@ async function main() {
   const r3BeforeR2 = withFailureLines(r1, mergeFailureLines([a], [b]))
   const effectiveR2Success = successfulAfterLaterRuns(['A'], [[{ name: 'B', conclusion: 'failure' }]])
   assert.deepEqual(effectiveR2Success, ['A'])
-  assert.deepEqual(remainingFailureLines(r3BeforeR2, effectiveR2Success), [b])
+  assert.deepEqual(remainingFailureLines(r3BeforeR2, effectiveR2Success.map(name => passed(name, 'Test A'))), [b])
   assert.deepEqual(successfulAfterLaterRuns(['A'], [
     [{ name: 'A', conclusion: 'failure' }],
   ]), []) // A failed again after R2; the delayed green must not erase it.
