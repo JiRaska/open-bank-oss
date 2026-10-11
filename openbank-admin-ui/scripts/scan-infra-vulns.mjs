@@ -16,7 +16,7 @@ import { readdirSync, statSync, readFileSync, writeFileSync, existsSync } from '
 import path from 'path'
 import { execSync } from 'child_process'
 import { fileURLToPath } from 'url'
-import { sourceDate } from './lib/source-date.mjs'
+import { sourceDateForSemanticInputs } from './lib/source-date.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const arg = (flag, def) => {
@@ -115,7 +115,9 @@ function main() {
   const out = {
     schema: 'openbank.infra-vulns/v1',
     source: 'grype (ADR-0079)',
-    scannedAt: sourceDate(REPO, INPUTS),
+    scannedAt: sourceDateForSemanticInputs(
+      REPO, INPUTS, reg.components.filter(c => c.versionSource === 'gitops' && c.imageGrep).map(c => c.imageGrep),
+    ),
     scanned: Object.keys(images),
     skipped,
     images,

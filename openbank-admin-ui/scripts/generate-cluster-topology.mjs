@@ -16,7 +16,7 @@
 import { readFileSync, readdirSync, writeFileSync, existsSync } from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
-import { sourceDate } from './lib/source-date.mjs'
+import { sourceDateForSemanticInputs } from './lib/source-date.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const arg = (flag, fallback) => {
@@ -232,7 +232,7 @@ const out = {
   schema: 'openbank.cluster-topology/v1',
   source: 'derived (GitOps apps + manifests + a representative Dockerfile + Deployment securityContext) — ADR-0081',
   // Commit time of the newest input, not the clock — see scripts/lib/source-date.mjs (#2621).
-  generatedAt: sourceDate(REPO, INPUTS),
+  generatedAt: sourceDateForSemanticInputs(REPO, INPUTS),
   counts,
   groups: GROUPS,
   namespaces: ns,

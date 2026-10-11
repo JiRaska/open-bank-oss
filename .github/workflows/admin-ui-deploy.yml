@@ -237,6 +237,8 @@ jobs:
       contents: write
       pull-requests: write
       id-token: write  # GitHub OIDC → openbank-arc-build-runner
+      attestations: write  # signed image-build input record
+      artifact-metadata: write
       actions: read    # gh run list / gh run download for SBOM staging; also read by
                        # collect-gate-health.mjs (ADR-0255) for the same reason — no new grant
     timeout-minutes: 30
@@ -999,6 +1001,7 @@ jobs:
           # Optional: enables source-map upload to GlitchTip (#3235). Unset = no upload, normal
           # build — the maps are what turn a captured error into a file and a line.
           GLITCHTIP_AUTH_TOKEN: ${{ secrets.GLITCHTIP_AUTH_TOKEN }}
+          ADMIN_UI_BUILD_INPUTS_OUT: ${{ runner.temp }}/admin-ui-build-inputs.json
         run: |
           set -euo pipefail
           # build-push-admin-ui.sh derives the tag from git (dirty check runs BEFORE
@@ -1023,7 +1026,16 @@ jobs:
           TAG="${PUSHED##*:}"
           [ -n "${TAG}" ] || { echo "ERROR: could not extract pushed image tag"; exit 1; }
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          jq -er '.digest' "$RUNNER_TEMP/admin-ui-build-inputs.json" | awk '{print "digest=" $0}' >> "$GITHUB_OUTPUT"
           echo "Pushed tag: ${TAG}"
+
+      - name: Attest immutable Admin UI image build inputs
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-name: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPO }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          predicate-type: https://github.com/JiRaska/open-bank-oss/attestations/admin-ui-build-inputs/v1
+          predicate-path: ${{ runner.temp }}/admin-ui-build-inputs.json
 
       - name: Retain immutable Test Intelligence snapshot
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

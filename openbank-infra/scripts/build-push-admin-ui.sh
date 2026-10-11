@@ -57,8 +57,8 @@ done
 
 # Provenance: version from version.txt (ADR-0029 release_invariant — version.txt is
 # the single source of truth, the admin-ui analog of quarkus.application.version),
-# short sha + clean/dirty marker from git, UTC build date. A dirty tree gets a
-# "-dirty" suffix so an uncommitted image can never masquerade as a clean commit.
+# short sha from git and UTC build date. The context freezer rejects modified
+# tracked source inputs outside the explicitly generated evidence allowlist.
 BUILD_VERSION="$(tr -d '[:space:]' < ./openbank-admin-ui/version.txt)"
 # Enforce the release_invariant locally: version.txt MUST equal package.json:version
 # (the runtime-readable version). A drift here means a release artifact whose UI chip
@@ -70,9 +70,6 @@ if [ "${BUILD_VERSION}" != "${PKG_VERSION}" ]; then
   exit 1
 fi
 GIT_SHA="$(git rev-parse --short HEAD)"
-if ! git diff --quiet HEAD -- openbank-admin-ui 2>/dev/null; then
-  GIT_SHA="${GIT_SHA}-dirty"
-fi
 BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 # A workflow_dispatch may rebuild the same commit after newly available evidence
 # has been staged. ECR tags are immutable, so it must use a distinct, still
@@ -326,6 +323,17 @@ else
   echo "    WARN: app-status.json missing/garbled; baked available:false stub." >&2
 fi
 
+# Freeze the post-collector tree before BuildKit sees it. The same context is
+# hashed and built; subsequent writes to the checkout cannot change this image.
+FREEZE_DIR="$(mktemp -d)"
+trap 'rm -f "${TR_TMP}"; rm -rf "${FREEZE_DIR}"' EXIT
+FROZEN_CONTEXT="${FREEZE_DIR}/context"
+CONTEXT_MANIFEST="${FREEZE_DIR}/context-manifest.json"
+python3 .github/scripts/freeze-admin-ui-context.py --root "$REPO_ROOT" \
+  --output "$FROZEN_CONTEXT" --manifest "$CONTEXT_MANIFEST"
+CONTEXT_SHA256="$(shasum -a 256 "$CONTEXT_MANIFEST" | awk '{print $1}')"
+echo "    frozen context manifest sha256: ${CONTEXT_SHA256}"
+
 if [ "${ECR_LOGIN}" = "1" ]; then
   echo "==> ECR login (${AWS_REGION})"
   aws ecr get-login-password --region "${AWS_REGION}" \
@@ -359,13 +367,14 @@ buildx_args=(
   --platform "${PLATFORM}" \
   --provenance=false \
   --sbom=false \
-  --file openbank-admin-ui/Dockerfile \
+  --file "${FROZEN_CONTEXT}/openbank-admin-ui/Dockerfile" \
   --build-arg "BUILD_VERSION=${BUILD_VERSION}" \
   --build-arg "BUILD_GIT_SHA=${GIT_SHA}" \
   --build-arg "BUILD_DATE=${BUILD_DATE}" \
   --tag "${IMAGE}" \
+  --metadata-file "${FREEZE_DIR}/build-metadata.json" \
   --push \
-  .
+  "${FROZEN_CONTEXT}"
 )
 
 # The GitHub job has a 30-minute ceiling, but an unbounded BuildKit invocation can consume the
@@ -387,6 +396,18 @@ else
 fi
 
 echo "==> pushed ${IMAGE}"
+IMAGE_DIGEST="$(jq -er '."containerimage.digest" | select(test("^sha256:[0-9a-f]{64}$"))' "${FREEZE_DIR}/build-metadata.json")"
+echo "    image digest: ${IMAGE_DIGEST}"
+if [ -n "${ADMIN_UI_BUILD_INPUTS_OUT:-}" ]; then
+  jq -n --arg image "${ECR_REGISTRY}/${ECR_REPO}" --arg tag "$TAG" \
+    --arg digest "$IMAGE_DIGEST" --arg source "$(git rev-parse HEAD)" \
+    --arg context "$CONTEXT_SHA256" --arg version "$BUILD_VERSION" --arg build_sha "$GIT_SHA" \
+    --arg date "$BUILD_DATE" --arg platform "$PLATFORM" --slurpfile files "$CONTEXT_MANIFEST" \
+    '{schema:"openbank.admin-ui.image-build/v1",image:$image,tag:$tag,digest:$digest,
+      sourceCommit:$source,contextManifestSha256:$context,contextManifest:$files[0],
+      buildArgs:{BUILD_VERSION:$version,BUILD_GIT_SHA:$build_sha,BUILD_DATE:$date},
+      platform:$platform}' > "$ADMIN_UI_BUILD_INPUTS_OUT"
+fi
 
 # Sign + attest via the shared helper (ADR-0029/0030 supply-chain), so admin-ui does
 # provenance identically to every other producer. KMS trust root

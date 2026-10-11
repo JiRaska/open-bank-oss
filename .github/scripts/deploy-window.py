@@ -48,6 +48,11 @@ DEFAULT_WINDOW_SECONDS = 1800
 DEPLOY_PREFIXES = ("chore/gitops-auto-deploy-", "chore/admin-ui-deploy-")
 DEPLOY_SUBJECTS = ("chore(gitops): auto-deploy ", "chore(admin-ui): deploy ")
 PIN_RE = re.compile(r"(?P<image>[A-Za-z0-9.-]+/openbank-[A-Za-z0-9._/-]+):(?P<tag>sandbox-[A-Za-z0-9._-]+)")
+ADMIN_UI_MANIFEST = "openbank-infra/gitops/components/admin-ui/admin-ui.yaml"
+ADMIN_UI_PIN_RE = re.compile(
+    r"^\s*image:\s*(?P<image>[A-Za-z0-9.-]+/openbank-admin-ui):"
+    r"sandbox-[A-Za-z0-9._-]+\s*$"
+)
 
 
 def decide(event: str, now: int, last_deploy: int | None, armed_open: bool, window: int) -> tuple[str, str]:
@@ -146,7 +151,7 @@ def global_build_inputs_unchanged(root: str, source: str) -> bool:
 def image_source_is_current(root: str, image: str, tag: str) -> bool:
     """Only carry an image when its source still builds the same service artifact."""
     service = image.rsplit("/", 1)[-1]
-    match = re.fullmatch(r"sandbox-([0-9a-f]{8})", tag)
+    match = re.fullmatch(r"sandbox-([0-9a-f]{8,40})(?:-run[0-9]+)?", tag)
     if not service.startswith("openbank-") or not match:
         return False
     source = subprocess.run(
@@ -155,6 +160,21 @@ def image_source_is_current(root: str, image: str, tag: str) -> bool:
     )
     if source.returncode != 0:
         return False
+    source_sha = source.stdout.strip()
+    # A short tag is a source identifier only when it resolves uniquely and is an
+    # ancestor of the checked-out main. Missing history (shallow fetch) fails closed.
+    if not source_sha.startswith(match[1]):
+        return False
+    ancestor = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", source_sha, "HEAD"],
+        cwd=root, capture_output=True, check=False,
+    )
+    if ancestor.returncode != 0:
+        return False
+    if service == "openbank-admin-ui":
+        if not admin_ui_image_inputs_unchanged(root, source_sha):
+            return False
+        return verify_signed_admin_ui_build(root, image, tag)
     if not global_build_inputs_unchanged(root, source.stdout.strip()):
         return False
     equivalent = subprocess.run(
@@ -163,6 +183,89 @@ def image_source_is_current(root: str, image: str, tag: str) -> bool:
         cwd=root, capture_output=True, text=True, check=False,
     )
     return equivalent.returncode == 0
+
+
+def verify_signed_admin_ui_build(root: str, image: str, tag: str) -> bool:
+    signed = subprocess.run(
+        [sys.executable, os.path.join(os.path.dirname(__file__), "verify-admin-ui-build-inputs.py"),
+         "--root", root, "--repo", os.environ.get("GITHUB_REPOSITORY", ""),
+         "--image", image, "--tag", tag],
+        cwd=root, capture_output=True, text=True, check=False,
+    )
+    if signed.returncode != 0:
+        print("Admin UI image build-input attestation verification failed", file=sys.stderr)
+    return signed.returncode == 0
+
+
+def admin_ui_image_inputs_unchanged(root: str, source: str, head: str = "HEAD") -> bool:
+    """Admit only this workflow's own image-only pin commits after an Admin UI source.
+
+    The Admin UI image includes repository-wide docs, contracts and generated
+    snapshots, so an arbitrary tracked change cannot be assumed inert. Its own
+    GitOps pin does not change the generated facts: topology ignores image refs,
+    and lifecycle/Grype registry images do not include Admin UI. This compares
+    repository inputs only; external EOL and Grype provenance remains uncaptured.
+    """
+    ancestor = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", source, head],
+        cwd=root, capture_output=True, check=False,
+    )
+    if ancestor.returncode != 0:
+        return False
+    commits = subprocess.run(
+        ["git", "rev-list", "--reverse", f"{source}..{head}"],
+        cwd=root, capture_output=True, text=True, check=False,
+    )
+    if commits.returncode != 0:
+        return False
+    pending = commits.stdout.splitlines()
+    registry_greps: list[str] = []
+    if pending:
+        # These generators display and scan every registry-selected GitOps image.
+        # If this pin ever matches the registry, it becomes a real input.
+        registry = os.path.join(root, "openbank-admin-ui/src/lib/infra-lifecycle/registry.json")
+        try:
+            with open(registry, encoding="utf-8") as registry_file:
+                components = json.load(registry_file)["components"]
+            registry_greps = [c["imageGrep"] for c in components
+                              if c.get("versionSource") == "gitops" and c.get("imageGrep")]
+        except (OSError, ValueError, KeyError, TypeError):
+            return False
+    for commit in pending:
+        subject = subprocess.run(
+            ["git", "log", "-1", "--format=%s", commit],
+            cwd=root, capture_output=True, text=True, check=False,
+        )
+        if subject.returncode != 0 or not subject.stdout.startswith("chore(admin-ui): deploy "):
+            return False
+        paths = subprocess.run(
+            ["git", "diff-tree", "--first-parent", "--no-commit-id", "--name-only", "-r", "-z", commit],
+            cwd=root, capture_output=True, check=False,
+        )
+        if paths.returncode != 0 or paths.stdout.split(b"\0") != [ADMIN_UI_MANIFEST.encode(), b""]:
+            return False
+        before = subprocess.run(
+            ["git", "show", f"{commit}^:{ADMIN_UI_MANIFEST}"],
+            cwd=root, capture_output=True, text=True, check=False,
+        )
+        after = subprocess.run(
+            ["git", "show", f"{commit}:{ADMIN_UI_MANIFEST}"],
+            cwd=root, capture_output=True, text=True, check=False,
+        )
+        if before.returncode != 0 or after.returncode != 0:
+            return False
+        old_lines, new_lines = before.stdout.splitlines(), after.stdout.splitlines()
+        if len(old_lines) != len(new_lines):
+            return False
+        changes = [(old, new) for old, new in zip(old_lines, new_lines) if old != new]
+        if len(changes) != 1:
+            return False
+        old_pin, new_pin = (ADMIN_UI_PIN_RE.fullmatch(line) for line in changes[0])
+        if not old_pin or not new_pin or old_pin["image"] != new_pin["image"]:
+            return False
+        if any(grep in line for grep in registry_greps for line in changes[0]):
+            return False
+    return True
 
 
 def carry(root: str, diff: str, skip_images: set[str],
@@ -195,6 +298,36 @@ def verify_pins(diff: str, fresh: Callable[[str, str], bool]) -> list[str]:
         if not fresh(image, new):
             return [f"{image.rsplit('/', 1)[-1]}:{new} in {rel}"]
     return []
+
+
+def admin_ui_pin_only_diff(diff: str) -> bool:
+    """Require one Admin UI image replacement and no other PR change.
+
+    A signed image built from main becomes stale if its own pin PR also changes
+    the Dockerfile or any other image input. `pins_from_diff` intentionally
+    extracts only image lines, so it cannot prove this PR-wide invariant.
+    """
+    expected_header = f"diff --git a/{ADMIN_UI_MANIFEST} b/{ADMIN_UI_MANIFEST}"
+    headers = [line for line in diff.splitlines() if line.startswith("diff --git ")]
+    if headers != [expected_header]:
+        return False
+    removed, added = [], []
+    for line in diff.splitlines():
+        if line.startswith(("--- ", "+++ ", "diff --git ", "index ", "@@ ", " ", "\\ No newline")):
+            continue
+        if line.startswith("-"):
+            removed.append(line[1:])
+        elif line.startswith("+"):
+            added.append(line[1:])
+        else:
+            # A mode change, rename, binary patch or unknown diff feature is
+            # not an image-only pin and must not be silently ignored.
+            return False
+    if len(removed) != 1 or len(added) != 1:
+        return False
+    old_pin, new_pin = (ADMIN_UI_PIN_RE.fullmatch(line) for line in (removed[0], added[0]))
+    return bool(old_pin and new_pin and old_pin["image"] == new_pin["image"]
+                and removed[0] != added[0])
 
 
 def last_deploy_from_commits(commits: list[dict]) -> int | None:
@@ -241,6 +374,10 @@ def self_test() -> int:
           flush(prs + [{"number": 13, "head": "chore/admin-ui-deploy-c", "created_at": "z", "armed": True}], T, None, W) is None)
     # Exercise the same CLI and event file that the serialized workflow uses. An unrelated
     # older PR must not steal a manual run's exemption, and routine events keep the window.
+    # The semantic fixture has no registry or GitHub attestation. The signed
+    # digest path is exercised independently by verify-admin-ui-build-inputs tests.
+    original_signed_verifier = verify_signed_admin_ui_build
+    globals()["verify_signed_admin_ui_build"] = lambda _root, _image, _tag: True
     with tempfile.TemporaryDirectory() as d:
         sha = "a" * 40
         manual_pr = {"number": 21, "head": DEPLOY_PREFIXES[0] + sha,
@@ -334,6 +471,117 @@ def self_test() -> int:
         check("verify accepts current GitOps pins", verify_pins(older, lambda image, tag: True) == [])
         check("verify refuses a diff without image pins", verify_pins("", lambda image, tag: True) != [])
 
+    admin_pin_diff = (f"diff --git a/{ADMIN_UI_MANIFEST} b/{ADMIN_UI_MANIFEST}\n"
+                      f"--- a/{ADMIN_UI_MANIFEST}\n+++ b/{ADMIN_UI_MANIFEST}\n@@ -1 +1 @@\n"
+                      f"-image: {reg}/openbank-admin-ui:sandbox-aaaaaaaa\n"
+                      f"+image: {reg}/openbank-admin-ui:sandbox-bbbbbbbb\n")
+    check("Admin UI image-only PR has complete pin coverage", admin_ui_pin_only_diff(admin_pin_diff))
+    check("Admin UI PR with changed Dockerfile is refused",
+          not admin_ui_pin_only_diff(admin_pin_diff +
+              "diff --git a/openbank-admin-ui/Dockerfile b/openbank-admin-ui/Dockerfile\n"
+              "--- a/openbank-admin-ui/Dockerfile\n+++ b/openbank-admin-ui/Dockerfile\n"
+              "@@ -1 +1 @@\n-FROM scratch\n+FROM busybox\n"))
+    check("Admin UI deploy verifier refuses mixed PR before image lookup",
+          subprocess.run([sys.executable, __file__, "verify", "--expect-admin-ui"],
+                         input=admin_pin_diff +
+                         "diff --git a/openbank-admin-ui/Dockerfile b/openbank-admin-ui/Dockerfile\n"
+                         "--- a/openbank-admin-ui/Dockerfile\n+++ b/openbank-admin-ui/Dockerfile\n"
+                         "@@ -1 +1 @@\n-FROM scratch\n+FROM busybox\n",
+                         text=True, capture_output=True, check=False).returncode == 1)
+    check("Admin UI PR with added image line is refused",
+          not admin_ui_pin_only_diff(admin_pin_diff + "@@ -3,0 +4 @@\n"
+              "+image: example.invalid/openbank-unverified:sandbox-cccccccc\n"))
+    check("Admin UI PR with manifest semantic change is refused",
+          not admin_ui_pin_only_diff(admin_pin_diff + "@@ -4 +4 @@\n-replicas: 1\n+replicas: 2\n"))
+    check("Admin UI PR with mode change is refused",
+          not admin_ui_pin_only_diff(admin_pin_diff.replace(
+              f"--- a/{ADMIN_UI_MANIFEST}", "old mode 100644\nnew mode 100755\n"
+              f"--- a/{ADMIN_UI_MANIFEST}")))
+
+    # Admin UI is built from the root Docker context, with service changelogs and
+    # other repository paths copied into collector stages. Exercise real Git
+    # ancestry and tag resolution rather than mocking the path comparator.
+    with tempfile.TemporaryDirectory() as d:
+        def git(*args):
+            return subprocess.run(["git", *args], cwd=d, capture_output=True,
+                                  text=True, check=True).stdout.strip()
+
+        def write(rel, value):
+            path = os.path.join(d, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as out:
+                out.write(value)
+
+        def commit(rel, value, subject="fixture"):
+            write(rel, value)
+            git("add", "--", rel)
+            git("commit", "-m", subject)
+
+        git("init", "-q")
+        git("config", "user.name", "Fixture")
+        git("config", "user.email", "fixture@example.invalid")
+        git("config", "commit.gpgsign", "false")
+        commit("openbank-admin-ui/Dockerfile", "FROM scratch\n")
+        registry = "openbank-admin-ui/src/lib/infra-lifecycle/registry.json"
+        commit(registry, '{"components": []}\n')
+        manifest = ADMIN_UI_MANIFEST
+        commit(manifest, "image: example.invalid/openbank-admin-ui:sandbox-old\n")
+        source = git("rev-parse", "HEAD")
+        image = "example.invalid/openbank-admin-ui"
+        tag = f"sandbox-{source[:8]}"
+        check("Admin UI source tag resolves to current main", image_source_is_current(d, image, tag))
+        check("unknown Admin UI source fails closed",
+              not image_source_is_current(d, image, "sandbox-deadbeef"))
+        commit(manifest, "image: example.invalid/openbank-admin-ui:sandbox-new\n",
+               "chore(admin-ui): deploy sandbox-new")
+        check("own image-only pin preserves Admin UI source eligibility",
+              image_source_is_current(d, image, tag))
+        check("producer and flusher share the own-pin decision",
+              subprocess.run([sys.executable, __file__, "admin-ui-source-current", "--root", d,
+                              "--source", source, "--main", "HEAD"], capture_output=True).returncode == 0)
+        producer_guard = os.path.join(os.path.dirname(__file__), "authorize-admin-ui-deploy-source.sh")
+        check("producer admits the same own image-only pin",
+              subprocess.run(["bash", producer_guard, source, git("rev-parse", "HEAD")],
+                             cwd=d, capture_output=True, text=True).stdout.strip() == "true")
+        commit(manifest, "image: example.invalid/openbank-admin-ui:sandbox-next\n",
+               "chore(admin-ui): deploy sandbox-next")
+        check("multiple own image-only pins preserve eligibility", image_source_is_current(d, image, tag))
+        source = git("rev-parse", "HEAD")
+        tag = f"sandbox-{source[:8]}"
+        commit("openbank-infra/gitops/components/payments/deployment.yaml",
+               "image: example.invalid/openbank-payments:sandbox-new\n")
+        check("unrelated GitOps pin lacks complete captured image provenance and remains stale",
+              not image_source_is_current(d, image, tag))
+        source = git("rev-parse", "HEAD")
+        tag = f"sandbox-{source[:8]}"
+        commit(manifest, "image: example.invalid/openbank-admin-ui:sandbox-new\nreplicas: 2\n",
+               "chore(admin-ui): deploy spoofed")
+        check("deploy-looking semantic manifest change is stale",
+              not image_source_is_current(d, image, tag))
+        check("producer also refuses semantic manifest change",
+              subprocess.run(["bash", producer_guard, source, git("rev-parse", "HEAD")],
+                             cwd=d, capture_output=True, text=True).stdout.strip() == "false")
+        source = git("rev-parse", "HEAD")
+        tag = f"sandbox-{source[:8]}"
+        commit("openbank-notification-service/CHANGELOG.md", "## new release\n")
+        check("service CHANGELOG change makes Admin UI image stale",
+              not image_source_is_current(d, image, tag))
+        source = git("rev-parse", "HEAD")
+        tag = f"sandbox-{source[:8]}-run123"
+        check("retry image tag resolves to exact source", image_source_is_current(d, image, tag))
+        commit("openbank-admin-ui/Dockerfile", "FROM busybox\n")
+        check("changed Dockerfile makes Admin UI image stale",
+              not image_source_is_current(d, image, tag))
+        commit(registry, '{"components": [{"versionSource": "gitops", '
+                         '"imageGrep": "openbank-admin-ui"}]}\n')
+        source = git("rev-parse", "HEAD")
+        tag = f"sandbox-{source[:8]}"
+        commit(manifest, "image: example.invalid/openbank-admin-ui:sandbox-final\nreplicas: 2\n",
+               "chore(admin-ui): deploy sandbox-final")
+        check("own pin displayed by lifecycle registry is stale",
+              not image_source_is_current(d, image, tag))
+
+    globals()["verify_signed_admin_ui_build"] = original_signed_verifier
     if fails:
         print(f"self-test: FAILED ({len(fails)})")
         return 1
@@ -358,6 +606,12 @@ def main() -> int:
     c.add_argument("--skip-images", default="", help="space-separated images this run pins itself")
     v = sub.add_parser("verify")
     v.add_argument("--root", default=".")
+    v.add_argument("--expect-admin-ui", action="store_true",
+                   help="require an Admin UI image-only pin PR")
+    au = sub.add_parser("admin-ui-source-current")
+    au.add_argument("--root", default=".")
+    au.add_argument("--source", required=True)
+    au.add_argument("--main", required=True)
     for p in (d, f):
         p.add_argument("--now", type=int, required=True)
         p.add_argument("--window", type=int, default=int(os.environ.get("DEPLOY_WINDOW_SECONDS", DEFAULT_WINDOW_SECONDS)))
@@ -383,11 +637,17 @@ def main() -> int:
             print(f"  [carried] {line}")
         return 0
     if a.cmd == "verify":
-        stale = verify_pins(sys.stdin.read(),
+        diff = sys.stdin.read()
+        if a.expect_admin_ui and not admin_ui_pin_only_diff(diff):
+            print("::error::Admin UI deploy PR changes more than its sole image pin", file=sys.stderr)
+            return 1
+        stale = verify_pins(diff,
                             lambda image, tag: image_source_is_current(a.root, image, tag))
         for pin in stale:
             print(f"::error::stale GitOps image pin: {pin}", file=sys.stderr)
         return 1 if stale else 0
+    if a.cmd == "admin-ui-source-current":
+        return 0 if admin_ui_image_inputs_unchanged(a.root, a.source, a.main) else 1
     ap.print_help()
     return 2
 

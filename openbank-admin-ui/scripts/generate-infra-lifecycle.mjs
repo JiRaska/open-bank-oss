@@ -16,7 +16,7 @@
 import { readdirSync, statSync, readFileSync, writeFileSync, existsSync } from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
-import { sourceDate } from './lib/source-date.mjs'
+import { sourceDateForSemanticInputs } from './lib/source-date.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const arg = (flag, def) => {
@@ -147,7 +147,9 @@ async function main() {
   const out = {
     schema: 'openbank.infra-lifecycle/v1',
     source: 'endoflife.date + GitOps image tags — ADR-0079',
-    generatedAt: sourceDate(REPO, INPUTS),
+    generatedAt: sourceDateForSemanticInputs(
+      REPO, INPUTS, reg.components.filter(c => c.versionSource === 'gitops' && c.imageGrep).map(c => c.imageGrep),
+    ),
     components,
   }
   writeFileSync(OUT, JSON.stringify(out, null, 2))

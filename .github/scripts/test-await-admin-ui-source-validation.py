@@ -172,13 +172,19 @@ class SourceValidationTest(unittest.TestCase):
             ui = root / "openbank-admin-ui" / "src"
             ui.mkdir(parents=True)
             (ui / "example.ts").write_text("export const ready = true;\n")
-            git("add", "openbank-admin-ui/src/example.ts")
+            registry = root / "openbank-admin-ui/src/lib/infra-lifecycle/registry.json"
+            registry.parent.mkdir(parents=True)
+            registry.write_text('{"components": []}\n')
+            manifest = root / "openbank-infra/gitops/components/admin-ui/admin-ui.yaml"
+            manifest.parent.mkdir(parents=True)
+            manifest.write_text("image: registry.example/openbank-admin-ui:sandbox-aaaaaaaa\n")
+            git("add", "openbank-admin-ui/src/example.ts",
+                "openbank-admin-ui/src/lib/infra-lifecycle/registry.json",
+                "openbank-infra/gitops/components/admin-ui/admin-ui.yaml")
             git("commit", "-qm", "fix(admin-ui): validated source")
             source_sha = git("rev-parse", "HEAD")
 
-            manifest = root / "openbank-infra/gitops/components/admin-ui/admin-ui.yaml"
-            manifest.parent.mkdir(parents=True)
-            manifest.write_text("image: verified\n")
+            manifest.write_text("image: registry.example/openbank-admin-ui:sandbox-bbbbbbbb\n")
             git("add", "openbank-infra/gitops/components/admin-ui/admin-ui.yaml")
             git("commit", "-qm", "chore(admin-ui): deploy verified image")
             main_sha = git("rev-parse", "HEAD")
