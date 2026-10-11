@@ -89,8 +89,8 @@ class LedgerTrialBalancePactConsumerTest {
     @Pact(consumer = "openbank-finrep-service", provider = "openbank-ledger-service")
     fun trialBalanceWithEntriesPact(builder: PactDslWithProvider): RequestResponsePact = builder
         .given("ledger has frozen monthly trial balance for the reporting date")
-        .uponReceiving("GET the GL trial balance for a FINREP reporting date")
-        .path("$LEDGER_MONTH_TRIAL_BALANCE_PATH/$REPORTING_DATE/frozen-trial-balance")
+        .uponReceiving("GET the frozen GL closing balance for a FINREP reporting date")
+        .path("$LEDGER_MONTH_TRIAL_BALANCE_PATH/$REPORTING_DATE/frozen-closing-balance")
         .method("GET")
         .headers(mapOf("Accept" to "application/json"))
         .willRespondWith()
@@ -102,7 +102,7 @@ class LedgerTrialBalancePactConsumerTest {
                 // `asOf=` query parameter this interaction pins by literal. A trial balance
                 // returned for a DIFFERENT date than the one asked for is a reporting defect of
                 // the first order, and a type matcher accepted any date string at all.
-                o.stringValue("period", "MONTH:2026-06")
+                o.stringValue("period", "MONTH:2000-06")
                 o.booleanType("balanced", true)
                 // stringType on `code`/{currency,type}, DELIBERATELY (issue #2425): `lines`
                 // is a heterogeneous list — a real trial balance carries many GL codes, several
@@ -126,11 +126,23 @@ class LedgerTrialBalancePactConsumerTest {
         )
         .toPact()
 
+    /** Ledger must not disclose a frozen reporting balance to a caller without a valid M2M identity. */
+    @Pact(consumer = "openbank-finrep-service", provider = "openbank-ledger-service")
+    fun frozenClosingBalanceMissingTokenPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("no valid M2M identity is presented")
+        .uponReceiving("GET the frozen FINREP closing balance without a valid identity")
+        .path("$LEDGER_MONTH_TRIAL_BALANCE_PATH/$REPORTING_DATE/frozen-closing-balance")
+        .method("GET")
+        .headers(mapOf("Accept" to "application/json"))
+        .willRespondWith()
+        .status(401)
+        .toPact()
+
     @Pact(consumer = "openbank-finrep-service", provider = "openbank-ledger-service")
     fun livePreviewTrialBalancePact(builder: PactDslWithProvider): RequestResponsePact = builder
         .given("ledger has frozen monthly trial balance for the reporting date")
-        .uponReceiving("GET the mutable monthly GL trial balance for an internal working preview")
-        .path("$LEDGER_MONTH_TRIAL_BALANCE_PATH/$REPORTING_DATE/trial-balance")
+        .uponReceiving("GET the mutable GL closing balance for an internal working preview")
+        .path("$LEDGER_MONTH_TRIAL_BALANCE_PATH/$REPORTING_DATE/closing-balance")
         .method("GET")
         .headers(mapOf("Accept" to "application/json"))
         .willRespondWith()
@@ -138,7 +150,7 @@ class LedgerTrialBalancePactConsumerTest {
         .headers(mapOf("Content-Type" to "application/json"))
         .body(
             newJsonBody { o ->
-                o.stringValue("period", "MONTH:2026-06")
+                o.stringValue("period", "MONTH:2000-06")
                 o.booleanType("balanced", true)
                 o.minArrayLike("lines", 0, 1) { line ->
                     line.stringType("code", "1100-CASH-CLEARING-CZK")
@@ -149,6 +161,90 @@ class LedgerTrialBalancePactConsumerTest {
             }.build(),
         )
         .toPact()
+
+    @Pact(consumer = "openbank-finrep-service", provider = "openbank-ledger-service")
+    fun frozenPeriodMovementsPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("ledger has frozen monthly trial balance for the reporting date")
+        .uponReceiving("GET the frozen monthly GL movements for F02 profit and loss")
+        .path("$LEDGER_MONTH_TRIAL_BALANCE_PATH/$REPORTING_DATE/frozen-trial-balance")
+        .method("GET")
+        .headers(mapOf("Accept" to "application/json"))
+        .willRespondWith()
+        .status(200)
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(periodMovementsBody())
+        .toPact()
+
+    @Pact(consumer = "openbank-finrep-service", provider = "openbank-ledger-service")
+    fun livePeriodMovementsPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("ledger has frozen monthly trial balance for the reporting date")
+        .uponReceiving("GET the mutable monthly GL movements for F02 working preview")
+        .path("$LEDGER_MONTH_TRIAL_BALANCE_PATH/$REPORTING_DATE/trial-balance")
+        .method("GET")
+        .headers(mapOf("Accept" to "application/json"))
+        .willRespondWith()
+        .status(200)
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(periodMovementsBody())
+        .toPact()
+
+    @Pact(consumer = "openbank-finrep-service", provider = "openbank-ledger-service")
+    fun frozenYearToDateMovementsPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("ledger has frozen monthly trial balance for the reporting date")
+        .uponReceiving("GET frozen January-to-date movements for FINREP F02")
+        .path("$LEDGER_MONTH_TRIAL_BALANCE_PATH/$REPORTING_DATE/frozen-year-to-date-trial-balance")
+        .method("GET")
+        .headers(mapOf("Accept" to "application/json"))
+        .willRespondWith()
+        .status(200)
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(yearToDateMovementsBody(frozen = true))
+        .toPact()
+
+    @Pact(consumer = "openbank-finrep-service", provider = "openbank-ledger-service")
+    fun liveYearToDateMovementsPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("ledger has frozen monthly trial balance for the reporting date")
+        .uponReceiving("GET mutable January-to-date movements for FINREP F02 preview")
+        .path("$LEDGER_MONTH_TRIAL_BALANCE_PATH/$REPORTING_DATE/year-to-date-trial-balance")
+        .method("GET")
+        .headers(mapOf("Accept" to "application/json"))
+        .willRespondWith()
+        .status(200)
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(yearToDateMovementsBody(frozen = false))
+        .toPact()
+
+    private fun yearToDateMovementsBody(frozen: Boolean) = newJsonBody { o ->
+        o.stringValue("period", "MONTH:2000-06")
+        o.stringValue("from", "2000-01-01")
+        o.stringValue("to", REPORTING_DATE)
+        o.booleanType("balanced", true)
+        if (frozen) {
+            o.array("sourcePeriods") { periods ->
+                (1..6).forEach { month -> periods.stringValue("MONTH:2000-%02d".format(month)) }
+            }
+            o.array("sourceContentHashes") { hashes ->
+                (1..6).forEach { hashes.stringType("0".repeat(64)) }
+            }
+        }
+        o.minArrayLike("lines", 0, 1) { line ->
+            line.stringType("code", "1100")
+            line.stringType("type", "ASSET")
+            line.decimalType("net", 100.0)
+            line.stringType("currency", "CZK")
+        }
+    }.build()
+
+    private fun periodMovementsBody() = newJsonBody { o ->
+        o.stringValue("period", "MONTH:2000-06")
+        o.booleanType("balanced", true)
+        o.minArrayLike("lines", 0, 1) { line ->
+            line.stringType("code", "4100-INTEREST-INCOME-CZK")
+            line.stringType("type", "INCOME")
+            line.decimalType("net", -150_000.00)
+            line.stringType("currency", "CZK")
+        }
+    }.build()
 
     @Pact(consumer = "openbank-finrep-service", provider = "openbank-ledger-service")
     fun closedPeriodsPact(builder: PactDslWithProvider): RequestResponsePact = builder
@@ -163,11 +259,13 @@ class LedgerTrialBalancePactConsumerTest {
         .headers(mapOf("Content-Type" to "application/json"))
         .body(
             newJsonArray { a ->
-                a.`object` { period ->
-                    period.stringValue("periodType", "MONTH")
-                    period.stringValue("to", REPORTING_DATE)
-                    period.stringValue("status", "FROZEN")
-                    period.stringValue("evidenceState", "LINES_V1")
+                (1..6).forEach { month ->
+                    a.`object` { period ->
+                        period.stringValue("periodType", "MONTH")
+                        period.stringValue("to", java.time.YearMonth.of(2000, month).atEndOfMonth().toString())
+                        period.stringValue("status", "FROZEN")
+                        period.stringValue("evidenceState", "LINES_V1")
+                    }
                 }
             }.build(),
         )
@@ -179,7 +277,7 @@ class LedgerTrialBalancePactConsumerTest {
         // Guards the reflection helpers themselves: were they ever to return an empty or partial
         // path, the interaction and the request would still agree with each other and both pact
         // tests would pass against a contract that pins nothing.
-        assertThat(ledgerTrialBalancePath).isEqualTo("$LEDGER_MONTH_TRIAL_BALANCE_PATH/{asOf}/frozen-trial-balance")
+        assertThat(ledgerTrialBalancePath).isEqualTo("$LEDGER_MONTH_TRIAL_BALANCE_PATH/{asOf}/frozen-closing-balance")
 
         val response = fetchTrialBalance(mockServer, REPORTING_DATE)
 
@@ -219,6 +317,17 @@ class LedgerTrialBalancePactConsumerTest {
     }
 
     @Test
+    @PactTestFor(pactMethod = "frozenClosingBalanceMissingTokenPact")
+    fun `frozen reporting balance refuses a missing identity with 401`(mockServer: MockServer) {
+        given()
+            .baseUri(mockServer.getUrl())
+            .accept("application/json")
+            .get(ledgerTrialBalancePath.replace("{asOf}", REPORTING_DATE))
+            .then()
+            .statusCode(401)
+    }
+
+    @Test
     @PactTestFor(pactMethod = "closedPeriodsPact")
     fun `the ledger client exposes immutable reporting period eligibility`(mockServer: MockServer) {
         assertThat(ledgerPeriodsPath).isEqualTo(LEDGER_PERIODS_PATH)
@@ -234,8 +343,8 @@ class LedgerTrialBalancePactConsumerTest {
             .extract().body().asString()
         val periods: List<ClosedPeriodResponse> = json.readValue(body)
 
-        assertThat(periods).hasSize(1)
-        val period = periods.single()
+        assertThat(periods).hasSize(6)
+        val period = periods.last()
         assertThat(period.periodType).isEqualTo("MONTH")
         assertThat(period.to).isEqualTo(LocalDate.parse(REPORTING_DATE))
         assertThat(period.status).isEqualTo("FROZEN")
@@ -246,7 +355,7 @@ class LedgerTrialBalancePactConsumerTest {
     @PactTestFor(pactMethod = "livePreviewTrialBalancePact")
     fun `the ledger client uses a distinct explicit path for the mutable working preview`(mockServer: MockServer) {
         assertThat(ledgerLiveTrialBalancePath)
-            .isEqualTo("$LEDGER_MONTH_TRIAL_BALANCE_PATH/{asOf}/trial-balance")
+            .isEqualTo("$LEDGER_MONTH_TRIAL_BALANCE_PATH/{asOf}/closing-balance")
 
         given()
             .baseUri(mockServer.getUrl())
@@ -255,6 +364,88 @@ class LedgerTrialBalancePactConsumerTest {
             .then()
             .statusCode(200)
     }
+
+    @Test
+    @PactTestFor(pactMethod = "frozenPeriodMovementsPact")
+    fun `F02 frozen movement client path is pinned independently of closing stock`(mockServer: MockServer) {
+        assertThat(ledgerFrozenMovementsPath)
+            .isEqualTo("$LEDGER_MONTH_TRIAL_BALANCE_PATH/{asOf}/frozen-trial-balance")
+        given().baseUri(mockServer.getUrl()).accept("application/json")
+            .get(ledgerFrozenMovementsPath.replace("{asOf}", REPORTING_DATE))
+            .then().statusCode(200)
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "livePeriodMovementsPact")
+    fun `F02 live movement client path is pinned independently of closing stock`(mockServer: MockServer) {
+        assertThat(ledgerLiveMovementsPath)
+            .isEqualTo("$LEDGER_MONTH_TRIAL_BALANCE_PATH/{asOf}/trial-balance")
+        given().baseUri(mockServer.getUrl()).accept("application/json")
+            .get(ledgerLiveMovementsPath.replace("{asOf}", REPORTING_DATE))
+            .then().statusCode(200)
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "frozenYearToDateMovementsPact")
+    fun `F02 frozen YTD client path is pinned`(mockServer: MockServer) {
+        assertThat(ledgerFrozenYearToDatePath)
+            .isEqualTo("$LEDGER_MONTH_TRIAL_BALANCE_PATH/{asOf}/frozen-year-to-date-trial-balance")
+        given().baseUri(mockServer.getUrl()).accept("application/json")
+            .get(ledgerFrozenYearToDatePath.replace("{asOf}", REPORTING_DATE)).then().statusCode(200)
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "liveYearToDateMovementsPact")
+    fun `F02 live YTD client path is pinned`(mockServer: MockServer) {
+        assertThat(ledgerLiveYearToDatePath)
+            .isEqualTo("$LEDGER_MONTH_TRIAL_BALANCE_PATH/{asOf}/year-to-date-trial-balance")
+        given().baseUri(mockServer.getUrl()).accept("application/json")
+            .get(ledgerLiveYearToDatePath.replace("{asOf}", REPORTING_DATE)).then().statusCode(200)
+    }
+
+    @Pact(consumer = "openbank-finrep-service", provider = "openbank-ledger-service")
+    fun anonymousLiveClosingPact(builder: PactDslWithProvider): RequestResponsePact =
+        anonymousReadPact(builder, "closing-balance")
+
+    @Test
+    @PactTestFor(pactMethod = "anonymousLiveClosingPact")
+    fun `anonymous closing-balance read is refused 401`(mockServer: MockServer) {
+        given().baseUri(mockServer.getUrl()).accept("application/json")
+            .get(ledgerLiveTrialBalancePath.replace("{asOf}", REPORTING_DATE)).then().statusCode(401)
+    }
+
+    @Pact(consumer = "openbank-finrep-service", provider = "openbank-ledger-service")
+    fun anonymousYtdPact(builder: PactDslWithProvider): RequestResponsePact =
+        anonymousReadPact(builder, "frozen-year-to-date-trial-balance")
+
+    @Test
+    @PactTestFor(pactMethod = "anonymousYtdPact")
+    fun `anonymous frozen-year-to-date-trial-balance read is refused 401`(mockServer: MockServer) {
+        given().baseUri(mockServer.getUrl()).accept("application/json")
+            .get(ledgerFrozenYearToDatePath.replace("{asOf}", REPORTING_DATE)).then().statusCode(401)
+    }
+
+    @Pact(consumer = "openbank-finrep-service", provider = "openbank-ledger-service")
+    fun anonymousLiveYtdPact(builder: PactDslWithProvider): RequestResponsePact =
+        anonymousReadPact(builder, "year-to-date-trial-balance")
+
+    @Test
+    @PactTestFor(pactMethod = "anonymousLiveYtdPact")
+    fun `anonymous year-to-date-trial-balance read is refused 401`(mockServer: MockServer) {
+        given().baseUri(mockServer.getUrl()).accept("application/json")
+            .get(ledgerLiveYearToDatePath.replace("{asOf}", REPORTING_DATE)).then().statusCode(401)
+    }
+
+    private fun anonymousReadPact(builder: PactDslWithProvider, suffix: String): RequestResponsePact = builder
+        // Existing provider verifier replays this state without @TestSecurity.
+        .given("no valid M2M identity is presented")
+        .uponReceiving("GET $suffix for FINREP without an authenticated identity")
+        .path("$LEDGER_MONTH_TRIAL_BALANCE_PATH/$REPORTING_DATE/$suffix")
+        .method("GET")
+        .headers(mapOf("Accept" to "application/json"))
+        .willRespondWith()
+        .status(401)
+        .toPact()
 
     /** Issues the request against the path the production client is annotated with. */
     private fun fetchTrialBalance(mockServer: MockServer, asOf: String): ClosedPeriodTrialBalanceResponse {
@@ -287,12 +478,20 @@ class LedgerTrialBalancePactConsumerTest {
 
         /** Ledger's query-parameter name for the as-of date — likewise literal. */
         /** A FINREP quarter-end reference date. */
-        const val REPORTING_DATE = "2026-06-30"
+        const val REPORTING_DATE = "2000-06-30"
 
         private val getTrialBalanceMethod =
             LedgerRestClient::class.java.getDeclaredMethod("getTrialBalance", String::class.java)
         private val getLiveTrialBalanceMethod =
             LedgerRestClient::class.java.getDeclaredMethod("getLiveTrialBalance", String::class.java)
+        private val getFrozenMovementsMethod =
+            LedgerRestClient::class.java.getDeclaredMethod("getFrozenPeriodMovements", String::class.java)
+        private val getLiveMovementsMethod =
+            LedgerRestClient::class.java.getDeclaredMethod("getLivePeriodMovements", String::class.java)
+        private val getFrozenYearToDateMethod =
+            LedgerRestClient::class.java.getDeclaredMethod("getYearToDateMovements", String::class.java)
+        private val getLiveYearToDateMethod =
+            LedgerRestClient::class.java.getDeclaredMethod("getLiveYearToDateMovements", String::class.java)
         private val listClosedPeriodsMethod = LedgerRestClient::class.java.getDeclaredMethod(
             "listClosedPeriods",
             String::class.java,
@@ -311,6 +510,26 @@ class LedgerTrialBalancePactConsumerTest {
         val ledgerLiveTrialBalancePath: String = listOf(
             LedgerRestClient::class.java.getAnnotation(Path::class.java).value,
             getLiveTrialBalanceMethod.getAnnotation(Path::class.java).value,
+        ).joinToString("/") { it.trim('/') }.let { "/$it" }
+
+        val ledgerFrozenMovementsPath: String = listOf(
+            LedgerRestClient::class.java.getAnnotation(Path::class.java).value,
+            getFrozenMovementsMethod.getAnnotation(Path::class.java).value,
+        ).joinToString("/") { it.trim('/') }.let { "/$it" }
+
+        val ledgerLiveMovementsPath: String = listOf(
+            LedgerRestClient::class.java.getAnnotation(Path::class.java).value,
+            getLiveMovementsMethod.getAnnotation(Path::class.java).value,
+        ).joinToString("/") { it.trim('/') }.let { "/$it" }
+
+        val ledgerFrozenYearToDatePath: String = listOf(
+            LedgerRestClient::class.java.getAnnotation(Path::class.java).value,
+            getFrozenYearToDateMethod.getAnnotation(Path::class.java).value,
+        ).joinToString("/") { it.trim('/') }.let { "/$it" }
+
+        val ledgerLiveYearToDatePath: String = listOf(
+            LedgerRestClient::class.java.getAnnotation(Path::class.java).value,
+            getLiveYearToDateMethod.getAnnotation(Path::class.java).value,
         ).joinToString("/") { it.trim('/') }.let { "/$it" }
 
         val ledgerPeriodsPath: String = LedgerRestClient::class.java.getAnnotation(Path::class.java).value

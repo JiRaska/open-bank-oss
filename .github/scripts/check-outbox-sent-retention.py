@@ -49,10 +49,6 @@ EXEMPT: dict[str, str] = {
         "SENT rows ARE the ADR-0214 evidence bundle (LendingResource GET /applications/{id}/evidence "
         "reads them via findByAggregateId); purge only after that evidence moves to a durable store (#11900)"
     ),
-    "openbank-risk-engine": (
-        "risk_outbox.dedup_key UNIQUE is the replay guard for limit events (PgRiskOutbox); purging SENT "
-        "rows would let a replayed run re-emit them. Payload is bank limit data, no personal data (#11901)"
-    ),
     "openbank-case-coordinator-agent": (
         "GET /cases/{caseId} projects proposal evidence directly from SENT case_outbox rows; "
         "purge only after that evidence has an independent durable source (#11896)"
