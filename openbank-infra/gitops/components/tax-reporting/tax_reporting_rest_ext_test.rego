@@ -54,7 +54,8 @@ test_service_account_with_operator_may_not_assemble if {
 
 # tax.filing.inspect is deliberately NOT a `.read`. The old `.read` remains only for already
 # published images and must stay excluded from operator-read-any while both versions coexist.
-# These run with the real data.rules, including the rollout compatibility exclusion.
+# The per-service test runner loads the generated governance data at data.authz. Inject only the
+# real exclusion list at data.rules.authz, matching the bundle's data.rules mount point.
 test_legacy_staff_can_read_while_old_image_drains if {
 	rest.allow with input as {
 		"principal": {"type": "HUMAN", "id": "audrey", "roles": ["ROLE_AUDITOR"]},
@@ -64,7 +65,7 @@ test_legacy_staff_can_read_while_old_image_drains if {
 
 test_legacy_read_is_denied_to_shared_service_account_with_staff_roles if {
 	every role in ["ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE", "ROLE_AUDITOR", "ROLE_VIEWER"] {
-		not rest.allow with input as {
+		not rest.allow with data.rules.authz.operator_read_any_excluded_actions as data.authz.operator_read_any_excluded_actions with input as {
 			"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_API", role]},
 			"action": "tax.filing.read",
 		}
@@ -72,7 +73,7 @@ test_legacy_read_is_denied_to_shared_service_account_with_staff_roles if {
 }
 
 test_legacy_read_is_denied_to_shared_service_account_with_all_staff_roles if {
-	not rest.allow with input as {
+	not rest.allow with data.rules.authz.operator_read_any_excluded_actions as data.authz.operator_read_any_excluded_actions with input as {
 		"principal": {
 			"type": "HUMAN", "id": "service-account-openbank-services",
 			"roles": ["ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE", "ROLE_AUDITOR"],
