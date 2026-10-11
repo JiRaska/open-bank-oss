@@ -498,6 +498,7 @@ class Corpus:
         self.code: dict[str, str] = {}
         self._memo: dict[str, bool] = {}
         self._stub_memo: dict[str, str | None] = {}
+        self._stub_sites: dict[str, str] | None = None
         for f in self.files:
             if f.endswith(DOCISH) or not f.endswith(CODEISH) or not is_backend(f):
                 continue
@@ -626,17 +627,20 @@ class Corpus:
         """
         if not (CAMEL.match(sym) or LOWERCAMEL.match(sym)):
             return None
-        decl = re.compile(r"\b(?:class|object|interface|fun|val|var)\s+" + re.escape(sym) + r"\b")
-        for f, b in self.main.items():
-            if sym not in b:
-                continue
-            lines = b.splitlines()
-            for n, line in enumerate(lines):
-                if not decl.search(line):
-                    continue
-                if STUB_MARK.search("\n".join(lines[n:n + STUB_WINDOW])):
-                    return f"{f}:{n + 1}"
-        return None
+        if self._stub_sites is None:
+            sites: dict[str, str] = {}
+            # Lookahead preserves overlapping declarations on a line, including comments:
+            # this index changes traversal cost, not the original declaration semantics.
+            decl = re.compile(r"(?=\b(?:class|object|interface|fun|val|var)\s+([A-Za-z][A-Za-z0-9]*)\b)")
+            for f, blob in self.main.items():
+                lines = blob.splitlines()
+                for n, line in enumerate(lines):
+                    names = [m.group(1) for m in decl.finditer(line)]
+                    if names and STUB_MARK.search("\n".join(lines[n:n + STUB_WINDOW])):
+                        for name in names:
+                            sites.setdefault(name, f"{f}:{n + 1}")
+            self._stub_sites = sites
+        return self._stub_sites.get(sym)
 
 
 # ---------------------------------------------------------------- self-reference
@@ -932,6 +936,7 @@ def self_test() -> int:
             self.files, self.names, self.paths = [], set(), set()
             self.blobs, self._memo = blobs, {}
             self._stub_memo = {}
+            self._stub_sites = None
             self.main = {}
             self.config_keys = set()
             for _f, _b in blobs.items():
@@ -970,6 +975,27 @@ def self_test() -> int:
     real.main = {"openbank-x/src/main/kotlin/A.kt": "class StubGuard { fun check() = true }"}
     case("another corpus does not inherit the previous stub finding",
          real.stub_site("StubGuard"), None)
+
+    indexed = _FakeCorpus({})
+    indexed.main = {
+        "openbank-x/src/main/kotlin/A.kt": (
+            "class RealGuard {}\n" + "\n" * STUB_WINDOW +
+            "class RealGuard { // TODO implement\n" +
+            "val class OverlapGuard // FIXME implement\n" +
+            "class SuffixGuardExtra // TODO implement\n" +
+            "class UnderGuard_extra // TODO implement\n" +
+            "// class CommentGuard // TODO implement\n"
+        ),
+        "openbank-x/src/main/kotlin/B.kt": "class RealGuard { // TODO later duplicate",
+    }
+    case("index preserves the first stub site, skipping an earlier real declaration",
+         indexed.stub_site("RealGuard"), f"openbank-x/src/main/kotlin/A.kt:{STUB_WINDOW + 2}")
+    case("overlapping declaration keywords remain visible",
+         indexed.stub_site("OverlapGuard"), f"openbank-x/src/main/kotlin/A.kt:{STUB_WINDOW + 3}")
+    case("a declaration suffix is not a match", indexed.stub_site("SuffixGuard"), None)
+    case("an underscore does not create a word boundary", indexed.stub_site("UnderGuard"), None)
+    case("comment declarations keep the existing scan semantics",
+         indexed.stub_site("CommentGuard"), f"openbank-x/src/main/kotlin/A.kt:{STUB_WINDOW + 6}")
 
     # (3b) EMBEDDED .rego. A `gen-*opa-bundle*.sh` generator writes its source `.rego` blob into
     #      a ConfigMap under a `<name>.rego: |` key instead of checking it in as its own file
