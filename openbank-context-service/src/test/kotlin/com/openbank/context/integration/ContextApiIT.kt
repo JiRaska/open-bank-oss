@@ -18,6 +18,7 @@ import io.restassured.RestAssured.given
 import io.smallrye.mutiny.coroutines.asUni
 import io.smallrye.reactive.messaging.memory.InMemoryConnector
 import io.smallrye.reactive.messaging.memory.InMemorySource
+import io.vertx.pgclient.PgException
 import jakarta.inject.Inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -25,15 +26,19 @@ import kotlinx.coroutines.async
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.eclipse.microprofile.config.ConfigProvider
+import org.eclipse.microprofile.reactive.messaging.Message
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.hasEntry
 import org.junit.jupiter.api.Test
 import java.sql.Connection
 import java.sql.DriverManager
+import java.sql.SQLException
 import java.time.Instant
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ConcurrentLinkedQueue
 import jakarta.enterprise.inject.Any as AnyQualifier
 
 @QuarkusTest
@@ -100,36 +105,57 @@ class ContextApiIT {
         val disputeId = UUID.randomUUID()
         val version = NOW.epochSecond * 1_000_000_000 + NOW.nano
         val payload = complaintEvent(complaintId, reference, accountId, transactionId, disputeId, version)
-        val source = connector.source<String>("dispute-events-in")
-        val payments = connector.source<String>("domestic-payment-events-in")
-        val transactions = connector.source<String>("transaction-events-in")
-        val ledger = connector.source<String>("ledger-events-in")
-        val clearing = connector.source<String>("clearing-events-in")
-        val sepaReturns = connector.source<String>("sepa-payment-events-in")
+        val source = connector.source<Any>("dispute-events-in")
+        val payments = connector.source<Any>("domestic-payment-events-in")
+        val transactions = connector.source<Any>("transaction-events-in")
+        val ledger = connector.source<Any>("ledger-events-in")
+        val clearing = connector.source<Any>("clearing-events-in")
+        val sepaReturns = connector.source<Any>("sepa-payment-events-in")
+        val nacks = ConcurrentLinkedQueue<String>()
         val reversalId = UUID.randomUUID()
         listOf(source, payments, transactions, ledger, clearing, sepaReturns)
             .forEach { it.runOnVertxContext(true) }
 
-        repeat(2) { source.send(payload) }
-        source.send(complaintEvent(complaintId, reference, accountId, transactionId, disputeId, version - 1))
-        val clearingItemId = sendRailEvidence(clearing, sepaReturns, transactionId, reversalId)
-        sendPaymentLifecycle(payments, transactionId)
+        repeat(2) { sendObserved(source, "dispute", payload, nacks) }
+        sendObserved(
+            source,
+            "dispute",
+            complaintEvent(complaintId, reference, accountId, transactionId, disputeId, version - 1),
+            nacks,
+        )
+        val clearingItemId = sendRailEvidence(
+            { sendObserved(clearing, "clearing", it, nacks) },
+            { sendObserved(sepaReturns, "sepa-return", it, nacks) },
+            transactionId,
+            reversalId,
+        )
+        sendPaymentLifecycle({ sendObserved(payments, "domestic", it, nacks) }, transactionId)
         val bookingTransactionId = UUID.randomUUID()
         val journalId = UUID.randomUUID()
         val reversalJournalId = UUID.randomUUID()
-        ledger.send(ledgerPostedEvent(journalId, bookingTransactionId))
-        ledger.send(ledgerPostedEvent(reversalJournalId, reversalId))
-        transactions.send(transactionInitiatedEvent(bookingTransactionId, transactionId))
-        transactions.send(transactionReversalEvent(reversalId, bookingTransactionId))
-        assertProjectionState(
-            reference,
-            transactionId,
-            bookingTransactionId,
-            journalId,
-            clearingItemId,
-            reversalId,
-            complaintId,
+        sendObserved(ledger, "ledger", ledgerPostedEvent(journalId, bookingTransactionId), nacks)
+        sendObserved(ledger, "ledger", ledgerPostedEvent(reversalJournalId, reversalId), nacks)
+        sendObserved(
+            transactions,
+            "transaction",
+            transactionInitiatedEvent(bookingTransactionId, transactionId),
+            nacks,
         )
+        sendObserved(transactions, "transaction", transactionReversalEvent(reversalId, bookingTransactionId), nacks)
+        try {
+            assertProjectionState(
+                reference,
+                transactionId,
+                bookingTransactionId,
+                journalId,
+                clearingItemId,
+                reversalId,
+                complaintId,
+            )
+        } catch (failure: AssertionError) {
+            throw AssertionError("projection state incomplete; channel nacks=${nacks.toList()}", failure)
+        }
+        assertThat(nacks).isEmpty()
         awaitCount("context_projection_events", "aggregate_ref", "booking-transaction:$reversalId", 1)
         awaitCount("context_projection_events", "aggregate_ref", "ledger-booking:$reversalJournalId", 1)
         val unrelatedComplaint = seedUnrelatedComplaint(transactionId)
@@ -606,21 +632,49 @@ class ContextApiIT {
             """"occurredAt":"${NOW.plusSeconds(revision)}"}"""
     }
 
-    private fun sendPaymentLifecycle(source: InMemorySource<String>, paymentId: UUID) {
-        source.send(domesticPaymentEvent(paymentId, 1, "RECEIVED"))
-        source.send(domesticPaymentEvent(paymentId, 2, "SENT_TO_CLEARING"))
-        source.send(domesticPaymentEvent(paymentId, 3, "RETURNED"))
-        source.send(domesticPaymentEvent(paymentId, 3, "RETURNED"))
+    /** Capture a failed in-memory delivery without printing a potentially sensitive event payload or row key. */
+    private fun sendObserved(
+        source: InMemorySource<Any>,
+        channel: String,
+        payload: String,
+        nacks: ConcurrentLinkedQueue<String>,
+    ) {
+        val message = Message.of(
+            payload,
+            { CompletableFuture.completedFuture<Void>(null) },
+            { failure: Throwable ->
+                val causes = generateSequence(failure) { it.cause }.toList()
+                val pgFailure = causes.filterIsInstance<PgException>().firstOrNull()
+                val sqlState = pgFailure?.sqlState
+                    ?: causes.filterIsInstance<SQLException>().firstOrNull()?.sqlState
+                    ?: "unknown"
+                val constraint = pgFailure?.constraint
+                    ?: causes.asSequence().mapNotNull { cause ->
+                        Regex("constraint \"([A-Za-z0-9_]+)\"").find(cause.message.orEmpty())?.groupValues?.get(1)
+                    }.firstOrNull()
+                    ?: "unknown"
+                nacks.add("$channel:${failure.javaClass.simpleName}:sqlState=$sqlState:constraint=$constraint")
+                CompletableFuture.completedFuture<Void>(null)
+            },
+        )
+        source.send(message)
+    }
+
+    private fun sendPaymentLifecycle(send: (String) -> Unit, paymentId: UUID) {
+        send(domesticPaymentEvent(paymentId, 1, "RECEIVED"))
+        send(domesticPaymentEvent(paymentId, 2, "SENT_TO_CLEARING"))
+        send(domesticPaymentEvent(paymentId, 3, "RETURNED"))
+        send(domesticPaymentEvent(paymentId, 3, "RETURNED"))
     }
 
     private fun sendRailEvidence(
-        clearing: InMemorySource<String>,
-        sepaReturns: InMemorySource<String>,
+        clearing: (String) -> Unit,
+        sepaReturns: (String) -> Unit,
         paymentId: UUID,
         reversalId: UUID,
     ): UUID = UUID.randomUUID().also { itemId ->
-        clearing.send(clearingItemSettledEvent(itemId, UUID.randomUUID(), paymentId))
-        sepaReturns.send(sepaReturnedEvent(paymentId, reversalId))
+        clearing(clearingItemSettledEvent(itemId, UUID.randomUUID(), paymentId))
+        sepaReturns(sepaReturnedEvent(paymentId, reversalId))
     }
 
     private fun seedUnrelatedComplaint(paymentId: UUID): String =
