@@ -6438,6 +6438,7 @@ gates:
       from history, and counts an unresolvable pin as lagging. It is monotonic once green.
     review_after: "2027-04-11"
     budget_seconds: 120                  # ~60 compare-API calls in a shallow checkout
+    min_subjects: 29   # 58 libs-runtime consumers derived 2026-10-11; half
     run: |
       bash .github/scripts/check-pdp-flag-rollout.sh
     selftest: bash .github/scripts/check-pdp-flag-rollout.sh --self-test
