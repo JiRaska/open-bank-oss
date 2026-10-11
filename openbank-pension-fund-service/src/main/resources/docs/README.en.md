@@ -90,3 +90,8 @@ These inputs support the reporting read model; they do not submit a statutory re
 ### Classification correction retries
 
 The proposal, approval, and rejection POSTs require a nonblank `Idempotency-Key` of at most 128 characters. A key is scoped to the authenticated caller and operation. Retrying the same instruction returns the original response, even after the correction has moved to another state; changed content with the same key returns 409. The replay snapshot and correction commit in one database transaction. Competing approval/rejection requests can commit only one decision.
+
+
+## Integration tests and the fail-closed service-account flag
+
+OPA treats any principal whose token is not verifiably a person as a service account (`input.principal.service_account`, fail closed). A plain `@TestSecurity` identity carries no JWT, so it counts as a machine and loses human-only grants. Integration tests that act as real staff therefore add `@OidcSecurity` human claims, which is why this module tests with `quarkus-test-security-oidc`.
