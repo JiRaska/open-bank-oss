@@ -80,6 +80,8 @@ class CatalogClientMtlsIT {
     @Inject
     lateinit var fundClient: PensionFundRestClient
 
+    // One call per injected client, asserted in sequence; the length is the client count.
+    @Suppress("LongMethod")
     @Test
     fun `real clients mint OIDC token and succeed with trusted mTLS peer`(): Unit = runBlocking {
         assertThat(client.offerings()).isEmpty()

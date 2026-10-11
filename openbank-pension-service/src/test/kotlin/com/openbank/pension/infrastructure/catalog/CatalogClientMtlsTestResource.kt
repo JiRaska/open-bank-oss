@@ -151,6 +151,9 @@ private class CatalogTlsFixture(private val scenario: CatalogTlsScenario) {
             )
         }
 
+    // One linear fixture: eight mTLS stub routes plus the OIDC token route, each a few lines.
+    // Splitting it would scatter the per-upstream wiring the test exists to show side by side.
+    @Suppress("LongMethod")
     fun start(): CatalogTlsServers {
         val serverName = if (scenario == CatalogTlsScenario.WRONG_HOSTNAME) "wrong-host" else "localhost"
         val serverStore = generateStore(
