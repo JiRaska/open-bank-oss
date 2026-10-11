@@ -216,7 +216,7 @@ jobs:
           # the first Gradle task; tests and build outputs are never replayed.
           bash .github/scripts/retry-testcontainers-ebusy.sh -- \
             bash .github/scripts/retry-gradle-verification-cache.sh -- \
-            ./gradlew :${{ inputs.service }}:build --build-cache --console=plain --stacktrace \
+            ./gradlew --configure-on-demand :${{ inputs.service }}:build --build-cache --console=plain --stacktrace \
             -Dquarkus.smallrye-openapi.store-schema-directory="build/openapi-generated"
 
       # A Docker Hub pull failure surfaces as NAMED TEST FAILURES, ~900 lines above the actual
