@@ -29,13 +29,12 @@
 #   of the pacticipant you wish to deploy to avoid race conditions. Without a version
 #   number, this result will not be reliable.
 #
-# WHY NOT JUST ALWAYS PASS --version $GITHUB_SHA
-# Because the existing `--latest main` is not an oversight — auto-deploy.yml records the
-# reason: path-scoped CI skips most services on any given commit, so for those the broker
-# legitimately has no version for $GITHUB_SHA and `--version` errors with "No pacts or
-# verifications". Switching unconditionally would break the common case to fix the rare
-# one. So the selector is chosen from a PROBE of whether this commit's version actually
-# exists, and falls back to today's exact behaviour whenever it does not.
+# WHY THE PROBE STILL MATTERS
+# A published version at this SHA is the first choice. A proven-equivalent ancestor is the
+# second. For a known pacticipant without either, a push asks about this SHA exactly: a
+# missing version fails closed until Services CI publishes it. A manual dispatch REFUSEs,
+# because path-scoped CI may never publish that unrelated SHA. An unknown pacticipant has
+# no contracts to check, so its first-deploy exception remains separate.
 #
 # WHY A SEPARATE SCRIPT
 # Same reason as classify-can-i-deploy-block.sh next door: inline in the workflow this is
@@ -44,16 +43,11 @@
 # (probe result, sha) with no network of its own, so the unit test can drive every branch.
 #
 # WHY A workflow_dispatch WITH NO VERSION IS REFUSED (issue #3318)
-# The `no` fallback is right for a PUSH: path-scoped CI skips most services on most commits,
-# so most of the fleet legitimately has no version for that sha. It is NOT right for a manual
-# dispatch. auto-deploy builds `sandbox-${GITHUB_SHA::8}` from the CURRENT main tip, a commit
-# services-ci never built for that service — so a version for it cannot exist, and falling
-# back means the gate answers about a DIFFERENT commit than the one being pinned into gitops.
-# Both outcomes are wrong and the quiet one ships: see the "WHY NOT JUST ALWAYS PASS" note
-# above. Measured on openbank-fx-service 2026-08-02 — five manual dispatches, five verdicts
-# about consumer version 8d321a8, a commit unrelated to the change being deployed (#3306).
-# So on (no + workflow_dispatch) this emits the REFUSE sentinel and the caller stops. Push
-# behaviour is untouched.
+# A manual dispatch builds `sandbox-${GITHUB_SHA::8}` from the current main tip, a commit
+# services-ci may never build for that service. Without a published or proven-equivalent
+# version, the gate cannot ask about this image. On openbank-fx-service five manual
+# dispatches asked about an unrelated consumer version (#3306).
+# So on (no + workflow_dispatch) this emits the REFUSE sentinel and the caller stops.
 #
 # Usage:
 #   PACT_VERSION_PRESENT=yes|no|absent|unknown|equivalent:<sha> [EVENT_NAME=<github.event_name>] \
@@ -64,8 +58,8 @@
 #       yes     → 200, a version exists for THIS commit
 #       equivalent:<sha>
 #               → no version for THIS commit, but the probe PROVED from git that <sha> — the
-#                 commit that does have one — is byte-identical in every build input of this
-#                 service (#3432). Not a fallback: a narrower, justified question.
+#                 commit that does have one — is byte-identical in every Pact input of this
+#                 service (#3432). Release metadata may differ; image freshness is separate.
 #       no      → 404 on the version, but the pacticipant EXISTS: this commit has published nothing yet
 #       absent  → the broker does not know the pacticipant AT ALL (no contracts either way)
 #       unknown → the probe itself failed (broker unreachable / non-2xx-non-404)
@@ -108,15 +102,15 @@ case "$PRESENT" in
   equivalent:*)
     # #3432. The probe could not find a version for THIS sha, but it proved — from git tree
     # objects, via pact-version-tree-equivalent.sh — that the commit which DOES have one is
-    # byte-identical to this one in every input this service's image is built from, and is an
-    # ancestor of it. So this is not the #3318 case at all: there is no "different commit" here
-    # in any sense that can reach the artifact, and asking by version number is more precise than
+    # byte-identical to this one in every Pact input, and is an ancestor of it. So this is not
+    # the #3318 case: release metadata may differ in the image, but cannot change the contract.
+    # Asking by version number is more precise than
     # the `--latest main` that a push would have used. Without this the manual/reconcile path can
     # deploy NOTHING, ever — 54 of 54 refused on run 30761923908 — which is the state the whole
     # fleet lands in exactly when a reconcile is needed. The refusal below is untouched for every
     # case where the equivalence could NOT be proved, including a broker the probe could not read.
     emit "--version ${PRESENT#equivalent:}" \
-      "no pact version for ${SHA}, but ${PRESENT#equivalent:} is byte-identical to it in every build input of ${SVC} (git tree objects, ancestor) — asking about that version by number is a question about the same source, not about a different commit (#3432, #3318)"
+      "no pact version for ${SHA}, but ${PRESENT#equivalent:} is byte-identical to it in every Pact input of ${SVC} (git tree objects, ancestor) — asking about that version by number is a question about the same contract, not about an unverified change (#3432, #3318)"
     ;;
   yes)
     # The precise question, and the one the broker's own warning asks for: can THIS commit
@@ -127,19 +121,14 @@ case "$PRESENT" in
     ;;
   no)
     if [ "$EVENT" = "workflow_dispatch" ]; then
-      # A manual deploy of a sha nobody has built cannot be gated on itself, and gating it on
-      # another commit is what #3318 exists to stop. Refuse instead of answering the wrong
-      # question — a manual dispatch is a human act, so a loud stop is actionable where a
-      # misdirected verdict is not.
       emit "REFUSE" \
         "workflow_dispatch of ${SHA} which has no published pact version for ${SVC} — the gate cannot ask about the sha being deployed, and asking about a different commit is not a gate (#3318)"
     else
-      # Today's behaviour on a push, deliberately unchanged. `--version` would error "No pacts
-      # or verifications" for a service path-scoped CI skipped on this commit, which is most
-      # of the fleet on most commits. The block classifier downstream then labels this
-      # PENDING_BUILD from the same probe result, and the reconcile tick re-drives it.
-      emit "--latest main" \
-        "no pact version for this commit — falling back to latest/main (ADR-0092); the block classifier will label this PENDING_BUILD"
+      # On a push, Services CI may still publish this version. Ask about this SHA exactly:
+      # a missing version fails closed as PENDING_BUILD, and a later publication can pass.
+      # Run 37977828840 returned green for notification by borrowing latest/main instead.
+      emit "--version ${SHA}" \
+        "no pact version for this commit yet — asking about ${SHA} exactly; a missing version cannot inherit a latest/main verdict (#12228)"
     fi
     ;;
   absent)
@@ -155,9 +144,9 @@ case "$PRESENT" in
       "broker does not know ${SVC} — no published contracts either way, so there is nothing to verify (not the #3318 case: that is a service WITH contracts and no version for this sha)"
     ;;
   *)
-    # Probe failed. Fall back rather than invent precision: an unreachable broker must not
-    # silently change which question the gate asks.
-    emit "--latest main" \
-      "broker probe inconclusive — falling back to latest/main rather than assuming a version that may not exist"
+    # A failed probe cannot establish equivalence. The can-i-deploy CLI may recover; if it
+    # does, it must answer about this image SHA rather than borrow latest/main.
+    emit "--version ${SHA}" \
+      "broker probe inconclusive — asking about ${SHA} exactly rather than borrowing latest/main"
     ;;
 esac
