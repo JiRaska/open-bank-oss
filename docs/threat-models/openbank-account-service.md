@@ -996,3 +996,18 @@ the caller that binds a mandate to the account (#12387). It is never present for
 foreign IBAN, so the no-oracle property holds. A second declared caller,
 `service-account-openbank-sdd`, verifies the debtor party of a scoped mandate initiator (D6).
 Every other identity is still denied (`account_rest_ext_test.rego`).
+
+
+### Pension client identity prerequisite (ADR-0335)
+
+The scoped pension ownership projection requires a token issuer that can mint the
+`openbank-pension` service-account identity. Both committed realm definitions now
+carry the same client and service-account user as the active pension integration
+(#12435), with only `ROLE_API` and the existing `catalog:read` client scope.
+Interactive login flows remain disabled. This establishes a reviewable issuer
+configuration prerequisite; it does not prove the live realm was imported, that
+credential material was supplied, or that a deployed token matches the policy.
+The account ownership projection still returns an account identifier only for an
+active account owned by the supplied party. A compromised pension credential can
+invoke its scoped projection; it does not acquire shared operator or compliance
+roles. Realm import and credential delivery must be verified before deployment.
