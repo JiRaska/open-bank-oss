@@ -51,7 +51,11 @@ class TieOutFreshnessWatchdog(
     private val staleAfter = Duration.ofHours(DAILY_SLA_HOURS)
 
     fun onStart(@Observes @Suppress("UNUSED_PARAMETER") ev: StartupEvent) {
-        liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, Duration.ofHours(1))
+        // A switched-off job registers no heartbeat (ScheduleSwitch): it cannot run, so a seeded
+        // age would only grow until WorkflowLivenessStale fired on an instance that runs without it.
+        if (!ScheduleSwitch.isOff(CRON_PROPERTY)) {
+            liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, Duration.ofHours(1))
+        }
     }
 
     @Scheduled(
@@ -101,10 +105,13 @@ class TieOutFreshnessWatchdog(
         }
     }
 
-    private companion object {
+    internal companion object {
         // 24h daily cadence + 1h grace for run duration / a delayed scheduler.
         const val DAILY_SLA_HOURS = 25L
         const val JOB_NAME = "ledger.tieout.freshness"
         const val WORKFLOW_NAME = "ledger-tieout-freshness"
+
+        /** The property this job's `@Scheduled` cron expression reads. */
+        const val CRON_PROPERTY = "openbank.ledger.tieout.freshness-cron"
     }
 }

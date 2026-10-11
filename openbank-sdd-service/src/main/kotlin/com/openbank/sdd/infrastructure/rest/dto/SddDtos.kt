@@ -25,6 +25,8 @@ data class RegisterMandateRequest(
     val creditorName: String,
     val debtorName: String,
     val signatureDate: LocalDate,
+    /** The debtor party the mandate is for. Required from a scoped initiator (ADR-0335 D6), ignored otherwise. */
+    val partyId: java.util.UUID? = null,
 )
 
 data class AmendMandateRequest(val field: AmendableField, val newValue: String)

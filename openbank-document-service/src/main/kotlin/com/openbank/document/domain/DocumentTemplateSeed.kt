@@ -209,6 +209,74 @@ object DocumentTemplateSeed {
             locale = "en",
             bodyHtml = DEPOSIT_INSURANCE_EN_BODY,
         ),
+        // Pension (ADR-0334, #12392): rendered by openbank-pension-service. DRAFT wording carrying
+        // the LEGAL-REVIEW-REQUIRED marker (bodies in PensionTemplateBodies.kt); seeded PUBLISHED only
+        // because render resolves PUBLISHED rows, and the body shows a DRAFT banner while the caller
+        // sends legalReviewRequired=true. Lower-case codes are what the pension adapters send.
+        template(
+            id = "1e575a01-0000-4000-9000-000000000040",
+            code = "pension-dps-key-information-cs",
+            version = "1.0.0",
+            name = "Sdělení klíčových informací k doplňkovému penzijnímu spoření",
+            locale = "cs",
+            bodyHtml = PENSION_DPS_KEY_INFORMATION_CS_BODY,
+        ),
+        template(
+            id = "1e575a01-0000-4000-9000-000000000041",
+            code = "pension-dps-key-information-en",
+            version = "1.0.0",
+            name = "Pre-contractual Key Information – Supplementary Pension Savings",
+            locale = "en",
+            bodyHtml = PENSION_DPS_KEY_INFORMATION_EN_BODY,
+        ),
+        template(
+            id = "1e575a01-0000-4000-9000-000000000042",
+            code = "pension-dip-kid-cs",
+            version = "1.0.0",
+            name = "Sdělení klíčových informací (KID) – DIP",
+            locale = "cs",
+            bodyHtml = PENSION_DIP_KID_CS_BODY,
+        ),
+        template(
+            id = "1e575a01-0000-4000-9000-000000000043",
+            code = "pension-dip-kid-en",
+            version = "1.0.0",
+            name = "Key Information Document (KID) – DIP",
+            locale = "en",
+            bodyHtml = PENSION_DIP_KID_EN_BODY,
+        ),
+        template(
+            id = "1e575a01-0000-4000-9000-000000000044",
+            code = "pension-tax-certificate-cs",
+            version = "1.0.0",
+            name = "Potvrzení o zaplacených příspěvcích pro účely daně z příjmů",
+            locale = "cs",
+            bodyHtml = PENSION_TAX_CERTIFICATE_CS_BODY,
+        ),
+        template(
+            id = "1e575a01-0000-4000-9000-000000000045",
+            code = "pension-tax-certificate-en",
+            version = "1.0.0",
+            name = "Certificate of Pension Contributions for Income Tax",
+            locale = "en",
+            bodyHtml = PENSION_TAX_CERTIFICATE_EN_BODY,
+        ),
+        template(
+            id = "1e575a01-0000-4000-9000-000000000046",
+            code = "pension-annual-statement-cs",
+            version = "1.0.0",
+            name = "Roční výpis z penzijního účtu",
+            locale = "cs",
+            bodyHtml = PENSION_ANNUAL_STATEMENT_CS_BODY,
+        ),
+        template(
+            id = "1e575a01-0000-4000-9000-000000000047",
+            code = "pension-annual-statement-en",
+            version = "1.0.0",
+            name = "Annual Pension Account Statement",
+            locale = "en",
+            bodyHtml = PENSION_ANNUAL_STATEMENT_EN_BODY,
+        ),
     )
 
     private fun template(id: String, code: String, version: String, name: String, locale: String, bodyHtml: String) =

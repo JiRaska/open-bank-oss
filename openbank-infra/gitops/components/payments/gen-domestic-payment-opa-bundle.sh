@@ -78,6 +78,19 @@ allowed_reasons contains "viewer-domestic-payment-read" if {
 # client_credentials JWTs, which the interceptor classifies as HUMAN.
 # customer-edge uses its OWN Keycloak client (unlike most backend services,
 # which share `openbank-services`) — gate on its verified identity instead.
+# ADR-0335 D5 — scoped payment initiators are DATA (rules.yaml: scoped_payment_initiators): the
+# declared identity is admitted to the declared actions only. WHICH debtor account it may pay from
+# is decided in domestic-payment's domain (InitiatorScope.Scoped), because that account is
+# environment configuration, not repo data, and a ROLE_API-only caller with no declaration is
+# refused there too (InitiatorScope.Undeclared).
+allowed_reasons contains "service-scoped-payment-initiator" if {
+	input.principal.type == "HUMAN"
+	some initiator in data.rules.scoped_payment_initiators
+	initiator.service == "openbank-domestic-payment"
+	input.principal.id == initiator.principal
+	input.action in initiator.actions
+}
+
 allowed_reasons contains "service-domestic-payment-m2m" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-edge"

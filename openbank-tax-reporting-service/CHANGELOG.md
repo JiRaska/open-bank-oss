@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.42.2](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.42.1...tax-reporting-service-v0.42.2) (2026-10-11)
+
+
+### Security
+
+* **tax-reporting:** keep service accounts out of statutory returns ([#12536](https://github.com/JiRaska/open-bank-oss/issues/12536)) ([b433e3e](https://github.com/JiRaska/open-bank-oss/commit/b433e3e18b96575f4800be595b5c7bdecee4517c))
+
+## [0.42.1](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.42.0...tax-reporting-service-v0.42.1) (2026-10-11)
+
+
+### Security
+
+* **tax-reporting:** name the filing read action tax.filing.inspect ([#12547](https://github.com/JiRaska/open-bank-oss/issues/12547)) ([56dc56f](https://github.com/JiRaska/open-bank-oss/commit/56dc56f62611b56124861b4d526e0c391156d848))
+
 ## [0.42.0](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.41.0...tax-reporting-service-v0.42.0) (2026-10-10)
 
 
