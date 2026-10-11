@@ -4,6 +4,7 @@
 
 package com.openbank.ledger.contract
 
+import au.com.dius.pact.core.model.SynchronousRequestResponse
 import au.com.dius.pact.provider.junit5.HttpTestTarget
 import au.com.dius.pact.provider.junit5.PactVerificationContext
 import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvider
@@ -48,7 +49,10 @@ import javax.sql.DataSource
  * zero-infra-dependency verification) is unaffected by this addition.
  */
 @QuarkusTest
-@QuarkusTestResource(com.openbank.ledger.it.PostgresRedpandaTestResource::class)
+@QuarkusTestResource(
+    value = com.openbank.ledger.it.PostgresRedpandaTestResource::class,
+    restrictToAnnotatedClass = true,
+)
 @TestSecurity(user = "pact-verifier", roles = ["ROLE_API", "ROLE_OPERATOR"])
 @Provider("openbank-ledger-service")
 @PactBroker(enablePendingPacts = "true")
@@ -65,8 +69,29 @@ class LedgerPactBrokerProviderVerificationTest {
     @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
     lateinit var testPort: String
 
+    private var reportingMonth = FinrepFrozenMonthPactSeed.REPORTING_MONTH
+    private var yearToDate = true
+
     @BeforeEach
     fun configureTarget(context: PactVerificationContext?) {
+        if (context != null &&
+            context.interaction.providerStates.any {
+                it.name ==
+                    "ledger has frozen monthly trial balance for the reporting date"
+            }
+        ) {
+            val paths = context.pact.interactions
+                .filter {
+                    it.providerStates.any { state ->
+                        state.name ==
+                            "ledger has frozen monthly trial balance for the reporting date"
+                    }
+                }
+                .map { (it as SynchronousRequestResponse).request.path }
+            val plan = FinrepFrozenMonthPactSeed.requestPlan(paths)
+            reportingMonth = plan.first
+            yearToDate = plan.second
+        }
         context?.target = HttpTestTarget("localhost", testPort.toInt())
         context?.addStateChangeHandlers(this)
     }
@@ -88,7 +113,8 @@ class LedgerPactBrokerProviderVerificationTest {
     }
 
     @State("ledger has frozen monthly trial balance for the reporting date")
-    fun stateWithFrozenMonthlyTrialBalance() = FinrepFrozenMonthPactSeed.seed(dataSource)
+    fun stateWithFrozenMonthlyTrialBalance() =
+        FinrepFrozenMonthPactSeed.seed(dataSource, reportingMonth, yearToDate, resetFixture = true)
 
     /**
      * Same state as [LedgerPactProviderVerificationTest.stateWithSeededChartOfAccounts] — no

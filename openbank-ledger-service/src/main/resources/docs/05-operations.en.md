@@ -112,3 +112,8 @@ The daily run is automated by `FxRevaluationScheduler`. To re-run for a business
 ## Deploy / release
 
 Per-service path-scoped CI (only changed services build). Release axis is owned by **release-please** from Conventional Commits — do not hand-edit `version.txt`/`CHANGELOG.md` (current release `1.2.0`). CD: ArgoCD tracks the deployment manifest image tag. Always take `--ours` for image-tag merge conflicts in GitOps.
+
+
+### FINREP Pact fixture
+
+Broker FINREP verification derives the reporting month from the selected contract requests and uses a dedicated test database. Fixture reset refuses foreign closed-period IDs and retains the immutable evidence trigger. Regression tests cover historical June 2026 and current June 2000 fixtures in both replay orders, including rejection of evidence DELETE. Production frozen-evidence validation is unchanged.
