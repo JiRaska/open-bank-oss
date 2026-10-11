@@ -32,6 +32,7 @@ The Czech question sets and packs are **REQUIRES_LEGAL_REVIEW** until compliance
 | Sign the application | `POST /onboarding/applications/{id}/sign` | `pension-onboarding:{applicationId}:{documentId}` | the key-information document's SHA-256 |
 | Transfer out | `POST /transfers/out`, `POST /transfers/{id}/consent` | `pension-transfer-out:{contractId}:{providerId}:{contractNumber}` | SHA-256 of that id |
 | Termination, payout confirm, payout-account change | `.../termination/{n}/sign`, `.../payouts/{p}/confirm`, `PUT .../payouts/{p}/account` | `pension-exit:{hash}` | `hash` = the quote's signing hash (covers quote AND payout IBAN) |
+| Strategy change | `PUT /contracts/{id}/strategy` | `pension-strategy-change:{hash}` | SHA-256 of `pension-strategy-change\|contractId\|strategyCode\|effectiveFrom\|sorted,acknowledged,warnings` |
 | Contribution schedule change | `POST /contracts/{id}/contribution-schedule/changes` | `pension-schedule-change:{documentSha256}` | `documentSha256` from the preview |
 | Beneficiary change | `POST /contracts/{id}/beneficiaries/changes` | `pension-beneficiary-change:{documentSha256}` | `documentSha256` from the preview |
 | Contribution mandate set-up | `POST /funding/contracts/{id}/mandates` | `pension-mandate-setup:{hash}` | `hash` = SHA-256 of `pension-mandate-setup\|contractId\|kind\|IBAN\|amount\|CURRENCY\|firstCollection` |
@@ -183,6 +184,86 @@ environment.
 - Both cs and en texts come from the question set, never from the UI bundle. The question set is the
   versioned, legally reviewed source.
 
+
+## Edge route map
+
+Every customer route the edge serves under `/customer/v1/pension`, with the pension-service route
+it relays to (under `/api/v2/pension`). **Key** = `Idempotency-Key` is required (400 without it,
+before anything goes upstream). **SCA**: *edge* = the edge consumes the challenge (`pension.<op>:<id>`),
+*doc* = pension-service consumes it (table above), *fwd* = forwarded to pension-service, which binds
+it to the quote it issued. On every SCA route a request without `X-SCA-Challenge-Id` answers 403
+`SCA_REQUIRED` with the exact `scaLinking` to raise — the app never computes a hash itself. Every
+POST/PUT is `Content-Type: application/json`, even when it carries no fields (send `{}`): the edge
+answers 415 otherwise.
+
+| Edge route | pension-service route | Key | SCA |
+|---|---|---|---|
+| `GET /products` | product catalog (retirement pack) | | |
+| `POST /simulations` | `POST /simulations` | | |
+| `POST /applications` | `POST /onboarding/applications` | yes | |
+| `POST /transfers-in` | `POST /contracts/transfers-in` | yes | |
+| `GET /applications/{a}` | `GET /onboarding/applications/{a}` | | |
+| `GET /applications/{a}/recommendation` | `GET .../recommendation` | | |
+| `GET /applications/{a}/questionnaire` | `GET .../questionnaire` | | |
+| `PUT /applications/{a}/questionnaire/draft` | `PUT .../questionnaire/draft` | yes | |
+| `POST /applications/{a}/questionnaire` | `POST .../questionnaire` | yes | |
+| `GET /applications/{a}/profile` | `GET .../profile` | | |
+| `GET /applications/{a}/warnings` | `GET .../warnings` | | |
+| `POST /applications/{a}/warnings/acknowledge` | `POST .../warnings/acknowledge` | yes | |
+| `POST /applications/{a}/strategy` | `POST .../strategy` | yes | |
+| `POST /applications/{a}/kid/accept` | `POST .../kid/accept` | yes | |
+| `POST /applications/{a}/sign` | `POST .../sign` | yes | doc |
+| `POST /applications/{a}/withdraw` | `POST .../withdraw` | yes | edge |
+| `GET /contracts` | `GET /contracts` | | |
+| `GET /contracts/{c}` | `GET /contracts/{c}` + `GET .../valuation` (`valuation: null` when unavailable) | | |
+| `GET /contracts/{c}/transactions` | `GET .../transactions` | | |
+| `POST /contracts/{c}/pause`, `/resume` | `POST .../suspend`, `.../resume` | yes | edge |
+| `PUT /contracts/{c}/strategy` | `PUT .../strategy` | yes | doc |
+| `GET /contracts/{c}/contribution-schedule` | same | | |
+| `POST /contracts/{c}/contribution-schedule/preview`, `/changes` | same | yes | changes: doc |
+| `GET /contracts/{c}/beneficiaries` | same | | |
+| `POST /contracts/{c}/beneficiaries/preview`, `/changes` | same | yes | changes: doc |
+| `GET /contracts/{c}/payment-reference` | `GET /funding/contracts/{c}/payment-reference` | | |
+| `POST /contracts/{c}/contribution-mandates` | `POST /funding/contracts/{c}/mandates` | yes | doc |
+| `POST /contracts/{c}/contribution-mandates/{m}/cancel` | `POST /funding/.../mandates/{m}/cancel` | yes | doc |
+| `GET /contracts/{c}/tax-summary?year=` | `GET /funding/contracts/{c}/tax-years/{year}` (contributions, state contribution, deductible) | | |
+| `GET /contracts/{c}/annual-statements/{year}` | same | | |
+| `POST /contracts/{c}/termination/quote` | `POST .../exit/termination/quote` | yes | |
+| `GET /contracts/{c}/termination/{n}` | `GET .../exit/termination/{n}` | | |
+| `POST /contracts/{c}/termination/{n}/sign` | `POST .../exit/termination/{n}/sign` | yes | fwd |
+| `GET /contracts/{c}/payout-eligibility` | `GET .../exit/payout-eligibility` | | |
+| `POST /contracts/{c}/payouts` | `POST .../exit/payouts/quote` | yes | |
+| `GET /contracts/{c}/payouts/{p}` | `GET .../exit/payouts/{p}` | | |
+| `POST /contracts/{c}/payouts/{p}/confirm` | `POST .../exit/payouts/{p}/confirm` | yes | fwd |
+| `PUT /contracts/{c}/payouts/{p}/account` | `PUT .../exit/payouts/{p}/account` | no (a PUT; the single-use challenge is the replay guard) | fwd |
+| `GET /contracts/{c}/payouts/{p}/statement` | same | | |
+| `GET /contracts/{c}/payouts/{p}/annuity` | same | | |
+| `POST /contracts/{c}/payouts/{p}/annuity/offers` | same | yes | |
+| `POST /contracts/{c}/payouts/{p}/annuity/selection`, `/cancellation` | same | yes | doc |
+
+Early termination has no separate confirm step: the signed notice (`.../sign`) is the confirmation.
+
+## Edge error codes
+
+| Status | `code` | Meaning, and what the app does |
+|---|---|---|
+| 400 | — | Malformed input or missing `Idempotency-Key`; nothing went upstream. Fix the request. |
+| 400 | `PENSION_RULE_REFUSED` | A jurisdiction-pack rule refused the request (e.g. payout conditions not met); show the generic refusal. |
+| 403 | `SCA_REQUIRED` | Raise the challenge from `scaLinking`, then repeat the identical request with `X-SCA-Challenge-Id`. |
+| 403 | `SCA_REJECTED` | The challenge was refused or already spent. Ask for a new one. |
+| 403 | `PENSION_CHANGE_REFUSED` | pension-service refused the challenge, the account is not the customer's own, or the designation is frozen. |
+| 403 | `STRATEGY_NOT_PERMITTED` | The strategy cannot be chosen under the current assessment. |
+| 404 | — | Unknown, malformed or another party's contract / application / payout — all the same answer. |
+| 409 | `REASSESSMENT_REQUIRED` | Re-answer the questionnaire on `applicationId`, then repeat. |
+| 409 | `WARNINGS_REQUIRED` | Show `warnings`, acknowledge them, then repeat. |
+| 409 | `INVALID_CONTRACT_STATE` | The contract cannot do this in its current state. |
+| 415 | — | Missing `Content-Type: application/json`. |
+| 422 | `PARTY_PROFILE_INCOMPLETE` | The customer record lacks birth date or residency; route to profile completion. |
+| 422 | `INCONSISTENT_ANSWERS` | Show the contradicting `questions` side by side (section 3). |
+| 502 | — | pension-service unavailable or answered unexpectedly; retry later with the same `Idempotency-Key`. |
+
+`WARNINGS_REQUIRED`'s warning codes include `STRATEGY_ABOVE_PROFILE`, `PRODUCT_NOT_APPROPRIATE` and
+`SUSTAINABILITY_PREFERENCE_NOT_MET` (section 3).
 
 ## Not covered yet
 
