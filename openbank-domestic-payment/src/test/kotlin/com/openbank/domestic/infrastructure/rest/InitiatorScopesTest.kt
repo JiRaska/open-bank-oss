@@ -13,6 +13,7 @@ import org.eclipse.microprofile.jwt.JsonWebToken
 import org.junit.jupiter.api.Test
 import org.yaml.snakeyaml.Yaml
 import java.io.File
+import java.security.Principal
 import java.util.Optional
 import java.util.UUID
 
@@ -30,6 +31,15 @@ class InitiatorScopesTest {
             }
             every { id.hasRole(any()) } answers { firstArg<String>() in roles }
         }
+
+    @Test
+    fun `a plain principal merely NAMED like pension is not scoped to its account`() {
+        val impostor = mockk<SecurityIdentity>().also { id ->
+            every { id.principal } returns Principal { "service-account-openbank-pension" }
+            every { id.hasRole(any()) } returns false
+        }
+        assertThat(InitiatorScopes(Optional.of(payout.toString())).of(impostor)).isEqualTo(InitiatorScope.Undeclared)
+    }
 
     @Test
     fun `pension is scoped to its configured payout account, and to nothing when unconfigured`() {

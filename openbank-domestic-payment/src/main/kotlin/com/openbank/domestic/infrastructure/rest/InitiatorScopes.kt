@@ -23,6 +23,7 @@ class InitiatorScopes(
     private val pensionDebtorAccount: Optional<String>,
 ) {
     fun of(identity: SecurityIdentity): InitiatorScope {
+        // Bound to the verified client (azp), never the principal NAME (#12448).
         if (ServiceAccountIdentity.isPrincipal(identity, PENSION_PRINCIPAL)) {
             val account = pensionDebtorAccount.orElse("").trim().takeIf { it.isNotEmpty() }
                 ?.let { runCatching { UUID.fromString(it) }.getOrNull() }

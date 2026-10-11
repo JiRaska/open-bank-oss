@@ -13,6 +13,7 @@ import org.eclipse.microprofile.jwt.JsonWebToken
 import org.junit.jupiter.api.Test
 import org.yaml.snakeyaml.Yaml
 import java.io.File
+import java.security.Principal
 import java.util.Optional
 
 /** ADR-0335 D6: only the declared principal is scoped; the declaration is held to rules.yaml. */
@@ -28,6 +29,18 @@ class MandateInitiatorScopesTest {
                     every { getClaim<Any?>("preferred_username") } returns name
                 }
         }
+
+    @Test
+    fun `plain principals merely NAMED like pension or edge are denied`() {
+        val scopes = MandateInitiatorScopes(Optional.of("CZ00ZZZPENSION01"))
+        listOf("service-account-openbank-pension", "service-account-openbank-edge").forEach { name ->
+            val impostor = mockk<SecurityIdentity>().also {
+                every { it.principal } returns Principal { name }
+                every { it.hasRole(any()) } returns false
+            }
+            assertThat(scopes.of(impostor)).isEqualTo(MandateInitiatorScope.Denied)
+        }
+    }
 
     @Test
     fun `pension is scoped and only declared edge and staff retain general access`() {
