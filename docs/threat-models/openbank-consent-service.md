@@ -222,3 +222,13 @@ escalating a consent is a direct path to unauthorized data access or payment ini
   this migration as "non-money-path" and is corrected here — no endpoint, authorization or
   consent-lifecycle logic changes. **Risk class:** none — response-plumbing de-duplication only.
   Rollback: restore the deleted mapper classes and revert the exception base classes.
+
+- **2026-10-11** — The production mTLS listener requires a trusted client certificate for the
+  transport, but Quarkus also exposes that certificate as an HTTP authentication mechanism.
+  Without an explicit bearer-only permission, a workload with a trusted certificate and no OIDC
+  token can be treated as authenticated by API role and policy checks (#12511). All `/api/*`
+  requests now select the bearer mechanism on both listeners. The real listener test verifies a
+  missing certificate fails the TLS handshake, a certificate alone receives 401 on HTTPS, and a
+  valid bearer reaches the same handler on HTTPS and HTTP. This changes identity selection only;
+  existing OIDC roles, consent permissions, and OPA policy still decide business authorization.
+  Rollback: revert the permission and restore the baseline entry only if the old risk is accepted.
