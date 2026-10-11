@@ -92,16 +92,19 @@ class DocumentTemplateSeeder(private val sf: Mutiny.SessionFactory) {
     }
 
     /** Retires any OTHER row currently PUBLISHED for [template]'s code, ahead of seeding it in. */
-    private fun retireCurrentPublishedSibling(s: Mutiny.Session, template: DocumentTemplate): Uni<Void> = s.createQuery(
-        "from DocumentTemplateEntity where code = :code and status = :published and id <> :id",
-        DocumentTemplateEntity::class.java,
-    )
-        .setParameter("code", template.code)
-        .setParameter("published", TemplateStatus.PUBLISHED)
-        .setParameter("id", template.id)
-        .resultList
-        .flatMap { siblings ->
-            siblings.forEach { it.status = TemplateStatus.RETIRED }
-            Uni.createFrom().voidItem()
-        }
+    private fun retireCurrentPublishedSibling(s: Mutiny.Session, template: DocumentTemplate): Uni<Void> {
+        if (template.status != TemplateStatus.PUBLISHED) return Uni.createFrom().voidItem()
+        return s.createQuery(
+            "from DocumentTemplateEntity where code = :code and status = :published and id <> :id",
+            DocumentTemplateEntity::class.java,
+        )
+            .setParameter("code", template.code)
+            .setParameter("published", TemplateStatus.PUBLISHED)
+            .setParameter("id", template.id)
+            .resultList
+            .flatMap { siblings ->
+                siblings.forEach { it.status = TemplateStatus.RETIRED }
+                Uni.createFrom().voidItem()
+            }
+    }
 }
