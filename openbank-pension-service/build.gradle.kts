@@ -105,7 +105,36 @@ tasks.withType<Test>().configureEach {
 // The repeatable demo reuses the journey suite in a fresh test JVM/database per synthetic company.
 // No production setting or normal test default is changed.
 tasks.named<Test>("test") {
+    // The cross-service journey builds and launches a second Quarkus application separately.
+    exclude("**/DipPublishedCatalogJourneyIT.class")
     providers.gradleProperty("pensionDemoCompany").orNull?.let {
         systemProperty("pension.demo.company", it)
     }
 }
+
+val dipCrossServiceIT = tasks.register<Test>("dipCrossServiceIT") {
+    description = "Verify real product-catalog publication is consumed by pension suitability over HTTP"
+    group = "verification"
+    dependsOn(tasks.named("testClasses"), ":openbank-product-catalog:quarkusBuild")
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    useJUnitPlatform()
+    filter.includeTestsMatching("*DipPublishedCatalogJourneyIT")
+    systemProperty(
+        "openbank.test.catalog.runner",
+        project(":openbank-product-catalog").layout.buildDirectory
+            .file("quarkus-app/quarkus-run.jar").get().asFile.absolutePath,
+    )
+    systemProperty(
+        "openbank.test.dip.fixture",
+        project(":openbank-product-catalog").file(
+            "src/test/resources/retirement-pack/cz-illustrative-offerings.json",
+        ).absolutePath,
+    )
+    systemProperty(
+        "openbank.test.keycloak-dockerfile",
+        rootProject.file("openbank-infra/docker/keycloak/Dockerfile").absolutePath,
+    )
+}
+
+tasks.named("check") { dependsOn(dipCrossServiceIT) }
