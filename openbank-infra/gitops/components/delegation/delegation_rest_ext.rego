@@ -42,7 +42,7 @@ import rego.v1
 # see the header note; without that exclusion this rule is a fleet-wide write primitive.
 allowed_reasons contains "operator-delegation-write" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
 	startswith(input.action, "delegation.")
@@ -57,7 +57,7 @@ allowed_reasons contains "operator-delegation-write" if {
 # about WHO may reach the read/propose/decide verbs once that gate is deliberately enabled.
 allowed_reasons contains "operator-delegation-approval" if {
     input.principal.type == "HUMAN"
-    not startswith(input.principal.id, "service-account-")
+    not principal_is_machine
     some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
     role in input.principal.roles
     input.action in {
@@ -71,7 +71,7 @@ allowed_reasons contains "operator-delegation-approval" if {
 # would otherwise admit `delegation.approval.read`. Veto the whole approval family for every
 # service account at the allow head; an extra allow reason can never bypass this.
 prohibited if {
-    startswith(input.principal.id, "service-account-")
+    principal_is_machine
     startswith(input.action, "delegation.approval.")
 }
 
@@ -86,6 +86,7 @@ prohibited if {
 allowed_reasons contains "edge-service-delegation" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-edge"
+	principal_is_machine
 	input.action in {
 		"delegation.offer",
         "delegation.preview",
@@ -121,14 +122,14 @@ allowed_reasons contains "edge-service-delegation" if {
 # services with their own event-fed projection (ADR-0232 D3) never call it at all.
 allowed_reasons contains "service-delegation-check" if {
 	input.principal.type == "HUMAN"
-	startswith(input.principal.id, "service-account-")
+	principal_is_machine
 	input.action == "delegation.check"
 }
 
 # Only the authenticated customer edge may record a customer's review, regardless of other roles.
 prohibited if {
     input.action == "delegation.recertification.confirm"
-    not input.principal.id == "service-account-openbank-edge"
+    not machine_named("service-account-openbank-edge")
 }
 
 # ADR-0312 business payment signing. Enumerated, never a prefix, and granted to the customer edge
@@ -142,6 +143,7 @@ prohibited if {
 allowed_reasons contains "edge-service-business-signing" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-edge"
+	principal_is_machine
 	input.action in {
 		"delegation.signing.evaluate",
 		"delegation.signing.policy.read",
@@ -163,5 +165,5 @@ allowed_reasons contains "edge-service-business-signing" if {
 # for every principal except the edge: an extra allow reason can never bypass `prohibited`.
 prohibited if {
 	startswith(input.action, "delegation.signing.")
-	input.principal.id != "service-account-openbank-edge"
+	not machine_named("service-account-openbank-edge")
 }

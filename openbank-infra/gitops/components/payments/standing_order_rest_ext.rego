@@ -42,7 +42,7 @@ import rego.v1
 # with no fallback, which is why the order matters.
 allowed_reasons contains "operator-standing-order-pause" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
 	input.action == "standingOrder.pause"
@@ -67,5 +67,6 @@ allowed_reasons contains "operator-standing-order-pause" if {
 allowed_reasons contains "m2m-standing-order-pause" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-edge"
+	principal_is_machine
 	input.action == "standingOrder.pause"
 }

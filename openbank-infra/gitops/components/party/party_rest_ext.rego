@@ -65,6 +65,7 @@ allowed_reasons contains "operator-party-write" if {
 allowed_reasons contains "service-edge-party-m2m" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-edge"
+	principal_is_machine
 	input.action in {
         "party.create",
 		"party.consent.update",
@@ -77,7 +78,7 @@ allowed_reasons contains "service-edge-party-m2m" if {
 # without this rule the new @Authorize would log a "would DENY" for every KYC-created party.
 allowed_reasons contains "kyc-party-create" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	"ROLE_KYC" in input.principal.roles
 	input.action == "party.create"
 }
@@ -94,6 +95,7 @@ allowed_reasons contains "kyc-party-create" if {
 allowed_reasons contains "service-kyb-party-m2m" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-kyb"
+	principal_is_machine
 	input.action in {
 		"party.create",
 		"party.mandate.grant",
@@ -106,5 +108,6 @@ allowed_reasons contains "service-kyb-party-m2m" if {
 allowed_reasons contains "service-delegation-mandate-read" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-delegation"
+	principal_is_machine
 	input.action in {"party.mandate.read"}
 }

@@ -45,7 +45,7 @@ import rego.v1
 # role, not just the payment rails.
 allowed_reasons contains "operator-vop-verify" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in {"ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS"}
 	role in input.principal.roles
 	input.action == "vop.verify"
@@ -66,6 +66,6 @@ allowed_reasons contains "operator-vop-verify" if {
 # per-caller allow-list — is the control that bounds it.
 allowed_reasons contains "m2m-vop-verify" if {
 	input.principal.type == "HUMAN"
-	startswith(input.principal.id, "service-account-")
+	principal_is_machine
 	input.action == "vop.verify"
 }

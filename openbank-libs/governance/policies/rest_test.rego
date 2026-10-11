@@ -1495,3 +1495,47 @@ test_commstyle_publish_denies_human_without_approver_role if {
 	}
 		with data.rules as rules_real
 }
+
+# ---------------------------------------------------------------------------------------
+# Verified machine flag (input.principal.service_account, set by AuthorizeInterceptor from
+# verified JWT claims). The id is a NAME claim; these hold the policy to the flag.
+# ---------------------------------------------------------------------------------------
+matrix_op_read := {"role_action_matrix": {"ROLE_OPERATOR": {"grant": ["account.read", "ledger.create"]}}}
+
+# A machine whose name is NOT `service-account-*` (client_id-only token, renamed account) used
+# to read as staff to every `not startswith(id, ...)` rule. With the flag it gets no staff grant.
+test_machine_with_non_prefixed_id_gets_no_staff_grant if {
+	machine := {"id": "batch-bot", "type": "HUMAN", "roles": ["ROLE_OPERATOR"], "service_account": true, "client_id": "openbank-batch"}
+	every action in {"account.read", "ledger.create"} {
+		not rest.allowed_reasons["matrix-allows"] with input as {"principal": machine, "action": action}
+			with data.rules.authz as matrix_op_read
+	}
+	not rest.allowed_reasons["operator-mcp-session"] with input as {"principal": machine, "action": "mcp.session.issue"}
+}
+
+# Negative control for the test above: the same id with the flag false (a person) keeps it.
+test_verified_human_keeps_staff_grant if {
+	human := {"id": "batch-bot", "type": "HUMAN", "roles": ["ROLE_OPERATOR"], "service_account": false}
+	rest.allowed_reasons["matrix-allows"] with input as {"principal": human, "action": "account.read"}
+		with data.rules.authz as matrix_op_read
+	rest.allowed_reasons["operator-mcp-session"] with input as {"principal": human, "action": "mcp.session.issue"}
+}
+
+# A specific-client grant needs BOTH the client's name and the verified flag: a person whose
+# username is `service-account-openbank-edge` does not get the edge's grants.
+test_specific_client_grant_requires_the_verified_flag if {
+	impostor := {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"], "service_account": false}
+	not rest.allowed_reasons["edge-service-notification"] with input as {"principal": impostor, "action": "notification.list"}
+
+	edge := {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"], "service_account": true, "client_id": "openbank-edge"}
+	rest.allowed_reasons["edge-service-notification"] with input as {"principal": edge, "action": "notification.list"}
+}
+
+# Rollout fallback: a PEP that predates the field sends no `service_account` key; only then is
+# the legacy name prefix consulted, so nothing widens or narrows before the service rebuilds.
+test_principal_is_machine_falls_back_to_the_name_only_without_the_field if {
+	rest.principal_is_machine with input as {"principal": {"id": "service-account-openbank-edge"}}
+	not rest.principal_is_machine with input as {"principal": {"id": "alice"}}
+	not rest.principal_is_machine with input as {"principal": {"id": "service-account-x", "service_account": false}}
+	rest.principal_is_machine with input as {"principal": {"id": "alice", "service_account": true}}
+}

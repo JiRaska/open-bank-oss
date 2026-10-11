@@ -29,7 +29,7 @@ import rego.v1
 # excluded outright so no backend service reads holdings by holding ROLE_OPERATOR.
 allowed_reasons contains "operator-wealth-read" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE"}
 	role in input.principal.roles
 	input.action == "wealth.holding.read"
@@ -42,6 +42,7 @@ allowed_reasons contains "operator-wealth-read" if {
 allowed_reasons contains "edge-service-wealth" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-edge"
+	principal_is_machine
 	input.action in {
 		"wealth.holding.read",
 		"wealth.holding.declare",

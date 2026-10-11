@@ -39,7 +39,7 @@ import rego.v1
 # Real staff working the review queue.
 allowed_reasons contains "operator-kyb-review" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC"}
 	role in input.principal.roles
 	startswith(input.action, "kyb.")
@@ -51,6 +51,7 @@ allowed_reasons contains "operator-kyb-review" if {
 allowed_reasons contains "edge-service-kyb" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-edge"
+	principal_is_machine
 	input.action in {
 		"kyb.lookup",
 		"kyb.case.start",

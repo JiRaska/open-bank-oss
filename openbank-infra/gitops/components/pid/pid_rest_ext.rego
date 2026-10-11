@@ -71,7 +71,7 @@ allowed_reasons contains "operator-pid-resolve-read" if {
 # POST /parties/{id}/external-ids (identity.link) from customer-edge.
 allowed_reasons contains "operator-party-status" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
 	input.action == "party.changeStatus"
@@ -95,5 +95,6 @@ allowed_reasons contains "customer-eudi-request" if {
 allowed_reasons contains "service-delegation-party-read" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-delegation"
+	principal_is_machine
 	input.action == "party.read"
 }

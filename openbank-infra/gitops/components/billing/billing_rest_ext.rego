@@ -31,7 +31,7 @@ import rego.v1
 # they land behind the four-eyes gate).
 allowed_reasons contains "operator-billing-write" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
 	startswith(input.action, "billing.")
@@ -48,6 +48,7 @@ allowed_reasons contains "operator-billing-write" if {
 # rest.rego gates its allow head on `not prohibited`).
 prohibited if {
 	input.principal.id == "service-account-openbank-edge"
+	principal_is_machine
 	input.action in {
 		"billing.post",
 		"billing.reverse",
@@ -61,6 +62,6 @@ prohibited if {
 # principals currently retain type HUMAN and ROLE_OPERATOR, so checking type or role alone is
 # insufficient to enforce the staff-only boundary.
 prohibited if {
-	startswith(input.principal.id, "service-account-")
+	principal_is_machine
 	input.action == "billing.approval.read"
 }

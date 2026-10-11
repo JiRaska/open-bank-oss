@@ -74,6 +74,35 @@ response_attributes := {"four_eyes_required": true} if four_eyes_required
 # the narrow path below does not.)
 default policy_version := "unknown"
 
+# ---------------------------------------------------------------------------------------
+# Machine identity: the VERIFIED flag, never the name. `input.principal.id` is a NAME claim
+# (Quarkus takes it from upn/preferred_username), so `startswith(id, "service-account-")`
+# lets a machine token whose name is not `service-account-*` (a client_id-only token, a
+# renamed account, mapper drift) read as a person. The PEP (libs-runtime AuthorizeInterceptor)
+# derives `input.principal.service_account` from the verified JWT's claims only
+# (ServiceAccountIdentity.machineClientId) and, when known, `input.principal.client_id`.
+#
+# Rules that keep machines OUT test `not principal_is_machine`; rules that grant ONE client test
+# `machine_named("service-account-<client>")` (the id still names WHICH client, the flag proves
+# it is one). Never write a bare id-prefix check.
+#
+# Rollout fallback: a service still built on a libs-runtime that predates the field sends no
+# `service_account` key at all. Only then is the legacy name prefix consulted, so a policy
+# bundle that lands before the service's rebuild neither locks staff out nor admits more than
+# it did before. Once the field is present the name is never consulted.
+# ---------------------------------------------------------------------------------------
+principal_is_machine if input.principal.service_account == true
+
+principal_is_machine if {
+	object.get(input.principal, "service_account", null) == null
+	startswith(input.principal.id, "service-account-")
+}
+
+machine_named(name) if {
+	input.principal.id == name
+	principal_is_machine
+}
+
 policy_version := data.openbank.bundle.version
 
 # ---------------------------------------------------------------------------------------
@@ -158,7 +187,7 @@ allowed_reasons contains "party-self-service" if {
 # stay empty; remove it and they demand a declared entry per M2M-reachable action again.
 allowed_reasons contains "matrix-allows" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in input.principal.roles
 	matrix_grants(input.action, role)
 }
@@ -214,7 +243,7 @@ allowed_reasons contains "operator-mcp-session" if {
 	input.principal.type == "HUMAN"
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	startswith(input.action, "mcp.session.")
 }
 
@@ -234,7 +263,7 @@ allowed_reasons contains "operator-compose-message" if {
 	input.principal.type == "HUMAN"
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	input.action == "opsmessage.compose"
 }
 
@@ -246,7 +275,7 @@ allowed_reasons contains "operator-decide-message-approval" if {
 	input.principal.type == "HUMAN"
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	input.action == "opsmessage.approval.decide"
 }
 
@@ -262,7 +291,7 @@ allowed_reasons contains "commstyle-publish" if {
 	input.principal.type == "HUMAN"
 	some role in {"ROLE_COMMS_APPROVER", "ROLE_ADMIN"}
 	role in input.principal.roles
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	input.action == "commstyle.publish"
 }
 
@@ -274,7 +303,7 @@ allowed_reasons contains "commstyle-decide-publish-approval" if {
 	input.principal.type == "HUMAN"
 	some role in {"ROLE_COMMS_APPROVER", "ROLE_ADMIN"}
 	role in input.principal.roles
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	input.action == "commstyle.approval.decide"
 }
 
@@ -344,6 +373,7 @@ allowed_reasons contains "customer-self-action" if {
 allowed_reasons contains "edge-service-notification" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-edge"
+	principal_is_machine
 	some family in {"notification.", "device.", "document.", "signatureCeremony."}
 	startswith(input.action, family)
 }
@@ -360,6 +390,7 @@ allowed_reasons contains "edge-service-notification" if {
 allowed_reasons contains "edge-service-consent" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-edge"
+	principal_is_machine
 	input.action in {"consent.list", "consent.revoke"}
 }
 
@@ -372,6 +403,7 @@ allowed_reasons contains "edge-service-consent" if {
 allowed_reasons contains "edge-service-engagement" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-edge"
+	principal_is_machine
 	input.action in {"engagement.surface.read", "engagement.surface.recordEvent"}
 }
 
@@ -394,6 +426,7 @@ allowed_reasons contains "edge-service-engagement" if {
 allowed_reasons contains "edge-service-audit-customer" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-edge"
+	principal_is_machine
 	input.action == "audit.customerRead"
 }
 
@@ -422,7 +455,7 @@ allowed_reasons contains "edge-service-audit-customer" if {
 # staff sessions from this specific carve-out.
 allowed_reasons contains "m2m-sanctions-screening" if {
 	input.principal.type == "HUMAN"
-	startswith(input.principal.id, "service-account-")
+	principal_is_machine
 	input.action == "sanctions.create"
 }
 
@@ -554,6 +587,7 @@ prohibited if {
 shared_m2m_identity if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-services"
+	principal_is_machine
 }
 
 # Which role-only write reasons this prohibition applies to — DATA, not a name pattern.

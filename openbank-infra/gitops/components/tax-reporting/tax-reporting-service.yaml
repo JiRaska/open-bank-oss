@@ -33,7 +33,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-tax-reporting-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "05fea1ee9eb04e72"
+        openbank.tech/policy-checksum: "a90fa4260f63d0b8"
       labels:
         app.kubernetes.io/name: tax-reporting-service
         app.kubernetes.io/part-of: tax-reporting

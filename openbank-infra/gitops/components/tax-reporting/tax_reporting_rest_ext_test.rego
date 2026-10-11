@@ -79,3 +79,36 @@ test_anonymous_may_not_read if {
 		"action": "tax.filing.read",
 	}
 }
+
+# Verified machine flag (input.principal.service_account): a machine token whose NAME is not
+# `service-account-*` (client_id-only token, renamed account) must not pass as staff.
+test_machine_token_with_a_human_looking_name_may_not_read_or_file if {
+	some action in {"tax.filing.read", "tax.filing.assemble", "tax.filing.file"}
+	not rest.allow with input as {
+		"principal": {
+			"type": "HUMAN", "id": "batch-bot", "roles": ["ROLE_OPERATOR", "ROLE_AUDITOR"],
+			"service_account": true, "client_id": "openbank-batch",
+		},
+		"action": action,
+	}
+		with data.rules as excluded
+}
+
+test_verified_human_operator_still_files if {
+	rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"], "service_account": false},
+		"action": "tax.filing.file",
+	}
+}
+
+# Once the PEP sends the flag the name is never consulted: a person whose username happens to
+# start with `service-account-` is a person.
+test_human_named_like_a_service_account_is_staff_when_the_flag_says_human if {
+	rest.allow with input as {
+		"principal": {
+			"type": "HUMAN", "id": "service-account-lookalike", "roles": ["ROLE_OPERATOR"],
+			"service_account": false,
+		},
+		"action": "tax.filing.file",
+	}
+}

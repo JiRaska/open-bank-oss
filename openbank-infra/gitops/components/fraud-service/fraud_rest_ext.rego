@@ -41,7 +41,7 @@ allowed_reasons contains "operator-fraud-write" if {
 	input.principal.type == "HUMAN"
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	startswith(input.action, "fraud.")
 }
 
@@ -63,6 +63,7 @@ allowed_reasons contains "operator-fraud-write" if {
 allowed_reasons contains "service-fraud-scoring" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-services"
+	principal_is_machine
 	input.action == "fraud.score"
 }
 
@@ -76,5 +77,6 @@ allowed_reasons contains "service-fraud-scoring" if {
 # prohibit every service-account because no M2M writer exists there; fraud cannot.
 prohibited if {
 	input.principal.id == "service-account-openbank-edge"
+	principal_is_machine
 	input.action == "fraud.score"
 }

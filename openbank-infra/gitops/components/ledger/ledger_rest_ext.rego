@@ -93,6 +93,7 @@ allowed_reasons contains "viewer-auditor-ledger-read" if {
 allowed_reasons contains "service-ledger-read" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-services"
+	principal_is_machine
 	some verb in {"list", "read"}
 	endswith(input.action, sprintf(".%v", [verb]))
 }
@@ -103,7 +104,7 @@ allowed_reasons contains "operator-ledger-write" if {
 	input.principal.type == "HUMAN"
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	input.action in {"ledger.create", "ledger.reverse", "ledger.trigger", "ledger.replay"}
 }
 
@@ -114,7 +115,7 @@ allowed_reasons contains "operator-ledger-close-draft" if {
     input.principal.type == "HUMAN"
     some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
     role in input.principal.roles
-    not startswith(input.principal.id, "service-account-")
+    not principal_is_machine
     input.action == "ledger.close.draft"
 }
 
@@ -128,7 +129,7 @@ allowed_reasons contains "operator-year-close-attest" if {
 	input.principal.type == "HUMAN"
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	input.action == "ledger.approve"
 }
 
@@ -155,6 +156,7 @@ allowed_reasons contains "operator-year-close-attest" if {
 allowed_reasons contains "service-ledger-post" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-services"
+	principal_is_machine
 	input.action == "ledger.create"
 }
 
@@ -170,6 +172,7 @@ allowed_reasons contains "service-ledger-post" if {
 allowed_reasons contains "service-interest-ledger-post" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-interest"
+	principal_is_machine
 	input.action == "ledger.create"
 }
 
@@ -181,12 +184,14 @@ allowed_reasons contains "service-interest-ledger-post" if {
 allowed_reasons contains "service-lending-ledger-post" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-lending"
+	principal_is_machine
 	input.action == "ledger.create"
 }
 
 allowed_reasons contains "service-clearing-ledger-post" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-clearing"
+	principal_is_machine
 	input.action == "ledger.create"
 }
 
@@ -201,12 +206,14 @@ allowed_reasons contains "service-clearing-ledger-post" if {
 allowed_reasons contains "service-transaction-ledger-write" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-transaction"
+	principal_is_machine
 	input.action in {"ledger.create", "ledger.reverse"}
 }
 
 allowed_reasons contains "service-settlement-ledger-post" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-settlement"
+	principal_is_machine
 	input.action in {"ledger.create", "ledger.read"}
 }
 
@@ -217,6 +224,7 @@ allowed_reasons contains "service-settlement-ledger-post" if {
 allowed_reasons contains "service-treasury-ledger-post" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-treasury"
+	principal_is_machine
 	input.action == "ledger.create"
 }
 
@@ -227,6 +235,7 @@ allowed_reasons contains "service-treasury-ledger-post" if {
 allowed_reasons contains "service-treasury-ledger-read" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-treasury"
+	principal_is_machine
 	input.action in {"ledger.list", "ledger.read"}
 }
 
@@ -242,6 +251,7 @@ allowed_reasons contains "service-treasury-ledger-read" if {
 allowed_reasons contains "service-ledger-reverse" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-services"
+	principal_is_machine
 	input.action == "ledger.reverse"
 }
 
@@ -253,5 +263,6 @@ allowed_reasons contains "service-ledger-reverse" if {
 
 prohibited if {
 	input.principal.id == "service-account-openbank-edge"
+	principal_is_machine
     input.action in {"ledger.create", "ledger.reverse", "ledger.trigger", "ledger.replay", "ledger.approve", "ledger.close.draft"}
 }

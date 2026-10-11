@@ -60,7 +60,7 @@ allowed_reasons contains "operator-balance-write" if {
 	input.principal.type == "HUMAN"
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	input.action in {
 		"balance.read",
 		"balance.hold",
@@ -81,7 +81,7 @@ allowed_reasons contains "supervisor-overdraft-limit" if {
 	input.principal.type == "HUMAN"
 	some role in {"ROLE_SUPERVISOR", "ROLE_ADMIN"}
 	role in input.principal.roles
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	input.action == "balance.overdraftLimit"
 }
 
@@ -150,6 +150,7 @@ allowed_reasons contains "viewer-balance-read" if {
 allowed_reasons contains "service-balance-m2m" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-services"
+	principal_is_machine
 	input.action in {
 		"balance.read",
 		"balance.hold",
@@ -182,12 +183,14 @@ allowed_reasons contains "service-balance-m2m" if {
 allowed_reasons contains "service-transaction-balance-hold" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-transaction"
+	principal_is_machine
 	input.action in {"balance.hold", "balance.holdRelease"}
 }
 
 allowed_reasons contains "service-settlement-balance-move" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-settlement"
+	principal_is_machine
 	input.action in {"balance.debit", "balance.credit"}
 }
 
@@ -196,11 +199,13 @@ allowed_reasons contains "service-settlement-balance-move" if {
 allowed_reasons contains "service-settlement-balance-cover" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-settlement"
+	principal_is_machine
 	input.action == "balance.hold"
 }
 
 prohibited if {
 	input.principal.id == "service-account-openbank-edge"
+	principal_is_machine
 	input.action in {
 		"balance.hold",
 		"balance.holdRelease",

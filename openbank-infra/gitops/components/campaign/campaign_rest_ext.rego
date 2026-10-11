@@ -33,7 +33,7 @@ import rego.v1
 # enrol a cohort or flip a campaign live.
 allowed_reasons contains "campaign-staff-write" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
 	input.action in {
@@ -52,7 +52,7 @@ allowed_reasons contains "campaign-staff-write" if {
 # what state) is exactly what an auditor reads.
 allowed_reasons contains "campaign-auditor-read" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	"ROLE_AUDITOR" in input.principal.roles
 	input.action in {"campaign.read", "campaign.list"}
 }
@@ -64,5 +64,6 @@ allowed_reasons contains "campaign-auditor-read" if {
 allowed_reasons contains "edge-campaign-interaction-validation" if {
     input.principal.type == "HUMAN"
     input.principal.id == "service-account-openbank-edge"
+    principal_is_machine
     input.action == "campaign.interaction.validate"
 }

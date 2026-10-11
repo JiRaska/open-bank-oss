@@ -49,7 +49,7 @@ import rego.v1
 
 treasury_staff if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 }
 
 allowed_reasons contains "treasury-staff-read" if {

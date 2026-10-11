@@ -34,7 +34,7 @@ import rego.v1
 # input, a SEPARATE principal/action namespace — this rule does not touch that surface).
 allowed_reasons contains "operator-account-write" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
 	startswith(input.action, "account.")
@@ -76,6 +76,7 @@ allowed_reasons contains "operator-account-write" if {
 allowed_reasons contains "service-edge-account-m2m" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-edge"
+	principal_is_machine
 	input.action in {
 		"account.create",
 		"account.update",
@@ -85,6 +86,7 @@ allowed_reasons contains "service-edge-account-m2m" if {
 allowed_reasons contains "service-backend-account-m2m" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-services"
+	principal_is_machine
 	input.action == "account.read"
 }
 
@@ -99,6 +101,7 @@ allowed_reasons contains "service-backend-account-m2m" if {
 # over-grant is tracked fleet-wide in #3734.
 prohibited if {
 	input.principal.id == "service-account-openbank-edge"
+	principal_is_machine
 	input.action in {
 		"account.close",
 		"account.freeze",
@@ -125,35 +128,41 @@ prohibited if {
 allowed_reasons contains "service-analytics-sink-account-read" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-analytics-sink"
+	principal_is_machine
 	input.action == "account.list"
 }
 
 allowed_reasons contains "service-billing-account-read" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-billing"
+	principal_is_machine
 	input.action in {"account.list", "account.read"}
 }
 
 allowed_reasons contains "service-interest-account-read" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-interest"
+	principal_is_machine
 	input.action in {"account.list", "account.read"}
 }
 
 allowed_reasons contains "service-document-account-read" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-document"
+	principal_is_machine
 	input.action == "account.list"
 }
 
 allowed_reasons contains "service-lending-account-read" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-lending"
+	principal_is_machine
 	input.action == "account.list"
 }
 
 allowed_reasons contains "service-party-account-read" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-party"
+	principal_is_machine
 	input.action == "account.list"
 }

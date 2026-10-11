@@ -79,11 +79,13 @@ allowed_reasons contains "compliance-card-block" if {
 allowed_reasons contains "service-delegation-card-read" if {
 	input.principal.type == "HUMAN"
 	input.principal.id in {"service-account-openbank-delegation"}
+	principal_is_machine
 	input.action == "card.read"
 }
 
 allowed_reasons contains "service-party-card-list" if {
 	input.principal.type == "HUMAN"
 	input.principal.id in {"service-account-openbank-party"}
+	principal_is_machine
 	input.action == "card.list"
 }

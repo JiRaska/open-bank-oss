@@ -28,7 +28,7 @@ import rego.v1
 # a participant's contract by holding ROLE_OPERATOR.
 allowed_reasons contains "operator-pension-read" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE"}
 	role in input.principal.roles
 	input.action == "pension.contract.read"
@@ -39,6 +39,7 @@ allowed_reasons contains "operator-pension-read" if {
 allowed_reasons contains "edge-service-pension" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-edge"
+	principal_is_machine
 	input.action in {
 		"pension.contract.read",
 		"pension.contract.create",
