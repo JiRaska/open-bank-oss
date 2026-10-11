@@ -55,7 +55,15 @@ err() {
 # `contains <needle> <newline-separated haystack>`
 contains() {
   [ -n "$2" ] || return 1
-  printf '%s\n' "$2" | grep -qxF -- "$1"
+  # Quoted newline boundaries preserve literal whole-line matching without a subprocess.
+  case "
+$2
+" in
+    *"
+$1
+"*) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 # Print pact filenames claimed by both runtimes. Without this check, the Gradle and Node tests can
