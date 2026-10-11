@@ -97,10 +97,11 @@ class ListenerAuthParityIT {
             .timeout(Duration.ofSeconds(10))
             .header("Authorization", "Bearer $bearerToken")
             .GET().build()
-        // The UUID is absent from Postgres. A 404 from this registered handler proves the signed
-        // bearer passed OIDC and RBAC; a 401/403 would only prove a different denial.
+        // The collection handler returns an empty JSON array from the fresh Postgres fixture.
+        // A generic router 404 would not prove the bearer reached a served route.
         val response = withCert.send(request, HttpResponse.BodyHandlers.ofString())
-        assertThat(response.statusCode()).describedAs(response.body()).isEqualTo(NOT_FOUND)
+        assertThat(response.statusCode()).describedAs(response.body()).isEqualTo(OK)
+        assertThat(response.body()).isEqualTo("[]")
     }
 
     private fun sslContext(withClientCertificate: Boolean): SSLContext {
@@ -253,8 +254,8 @@ class ListenerAuthParityIT {
     }
 
     private companion object {
-        const val PATH = "/api/v1/standing-orders/00000000-0000-0000-0000-000000000001"
+        const val PATH = "/api/v1/standing-orders"
         const val UNAUTHORIZED = 401
-        const val NOT_FOUND = 404
+        const val OK = 200
     }
 }
