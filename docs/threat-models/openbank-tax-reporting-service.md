@@ -35,10 +35,12 @@ NetworkPolicy admits admin-ui and the platform scrapers only, no ingress); servi
   `tax_reporting_rest_ext.rego` grants `tax.filing.inspect` to real staff (operator, admin, auditor,
   viewer, compliance) and `tax.filing.assemble` / `tax.filing.file` to a real operator. Both rules
   exclude `service-account-*`, so the shared M2M account cannot read, freeze or file a return.
-  The read verb is deliberately not `.read`: it carried that suffix until it was found that base
-  `compliance-read-any` grants every `.read` to any HUMAN principal with `ROLE_COMPLIANCE`, which the
-  shared service-account holds in at least one realm, and `operator_read_any_excluded_actions` only
-  vetoes `operator-read-any`. A non-read verb is reachable only through the extension's rule.
+  The new read verb deliberately does not end in `.read`: it bypasses both generic read grants and
+  is reachable only through the extension's rule. Main #12488 independently excludes
+  service-accounts from `compliance-read-any`. Previously published tax images may still emit
+  `tax.filing.read`, so the legacy verb remains excluded from `operator-read-any` and temporarily
+  staff-only in the extension until those images have drained. Removing the exclusion first would
+  reopen that old verb to shared service-accounts with `ROLE_OPERATOR` during rollout.
   No action sits in `rules.yaml: authz.role_action_matrix` (#3765/#3734).
 - `AUTHZ_ENFORCE=true` from the first rollout. Every allow test has a matching must-deny.
 
@@ -51,7 +53,7 @@ NetworkPolicy admits admin-ui and the platform scrapers only, no ingress); servi
 | **Tampering** | A redelivered or retried remittance is counted twice | `observe` is idempotent on the remittance id (the `duplicate` outcome) |
 | **Tampering** | A period's totals change after it was frozen | `ASSEMBLED` freezes the totals. An illegal transition is a 409 (`TaxConflictException`) |
 | **Repudiation** | Dispute over who froze or filed a return | `assembledBy` / `filedBy` hold the authenticated subject, with timestamps, on the filing row |
-| **Information disclosure** | Withholding amounts leak | Confidential classification. No ingress. Reads go to staff only. Service-accounts are excluded by the extension; the read action `tax.filing.inspect` is not a `.read`/`.list`, so neither base `operator-read-any` nor `compliance-read-any` reaches it. Checked with `opa eval` against the generated bundle (shared account with each of OPERATOR/ADMIN/COMPLIANCE/AUDITOR denied) |
+| **Information disclosure** | Withholding amounts leak | Confidential classification. No ingress. Reads go to staff only. `tax.filing.inspect` is not a `.read`/`.list`, so neither generic read rule reaches it. The temporary old `.read` verb stays on the operator exclusion list; main #12488 also excludes service-accounts from compliance-read-any. Check both verbs with the generated bundle during rollout |
 | **Denial of service / loss** | A database outage while remittances arrive | A failed write is retried, then rethrown. The channel's dead-letter strategy parks the record on its own DLQ topic. Acking it would silently understate the return. A dead-lettered record is still missing from that period's return until it is replayed, so it needs an operator |
 | **Elevation of privilege** | A backend service-account holding `ROLE_OPERATOR` assembles or files | Both lifecycle rules require a principal id outside `service-account-*`. Tested with that exact principal |
 

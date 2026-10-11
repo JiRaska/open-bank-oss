@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: clearing-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "061f1e0b4391fdbf"
+    openbank.tech/policy-checksum: "6b9292678b6ebd23"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1659,15 +1659,15 @@ data:
       # An action listed here is served ONLY by its service's identity-scoped rules (staff, and the
       # one named machine caller). Tested must-deny/must-allow in that service's rest_ext test.
       #
-      # This list vetoes operator-read-any ONLY; compliance-read-any (ROLE_COMPLIANCE, every `.read`)
-      # has no such list, and the shared service-account holds ROLE_COMPLIANCE in the CI realm. So an
-      # entry here does NOT keep the shared account out on its own. For a read that must be closed to
-      # it, name the action with a non-read verb (`.inspect`, `.reconstruct`) instead, as
-      # pension-fund.holding.inspect does (#12481).
-      # Empty since tax.filing.read was renamed tax.filing.inspect: its entry here never kept the
-      # shared service-account out (compliance-read-any still admitted it). Kept as a key so a
-      # future entry has a home, but prefer the non-read verb.
-      operator_read_any_excluded_actions: []
+      # This list vetoes operator-read-any ONLY. Base compliance-read-any now independently excludes
+      # service-account principals (#12488). For sensitive new reads, use a non-read verb such as
+      # `.inspect` so neither generic read grant can ever admit them.
+      # Keep the old tax.filing.read excluded while previously published tax-service images may still
+      # emit it during the image/OPA-bundle rollout. The tax extension grants that legacy verb to
+      # named staff roles only; removing this entry first would reopen it to every ROLE_OPERATOR
+      # service-account through operator-read-any (#12547). Retire it only after old images are gone.
+      operator_read_any_excluded_actions:
+        - tax.filing.read
       role_action_matrix:
         ROLE_OPERATOR:
           grant:

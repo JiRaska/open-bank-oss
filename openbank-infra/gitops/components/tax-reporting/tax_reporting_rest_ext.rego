@@ -23,13 +23,10 @@ import rego.v1
 
 # Real staff, reading. A tax return is exactly the artefact an auditor needs to see.
 #
-# The read action deliberately does NOT end in `.read`/`.list`. It used to be `tax.filing.read`,
-# vetoed for operator-read-any by rules.yaml authz.operator_read_any_excluded_actions — but base
-# rest.rego's compliance-read-any grants every `.read` to any HUMAN principal holding
-# ROLE_COMPLIANCE, and that list does not veto it. Keycloak service-accounts are classified HUMAN
-# and the shared one holds ROLE_COMPLIANCE in at least one realm, so every backend service could
-# read §38d returns (per-taxpayer data). A non-read verb is reachable only through the rule below
-# (same remedy as pension-fund.holding.inspect, audit.evidence.reconstruct).
+# The new read action deliberately does NOT end in `.read`/`.list`, so neither generic read grant
+# reaches it. The old tax.filing.read is a temporary compatibility alias for images published
+# before this rename: rules.yaml still excludes it from operator-read-any, and #12488 excludes
+# service-accounts from compliance-read-any. Keep both controls until old images have drained.
 #
 # Machine exclusion is the id-prefix test; move to `not principal_is_machine` once #12537 lands.
 allowed_reasons contains "staff-tax-filing-read" if {
@@ -37,7 +34,7 @@ allowed_reasons contains "staff-tax-filing-read" if {
 	not startswith(input.principal.id, "service-account-")
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_AUDITOR", "ROLE_VIEWER", "ROLE_COMPLIANCE"}
 	role in input.principal.roles
-	input.action == "tax.filing.inspect"
+    input.action in {"tax.filing.inspect", "tax.filing.read"}
 }
 
 # Real operators freeze and file a period. No service-account, whatever roles it holds.

@@ -52,10 +52,35 @@ test_service_account_with_operator_may_not_assemble if {
 	}
 }
 
-# tax.filing.inspect is deliberately NOT a `.read`: base compliance-read-any grants every `.read`
-# to any HUMAN holding ROLE_COMPLIANCE (and operator-read-any every `.read`/`.list` to
-# ROLE_OPERATOR/ROLE_ADMIN), and Keycloak service-accounts are classified HUMAN. These run with the
-# REAL data.rules (no exclusion list override), so renaming the action back to `.read` reddens them.
+# tax.filing.inspect is deliberately NOT a `.read`. The old `.read` remains only for already
+# published images and must stay excluded from operator-read-any while both versions coexist.
+# These run with the real data.rules, including the rollout compatibility exclusion.
+test_legacy_staff_can_read_while_old_image_drains if {
+	rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "audrey", "roles": ["ROLE_AUDITOR"]},
+		"action": "tax.filing.read",
+	}
+}
+
+test_legacy_read_is_denied_to_shared_service_account_with_staff_roles if {
+	every role in ["ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE", "ROLE_AUDITOR", "ROLE_VIEWER"] {
+		not rest.allow with input as {
+			"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_API", role]},
+			"action": "tax.filing.read",
+		}
+	}
+}
+
+test_legacy_read_is_denied_to_shared_service_account_with_all_staff_roles if {
+	not rest.allow with input as {
+		"principal": {
+			"type": "HUMAN", "id": "service-account-openbank-services",
+			"roles": ["ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE", "ROLE_AUDITOR"],
+		},
+		"action": "tax.filing.read",
+	}
+}
+
 test_shared_service_account_may_not_inspect_with_any_staff_role if {
 	every role in ["ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE", "ROLE_AUDITOR", "ROLE_VIEWER"] {
 		not rest.allow with input as {
