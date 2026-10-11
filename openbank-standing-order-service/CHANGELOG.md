@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.1](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.18.0...standing-order-service-v0.18.1) (2026-10-11)
+
+
+### Security
+
+* **sca:** scoped downstream access for pension-service (ADR-0335) ([#12419](https://github.com/JiRaska/open-bank-oss/issues/12419)) ([21bb0e9](https://github.com/JiRaska/open-bank-oss/commit/21bb0e9d2a9e44394ec9bb1d6eac8ca7f80556a0))
+
 ## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.17.2...standing-order-service-v0.18.0) (2026-10-09)
 
 

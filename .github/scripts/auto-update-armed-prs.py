@@ -268,7 +268,7 @@ def self_test() -> int:
                                     AssertionError("exhausted budget called update-branch"))}):
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
-            result = run("example/repo", "main", 5, 0, False, 20)
+            result = run("example/repo", "main", 5, 0, False, 20, max_updates_per_pr=2)
         ok = result == 0 and "branch-history update budget exhausted (2/2)" in output.getvalue()
         failures += not ok
         print(f"{'PASS' if ok else 'FAIL'}  exhausted budget never calls update-branch")
@@ -335,7 +335,7 @@ DECLARATION = [
     ("schedule fallback", "cron:"),
     ("concurrency cancels in progress", "cancel-in-progress: true"),
     ("ambient token read-only", "contents: read"),
-    ("persistent per-PR budget wired", "--max-updates-per-pr 2"),
+    ("persistent per-PR budget wired", "--max-updates-per-pr 4"),
 ]
 
 
@@ -437,7 +437,7 @@ def branch_update_count(repo: str, number: int, branch: str) -> int:
 
 
 def run(repo: str, branch: str, max_updates: int, debounce: int, dry_run: bool,
-        fleet_threshold: int, max_updates_per_pr: int = 2) -> int:
+        fleet_threshold: int, max_updates_per_pr: int = 4) -> int:
     required, strict = required_policy(repo, branch)
     print(f"required contexts on {branch} (live): {required}; strict={strict}")
     if not required:
@@ -530,7 +530,7 @@ def main() -> int:
     ap.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
     ap.add_argument("--branch", default="main")
     ap.add_argument("--max-updates", type=int, default=5)
-    ap.add_argument("--max-updates-per-pr", type=int, default=2,
+    ap.add_argument("--max-updates-per-pr", type=int, default=4,
                     help="hard lifetime cap from server-side merge commits on the PR")
     ap.add_argument("--debounce-minutes", type=int, default=20)
     ap.add_argument("--dry-run", action="store_true")
