@@ -139,6 +139,9 @@ class PensionTransferWithdrawalApiIT {
         call("GET", transfers, asParty = stranger).statusCode(200)
             .body("transferId", containsInAnyOrder(theirs))
         call("GET", transfers, asParty = UUID.randomUUID()).statusCode(200).body("$", empty<Any>())
+        // The filter runs in the query: the newest row (the ended one) must not crowd out the
+        // older pending ones under a limit.
+        call("GET", "$transfers?limit=1&direction=OUT").statusCode(200).body("transferId", containsInAnyOrder(awaiting))
         call("GET", transfers, asParty = null).statusCode(400)
         call("GET", "$transfers?limit=0").statusCode(400)
     }

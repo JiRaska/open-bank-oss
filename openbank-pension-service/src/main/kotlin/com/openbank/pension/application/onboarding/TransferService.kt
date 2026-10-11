@@ -94,9 +94,8 @@ class TransferService(
         limit: Int,
     ): List<TransferRequest> {
         require(limit in 1..MAX_LIST) { "limit must be between 1 and $MAX_LIST" }
-        return transfers.findByParty(partyId, limit)
-            .filter { direction == null || it.direction == direction }
-            .filter { !pendingOnly || !it.status.terminal }
+        val statuses = if (pendingOnly) TransferStatus.entries.filterNot { it.terminal }.toSet() else null
+        return transfers.findByParty(partyId, direction, statuses, limit)
     }
 
     // --- transfer-out: entry ------------------------------------------------------------------
