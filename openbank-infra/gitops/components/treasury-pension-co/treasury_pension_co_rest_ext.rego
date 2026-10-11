@@ -11,8 +11,8 @@
 #      positions and counterparties are the bank's dealing book; on this instance they would book
 #      deals no ledger receives (no LEDGER_SERVICE_URL is wired) and must not be reachable at all.
 #   2. Every service-account other than tax-reporting's own is prohibited, and tax-reporting's
-#      only on treasury.portfolio.read. operator-read-any already skips that action
-#      (rules.yaml: operator_read_any_excluded_actions), but the veto here is at the allow head so a
+#      only on treasury.portfolio.inspect. Base operator-read-any and compliance-read-any never match
+#      that non-read verb, but the veto here is at the allow head so a
 #      reason added later to rest.rego or treasury_rest_ext.rego cannot open the instance to a
 #      machine.
 #
@@ -23,7 +23,7 @@ package openbank.rest
 
 import rego.v1
 
-treasury_pension_co_actions := {"treasury.portfolio.read", "treasury.portfolio.upload"}
+treasury_pension_co_actions := {"treasury.portfolio.inspect", "treasury.portfolio.upload"}
 
 treasury_pension_co_tax_reporting_account := "service-account-openbank-tax-reporting"
 
@@ -41,5 +41,5 @@ treasury_pension_co_tax_reporting_read if {
 	input.principal.type == "HUMAN"
 	input.principal.id == treasury_pension_co_tax_reporting_account
 	"ROLE_API" in input.principal.roles
-	input.action == "treasury.portfolio.read"
+	input.action == "treasury.portfolio.inspect"
 }

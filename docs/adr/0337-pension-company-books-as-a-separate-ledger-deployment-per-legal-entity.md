@@ -136,7 +136,7 @@ of ADR-0315, not a read model.
 2. **The read contract stays as agreed with tax-reporting:**
    `GET /api/v1/treasury/portfolio/period-end?date=YYYY-MM-DD` answers the snapshot for exactly
    that date (`asOf`, `currency`, positions of `instrumentClass`, `isin`, `quantity`,
-   `valuation`, `valuationCurrency`, decimals as strings), OPA action `treasury.portfolio.read`
+   `valuation`, `valuationCurrency`, decimals as strings), OPA action `treasury.portfolio.inspect`
    granted to tax-reporting's service account by `principal.id` only. With no snapshot for the
    date it answers **409**, never an empty list: an empty portfolio and a missing statement must
    not look the same, the same fail-closed rule as the frozen trial balance in Decision 2.

@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: tax-reporting-service
     app.kubernetes.io/part-of: tax-reporting
   annotations:
-    openbank.tech/policy-checksum: "dcd20fcfc7399266"
+    openbank.tech/policy-checksum: "881956dbe5c0cdc3"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -108,10 +108,6 @@ data:
     	input.principal.type == "HUMAN"
     	"ROLE_COMPLIANCE" in input.principal.roles
     	endswith(input.action, ".read")
-    	# The same exclusion as operator-read-any: an excluded read is served ONLY by its service's
-    	# identity-scoped rules. Without it a client holding ROLE_COMPLIANCE reached it here (ADR-0337
-    	# amendment, treasury.portfolio.read). Compliance staff who need one are granted it there.
-    	not operator_read_any_excluded(input.action)
     }
 
     # AI agents go through this same query when the agent's tool wraps a REST call
@@ -608,7 +604,7 @@ data:
     # Extends openbank.rest with §38d filing allow reasons.
     # Mounted alongside rest.rego in the same OPA bundle — OPA merges same-package rules.
     #
-    # Actions gated (TaxFilingResource):
+    # Actions gated (TaxFilingResource; StatutoryReturnResource further below):
     #   tax.filing.read      — GET /api/v1/tax/filings, /overdue, /{period}, /{period}/remittances,
     #                          /export-capability
     #   tax.filing.assemble  — POST /api/v1/tax/filings/{period}/assemble   (OPEN -> ASSEMBLED)
@@ -641,6 +637,63 @@ data:
     	not startswith(input.principal.id, "service-account-")
     	"ROLE_OPERATOR" in input.principal.roles
     	input.action in {"tax.filing.assemble", "tax.filing.file"}
+    }
+
+    # ---------------------------------------------------------------------------------------
+    # ADR-0336 statutory returns (StatutoryReturnResource) — ČNB pension returns.
+    #   tax.statutory-return.inspect   — every GET under /api/v1/statutory-returns
+    #   tax.statutory-return.assemble  — POST /assemble              (maker)
+    #   tax.statutory-return.approve   — POST /{id}/approve          (checker; attests the content hash)
+    #   tax.statutory-return.submit    — POST /{id}/submitted        (records the regulator reference)
+    #
+    # The verbs are deliberately NOT `read`/`list`: base `operator-read-any` and `compliance-read-any`
+    # match on those suffixes for ANY HUMAN-typed principal, which includes the shared
+    # service-account. With `inspect`, only the rules below can grant. Maker != checker is enforced
+    # in the domain (StatutoryReturn.approve) on the acting subject; this policy guarantees that
+    # subject is never a machine, whatever roles it holds.
+    # ---------------------------------------------------------------------------------------
+
+    allowed_reasons contains "staff-statutory-return-inspect" if {
+    	input.principal.type == "HUMAN"
+    	not startswith(input.principal.id, "service-account-")
+    	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_AUDITOR", "ROLE_VIEWER", "ROLE_COMPLIANCE"}
+    	role in input.principal.roles
+    	input.action == "tax.statutory-return.inspect"
+    }
+
+    allowed_reasons contains "operator-statutory-return-lifecycle" if {
+    	input.principal.type == "HUMAN"
+    	not startswith(input.principal.id, "service-account-")
+    	"ROLE_OPERATOR" in input.principal.roles
+    	input.action in {"tax.statutory-return.assemble", "tax.statutory-return.approve", "tax.statutory-return.submit"}
+    }
+
+    # ---------------------------------------------------------------------------------------
+    # Corporate register (CorporateRegisterResource) — operator-maintained figures that feed
+    # ČNB PSP 32-04, 50-04 and 40-01.
+    #   tax.corporate-register.inspect  — GET /api/v1/corporate-register, /effective
+    #   tax.corporate-register.propose  — POST /api/v1/corporate-register        (maker)
+    #   tax.corporate-register.approve  — POST /{id}/approve                     (checker)
+    #   tax.corporate-register.reject   — POST /{id}/reject                      (checker)
+    #
+    # Same shape as the statutory returns above: `inspect`, not `read`, so no base read-any rule
+    # matches; maker != checker is enforced in the domain (CorporateRegisterEntry) on the acting
+    # subject, and this policy guarantees that subject is never a machine.
+    # ---------------------------------------------------------------------------------------
+
+    allowed_reasons contains "staff-corporate-register-inspect" if {
+    	input.principal.type == "HUMAN"
+    	not startswith(input.principal.id, "service-account-")
+    	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_AUDITOR", "ROLE_VIEWER", "ROLE_COMPLIANCE"}
+    	role in input.principal.roles
+    	input.action == "tax.corporate-register.inspect"
+    }
+
+    allowed_reasons contains "operator-corporate-register-change" if {
+    	input.principal.type == "HUMAN"
+    	not startswith(input.principal.id, "service-account-")
+    	"ROLE_OPERATOR" in input.principal.roles
+    	input.action in {"tax.corporate-register.propose", "tax.corporate-register.approve", "tax.corporate-register.reject"}
     }
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1596,19 +1649,16 @@ data:
       # ROLE_OPERATOR, so without an entry here the action is readable by every backend service.
       # An action listed here is served ONLY by its service's identity-scoped rules (staff, and the
       # one named machine caller). Tested must-deny/must-allow in that service's rest_ext test.
+      #
+      # This list vetoes operator-read-any ONLY; compliance-read-any (ROLE_COMPLIANCE, every `.read`)
+      # has no such list, and the shared service-account holds ROLE_COMPLIANCE in the CI realm. So an
+      # entry here does NOT keep the shared account out on its own. For a read that must be closed to
+      # it, name the action with a non-read verb (`.inspect`, `.reconstruct`) instead, as
+      # pension-fund.holding.inspect does (#12481).
       operator_read_any_excluded_actions:
-        - pension-fund.holding.read   # participants' unit holdings and orders (ADR-0334 S4, #12350):
-                                      # staff + service-account-openbank-pension only
         - tax.filing.read             # §38d withholding returns and the per-remittance audit trail behind
                                       # them (#5760): real staff only via tax_reporting_rest_ext.rego; no
                                       # service-account reads them through operator-read-any
-        - pension-fund.reporting.read # period-end fund aggregates for the ČNB returns (#12425, ADR-0336 D4):
-                                      # staff + service-account-openbank-tax-reporting only. Aggregates,
-                                      # but they are a supervisory filing's figures before it is filed.
-        - treasury.portfolio.read     # the pension company's own holdings, custodian semt.002 (ADR-0337
-                                      # amendment, PSP 34-12 PS): treasury staff +
-                                      # service-account-openbank-tax-reporting only. Also excluded
-                                      # from compliance-read-any (rest.rego honours this list there).
       role_action_matrix:
         ROLE_OPERATOR:
           grant:

@@ -37,8 +37,8 @@ import java.util.UUID
  * contract, same evidence: sha256 of the exact bytes and who supplied them); the period-end read is
  * tax-reporting's contract. Nothing here posts.
  *
- * `@RolesAllowed` is the coarse gate; OPA decides (`treasury.portfolio.read` is excluded from base
- * operator-read-any and compliance-read-any, so only treasury staff and tax-reporting's own client
+ * `@RolesAllowed` is the coarse gate; OPA decides (`treasury.portfolio.inspect` is not a `.read` verb, so base
+ * operator-read-any and compliance-read-any never match it; only treasury staff and tax-reporting's own client
  * reach it — treasury_rest_ext.rego).
  *
  * NOTE the annotation order: `@Path` sits immediately above `class` (#3371).
@@ -78,14 +78,14 @@ class PortfolioResource {
     @GET
     @Path("/period-end")
     @Operation(summary = "The portfolio at exactly that date; 409 when no statement of holdings is stored for it")
-    @Authorize(action = "treasury.portfolio.read")
+    @Authorize(action = "treasury.portfolio.inspect")
     suspend fun periodEnd(@QueryParam("date") date: String?): PeriodEndPortfolioResponse =
         PeriodEndPortfolioResponse.from(portfolio.periodEnd(date(date)))
 
     @GET
     @Path("/statements")
     @Operation(summary = "Every version stored for a date, oldest first: the correction trail")
-    @Authorize(action = "treasury.portfolio.read")
+    @Authorize(action = "treasury.portfolio.inspect")
     suspend fun versions(@QueryParam("date") date: String?): List<PortfolioStatementResponse> =
         portfolio.versions(date(date)).map(PortfolioStatementResponse::from)
 

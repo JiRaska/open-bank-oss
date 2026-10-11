@@ -161,7 +161,20 @@ jobs:
           for t in "${TESTS[@]}"; do
             ext="${t%_test.rego}.rego"
             echo "--- $t"
-            opa test openbank-libs/governance/policies/rest.rego "$ext" "$t" || FAILED=1
+            # An instance ext that narrows another service's ext (treasury-pension-co, ADR-0337)
+            # is only meaningful composed as its bundle is: the test names the extra sources it
+            # needs with `# opa-test-with: <repo path>` lines, and `# opa-test-data: real` loads
+            # the derived rules/agents data the bundle mounts.
+            EXTRA=()
+            while IFS= read -r x; do EXTRA+=("$x"); done < <(sed -n 's/^# opa-test-with: *//p' "$t")
+            DATA=()
+            if grep -q '^# opa-test-data: real$' "$t"; then
+              D=$(mktemp -d); mkdir -p "$D/rules" "$D/agents"
+              cp openbank-libs/governance/rules-opa-data.yaml "$D/rules/data.yaml"
+              cp openbank-libs/governance/agents-opa-data.yaml "$D/agents/data.yaml"
+              DATA=("$D")
+            fi
+            opa test openbank-libs/governance/policies/rest.rego ${EXTRA[@]+"${EXTRA[@]}"} "$ext" "$t" ${DATA[@]+"${DATA[@]}"} || FAILED=1
           done
           [ "$FAILED" -eq 0 ] || { echo "::error::One or more rest_ext suites failed."; exit 1; }
           echo "All ${#TESTS[@]} rest_ext suites green."

@@ -21,8 +21,11 @@ import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.nio.file.Files
 import java.nio.file.Path
+import java.security.KeyPairGenerator
 import java.security.KeyStore
+import java.security.Signature
 import java.time.Duration
+import java.time.Instant
 import java.util.Base64
 import java.util.UUID
 import javax.net.ssl.KeyManagerFactory
@@ -56,6 +59,9 @@ class ListenerAuthParityIT {
     @ConfigProperty(name = "quarkus.http.test-ssl-port")
     lateinit var httpsPort: String
 
+    @ConfigProperty(name = "treasury.test.bearer-token")
+    lateinit var bearerToken: String
+
     private fun portfolio(scheme: String, port: String) = HttpRequest.newBuilder(
         URI.create("$scheme://localhost:$port$PATH"),
     ).timeout(Duration.ofSeconds(10)).GET().build()
@@ -83,6 +89,20 @@ class ListenerAuthParityIT {
         assertThat(response.statusCode()).isEqualTo(UNAUTHORIZED)
     }
 
+    @Test
+    fun `a trusted client certificate and valid bearer reach the portfolio handler`() {
+        val withCert = HttpClient.newBuilder().sslContext(sslContext(withClientCertificate = true)).build()
+        val request = HttpRequest.newBuilder(URI.create("https://localhost:$httpsPort$PATH"))
+            .timeout(Duration.ofSeconds(10))
+            .header("Authorization", "Bearer $bearerToken")
+            .GET().build()
+        // The date is absent from the real Postgres fixture. A 409 from this handler proves the
+        // signed bearer passed OIDC and RBAC; a 401/403 would only prove a different denial.
+        val response = withCert.send(request, HttpResponse.BodyHandlers.ofString())
+        assertThat(response.statusCode()).describedAs(response.body()).isEqualTo(CONFLICT)
+        assertThat(response.body()).contains("PORTFOLIO_SNAPSHOT_MISSING")
+    }
+
     private fun sslContext(withClientCertificate: Boolean): SSLContext {
         val material = MtlsMaterial.current()
         val trust = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm())
@@ -106,7 +126,7 @@ class ListenerAuthParityIT {
             "quarkus.http.ssl.client-auth" to "required",
             // Mirrors %prod in application.yaml: /api/* is authenticated by the bearer only.
             "quarkus.oidc.enabled" to "true",
-            "quarkus.oidc.auth-server-url" to "http://localhost:1/realms/none",
+            "quarkus.oidc.auth-server-url" to "",
             "quarkus.oidc.discovery-enabled" to "false",
             "quarkus.oidc.jwks-path" to "protocol/openid-connect/certs",
             "quarkus.http.auth.permission.bearer-only.paths" to "/api/*",
@@ -138,6 +158,32 @@ class ListenerAuthParityIT {
                 "quarkus.http.ssl.protocols" to "TLSv1.3",
                 "quarkus.http.test-ssl-port" to "0",
                 "quarkus.http.insecure-requests" to "enabled",
+            ) + bearerFixture()
+        }
+
+        private fun bearerFixture(): Map<String, String> {
+            val keys = KeyPairGenerator.getInstance("RSA").apply { initialize(2048) }.generateKeyPair()
+            val encoder = Base64.getUrlEncoder().withoutPadding()
+            val header = encoder.encodeToString("""{"alg":"RS256","typ":"JWT"}""".toByteArray())
+            val now = Instant.now().epochSecond
+            val claims = """
+                {"iss":"urn:openbank:treasury-listener-test","aud":"treasury-listener-test",
+                 "sub":"approver","groups":["ROLE_TREASURY_APPROVER"],"iat":$now,"exp":${now + 300}}
+            """.trimIndent()
+            val input = "$header.${encoder.encodeToString(claims.toByteArray())}"
+            val signature = Signature.getInstance("SHA256withRSA").apply {
+                initSign(keys.private)
+                update(input.toByteArray())
+            }.sign()
+            return mapOf(
+                "quarkus.oidc.public-key" to Base64.getEncoder().encodeToString(keys.public.encoded),
+                "quarkus.oidc.tenant-enabled" to "true",
+                "quarkus.oidc.auth-server-url" to "",
+                "quarkus.oidc.discovery-enabled" to "false",
+                "quarkus.oidc.token.issuer" to "urn:openbank:treasury-listener-test",
+                "quarkus.oidc.token.audience" to "treasury-listener-test",
+                "quarkus.oidc.roles.role-claim-path" to "groups",
+                "treasury.test.bearer-token" to "$input.${encoder.encodeToString(signature)}",
             )
         }
 
@@ -192,5 +238,6 @@ class ListenerAuthParityIT {
     private companion object {
         const val PATH = "/api/v1/treasury/portfolio/period-end?date=2026-12-31"
         const val UNAUTHORIZED = 401
+        const val CONFLICT = 409
     }
 }

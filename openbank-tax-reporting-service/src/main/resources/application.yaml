@@ -150,6 +150,31 @@ openbank:
   git:
     commit: "${GIT_COMMIT:unknown}"
 
+"%prod":
+  quarkus:
+    # East-west mTLS to the pension company's treasury-service instance (8443, client auth REQUIRED,
+    # ADR-0337): the call carries a bearer token and the cluster has no mesh, so plaintext 8160 is
+    # not an option (ASVS V9.1). Client certificate tax-reporting-internal-tls, mounted at
+    # /mnt/internal-tls in the cluster only (gitops); the server is verified against openbank-ca
+    # with HTTPS hostname verification (the default — never set to NONE). %prod only: the files
+    # exist only in the cluster, and the TLS registry loads them at boot. The bucket is the shared
+    # `internal-authority` that #12500 (ledger), #12507 (pension, pension-fund) also name: ONE `tls:`
+    # and ONE `rest-client:` map under %prod (SnakeYAML keeps only the last of a repeated key).
+    tls:
+      internal-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/internal-tls/tls.crt
+              key: /mnt/internal-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/internal-tls/ca.crt
+        protocols: TLSv1.3
+    rest-client:
+      treasury-service:
+        tls-configuration-name: internal-authority
+
 "%test":
   quarkus:
     datasource:
@@ -170,28 +195,3 @@ openbank:
   authz:
     enforce: "false"
 
-"%prod":
-  quarkus:
-    # East-west mTLS (ASVS V9.1): the pension company's treasury-service (ADR-0337) is called on its
-    # private-CA listener, 8443, which REQUIRES a client certificate (treasury's %prod
-    # quarkus.http.ssl.client-auth). Without this bucket the call would offer no client certificate
-    # and trust only the JVM's public CAs, so the handshake fails. One client identity,
-    # tax-reporting-internal-tls, mounted at /mnt/internal-tls; its ca.crt is openbank-ca, which
-    # verifies the server with Quarkus' default hostname verification (HTTPS). Under %prod only —
-    # the certificate exists only in the cluster. ONE `tls:` map and ONE `rest-client:` map
-    # (SnakeYAML keeps only the last of a repeated key): #12500 names the same bucket for
-    # ledger-service.
-    tls:
-      internal-authority:
-        key-store:
-          pem:
-            client:
-              cert: /mnt/internal-tls/tls.crt
-              key: /mnt/internal-tls/tls.key
-        trust-store:
-          pem:
-            certs: /mnt/internal-tls/ca.crt
-        protocols: TLSv1.3
-    rest-client:
-      treasury-service:
-        tls-configuration-name: internal-authority
