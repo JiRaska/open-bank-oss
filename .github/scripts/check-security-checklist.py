@@ -116,7 +116,7 @@ PCI_NEGATIVE = re.compile(
     r"Exception: No cardholder data path changed;\s+(?P<reason>\S.*)$"
 )
 PCI_FIELD = re.compile(
-    r"(?i:\b(?:pan|masked_?pan|cvv|cvc|card_?number|card_?token|cardholder|"
+    r"(?i:\b(?:pan|masked_?pan|cvv2?|cvc2?|card_?(?:number|token|data)|cardholder_?data|cardholder|"
     r"primary_?account_?number|track_?2)(?:_[a-z0-9]+)*\b)"
     r"|\b[a-z]+(?:Pan|PAN|Card|Cvv|Cvc|CVV|CVC)(?:[A-Z][A-Za-z0-9]*)?\b"
     r"|\b(?:Pan|PAN|Card|Cvv|Cvc|CVV|CVC)(?:[A-Z][A-Za-z0-9]*)?\b"
@@ -701,6 +701,14 @@ def self_test() -> int:
         ("camel cardholder ID", negative, [], [("src/main/X.kt", "val cardholderId: UUID")], [], False, False),
         ("removed snake PAN hash", negative, [], [], [("src/main/V3.sql", "  pan_hash varchar(64),")], False, False),
         ("removed schema cardholder field", negative, [], [], [("src/main/openapi.yaml", "      cvv:")], False, False),
+        ("added CVV2 field", negative, [], [("src/main/X.kt", "val cvv2: String")], [], False, False),
+        ("removed CVV2 column", negative, [], [], [("src/main/V3.sql", "  cvv2 varchar(4),")], False, False),
+        ("added CVC2 field", negative, [], [("src/main/X.kt", "val cvc2: String")], [], False, False),
+        ("removed CVC2 column", negative, [], [], [("src/main/V3.sql", "  cvc2 varchar(4),")], False, False),
+        ("added card data field", negative, [], [("src/main/X.kt", "val card_data: String")], [], False, False),
+        ("removed card data column", negative, [], [], [("src/main/V3.sql", "  card_data text,")], False, False),
+        ("added cardholderdata field", negative, [], [("src/main/X.kt", "val cardholderdata: String")], [], False, False),
+        ("removed cardholderdata column", negative, [], [], [("src/main/V3.sql", "  cardholderdata text,")], False, False),
         ("changed declaration", negative, [], [], [], True, False),
     ]:
         if negative_pci_exception(text, files, added + removed, changed) != accepted:
@@ -913,6 +921,9 @@ def self_test() -> int:
     generic_pci = {f"{svc}/src/main/kotlin/com/x/domain/Money.kt": "data class Money(val encryptedPan: String)\n"}
     if dfixture(decl_rules, generic_pci, pci_body) == 0:
         print("self-test FAIL (g2): PCI field in a generic declared path passed an unticked PCI box"); bad += 1
+    generic_card_data = {f"{svc}/src/main/kotlin/com/x/domain/Money.kt": "data class Money(val card_data: String)\n"}
+    if dfixture(decl_rules, generic_card_data, pci_body) == 0:
+        print("self-test FAIL (g3): card_data in a generic declared path passed negative PCI"); bad += 1
     # (h) change inside the auth glob → fails without the tick.
     if dfixture(decl_rules, {f"{svc}/src/main/kotlin/com/x/security/Guard.kt": "x\n"}, no_checklist) == 0:
         print("self-test FAIL (h): change inside a declared auth glob passed without a tick"); bad += 1
