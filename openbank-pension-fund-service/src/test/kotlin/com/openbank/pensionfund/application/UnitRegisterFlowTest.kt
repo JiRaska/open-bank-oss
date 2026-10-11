@@ -92,6 +92,28 @@ class UnitRegisterFlowTest {
     }
 
     @Test
+    fun `accepted order replays after fund closure while changed payload still fails`(): Unit = runBlocking {
+        val fund = admin.createFund(definition("CZ0000000219"))
+        val command = PlaceOrderCommand(
+            contract,
+            fund.id,
+            OrderType.SUBSCRIBE,
+            BigDecimal("100"),
+            null,
+            null,
+            key(),
+        )
+        val accepted = register.place(command)
+        admin.closeFund(fund.id)
+
+        assertThat(register.place(command)).isEqualTo(accepted)
+        assertThatThrownBy {
+            runBlocking { register.place(command.copy(amount = BigDecimal("200"))) }
+        }.isInstanceOf(IllegalStateException::class.java).hasMessageContaining("Idempotency-Key reused")
+        assertThat(store.orders).hasSize(1)
+    }
+
+    @Test
     fun `an order placed while a nav awaits approval settles at that nav`(): Unit = runBlocking {
         val fund = admin.createFund(definition("CZ0000000029"))
         val nav = navs.calculate(
