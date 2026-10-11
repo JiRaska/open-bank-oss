@@ -64,7 +64,6 @@ CONFIG = Path("release-please-config.json")
 # Each entry names the overlay it strands, and a stale declaration fails in either direction.
 NO_RELEASE_COMPONENT: dict[str, str] = {
     "openbank-campaign-service": "campaign-service",
-    "openbank-tax-reporting-service": "tax-reporting-service",
 }
 
 # component -> issue that tracks writing its overlay. Reason required; stale either direction.

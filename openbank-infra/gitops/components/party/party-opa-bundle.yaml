@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: party-service
     app.kubernetes.io/part-of: party
   annotations:
-    openbank.tech/policy-checksum: "8ca6a657bab06bed"
+    openbank.tech/policy-checksum: "bed3c696a113ab08"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1660,9 +1660,16 @@ data:
       # ROLE_OPERATOR, so without an entry here the action is readable by every backend service.
       # An action listed here is served ONLY by its service's identity-scoped rules (staff, and the
       # one named machine caller). Tested must-deny/must-allow in that service's rest_ext test.
+      #
+      # This list vetoes operator-read-any ONLY; compliance-read-any (ROLE_COMPLIANCE, every `.read`)
+      # has no such list, and the shared service-account holds ROLE_COMPLIANCE in the CI realm. So an
+      # entry here does NOT keep the shared account out on its own. For a read that must be closed to
+      # it, name the action with a non-read verb (`.inspect`, `.reconstruct`) instead, as
+      # pension-fund.holding.inspect does (#12481).
       operator_read_any_excluded_actions:
-        - pension-fund.holding.read   # participants' unit holdings and orders (ADR-0334 S4, #12350):
-                                      # staff + service-account-openbank-pension only
+        - tax.filing.read             # §38d withholding returns and the per-remittance audit trail behind
+                                      # them (#5760): real staff only via tax_reporting_rest_ext.rego; no
+                                      # service-account reads them through operator-read-any
       role_action_matrix:
         ROLE_OPERATOR:
           grant:

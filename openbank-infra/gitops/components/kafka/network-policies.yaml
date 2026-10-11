@@ -161,6 +161,9 @@ spec:
               kubernetes.io/metadata.name: statements
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: tax-reporting
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: tpp-registry
         - namespaceSelector:
             matchLabels:

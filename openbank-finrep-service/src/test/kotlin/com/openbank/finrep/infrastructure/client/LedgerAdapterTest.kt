@@ -9,11 +9,85 @@ import io.mockk.verify
 import io.smallrye.mutiny.Uni
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.time.LocalDate
 
 class LedgerAdapterTest {
+
+    @Test
+    fun `frozen F02 requires every current-year month and valid anchors`(): Unit = runBlocking {
+        val client = mockk<LedgerRestClient>()
+        val asOf = LocalDate.parse("2026-02-28")
+        val valid = ClosedPeriodTrialBalanceResponse(
+            period = "MONTH:2026-02",
+            from = LocalDate.parse("2026-01-01"),
+            to = asOf,
+            balanced = true,
+            lines = listOf(TrialBalanceLineResponse("4100", "INCOME", BigDecimal("-1300"), "CZK")),
+            sourcePeriods = listOf("MONTH:2026-01", "MONTH:2026-02"),
+            sourceContentHashes = listOf("a".repeat(64), "b".repeat(64)),
+        )
+        every { client.getYearToDateMovements(asOf.toString()) } returns Uni.createFrom().item(valid)
+        assertThat(LedgerAdapter(client).getYearToDateMovements(asOf).lines.single().net)
+            .isEqualByComparingTo("-1300")
+        every { client.getYearToDateMovements(asOf.toString()) } returns Uni.createFrom().item(
+            valid.copy(sourcePeriods = listOf("MONTH:2026-02")),
+        )
+        assertThatThrownBy { runBlocking { LedgerAdapter(client).getYearToDateMovements(asOf) } }
+            .isInstanceOf(IllegalStateException::class.java)
+        Unit
+    }
+
+    @Test
+    fun `frozen F02 rejects a midmonth date before calling ledger`(): Unit = runBlocking {
+        val client = mockk<LedgerRestClient>()
+        assertThatThrownBy {
+            runBlocking { LedgerAdapter(client).getYearToDateMovements(LocalDate.parse("2026-02-15")) }
+        }.isInstanceOf(IllegalArgumentException::class.java)
+        verify(exactly = 0) { client.getYearToDateMovements(any()) }
+        Unit
+    }
+
+    @Test
+    fun `live F02 preview is bounded to the exact date`(): Unit = runBlocking {
+        val client = mockk<LedgerRestClient>()
+        val asOf = LocalDate.parse("2026-02-15")
+        every { client.getLiveYearToDateMovements(asOf.toString()) } returns Uni.createFrom().item(
+            ClosedPeriodTrialBalanceResponse(
+                period = "MONTH:2026-02",
+                from = LocalDate.parse("2026-01-01"),
+                to = asOf,
+                balanced = true,
+                lines = emptyList(),
+            ),
+        )
+        assertThat(LedgerAdapter(client).getLiveYearToDateMovements(asOf).lines).isEmpty()
+        verify(exactly = 1) { client.getLiveYearToDateMovements(asOf.toString()) }
+        Unit
+    }
+
+    @Test
+    fun `F02 movement reads use distinct frozen and live period endpoints`(): Unit = runBlocking {
+        val client = mockk<LedgerRestClient>()
+        val asOf = LocalDate.parse("2026-06-30")
+        val movements = ClosedPeriodTrialBalanceResponse(
+            period = "MONTH:2026-06",
+            balanced = true,
+            lines = listOf(TrialBalanceLineResponse("4100", "INCOME", BigDecimal("-120"), "CZK")),
+        )
+        every { client.getFrozenPeriodMovements(asOf.toString()) } returns Uni.createFrom().item(movements)
+        every { client.getLivePeriodMovements(asOf.toString()) } returns Uni.createFrom().item(movements)
+
+        val adapter = LedgerAdapter(client)
+        assertThat(adapter.getFrozenPeriodMovements(asOf).lines.single().net).isEqualByComparingTo("-120")
+        assertThat(adapter.getLivePeriodMovements(asOf).lines.single().net).isEqualByComparingTo("-120")
+        verify(exactly = 1) { client.getFrozenPeriodMovements("2026-06-30") }
+        verify(exactly = 1) { client.getLivePeriodMovements("2026-06-30") }
+        verify(exactly = 0) { client.getTrialBalance(any()) }
+        verify(exactly = 0) { client.getLiveTrialBalance(any()) }
+    }
 
     @Test
     fun `live preview uses the explicit mutable period endpoint and preserves the balance verdict`(): Unit =

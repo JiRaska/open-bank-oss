@@ -4,6 +4,7 @@
 
 package com.openbank.tax.infrastructure.rest
 
+import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import com.openbank.tax.application.port.out.EpoRendererPort
 import com.openbank.tax.application.usecase.TaxFilingNotFoundException
@@ -43,6 +44,10 @@ private const val UNPROCESSABLE_ENTITY = 422
  * Reads are open to auditor/viewer/operator/admin — a tax return is exactly the artefact an auditor
  * needs to see. Both state changes are operator-only and four-eyes separated: whoever assembled a
  * period may not also record it as filed.
+ *
+ * `@RolesAllowed` is the coarse gate; `@Authorize` adds the OPA decision
+ * (openbank-infra/gitops/components/tax-reporting/tax_reporting_rest_ext.rego), which is where a
+ * Keycloak service-account holding ROLE_OPERATOR is refused a state change no machine should make.
  */
 @Path("/api/v1/tax/filings")
 @Produces(MediaType.APPLICATION_JSON)
@@ -55,12 +60,14 @@ class TaxFilingResource(private val taxFilingService: TaxFilingService, private 
 
     @GET
     @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "tax.filing.read")
     @Operation(summary = "List filing periods, newest first")
     suspend fun list(): Response = Response.ok(taxFilingService.list().map { it.toResponse() }).build()
 
     @GET
     @Path("/overdue")
     @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "tax.filing.read")
     @Operation(
         summary = "Filings past their §38d deadline and not yet filed — the thing worth alerting on",
     )
@@ -69,6 +76,7 @@ class TaxFilingResource(private val taxFilingService: TaxFilingService, private 
     @GET
     @Path("/{period}")
     @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "tax.filing.read")
     @Operation(summary = "Get one filing period (YYYY-MM)")
     suspend fun get(@PathParam("period") period: String): Response =
         Response.ok(taxFilingService.get(parsePeriod(period)).toResponse()).build()
@@ -76,6 +84,7 @@ class TaxFilingResource(private val taxFilingService: TaxFilingService, private 
     @GET
     @Path("/{period}/remittances")
     @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "tax.filing.read")
     @Operation(summary = "The remittance batches making up a period — the audit trail behind the total")
     suspend fun remittances(@PathParam("period") period: String): Response =
         Response.ok(taxFilingService.remittancesFor(parsePeriod(period)).map { it.toResponse() }).build()
@@ -83,6 +92,7 @@ class TaxFilingResource(private val taxFilingService: TaxFilingService, private 
     @POST
     @Path("/{period}/assemble")
     @RolesAllowed(Roles.OPERATOR)
+    @Authorize(action = "tax.filing.assemble", resource = "#period")
     @Operation(summary = "Assemble the period, freezing its totals (OPEN → ASSEMBLED)")
     suspend fun assemble(@PathParam("period") period: String): Response {
         val record = taxFilingService.assemble(parsePeriod(period), by = actingPrincipal())
@@ -92,6 +102,7 @@ class TaxFilingResource(private val taxFilingService: TaxFilingService, private 
     @POST
     @Path("/{period}/filed")
     @RolesAllowed(Roles.OPERATOR)
+    @Authorize(action = "tax.filing.file", resource = "#period")
     @Operation(
         summary = "Record that the assembled return was submitted, with its FÚ/EPO reference " +
             "(ASSEMBLED → FILED; four-eyes, the assembler may not file)",
@@ -104,6 +115,7 @@ class TaxFilingResource(private val taxFilingService: TaxFilingService, private 
     @GET
     @Path("/export-capability")
     @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "tax.filing.read")
     @Operation(
         summary = "Whether EPO XML rendering is available; reports the truth rather than implying it",
     )
