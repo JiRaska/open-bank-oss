@@ -17,9 +17,9 @@ This documentation is published by the service at the management endpoint `/q/op
 
 | Method & path | What it does |
 |---|---|
-| `POST /api/v2/pension/contracts` | Create a DRAFT contract under the pack in force today |
 | `GET /api/v2/pension/contracts/{id}` | Read a contract with its strategy history |
-| `POST /api/v2/pension/contracts/{id}/submit` | DRAFT → PENDING_ACTIVATION |
+| `GET /api/v2/pension/transfers` | The participant's own transfers, in and out (pending by default) |
+| `POST /api/v2/pension/transfers/{id}/withdrawal` | Withdraw a transfer-out (or the consent to one) before it is valued — SCA-signed |
 | `PUT /api/v2/pension/contracts/{id}/strategy` | Elect or change the strategy (history kept) |
 | `POST /api/v2/pension/contracts/{id}/suspend` / `resume` | Pause / resume contributions |
 | `POST /api/v2/pension/contracts/{id}/incentive-evaluation` | Incentives of the pinned pack for one contribution |

@@ -17,9 +17,9 @@ Dokumentaci služba publikuje na management endpointu `/q/openbank/docs` (Docs-a
 
 | Metoda a cesta | Co dělá |
 |---|---|
-| `POST /api/v2/pension/contracts` | Založí smlouvu ve stavu DRAFT podle dnes platného balíčku |
 | `GET /api/v2/pension/contracts/{id}` | Načte smlouvu včetně historie strategií |
-| `POST /api/v2/pension/contracts/{id}/submit` | DRAFT → PENDING_ACTIVATION |
+| `GET /api/v2/pension/transfers` | Vlastní převody účastníka, příchozí i odchozí (výchozí: jen probíhající) |
+| `POST /api/v2/pension/transfers/{id}/withdrawal` | Odvolá odchozí převod (nebo souhlas s ním) před oceněním — podepsáno SCA |
 | `PUT /api/v2/pension/contracts/{id}/strategy` | Zvolí nebo změní strategii (historie se zachová) |
 | `POST /api/v2/pension/contracts/{id}/suspend` / `resume` | Přeruší / obnoví placení příspěvků |
 | `POST /api/v2/pension/contracts/{id}/incentive-evaluation` | Pobídky fixovaného balíčku pro jeden příspěvek |
