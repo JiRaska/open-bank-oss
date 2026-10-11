@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.277.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.277.1...admin-ui-v0.277.2) (2026-10-11)
+
+
+### Bug Fixes
+
+* **admin-ui:** derive platform versions from infra sources instead of literals ([#12469](https://github.com/JiRaska/open-bank-oss/issues/12469)) ([fff7b94](https://github.com/JiRaska/open-bank-oss/commit/fff7b94ca61a86ce8e5aea0a4f1ec6780895acc8))
+
 ## [0.277.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.277.0...admin-ui-v0.277.1) (2026-10-08)
 
 
