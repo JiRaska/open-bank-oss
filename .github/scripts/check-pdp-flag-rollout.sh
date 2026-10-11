@@ -106,7 +106,7 @@ pin_is_current() {
 }
 
 run() {
-  local source="$1" marker svc tag lag=0 ok=0 missing=0
+  local source="$1" marker svc tag lag=0 ok=0 missing=0 examined=0
   [ "${PDP_ROLLOUT_FORCE_API:-0}" = 1 ] && API=1
   if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
     if command -v gh >/dev/null 2>&1 && [ -n "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ]; then
@@ -127,6 +127,7 @@ run() {
   if [ "$source" = live ]; then pins="$(pins_live)"; else pins="$(pins_gitops)"; fi
   while IFS= read -r svc; do
     [ -n "$svc" ] || continue
+    examined=$((examined + 1))
     tag="$(grep -E "^${svc}:sandbox-" <<< "$pins" | sed -E 's/^[^:]+:sandbox-//' || true)"
     if [ -z "$tag" ]; then
       # A consumer with no sandbox pin is not deployed by this pipeline; nothing to roll.
@@ -143,6 +144,7 @@ run() {
       fi
     done <<< "$tag"
   done < <(consumers)
+  echo "SUBJECTS=${examined}  # libs-runtime consumers examined against their pins"
   echo "check-pdp-flag-rollout (${source}): current=${ok} lagging=${lag} consumers-without-a-pin=${missing}"
   if [ "$ok" -eq 0 ] && [ "$lag" -eq 0 ]; then
     echo "::error::no libs-runtime consumer pin found at all. The derivation is broken, not the fleet." >&2
