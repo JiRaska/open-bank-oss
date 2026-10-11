@@ -236,7 +236,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh api --method POST \
+          source .github/scripts/gh-retry.sh
+          # Retry only classified transient API failures against the same validated file.
+          # A response can fail after GitHub accepted the POST; repeating identical
+          # snapshot identity and graph cannot publish a partial or different graph.
+          gh_retry 3 -- gh api --method POST \
             "repos/${GITHUB_REPOSITORY}/dependency-graph/snapshots" \
             --input "${RUNNER_TEMP}/dependency-snapshot-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/merged.json"
 
