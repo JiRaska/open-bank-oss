@@ -5,6 +5,7 @@
 package com.openbank.domestic.infrastructure.rest
 
 import com.openbank.domestic.domain.model.InitiatorScope
+import com.openbank.libs.authz.ServiceAccountIdentity
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
@@ -22,13 +23,15 @@ class InitiatorScopes(
     private val pensionDebtorAccount: Optional<String>,
 ) {
     fun of(identity: SecurityIdentity): InitiatorScope {
-        val principal = identity.principal?.name
-        if (principal == PENSION_PRINCIPAL) {
+        if (ServiceAccountIdentity.isPrincipal(identity, PENSION_PRINCIPAL)) {
             val account = pensionDebtorAccount.orElse("").trim().takeIf { it.isNotEmpty() }
                 ?.let { runCatching { UUID.fromString(it) }.getOrNull() }
             return InitiatorScope.Scoped(PENSION_PRINCIPAL, account)
         }
-        return if (STAFF_ROLES.any { identity.hasRole(it) }) InitiatorScope.General else InitiatorScope.Undeclared
+        val staff = STAFF_ROLES.any(identity::hasRole) && ServiceAccountIdentity.isHumanStaff(identity)
+        val edge = identity.hasRole("ROLE_OPERATOR") &&
+            ServiceAccountIdentity.isPrincipal(identity, "service-account-openbank-edge")
+        return if (staff || edge) InitiatorScope.General else InitiatorScope.Undeclared
     }
 
     companion object {

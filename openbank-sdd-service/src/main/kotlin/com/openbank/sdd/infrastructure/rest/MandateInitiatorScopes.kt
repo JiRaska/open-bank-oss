@@ -4,6 +4,7 @@
 
 package com.openbank.sdd.infrastructure.rest
 
+import com.openbank.libs.authz.ServiceAccountIdentity
 import com.openbank.sdd.domain.model.MandateInitiatorScope
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.enterprise.context.ApplicationScoped
@@ -19,19 +20,19 @@ class MandateInitiatorScopes(
     @ConfigProperty(name = PENSION_CREDITOR_KEY)
     private val pensionCreditor: Optional<String>,
 ) {
-    fun of(identity: SecurityIdentity): MandateInitiatorScope {
-        val principal = identity.principal?.name ?: return MandateInitiatorScope.Denied
-        return when {
-            principal == PENSION_PRINCIPAL -> MandateInitiatorScope.Scoped(
-                PENSION_PRINCIPAL,
-                pensionCreditor.orElse("").trim().ifEmpty { null },
-            )
-            principal == "service-account-openbank-edge" -> MandateInitiatorScope.General
-            principal.startsWith("service-account-") -> MandateInitiatorScope.Denied
-            principal.isNotBlank() && (identity.hasRole("ROLE_OPERATOR") || identity.hasRole("ROLE_ADMIN")) ->
-                MandateInitiatorScope.General
-            else -> MandateInitiatorScope.Denied
-        }
+    fun of(identity: SecurityIdentity): MandateInitiatorScope = when {
+        ServiceAccountIdentity.isPrincipal(identity, PENSION_PRINCIPAL) -> MandateInitiatorScope.Scoped(
+            PENSION_PRINCIPAL,
+            pensionCreditor.orElse("").trim().ifEmpty { null },
+        )
+        ServiceAccountIdentity.isPrincipal(
+            identity,
+            "service-account-openbank-edge",
+        ) -> MandateInitiatorScope.General
+        ServiceAccountIdentity.isHumanStaff(identity) &&
+            (identity.hasRole("ROLE_OPERATOR") || identity.hasRole("ROLE_ADMIN")) ->
+            MandateInitiatorScope.General
+        else -> MandateInitiatorScope.Denied
     }
 
     companion object {

@@ -9,10 +9,10 @@ import io.mockk.every
 import io.mockk.mockk
 import io.quarkus.security.identity.SecurityIdentity
 import org.assertj.core.api.Assertions.assertThat
+import org.eclipse.microprofile.jwt.JsonWebToken
 import org.junit.jupiter.api.Test
 import org.yaml.snakeyaml.Yaml
 import java.io.File
-import java.security.Principal
 import java.util.Optional
 import java.util.UUID
 
@@ -20,22 +20,28 @@ import java.util.UUID
 class InitiatorScopesTest {
     private val payout = UUID.randomUUID()
 
-    private fun identity(name: String, vararg roles: String) = mockk<SecurityIdentity>().also { id ->
-        every { id.principal } returns Principal { name }
-        every { id.hasRole(any()) } answers { firstArg<String>() in roles }
-    }
+    private fun identity(name: String, vararg roles: String, azp: String? = null) =
+        mockk<SecurityIdentity>().also { id ->
+            every { id.principal } returns mockk<JsonWebToken> {
+                every { this@mockk.name } returns name
+                every { subject } returns "subject"
+                every { getClaim<Any?>("azp") } returns azp
+                every { getClaim<Any?>("preferred_username") } returns name
+            }
+            every { id.hasRole(any()) } answers { firstArg<String>() in roles }
+        }
 
     @Test
     fun `pension is scoped to its configured payout account, and to nothing when unconfigured`() {
         assertThat(
             InitiatorScopes(
                 Optional.of(payout.toString()),
-            ).of(identity("service-account-openbank-pension", "ROLE_API")),
+            ).of(identity("service-account-openbank-pension", "ROLE_API", azp = "openbank-pension")),
         )
             .isEqualTo(InitiatorScope.Scoped("service-account-openbank-pension", payout))
         val unconfigured = InitiatorScopes(
             Optional.empty(),
-        ).of(identity("service-account-openbank-pension", "ROLE_API"))
+        ).of(identity("service-account-openbank-pension", "ROLE_API", azp = "openbank-pension"))
         assertThat(unconfigured.permits(payout)).isFalse()
     }
 
@@ -50,10 +56,27 @@ class InitiatorScopesTest {
     @Test
     fun `staff and the operator-role edge keep general scope`() {
         assertThat(
-            InitiatorScopes(Optional.empty()).of(identity("u-op", "ROLE_OPERATOR")),
+            InitiatorScopes(Optional.empty()).of(identity("u-op", "ROLE_OPERATOR", azp = "openbank-admin-ui")),
         ).isEqualTo(InitiatorScope.General)
-        assertThat(InitiatorScopes(Optional.empty()).of(identity("service-account-openbank-edge", "ROLE_OPERATOR")))
+        assertThat(
+            InitiatorScopes(Optional.empty()).of(
+                identity("service-account-openbank-edge", "ROLE_OPERATOR", azp = "openbank-edge"),
+            ),
+        )
             .isEqualTo(InitiatorScope.General)
+    }
+
+    @Test
+    fun `spoofed names and machine staff roles grant no payment scope`() {
+        val scopes = InitiatorScopes(Optional.of(payout.toString()))
+        assertThat(scopes.of(identity("service-account-openbank-pension", "ROLE_API", azp = "openbank-edge")))
+            .isEqualTo(InitiatorScope.Undeclared)
+        assertThat(scopes.of(identity("service-account-openbank-edge", "ROLE_OPERATOR", azp = "openbank-pension")))
+            .isEqualTo(InitiatorScope.Undeclared)
+        assertThat(scopes.of(identity("service-account-openbank-services", "ROLE_OPERATOR", azp = "openbank-services")))
+            .isEqualTo(InitiatorScope.Undeclared)
+        assertThat(scopes.of(identity("u-op", "ROLE_OPERATOR", azp = "openbank-edge")))
+            .isEqualTo(InitiatorScope.Undeclared)
     }
 
     @Test
