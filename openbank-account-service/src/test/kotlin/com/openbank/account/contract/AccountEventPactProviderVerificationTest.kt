@@ -95,7 +95,7 @@ import java.util.concurrent.TimeUnit
     initArgs = [ResourceArg(name = "db", value = "openbank_accounts_it")],
 )
 @TestSecurity(
-    user = "pact-verifier",
+    user = "service-account-openbank-pension",
     roles = ["ROLE_API", "ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_PENSION_ACCOUNT_VERIFY"],
 )
 @Provider("openbank-account-service")

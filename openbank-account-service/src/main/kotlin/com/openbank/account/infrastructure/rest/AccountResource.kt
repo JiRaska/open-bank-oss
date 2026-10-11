@@ -80,6 +80,7 @@ import java.util.UUID
  */
 private const val ACCOUNTS_PATH = "/api/v1/accounts"
 private const val IDEMPOTENCY_SERVICE = "account-service"
+private const val PENSION_SERVICE_PRINCIPAL = "service-account-openbank-pension"
 
 data class OwnershipVerificationRequest(val iban: String, val partyId: UUID)
 
@@ -250,6 +251,11 @@ class AccountResource(
     @Authorize(action = "account.verifyOwnership")
     @Operation(summary = "Verify that a pension participant owns an active account")
     suspend fun verifyOwnership(request: OwnershipVerificationRequest): Response {
+        // The realm role is narrow, but a misplaced grant must not turn this existence probe
+        // into a cross-service API. OIDC has already authenticated this principal.
+        if (identity.principal.name != PENSION_SERVICE_PRINCIPAL) {
+            throw jakarta.ws.rs.ForbiddenException("pension service identity is required")
+        }
         require(request.iban.isNotBlank()) { "iban is required" }
         val verdict = accountUseCase.verifyAccountOwnership(
             VerifyAccountOwnershipQuery(request.iban, request.partyId),

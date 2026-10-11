@@ -83,7 +83,7 @@ class AccountResourceAuthzTest {
     }
 
     @Test
-    @TestSecurity(user = "pension-service", roles = ["ROLE_PENSION_ACCOUNT_VERIFY"])
+    @TestSecurity(user = "service-account-openbank-pension", roles = ["ROLE_PENSION_ACCOUNT_VERIFY"])
     fun `pension verification returns a non-disclosing denial for unknown IBAN`() {
         Given {
             contentType("application/json")

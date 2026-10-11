@@ -104,6 +104,11 @@ tasks.withType<Test> {
     // module starts OOMing, that is the signal to raise it in build-logic and to count the Quarkus
     // boots per module rather than keep paying for them.
     maxHeapSize = "2g"
+    val keycloakDockerfile = rootProject.file("openbank-infra/docker/keycloak/Dockerfile")
+    inputs.file(keycloakDockerfile)
+        .withPropertyName("accountKeycloakImage")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+    systemProperty("openbank.test.keycloak-dockerfile", keycloakDockerfile.absolutePath)
 
     // Pact rootDir + Pact Broker property forwarding centralised into
     // build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
