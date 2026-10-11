@@ -237,7 +237,7 @@ async function clearingPending(headers: HeadersInit): Promise<SourceResult> {
 
 async function fxPending(headers: HeadersInit): Promise<SourceResult> {
   // k8s workload is `fx-service` (with the `-service` suffix, unlike sepa-instant) — see
-  // src/app/api/svc/[service]/[...path]/route.ts's SERVICE_MAP for the canonical key and
+  // src/app/api/svc/[service]/[...path]/route.ts's derived allowlist for the canonical key and
   // openbank-infra/gitops/components/fx-service/fx-service.yaml for the `fx` namespace.
   // fx-service also sits on the FinOps off-hours scaledown allowlist (see app/api/fx/rates'
   // discovery-based handling), so a scaled-to-zero fx-service surfaces here as 'unavailable'
