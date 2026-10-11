@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.1](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.14.0...sdd-service-v0.14.1) (2026-10-11)
+
+
+### Security
+
+* **sca:** scoped downstream access for pension-service (ADR-0335) ([#12419](https://github.com/JiRaska/open-bank-oss/issues/12419)) ([21bb0e9](https://github.com/JiRaska/open-bank-oss/commit/21bb0e9d2a9e44394ec9bb1d6eac8ca7f80556a0))
+
 ## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.13.6...sdd-service-v0.14.0) (2026-10-09)
 
 

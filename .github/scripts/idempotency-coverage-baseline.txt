@@ -16,6 +16,7 @@ openbank-account-service POST /api/v1/accounts/{accountId}/pockets  # natural-ke
 openbank-account-service POST /api/v1/accounts/{accountId}/savings-goal/delegation/proposals  # replay while PENDING+unexpired — ADR-0295, burn-down #8351
 openbank-account-service POST /api/v1/accounts/{accountId}/savings-goal/delegation/proposals/{proposalId}/decide  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-account-service POST /api/v1/accounts/{accountId}/unfreeze  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-account-service POST /api/v1/accounts/ownership-verifications  # read-only query (POST only to keep the IBAN out of URLs/access logs); mutates nothing, replay is harmless — ADR-0335 D2 exception
 openbank-balance-service POST /api/v1/balances/reconciliation  # operator trigger, mutates no balance; re-run records a fresh report by design — ADR-0287 exception; burn-down #8351
 openbank-balance-service POST /api/v1/balances/{accountId}/credit  # natural-key idempotency via balance_movement dedup ledger (V8) — ADR-0287 exception; burn-down #8351
 openbank-balance-service POST /api/v1/balances/{accountId}/debit  # natural-key idempotency via balance_movement dedup ledger (V8) — ADR-0287 exception; burn-down #8351
@@ -132,3 +133,12 @@ openbank-sca-service POST /api/v1/sca/challenges/{id}/consume  # lifecycle/actio
 # card-processing joined money_path_services with #11990's follow-up (its threat model always called it
 # money-path). Clearing and authorisation carry required keys; the reversal does not yet. Burn-down: #11995.
 openbank-card-processing-service POST /api/v1/card-authorizations/{id}/reversal  # lifecycle/action endpoint on an addressed resource — a sequential replay is refused by aggregate state (NOT_HOLDING_FUNDS, nothing released twice); a real DB-row key needs a Flyway version the card-processing namespace cannot take until #8864/#11990 land — burn-down #11995
+openbank-pension-fund-service POST /api/v1/funds  # natural-key 409 (funds.isin UNIQUE); creates no money movement — ADR-0334, burn-down #8351
+openbank-pension-fund-service POST /api/v1/funds/{fundId}/navs  # a second calculation for the same date is 409 while one awaits approval; publishes nothing — ADR-0334, burn-down #8351
+openbank-pension-fund-service POST /api/v1/navs/{navId}/approve  # lifecycle/action endpoint on an addressed resource — replay refused 409 by NavRecord state — ADR-0334
+openbank-pension-fund-service POST /api/v1/navs/{navId}/reject  # lifecycle/action endpoint on an addressed resource — replay refused 409 by NavRecord state — ADR-0334
+openbank-pension-fund-service POST /api/v1/strategies  # bare creation, moves no money (a duplicate strategy holds no units until changed by four-eyes) — ADR-0334, burn-down #8351
+openbank-pension-fund-service POST /api/v1/strategies/{strategyId}/changes  # bare creation of a PENDING change; nothing applies without a second approver — ADR-0334, burn-down #8351
+openbank-pension-fund-service POST /api/v1/strategy-changes/{changeId}/approve  # lifecycle/action endpoint on an addressed resource — replay refused 409 by StrategyChange state — ADR-0334
+openbank-pension-fund-service POST /api/v1/strategy-changes/{changeId}/reject  # lifecycle/action endpoint on an addressed resource — replay refused 409 by StrategyChange state — ADR-0334
+openbank-pension-fund-service POST /api/v1/strategy-changes/{changeId}/apply  # lifecycle/action endpoint on an addressed resource — replay refused 409 by StrategyChange state — ADR-0334

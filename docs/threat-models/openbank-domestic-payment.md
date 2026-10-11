@@ -683,3 +683,40 @@ resolved; do not drop customer drafts during code rollback.
 Draft item replacement records the verified editing human alongside the company and revision. A
 replayed creation key is checked against its persisted fingerprint before item validation, so an
 altered parseable body cannot change a conflict into an unrelated validation response.
+
+## 2026-10-09 — Scoped payment initiator: pension-service (ADR-0335 D5)
+
+`POST /api/v1/domestic-payments` now admits `ROLE_API` in `@RolesAllowed`. That change on its own
+would let any machine holding `ROLE_API` reach the money path, so the domain confines every
+ROLE_API-only caller:
+
+- **Elevation of privilege / Tampering:** `service-account-openbank-pension`, declared in
+  `rules.yaml: scoped_payment_initiators`, may pay only **from** the account configured under
+  `openbank.domestic-payment.scoped-initiators.pension.debtor-account-id`, the pension payout
+  account. An unset value permits nothing. Any other ROLE_API-only principal is `Undeclared` and
+  may pay from no account. Both refusals are a 403 raised before the idempotency lookup or any
+  persistence (`DomesticPaymentServiceTest`). OPA, through `service-scoped-payment-initiator`
+  reading the same register, admits pension to `domestic-payment.create` only. Staff and the
+  operator-role edge are unchanged.
+- **Residual:** a stolen pension credential can still pay **out of the pension payout account**
+  to any CZK creditor. That is the account's purpose. Sanctions screening, fraud scoring, the
+  scheme rules and per-step idempotency still apply to every such payment. Payout limits, or a
+  creditor allow-list from pension's own records, would narrow it further and belong to
+  pension-service.
+
+### Scoped debtor coordinate binding
+
+A scoped initiator must supply its configured debtor account identifier. Before any
+idempotency lookup, persistence or workflow start, the normalized account number and
+bank code are resolved through the existing account lookup and must match that identifier.
+Missing or mismatched resolution fails closed. General initiators retain their existing flow.
+
+### Provider TLS build and rollout
+
+The production build requires client certificates for an HTTPS listener when its server
+key material is configured. This property is fixed at build time; setting only a runtime
+environment variable cannot upgrade an image built without it. Preserve the HTTP listener
+during rollout. First publish a compatible signed provider image, then configure the
+private-CA listener and certificate rotation, and finally switch pension callers to HTTPS.
+OIDC and policy checks continue to authorize business operations independently of TLS trust.
+Roll back caller URLs before removing the provider listener or reverting its image.

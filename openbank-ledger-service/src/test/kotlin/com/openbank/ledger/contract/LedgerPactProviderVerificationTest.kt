@@ -12,10 +12,6 @@ import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactFilter
 import au.com.dius.pact.provider.junitsupport.loader.PactFolder
-import com.openbank.ledger.domain.model.GlAccountType
-import com.openbank.ledger.domain.model.PeriodTrialBalance
-import com.openbank.ledger.domain.model.PeriodType
-import com.openbank.ledger.domain.model.TrialBalanceLine
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
@@ -24,11 +20,6 @@ import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.extension.ExtendWith
-import java.math.BigDecimal
-import java.sql.Timestamp
-import java.time.Instant
-import java.time.LocalDate
-import java.util.UUID
 import javax.sql.DataSource
 
 /**
@@ -98,61 +89,7 @@ class LedgerPactProviderVerificationTest {
      * which still satisfies the contract shape (type matchers, not value matchers).
      */
     @State("ledger has frozen monthly trial balance for the reporting date")
-    fun stateWithFrozenMonthlyTrialBalance() {
-        val period = PeriodType.MONTH.of(LocalDate.of(2026, 6, 30))
-        val lines = listOf(
-            TrialBalanceLine(
-                UUID.fromString(ASSET_ID),
-                "1100",
-                "Cash",
-                GlAccountType.ASSET,
-                "CZK",
-                BigDecimal("150000"),
-                BigDecimal.ZERO,
-            ),
-            TrialBalanceLine(
-                UUID.fromString(LIABILITY_ID),
-                "2100",
-                "Deposits",
-                GlAccountType.LIABILITY,
-                "CZK",
-                BigDecimal.ZERO,
-                BigDecimal("150000"),
-            ),
-        )
-        val balance = PeriodTrialBalance(period, lines)
-        dataSource.connection.use { connection ->
-            connection.prepareStatement(
-                """insert into ledger_closed_period (id, period_type, period_from, period_to, status, evidence_state, computed_at, total_debits, total_credits, account_count, content_hash, drafted_by, frozen_by, frozen_at, created_at, updated_at)
-                   values (?, 'MONTH', '2026-06-01', '2026-06-30', 'FROZEN', 'LINES_V1', ?, 150000, 150000, 2, ?, 'maker', 'checker', ?, ?, ?)
-                   on conflict (period_type, period_from) do nothing""",
-            ).use { statement ->
-                statement.setObject(1, UUID.fromString(PERIOD_ID))
-                statement.setTimestamp(2, Timestamp.from(Instant.parse("2026-07-01T00:00:00Z")))
-                statement.setString(3, balance.contentHash())
-                statement.setTimestamp(4, Timestamp.from(Instant.parse("2026-07-02T00:00:00Z")))
-                statement.setTimestamp(5, Timestamp.from(Instant.parse("2026-07-01T00:00:00Z")))
-                statement.setTimestamp(6, Timestamp.from(Instant.parse("2026-07-02T00:00:00Z")))
-                statement.executeUpdate()
-            }
-            connection.prepareStatement(
-                """insert into ledger_closed_period_trial_balance_line (period_id, gl_account_id, currency, code, name, account_type, total_debit, total_credit)
-                   values (?, ?, 'CZK', ?, ?, ?, ?, ?) on conflict do nothing""",
-            ).use { statement ->
-                lines.forEach { line ->
-                    statement.setObject(1, UUID.fromString(PERIOD_ID))
-                    statement.setObject(2, line.glAccountId)
-                    statement.setString(3, line.code)
-                    statement.setString(4, line.name)
-                    statement.setString(5, line.type.name)
-                    statement.setBigDecimal(6, line.totalDebit)
-                    statement.setBigDecimal(7, line.totalCredit)
-                    statement.addBatch()
-                }
-                statement.executeBatch()
-            }
-        }
-    }
+    fun stateWithFrozenMonthlyTrialBalance() = FinrepFrozenMonthPactSeed.seed(dataSource)
 
     /**
      * Backward-compatible state for balance-service's live `/journals/trial-balance` pact.
@@ -199,10 +136,4 @@ class LedgerPactProviderVerificationTest {
      */
     @State("ledger does not hold GL account 9999")
     fun stateWithUnknownGlAccount() = Unit
-
-    private companion object {
-        const val PERIOD_ID = "00000000-0000-0000-0000-000000009601"
-        const val ASSET_ID = "00000000-0000-0000-0000-000000009602"
-        const val LIABILITY_ID = "00000000-0000-0000-0000-000000009603"
-    }
 }

@@ -108,6 +108,12 @@ isolation from transport/persistence.
   regulatory source. During rollout the count of `HASH_ONLY` frozen records is an explicit report
   availability gate. No backfill is automatic: historical reproduction needs a separately approved,
   controlled evidence-import procedure and cannot be inferred from mutable journals.
+- **Regulatory year-to-date flow:** FINREP F02.00 uses January through the reporting month only.
+  The frozen route requires every intervening monthly `LINES_V1` close, verifies each hash, and
+  reconciles gross account/currency legs against that calendar year's journal range. Missing January
+  fails even when no January posting exists. A frozen mid-month request is rejected before month
+  normalization so later postings cannot leak into an earlier dated report. The separate mutable
+  January-to-date route is for working previews only; prior fiscal years cannot enter the submission source.
 - **Regulatory capital source integrity:** COREP reads only explicit 6000–6060 EQUITY accounts.
   Capital is never plugged as assets minus liabilities; each movement is a balanced, attributable
   journal subject to normal posting, idempotency, period-lock and frozen-evidence controls.
@@ -603,3 +609,16 @@ set) apply equally to the new `ledger.approval.decide` action.
   (uninitialized-property crash) on a malformed request back to the intended 400; no endpoint,
   authorization, self-approval or wire-shape change. Rollback: revert to the eager
   `SecurityIdentity` parameter.
+- **2026-10-10** — **`ledger.close.inspect`: the frozen trial balance gets its own action (ADR-0337, #12496).**
+  `GET /api/v1/ledger/periods/{type}/{date}/frozen-trial-balance` authorizes as `ledger.close.inspect`
+  instead of `ledger.read`, so a policy can grant the attested statutory trial balance without every
+  journal, live trial balance and control-account read (the pension company's ledger grants
+  tax-reporting this action alone). **STRIDE-I/E:** no audience change on the bank's ledger — the verb is
+  not `read`/`list`, so no base `*-read-any` rule reaches it, and `ledger_rest_ext.rego` names the
+  previous holders explicitly: staff with OPERATOR/ADMIN/VIEWER/AUDITOR (`service-account-*` excluded)
+  and the shared `openbank-services` client finrep reads it with. Measured with `opa eval` against the
+  regenerated bundle: those five ALLOW; ROLE_COMPLIANCE, settlement, treasury, edge and tax-reporting
+  DENY. Dropping the service-account exclusion, the shared client's `principal.id` line or its rule each
+  turns `opa test` red. RBAC unchanged. Rollback: revert the annotation and the two rego reasons together.
+  Same change: a cron job switched `off` no longer registers a workflow-liveness gauge (no security
+  surface; removes a stale-alert source on instances that run without it).

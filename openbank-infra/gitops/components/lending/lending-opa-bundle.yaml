@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: lending-service
     app.kubernetes.io/part-of: lending
   annotations:
-    openbank.tech/policy-checksum: "3fd3ed3c5a9884b7"
+    openbank.tech/policy-checksum: "d24ca8e5cefbc6cf"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -104,8 +104,20 @@ data:
     	input.principal.attributes.tenant == input.resource.attributes.tenant
     }
 
+    # Compliance staff may read any resource (audit duty). STAFF ONLY: a Keycloak
+    # client_credentials token is classified HUMAN (rules.yaml: authz_policy.
+    # principal_type_service_unreachable), so without the `service-account-` exclusion any machine
+    # identity holding ROLE_COMPLIANCE reached every `*.read` fleet-wide — including the reads
+    # rules.yaml: authz.operator_read_any_excluded_actions withholds from operator-read-any, and no
+    # per-service rule can veto it because the decision is a union of reasons (#3765, ADR-0223).
+    # Measured before this line was added: no service-account holds ROLE_COMPLIANCE in the deployed
+    # realm (realm-template.json) or the docker realm; only the CI realm's shared
+    # service-account-openbank-services does, and every CI workflow using that realm runs with
+    # authz.enforce=false, so no real M2M caller relied on this grant. A machine that needs a read
+    # gets a rule naming its `service-account-<client>` id in the target service's rest_ext.
     allowed_reasons contains "compliance-read-any" if {
     	input.principal.type == "HUMAN"
+        not startswith(input.principal.id, "service-account-")
     	"ROLE_COMPLIANCE" in input.principal.roles
     	endswith(input.action, ".read")
     }
@@ -197,6 +209,16 @@ data:
     	role in input.principal.roles
     	some verb in {"list", "read"}
     	endswith(input.action, sprintf(".%v", [verb]))
+    	not operator_read_any_excluded(input.action)
+    }
+
+    # Reads too sensitive for the generic operator rule, declared in rules.yaml:
+    # authz.operator_read_any_excluded_actions. The shared backend service-account carries
+    # ROLE_OPERATOR, so without this an excluded read is reachable by every service in the fleet.
+    # Each listed action's own service MUST carry identity-scoped rules for its staff and its named
+    # machine caller; removing an action from that list re-opens it fleet-wide.
+    operator_read_any_excluded(action) if {
+    	action in object.get(data.rules, ["authz", "operator_read_any_excluded_actions"], [])
     }
 
     # ADR-0224 D2: staff agent-session lifecycle (issue/read/revoke). Operator/admin only — sessions
@@ -538,9 +560,10 @@ data:
     # Here it cannot be bypassed by adding a new reason.
     #
     # What this does NOT block, by design:
-    #  - READS. `operator-read-any` / `compliance-read-any` are how real M2M callers fetch
-    #    cross-service data today (party-service's GDPR Art. 15 aggregation against kyc-service
-    #    and card-issuance-service depends on exactly that), so they are untouched.
+    #  - READS. `operator-read-any` is how real M2M callers fetch cross-service data today
+    #    (party-service's GDPR Art. 15 aggregation against kyc-service and card-issuance-service
+    #    depends on exactly that), so it is untouched here. `compliance-read-any` excludes every
+    #    `service-account-*` principal on its own rule (see there).
     #  - Writes granted by a reason that names the caller. A rule that identifies a specific
     #    verified caller by `input.principal.id` and scopes the action set — e.g.
     #    `service-consent-m2m-marketing`, `m2m-sanctions-screening`,
@@ -1555,6 +1578,26 @@ data:
                                                 # PENDING_APPROVAL state already is. Writes are human-only in
                                                 # treasury_rest_ext.rego.
       - openbank-card-processing-service       # ADR-0283 phase 1 (#8809): the card money path — holds approved spend,
+                                                # applies clearing presentments against the hold and posts cleared
+                                                # spend to the books on the CARD rail through transaction-service.
+                                                # Its threat model has called it money-path since the first commit
+                                                # (docs/threat-models/openbank-card-processing-service.md) but it was
+                                                # never listed here (found with the clearing-idempotency fix, #11990).
+                                                # four-eyes assessed: cardprocessing.authorize/clear/reverse are
+                                                # acquirer automation (M2M, per presentment) — gating them would
+                                                # stop card traffic, not add a second human; the sandbox acquirer is
+                                                # ROLE_ADMIN, off by default and 404 when off. No operator endpoint
+                                                # moves money by hand today — add a verb here when one ships.
+      - openbank-pension-service               # ADR-0334 S1 (#12350): participant-side pension contracts. Listed
+                                                # from the bootstrap, before any money moves: contributions, state
+                                                # incentive receipt/clawback and payouts land in this service in the
+                                                # next slices, and the threat model + two-approval rule must already
+                                                # hold when they do (docs/threat-models/openbank-pension-service.md).
+                                                # four-eyes assessed: S1 exposes no operator write that moves money —
+                                                # create/activate/strategy/suspend/resume/terminate are the
+                                                # participant's own intent through the edge; add a verb when payout
+                                                # or an operator-side correction ships.
+      - openbank-pension-fund-service          # ADR-0334 S4 (#12350): the unit register of segregated pension funds —
 
     money_path_action_prefixes:
       sepa-payment: [sepaPayment]
@@ -1739,6 +1782,7 @@ data:
         scaChallenge.consume:                                          # ADR-0021 settlement gate + ceremonies
           - service-account-openbank-edge                              # scaGate before every money-path forward
           - service-account-openbank-services                          # delegation grant-accept, document-signing (#3734)
+          - service-account-openbank-pension                           # ADR-0335: scope is DATA, see scoped_sca_consumers
 
     feature_flags:
       # Disabling any of these via a flag flip is never permitted — they guard SCA (ADR-0021),
@@ -1755,6 +1799,22 @@ data:
         - lending-disbursement-enabled
 
     authz:
+      # Actions the generic `operator-read-any` rule in rest.rego must NOT grant. That rule admits
+      # any HUMAN principal holding ROLE_OPERATOR/ROLE_ADMIN to every `*.read`/`*.list`, and the
+      # shared service-account (service-account-openbank-services) is classified HUMAN and holds
+      # ROLE_OPERATOR, so without an entry here the action is readable by every backend service.
+      # An action listed here is served ONLY by its service's identity-scoped rules (staff, and the
+      # one named machine caller). Tested must-deny/must-allow in that service's rest_ext test.
+      #
+      # This list vetoes operator-read-any ONLY; compliance-read-any (ROLE_COMPLIANCE, every `.read`)
+      # has no such list, and the shared service-account holds ROLE_COMPLIANCE in the CI realm. So an
+      # entry here does NOT keep the shared account out on its own. For a read that must be closed to
+      # it, name the action with a non-read verb (`.inspect`, `.reconstruct`) instead, as
+      # pension-fund.holding.inspect does (#12481).
+      operator_read_any_excluded_actions:
+        - tax.filing.read             # §38d withholding returns and the per-remittance audit trail behind
+                                      # them (#5760): real staff only via tax_reporting_rest_ext.rego; no
+                                      # service-account reads them through operator-read-any
       role_action_matrix:
         ROLE_OPERATOR:
           grant:
@@ -2067,5 +2127,29 @@ data:
         operator-domestic-payment-write: "1 identity-pinned rule; action coverage unverified"
         operator-party-write: "1 identity-pinned rule, but onboarding-service PUTs party.kyc-status via the shared client (latent: AUTHZ_ENFORCE=false there today)"
       adr: ADR-0034
+
+    scoped_sca_consumers:
+      - principal: service-account-openbank-pension
+        actions: [scaChallenge.consume]
+        purposes: [APPROVAL]
+        approval_request_prefix: "pension-"
+        adr: ADR-0335
+
+    scoped_payment_initiators:
+      - principal: service-account-openbank-pension
+        service: openbank-domestic-payment
+        actions: [domestic-payment.create]
+        # Pays only FROM this account (pension payout account), CZK only (domestic scheme rule).
+        debtor_account_config: openbank.domestic-payment.scoped-initiators.pension.debtor-account-id
+        adr: ADR-0335
+      - principal: service-account-openbank-pension
+        service: openbank-sdd-service
+        actions: [sdd.create, sdd.delete]
+        # Registers/cancels only mandates whose creditor is this SEPA creditor identifier (pension
+        # collection), and registers only on a debtor account account-service verifies is owned
+        # and active by the stated subject party.
+        creditor_identifier_config: openbank.sdd.scoped-initiators.pension.creditor-identifier
+        debtor_party_verified: true
+        adr: ADR-0335
   manifest.json: |
     {"roots": ["openbank/agents", "openbank/copilot", "openbank/rest", "agents", "rules"]}
