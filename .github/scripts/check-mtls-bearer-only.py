@@ -85,6 +85,48 @@ def bearer_paths(flat: dict) -> list[str]:
     return out
 
 
+def _permission_paths(flat: dict, name: str) -> list[str]:
+    return [p.strip() for p in str(flat.get(f"{PERMISSION}.{name}.paths", "")).split(",") if p.strip()]
+
+
+def _specificity(pattern: str) -> tuple[int, int]:
+    """Quarkus chooses the longest matching path; exact beats a wildcard at that point."""
+    prefix = pattern.split("*", 1)[0]
+    return len(prefix), int("*" not in pattern)
+
+
+def _witness(pattern: str) -> str:
+    """A concrete descendant matched by the supported trailing-wildcard forms."""
+    return pattern[:-1] + "listener-auth-probe" if pattern.endswith("/*") else pattern
+
+
+def overriding_permissions(flat: dict, roots: list[str], bearer: list[str]) -> list[str]:
+    """Find a more-specific unshared permission that could defeat broad bearer-only coverage."""
+    names = {k[len(PERMISSION) + 1:].split(".")[0] for k in flat if k.startswith(PERMISSION + ".")}
+    out = []
+    for name in sorted(names):
+        key = f"{PERMISSION}.{name}."
+        if str(flat.get(key + "enabled", "true")).lower() == "false":
+            continue
+        if str(flat.get(key + "shared", "false")).lower() == "true":
+            continue
+        if str(flat.get(key + "auth-mechanism", "")).strip().lower() == "bearer":
+            continue
+        # An unconditional deny does not authenticate a certificate or reach the API.
+        if str(flat.get(key + "policy", "")).strip().lower() == "deny":
+            continue
+        for pattern in _permission_paths(flat, name):
+            witness = _witness(pattern)
+            if not any(witness == root or witness.startswith(root.rstrip("/") + "/") or
+                       _covers(pattern, root) for root in roots):
+                continue
+            methods = str(flat.get(key + "methods", "")).strip()
+            if any(_covers(b, witness) and (_specificity(pattern) > _specificity(b) or
+                   (methods and _specificity(pattern) == _specificity(b))) for b in bearer):
+                out.append(f"{name} ({pattern})")
+    return out
+
+
 _PATH = re.compile(r'^\s*@(?:jakarta\.ws\.rs\.)?Path\(\s*"([^"]*)"\s*\)')
 _DECL = re.compile(r"^\s*(?:(?:public|internal|private|protected|open|abstract|data|final|override|suspend|inline|sealed|enum|annotation|operator)\s+)*(class|interface|object|fun|val|var)\b")
 
@@ -124,6 +166,10 @@ def findings_for(doc, roots: list[str]) -> list[str]:
         uncovered = [r for r in roots if not any(_covers(p, r) for p in patterns)]
         if uncovered:
             out.append(f"{label}: bearer-only paths {patterns} do not cover resource roots {uncovered}")
+        overridden = overriding_permissions(flat, roots, patterns)
+        if overridden:
+            out.append(f"{label}: more-specific non-bearer permissions can override bearer-only coverage: "
+                       f"{overridden}")
     return out
 
 
@@ -160,6 +206,24 @@ def self_test() -> int:
         "      auth:\n        permission:\n          x:\n            paths: /api/*\n"
         "            methods: GET\n            auth-mechanism: bearer\n"
     )
+    overridden = yaml.safe_load(
+        '"%prod":\n  quarkus:\n    http:\n      ssl:\n        client-auth: required\n'
+        "      auth:\n        permission:\n"
+        "          bearer-only:\n            paths: /api/*\n            auth-mechanism: bearer\n"
+        "          narrower:\n            paths: /api/v1/accounts/*\n            policy: authenticated\n"
+    )
+    unrelated = yaml.safe_load(
+        '"%prod":\n  quarkus:\n    http:\n      ssl:\n        client-auth: required\n'
+        "      auth:\n        permission:\n"
+        "          bearer-only:\n            paths: /api/*\n            auth-mechanism: bearer\n"
+        "          other:\n            paths: /status/*\n            policy: authenticated\n"
+    )
+    method_override = yaml.safe_load(
+        '"%prod":\n  quarkus:\n    http:\n      ssl:\n        client-auth: required\n'
+        "      auth:\n        permission:\n"
+        "          bearer-only:\n            paths: /api/*\n            auth-mechanism: bearer\n"
+        "          get-only:\n            paths: /api/*\n            methods: GET\n            policy: authenticated\n"
+    )
     none = yaml.safe_load("quarkus:\n  http:\n    port: 8080\n")
     api = ["/api/v1/sca"]
     checks = [
@@ -170,6 +234,11 @@ def self_test() -> int:
         ("inherited multi-path bearer-only passes", findings_for(inherited, ["/ap2/verify", "/api/v1/x"]) == []),
         ("auth-mechanism other than bearer flagged", len(findings_for(wrong_mech, api)) == 1),
         ("GET-only bearer permission does not protect POST", len(findings_for(get_only, api)) == 1),
+        ("more-specific non-bearer path defeats broad bearer-only", len(findings_for(overridden, ["/api/v1/accounts"])) == 1),
+        ("method-specific non-bearer path defeats same-path bearer-only",
+         len(findings_for(method_override, ["/api/v1/accounts"])) == 1),
+        ("non-bearer permission outside served API does not defeat bearer-only",
+         findings_for(unrelated, ["/api/v1/accounts"]) == []),
         ("no client-auth passes", findings_for(none, api) == []),
         ("/api/* does not cover /apix", not _covers("/api/*", "/apix")),
     ]
