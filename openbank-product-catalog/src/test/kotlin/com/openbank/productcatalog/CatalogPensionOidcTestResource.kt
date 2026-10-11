@@ -15,7 +15,7 @@ import java.time.Duration
 import java.util.UUID
 import kotlin.io.path.readText
 
-/** Isolated Keycloak issuer with synthetic, short-lived service-account credentials. */
+/** Isolated Keycloak issuer with synthetic, short-lived service and human credentials. */
 class CatalogPensionOidcTestResource : QuarkusTestResourceLifecycleManager {
     private var container: GenericContainer<*>? = null
 
@@ -24,13 +24,63 @@ class CatalogPensionOidcTestResource : QuarkusTestResourceLifecycleManager {
         val realm = mapOf(
             "realm" to REALM,
             "enabled" to true,
-            "roles" to mapOf("realm" to listOf(mapOf("name" to "ROLE_API"))),
-            "clientScopes" to listOf(mapOf("name" to "catalog:read", "protocol" to "openid-connect")),
+            "roles" to mapOf(
+                "realm" to listOf(
+                    mapOf("name" to "ROLE_API"),
+                    mapOf("name" to "ROLE_PENSION_LEGAL_COUNSEL"),
+                    mapOf("name" to "ROLE_PENSION_PRODUCT_OWNER"),
+                ),
+            ),
+            "clientScopes" to listOf(
+                mapOf(
+                    "name" to "profile",
+                    "protocol" to "openid-connect",
+                    "protocolMappers" to listOf(
+                        mapOf(
+                            "name" to "username",
+                            "protocol" to "openid-connect",
+                            "protocolMapper" to "oidc-usermodel-attribute-mapper",
+                            "consentRequired" to false,
+                            "config" to mapOf(
+                                "user.attribute" to "username",
+                                "access.token.claim" to "true",
+                                "claim.name" to "preferred_username",
+                                "jsonType.label" to "String",
+                            ),
+                        ),
+                    ),
+                ),
+                mapOf(
+                    "name" to "roles",
+                    "protocol" to "openid-connect",
+                    "protocolMappers" to listOf(
+                        mapOf(
+                            "name" to "realm roles",
+                            "protocol" to "openid-connect",
+                            "protocolMapper" to "oidc-usermodel-realm-role-mapper",
+                            "consentRequired" to false,
+                            "config" to mapOf(
+                                "access.token.claim" to "true",
+                                "claim.name" to "realm_access.roles",
+                                "jsonType.label" to "String",
+                                "multivalued" to "true",
+                            ),
+                        ),
+                    ),
+                ),
+            ) + listOf("catalog:read", "pension:legal-approve", "pension:product-approve")
+                .map { mapOf("name" to it, "protocol" to "openid-connect") },
             "clients" to listOf(
                 client("openbank-pension", secret, catalogRead = true),
                 client("unrelated-service", secret, catalogRead = false),
+                adminClient(secret),
             ),
-            "users" to listOf(serviceUser("openbank-pension"), serviceUser("unrelated-service")),
+            "users" to listOf(
+                serviceUser("openbank-pension"),
+                serviceUser("unrelated-service"),
+                humanUser("legal-reviewer", secret, "ROLE_PENSION_LEGAL_COUNSEL"),
+                humanUser("product-reviewer", secret, "ROLE_PENSION_PRODUCT_OWNER"),
+            ),
         )
         val keycloak = GenericContainer(DockerImageName.parse(upstreamImage()))
             .withExposedPorts(8080)
@@ -81,6 +131,30 @@ class CatalogPensionOidcTestResource : QuarkusTestResourceLifecycleManager {
         "enabled" to true,
         "serviceAccountClientId" to id,
         "realmRoles" to listOf("ROLE_API"),
+    )
+
+    /** Password grant is enabled only in this disposable test realm to obtain real human JWTs. */
+    private fun adminClient(secret: String) = mapOf(
+        "clientId" to "openbank-admin-ui",
+        "secret" to secret,
+        "publicClient" to false,
+        "standardFlowEnabled" to true,
+        "directAccessGrantsEnabled" to true,
+        "serviceAccountsEnabled" to false,
+        "defaultClientScopes" to listOf("profile", "roles"),
+        "optionalClientScopes" to listOf("pension:legal-approve", "pension:product-approve"),
+    )
+
+    private fun humanUser(username: String, password: String, role: String) = mapOf(
+        "username" to username,
+        "email" to "$username@example.invalid",
+        "emailVerified" to true,
+        "firstName" to "Synthetic",
+        "lastName" to "Reviewer",
+        "enabled" to true,
+        "requiredActions" to emptyList<String>(),
+        "credentials" to listOf(mapOf("type" to "password", "value" to password, "temporary" to false)),
+        "realmRoles" to listOf(role),
     )
 
     private companion object {
