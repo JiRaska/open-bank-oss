@@ -175,3 +175,57 @@ test_absent_service_account_field_denies_every_staff_rule if {
 		}
 	}
 }
+
+# --- statutory returns (ADR-0336) ---------------------------------------------------------
+
+sr_actions := {
+	"tax.statutory-return.inspect",
+	"tax.statutory-return.assemble",
+	"tax.statutory-return.approve",
+	"tax.statutory-return.submit",
+}
+
+sr_lifecycle := {"tax.statutory-return.assemble", "tax.statutory-return.approve", "tax.statutory-return.submit"}
+
+test_human_operator_may_do_every_statutory_return_action if {
+	every action in sr_actions {
+		rest.allow with input as {"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"], "service_account": false}, "action": action}
+	}
+}
+
+test_admin_and_auditor_may_inspect_but_not_act if {
+	every role in ["ROLE_ADMIN", "ROLE_AUDITOR", "ROLE_VIEWER", "ROLE_COMPLIANCE"] {
+		rest.allow with input as {"principal": {"type": "HUMAN", "id": "audrey", "roles": [role], "service_account": false}, "action": "tax.statutory-return.inspect"}
+	}
+	every role in ["ROLE_ADMIN", "ROLE_AUDITOR", "ROLE_VIEWER", "ROLE_COMPLIANCE"] {
+		every action in sr_lifecycle {
+			not rest.allow with input as {"principal": {"type": "HUMAN", "id": "audrey", "roles": [role], "service_account": false}, "action": action}
+		}
+	}
+}
+
+test_shared_service_account_denied_every_statutory_return_action_with_any_role if {
+	every role in ["ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE", "ROLE_AUDITOR", "ROLE_VIEWER", "ROLE_API"] {
+		every action in sr_actions {
+			not rest.allow with input as {
+				"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": [role, "ROLE_OPERATOR", "ROLE_ADMIN"], "service_account": true},
+				"action": action,
+			}
+		}
+	}
+}
+
+test_other_service_account_denied_every_statutory_return_action if {
+	every action in sr_actions {
+		not rest.allow with input as {
+			"principal": {"type": "HUMAN", "id": "service-account-openbank-pension", "roles": ["ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE"]},
+			"action": action,
+		}
+	}
+}
+
+test_ai_agent_denied_every_statutory_return_action if {
+	every action in sr_actions {
+		not rest.allow with input as {"principal": {"type": "AI_AGENT", "id": "agent-x", "roles": ["ROLE_OPERATOR"], "service_account": false}, "action": action}
+	}
+}
