@@ -219,3 +219,29 @@ not reversed automatically.
 - Before real-money production launch, reconcile the configured provider with existing data
   and prove identity, database and workflow isolation (#12472). A configuration edit does not
   relabel existing data; synthetic development fixtures are not production ownership evidence.
+
+
+## Catalog transport migration
+
+The catalog adapter reads the API v2 offering and approval projection using pension's own OIDC
+client. The catalog's KEDA interceptor routes only API v1; the supported v2 target is the direct
+8443 listener. Catalog currently retains at least one replica.
+
+The expansion stage provisions a dedicated outbound `pension-service-client-tls` certificate with
+client-auth usage, separate from pension's inbound server key. The production `catalog-authority`
+bucket loads this identity and the private CA trust anchor from `/mnt/catalog-tls`, with TLS 1.3
+and certificate/hostname verification. OIDC authorization remains required: transport identity
+does not grant catalog business permissions. A missing identity or trust file must fail rather
+than silently use an anonymous or trust-all client.
+
+Cutover must follow delivery of a reviewed image containing the client TLS configuration. Only
+then change the catalog URL to its direct HTTPS listener and regenerate catalog ingress policy
+to admit pension. Switching the URL while the old image is pinned would fail mTLS and interrupt
+onboarding. The source expansion alone does not establish that production uses mTLS.
+
+Verification requires the actual catalog REST client to complete a client-authenticated handshake
+and reject a wrong CA and hostname, plus authenticated API v2 and network-policy reachability
+after deployment. Rollback of the cutover restores the prior URL and generated policy together;
+it restores the former transport/routing limitations and is not a security completion claim.
+The additive client identity and listener compatibility can remain during rollback. Other
+plaintext integrations, including pension-fund, are separate remaining transport risks.
