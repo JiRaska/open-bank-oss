@@ -71,6 +71,10 @@ quarkus:
       type: client
 
   rest-client:
+    product-catalog:
+      url: ${PRODUCT_CATALOG_SERVICE_URL:http://localhost:8104}
+      connect-timeout: 2000
+      read-timeout: 5000
     pension-fund-service:
       url: ${PENSION_FUND_SERVICE_URL:http://localhost:8162}
       connect-timeout: 2000
@@ -218,13 +222,21 @@ mp:
         ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
     incoming:
       # #12378: domestic-payment status changes -> payout instruction SETTLED / REJECTED.
-      # group.id / auto.offset.reset are NOT YAML keys here: SmallRye's YAML source quotes a dotted
-      # leaf key and the connector never reads it (#686). They come from the
-      # pension-service-msg-override ConfigMap (override.properties, config_ordinal=500).
       domestic-payment-events-in:
         connector: smallrye-kafka
         topic: openbank.domestic.payment.events
         client.id: pension-service-domestic-payment-${quarkus.uuid}
+        # group.id / auto.offset.reset ship WITH the consumer in this image, NESTED (the dotted
+        # one-liner is quoted by the YAML source and never reaches the connector, #686/#2945). A
+        # GitOps msg-override would declare the channel for whatever image is pinned, and an image
+        # without this connector refuses to boot (SRMSG00071). The group matches the Read ACL in
+        # kafka-pension-mtls.yaml. `latest`: a NEW group starts at the head; the topic only carries
+        # outcomes for payments pension-service itself initiated, all of which post-date it.
+        group:
+          id: pension-service-domestic-payment
+        auto:
+          offset:
+            reset: latest
         value:
           deserializer: org.apache.kafka.common.serialization.StringDeserializer
         # A rethrow parks the record instead of stopping the channel (SmallRye's default `fail`).
@@ -322,3 +334,104 @@ authz:
       incoming:
         domestic-payment-events-in:
           connector: smallrye-in-memory
+
+"%prod":
+  quarkus:
+    tls:
+      catalog-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/catalog-tls/tls.crt
+              key: /mnt/catalog-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/catalog-tls/ca.crt
+        protocols: TLSv1.3
+      account-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/account-tls/tls.crt
+              key: /mnt/account-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/account-tls/ca.crt
+        protocols: TLSv1.3
+      party-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/party-tls/tls.crt
+              key: /mnt/party-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/party-tls/ca.crt
+        protocols: TLSv1.3
+      sca-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/sca-tls/tls.crt
+              key: /mnt/sca-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/sca-tls/ca.crt
+        protocols: TLSv1.3
+      sdd-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/sdd-tls/tls.crt
+              key: /mnt/sdd-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/sdd-tls/ca.crt
+        protocols: TLSv1.3
+      domestic-payment-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/domestic-payment-tls/tls.crt
+              key: /mnt/domestic-payment-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/domestic-payment-tls/ca.crt
+        protocols: TLSv1.3
+      standing-order-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/standing-order-tls/tls.crt
+              key: /mnt/standing-order-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/standing-order-tls/ca.crt
+        protocols: TLSv1.3
+      fund-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/fund-tls/tls.crt
+              key: /mnt/fund-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/fund-tls/ca.crt
+        protocols: TLSv1.3
+    rest-client:
+      product-catalog:
+        tls-configuration-name: catalog-authority
+      account-service:
+        tls-configuration-name: account-authority
+      party-service:
+        tls-configuration-name: party-authority
+      sca-service:
+        tls-configuration-name: sca-authority
+      sdd-service:
+        tls-configuration-name: sdd-authority
+      domestic-payment:
+        tls-configuration-name: domestic-payment-authority
+      standing-order-service:
+        tls-configuration-name: standing-order-authority
+      pension-fund-service:
+        tls-configuration-name: fund-authority

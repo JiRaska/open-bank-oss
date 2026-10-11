@@ -48,6 +48,20 @@ packs are code-reviewed data baked into the image, not runtime input).
 
 ## 4. STRIDE
 
+Questionnaire appropriateness for investment products uses the effective published catalog
+instrument mapping for each offered strategy. Submission stores the mapping revisions and classes
+in the immutable assessment JSON; strategy choice stores the selected per-class decision in the
+application JSON. Choice and signature reject a missing, ambiguous, or changed mapping. Historical
+assessments without this evidence must be answered again before a DIP strategy can be chosen.
+Legacy scale-only submissions are rejected for an appropriateness regime because they cannot
+provide per-class evidence.
+The pre-SCA signature check prevents spending a challenge after the mapping has changed. DPS
+packs without an appropriateness test retain their existing risk-profile warning flow.
+
+Residual: the separate post-onboarding contract strategy-election endpoint does not yet resolve
+the assessment or apply this instrument gate. It must be gated before investment strategy changes
+can use this evidence.
+
 | Threat | Vector | Mitigation in S1 |
 |---|---|---|
 | **Spoofing** | A caller impersonates the participant to open or terminate a contract | Writes reachable only through the edge principal, which authenticates the human and stamps `X-Customer-Party-Id`; an absent header is a 400 (nullable param + `requireNotNull`, #3104) |
@@ -77,9 +91,9 @@ order mis-states a participant's savings.
 `service-pension-unit-register`) admits that one principal id, and only with `ROLE_API`, to
 `pension-fund.holding.inspect`, `pension-fund.order.place` and the reference reads `fund.read`,
 `strategy.read`, `nav.read` — never NAV calculation/approval, fund or strategy administration.
-Every staff write excludes `service-account-*` principals. The non-read `holding.inspect` action
-matches neither base `operator-read-any` nor `compliance-read-any`, so the shared M2M account
-(`ROLE_OPERATOR` and `ROLE_COMPLIANCE`) is denied. Policy tests:
+Every staff write excludes `service-account-*` principals, and the holdings action uses a non-read
+verb so neither base `operator-read-any` nor `compliance-read-any` admits it: the shared M2M
+account is denied whether it holds `ROLE_OPERATOR`, `ROLE_COMPLIANCE` or `ROLE_ADMIN`. Policy tests:
 `pension_fund_rest_ext_test.rego` (`test_pension_service_places_orders_but_cannot_administer`).
 
 | Threat | Vector | Mitigation |
@@ -216,3 +230,55 @@ not reversed automatically.
 - Before real-money production launch, reconcile the configured provider with existing data
   and prove identity, database and workflow isolation (#12472). A configuration edit does not
   relabel existing data; synthetic development fixtures are not production ownership evidence.
+
+
+## Catalog transport migration
+
+The catalog adapter reads the API v2 offering and approval projection using pension's own OIDC
+client. The catalog's KEDA interceptor routes only API v1; the supported v2 target is the direct
+8443 listener. Catalog currently retains at least one replica.
+
+The expansion stage provisions a dedicated outbound `pension-service-client-tls` certificate with
+client-auth usage, separate from pension's inbound server key. The production `catalog-authority`
+bucket loads this identity and the private CA trust anchor from `/mnt/catalog-tls`, with TLS 1.3
+and certificate/hostname verification. OIDC authorization remains required: transport identity
+does not grant catalog business permissions. A missing identity or trust file must fail rather
+than silently use an anonymous or trust-all client.
+
+Cutover must follow delivery of a reviewed image containing the client TLS configuration. Only
+then change the catalog URL to its direct HTTPS listener and regenerate catalog ingress policy
+to admit pension. Switching the URL while the old image is pinned would fail mTLS and interrupt
+onboarding. The source expansion alone does not establish that production uses mTLS.
+
+Verification requires the actual catalog REST client to complete a client-authenticated handshake
+and reject a wrong CA and hostname, plus authenticated API v2 and network-policy reachability
+after deployment. Rollback of the cutover restores the prior URL and generated policy together;
+it restores the former transport/routing limitations and is not a security completion claim.
+The additive client identity and listener compatibility can remain during rollback. Other
+plaintext integrations, including pension-fund, are separate remaining transport risks.
+
+The same expansion sequence prepares account, party and SCA clients using their own named TLS
+authorities and mount paths for the dedicated outbound pension identity. Their existing 8443
+listeners and ingress policies already admit pension; this does not establish deployed reachability.
+Each client must be verified through its actual REST interface with client authentication and
+OIDC before cutover. Keep the current URLs until the reviewed configuration image is delivered.
+The shared CA identifies transport peers; account ownership, party validation and SCA consumption
+continue to enforce their existing business authorization and participant constraints.
+
+Payment clients additionally prepare separate `sdd-authority`, `domestic-payment-authority`
+and `standing-order-authority` TLS buckets using pension's dedicated client-auth identity
+and explicit CA trust from their own read-only mount aliases. The provider manifests prepare
+parallel required-client-auth listeners with distinct server identities. No source expansion
+proves those listeners have issued certificates or are serving in the deployment. Deliver and
+verify both provider listeners and the reviewed pension image before changing caller URLs
+and regenerating ingress policies; existing HTTP edges remain until that reviewed cutover.
+Transport identity does not authorize mandate registration, standing orders or payment creation;
+OIDC, request bindings and each provider's business authorization remain independent controls.
+
+The fund adapter additionally prepares `fund-authority` with explicit private-CA
+trust and pension's client-auth identity from `/mnt/fund-tls`. Its provider already
+declares a TLS 1.3 listener and exact Service DNS certificate SANs, but current
+server configuration does not require client certificates. Client preparation does
+not establish server-side mTLS enforcement. Verify TLS readiness and independent
+OIDC/business authorization before the staged HTTPS URL cutover; require provider
+client authentication only with verified compatibility for its other callers.

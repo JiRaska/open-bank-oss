@@ -17,11 +17,13 @@ import com.openbank.pension.application.port.`in`.StrategyChangeDocument
 import com.openbank.pension.application.port.out.ContractNotFoundException
 import com.openbank.pension.application.port.out.ParticipantNotifier
 import com.openbank.pension.application.port.out.PensionContractRepository
+import com.openbank.pension.application.port.out.StrategyNotPermittedException
 import com.openbank.pension.application.port.out.StrategySuitabilityPort
 import com.openbank.pension.application.port.out.StrategySuitabilityRequest
 import com.openbank.pension.domain.model.ContractStatus
 import com.openbank.pension.domain.model.Limits
 import com.openbank.pension.domain.model.PensionContract
+import com.openbank.pension.domain.model.ProductLine
 import com.openbank.pension.domain.pack.IncentiveResult
 import com.openbank.pension.domain.pack.JurisdictionPackRegistry
 import com.openbank.pension.domain.pack.PackEvaluator
@@ -110,8 +112,13 @@ class PensionContractService(
         }
     }
 
-    override suspend fun submit(caller: Caller, id: UUID) =
-        transition(caller, id, ContractStatus.PENDING_ACTIVATION) { it.submit(clock.instant()) }
+    override suspend fun submit(caller: Caller, id: UUID): PensionContract {
+        val contract = get(caller, id)
+        if (contract.productLine == ProductLine.DIP) {
+            throw StrategyNotPermittedException("DIP submission requires the signed onboarding flow")
+        }
+        return transition(caller, id, ContractStatus.PENDING_ACTIVATION) { it.submit(clock.instant()) }
+    }
 
     override suspend fun list(caller: Caller, status: ContractStatus?, limit: Int): List<PensionContract> {
         val page = limit.coerceIn(1, MAX_LIST)

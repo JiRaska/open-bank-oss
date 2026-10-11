@@ -6,6 +6,7 @@ package com.openbank.pension.infrastructure.onboarding.rest
 
 import com.openbank.pension.application.onboarding.ProfileView
 import com.openbank.pension.application.onboarding.QuestionnaireView
+import com.openbank.pension.domain.onboarding.QuestionnaireRegime
 import com.openbank.pension.domain.onboarding.RiskLabel
 import com.openbank.pension.domain.questionnaire.Dimension
 import com.openbank.pension.domain.questionnaire.Inconsistency
@@ -189,7 +190,15 @@ data class ProfileResponse(
                     )
                 },
                 financialSituationStable = a.answers.financialSituationStable,
-                appropriate = a.appropriate,
+                // Appropriateness is strategy-specific once a catalog mapping is pinned.
+                // The profile has no selected strategy, so the aggregate best-class score is not an answer.
+                appropriate = if (a.strategyInstrumentMappings != null ||
+                    a.regime == QuestionnaireRegime.MIFID_SUITABILITY
+                ) {
+                    null
+                } else {
+                    a.appropriate
+                },
                 competence = record?.competence.orEmpty().map {
                     CompetenceResponse(it.instrumentClass, it.knowledge, it.experience)
                 },

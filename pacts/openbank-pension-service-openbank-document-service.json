@@ -4,43 +4,10 @@
   },
   "interactions": [
     {
-      "description": "POST render with no M2M identity is refused",
-      "providerStates": [
-        {
-          "name": "no valid M2M identity is presented"
-        }
-      ],
-      "request": {
-        "body": {
-          "caseRef": "a0000000-0000-4000-8000-000000000001",
-          "contentType": "application/pdf",
-          "data": {
-            "applicationId": "a0000000-0000-4000-8000-000000000001",
-            "documentType": "PRE_CONTRACTUAL_INFORMATION",
-            "legalReviewRequired": true,
-            "productLine": "DPS",
-            "strategyCode": "BALANCED"
-          },
-          "partyRef": "b0000000-0000-4000-8000-000000000001",
-          "productRef": "pension-dps",
-          "retainUntil": null,
-          "templateCode": "pension-dps-key-information-cs"
-        },
-        "headers": {
-          "Content-Type": "application/json"
-        },
-        "method": "POST",
-        "path": "/api/v1/documents/render"
-      },
-      "response": {
-        "status": 401
-      }
-    },
-    {
       "description": "POST render the pension key-information document for a strategy choice",
       "providerStates": [
         {
-          "name": "the canonical document templates are seeded and published"
+          "name": "a test-only published pension key-information fixture exists"
         }
       ],
       "request": {
@@ -105,6 +72,39 @@
           }
         },
         "status": 201
+      }
+    },
+    {
+      "description": "POST render with no M2M identity is refused",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "body": {
+          "caseRef": "a0000000-0000-4000-8000-000000000001",
+          "contentType": "application/pdf",
+          "data": {
+            "applicationId": "a0000000-0000-4000-8000-000000000001",
+            "documentType": "PRE_CONTRACTUAL_INFORMATION",
+            "legalReviewRequired": true,
+            "productLine": "DPS",
+            "strategyCode": "BALANCED"
+          },
+          "partyRef": "b0000000-0000-4000-8000-000000000001",
+          "productRef": "pension-dps",
+          "retainUntil": null,
+          "templateCode": "pension-dps-key-information-cs"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/documents/render"
+      },
+      "response": {
+        "status": 401
       }
     }
   ],

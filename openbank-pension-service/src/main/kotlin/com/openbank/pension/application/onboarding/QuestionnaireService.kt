@@ -16,7 +16,6 @@ import com.openbank.pension.domain.questionnaire.QuestionnaireProgress
 import com.openbank.pension.domain.questionnaire.QuestionnaireRecord
 import com.openbank.pension.domain.questionnaire.ReassessmentPolicy
 import com.openbank.pension.domain.questionnaire.WarningCode
-import com.openbank.pension.domain.questionnaire.WarningPolicy
 import java.math.BigDecimal
 import java.time.Clock
 import java.time.LocalDate
@@ -151,13 +150,9 @@ class QuestionnaireService(
         val recommendation = onboarding.recommendation(id, partyId)
         return ProfileView(
             assessment = assessment,
-            questionSet = setFor(application),
+            questionSet = setFor(application, assessment),
             recommendation = recommendation,
-            recommendedStrategyWarnings = WarningPolicy.required(
-                recommendation.recommended,
-                assessment,
-                recommendation,
-            ),
+            recommendedStrategyWarnings = onboarding.requiredWarnings(id, partyId, recommendation.recommended),
         )
     }
 
@@ -169,8 +164,7 @@ class QuestionnaireService(
         }
         val assessment =
             checkNotNull(onboarding.assessmentOf(id, partyId)) { "the questionnaire has not been answered" }
-        val recommendation = onboarding.recommendation(id, partyId)
-        return setFor(application) to WarningPolicy.required(strategyCode, assessment, recommendation)
+        return setFor(application, assessment) to onboarding.requiredWarnings(id, partyId, strategyCode)
     }
 
     private fun view(application: OnboardingApplication, previous: SuitabilityAssessment?): QuestionnaireView {
@@ -199,4 +193,8 @@ class QuestionnaireService(
 
     private fun setFor(application: OnboardingApplication): QuestionSet =
         questionSets.questionSet(application.jurisdiction, application.productLine)
+
+    private fun setFor(application: OnboardingApplication, assessment: SuitabilityAssessment): QuestionSet =
+        assessment.questionnaire?.let { questionSets.questionSet(it.questionSetId, it.questionSetVersion) }
+            ?: setFor(application)
 }

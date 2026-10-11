@@ -42,13 +42,6 @@ class UnitRegisterService(private val store: PensionFundStore, private val clock
         require(command.type != OrderType.SWITCH_IN) {
             "SWITCH_IN is created by a settled switch, never placed directly"
         }
-        val source = requireActiveFund(command.fundId)
-        command.targetFundId?.let {
-            val target = requireActiveFund(it)
-            require(source.currency == target.currency) {
-                "cross-currency switches are not supported: ${source.currency} to ${target.currency}"
-            }
-        }
         val order = UnitOrder(
             id = Ids.newId(),
             contractId = command.contractId,
@@ -67,6 +60,15 @@ class UnitRegisterService(private val store: PensionFundStore, private val clock
         store.orderByIdempotencyKey(command.contractId, command.idempotencyKey)?.let { existing ->
             check(existing.sameInstructionAs(order)) { "Idempotency-Key reused for a different order" }
             return existing
+        }
+        // A replay names an already accepted instruction. Its answer must remain available after
+        // the fund closes; only a NEW instruction needs to pass current fund eligibility.
+        val source = requireActiveFund(command.fundId)
+        command.targetFundId?.let {
+            val target = requireActiveFund(it)
+            require(source.currency == target.currency) {
+                "cross-currency switches are not supported: ${source.currency} to ${target.currency}"
+            }
         }
         if (order.isOutgoing) return store.reserveOutgoing(order)
         store.commit(StoreChanges(orders = listOf(order)))

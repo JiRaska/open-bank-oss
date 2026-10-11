@@ -143,6 +143,7 @@ class ContractValuationServiceTest {
             .containsExactly("2026-10-05T10:00:00Z", "2026-10-04T10:00:00Z")
         assertThat(service.transactions(Caller.STAFF, contractId, 2, 2).items).hasSize(1)
         assertThat(service.transactions(Caller.STAFF, contractId, 9, 2).items).isEmpty()
+        assertThat(service.transactions(Caller.STAFF, contractId, Int.MAX_VALUE, 200).items).isEmpty()
     }
 
     @Test

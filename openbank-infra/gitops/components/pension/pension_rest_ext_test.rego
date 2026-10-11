@@ -515,11 +515,13 @@ test_edge_relays_customer_scoped_reads_only if {
 	}
 }
 
-# The verb is what does the work: the same read spelt `.read` IS admitted to the shared client by
-# the base rules — the control that shows the tests above can fail.
-test_a_read_verb_would_reach_the_shared_client if {
+# Generic operator reads remain a positive control for the inspect-verb tests above.
+# Compliance reads separately exclude machines in the base policy; real staff still pass.
+test_read_controls_match_base_identity_policy if {
 	rest.allow with input as {"principal": pension_principal("service-account-openbank-services", ["ROLE_OPERATOR"]), "action": "pension.onboarding.read"}
 		with data.rules as no_exclusions
-	rest.allow with input as {"principal": pension_principal("service-account-openbank-services", ["ROLE_COMPLIANCE"]), "action": "pension.contract.read"}
+	not rest.allow with input as {"principal": pension_principal("service-account-openbank-services", ["ROLE_COMPLIANCE"]), "action": "pension.contract.read"}
+		with data.rules as no_exclusions
+	rest.allow with input as {"principal": pension_principal("alice", ["ROLE_COMPLIANCE"]), "action": "pension.contract.read"}
 		with data.rules as no_exclusions
 }

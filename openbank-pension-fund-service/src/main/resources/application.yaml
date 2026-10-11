@@ -135,3 +135,12 @@ authz:
       enabled: false
   authz:
     enforce: "false"
+
+"%prod":
+  quarkus:
+    http:
+      # Client authentication is fixed during Quarkus augmentation, not by deployment env.
+      ssl:
+        client-auth: required
+      # Retain the HTTP compatibility listener until the reviewed caller cutover.
+      insecure-requests: enabled

@@ -8,7 +8,7 @@ info:
     Debtor-side SEPA Direct Debit (ADR-0036): mandate vault keyed by (creditorIdentifier, UMR),
     lifecycle, fail-closed collection authorisation and refund-window assessment. v1 never moves
     money — an authorised collection is emitted for the ledger/payment path.
-  version: 1.1.1
+  version: 1.2.0
 tags:
   - name: SEPA Direct Debit
 paths:
@@ -50,6 +50,11 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Mandate' }
+        '400': { description: partyId missing for a scoped initiator }
+        '403':
+          description: >-
+            A scoped initiator (ADR-0335 D6) stated a creditor identifier other than its own, or a
+            debtor account that is not an active account of the stated party.
     get:
       tags: [SEPA Direct Debit]
       summary: List an account's mandates
@@ -122,6 +127,7 @@ paths:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
         '200': { description: Cancelled, content: { application/json: { schema: { $ref: '#/components/schemas/Mandate' } } } }
+        '403': { description: A scoped initiator (ADR-0335 D6) may cancel only its own creditor's mandates }
         '409': { description: Illegal transition }
   /api/v1/sdd/mandates/{id}/refund-assessment:
     get:
@@ -177,6 +183,13 @@ components:
         creditorName: { type: string }
         debtorName: { type: string }
         signatureDate: { type: string, format: date }
+        partyId:
+          type: string
+          format: uuid
+          description: >-
+            The debtor party the mandate is for. Required from a scoped initiator (ADR-0335 D6),
+            whose debtor account must be verified by account-service as owned and active by this
+            party; ignored for other callers.
     AmendMandateRequest:
       type: object
       required: [field, newValue]

@@ -6,10 +6,13 @@ package com.openbank.pension.e2e
 
 import com.openbank.pension.application.port.out.PensionContractRepository
 import com.openbank.pension.infrastructure.fund.InMemoryFundAdministrationAdapter
+import com.openbank.pension.integration.QuestionnaireApiIT
+import com.openbank.pension.integration.StrategyCatalogWireMockResource
 import com.openbank.pension.it.PostgresTestResource
 import com.openbank.pension.testsupport.ProviderFixtures
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.vertx.VertxContextSupport
 import io.restassured.RestAssured.given
@@ -50,6 +53,8 @@ import java.util.UUID
  */
 @QuarkusTest
 @QuarkusTestResource(PostgresTestResource::class)
+@QuarkusTestResource(StrategyCatalogWireMockResource::class, restrictToAnnotatedClass = true)
+@TestProfile(QuestionnaireApiIT.CatalogOidcEnabled::class)
 class PensionLifecycleJourneyE2E {
 
     /**
@@ -181,28 +186,18 @@ class PensionLifecycleJourneyE2E {
             .containsExactly(BigDecimal("60"), BigDecimal("40"))
     }
 
-    /** Scenario (f) — DIP happy path: a bank may provide it, and it earns tax relief, never a state contribution. */
+    /** Scenario (f) — direct DIP creation cannot bypass approved mapping and signed onboarding. */
     @Test
     @TestSecurity(user = "edge", roles = ["ROLE_API"])
-    fun `a DIP contract provided by the bank activates and earns tax relief only`() {
+    fun `a direct DIP draft is refused before onboarding and leaves no contract`() {
         val party = UUID.randomUUID()
-        val id = activeContract(party, dip(providerType = "BANK"))
-        val contract = read(party, id).jsonPath()
-        assertThat(contract.getString("productLine")).isEqualTo("DIP")
-        assertThat(contract.getString("providerType")).isEqualTo("BANK")
+        val created = create(party, dip(providerType = "BANK"))
+        assertThat(created.statusCode).describedAs(created.body.asString()).isEqualTo(403)
+        val contracts = given().header(PARTY, party.toString()).`when`().get(BASE)
+        assertThat(contracts.statusCode).describedAs(contracts.body.asString()).isEqualTo(200)
+        assertThat(contracts.jsonPath().getList<Any>("$")).isEmpty()
 
-        val relief = incentives(party, id, contribution = 4000, period = "MONTH")
-        assertThat(relief.getList<String>("incentiveId")).doesNotContain("state-contribution")
-        assertThat(money(relief, "income-tax-deduction")).isEqualByComparingTo("48000.00")
-        // The deduction cap is shared with DPS: a participant who used 30 000 there has 18 000 left.
-        val shared = post(
-            party,
-            "$BASE/$id/incentive-evaluation",
-            """{"contribution":4000,"period":"MONTH","sharedCapUsed":{"retirement-products-deduction":30000}}""",
-        ).jsonPath()
-        assertThat(money(shared, "income-tax-deduction")).isEqualByComparingTo("18000.00")
-
-        // The DPS pack does not permit a bank as provider; the DIP pack does.
+        // The DPS pack does not permit a bank as provider; DIP permits banks only after onboarding.
         assertThat(create(party, dps(monthly = 1000, providerType = "BANK")).statusCode).isEqualTo(400)
     }
 

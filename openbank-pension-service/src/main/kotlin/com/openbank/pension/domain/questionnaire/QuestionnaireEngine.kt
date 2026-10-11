@@ -195,9 +195,9 @@ object QuestionnaireEngine {
         amount.multiply(BigDecimal(percent)).divide(BigDecimal(PERCENT), 0, RoundingMode.HALF_DOWN)
 
     /**
-     * The 0..3 projection the existing assessment stores. Knowledge/experience take the BEST
-     * instrument class (appropriateness asks whether the participant understands the product's
-     * main class at all); null when the set asks none, so the light regime keeps omitting them.
+     * The 0..3 projection the existing assessment stores. Knowledge and experience come from the
+     * same best-scoring instrument class; combining scores from different classes could incorrectly
+     * pass the appropriateness threshold. Null when the set asks none, as in the light regime.
      */
     private fun legacy(
         chosen: List<Pair<Question, AnswerOption>>,
@@ -210,9 +210,10 @@ object QuestionnaireEngine {
         val willingness = scale(Dimension.RISK_WILLINGNESS) ?: 0
         val capacity = scale(Dimension.LOSS_CAPACITY) ?: willingness
         val asksSustainability = set.questions.any { it.dimension == Dimension.SUSTAINABILITY }
+        val bestCompetence = competence.maxByOrNull { it.knowledge + it.experience }
         return QuestionnaireAnswers(
-            knowledgeLevel = competence.maxOfOrNull { it.knowledge },
-            experienceLevel = competence.maxOfOrNull { it.experience },
+            knowledgeLevel = bestCompetence?.knowledge,
+            experienceLevel = bestCompetence?.experience,
             riskAppetite = willingness.coerceIn(QuestionnaireAnswers.SCALE),
             lossTolerance = capacity.coerceIn(QuestionnaireAnswers.SCALE),
             financialSituationStable = stable,
