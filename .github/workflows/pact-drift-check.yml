@@ -129,7 +129,9 @@ jobs:
   drift-check:
     name: Regenerate consumer pacts and diff against committed
     needs: gradle-pacts
-    if: always()
+    # Report failed/skipped shards, but do not allocate a runner for a superseded PR run.
+    # always() launched the aggregator even after all shards were cancelled (run 38101292378).
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
