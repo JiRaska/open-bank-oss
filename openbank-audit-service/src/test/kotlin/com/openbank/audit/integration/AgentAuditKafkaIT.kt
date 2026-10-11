@@ -9,6 +9,7 @@ import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
 import org.apache.kafka.clients.admin.Admin
+import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.apache.kafka.clients.consumer.KafkaConsumer
 import org.apache.kafka.clients.producer.KafkaProducer
 import org.apache.kafka.clients.producer.ProducerRecord
@@ -80,6 +81,7 @@ class AgentAuditKafkaIT {
                 sql(
                     "ALTER TABLE audit_entries ADD CONSTRAINT $constraint CHECK (aggregate_id <> 'resource-$rejected') NOT VALID",
                 )
+                var capturedDeadLetter: ConsumerRecord<String, String>? = null
                 try {
                     KafkaConsumer<String, String>(
                         mapOf(
@@ -99,19 +101,22 @@ class AgentAuditKafkaIT {
                             ),
                         ).get(15, TimeUnit.SECONDS)
                         val deadline = System.nanoTime() + Duration.ofSeconds(30).toNanos()
-                        var deadLetter: String? = null
-                        while (deadLetter == null && System.nanoTime() < deadline) {
-                            deadLetter = dlq.poll(Duration.ofMillis(200)).firstOrNull()?.value()
+                        while (capturedDeadLetter == null && System.nanoTime() < deadline) {
+                            capturedDeadLetter = dlq.poll(Duration.ofMillis(200)).firstOrNull()
                         }
-                        assertThat(deadLetter).isEqualTo(rejectedPayload)
+                        assertThat(capturedDeadLetter?.key()).isEqualTo(rejected.toString())
+                        assertThat(capturedDeadLetter?.value()).isEqualTo(rejectedPayload)
                         awaitCommitted(admin, failed.topic(), failed.partition(), failed.offset() + 1)
                         assertStored(rejected, "resource-$rejected", 0)
                     }
                 } finally {
                     sql("ALTER TABLE audit_entries DROP CONSTRAINT $constraint")
                 }
+                // Recover from the broker's captured DLQ record, not the original in-memory
+                // payload. A transformed or missing DLQ value must fail this proof.
+                val deadLetter = requireNotNull(capturedDeadLetter)
                 val replay = producer.send(
-                    ProducerRecord(AgentAuditKafkaTestResource.INPUT_TOPIC, rejected.toString(), rejectedPayload),
+                    ProducerRecord(AgentAuditKafkaTestResource.INPUT_TOPIC, deadLetter.key(), deadLetter.value()),
                 )
                     .get(15, TimeUnit.SECONDS)
                 awaitCommitted(admin, replay.topic(), replay.partition(), replay.offset() + 1)
