@@ -98,6 +98,15 @@ describe('approval queue evidence contracts', () => {
     expect(parseApprovalInbox({ ...inbox, items: [item] })).toEqual({ ...inbox, items: [{ ...item, makerActorKind: 'UNKNOWN' }] })
   })
 
+  it('rejects a non-string maker kind rather than presenting it as verified', () => {
+    const item = {
+      id: 'approval-7', domain: 'billing', action: 'billing.feeWaiver',
+      resourceId: 'fee-7', maker: 'maker-7', proposedAt: '2026-09-24T10:00:00Z',
+    }
+    expect(parseApprovalInbox({ ...inbox, items: [{ ...item, makerActorKind: ['HUMAN'] }] })).toBeNull()
+    expect(parseApprovalInbox({ ...inbox, items: [{ ...item, makerActorKind: null }] })).toBeNull()
+  })
+
   it('does not infer an AI maker from an agent-shaped display id', () => {
     const item = {
       id: 'legacy-approval-7', domain: 'billing', action: 'billing.feeWaiver',
