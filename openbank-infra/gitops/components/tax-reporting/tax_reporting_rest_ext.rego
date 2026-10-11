@@ -4,7 +4,7 @@
 # Mounted alongside rest.rego in the same OPA bundle — OPA merges same-package rules.
 #
 # Actions gated (TaxFilingResource):
-#   tax.filing.read      — GET /api/v1/tax/filings, /overdue, /{period}, /{period}/remittances,
+#   tax.filing.inspect   — GET /api/v1/tax/filings, /overdue, /{period}, /{period}/remittances,
 #                          /export-capability
 #   tax.filing.assemble  — POST /api/v1/tax/filings/{period}/assemble   (OPEN -> ASSEMBLED)
 #   tax.filing.file      — POST /api/v1/tax/filings/{period}/filed      (ASSEMBLED -> FILED)
@@ -22,12 +22,19 @@ package openbank.rest
 import rego.v1
 
 # Real staff, reading. A tax return is exactly the artefact an auditor needs to see.
+#
+# The new read action deliberately does NOT end in `.read`/`.list`, so neither generic read grant
+# reaches it. The old tax.filing.read is a temporary compatibility alias for images published
+# before this rename: rules.yaml still excludes it from operator-read-any, and #12488 excludes
+# service-accounts from compliance-read-any. Keep both controls until old images have drained.
+#
+# Machine exclusion is the id-prefix test; move to `not principal_is_machine` once #12537 lands.
 allowed_reasons contains "staff-tax-filing-read" if {
 	input.principal.type == "HUMAN"
 	not principal_is_machine
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_AUDITOR", "ROLE_VIEWER", "ROLE_COMPLIANCE"}
 	role in input.principal.roles
-	input.action == "tax.filing.read"
+    input.action in {"tax.filing.inspect", "tax.filing.read"}
 }
 
 # Real operators freeze and file a period. No service-account, whatever roles it holds.
