@@ -111,6 +111,35 @@ class ServiceAccountIdentityTest {
     }
 
     @Test
+    fun `MCP OBO requires positive interactive-human token evidence`() {
+        assertThat(
+            ServiceAccountIdentity.isInteractiveHumanToken(
+                claims("azp" to "openbank-admin-ui", "preferred_username" to "alice").principal,
+            ),
+        ).isTrue()
+        assertThat(
+            ServiceAccountIdentity.isInteractiveHumanToken(
+                claims("azp" to "openbank-edge", "preferred_username" to "alice").principal,
+            ),
+        ).isFalse()
+        assertThat(
+            ServiceAccountIdentity.isInteractiveHumanToken(
+                claims("azp" to "openbank-admin-ui", "preferred_username" to edge).principal,
+            ),
+        ).isFalse()
+        assertThat(
+            ServiceAccountIdentity.isInteractiveHumanToken(
+                claims("azp" to "openbank-admin-ui").principal,
+            ),
+        ).isFalse()
+        assertThat(
+            ServiceAccountIdentity.isInteractiveHumanToken(
+                claims("azp" to "openbank-admin-ui", "preferred_username" to "alice", "client_id" to "batch").principal,
+            ),
+        ).isFalse()
+    }
+
+    @Test
     fun `staff login clients in the deployed realm cannot mint service account tokens`() {
         val realm = ObjectMapper().readTree(File("../openbank-infra/gitops/components/keycloak/realm-template.json"))
         val clients = realm["clients"].associateBy { it["clientId"].asText() }

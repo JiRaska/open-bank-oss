@@ -593,7 +593,7 @@ class AuthorizeInterceptorTest {
         val p = capturePrincipalFor(mapOf("client_id" to "openbank-batch", "azp" to "openbank-batch"), "batch-bot")
         assertThat(p.id).isEqualTo("batch-bot")
         assertThat(p.serviceAccount).isTrue()
-        assertThat(p.clientId).isEqualTo("openbank-batch")
+        assertThat(p.clientId).isNull()
     }
 
     @Test
@@ -603,6 +603,41 @@ class AuthorizeInterceptorTest {
             "alice",
         )
         assertThat(p.serviceAccount).isTrue()
+        assertThat(p.clientId).isNull()
+    }
+
+    @Test
+    fun `a conventional service account binds its client without the optional client_id note`() {
+        val p = capturePrincipalFor(
+            mapOf("azp" to "openbank-edge", "preferred_username" to "service-account-openbank-edge"),
+            "service-account-openbank-edge",
+        )
+        assertThat(p.serviceAccount).isTrue()
+        assertThat(p.clientId).isEqualTo("openbank-edge")
+    }
+
+    @Test
+    fun `a client_id note cannot impersonate a different azp service account`() {
+        val p = capturePrincipalFor(
+            mapOf(
+                "client_id" to "openbank-edge",
+                "azp" to "openbank-unrelated",
+                "preferred_username" to "service-account-openbank-edge",
+            ),
+            "service-account-openbank-edge",
+        )
+        assertThat(p.serviceAccount).isTrue()
+        assertThat(p.clientId).isNull()
+    }
+
+    @Test
+    fun `a service-account name without preferred_username cannot claim a named client`() {
+        val p = capturePrincipalFor(
+            mapOf("client_id" to "openbank-edge", "azp" to "openbank-edge"),
+            "service-account-openbank-edge",
+        )
+        assertThat(p.serviceAccount).isTrue()
+        assertThat(p.clientId).isNull()
     }
 
     @Test

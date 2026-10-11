@@ -60,6 +60,6 @@ This is invisible to a test that mocks the repository — the fleet has shipped 
 
 No customer identifiers, balances or payment data are stored here: this table describes **who may act**, never what they read. The data the session grants access to lives in the services the MCP tools call.
 
-## Caller identity sent to OPA
+## Authorization context sent to OPA
 
-Every `tools/list` filter and every tool-call authorization sends the caller to OPA as `input.principal`, including `service_account`. That flag comes from the caller context and fails closed: it is `true` unless the context was built from a verified token that positively reads as a person. Only the on-behalf-of staff exchange (`resolveOboHuman`) can set it to `false`, and only when `ServiceAccountIdentity.machineClientId(jwt)` finds no machine client in that token. Agent sessions therefore always reach OPA as service accounts, so a policy rule written for real staff cannot admit them on role alone.
+The MCP tool catalog and audit decision pass `ConsentContext.serviceAccount` to the shared OPA principal as `service_account`. Agent contexts default to `true`. A staff on-behalf-of token is admitted only with positive evidence of an interactive client and a human username in the verified JWT, as well as the existing active-session, audience and bounded-role checks. Those admitted human contexts set the flag to `false`; every other OBO candidate is refused. This flag is an authorization input, not a field stored in `agent_session`. The shared policy reads it through `principal_is_machine`, which fails closed: only an explicit `false` makes a person, so an agent session never satisfies a rule written for staff on role alone.

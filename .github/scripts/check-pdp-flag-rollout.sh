@@ -152,19 +152,23 @@ run() {
 }
 
 selftest() {
-  local fail=0 tmp
+  local fail=0 tmp consumer_count
   # Consumer derivation against the real tree.
+  consumer_count="$(consumers | wc -l | tr -d '[:space:]')"
+  echo "SUBJECTS=$consumer_count  # libs-runtime consumers examined by rollout probe"
   consumers | grep -qx openbank-tax-reporting-service || { echo "selftest FAIL: tax-reporting not derived as a libs-runtime consumer" >&2; fail=1; }
   # Ancestry against a throwaway two-commit repo, so the self-test also runs in a shallow clone.
   # Isolated in a subshell with every inherited GIT_* variable cleared: a harness that exports
   # GIT_INDEX_FILE or GIT_DIR would otherwise point the fixture at the real repository.
   tmp="$(mktemp -d)"
   (
-    unset $(env | sed -n 's/^\(GIT_[A-Z_]*\)=.*/\1/p')
+    while IFS='=' read -r name _; do
+      [[ "$name" == GIT_* ]] && unset "$name"
+    done < <(env)
     export GIT_DIR="$tmp/.git" GIT_WORK_TREE="$tmp"
     cd "$tmp" || exit 1
-    git init -q && git -c user.email=t@t -c user.name=t commit -q --allow-empty -m a \
-      && git -c user.email=t@t -c user.name=t commit -q --allow-empty -m b \
+    git init -q && git -c commit.gpgsign=false -c user.email=t@t -c user.name=t commit -q --allow-empty -m a \
+      && git -c commit.gpgsign=false -c user.email=t@t -c user.name=t commit -q --allow-empty -m b \
       || { echo "selftest FAIL: could not build the fixture repo" >&2; exit 1; }
     f=0
     API=0

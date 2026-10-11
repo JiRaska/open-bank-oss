@@ -10,6 +10,8 @@ import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.RestAssured
 import io.restassured.response.Response
 import io.smallrye.reactive.messaging.memory.InMemoryConnector
@@ -72,6 +74,13 @@ class DomesticPaymentOutboxAtomicityIT {
 
     @Test
     @TestSecurity(user = ACTOR_ID, roles = ["ROLE_PAYMENTS"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = ACTOR_ID),
+            Claim(key = "preferred_username", value = ACTOR_ID),
+        ],
+    )
     fun `creating a payment commits the payment row and its outbox row in one transaction`() {
         val created = post("atomicity-it-${UUID.randomUUID()}")
         assertThat(created.statusCode).isEqualTo(201)

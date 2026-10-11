@@ -55,7 +55,7 @@ data class Principal(
      * Defaults to `true` (FAIL CLOSED): a principal is a person only when the PEP has verified it.
      */
     val serviceAccount: Boolean = true,
-    /** The verified client the machine token was issued to (`client_id`/`azp`); `null` for humans. */
+    /** Client bound by verified JWT `azp` and its matching service-account username; `null` otherwise. */
     val clientId: String? = null,
 )
 

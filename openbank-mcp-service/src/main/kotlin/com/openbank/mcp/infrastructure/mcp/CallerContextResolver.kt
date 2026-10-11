@@ -78,6 +78,7 @@ class CallerContextResolver @Inject constructor(
      * runBlocking on the JAX-RS worker thread — no nested blocking bridge on the auth path.
      */
     private suspend fun resolveOboHuman(subject: String): ConsentContext? {
+        if (!ServiceAccountIdentity.isInteractiveHumanToken(jwt)) return null
         val azp = jwt.getClaim<String?>(CLAIM_AZP)?.takeIf { it.isNotBlank() } ?: return null
         val jti = jwt.getClaim<String?>(CLAIM_JTI)?.takeIf { it.isNotBlank() } ?: return null
         if (MCP_AUDIENCE !in audience()) return null
@@ -116,7 +117,7 @@ class CallerContextResolver @Inject constructor(
             sessionId = jti,
             principalType = "HUMAN",
             roles = bounded,
-            serviceAccount = ServiceAccountIdentity.machineClientId(jwt) != null,
+            serviceAccount = false,
         )
     }
 

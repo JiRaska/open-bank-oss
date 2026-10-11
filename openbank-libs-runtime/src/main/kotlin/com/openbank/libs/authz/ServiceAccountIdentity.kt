@@ -50,15 +50,38 @@ object ServiceAccountIdentity {
             jwt.name == username
     }
 
+    /**
+     * MCP OBO requires positive evidence of an interactive staff token before assigning a human
+     * principal. Absence of machine indicators alone is insufficient: an unfamiliar client with
+     * a non-service-account username must not acquire staff policy grants through a live session.
+     */
+    fun isInteractiveHumanToken(principal: Principal?): Boolean {
+        val jwt = principal as? JsonWebToken ?: return false
+        return runCatching {
+            val clientId = jwt.claimString(CLAIM_AZP)
+            val username = jwt.claimString(CLAIM_PREFERRED_USERNAME)
+            clientId in HUMAN_CLIENT_IDS &&
+                !jwt.subject.isNullOrBlank() &&
+                !username.isNullOrBlank() &&
+                !username.startsWith(PRINCIPAL_PREFIX) &&
+                machineClientId(jwt) == null
+        }.getOrDefault(false)
+    }
+
     /** The client id whose OWN service-account issued this token, or `null` if it is not one. */
     fun verifiedClientId(identity: SecurityIdentity?): String? = verifiedClientId(identity?.principal)
 
     /** JAX-RS filters can verify a JWT principal without injecting [SecurityIdentity]. */
     fun verifiedClientId(principal: Principal?): String? {
         val jwt = principal as? JsonWebToken ?: return null
-        if (jwt.subject.isNullOrBlank()) return null
-        val clientId = jwt.claimString(CLAIM_AZP)?.takeIf { it.isNotBlank() } ?: return null
-        return clientId.takeIf { jwt.claimString(CLAIM_PREFERRED_USERNAME) == PRINCIPAL_PREFIX + it }
+        return try {
+            if (jwt.subject.isNullOrBlank()) return null
+            val clientId = jwt.claimString(CLAIM_AZP)?.takeIf { it.isNotBlank() } ?: return null
+            clientId.takeIf { jwt.claimString(CLAIM_PREFERRED_USERNAME) == PRINCIPAL_PREFIX + it }
+        } catch (_: RuntimeException) {
+            // An unreadable claim must never grant a named-client identity or break a request filter.
+            null
+        }
     }
 
     /**
@@ -71,8 +94,10 @@ object ServiceAccountIdentity {
         identity?.principal is JsonWebToken && machineClientId(identity.principal) == null
 
     /**
-     * The verified client of a MACHINE token, or `null` when the verified token is not one — the
-     * value the PEP hands OPA as `input.principal.service_account`/`client_id`.
+     * The client hinted by a MACHINE token, or `null` when the token is not one. This broad
+     * classifier drives `input.principal.service_account`; it is NOT safe to use as the
+     * `input.principal.client_id` proof for a named-client grant. That value must come from
+     * [verifiedClientId], which binds `azp` to the service-account username.
      *
      * Broader than [verifiedClientId] on purpose: that one answers "is this exactly client C's own
      * service-account" (for granting a SPECIFIC client), this one answers "is this a machine at
@@ -114,6 +139,6 @@ object ServiceAccountIdentity {
     /** True iff the caller is the service-account of a client whose CLIENT ID is in [allowedClientIds]. */
     fun isClient(identity: SecurityIdentity?, allowedClientIds: Collection<String>): Boolean =
         verifiedClientId(identity)?.let { it in allowedClientIds } ?: false
-
-    private fun JsonWebToken.claimString(name: String): String? = getClaim<Any?>(name) as? String
 }
+
+private fun JsonWebToken.claimString(name: String): String? = getClaim<Any?>(name) as? String
