@@ -6,6 +6,8 @@ kind: Deployment
 metadata:
   name: sdd-service
   namespace: sdd
+  annotations:
+    openbank.io/port-scoped-ingress: "true"
   labels:
     app.kubernetes.io/name: sdd-service
     app.kubernetes.io/part-of: sdd
@@ -47,9 +49,25 @@ spec:
           ports:
             - name: http
               containerPort: 8129
+            - name: https
+              containerPort: 8443
             - name: management
               containerPort: 8086
           env:
+            # Parallel private-CA mTLS listener for new east-west callers; HTTP/8129 stays
+            # available for existing customer-edge and scanner callers during migration.
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
+              value: /mnt/internal-tls/tls.crt
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
+              value: /mnt/internal-tls/tls.key
+            - name: QUARKUS_HTTP_SSL_PORT
+              value: "8443"
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_TRUST_STORE_FILES
+              value: /mnt/internal-tls/ca.crt
+            - name: QUARKUS_HTTP_SSL_CLIENT_AUTH
+              value: REQUIRED
+            - name: QUARKUS_HTTP_SSL_PROTOCOLS
+              value: TLSv1.3
             - name: QUARKUS_DATASOURCE_JDBC_URL
               value: jdbc:postgresql://sdd-db-rw.sdd.svc:5432/openbank_sdd
             - name: QUARKUS_DATASOURCE_REACTIVE_URL
@@ -180,6 +198,9 @@ spec:
             - name: account-tls
               mountPath: /mnt/account-tls
               readOnly: true
+            - name: internal-tls
+              mountPath: /mnt/internal-tls
+              readOnly: true
             - name: kafka-keystore
               mountPath: /mnt/kafka/keystore
               readOnly: true
@@ -273,6 +294,10 @@ spec:
           secret:
             secretName: sdd-internal-tls
             optional: false
+        - name: internal-tls
+          secret:
+            secretName: sdd-service-server-tls
+            optional: false
 ---
 apiVersion: v1
 kind: Service
@@ -289,6 +314,9 @@ spec:
     - name: http
       port: 8129
       targetPort: http
+    - name: https
+      port: 8443
+      targetPort: https
     - name: management
       port: 8086
       targetPort: management

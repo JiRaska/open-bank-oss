@@ -816,6 +816,8 @@ kind: Rollout
 metadata:
   name: domestic-payment
   namespace: payments
+  annotations:
+    openbank.io/port-scoped-ingress: "true"
   labels:
     app.kubernetes.io/name: domestic-payment
     app.kubernetes.io/part-of: payments
@@ -857,9 +859,23 @@ spec:
           ports:
             - name: http
               containerPort: 8116
+            - name: https
+              containerPort: 8443
             - name: management
               containerPort: 8085
           env:
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
+              value: "/mnt/internal-tls/tls.crt"
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
+              value: "/mnt/internal-tls/tls.key"
+            - name: QUARKUS_HTTP_SSL_PORT
+              value: "8443"
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_TRUST_STORE_FILES
+              value: "/mnt/internal-tls/ca.crt"
+            - name: QUARKUS_HTTP_SSL_CLIENT_AUTH
+              value: "REQUIRED"
+            - name: QUARKUS_HTTP_SSL_PROTOCOLS
+              value: "TLSv1.3"
             - name: QUARKUS_DATASOURCE_JDBC_URL
               value: jdbc:postgresql://domestic-payment-db-rw.payments.svc:5432/openbank_domestic_payment
             - name: QUARKUS_DATASOURCE_REACTIVE_URL
@@ -997,6 +1013,9 @@ spec:
               drop:
                 - ALL
           volumeMounts:
+            - name: internal-server-tls
+              mountPath: /mnt/internal-tls
+              readOnly: true
             - name: document-tls
               mountPath: /mnt/document-tls
               readOnly: true
@@ -1094,6 +1113,9 @@ spec:
               cpu: 100m
               memory: 64Mi
       volumes:
+        - name: internal-server-tls
+          secret:
+            secretName: domestic-payment-server-tls
         - name: aml-tls
           secret:
             secretName: domestic-payment-internal-tls
@@ -1157,6 +1179,9 @@ spec:
     - name: http
       port: 8116
       targetPort: http
+    - name: https
+      port: 8443
+      targetPort: https
 ---
 apiVersion: v1
 kind: Service
@@ -1174,6 +1199,9 @@ spec:
     - name: http
       port: 8116
       targetPort: http
+    - name: https
+      port: 8443
+      targetPort: https
 ---
 # ─────────────────────────────────────────────────────────────────────────────
 # sepa-instant  (port 8127)
@@ -1847,6 +1875,8 @@ kind: Deployment
 metadata:
   name: standing-order-service
   namespace: payments
+  annotations:
+    openbank.io/port-scoped-ingress: "true"
   labels:
     app.kubernetes.io/name: standing-order-service
     app.kubernetes.io/part-of: payments
@@ -1888,9 +1918,23 @@ spec:
           ports:
             - name: http
               containerPort: 8121
+            - name: https
+              containerPort: 8443
             - name: management
               containerPort: 8085
           env:
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
+              value: "/mnt/internal-tls/tls.crt"
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
+              value: "/mnt/internal-tls/tls.key"
+            - name: QUARKUS_HTTP_SSL_PORT
+              value: "8443"
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_TRUST_STORE_FILES
+              value: "/mnt/internal-tls/ca.crt"
+            - name: QUARKUS_HTTP_SSL_CLIENT_AUTH
+              value: "REQUIRED"
+            - name: QUARKUS_HTTP_SSL_PROTOCOLS
+              value: "TLSv1.3"
             - name: QUARKUS_DATASOURCE_JDBC_URL
               value: jdbc:postgresql://standing-order-db-rw.payments.svc:5432/openbank_standing_orders
             - name: QUARKUS_DATASOURCE_REACTIVE_URL
@@ -2006,6 +2050,9 @@ spec:
               drop:
                 - ALL
           volumeMounts:
+            - name: internal-server-tls
+              mountPath: /mnt/internal-tls
+              readOnly: true
             - name: tmp
               mountPath: /tmp
             - name: kafka-keystore
@@ -2093,6 +2140,9 @@ spec:
               cpu: 100m
               memory: 64Mi
       volumes:
+        - name: internal-server-tls
+          secret:
+            secretName: standing-order-service-server-tls
         - name: tmp
           emptyDir: {}
         - name: kafka-keystore
@@ -2121,6 +2171,9 @@ spec:
     - name: http
       port: 8121
       targetPort: http
+    - name: https
+      port: 8443
+      targetPort: https
 ---
 # ─────────────────────────────────────────────────────────────────────────────
 # card-issuance-service  (port 8118)

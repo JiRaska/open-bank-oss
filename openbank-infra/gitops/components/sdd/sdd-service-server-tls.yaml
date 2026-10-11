@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Private-CA server certificate for sdd-service's parallel east-west mTLS listener (8443).
+# Kept separate from sdd-internal-tls, which is the outbound client identity for account-service.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: sdd-service-server-tls
+  namespace: sdd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  secretName: sdd-service-server-tls
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  dnsNames:
+    - sdd-service.sdd.svc
+    - sdd-service.sdd.svc.cluster.local
+  usages:
+    - server auth
+  issuerRef:
+    name: openbank-ca
+    kind: ClusterIssuer
+    group: cert-manager.io
