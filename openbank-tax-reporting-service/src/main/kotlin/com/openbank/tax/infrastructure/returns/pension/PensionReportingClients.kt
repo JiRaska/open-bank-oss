@@ -42,8 +42,8 @@ interface PensionFundReportingClient {
     ): FundPeriodFiguresDto
 }
 
-/** pension-service's `GET /api/v1/pension/reporting/participant-aggregates` (its openapi.yaml). */
-@Path("/api/v1/pension/reporting")
+/** pension-service's `GET /api/v2/pension/reporting/participant-aggregates` (its openapi.yaml). */
+@Path("/api/v2/pension/reporting")
 @Produces(MediaType.APPLICATION_JSON)
 @OidcClientFilter
 @RegisterRestClient(configKey = "pension-service")

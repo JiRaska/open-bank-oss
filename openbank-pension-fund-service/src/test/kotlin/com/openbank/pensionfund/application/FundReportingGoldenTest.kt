@@ -144,6 +144,10 @@ class FundReportingGoldenTest {
         assertThat(pl.profitLoss).isEqualByComparingTo(
             pl.revaluationGains!! - pl.revaluationLosses!! + pl.otherInvestmentResult!! - pl.managementFees,
         )
+        // Deprecated 1.1.0 fields agree with the lines and stay non-negative.
+        assertThat(pl.income - pl.expenses).isEqualByComparingTo(pl.profitLoss)
+        assertThat(pl.income.signum()).isGreaterThanOrEqualTo(0)
+        assertThat(pl.expenses.signum()).isGreaterThanOrEqualTo(0)
         // Unit roll-forward.
         assertThat(r.units.closing).isEqualByComparingTo(r.units.opening + r.units.issued - r.units.cancelled)
         // Entitlement roll-forward; closing entitlements are the fund's equity.

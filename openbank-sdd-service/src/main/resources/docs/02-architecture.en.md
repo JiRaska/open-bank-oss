@@ -140,3 +140,12 @@ The dispatcher runs on the Vert.x event loop (returns `Uni<Void>`), so reactive 
 3. **Pure domain, no wall clock** — lifecycle and refund arithmetic take an explicit `asOf`/clock seam; no remote calls inside the transaction.
 4. **Transactional outbox** — the mandate write and the event insert share one transaction; async delivery via the dispatcher.
 5. **v1 never moves money** — an ACCEPT emits an event for the downstream posting path; the irreversible debit/refund posting is delegated.
+
+## Scoped mandate initiators (ADR-0335 D6)
+
+`ScopedMandateService` limits pension-service to mandates whose `creditorIdentifier` is its
+configured SEPA creditor identifier (`OPENBANK_SDD_SCOPED_INITIATORS_PENSION_CREDITOR_IDENTIFIER`).
+It must state the subject `partyId`, and account-service's ownership projection, called over mTLS,
+must confirm the debtor IBAN is owned and active by that party and names the mandated account.
+Pension may cancel only its own creditor's mandates. Every refusal is a 403 before anything is
+persisted.
