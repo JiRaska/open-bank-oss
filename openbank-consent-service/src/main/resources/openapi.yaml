@@ -5,7 +5,7 @@ info:
   title: Consent Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.0 -> 1.1): additive
   # endpoint only (PATCH /approvals/{id}, ADR-0155 four-eyes) — no breaking change.
-  version: 1.13.0
+  version: 1.14.0
   description: >-
     Data sharing consent lifecycle — create, activate, reject, revoke, validate. GET /approvals
     lists pending four-eyes work for checkers; PATCH /approvals/{id} decides an approval paused by
@@ -336,6 +336,8 @@ paths:
     post:
       tags: [Suppressions]
       summary: Create a do-not-contact suppression (ADR-0219 D3)
+      security:
+        - bearerAuth: []
       description: >-
         Idempotent on the natural key (partyId, scope, value) over ACTIVE rows: a retried create
         replays the original suppression — no duplicate row, no second event (ADR-0293). A revoked
@@ -356,6 +358,8 @@ paths:
                 $ref: '#/components/schemas/SuppressionResponse'
         '400':
           description: Invalid entry (ALL takes no value; SCOPE/TOPIC require one)
+        '401':
+          description: Missing or invalid authentication
         '403':
           $ref: '#/components/responses/Forbidden'
 
@@ -363,6 +367,8 @@ paths:
     get:
       tags: [Suppressions]
       summary: List a party's active suppressions — the contact-policy gate's read
+      security:
+        - bearerAuth: []
       operationId: listActiveSuppressions
       parameters:
         - name: partyId
@@ -380,6 +386,8 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/SuppressionResponse'
+        '401':
+          description: Missing or invalid authentication
         '403':
           $ref: '#/components/responses/Forbidden'
 
@@ -387,6 +395,8 @@ paths:
     post:
       tags: [Suppressions]
       summary: Revoke a suppression entry
+      security:
+        - bearerAuth: []
       operationId: revokeSuppression
       parameters:
         - name: id
@@ -406,6 +416,8 @@ paths:
           description: No suppression with that id
         '409':
           description: Already revoked
+        '401':
+          description: Missing or invalid authentication
         '403':
           $ref: '#/components/responses/Forbidden'
 
@@ -427,7 +439,7 @@ components:
 
   responses:
     Forbidden:
-      description: Authenticated but denied by the OPA authorization policy (ADR-0034)
+      description: Authenticated but denied by a role gate or the OPA authorization policy (ADR-0034)
       content:
         application/json:
           schema:
