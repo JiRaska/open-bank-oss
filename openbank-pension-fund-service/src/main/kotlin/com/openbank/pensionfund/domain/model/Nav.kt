@@ -10,7 +10,12 @@ import java.time.LocalDate
 import java.util.UUID
 
 /** A priced position held by the fund at its depositary. */
-data class PricedPosition(val instrumentId: String, val quantity: BigDecimal, val price: BigDecimal) {
+data class PricedPosition(
+    val instrumentId: String,
+    val quantity: BigDecimal,
+    val price: BigDecimal,
+    val instrumentClass: InstrumentClass = InstrumentClass.UNCLASSIFIED,
+) {
     init {
         require(instrumentId.isNotBlank()) { "instrumentId must not be blank" }
         require(quantity.signum() >= 0) { "quantity must not be negative" }
