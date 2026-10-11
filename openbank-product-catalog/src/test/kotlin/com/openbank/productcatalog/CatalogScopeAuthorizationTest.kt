@@ -140,7 +140,14 @@ class CatalogScopeAuthorizationTest {
 
     @Test
     @TestSecurity(user = "service-account-openbank-pension", augmentors = [CatalogScopeIdentityAugmentor::class])
-    @OidcSecurity(claims = [Claim(key = "scope", value = "catalog:read")])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "scope", value = "catalog:read"),
+            Claim(key = "azp", value = "openbank-pension"),
+            Claim(key = "sub", value = "pension-test-subject"),
+            Claim(key = "preferred_username", value = "service-account-openbank-pension"),
+        ],
+    )
     fun pensionM2mScopePassesTheThreeCatalogReadRoleChecksOnly() {
         given().get("/api/v2/offerings").then().statusCode(200)
         given().get("/api/v2/products/00000000-0000-0000-0000-000000000001")

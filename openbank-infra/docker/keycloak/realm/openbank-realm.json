@@ -1075,6 +1075,7 @@
       "protocol": "openid-connect",
       "defaultClientScopes": [
         "openid",
+        "basic",
         "profile",
         "roles",
         "catalog:read"

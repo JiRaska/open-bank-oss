@@ -49,8 +49,14 @@ class CatalogPensionOidcApprovalIT {
     fun `pension service JWT gains scoped read and unrelated service JWT is forbidden`() {
         val path = "/api/v2/offerings/${UUID.randomUUID()}/revisions/${UUID.randomUUID()}/pension-approvals"
         given().get(path).then().statusCode(401)
-        given().auth().oauth2(serviceToken("unrelated-service")).get(path).then().statusCode(403)
-        given().auth().oauth2(serviceToken("openbank-pension")).get(path).then().statusCode(404)
+        val unrelated = serviceToken("unrelated-service")
+        assertThat(jwtPayload(unrelated).path("scope").asText().split(' ')).contains("catalog:read")
+        assertThat(jwtPayload(unrelated).path("sub").asText()).isNotBlank()
+        given().auth().oauth2(unrelated).get("/api/v2/offerings").then().statusCode(200)
+        given().auth().oauth2(unrelated).get(path).then().statusCode(403)
+        val pension = serviceToken("openbank-pension")
+        assertThat(jwtPayload(pension).path("sub").asText()).isNotBlank()
+        given().auth().oauth2(pension).get(path).then().statusCode(404)
     }
 
     @Test
