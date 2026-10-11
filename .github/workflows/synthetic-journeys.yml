@@ -10,6 +10,7 @@ name: Synthetic journeys
 on:
   pull_request:
     paths:
+      - ".github/scripts/collect-test-run-evidence.py"
       - ".github/scripts/check-journey-catalog.py"
       - ".github/scripts/check-journey-coverage.py"
       - ".github/workflows/synthetic-journeys.yml"
