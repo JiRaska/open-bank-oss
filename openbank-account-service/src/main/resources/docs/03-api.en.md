@@ -10,6 +10,12 @@
 
 All endpoints require a **Keycloak Bearer token** with realm `openbank`. Mutating operations are additionally role-gated:
 
+In production, the `/api/*` routes use bearer authentication on both listeners. The plain HTTP
+listener is on port 8100. The TLS listener on port 8443 also requires a trusted client
+certificate for the connection, but that certificate does not authenticate an API caller by
+itself: a request without a bearer token receives 401. The same route role checks apply on
+either port. OPA decisions are enforced only when `AUTHZ_ENFORCE=true`.
+
 | Role | Rights |
 |---|---|
 | `ROLE_VIEWER` | GET only |

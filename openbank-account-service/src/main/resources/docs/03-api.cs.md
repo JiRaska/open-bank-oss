@@ -10,6 +10,12 @@
 
 Všechny endpointy vyžadují **Keycloak Bearer token** s realm `openbank`. Mutační operace navíc role-gated:
 
+V produkci používají trasy `/api/*` autentizaci bearer tokenem na obou portech. Běžný HTTP
+port je 8100. TLS port 8443 navíc vyžaduje důvěryhodný klientský certifikát pro navázání
+spojení, samotný certifikát však volajícího API neautentizuje: požadavek bez bearer tokenu
+vrací 401. Na obou portech platí stejné kontroly rolí u jednotlivých tras. Rozhodnutí OPA se
+vynucují pouze při `AUTHZ_ENFORCE=true`.
+
 | Role | Práva |
 |---|---|
 | `ROLE_VIEWER` | GET only |
