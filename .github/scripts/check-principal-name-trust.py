@@ -42,10 +42,7 @@ OPT_OUT = "principal-name-trust: allow"
 
 # Known sites, each tied to the issue/PR that removes it. An entry whose file no longer produces a
 # finding is itself reported (stale), so this list can only shrink.
-KNOWN_PENDING = {
-    # #12447 rebinds pension's relay to azp; left out of the fleet sweep so the two PRs don't fight.
-    "openbank-pension-service/src/main/kotlin/com/openbank/pension/infrastructure/authz/ContractAccessGuard.kt": "#12447",
-}
+KNOWN_PENDING: dict[str, str] = {}
 SKIP_DIRS = {".git", "build", "node_modules", ".gradle", "worktrees"}
 
 
