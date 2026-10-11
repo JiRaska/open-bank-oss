@@ -5,6 +5,7 @@
 package com.openbank.pension.infrastructure.catalog
 
 import com.github.tomakehurst.wiremock.WireMockServer
+import com.github.tomakehurst.wiremock.client.WireMock.equalToJson
 import com.github.tomakehurst.wiremock.client.WireMock.get
 import com.github.tomakehurst.wiremock.client.WireMock.okJson
 import com.github.tomakehurst.wiremock.client.WireMock.post
@@ -24,6 +25,8 @@ enum class CatalogTlsScenario {
     WRONG_CA,
     WRONG_HOSTNAME,
 }
+
+private const val TEST_APPROVAL_HASH = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 
 /** WireMock peers owned by the currently active, class-scoped test resource. */
 internal data class CatalogTlsServers(val token: WireMockServer, val catalog: WireMockServer)
@@ -102,6 +105,24 @@ private class CatalogTlsFixture(private val scenario: CatalogTlsScenario) {
                 "quarkus.tls.catalog-authority.key-store.pem.client.key" to clientKey.toString(),
                 "quarkus.tls.catalog-authority.trust-store.pem.certs" to serverTrust.toString(),
                 "quarkus.tls.catalog-authority.protocols" to "TLSv1.3",
+                "quarkus.rest-client.account-service.url" to "https://localhost:${catalog.httpsPort()}",
+                "quarkus.rest-client.account-service.tls-configuration-name" to "account-authority",
+                "quarkus.tls.account-authority.key-store.pem.client.cert" to clientCertificate.toString(),
+                "quarkus.tls.account-authority.key-store.pem.client.key" to clientKey.toString(),
+                "quarkus.tls.account-authority.trust-store.pem.certs" to serverTrust.toString(),
+                "quarkus.tls.account-authority.protocols" to "TLSv1.3",
+                "quarkus.rest-client.party-service.url" to "https://localhost:${catalog.httpsPort()}",
+                "quarkus.rest-client.party-service.tls-configuration-name" to "party-authority",
+                "quarkus.tls.party-authority.key-store.pem.client.cert" to clientCertificate.toString(),
+                "quarkus.tls.party-authority.key-store.pem.client.key" to clientKey.toString(),
+                "quarkus.tls.party-authority.trust-store.pem.certs" to serverTrust.toString(),
+                "quarkus.tls.party-authority.protocols" to "TLSv1.3",
+                "quarkus.rest-client.sca-service.url" to "https://localhost:${catalog.httpsPort()}",
+                "quarkus.rest-client.sca-service.tls-configuration-name" to "sca-authority",
+                "quarkus.tls.sca-authority.key-store.pem.client.cert" to clientCertificate.toString(),
+                "quarkus.tls.sca-authority.key-store.pem.client.key" to clientKey.toString(),
+                "quarkus.tls.sca-authority.trust-store.pem.certs" to serverTrust.toString(),
+                "quarkus.tls.sca-authority.protocols" to "TLSv1.3",
             )
         }
 
@@ -160,6 +181,67 @@ private class CatalogTlsFixture(private val scenario: CatalogTlsScenario) {
         catalog.start()
         catalogServerStarted = true
         catalog.stubFor(get(urlEqualTo("/api/v2/offerings")).willReturn(okJson("[]")))
+        catalog.stubFor(
+            post(urlEqualTo("/api/v1/accounts/ownership-verifications"))
+                .withRequestBody(
+                    equalToJson(
+                        """
+                            {
+                              "iban": "CZ0000000000000000000000",
+                              "partyId": "66666666-7777-4888-8999-aaaaaaaaaaaa"
+                            }
+                        """.trimIndent(),
+                    ),
+                )
+                .willReturn(
+                    okJson(
+                        """{"owned":true,"active":true,"accountId":"11111111-2222-4333-8444-555555555555"}""",
+                    ),
+                ),
+        )
+        catalog.stubFor(
+            get(urlEqualTo("/api/v1/parties/d1d1d1d1-e2e2-4f4f-8a8a-b1b1b1b1b1b1"))
+                .willReturn(
+                    okJson(
+                        """
+                            {
+                              "id": "d1d1d1d1-e2e2-4f4f-8a8a-b1b1b1b1b1b1",
+                              "partyType": "INDIVIDUAL",
+                              "status": "ACTIVE",
+                              "legalName": "Pact Joint Signatory",
+                              "kycStatus": "APPROVED"
+                            }
+                        """.trimIndent(),
+                    ),
+                ),
+        )
+        catalog.stubFor(
+            post(urlEqualTo("/api/v1/sca/challenges/7e5a0001-0000-4000-8000-000000000335/consume"))
+                .withRequestBody(
+                    equalToJson(
+                        """
+                            {
+                              "partyId": "7e5a0002-0000-4000-8000-000000000335",
+                              "approvalRequestId": "pension-exit:$TEST_APPROVAL_HASH",
+                              "payloadSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+                            }
+                        """.trimIndent(),
+                    ),
+                )
+                .willReturn(
+                    okJson(
+                        """
+                            {
+                              "id": "7e5a0001-0000-4000-8000-000000000335",
+                              "partyId": "7e5a0002-0000-4000-8000-000000000335",
+                              "purpose": "APPROVAL",
+                              "status": "COMPLETED",
+                              "consumedAt": "2026-10-10T08:00:00Z"
+                            }
+                        """.trimIndent(),
+                    ),
+                ),
+        )
         return CatalogTlsServers(tokenServer, catalog)
     }
 
