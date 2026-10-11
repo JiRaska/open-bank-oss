@@ -134,6 +134,6 @@ object ServiceAccountIdentity {
     /** True iff the caller is the service-account of a client whose CLIENT ID is in [allowedClientIds]. */
     fun isClient(identity: SecurityIdentity?, allowedClientIds: Collection<String>): Boolean =
         verifiedClientId(identity)?.let { it in allowedClientIds } ?: false
-
-    private fun JsonWebToken.claimString(name: String): String? = getClaim<Any?>(name) as? String
 }
+
+private fun JsonWebToken.claimString(name: String): String? = getClaim<Any?>(name) as? String
