@@ -67,6 +67,12 @@ dependencies {
 }
 
 kover {
+    currentProject {
+        instrumentation {
+            // Keep service coverage probes; dependency bytecode is outside this report.
+            includedClasses.add("com.openbank.pension.*")
+        }
+    }
     reports {
         filters {
             excludes {
