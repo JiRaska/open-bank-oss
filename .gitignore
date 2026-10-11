@@ -226,6 +226,8 @@ openbank-admin-ui/test-run-history/
 # Generated AWS Cost Explorer snapshot baked into the admin-ui image at build
 # time (scripts/collect-aws-costs.mjs). Derived billing data — never committed.
 openbank-admin-ui/cost-report.json
+# Build-derived FinOps showback taxonomy from rules.yaml; never hand-edit.
+openbank-admin-ui/finops-cost-groups.json
 # Generated repo-derived production-readiness scorecard baked at build time
 # (scripts/prod-readiness-collector.py). Derived — never committed (rule #7).
 openbank-admin-ui/prod-readiness.json
