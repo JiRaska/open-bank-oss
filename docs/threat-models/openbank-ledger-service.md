@@ -622,3 +622,12 @@ set) apply equally to the new `ledger.approval.decide` action.
   turns `opa test` red. RBAC unchanged. Rollback: revert the annotation and the two rego reasons together.
   Same change: a cron job switched `off` no longer registers a workflow-liveness gauge (no security
   surface; removes a stale-alert source on instances that run without it).
+
+- **2026-10-11** — **mTLS client certificates establish transport trust, not ledger API identity
+  (#12511).** The production `/api/*` permission selects the bearer authentication mechanism on
+  both the HTTPS and plain HTTP listeners. A trusted workload certificate without a bearer must
+  receive 401; a valid bearer must reach the same accounting-day handler on both listeners. The
+  real-listener parity test exercises certificate-free handshake refusal, certificate-only denial,
+  plain HTTP denial and valid-bearer acceptance with ephemeral test keys. OPA and method roles
+  continue to authorize business operations independently. Rollback requires restoring a
+  separately reviewed bearer-only permission before removing this one.

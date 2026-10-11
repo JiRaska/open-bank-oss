@@ -241,3 +241,11 @@ openbank:
       # readiness probe and every in-cluster plaintext caller get `connection refused`.
       # mTLS applies to the 8443 listener only. Runtime property; see #10441.
       insecure-requests: enabled
+      # The client certificate authenticates transport only. API identity and OPA authorization
+      # must still come from an OIDC bearer on both the HTTPS and plain HTTP listeners (#12511).
+      auth:
+        permission:
+          bearer-only:
+            paths: /api/*
+            policy: permit
+            auth-mechanism: bearer
