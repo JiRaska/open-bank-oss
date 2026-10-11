@@ -19,7 +19,7 @@ This documentation is published by the service at the management endpoint `/q/op
 |---|---|
 | `POST/GET /api/v1/funds`, `GET/PUT/DELETE /api/v1/funds/{id}` | Fund administration; closing is refused while units are outstanding |
 | `POST/GET /api/v1/funds/{id}/navs` | Calculate a NAV (maker) or list them |
-| `POST /api/v1/navs/{id}/approve` · `/reject` | Publish (checker): this settles queued orders, or re-prices transactions for a correction |
+| `POST /api/v1/navs/{id}/approve` · `/reject` | Publish (checker): this settles queued orders. Correction publication returns 409 until durable compensation accounting is implemented (#12473). |
 | `POST/GET /api/v1/strategies`, `GET /api/v1/strategies/{id}` | Strategies: target allocation, bands, glide path |
 | `GET /api/v1/strategies/{id}/allocation?yearsToRetirement=` | The glide-path allocation for a participant |
 | `POST /api/v1/strategies/{id}/changes`, `POST /api/v1/strategy-changes/{id}/approve` · `/reject` · `/apply` | Governed change: a second approver and a notice period before it applies |
