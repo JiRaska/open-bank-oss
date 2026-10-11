@@ -63,12 +63,15 @@ class Cred:
         self.name = _field(doc, r"name:\s*([a-z0-9.-]+)") or "?"
         self.namespace = _field(doc, r"namespace:\s*([a-z0-9.-]+)") or "?"
         self.keys = re.findall(r"^\s*key:\s*([A-Za-z0-9_./-]+)", doc, re.M)
+        self.source_unknown = True
         parsed = _yaml_text_documents(doc)
         if parsed is not None and len(parsed) == 1:
             source_keys = _source_keys(parsed[0])
             if source_keys is not None:
                 self.keys = source_keys
-        self.dynamic = bool(self.keys) and all(DYNAMIC_KEY.search(k) for k in self.keys)
+                self.source_unknown = False
+        self.dynamic = (not self.source_unknown and bool(self.keys)
+                        and all(DYNAMIC_KEY.search(k) for k in self.keys))
         self.operator_managed = False
         ann_block = re.search(r"annotations:\n((?:\s{4,}[^\n]*\n?)*)", doc)
         self.annotations = ann_block.group(1) if ann_block else ""
@@ -76,7 +79,7 @@ class Cred:
 
     @property
     def static(self) -> bool:
-        return bool(self.keys) and not self.dynamic and not self.operator_managed
+        return (bool(self.keys) or self.source_unknown) and not self.dynamic and not self.operator_managed
 
 
 class _UniqueKeyLoader(getattr(yaml, "CSafeLoader", yaml.SafeLoader) if yaml else object):
@@ -448,7 +451,7 @@ def self_test() -> int:
     today = dt.date(2026, 9, 4)
     doc_static = (
         "kind: ExternalSecret\nmetadata:\n  name: foo-oidc\n  namespace: foo\n"
-        "spec:\n  target:\n    name: foo-oidc\n  data:\n  - remoteRef:\n      key: account-service\n")
+        "spec:\n  target:\n    name: foo-oidc\n  data:\n  - secretKey: password\n    remoteRef:\n      key: account-service\n")
     c = Cred(doc_static, Path("x.yaml"))
     if not c.static or c.dynamic:
         print("self-test FAIL: static classification"); bad += 1
@@ -463,7 +466,13 @@ def self_test() -> int:
                 "    - secretKey: password\n      remoteRef: {key: static-api-key}\n")
     if not Cred(doc_flow, Path("x.yaml")).static:
         print("self-test FAIL: flow mapping static source was ignored"); bad += 1
-    doc_mixed = doc_dyn + "  - remoteRef:\n      key: static-api-key\n"
+    doc_unknown = ("kind: ExternalSecret\nspec:\n  dataFrom:\n"
+                   "    - find: {name: {regexp: 'credentials-.*'}}\n")
+    if not Cred(doc_unknown, Path("x.yaml")).static:
+        print("self-test FAIL: unknown source format bypassed static deadline"); bad += 1
+    if not Cred("kind: ExternalSecret\nspec: [invalid\n", Path("x.yaml")).static:
+        print("self-test FAIL: malformed source bypassed static deadline"); bad += 1
+    doc_mixed = doc_dyn + "  - secretKey: api-key\n    remoteRef:\n      key: static-api-key\n"
     if not Cred(doc_mixed, Path("x.yaml")).static:
         print("self-test FAIL: mixed dynamic/static sources bypassed static deadline"); bad += 1
     doc_ok = doc_static.replace("metadata:\n",
