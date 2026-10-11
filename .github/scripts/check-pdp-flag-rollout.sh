@@ -152,7 +152,17 @@ run() {
 }
 
 selftest() {
-  local fail=0 marker parent
+  local fail=0 marker parent tmp
+  # Consumer derivation against the real tree.
+  consumers | grep -qx openbank-tax-reporting-service || { echo "selftest FAIL: tax-reporting not derived as a libs-runtime consumer" >&2; fail=1; }
+  # Ancestry against a throwaway two-commit repo, so the self-test also runs in a shallow clone.
+  tmp="$(mktemp -d)"
+  (
+    cd "$tmp" && git init -q && git -c user.email=t@t -c user.name=t commit -q --allow-empty -m a \
+      && git -c user.email=t@t -c user.name=t commit -q --allow-empty -m b
+  ) || { echo "selftest FAIL: could not build the fixture repo" >&2; return 1; }
+  pushd "$tmp" >/dev/null
+  API=0
   marker="$(git rev-parse HEAD)"
   parent="$(git rev-parse HEAD~1)"
   pin_is_current "$marker" "${marker:0:12}" || { echo "selftest FAIL: HEAD pin not current vs HEAD marker" >&2; fail=1; }
@@ -160,7 +170,8 @@ selftest() {
   if pin_is_current "$marker" "${parent:0:12}"; then echo "selftest FAIL: an OLDER pin read as current" >&2; fail=1; fi
   if pin_is_current "$marker" "000000000"; then echo "selftest FAIL: a placeholder read as current" >&2; fail=1; fi
   if pin_is_current "$marker" "deadbeefdeadbeef"; then echo "selftest FAIL: an unresolvable pin read as current" >&2; fail=1; fi
-  consumers | grep -qx openbank-tax-reporting-service || { echo "selftest FAIL: tax-reporting not derived as a libs-runtime consumer" >&2; fail=1; }
+  popd >/dev/null
+  rm -rf "$tmp"
   [ "$fail" -eq 0 ] && echo "check-pdp-flag-rollout --self-test: PASS"
   return "$fail"
 }
