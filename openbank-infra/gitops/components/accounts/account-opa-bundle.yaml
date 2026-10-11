@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: account-service
     app.kubernetes.io/part-of: accounts
   annotations:
-    openbank.tech/policy-checksum: "18531f774875debe"
+    openbank.tech/policy-checksum: "0d75887606fcff34"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -614,6 +614,7 @@ data:
     #   account.freeze         — freeze an account (four-eyes verb, rules.yaml four_eyes.verbs)
     #   account.unfreeze       — unfreeze an account
     #   account.authorize      — grant/revoke a delegated account authorization
+    #   account.verifyOwnership — {owned, active} verdict for (iban, partyId) (ADR-0335 D2)
     #
     # The action namespace is the money-path scope from rules.yaml as-is (openbank-account-service
     # normalises to `account`, no override needed in money_path_action_prefixes) — so the base
@@ -757,6 +758,21 @@ data:
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-party"
     	input.action == "account.list"
+    }
+
+    # ADR-0335 D2 — declared callers of the ownership projection. pension-service's own client (`openbank-pension`, ROLE_API only) verifies that a
+    # payout/own-account IBAN belongs to the participant and is active. It gets the ownership
+    # projection (AccountOwnershipResource: the answer is exactly {owned, active}, identical for an
+    # unknown IBAN and another party's) and NOTHING else — account.read stays denied, so a stolen
+    # pension credential cannot read an account, a balance or a holder. A future caller with the same
+    # need is added to this set with its own evidence, never by granting it account.read.
+    allowed_reasons contains "service-account-verify-ownership" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id in {
+    		"service-account-openbank-pension", # payout / own-account checks (#12385)
+    		"service-account-openbank-sdd", # debtor-party check for a scoped mandate initiator (#12387)
+    	}
+    	input.action == "account.verifyOwnership"
     }
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1690,6 +1706,7 @@ data:
         scaChallenge.consume:                                          # ADR-0021 settlement gate + ceremonies
           - service-account-openbank-edge                              # scaGate before every money-path forward
           - service-account-openbank-services                          # delegation grant-accept, document-signing (#3734)
+          - service-account-openbank-pension                           # ADR-0335: scope is DATA, see scoped_sca_consumers
 
     feature_flags:
       # Disabling any of these via a flag flip is never permitted — they guard SCA (ADR-0021),
@@ -2034,5 +2051,29 @@ data:
         operator-domestic-payment-write: "1 identity-pinned rule; action coverage unverified"
         operator-party-write: "1 identity-pinned rule, but onboarding-service PUTs party.kyc-status via the shared client (latent: AUTHZ_ENFORCE=false there today)"
       adr: ADR-0034
+
+    scoped_sca_consumers:
+      - principal: service-account-openbank-pension
+        actions: [scaChallenge.consume]
+        purposes: [APPROVAL]
+        approval_request_prefix: "pension-"
+        adr: ADR-0335
+
+    scoped_payment_initiators:
+      - principal: service-account-openbank-pension
+        service: openbank-domestic-payment
+        actions: [domestic-payment.create]
+        # Pays only FROM this account (pension payout account), CZK only (domestic scheme rule).
+        debtor_account_config: openbank.domestic-payment.scoped-initiators.pension.debtor-account-id
+        adr: ADR-0335
+      - principal: service-account-openbank-pension
+        service: openbank-sdd-service
+        actions: [sdd.create, sdd.delete]
+        # Registers/cancels only mandates whose creditor is this SEPA creditor identifier (pension
+        # collection), and registers only on a debtor account account-service verifies is owned
+        # and active by the stated subject party.
+        creditor_identifier_config: openbank.sdd.scoped-initiators.pension.creditor-identifier
+        debtor_party_verified: true
+        adr: ADR-0335
   manifest.json: |
     {"roots": ["openbank/agents", "openbank/copilot", "openbank/rest", "agents", "rules"]}
