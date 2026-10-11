@@ -100,8 +100,15 @@ def workload_env(root: pathlib.Path):
     """
     index = {}
     for p in sorted((root / "openbank-infra/gitops").rglob("*.yaml")):
+        source = p.read_text()
+        # Only workload kinds can contribute an env block. A YAML alias or quoted scalar still
+        # needs its value spelled somewhere in this same document/file. Escaped quoted scalars
+        # may spell a character with a backslash, so parse any file with one as well. Keep the
+        # full YAML parser for possible workloads: regex cannot resolve anchors and nested specs.
+        if "\\" not in source and not any(kind in source for kind in WORKLOAD_KINDS):
+            continue
         try:
-            docs = list(yaml.safe_load_all(p.read_text()))
+            docs = list(yaml.safe_load_all(source))
         except yaml.YAMLError:
             continue
         for d in docs:
@@ -155,6 +162,21 @@ def self_test() -> int:
         service("nofilter", filter_registered=False, url=None, env=[])
         service("noworkload", url="${KC_URL:http://localhost:8080}/x", env=["KC_URL"], workload="other-name")
 
+        # The cheap kind prefilter must keep quoted values and YAML aliases. These are parsed
+        # normally, while unrelated ConfigMaps do not need the expensive full YAML load.
+        gitops.joinpath("quoted-kind.yaml").write_text(
+            'kind: "Deployment"\nmetadata:\n  name: quoted-service\nspec:\n  template:\n'
+            '    spec:\n      containers:\n        - env:\n            - name: QUOTED_URL\n')
+        gitops.joinpath("aliased-kind.yaml").write_text(
+            'workload-kind: &workload_kind Deployment\nkind: *workload_kind\n'
+            'metadata:\n  name: aliased-service\n'
+            'spec:\n  template:\n    spec:\n      containers:\n        - env:\n'
+            '            - name: ALIASED_URL\n')
+        gitops.joinpath("escaped-kind.yaml").write_text(
+            'kind: "\\u0044eployment"\nmetadata:\n  name: escaped-service\nspec:\n'
+            '  template:\n    spec:\n      containers:\n        - env:\n'
+            '            - name: ESCAPED_URL\n')
+
         lib = root / "openbank-libs-runtime/src/main/kotlin/com/openbank/libs"
         lib.mkdir(parents=True)
         (lib / "L.kt").write_text("@RegisterProvider(OidcClientRequestReactiveFilter::class)\ninterface L\n")
@@ -176,6 +198,12 @@ def self_test() -> int:
         env_index = workload_env(root)
         if env_index.get("good-service") != {"KC_URL"}:
             fails.append(f"workload env index wrong: {env_index.get('good-service')}")
+        if env_index.get("quoted-service") != {"QUOTED_URL"}:
+            fails.append("quoted workload kind missing from env index")
+        if env_index.get("aliased-service") != {"ALIASED_URL"}:
+            fails.append("aliased workload kind missing from env index")
+        if env_index.get("escaped-service") != {"ESCAPED_URL"}:
+            fails.append("escaped workload kind missing from env index")
 
         found = dict(evaluate(root, mods, env_index))
         for m, must_fail in (("good", False), ("altspelling", False), ("override", False),
