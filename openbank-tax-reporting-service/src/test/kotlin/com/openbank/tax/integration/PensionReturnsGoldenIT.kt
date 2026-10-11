@@ -189,7 +189,7 @@ class PensionProvidersStub : QuarkusTestResourceLifecycleManager {
             "$FUNDS?periodStart=2025-11-01&periodEnd=2025-11-30" to "fund-month-2025-10.json",
             "$FUNDS?periodStart=2025-10-01&periodEnd=2025-12-31" to "fund-quarter-2025-q4.json",
             "$FUNDS?periodStart=2025-01-01&periodEnd=2025-12-31" to "fund-year-2025.json",
-            "/api/v1/pension/reporting/participant-aggregates?periodStart=2009-01-01&periodEnd=2009-03-31" to
+            "/api/v2/pension/reporting/participant-aggregates?periodStart=2009-01-01&periodEnd=2009-03-31" to
                 "participants-2009-q1.json",
         )
     }

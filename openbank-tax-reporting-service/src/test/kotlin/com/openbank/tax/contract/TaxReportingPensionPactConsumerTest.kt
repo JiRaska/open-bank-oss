@@ -34,7 +34,7 @@ import java.util.UUID
 
 /**
  * Consumer contract: tax-reporting-service -> pension-service
- * `GET /api/v1/pension/reporting/participant-aggregates` (#12425). Replayed by pension-service's
+ * `GET /api/v2/pension/reporting/participant-aggregates` (#12425). Replayed by pension-service's
  * `PensionPactFolderProviderVerificationTest` (AS service-account-openbank-tax-reporting) and
  * `PensionReportingNegativeAuthProviderVerificationTest`. Literal expected path, reflected request
  * path; the decoded body goes through the real PSP 31-04 mapping.
@@ -142,7 +142,7 @@ class TaxReportingPensionPactConsumerTest {
         const val STATE = "pension participant activity may exist for the third quarter of 2026"
 
         /** LITERAL, retyped from pension-service's ParticipantReportingResource — never derived from the client. */
-        const val EXPECTED_PATH = "/api/v1/pension/reporting/participant-aggregates"
+        const val EXPECTED_PATH = "/api/v2/pension/reporting/participant-aggregates"
 
         fun clientPath(): String {
             val base = PensionReportingClient::class.java.getAnnotation(Path::class.java).value
