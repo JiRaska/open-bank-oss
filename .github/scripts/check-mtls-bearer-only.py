@@ -89,15 +89,33 @@ def _permission_paths(flat: dict, name: str) -> list[str]:
     return [p.strip() for p in str(flat.get(f"{PERMISSION}.{name}.paths", "")).split(",") if p.strip()]
 
 
-def _specificity(pattern: str) -> tuple[int, int]:
-    """Quarkus chooses the longest matching path; exact beats a wildcard at that point."""
-    prefix = pattern.split("*", 1)[0]
-    return len(prefix), int("*" not in pattern)
+def _specificity(pattern: str) -> tuple[tuple[int, int], ...]:
+    """Order path segments as Quarkus does: an earlier literal beats a wildcard."""
+    return tuple((int(part != "*"), len(part.replace("*", ""))) for part in pattern.strip("/").split("/"))
 
 
-def _witness(pattern: str) -> str:
-    """A concrete descendant matched by the supported trailing-wildcard forms."""
-    return pattern[:-1] + "listener-auth-probe" if pattern.endswith("/*") else pattern
+def _overlap_witness(pattern: str, root: str) -> str | None:
+    """Find a possible served path under root matched by a Quarkus permission pattern.
+
+    A middle `*` occupies one segment; a trailing `*` may consume the rest.
+    Unknown partial-segment wildcard syntax remains possible (fail closed).
+    """
+    parts = pattern.strip("/").split("/")
+    root_parts = root.strip("/").split("/")
+    candidate = []
+    for i, part in enumerate(parts):
+        if part == "*" and i == len(parts) - 1:
+            candidate.extend(root_parts[i:] or ["listener-auth-probe"])
+            return "/" + "/".join(candidate)
+        if i < len(root_parts):
+            if part != root_parts[i] and "*" not in part:
+                return None
+            candidate.append(root_parts[i])
+        else:
+            candidate.append("listener-auth-probe" if "*" in part else part)
+    if len(root_parts) > len(parts):
+        return None  # An exact or middle-wildcard pattern does not match descendants.
+    return "/" + "/".join(candidate)
 
 
 def overriding_permissions(flat: dict, roots: list[str], bearer: list[str]) -> list[str]:
@@ -116,13 +134,12 @@ def overriding_permissions(flat: dict, roots: list[str], bearer: list[str]) -> l
         if str(flat.get(key + "policy", "")).strip().lower() == "deny":
             continue
         for pattern in _permission_paths(flat, name):
-            witness = _witness(pattern)
-            if not any(witness == root or witness.startswith(root.rstrip("/") + "/") or
-                       _covers(pattern, root) for root in roots):
-                continue
             methods = str(flat.get(key + "methods", "")).strip()
-            if any(_covers(b, witness) and (_specificity(pattern) > _specificity(b) or
-                   (methods and _specificity(pattern) == _specificity(b))) for b in bearer):
+            witnesses = (_overlap_witness(pattern, root) for root in roots)
+            if any(witness is not None and _covers(b, witness) and
+                   (_specificity(pattern) > _specificity(b) or
+                    (methods and _specificity(pattern) == _specificity(b)))
+                   for witness in witnesses for b in bearer):
                 out.append(f"{name} ({pattern})")
     return out
 
@@ -224,6 +241,12 @@ def self_test() -> int:
         "          bearer-only:\n            paths: /api/*\n            auth-mechanism: bearer\n"
         "          get-only:\n            paths: /api/*\n            methods: GET\n            policy: authenticated\n"
     )
+    middle_wildcard = yaml.safe_load(
+        '"%prod":\n  quarkus:\n    http:\n      ssl:\n        client-auth: required\n'
+        "      auth:\n        permission:\n"
+        "          bearer-only:\n            paths: /api/*\n            auth-mechanism: bearer\n"
+        "          admin:\n            paths: /api/*/admin\n            policy: authenticated\n"
+    )
     none = yaml.safe_load("quarkus:\n  http:\n    port: 8080\n")
     api = ["/api/v1/sca"]
     checks = [
@@ -237,6 +260,10 @@ def self_test() -> int:
         ("more-specific non-bearer path defeats broad bearer-only", len(findings_for(overridden, ["/api/v1/accounts"])) == 1),
         ("method-specific non-bearer path defeats same-path bearer-only",
          len(findings_for(method_override, ["/api/v1/accounts"])) == 1),
+        ("middle wildcard shadows a broad bearer permission under a served root",
+         len(findings_for(middle_wildcard, ["/api/v1"])) == 1),
+        ("middle wildcard on another branch does not overlap a served root",
+         findings_for(middle_wildcard, ["/api/v1/accounts"]) == []),
         ("non-bearer permission outside served API does not defeat bearer-only",
          findings_for(unrelated, ["/api/v1/accounts"]) == []),
         ("no client-auth passes", findings_for(none, api) == []),
