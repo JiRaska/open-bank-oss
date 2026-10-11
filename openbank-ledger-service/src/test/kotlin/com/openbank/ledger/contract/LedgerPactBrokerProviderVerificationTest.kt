@@ -88,7 +88,10 @@ class LedgerPactBrokerProviderVerificationTest {
     }
 
     @State("ledger has frozen monthly trial balance for the reporting date")
-    fun stateWithFrozenMonthlyTrialBalance() = FinrepFrozenMonthPactSeed.seed(dataSource)
+    fun stateWithLegacyFrozenMonth() = FinrepLegacyMonthPactSeed.seed(dataSource)
+
+    @State("ledger has cumulative frozen monthly evidence for the reporting date")
+    fun stateWithCumulativeFrozenMonths() = FinrepFrozenMonthPactSeed.seed(dataSource)
 
     /**
      * Same state as [LedgerPactProviderVerificationTest.stateWithSeededChartOfAccounts] — no

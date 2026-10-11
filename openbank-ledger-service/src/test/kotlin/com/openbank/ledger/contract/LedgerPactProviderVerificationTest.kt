@@ -88,8 +88,12 @@ class LedgerPactProviderVerificationTest {
      * If running in isolation the DB is empty → trial-balance returns an empty balanced result,
      * which still satisfies the contract shape (type matchers, not value matchers).
      */
-    @State("ledger has frozen monthly trial balance for the reporting date")
+    @State("ledger has cumulative frozen monthly evidence for the reporting date")
     fun stateWithFrozenMonthlyTrialBalance() = FinrepFrozenMonthPactSeed.seed(dataSource)
+
+    // Broker retains the former FINREP consumer version until its deployment window expires.
+    @State("ledger has frozen monthly trial balance for the reporting date")
+    fun stateWithLegacyFrozenMonth() = FinrepLegacyMonthPactSeed.seed(dataSource)
 
     /**
      * Backward-compatible state for balance-service's live `/journals/trial-balance` pact.

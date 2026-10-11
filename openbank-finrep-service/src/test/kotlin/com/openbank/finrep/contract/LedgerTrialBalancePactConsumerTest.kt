@@ -88,7 +88,7 @@ class LedgerTrialBalancePactConsumerTest {
 
     @Pact(consumer = "openbank-finrep-service", provider = "openbank-ledger-service")
     fun trialBalanceWithEntriesPact(builder: PactDslWithProvider): RequestResponsePact = builder
-        .given("ledger has frozen monthly trial balance for the reporting date")
+        .given("ledger has cumulative frozen monthly evidence for the reporting date")
         .uponReceiving("GET the frozen GL closing balance for a FINREP reporting date")
         .path("$LEDGER_MONTH_TRIAL_BALANCE_PATH/$REPORTING_DATE/frozen-closing-balance")
         .method("GET")
@@ -140,7 +140,7 @@ class LedgerTrialBalancePactConsumerTest {
 
     @Pact(consumer = "openbank-finrep-service", provider = "openbank-ledger-service")
     fun livePreviewTrialBalancePact(builder: PactDslWithProvider): RequestResponsePact = builder
-        .given("ledger has frozen monthly trial balance for the reporting date")
+        .given("ledger has cumulative frozen monthly evidence for the reporting date")
         .uponReceiving("GET the mutable GL closing balance for an internal working preview")
         .path("$LEDGER_MONTH_TRIAL_BALANCE_PATH/$REPORTING_DATE/closing-balance")
         .method("GET")
@@ -164,7 +164,7 @@ class LedgerTrialBalancePactConsumerTest {
 
     @Pact(consumer = "openbank-finrep-service", provider = "openbank-ledger-service")
     fun frozenPeriodMovementsPact(builder: PactDslWithProvider): RequestResponsePact = builder
-        .given("ledger has frozen monthly trial balance for the reporting date")
+        .given("ledger has cumulative frozen monthly evidence for the reporting date")
         .uponReceiving("GET the frozen monthly GL movements for F02 profit and loss")
         .path("$LEDGER_MONTH_TRIAL_BALANCE_PATH/$REPORTING_DATE/frozen-trial-balance")
         .method("GET")
@@ -177,7 +177,7 @@ class LedgerTrialBalancePactConsumerTest {
 
     @Pact(consumer = "openbank-finrep-service", provider = "openbank-ledger-service")
     fun livePeriodMovementsPact(builder: PactDslWithProvider): RequestResponsePact = builder
-        .given("ledger has frozen monthly trial balance for the reporting date")
+        .given("ledger has cumulative frozen monthly evidence for the reporting date")
         .uponReceiving("GET the mutable monthly GL movements for F02 working preview")
         .path("$LEDGER_MONTH_TRIAL_BALANCE_PATH/$REPORTING_DATE/trial-balance")
         .method("GET")
@@ -190,7 +190,7 @@ class LedgerTrialBalancePactConsumerTest {
 
     @Pact(consumer = "openbank-finrep-service", provider = "openbank-ledger-service")
     fun frozenYearToDateMovementsPact(builder: PactDslWithProvider): RequestResponsePact = builder
-        .given("ledger has frozen monthly trial balance for the reporting date")
+        .given("ledger has cumulative frozen monthly evidence for the reporting date")
         .uponReceiving("GET frozen January-to-date movements for FINREP F02")
         .path("$LEDGER_MONTH_TRIAL_BALANCE_PATH/$REPORTING_DATE/frozen-year-to-date-trial-balance")
         .method("GET")
@@ -203,7 +203,7 @@ class LedgerTrialBalancePactConsumerTest {
 
     @Pact(consumer = "openbank-finrep-service", provider = "openbank-ledger-service")
     fun liveYearToDateMovementsPact(builder: PactDslWithProvider): RequestResponsePact = builder
-        .given("ledger has frozen monthly trial balance for the reporting date")
+        .given("ledger has cumulative frozen monthly evidence for the reporting date")
         .uponReceiving("GET mutable January-to-date movements for FINREP F02 preview")
         .path("$LEDGER_MONTH_TRIAL_BALANCE_PATH/$REPORTING_DATE/year-to-date-trial-balance")
         .method("GET")
@@ -248,7 +248,7 @@ class LedgerTrialBalancePactConsumerTest {
 
     @Pact(consumer = "openbank-finrep-service", provider = "openbank-ledger-service")
     fun closedPeriodsPact(builder: PactDslWithProvider): RequestResponsePact = builder
-        .given("ledger has frozen monthly trial balance for the reporting date")
+        .given("ledger has cumulative frozen monthly evidence for the reporting date")
         .uponReceiving("GET closed periods available for regulatory reporting")
         .path(LEDGER_PERIODS_PATH)
         .query("from=$CLOSED_PERIODS_FROM&to=$CLOSED_PERIODS_TO")

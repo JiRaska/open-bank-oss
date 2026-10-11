@@ -31,6 +31,7 @@ object FinrepFrozenMonthPactSeed {
     val REPORTING_MONTH: LocalDate = LocalDate.of(2000, 6, 30)
 
     fun seed(dataSource: DataSource) = dataSource.connection.use { c ->
+        resetFrozenPeriodEvidence(c)
         journal(c)
         line(c, CASH_LINE_ID, CASH_GL_ID, "D", 1)
         line(c, DEPOSITS_LINE_ID, DEPOSITS_GL_ID, "C", 2)
@@ -160,4 +161,13 @@ object FinrepFrozenMonthPactSeed {
     private val CASH_GL_ID: UUID = UUID.fromString("a0000000-0000-0000-0000-000000000001")
     private val DEPOSITS_GL_ID: UUID = UUID.fromString("a0000000-0000-0000-0000-000000000002")
     private val SYSTEM_ACTOR_ID: UUID = UUID.fromString("00000000-0000-0000-0000-0000000000cc")
+
+    /** Testcontainer-only reset: historical broker Pacts and the current git Pact need disjoint periods. */
+    internal fun resetFrozenPeriodEvidence(c: Connection) {
+        // Immutable evidence deliberately rejects DELETE. TRUNCATE is restricted to this test
+        // fixture and leaves journals and chart-of-accounts intact.
+        c.createStatement().use { s ->
+            s.execute("truncate table ledger_closed_period_trial_balance_line, ledger_closed_period")
+        }
+    }
 }
