@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.26.1](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.26.0...consent-service-v0.26.1) (2026-10-11)
+
+
+### Security
+
+* **consent:** require authentication on the suppression endpoints ([#12545](https://github.com/JiRaska/open-bank-oss/issues/12545)) ([e6e2e5a](https://github.com/JiRaska/open-bank-oss/commit/e6e2e5af845672b96e742ffcd8a055ed35792a60))
+
 ## [0.26.0](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.25.1...consent-service-v0.26.0) (2026-10-09)
 
 

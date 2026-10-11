@@ -128,7 +128,7 @@ export async function GET() {
             // 404 from the BFF proxy means the service key resolved to nothing — "not deployed",
             // NOT "deployed but silent". Collapsing the two sends whoever debugs it to look at a
             // healthy pod, which is exactly what happened when campaign-service was missing from
-            // SERVICE_MAP (#2997).
+            // BFF allowlist (#2997).
             : res.status === 404
               ? 'not_deployed'
               : 'unreachable' },
