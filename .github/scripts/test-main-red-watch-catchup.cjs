@@ -145,6 +145,17 @@ async function main() {
   ]))
   assert.equal(legacy.state, 'open')
   assert.match(legacy.body, /build \(openbank-ledger-service\) \/ openbank-ledger-service \(contract\)/)
+  // Watch 38174993420 falsely closed #4195 after Services CI 38174474375
+  // on 07811147. Its build and verification-metadata jobs were skipped;
+  // only Detect changed services and all-green succeeded. The newer
+  // 38177090662 on e473c2a repeated the same no-service shape.
+  for (const runId of [38174474375, 38177090662]) {
+    await applyVerdict(github, context, verdict(runId, 'green', [], [
+      'Detect changed services', 'all-green',
+    ]))
+    assert.equal(legacy.state, 'open')
+    assert.match(legacy.body, /build \(openbank-ledger-service\) \/ openbank-ledger-service \(contract\)/)
+  }
   // A reused job name can succeed after its provider step is skipped or absent.
   // The exact legacy failure must survive both outcomes.
   await applyVerdict(github, context, verdict(105, 'green', [], [
