@@ -210,6 +210,9 @@ spec:
               drop:
                 - ALL
           volumeMounts:
+            - name: catalog-tls
+              mountPath: /mnt/catalog-tls
+              readOnly: true
             - name: internal-tls
               mountPath: /mnt/internal-tls
               readOnly: true
@@ -300,6 +303,9 @@ spec:
             - name: opa-tmp
               mountPath: /tmp
       volumes:
+        - name: catalog-tls
+          secret:
+            secretName: pension-service-client-tls
         - name: internal-tls
           secret:
             secretName: pension-service-internal-tls

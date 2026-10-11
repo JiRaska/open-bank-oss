@@ -326,3 +326,20 @@ authz:
       incoming:
         domestic-payment-events-in:
           connector: smallrye-in-memory
+
+"%prod":
+  quarkus:
+    tls:
+      catalog-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/catalog-tls/tls.crt
+              key: /mnt/catalog-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/catalog-tls/ca.crt
+        protocols: TLSv1.3
+    rest-client:
+      product-catalog:
+        tls-configuration-name: catalog-authority

@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+# Outbound mTLS identity, separate from pension's inbound server certificate.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: pension-service-client-tls
+  namespace: pension
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  secretName: pension-service-client-tls
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  commonName: pension-service.pension.svc
+  usages:
+    - digital signature
+    - client auth
+  issuerRef:
+    name: openbank-ca
+    kind: ClusterIssuer
+    group: cert-manager.io
