@@ -154,7 +154,7 @@ def check(root: pathlib.Path) -> tuple[list[str], int]:
                     findings.append(f"{where}: switch {prop} ({f.name}) is {val!r}; set {env_name(prop)}=\"false\"")
 
         seen_keep: set[str] = set()
-        for k, v in sorted(app.items()):
+        for k in sorted(app):
             if not (k.startswith("openbank.") and k.endswith(".enabled")):
                 continue
             subjects += 1
