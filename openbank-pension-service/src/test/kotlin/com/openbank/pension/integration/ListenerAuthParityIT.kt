@@ -234,7 +234,7 @@ class ListenerAuthParityIT {
     }
 
     private companion object {
-        const val PATH = "/api/v1/pension/contracts/00000000-0000-0000-0000-000000000000"
+        const val PATH = "/api/v2/pension/contracts/00000000-0000-0000-0000-000000000000"
         const val UNAUTHORIZED = 401
         const val NOT_FOUND = 404
     }
