@@ -1495,6 +1495,7 @@ four_eyes:
     scaChallenge.consume:                                          # ADR-0021 settlement gate + ceremonies
       - service-account-openbank-edge                              # scaGate before every money-path forward
       - service-account-openbank-services                          # delegation grant-accept, document-signing (#3734)
+      - service-account-openbank-pension                           # ADR-0335: scope is DATA, see scoped_sca_consumers
 
 # ---------------------------------------------------------------------------------------
 # Feature-flag flip governance (ADR-0067 follow-up, issue #419). The OPA PEP (rest.rego)
@@ -3561,6 +3562,41 @@ shared_m2m_write_prohibition:
 # final step), while the CI realm, the api-fuzz harness identity, still gives it ROLE_OPERATOR, and
 # `service-account-openbank-edge` carries ROLE_OPERATOR in the deployed template. The union
 # is used, because a role assignment that exists in any environment is an exposure there.
+# ADR-0335 D1 — scoped SCA consumers. Structured, not a comment: sca_rest_ext.rego reads
+# `principal` + `actions` (the identity is admitted to those actions and no others), and
+# sca-service's ConsumerScopes is held to `purposes` + `approval_request_prefix` by
+# ConsumerScopesRulesParityTest, which reads THIS block. The namespace and the party are decided in
+# sca-service's domain because both live only in the stored, device-signed challenge — OPA's input
+# for consume carries the challenge id, not its party or approval id.
+scoped_sca_consumers:
+  - principal: service-account-openbank-pension
+    actions: [scaChallenge.consume]
+    purposes: [APPROVAL]
+    approval_request_prefix: "pension-"
+    adr: ADR-0335
+
+# ADR-0335 D5/D6 — scoped payment initiators. Same shape as scoped_sca_consumers: the policy
+# (gen-domestic-payment-opa-bundle.sh, sdd_rest_ext.rego) reads `principal`, `service` and
+# `actions`; the provider's domain enforces the rest, and a parity test in each provider holds
+# its code to the `*_config` keys named here. The account / creditor identifier VALUES are
+# environment configuration (unset = the scoped initiator may do nothing — fail closed).
+scoped_payment_initiators:
+  - principal: service-account-openbank-pension
+    service: openbank-domestic-payment
+    actions: [domestic-payment.create]
+    # Pays only FROM this account (pension payout account), CZK only (domestic scheme rule).
+    debtor_account_config: openbank.domestic-payment.scoped-initiators.pension.debtor-account-id
+    adr: ADR-0335
+  - principal: service-account-openbank-pension
+    service: openbank-sdd-service
+    actions: [sdd.create, sdd.delete]
+    # Registers/cancels only mandates whose creditor is this SEPA creditor identifier (pension
+    # collection), and registers only on a debtor account account-service verifies is owned
+    # and active by the stated subject party.
+    creditor_identifier_config: openbank.sdd.scoped-initiators.pension.creditor-identifier
+    debtor_party_verified: true
+    adr: ADR-0335
+
 shared_m2m_matrix_write_grants:
   gate: matrix-write-grants
   enforced: enforced

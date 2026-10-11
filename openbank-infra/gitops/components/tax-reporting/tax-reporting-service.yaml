@@ -33,7 +33,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-tax-reporting-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "a436f81629ce1618"
+        openbank.tech/policy-checksum: "f9a70b86e9012d19"
       labels:
         app.kubernetes.io/name: tax-reporting-service
         app.kubernetes.io/part-of: tax-reporting
@@ -49,7 +49,7 @@ spec:
         - name: tax-reporting-service
           # First build lands via auto-deploy on the merge that adds openbank-tax-reporting-service to
           # ALL_SERVICES; the auto-deploy gitops PR rewrites this pin to the built sha.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-tax-reporting-service:sandbox-000000000
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-tax-reporting-service:sandbox-6bb56627
           imagePullPolicy: IfNotPresent
           ports:
             # HTTP 8152 and management 8085 — both read off the service's own application.yaml
