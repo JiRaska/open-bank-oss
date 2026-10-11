@@ -93,6 +93,24 @@ test_default_deny if {
 	}
 }
 
+test_pension_account_ownership_verification_only_for_scoped_service if {
+	decision := rest.allow with input as {
+		"principal": {"id": "service-account-openbank-pension", "type": "HUMAN", "roles": ["ROLE_PENSION_ACCOUNT_VERIFY"]},
+		"action": "account.verifyOwnership",
+	}
+		with data.openbank.bundle as bundle
+	decision.allow == true
+	decision.reason == "pension-account-ownership-verification"
+	not rest.allow with input as {
+		"principal": {"id": "service-account-other", "type": "HUMAN", "roles": ["ROLE_PENSION_ACCOUNT_VERIFY"]},
+		"action": "account.verifyOwnership",
+	}
+	not rest.allow with input as {
+		"principal": {"id": "service-account-openbank-pension", "type": "HUMAN", "roles": ["ROLE_API"]},
+		"action": "account.verifyOwnership",
+	}
+}
+
 # ---------------------------------------------------------------------------------------
 # operator-on-own-tenant: ROLE_OPERATOR may act on resources in their own tenant.
 # ---------------------------------------------------------------------------------------

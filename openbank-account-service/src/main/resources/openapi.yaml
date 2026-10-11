@@ -17,7 +17,8 @@ info:
   # 1.19 -> 1.20 (#9430): additive — proposal responses expose the immutable approval-group
   # snapshot and canonical approve/reject SCA references. Existing clients may ignore them.
   # 1.20 -> 1.21 (#11588): additive — approval responses expose verified makerActorKind.
-  version: 1.21.0
+  # 1.21 -> 1.22 (#12465): additive — scoped pension ownership verification POST.
+  version: 1.22.0
   description: BIAN-aligned account lifecycle management — open, query, freeze, close accounts.
   contact:
     name: OpenBank Platform
@@ -244,6 +245,31 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+
+  /api/v1/accounts/ownership-verifications:
+    post:
+      tags: [Accounts]
+      summary: Verify a pension participant owns an active account
+      operationId: verifyAccountOwnership
+      security:
+        - bearerAuth: [ROLE_PENSION_ACCOUNT_VERIFY]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OwnershipVerificationRequest'
+      responses:
+        '200':
+          description: Non-disclosing ownership verdict; unknown or foreign IBANs both return false
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnershipVerificationResponse'
+        '401':
+          description: Missing M2M identity
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /api/v1/accounts/{accountId}/balance:
     get:
@@ -1035,6 +1061,19 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
+    OwnershipVerificationRequest:
+      type: object
+      required: [iban, partyId]
+      properties:
+        iban: { type: string, minLength: 1 }
+        partyId: { type: string, format: uuid }
+    OwnershipVerificationResponse:
+      type: object
+      required: [owned, active]
+      properties:
+        owned: { type: boolean }
+        active: { type: boolean }
+        accountId: { type: [string, 'null'], format: uuid }
     AuthorizationRole:
       type: string
       enum: [FULL_ACCESS, PAYMENT_ONLY, READ_ONLY, CARD_HOLDER]

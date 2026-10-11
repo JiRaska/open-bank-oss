@@ -13,6 +13,7 @@ import com.openbank.account.application.port.`in`.ClosePocketCommand
 import com.openbank.account.application.port.`in`.FreezeAccountCommand
 import com.openbank.account.application.port.`in`.GetAccountByIbanQuery
 import com.openbank.account.application.port.`in`.GetAccountQuery
+import com.openbank.account.application.port.`in`.VerifyAccountOwnershipQuery
 import com.openbank.account.application.port.`in`.ListAccountsQuery
 import com.openbank.account.application.port.`in`.ListActiveAccountsQuery
 import com.openbank.account.application.port.`in`.ListPocketsQuery
@@ -79,6 +80,8 @@ import java.util.UUID
  */
 private const val ACCOUNTS_PATH = "/api/v1/accounts"
 private const val IDEMPOTENCY_SERVICE = "account-service"
+
+data class OwnershipVerificationRequest(val iban: String, val partyId: UUID)
 
 @Path("/api/v1/accounts")
 @Produces(MediaType.APPLICATION_JSON)
@@ -238,6 +241,20 @@ class AccountResource(
         val account = accountUseCase.getAccountByIban(GetAccountByIbanQuery(iban))
         denyIfNotOwner(account.partyId, customerPartyId)?.let { return it }
         return Response.ok(account.toResponse()).build()
+    }
+
+    /** Pension's M2M ownership check. The dedicated realm role is assigned only to its service account. */
+    @POST
+    @Path("/ownership-verifications")
+    @RolesAllowed(Roles.PENSION_ACCOUNT_VERIFY)
+    @Authorize(action = "account.verifyOwnership")
+    @Operation(summary = "Verify that a pension participant owns an active account")
+    suspend fun verifyOwnership(request: OwnershipVerificationRequest): Response {
+        require(request.iban.isNotBlank()) { "iban is required" }
+        val verdict = accountUseCase.verifyAccountOwnership(
+            VerifyAccountOwnershipQuery(request.iban, request.partyId),
+        )
+        return Response.ok(verdict).build()
     }
 
     @GET

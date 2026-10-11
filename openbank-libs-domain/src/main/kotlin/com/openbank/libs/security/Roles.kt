@@ -76,6 +76,9 @@ object Roles {
      */
     const val API = "ROLE_API"
 
+    /** Pension service account's read-only account ownership verification capability. */
+    const val PENSION_ACCOUNT_VERIFY = "ROLE_PENSION_ACCOUNT_VERIFY"
+
     /** All canonical roles, in declaration order. Use for policy/audit enumeration. */
     val ALL: List<String> = listOf(
         ADMIN,
@@ -88,6 +91,7 @@ object Roles {
         KYC_OPENER,
         KYC_REVIEWER,
         PAYMENTS,
+        PENSION_ACCOUNT_VERIFY,
         API,
     )
 }

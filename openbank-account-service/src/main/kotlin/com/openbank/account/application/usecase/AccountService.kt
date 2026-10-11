@@ -4,6 +4,7 @@
 
 package com.openbank.account.application.usecase
 
+import com.openbank.account.application.port.`in`.AccountOwnershipVerdict
 import com.openbank.account.application.port.`in`.AccountUseCase
 import com.openbank.account.application.port.`in`.AddPocketCommand
 import com.openbank.account.application.port.`in`.ClearSavingsGoalCommand
@@ -21,6 +22,7 @@ import com.openbank.account.application.port.`in`.ResolvePocketQuery
 import com.openbank.account.application.port.`in`.SearchAccountsQuery
 import com.openbank.account.application.port.`in`.UnfreezeAccountCommand
 import com.openbank.account.application.port.`in`.UpdateSavingsGoalCommand
+import com.openbank.account.application.port.`in`.VerifyAccountOwnershipQuery
 import com.openbank.account.application.port.out.AccountEventPublisher
 import com.openbank.account.application.port.out.AccountRepository
 import com.openbank.account.application.port.out.AccountSanctionsScreeningPort
@@ -362,6 +364,15 @@ class AccountService(
         val iban = Iban.of(query.iban)
         return accountRepository.findByIban(iban)
             ?: throw AccountNotFoundException("Account not found for IBAN: ${query.iban}")
+    }
+
+    override suspend fun verifyAccountOwnership(query: VerifyAccountOwnershipQuery): AccountOwnershipVerdict {
+        val account = accountRepository.findByIban(Iban.of(query.iban))
+            ?: return AccountOwnershipVerdict(owned = false, active = false)
+        // Neither the status nor the account ID is disclosed when the party does not own it.
+        if (account.partyId != query.partyId) return AccountOwnershipVerdict(owned = false, active = false)
+        val active = account.isActive()
+        return AccountOwnershipVerdict(owned = true, active = active, accountId = account.id.takeIf { active })
     }
 
     override suspend fun listAccounts(query: ListAccountsQuery): CursorPage<Account> {

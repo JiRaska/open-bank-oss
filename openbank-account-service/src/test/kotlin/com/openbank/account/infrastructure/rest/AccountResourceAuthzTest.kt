@@ -58,6 +58,47 @@ class AccountResourceAuthzTest {
     }
 
     @Test
+    fun `anonymous pension ownership verification answers 401`() {
+        Given {
+            contentType("application/json")
+            body("""{"iban":"CZ0708000000000000000099","partyId":"66666666-7777-4888-8999-aaaaaaaaaaaa"}""")
+        } When {
+            post("/api/v1/accounts/ownership-verifications")
+        } Then {
+            statusCode(401)
+        }
+    }
+
+    @Test
+    @TestSecurity(user = "another-service", roles = ["ROLE_API"])
+    fun `general M2M role cannot verify pension ownership`() {
+        Given {
+            contentType("application/json")
+            body("""{"iban":"CZ0708000000000000000099","partyId":"66666666-7777-4888-8999-aaaaaaaaaaaa"}""")
+        } When {
+            post("/api/v1/accounts/ownership-verifications")
+        } Then {
+            statusCode(403)
+        }
+    }
+
+    @Test
+    @TestSecurity(user = "pension-service", roles = ["ROLE_PENSION_ACCOUNT_VERIFY"])
+    fun `pension verification returns a non-disclosing denial for unknown IBAN`() {
+        Given {
+            contentType("application/json")
+            body("""{"iban":"CZ0708000000000000000099","partyId":"66666666-7777-4888-8999-aaaaaaaaaaaa"}""")
+        } When {
+            post("/api/v1/accounts/ownership-verifications")
+        } Then {
+            statusCode(200)
+            body("owned", org.hamcrest.Matchers.equalTo(false))
+            body("active", org.hamcrest.Matchers.equalTo(false))
+            body("accountId", org.hamcrest.Matchers.nullValue())
+        }
+    }
+
+    @Test
     @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
     fun `advisory mode does not block an annotated read - request reaches the handler`() {
         // Unknown account id -> the handler's own not-found path answers, proving the

@@ -96,6 +96,13 @@ allowed_reasons contains "compliance-read-any" if {
 	endswith(input.action, ".read")
 }
 
+# Pension may ask only for the account ownership verdict used by its money-path guards.
+allowed_reasons contains "pension-account-ownership-verification" if {
+	input.principal.id == "service-account-openbank-pension"
+	"ROLE_PENSION_ACCOUNT_VERIFY" in input.principal.roles
+	input.action == "account.verifyOwnership"
+}
+
 # AI agents go through this same query when the agent's tool wraps a REST call
 # (ADR-0031 D5). The charter check is delegated to agents.rego so we don't
 # duplicate the charter logic — call it through the unified package boundary.

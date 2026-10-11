@@ -15,6 +15,7 @@ import com.openbank.account.application.port.`in`.ListPocketsQuery
 import com.openbank.account.application.port.`in`.ResolvePocketQuery
 import com.openbank.account.application.port.`in`.SearchAccountsQuery
 import com.openbank.account.application.port.`in`.UnfreezeAccountCommand
+import com.openbank.account.application.port.`in`.VerifyAccountOwnershipQuery
 import com.openbank.account.application.port.out.AccountEventPublisher
 import com.openbank.account.application.port.out.AccountRepository
 import com.openbank.account.application.port.out.AccountSanctionsScreeningPort
@@ -421,6 +422,37 @@ class AccountServiceLifecycleTest {
         assertThatThrownBy {
             runBlocking { service.getAccountByIban(GetAccountByIbanQuery("CZ6508000000192000145399")) }
         }.isInstanceOf(AccountNotFoundException::class.java)
+    }
+
+    @Test
+    fun `ownership verification discloses account ID only to the owner of an active account`(): Unit = runBlocking {
+        val iban = "CZ6508000000192000145399"
+        val owner = UUID.randomUUID()
+        val other = UUID.randomUUID()
+        val active = account().copy(partyId = owner, status = AccountStatus.ACTIVE)
+        coEvery { accountRepository.findByIban(Iban.of(iban)) } returns active
+
+        val owned = service.verifyAccountOwnership(VerifyAccountOwnershipQuery(iban, owner))
+        assertThat(owned.owned).isTrue()
+        assertThat(owned.active).isTrue()
+        assertThat(owned.accountId).isEqualTo(active.id)
+
+        val foreign = service.verifyAccountOwnership(VerifyAccountOwnershipQuery(iban, other))
+        assertThat(foreign.owned).isFalse()
+        assertThat(foreign.active).isFalse()
+        assertThat(foreign.accountId).isNull()
+
+        coEvery { accountRepository.findByIban(Iban.of(iban)) } returns active.copy(status = AccountStatus.FROZEN)
+        val frozen = service.verifyAccountOwnership(VerifyAccountOwnershipQuery(iban, owner))
+        assertThat(frozen.owned).isTrue()
+        assertThat(frozen.active).isFalse()
+        assertThat(frozen.accountId).isNull()
+
+        coEvery { accountRepository.findByIban(Iban.of(iban)) } returns null
+        val missing = service.verifyAccountOwnership(VerifyAccountOwnershipQuery(iban, owner))
+        assertThat(missing.owned).isFalse()
+        assertThat(missing.active).isFalse()
+        assertThat(missing.accountId).isNull()
     }
 
     @Test
