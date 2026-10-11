@@ -16,6 +16,7 @@ openbank-account-service POST /api/v1/accounts/{accountId}/pockets  # natural-ke
 openbank-account-service POST /api/v1/accounts/{accountId}/savings-goal/delegation/proposals  # replay while PENDING+unexpired — ADR-0295, burn-down #8351
 openbank-account-service POST /api/v1/accounts/{accountId}/savings-goal/delegation/proposals/{proposalId}/decide  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-account-service POST /api/v1/accounts/{accountId}/unfreeze  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-account-service POST /api/v1/accounts/ownership-verifications  # read-only query (POST only to keep the IBAN out of URLs/access logs); mutates nothing, replay is harmless — ADR-0335 D2 exception
 openbank-balance-service POST /api/v1/balances/reconciliation  # operator trigger, mutates no balance; re-run records a fresh report by design — ADR-0287 exception; burn-down #8351
 openbank-balance-service POST /api/v1/balances/{accountId}/credit  # natural-key idempotency via balance_movement dedup ledger (V8) — ADR-0287 exception; burn-down #8351
 openbank-balance-service POST /api/v1/balances/{accountId}/debit  # natural-key idempotency via balance_movement dedup ledger (V8) — ADR-0287 exception; burn-down #8351

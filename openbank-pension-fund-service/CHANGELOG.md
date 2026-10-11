@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/pension-fund-service-v0.3.0...pension-fund-service-v0.4.0) (2026-10-11)
+
+
+### Features
+
+* **pension-fund:** accumulate P&L lines and classify fund positions for the ČNB returns ([#12493](https://github.com/JiRaska/open-bank-oss/issues/12493)) ([c4d4b04](https://github.com/JiRaska/open-bank-oss/commit/c4d4b045231d6eab0b76c05c4694eaeb7466fecb))
+
 ## [0.3.0](https://github.com/JiRaska/open-bank-oss/compare/pension-fund-service-v0.2.1...pension-fund-service-v0.3.0) (2026-10-10)
 
 
