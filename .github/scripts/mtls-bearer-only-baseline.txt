@@ -6,8 +6,11 @@ openbank-aml-service
 openbank-ap2-service
 openbank-consent-service
 openbank-document-service
+openbank-domestic-payment
 openbank-ledger-service
 openbank-lending-service
 openbank-product-catalog
 openbank-risk-engine
 openbank-sca-service
+openbank-sdd-service
+openbank-standing-order-service
