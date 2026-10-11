@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.15.5...fraud-service-v0.16.0) (2026-10-09)
+
+
+### Features
+
+* **libs:** purge SENT outbox rows fleet-wide with one shared retention job ([#11899](https://github.com/JiRaska/open-bank-oss/issues/11899)) ([b322ed7](https://github.com/JiRaska/open-bank-oss/commit/b322ed7116137ecc8f132dc79cd79444c995bb2f))
+
 ## [0.15.5](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.15.4...fraud-service-v0.15.5) (2026-10-04)
 
 

@@ -21,7 +21,8 @@
 
 import { promises as fs } from 'fs'
 import path from 'path'
-import { findService, serviceBaseUrl, k8sNameOf, type ServiceEntry } from './registry'
+import { findService } from './fleet'
+import { serviceBaseUrl, k8sNameOf, type ServiceEntry } from './registry'
 import { inCluster, resolveInClusterBaseUrl } from '@/lib/discovery'
 
 // A fleet-wide overview probes many pods concurrently; 2s produced false

@@ -10,12 +10,16 @@ import com.openbank.domestic.application.port.out.AccountLookupPort
 import com.openbank.domestic.application.port.out.DelegatedSpendBindingRepository
 import com.openbank.domestic.application.port.out.DomesticPaymentEventPublisher
 import com.openbank.domestic.application.port.out.DomesticPaymentRepository
+import com.openbank.domestic.domain.error.DomesticSchemeErrorCode
 import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentPriority
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.domestic.domain.model.DomesticTransferScope
+import com.openbank.domestic.domain.model.InitiatorScope
+import com.openbank.libs.domain.error.ValidationFailure
 import com.openbank.libs.domain.money.Money
 import com.openbank.libs.observability.DomainMetrics
+import io.mockk.Called
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -87,6 +91,73 @@ class DomesticPaymentServiceTest {
             assertThat(result.replayed).isTrue()
             coVerify(exactly = 0) { paymentRepository.save(any(), any()) }
         }
+
+    @Test
+    fun `non-CZK owner command is rejected before idempotency lookup or persistence`() {
+        listOf("EUR", "USD").forEach { currency ->
+            assertThatThrownBy {
+                runBlocking { service.createPayment(createCommand(currency = currency)) }
+            }.isInstanceOfSatisfying(ValidationFailure::class.java) {
+                assertThat(it.errorCode).isEqualTo(DomesticSchemeErrorCode.CURRENCY_NOT_ALLOWED)
+            }
+        }
+
+        coVerify(exactly = 0) { paymentRepository.findByIdempotencyKey(any()) }
+        coVerify(exactly = 0) { paymentRepository.save(any(), any()) }
+        verify(exactly = 0) { eventPublisher.paymentCreatedPayload(any()) }
+    }
+
+    // --- ADR-0335 D5: initiator scope ---
+
+    @Test
+    fun `a scoped initiator cannot pay from any other account, before any lookup or persistence`() {
+        val command = createCommand()
+        listOf(
+            InitiatorScope.Scoped("service-account-openbank-pension", UUID.randomUUID()),
+            InitiatorScope.Scoped("service-account-openbank-pension", null),
+            InitiatorScope.Undeclared,
+        ).forEach { scope ->
+            assertThatThrownBy {
+                runBlocking { service.createPayment(command.copy(initiatorScope = scope)) }
+            }.`as`(scope.toString()).isInstanceOf(InitiatorScopeViolationException::class.java)
+        }
+        coVerify(exactly = 0) { paymentRepository.findByIdempotencyKey(any()) }
+        coVerify(exactly = 0) { paymentRepository.save(any(), any()) }
+    }
+
+    @Test
+    fun `allowed account id with another debtor IBAN or unresolved authority is refused before any write`() {
+        val base = createCommand()
+        val command = base.copy(
+            initiatorScope = InitiatorScope.Scoped("service-account-openbank-pension", base.debtorAccountId),
+        )
+        listOf(UUID.randomUUID(), null).forEach { resolved ->
+            coEvery { accountLookupPort.findAccountIdByIban(any()) } returns resolved
+            assertThatThrownBy { runBlocking { service.createPayment(command) } }
+                .isInstanceOf(InitiatorScopeViolationException::class.java)
+        }
+        coVerify(exactly = 0) { paymentRepository.findByIdempotencyKey(any()) }
+        coVerify(exactly = 0) { paymentRepository.save(any(), any()) }
+        verify { eventPublisher wasNot Called }
+        verify { workflowClient wasNot Called }
+    }
+
+    @Test
+    fun `a scoped initiator paying from its own account proceeds`(): Unit = runBlocking {
+        val base = createCommand(idempotencyKey = "dom-idem-scoped")
+        val command = base.copy(
+            initiatorScope = InitiatorScope.Scoped("service-account-openbank-pension", base.debtorAccountId),
+        )
+        val existing = payment().copy(requestFingerprint = DomesticPaymentRequestFingerprint.sha256(command))
+        coEvery { paymentRepository.findByIdempotencyKey("dom-idem-scoped") } returns
+            existing.copy(idempotencyKey = "dom-idem-scoped")
+
+        coEvery { accountLookupPort.findAccountIdByIban(any()) } returns command.debtorAccountId
+
+        val result = service.createPayment(command)
+
+        assertThat(result.replayed).isTrue()
+    }
 
     @Test
     fun `idempotent replay refuses any changed request`() {
@@ -230,6 +301,7 @@ class DomesticPaymentServiceTest {
         technicalAccountCode: String? = null,
         creditorBankCode: String = " 0100 ",
         actorId: UUID? = null,
+        currency: String = " czk ",
     ) = CreateDomesticPaymentCommand(
         idempotencyKey = idempotencyKey,
         debtorAccountId = UUID.randomUUID(),
@@ -239,7 +311,7 @@ class DomesticPaymentServiceTest {
         creditorAccountNumber = " 9876543210 ",
         creditorBankCode = creditorBankCode,
         creditorName = "  Brno Utility ",
-        amount = Money.parseInbound(BigDecimal("1500.00"), " czk "),
+        amount = Money.parseInbound(BigDecimal("1500.00"), currency),
         variableSymbol = " 2026001 ",
         specificSymbol = null,
         constantSymbol = " 0308 ",

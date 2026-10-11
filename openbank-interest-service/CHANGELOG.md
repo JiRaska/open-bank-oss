@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.21.2...interest-service-v0.22.0) (2026-10-09)
+
+
+### Features
+
+* **libs:** purge SENT outbox rows fleet-wide with one shared retention job ([#11899](https://github.com/JiRaska/open-bank-oss/issues/11899)) ([b322ed7](https://github.com/JiRaska/open-bank-oss/commit/b322ed7116137ecc8f132dc79cd79444c995bb2f))
+
 ## [0.21.2](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.21.1...interest-service-v0.21.2) (2026-10-03)
 
 

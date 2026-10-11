@@ -119,6 +119,8 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `domestic_payment_outbox` kept every SENT row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; its v1 repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`. PENDING, FAILED, DISPATCHING and DEAD rows are never touched. Information disclosure: shrinks the window in which a database read (replica, backup, operator query) exposes past event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now comes from the broker or audit-service, not this table.
+
 - **2026-09-30** — Fraud verdict mapping (#4403 prerequisite, PR #11614). `FraudScoringAdapter.mapVerdict`
   folded any verdict outside `ALLOW | CHALLENGE | REVIEW | DECLINE` — including a blank one — into
   a non-synthetic `ALLOW`, so an unreadable answer from fraud-service was indistinguishable from a
@@ -621,8 +623,11 @@ not change any existing request's outcome until explicitly flipped.
   the replay fingerprint, pinned byte-identical to the pre-Money digest; the settlement amount, which
   is now the Money amount itself (the removed `LEDGER_POSTING` rescale was a no-op for every amount
   Money can hold). Reads, events and the confirmation document serialise at the currency scale
-  (`100.50`, not `100.500000`), numerically equal. **Not changed here:** no CZK-only rule exists today;
-  any ISO 4217 currency with a minor unit is accepted — tracked in #12059. Rollback: revert the commit.
+  (`100.50`, not `100.500000`), numerically equal. **Follow-up #12059:**
+  `DomesticSchemeRules.requireSchemeCurrency` now refuses every valid non-CZK amount before the
+  Idempotency-Key is bound, including technical-account submissions. The rejected currency is not
+  echoed to the caller; a corrected CZK retry remains possible. Rollback: revert the rule and its
+  documented API contract together.
 
 ## 2026-10-04 — Staged Envoy Gateway public edge (ADR-0324 Phase 4)
 
@@ -655,3 +660,40 @@ its Ingress and NetworkPolicy peer remain until Phase 5.
   Rollout verification must exercise this caller against 8443 with valid and invalid
   client certificates and check that failures do not reroute to HTTP. Rollback restores
   the previous client URL/configuration while the AML listener remains available.
+
+## 2026-10-09 — Scoped payment initiator: pension-service (ADR-0335 D5)
+
+`POST /api/v1/domestic-payments` now admits `ROLE_API` in `@RolesAllowed`. That change on its own
+would let any machine holding `ROLE_API` reach the money path, so the domain confines every
+ROLE_API-only caller:
+
+- **Elevation of privilege / Tampering:** `service-account-openbank-pension`, declared in
+  `rules.yaml: scoped_payment_initiators`, may pay only **from** the account configured under
+  `openbank.domestic-payment.scoped-initiators.pension.debtor-account-id`, the pension payout
+  account. An unset value permits nothing. Any other ROLE_API-only principal is `Undeclared` and
+  may pay from no account. Both refusals are a 403 raised before the idempotency lookup or any
+  persistence (`DomesticPaymentServiceTest`). OPA, through `service-scoped-payment-initiator`
+  reading the same register, admits pension to `domestic-payment.create` only. Staff and the
+  operator-role edge are unchanged.
+- **Residual:** a stolen pension credential can still pay **out of the pension payout account**
+  to any CZK creditor. That is the account's purpose. Sanctions screening, fraud scoring, the
+  scheme rules and per-step idempotency still apply to every such payment. Payout limits, or a
+  creditor allow-list from pension's own records, would narrow it further and belong to
+  pension-service.
+
+### Scoped debtor coordinate binding
+
+A scoped initiator must supply its configured debtor account identifier. Before any
+idempotency lookup, persistence or workflow start, the normalized account number and
+bank code are resolved through the existing account lookup and must match that identifier.
+Missing or mismatched resolution fails closed. General initiators retain their existing flow.
+
+### Provider TLS build and rollout
+
+The production build requires client certificates for an HTTPS listener when its server
+key material is configured. This property is fixed at build time; setting only a runtime
+environment variable cannot upgrade an image built without it. Preserve the HTTP listener
+during rollout. First publish a compatible signed provider image, then configure the
+private-CA listener and certificate rotation, and finally switch pension callers to HTTPS.
+OIDC and policy checks continue to authorize business operations independently of TLS trust.
+Roll back caller URLs before removing the provider listener or reverting its image.

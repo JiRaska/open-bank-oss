@@ -459,6 +459,12 @@ money_path_accountability:
         off in every deployed environment. When the journey lands it should assert the posted
         transaction by its ledger key (card-clearing:<authorizationId>:<key> once #11990 lands), not the HTTP status
         — a SKIPPED_DISABLED posting also answers 200.
+    - service: openbank-pension-service
+      note: >-
+        ADR-0334 S1 (#12350). Listed as money-path from the bootstrap; S1 itself moves no money
+        (contract lifecycle and pack evaluation only). A journey belongs with the first slice that
+        collects a contribution or pays out, and is then blocked by the default blocker like the
+        other posting services until the SYNTHETIC taint reaches the ledger.
     - service: openbank-treasury-service
       note: >-
         ADR-0315. A journey here would book, approve and settle a deal, which posts a real journal
@@ -466,3 +472,8 @@ money_path_accountability:
         ledger that is a synthetic movement in the balance sheet. The sandbox simulated market
         (ADR-0315 D9) already drives settle/mature end to end, so the journey, when it lands,
         should assert the posted journal by its idempotency key, not the HTTP status.
+    - service: openbank-pension-fund-service
+      note: >-
+        ADR-0334 S4. A journey would subscribe, publish a NAV with two principals and assert the
+        settled units by order id; it moves participants' units, not bank money, and has no
+        customer-facing caller until pension-service's FundAdministrationPort adapter lands.

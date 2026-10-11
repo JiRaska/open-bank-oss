@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.17.1...fx-service-v0.18.0) (2026-10-09)
+
+
+### Features
+
+* **libs:** purge SENT outbox rows fleet-wide with one shared retention job ([#11899](https://github.com/JiRaska/open-bank-oss/issues/11899)) ([b322ed7](https://github.com/JiRaska/open-bank-oss/commit/b322ed7116137ecc8f132dc79cd79444c995bb2f))
+
 ## [0.17.1](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.17.0...fx-service-v0.17.1) (2026-10-07)
 
 

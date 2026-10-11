@@ -31,10 +31,14 @@ data class DraftStyleVersionRequest(
     val preferredTerms: Map<String, String?> = emptyMap(),
     val forbiddenTerms: List<String?> = emptyList(),
     val signature: String? = null,
+    val uiMessages: Map<String, String?> = emptyMap(),
 ) {
     /** Validates every element is non-null and returns the caller-facing non-nullable shape. */
     fun validatedPreferredTerms(): Map<String, String> =
         preferredTerms.mapValues { (k, v) -> requireNotNull(v) { "preferredTerms['$k'] must not be null" } }
+
+    fun validatedUiMessages(): Map<String, String> =
+        uiMessages.mapValues { (k, v) -> requireNotNull(v) { "uiMessages['$k'] must not be null" } }
 
     fun validatedForbiddenTerms(): List<String> =
         forbiddenTerms.mapIndexed { i, v -> requireNotNull(v) { "forbiddenTerms[$i] must not be null" } }
@@ -70,6 +74,7 @@ class CommunicationStyleResource(
                     forbiddenTerms = req.validatedForbiddenTerms(),
                     signature = req.signature,
                     maker = actor(),
+                    uiMessages = req.validatedUiMessages(),
                 ),
             ),
         ).build()
@@ -100,7 +105,7 @@ class CommunicationStyleResource(
      */
     @GET
     @Path("/{personaKey}/published")
-    @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
+    @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMMS_EDITOR", "ROLE_COMMS_APPROVER")
     suspend fun published(@PathParam("personaKey") personaKey: String): Response {
         val style = service.published(personaKey)
         return Response.ok(style).tag(style.styleVersion.toString()).build()
