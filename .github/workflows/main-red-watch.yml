@@ -75,14 +75,10 @@ on:
       # pure projection of its sources — and in both cases the fleet-wide merge freeze this
       # workflow exists to end is back, with nothing else reporting it.
       - "Derived artefact autoheal"
-      - "ADR registry"
       # Builds, signs and pushes the IdP and LLM-gateway images (#11265). A red run on main
       # means a merged Dockerfile fix (a CVE bump) is not in the registry and not deployed.
       - "Platform images"
-      - "Agent charter registry"
-      - "AI governance snapshot"
       - "API contract post-merge guard"
-      - "EU AI Act registry"
       - "Evals - copilot proposal quality"
       - "Evals - fraud review"
       - "Fleet lint"
@@ -102,6 +98,7 @@ on:
       - ".github/scripts/main-red-watch-checkpoint.cjs"
       - ".github/scripts/main-red-watch-catchup.cjs"
       - ".github/scripts/test-main-red-watch-catchup.cjs"
+      - ".github/scripts/main-red-watch-reconcile.py"
   workflow_dispatch:
     inputs:
       run_id:
@@ -110,6 +107,11 @@ on:
       attempt:
         description: "Attempt number to inspect (defaults to the run's latest)"
         required: false
+  repository_dispatch:
+    types: [main-red-reconcile]
+  schedule:
+    # Backstop when the final workflow_run event is lost or its API read was transient.
+    - cron: "17 */3 * * *"
 
 permissions:
   contents: read
@@ -117,15 +119,55 @@ permissions:
 concurrency:
   # GitHub may replace an older PENDING run even with cancel-in-progress=false.
   # Every later event, including a cancelled one, replays from a durable cursor.
-  group: main-red-watch-${{ github.event.workflow_run.workflow_id || github.ref }}
+  group: main-red-watch-${{ github.event.workflow_run.workflow_id || github.event.client_payload.workflow_id || github.ref }}
   cancel-in-progress: false
 
 jobs:
+  reconcile:
+    name: Dispatch one catch-up per watched workflow
+    if: ${{ github.event_name == 'schedule' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: bash .github/scripts/install-pyyaml-hash-pinned.sh
+      - name: Extract the watched workflow names
+        run: python3 .github/scripts/main-red-watch-reconcile.py > /tmp/main-red-watch-names.json
+      - name: Dispatch bounded per-workflow reconciliation
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const fs = require('fs')
+            const names = JSON.parse(fs.readFileSync('/tmp/main-red-watch-names.json', 'utf8'))
+            const workflows = await github.paginate(github.rest.actions.listRepoWorkflows, {
+              ...context.repo, per_page: 100,
+            })
+            const failures = []
+            for (const name of names) {
+              const matches = workflows.filter(workflow => workflow.name === name)
+              if (matches.length !== 1) {
+                failures.push(`Cannot resolve watched workflow ${name}`)
+                continue
+              }
+              try {
+                await github.rest.repos.createDispatchEvent({
+                  ...context.repo, event_type: 'main-red-reconcile',
+                  client_payload: { workflow_id: matches[0].id },
+                })
+              } catch (error) {
+                failures.push(`Cannot dispatch ${name}: ${error.message}`)
+              }
+            }
+            if (failures.length) throw new Error(failures.join('; '))
+
   # PR / dispatch lane: prove the watch's coverage set and its classifier are
   # honest. Cheap, offline, and it is the only lane that runs on a PR.
   declaration:
     name: main-red-watch declaration
-    if: ${{ github.event_name != 'workflow_run' }}
+    if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -136,6 +178,7 @@ jobs:
           python3 .github/scripts/check-main-red-watch.py --self-test
           node .github/scripts/test-main-red-watch-order.cjs
           node .github/scripts/test-main-red-watch-catchup.cjs
+          python3 .github/scripts/main-red-watch-reconcile.py > /dev/null
       - name: Every push-on-main workflow is watched or declared
         run: python3 .github/scripts/check-main-red-watch.py --check-declaration
 
@@ -147,6 +190,7 @@ jobs:
     # falsification against a known-red and a known-green run.
     if: >-
       github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'repository_dispatch' ||
       (github.event.workflow_run.head_branch == 'main' &&
        github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
@@ -199,7 +243,7 @@ jobs:
       - name: Replay missed main runs and persist the checkpoint
         # Manual dispatch remains read-only. A failed classifier or API request
         # never advances the cursor and is retried by a later source event.
-        if: ${{ github.event_name == 'workflow_run' }}
+        if: ${{ github.event_name == 'workflow_run' || github.event_name == 'repository_dispatch' }}
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

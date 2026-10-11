@@ -132,8 +132,7 @@ async function applyVerdict(github, context, verdict) {
   await github.rest.issues.create({ ...repo, title, body, labels: ['main-red', 'fleet-health'] })
 }
 
-async function bootstrapCheckpoint(github, context, workflowId) {
-  const event = context.payload.workflow_run
+async function bootstrapCheckpoint(github, context, workflowId, event) {
   const eventCreated = Date.parse(event.created_at)
   if (!Number.isFinite(eventCreated)) throw new Error('Cannot establish first replay window')
   // The new watch cannot observe pre-deployment history indefinitely. Include
@@ -161,16 +160,30 @@ async function bootstrapCheckpoint(github, context, workflowId) {
 
 async function runCatchup({ github, context, core, classify = classifyAttempt,
   bootstrap = bootstrapCheckpoint }) {
-  const event = context.payload.workflow_run
-  const workflowId = event?.workflow_id
+  let event = context.payload.workflow_run
+  const isReconcile = !event && context.eventName === 'repository_dispatch'
+  const workflowId = event?.workflow_id || (isReconcile && context.payload.client_payload?.workflow_id)
+  if (isReconcile) {
+    if (!Number.isSafeInteger(workflowId) || workflowId < 1) {
+      throw new Error('Invalid reconciliation workflow ID')
+    }
+    const latest = await github.rest.actions.listWorkflowRuns({
+      ...context.repo, workflow_id: workflowId, branch: 'main', event: 'push', per_page: 1,
+    })
+    event = latest.data.workflow_runs?.[0]
+    if (!event && latest.data.total_count === 0) {
+      core.info(`Watched workflow ${workflowId} has no main push run to reconcile`)
+      return
+    }
+  }
   if (!Number.isSafeInteger(workflowId) || workflowId < 1 ||
-      !Number.isSafeInteger(event.id) || event.id < 1 ||
+      !Number.isSafeInteger(event?.id) || event.id < 1 ||
       event.head_branch !== 'main' || event.event !== 'push') {
     throw new Error('Invalid main push workflow_run identity')
   }
   await ensureStateBranch(github, context.repo)
   let { checkpoint, sha } = await readCheckpoint(github, context.repo, workflowId)
-  if (!checkpoint) checkpoint = await waitForIndex(() => bootstrap(github, context, workflowId))
+  if (!checkpoint) checkpoint = await waitForIndex(() => bootstrap(github, context, workflowId, event))
   let processed = 0
   while (processed < MAX_ATTEMPTS) {
     const plan = await waitForIndex(() => unprocessedAttempts(checkpoint, async page => {

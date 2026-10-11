@@ -93,7 +93,8 @@ async function main() {
   // red webhook is recovered from the Actions list and the cursor advances
   // only after the red and subsequent scoped green have been applied.
   const entryIssues = []
-  const sourceRuns = [102, 101, 100].map(id => ({ id, run_attempt: 1, status: 'completed' }))
+  const sourceRuns = [102, 101, 100].map(id => ({ id, run_attempt: 1, status: 'completed',
+    head_branch: 'main', event: 'push', created_at: '2026-10-11T00:00:00Z' }))
   let entryContent = Buffer.from(JSON.stringify({ version: 1, workflow_id: 7, run_id: 100, attempt: 1 })).toString('base64')
   let entrySha = 'initial'
   const entryGithub = {
@@ -144,6 +145,19 @@ async function main() {
   assert.equal(entryIssues.length, 1)
   assert.equal(entryIssues[0].state, 'open')
   assert.equal(JSON.parse(Buffer.from(entryContent, 'base64')).run_id, 102)
+  // The final new red event 103 has no webhook consumer. The scheduled
+  // repository_dispatch backstop discovers it from the same cursor.
+  sourceRuns.unshift({ id: 103, run_attempt: 1, status: 'completed',
+    head_branch: 'main', event: 'push', created_at: '2026-10-11T01:00:00Z' })
+  await runCatchup({ github: entryGithub,
+    context: { ...context, eventName: 'repository_dispatch', payload: { action: 'main-red-reconcile',
+      client_payload: { workflow_id: 7 } } },
+    core: { info: () => {}, warning: () => {} },
+    classify: async (_repo, id) => verdict(id, 'red', [failed('new-failure')]),
+  })
+  assert.equal(entryIssues[0].state, 'open')
+  assert.match(entryIssues[0].body, /new-failure/)
+  assert.equal(JSON.parse(Buffer.from(entryContent, 'base64')).run_id, 103)
   console.log('main-red-watch durable checkpoint and replaced-event recovery: passed')
 }
 
