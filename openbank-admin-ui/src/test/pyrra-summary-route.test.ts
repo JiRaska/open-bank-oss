@@ -1,6 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs'
+import path from 'node:path'
+import os from 'node:os'
+import { parse } from 'yaml'
+
+const repo = path.resolve(__dirname, '../../..')
+const catalog = JSON.parse(readFileSync(path.join(repo, 'openbank-admin-ui/catalog.json'), 'utf8')) as {
+  services: { name: string; moneyPath: boolean }[]
+}
+const declaredNames = catalog.services.filter(service => service.moneyPath)
+  .map(service => `${service.name.replace(/-service$/, '')}-availability`).sort()
+const sloObjects = readFileSync(path.join(repo, 'openbank-infra/gitops/components/observability/pyrra-slo-money-path.yaml'), 'utf8')
+  .split(/^---\s*$/m).map(document => parse(document) as { metadata?: { name?: string } } | null)
+const deployedNames = sloObjects.map(object => object?.metadata?.name)
+  .filter((name): name is string => typeof name === 'string' && name.endsWith('-availability')).sort()
 
 const response = (rows: { slo: string; value: number }[]) => Response.json({
   status: 'success',
@@ -8,9 +23,15 @@ const response = (rows: { slo: string; value: number }[]) => Response.json({
 })
 
 describe('Pyrra evidence summary route', () => {
+  it('the code-derived money-path catalog exactly matches declared Pyrra availability SLOs', () => {
+    expect(declaredNames.length).toBeGreaterThan(6)
+    expect(declaredNames).toEqual(deployedNames)
+  })
+
   afterEach(() => {
     vi.unstubAllGlobals()
     delete process.env.PROMETHEUS_URL
+    delete process.env.OPENBANK_CATALOG
   })
 
   it('derives availability and remaining budget from Pyrra recording rules', async () => {
@@ -25,7 +46,8 @@ describe('Pyrra evidence summary route', () => {
 
     expect(result.status).toBe(200)
     const body = await result.json()
-    expect(body).toMatchObject({ available: true, configured: 6, monitored: 1 })
+    expect(body).toMatchObject({ available: true, configured: declaredNames.length, monitored: 1 })
+    expect(body.objectives.map((objective: { name: string }) => objective.name).sort()).toEqual(declaredNames)
     expect(body.objectives).toContainEqual(expect.objectContaining({
       name: 'openbank-transaction-availability',
       target: 0.999,
@@ -36,6 +58,9 @@ describe('Pyrra evidence summary route', () => {
     }))
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(fetchMock.mock.calls.every(([url]) => String(url).startsWith('https://prometheus.test/api/v1/query'))).toBe(true)
+    for (const name of declaredNames) {
+      expect(String(fetchMock.mock.calls[0][0])).toContain(name)
+    }
   })
 
   it('treats absent error series as zero but does not call zero traffic healthy', async () => {
@@ -64,6 +89,24 @@ describe('Pyrra evidence summary route', () => {
 
     const result = await GET()
     expect(result.status).toBe(502)
-    await expect(result.json()).resolves.toMatchObject({ available: false, error: 'pyrra_evidence_unreachable', objectives: [] })
+    await expect(result.json()).resolves.toMatchObject({ available: false, error: 'pyrra_evidence_unreachable', configured: declaredNames.length, objectives: [] })
+  })
+
+  it('fails closed when the baked catalog has no valid money-path set', async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'pyrra-catalog-'))
+    try {
+      const file = path.join(dir, 'catalog.json')
+      writeFileSync(file, JSON.stringify({ services: [{ name: 'openbank-ledger-service', moneyPath: false }] }))
+      process.env.OPENBANK_CATALOG = file
+      const fetchMock = vi.fn()
+      vi.stubGlobal('fetch', fetchMock)
+      const { GET } = await import('@/app/api/pyrra/summary/route')
+      const result = await GET()
+      expect(result.status).toBe(502)
+      await expect(result.json()).resolves.toMatchObject({ available: false, error: 'catalog_unavailable', configured: 0, objectives: [] })
+      expect(fetchMock).not.toHaveBeenCalled()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
