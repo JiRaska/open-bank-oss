@@ -29,3 +29,7 @@ Rollback: `ALTER ROLE <aplikační role> IN DATABASE <db> RESET statement_timeou
 ## Produkční mTLS volání AML služby
 
 Produkční REST klient AML používá pojmenovanou konfiguraci TLS `aml-authority` a listener AML služby na portu 8443, který vyžaduje klientský certifikát. Nasazení dodává klientský certifikát a svazek důvěryhodné privátní CA; vyžaduje se TLS 1.3. Pokud volání AML po nasazení selhává, zkontrolujte společně klientský certifikát a CA, produkční URL REST klienta a síťovou politiku k listeneru. Lokální vývoj a testy nadále používají HTTP fixture; úspěšný lokální HTTP test sám neprokazuje navázání TLS v nasazení.
+
+## Souběžné projekce uzlů
+
+Konzumenti stížností, tuzemských plateb, incidentů, zaúčtování plateb a platebních kanálů mohou vložit stejný uzel grafu z více kanálů současně. Každý pokus o vložení dostane nové náhradní ID řádku UUIDv7 (`Ids.newId()`); idempotenci zajišťuje konflikt na přirozeném klíči, takže prohrávající vložení aktualizuje existující řádek a ponechá jeho uložené ID. Deterministické náhradní ID by nejdříve kolidovalo na primárním klíči a událost by se ztratila (#12188). Identity událostí a hran zůstávají deterministické.
