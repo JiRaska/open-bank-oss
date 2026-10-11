@@ -62,8 +62,13 @@ class Cred:
         self.file = file
         self.name = _field(doc, r"name:\s*([a-z0-9.-]+)") or "?"
         self.namespace = _field(doc, r"namespace:\s*([a-z0-9.-]+)") or "?"
-        self.keys = re.findall(r"key:\s*([A-Za-z0-9_./-]+)", doc)
-        self.dynamic = any(DYNAMIC_KEY.search(k) for k in self.keys)
+        self.keys = re.findall(r"^\s*key:\s*([A-Za-z0-9_./-]+)", doc, re.M)
+        parsed = _yaml_text_documents(doc)
+        if parsed is not None and len(parsed) == 1:
+            source_keys = _source_keys(parsed[0])
+            if source_keys is not None:
+                self.keys = source_keys
+        self.dynamic = bool(self.keys) and all(DYNAMIC_KEY.search(k) for k in self.keys)
         self.operator_managed = False
         ann_block = re.search(r"annotations:\n((?:\s{4,}[^\n]*\n?)*)", doc)
         self.annotations = ann_block.group(1) if ann_block else ""
@@ -452,6 +457,15 @@ def self_test() -> int:
     doc_dyn = doc_static.replace("key: account-service", "key: database/creds/foo-db-vault-role")
     if Cred(doc_dyn, Path("x.yaml")).static:
         print("self-test FAIL: dynamic path classified as static"); bad += 1
+    if Cred(doc_dyn + "# projected field (key: password)\n", Path("x.yaml")).static:
+        print("self-test FAIL: comment text classified as a static source"); bad += 1
+    doc_flow = ("kind: ExternalSecret\nspec:\n  data:\n"
+                "    - secretKey: password\n      remoteRef: {key: static-api-key}\n")
+    if not Cred(doc_flow, Path("x.yaml")).static:
+        print("self-test FAIL: flow mapping static source was ignored"); bad += 1
+    doc_mixed = doc_dyn + "  - remoteRef:\n      key: static-api-key\n"
+    if not Cred(doc_mixed, Path("x.yaml")).static:
+        print("self-test FAIL: mixed dynamic/static sources bypassed static deadline"); bad += 1
     doc_ok = doc_static.replace("metadata:\n",
                                 f'metadata:\n  annotations:\n    {DEADLINE}: "2027-01-01"\n')
     if validate_deadline(Cred(doc_ok, Path("x.yaml")), today) is not None:
