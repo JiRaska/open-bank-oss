@@ -550,6 +550,10 @@ rules:
       # Without this the keystore ExternalSecret sits at SecretSyncedError, ArgoCD never
       # advances past sync-wave -1, and no pod is ever created — the #2749 failure class.
       - wealth-service
+      # #5760: §38d withholding consumer, ns tax-reporting (first ESO client there). Without this
+      # the keystore ExternalSecret sits at SecretSyncedError, ArgoCD never advances past
+      # sync-wave -1, and no pod is ever created — the #2749 failure class.
+      - tax-reporting-service
       # ADR-0303: complaint and ICT-incident projection consumer, ns context.
       - context-service
       # ADR-0314: balance-sheet risk engine, FX fixing consumer, ns risk. Without this the

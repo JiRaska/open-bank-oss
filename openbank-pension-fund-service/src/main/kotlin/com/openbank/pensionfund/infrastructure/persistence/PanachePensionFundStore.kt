@@ -6,6 +6,7 @@ package com.openbank.pensionfund.infrastructure.persistence
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.pensionfund.application.port.PensionFundStore
 import com.openbank.pensionfund.application.port.StoreChanges
 import com.openbank.pensionfund.domain.model.AllocationTarget
@@ -14,6 +15,7 @@ import com.openbank.pensionfund.domain.model.FundStatus
 import com.openbank.pensionfund.domain.model.FundStrategy
 import com.openbank.pensionfund.domain.model.GlidePathStep
 import com.openbank.pensionfund.domain.model.NavFigures
+import com.openbank.pensionfund.domain.model.NavPosition
 import com.openbank.pensionfund.domain.model.NavRecord
 import com.openbank.pensionfund.domain.model.NavStatus
 import com.openbank.pensionfund.domain.model.OrderStatus
@@ -45,6 +47,7 @@ class PanachePensionFundStore(
     private val orders: UnitOrderRepository,
     private val holdings: UnitHoldingRepository,
     private val transactions: UnitTransactionRepository,
+    private val positions: FundNavPositionRepository,
 ) : PensionFundStore {
 
     private val json = jacksonObjectMapper().findAndRegisterModules()
@@ -65,6 +68,7 @@ class PanachePensionFundStore(
                 changes.orders.forEach { o -> writes += { session.merge(o.toEntity()).flatMap { session.flush() } } }
                 changes.holdings.forEach { h -> writes += { session.merge(h.toEntity()) } }
                 changes.transactions.forEach { t -> writes += { session.merge(t.toEntity()) } }
+                changes.navPositions.forEach { p -> writes += { session.persist(p.toEntity()) } }
                 writes.fold(Uni.createFrom().voidItem() as Uni<*>) { acc, w -> acc.flatMap { w() } }
                     .flatMap { session.flush() }
             }
@@ -140,6 +144,26 @@ class PanachePensionFundStore(
 
     override suspend fun transactions(contractId: UUID): List<UnitTransaction> =
         read { transactions.find("contractId = ?1 order by pricedAt desc", contractId).list() }.map { it.toDomain() }
+
+    override suspend fun publishedNavsUpTo(fundId: UUID, upTo: LocalDate): List<NavRecord> = read {
+        navs.find(
+            "fundId = ?1 and status = ?2 and valuationDate <= ?3 order by valuationDate",
+            fundId,
+            NavStatus.PUBLISHED.name,
+            upTo,
+        ).list()
+    }.map { it.toDomain() }
+
+    override suspend fun transactionsPricedAtAny(navIds: Collection<UUID>): List<UnitTransaction> =
+        if (navIds.isEmpty()) {
+            emptyList()
+        } else {
+            read { transactions.find("navId in ?1", navIds.toList()).list() }.map { it.toDomain() }
+        }
+
+    override suspend fun navPositions(navId: UUID): List<NavPosition> =
+        read { positions.find("navId = ?1 order by instrumentId", navId).list() }
+            .map { NavPosition(it.navId, it.instrumentId, it.quantity, it.price) }
 
     // ---- mapping -----------------------------------------------------------------------------
 
@@ -247,6 +271,16 @@ class PanachePensionFundStore(
         it.correctsNavId = correctsNavId
         it.approvedBy = approvedBy
         it.publishedAt = publishedAt
+        it.positionsRecorded = positionsRecorded
+    }
+
+    private fun NavPosition.toEntity() = FundNavPositionEntity().also {
+        // Written only inside the NAV's own (atomic) calculation commit, so a fresh id cannot duplicate.
+        it.id = Ids.newId()
+        it.navId = navId
+        it.instrumentId = instrumentId
+        it.quantity = quantity
+        it.price = price
     }
 
     private fun FundNavEntity.toDomain() = NavRecord(
@@ -267,6 +301,7 @@ class PanachePensionFundStore(
         correctsNavId = correctsNavId,
         approvedBy = approvedBy,
         publishedAt = publishedAt,
+        positionsRecorded = positionsRecorded,
     )
 
     private fun UnitOrder.toEntity() = UnitOrderEntity().also {
