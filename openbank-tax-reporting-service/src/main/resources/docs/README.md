@@ -22,6 +22,10 @@ Statutory-return access requires a staff identity as well as the route's role an
 
 `/capability` is authoritative for the current deployment. The pension data adapter and regulator wire renderer are presently unavailable: assembly fails rather than inventing figures, and this service does not claim to have transmitted a regulator file. Pension source read models and verified cell-level rendering are tracked separately. The configured reporting entity IDs and reporting start must be supplied before never-assembled pension returns can be monitored.
 
+## Outbound transport
+
+In production the calls to pension-service and pension-fund-service go to their private-CA TLS listeners (8443), which require a client certificate. Both REST clients use the `internal-authority` TLS bucket: client identity `tax-reporting-internal-tls` and the `openbank-ca` trust store mounted at `/mnt/internal-tls`, TLS 1.3, with hostname verification. The certificate is transport authentication only; each call still carries this service's own OIDC bearer token, and the providers authorize it by that identity.
+
 ## Build identity
 
 The generated `00-build` page in this same documentation index reports the release version, full source commit, and API contract version packaged in the running image. The index is available at `/q/openbank/docs`.
