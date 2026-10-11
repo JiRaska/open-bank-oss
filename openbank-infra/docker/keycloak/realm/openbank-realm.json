@@ -1287,6 +1287,7 @@
       "attributes": {},
       "defaultClientScopes": [
         "openid",
+        "basic",
         "profile",
         "email",
         "roles"

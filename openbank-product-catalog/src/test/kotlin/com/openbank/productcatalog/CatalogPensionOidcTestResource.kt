@@ -33,6 +33,19 @@ class CatalogPensionOidcTestResource : QuarkusTestResourceLifecycleManager {
             ),
             "clientScopes" to listOf(
                 mapOf(
+                    "name" to "basic",
+                    "protocol" to "openid-connect",
+                    "protocolMappers" to listOf(
+                        mapOf(
+                            "name" to "sub",
+                            "protocol" to "openid-connect",
+                            "protocolMapper" to "oidc-sub-mapper",
+                            "consentRequired" to false,
+                            "config" to mapOf("access.token.claim" to "true"),
+                        ),
+                    ),
+                ),
+                mapOf(
                     "name" to "profile",
                     "protocol" to "openid-connect",
                     "protocolMappers" to listOf(
@@ -141,7 +154,7 @@ class CatalogPensionOidcTestResource : QuarkusTestResourceLifecycleManager {
         "standardFlowEnabled" to true,
         "directAccessGrantsEnabled" to true,
         "serviceAccountsEnabled" to false,
-        "defaultClientScopes" to listOf("profile", "roles"),
+        "defaultClientScopes" to listOf("basic", "profile", "roles"),
         "optionalClientScopes" to listOf("pension:legal-approve", "pension:product-approve"),
     )
 
