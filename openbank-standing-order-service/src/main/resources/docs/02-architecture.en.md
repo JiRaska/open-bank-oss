@@ -153,3 +153,16 @@ sequenceDiagram
 3. **No remote calls in TX** — synchronous within request-response, async via outbox + Kafka.
 4. **Idempotent creation** — `idempotencyKey` is unique in the DB; a repeat create returns the existing order.
 5. **Decoupled execution** — this service records intent; downstream services execute the payment.
+
+## Internal TLS transport
+
+The production profile builds the HTTPS listener with client authentication required.
+Quarkus fixes this setting at build time: a runtime environment variable cannot add
+client-certificate enforcement to an incompatible image. When the listener receives
+private-CA server key material during deployment, callers must present a trusted client
+certificate. OIDC and policy checks still decide business permissions independently.
+
+The HTTP listener remains enabled during the staged migration. Publish and verify the
+compatible signed image before configuring the HTTPS listener and certificate rotation;
+switch pension callers only after the listener and network policies are ready. Restore
+caller URLs before reverting the provider image or removing its TLS listener.

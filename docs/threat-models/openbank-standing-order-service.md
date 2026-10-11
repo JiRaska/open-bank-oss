@@ -200,3 +200,13 @@ openbank-sdd-service.
   CANCELLED), so no stored order is affected and the execution path needs no change — a hypothetical
   legacy row would still be refused by sepa-payment and recorded as a failure. No new endpoint,
   caller, privilege or event. Rollback: revert the commit.
+
+### Provider TLS build and rollout
+
+The production build requires client certificates for an HTTPS listener when its server
+key material is configured. This property is fixed at build time; setting only a runtime
+environment variable cannot upgrade an image built without it. Preserve the HTTP listener
+during rollout. First publish a compatible signed provider image, then configure the
+private-CA listener and certificate rotation, and finally switch pension callers to HTTPS.
+OIDC and policy checks continue to authorize business operations independently of TLS trust.
+Roll back caller URLs before removing the provider listener or reverting its image.
