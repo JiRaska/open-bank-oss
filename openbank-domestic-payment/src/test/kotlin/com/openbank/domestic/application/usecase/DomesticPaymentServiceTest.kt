@@ -15,6 +15,7 @@ import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentPriority
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.domestic.domain.model.DomesticTransferScope
+import com.openbank.domestic.domain.model.InitiatorScope
 import com.openbank.libs.domain.error.ValidationFailure
 import com.openbank.libs.domain.money.Money
 import com.openbank.libs.observability.DomainMetrics
@@ -103,6 +104,39 @@ class DomesticPaymentServiceTest {
         coVerify(exactly = 0) { paymentRepository.findByIdempotencyKey(any()) }
         coVerify(exactly = 0) { paymentRepository.save(any(), any()) }
         verify(exactly = 0) { eventPublisher.paymentCreatedPayload(any()) }
+    }
+
+    // --- ADR-0335 D5: initiator scope ---
+
+    @Test
+    fun `a scoped initiator cannot pay from any other account, before any lookup or persistence`() {
+        val command = createCommand()
+        listOf(
+            InitiatorScope.Scoped("service-account-openbank-pension", UUID.randomUUID()),
+            InitiatorScope.Scoped("service-account-openbank-pension", null),
+            InitiatorScope.Undeclared,
+        ).forEach { scope ->
+            assertThatThrownBy {
+                runBlocking { service.createPayment(command.copy(initiatorScope = scope)) }
+            }.`as`(scope.toString()).isInstanceOf(InitiatorScopeViolationException::class.java)
+        }
+        coVerify(exactly = 0) { paymentRepository.findByIdempotencyKey(any()) }
+        coVerify(exactly = 0) { paymentRepository.save(any(), any()) }
+    }
+
+    @Test
+    fun `a scoped initiator paying from its own account proceeds`(): Unit = runBlocking {
+        val base = createCommand(idempotencyKey = "dom-idem-scoped")
+        val command = base.copy(
+            initiatorScope = InitiatorScope.Scoped("service-account-openbank-pension", base.debtorAccountId),
+        )
+        val existing = payment().copy(requestFingerprint = DomesticPaymentRequestFingerprint.sha256(command))
+        coEvery { paymentRepository.findByIdempotencyKey("dom-idem-scoped") } returns
+            existing.copy(idempotencyKey = "dom-idem-scoped")
+
+        val result = service.createPayment(command)
+
+        assertThat(result.replayed).isTrue()
     }
 
     @Test

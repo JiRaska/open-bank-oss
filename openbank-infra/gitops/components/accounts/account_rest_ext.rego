@@ -13,6 +13,7 @@
 #   account.freeze         — freeze an account (four-eyes verb, rules.yaml four_eyes.verbs)
 #   account.unfreeze       — unfreeze an account
 #   account.authorize      — grant/revoke a delegated account authorization
+#   account.verifyOwnership — {owned, active} verdict for (iban, partyId) (ADR-0335 D2)
 #
 # The action namespace is the money-path scope from rules.yaml as-is (openbank-account-service
 # normalises to `account`, no override needed in money_path_action_prefixes) — so the base
@@ -156,4 +157,19 @@ allowed_reasons contains "service-party-account-read" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-party"
 	input.action == "account.list"
+}
+
+# ADR-0335 D2 — declared callers of the ownership projection. pension-service's own client (`openbank-pension`, ROLE_API only) verifies that a
+# payout/own-account IBAN belongs to the participant and is active. It gets the ownership
+# projection (AccountOwnershipResource: the answer is exactly {owned, active}, identical for an
+# unknown IBAN and another party's) and NOTHING else — account.read stays denied, so a stolen
+# pension credential cannot read an account, a balance or a holder. A future caller with the same
+# need is added to this set with its own evidence, never by granting it account.read.
+allowed_reasons contains "service-account-verify-ownership" if {
+	input.principal.type == "HUMAN"
+	input.principal.id in {
+		"service-account-openbank-pension", # payout / own-account checks (#12385)
+		"service-account-openbank-sdd", # debtor-party check for a scoped mandate initiator (#12387)
+	}
+	input.action == "account.verifyOwnership"
 }

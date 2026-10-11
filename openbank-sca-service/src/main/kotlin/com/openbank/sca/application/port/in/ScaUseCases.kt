@@ -80,6 +80,8 @@ data class ConsumeScaCommand(
     val cardAction: String? = null,
     val approvalRequestId: String? = null,
     val payloadSha256: String? = null,
+    /** What the authenticated consumer may spend (ADR-0335 D1); resolved from the principal at the edge of the service. */
+    val scope: ConsumerScope = ConsumerScope.General,
 )
 
 /**

@@ -965,3 +965,49 @@ than ten connections and compete with other account clients for that shared limi
 on nginx until the listener policy and 401/429 behavior have been checked on the Gateway
 address. Rollback is the coordinated DNS switch back to nginx; its Ingress and network
 allowance remain until Phase 5.
+
+## 2026-10-09 — Ownership-verification projection for pension-service (ADR-0335 D2)
+
+New endpoint `POST /api/v1/accounts/ownership-verifications`, under a new action
+`account.verifyOwnership`. It is granted to one machine identity,
+`service-account-openbank-pension` (ROLE_API), by `service-pension-account-verify-ownership`.
+Staff keep the action through `operator-account-write`. Pension is **not** granted
+`account.read`, `account.list` or any write.
+
+- **Information disclosure:** the answer is exactly `{owned, active}`. An unknown IBAN and
+  another party's IBAN both answer `owned=false, active=false`, and another party's account
+  status is never revealed. No balance, product, holder name or account id is returned. The IBAN
+  travels in the request body, so it stays out of access and ingress logs. A stolen pension
+  credential yields a membership oracle for (IBAN, party) pairs the attacker already holds. It
+  cannot enumerate accounts, and per-call audit makes a sweep visible.
+- **Elevation of privilege:** the shared `service-account-openbank-services` and
+  `service-account-openbank-edge` identities, every other service account, and an `AI_AGENT`
+  presenting the pension id are all denied. `account_rest_ext_test.rego` pins this.
+- **Repudiation:** each verification emits an `AuditEvent` with the calling principal as actor
+  and the claimed party as subject. The verdict goes in the payload; the IBAN never does.
+- **Tampering:** none. The endpoint is read-only.
+
+Tests: `OwnershipVerdictTest`, `AccountOwnershipResourceTest`, `AccountOwnershipVerificationIT`
+(real HTTP: route served, exact body, indistinguishable negatives, 400 not 500, 401 anonymous).
+
+
+Update the same day (ADR-0335 D2a): when `owned` is true, the answer also carries `accountId`, for
+the caller that binds a mandate to the account (#12387). It is never present for an unknown or
+foreign IBAN, so the no-oracle property holds. A second declared caller,
+`service-account-openbank-sdd`, verifies the debtor party of a scoped mandate initiator (D6).
+Every other identity is still denied (`account_rest_ext_test.rego`).
+
+
+### Pension client identity prerequisite (ADR-0335)
+
+The scoped pension ownership projection requires a token issuer that can mint the
+`openbank-pension` service-account identity. Both committed realm definitions now
+carry the same client and service-account user as the active pension integration
+(#12435), with only `ROLE_API` and the existing `catalog:read` client scope.
+Interactive login flows remain disabled. This establishes a reviewable issuer
+configuration prerequisite; it does not prove the live realm was imported, that
+credential material was supplied, or that a deployed token matches the policy.
+The account ownership projection still returns an account identifier only for an
+active account owned by the supplied party. A compromised pension credential can
+invoke its scoped projection; it does not acquire shared operator or compliance
+roles. Realm import and credential delivery must be verified before deployment.

@@ -12,10 +12,13 @@ import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactBroker
 import com.openbank.sca.application.port.out.ScaChallengeRepository
+import com.openbank.sca.domain.model.DynamicLinkingData
 import com.openbank.sca.domain.model.ScaChallenge
 import com.openbank.sca.domain.model.ScaMethod
 import com.openbank.sca.domain.model.ScaPurpose
 import com.openbank.sca.domain.model.ScaStatus
+import io.quarkus.security.runtime.QuarkusPrincipal
+import io.quarkus.security.runtime.QuarkusSecurityIdentity
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestIdentityAssociation
@@ -55,6 +58,15 @@ import java.util.concurrent.TimeUnit
 class ScaPactProviderVerificationTest {
 
     companion object {
+        const val PENSION_OPERATION_STATE = "a COMPLETED APPROVAL SCA challenge bound to a pension operation exists"
+        val PENSION_CHALLENGE_ID: UUID = UUID.fromString("7e5a0001-0000-4000-8000-000000000335")
+        val PENSION_PARTY_ID: UUID = UUID.fromString("7e5a0002-0000-4000-8000-000000000335")
+        const val PENSION_PAYLOAD_SHA256 = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        const val PENSION_APPROVAL_REQUEST_ID = "pension-exit:$PENSION_PAYLOAD_SHA256"
+        val PENSION_IDENTITY: QuarkusSecurityIdentity = QuarkusSecurityIdentity.builder()
+            .setPrincipal(QuarkusPrincipal("service-account-openbank-pension"))
+            .addRole("ROLE_API")
+            .build()
         private val CHALLENGE_ID = UUID.fromString("99999999-9999-9999-9999-999999999999")
         private val PARTY_ID = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
         private val DELEGATION_CHALLENGE_ID = UUID.fromString("d1e2f3a4-b5c6-4d7e-8f90-1a2b3c4d5e6f")
@@ -117,6 +129,9 @@ class ScaPactProviderVerificationTest {
         // authenticates every broker replay, including those, and would answer as if signed in.
         if (context != null && context.interaction.providerStates.any { it.name == NEGATIVE_AUTH_STATE }) {
             testIdentityAssociation.setTestIdentity(null)
+        }
+        if (context != null && context.interaction.providerStates.any { it.name == PENSION_OPERATION_STATE }) {
+            testIdentityAssociation.setTestIdentity(PENSION_IDENTITY)
         }
         context?.verifyInteraction()
     }
@@ -194,6 +209,40 @@ class ScaPactProviderVerificationTest {
                 expiresAt = OffsetDateTime.now().plusMinutes(5),
                 completedAt = OffsetDateTime.now(),
                 consumedAt = null,
+                createdAt = OffsetDateTime.now(),
+            ),
+        )
+        Unit
+    }
+
+    /**
+     * ADR-0335 / #12385 item 3: pension-service's positive consume. Seeded COMPLETED, unconsumed,
+     * APPROVAL, with a device-signed `pension-exit:` id, so the consume succeeds ONLY for the
+     * pension principal — [verifyPacts] switches the replay identity to it for this state, exactly
+     * as production would present it. Constants must match the pension consumer pact.
+     */
+    @State(PENSION_OPERATION_STATE)
+    fun stateCompletedPensionApprovalExists() = runOnVertxContext {
+        challengeRepo.save(
+            ScaChallenge(
+                id = PENSION_CHALLENGE_ID,
+                version = challengeRepo.findById(PENSION_CHALLENGE_ID)?.version ?: 0,
+                partyId = PENSION_PARTY_ID,
+                purpose = ScaPurpose.APPROVAL,
+                method = ScaMethod.PUSH_NOTIFICATION,
+                status = ScaStatus.COMPLETED,
+                expiresAt = OffsetDateTime.now().plusMinutes(5),
+                completedAt = OffsetDateTime.now(),
+                consumedAt = null,
+                dynamicLinkingData = DynamicLinkingData(
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    approvalRequestId = PENSION_APPROVAL_REQUEST_ID,
+                    payloadSha256 = PENSION_PAYLOAD_SHA256,
+                ),
                 createdAt = OffsetDateTime.now(),
             ),
         )

@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: sca-service
     app.kubernetes.io/part-of: sca
   annotations:
-    openbank.tech/policy-checksum: "eef2d9d00e66b001"
+    openbank.tech/policy-checksum: "e9197c80e94f229c"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -700,6 +700,22 @@ data:
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-services"
     	input.action in {"scaChallenge.read", "scaChallenge.consume"}
+    }
+
+    # ADR-0335 D1 — pension-service's own Keycloak client (`openbank-pension`, ROLE_API only) is a
+    # SCOPED consumer: consume and nothing else. No initiate (customer-edge raises pension challenges),
+    # no read, no decide, no verify. This rule admits the identity to the action; WHICH challenges it
+    # may spend is decided in sca-service's domain (ConsumerScope.Reserved(PENSION): APPROVAL purpose,
+    # device-signed approvalRequestId `pension-<operation>:<ref>`), because the OPA resource is only
+    # the challenge id and the device-signed namespace exists nowhere but sca-service's database.
+    # The grant is DATA (rules.yaml: scoped_sca_consumers), not a hard-coded identity.
+    # Paired with rules.yaml four_eyes.exemptions.scaChallenge.consume (ADR-0280 bar: ceremony-only
+    # service account, no human path rides on it).
+    allowed_reasons contains "service-sca-scoped-consumer" if {
+    	input.principal.type == "HUMAN"
+    	some consumer in data.rules.scoped_sca_consumers
+    	input.principal.id == consumer.principal
+    	input.action in consumer.actions
     }
 
     # Operator-approval queue (ApprovalResource, /api/v1/sca/approvals, #10041 slice 9b): the queue
@@ -1645,6 +1661,7 @@ data:
         scaChallenge.consume:                                          # ADR-0021 settlement gate + ceremonies
           - service-account-openbank-edge                              # scaGate before every money-path forward
           - service-account-openbank-services                          # delegation grant-accept, document-signing (#3734)
+          - service-account-openbank-pension                           # ADR-0335: scope is DATA, see scoped_sca_consumers
 
     feature_flags:
       # Disabling any of these via a flag flip is never permitted — they guard SCA (ADR-0021),
@@ -1989,5 +2006,29 @@ data:
         operator-domestic-payment-write: "1 identity-pinned rule; action coverage unverified"
         operator-party-write: "1 identity-pinned rule, but onboarding-service PUTs party.kyc-status via the shared client (latent: AUTHZ_ENFORCE=false there today)"
       adr: ADR-0034
+
+    scoped_sca_consumers:
+      - principal: service-account-openbank-pension
+        actions: [scaChallenge.consume]
+        purposes: [APPROVAL]
+        approval_request_prefix: "pension-"
+        adr: ADR-0335
+
+    scoped_payment_initiators:
+      - principal: service-account-openbank-pension
+        service: openbank-domestic-payment
+        actions: [domestic-payment.create]
+        # Pays only FROM this account (pension payout account), CZK only (domestic scheme rule).
+        debtor_account_config: openbank.domestic-payment.scoped-initiators.pension.debtor-account-id
+        adr: ADR-0335
+      - principal: service-account-openbank-pension
+        service: openbank-sdd-service
+        actions: [sdd.create, sdd.delete]
+        # Registers/cancels only mandates whose creditor is this SEPA creditor identifier (pension
+        # collection), and registers only on a debtor account account-service verifies is owned
+        # and active by the stated subject party.
+        creditor_identifier_config: openbank.sdd.scoped-initiators.pension.creditor-identifier
+        debtor_party_verified: true
+        adr: ADR-0335
   manifest.json: |
     {"roots": ["openbank/agents", "openbank/copilot", "openbank/rest", "agents", "rules"]}

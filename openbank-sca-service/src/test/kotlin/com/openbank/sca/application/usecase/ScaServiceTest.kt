@@ -21,10 +21,12 @@ import com.openbank.sca.application.port.out.PartyTypeLookup
 import com.openbank.sca.application.port.out.ScaChallengeRepository
 import com.openbank.sca.application.port.out.ScaDecisionStore
 import com.openbank.sca.application.port.out.ScaIdempotencyStore
+import com.openbank.sca.domain.model.ConsumerScope
 import com.openbank.sca.domain.model.DeviceApprovalDecision
 import com.openbank.sca.domain.model.DeviceDecisionType
 import com.openbank.sca.domain.model.DynamicLinkingData
 import com.openbank.sca.domain.model.EnrolledDevice
+import com.openbank.sca.domain.model.ReservedNamespace
 import com.openbank.sca.domain.model.ScaChallenge
 import com.openbank.sca.domain.model.ScaMethod
 import com.openbank.sca.domain.model.ScaPurpose
@@ -894,6 +896,53 @@ class ScaServiceTest {
         verify(exactly = 1) { metrics.scaChallengeResolved(ch.method.name, "consumed") }
     }
 
+    // --- consumer scope (ADR-0335 D1) ---
+
+    @Test
+    fun `a scoped consumer cannot spend a challenge outside its namespace and does not burn it`(): Unit = runBlocking {
+        val ch = challenge(status = ScaStatus.COMPLETED)
+        coEvery { repository.findById(ch.id) } returns ch
+        coEvery { repository.markConsumed(ch.id) } returns true
+        assertThatThrownBy {
+            runBlocking {
+                service.consume(ConsumeScaCommand(ch.id, ch.partyId, null, null, null, scope = pensionScope))
+            }
+        }.isInstanceOf(ScaConsumerScopeViolationException::class.java)
+        coVerify(exactly = 0) { repository.markConsumed(any()) }
+    }
+
+    @Test
+    fun `a general consumer cannot spend a pension-namespaced challenge`(): Unit = runBlocking {
+        val ch = pensionApproval()
+        coEvery { repository.findById(ch.id) } returns ch
+        coEvery { repository.markConsumed(ch.id) } returns true
+        assertThatThrownBy {
+            runBlocking { service.consume(pensionConsume(ch, ConsumerScope.General)) }
+        }.isInstanceOf(ScaConsumerScopeViolationException::class.java)
+        coVerify(exactly = 0) { repository.markConsumed(any()) }
+    }
+
+    @Test
+    fun `the pension consumer spends its own approval once, still bound to party and payload`(): Unit = runBlocking {
+        val ch = pensionApproval()
+        coEvery { repository.findById(ch.id) } returns ch
+        coEvery { repository.markConsumed(ch.id) } returns true
+        assertThatThrownBy {
+            runBlocking {
+                service.consume(pensionConsume(ch, pensionScope).copy(expectedPartyId = UUID.randomUUID()))
+            }
+        }.isInstanceOf(ScaChallengePartyMismatchException::class.java)
+        assertThatThrownBy {
+            runBlocking { service.consume(pensionConsume(ch, pensionScope).copy(payloadSha256 = "b".repeat(64))) }
+        }.isInstanceOf(ScaDynamicLinkingMismatchException::class.java)
+        coVerify(exactly = 0) { repository.markConsumed(any()) }
+
+        val result = service.consume(pensionConsume(ch, pensionScope))
+
+        assertThat(result.consumedAt).isNotNull()
+        coVerify(exactly = 1) { repository.markConsumed(ch.id) }
+    }
+
     @Test
     fun `consume throws ScaChallengeNotFoundException for unknown id`(): Unit = runBlocking {
         coEvery { repository.findById(any()) } returns null
@@ -1249,6 +1298,32 @@ class ScaServiceTest {
         decision = type,
         signatureB64 = "sig",
         decidedAt = now,
+    )
+
+    private val pensionScope = ConsumerScope.Reserved(ReservedNamespace.PENSION)
+
+    private fun pensionApproval() = challenge(status = ScaStatus.COMPLETED).copy(
+        purpose = ScaPurpose.APPROVAL,
+        dynamicLinkingData = DynamicLinkingData(
+            null,
+            null,
+            null,
+            null,
+            null,
+            approvalRequestId = "pension-exit:${"c".repeat(64)}",
+            payloadSha256 = "c".repeat(64),
+        ),
+    )
+
+    private fun pensionConsume(ch: ScaChallenge, scope: ConsumerScope) = ConsumeScaCommand(
+        challengeId = ch.id,
+        expectedPartyId = ch.partyId,
+        amount = null,
+        currency = null,
+        creditor = null,
+        approvalRequestId = ch.dynamicLinkingData?.approvalRequestId,
+        payloadSha256 = ch.dynamicLinkingData?.payloadSha256,
+        scope = scope,
     )
 
     private fun challenge(

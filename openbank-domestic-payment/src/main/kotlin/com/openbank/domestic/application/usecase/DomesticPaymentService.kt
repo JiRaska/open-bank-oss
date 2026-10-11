@@ -124,6 +124,11 @@ class DomesticPaymentService(
             "The public domestic-payment use case accepts owner-funded payments only"
         }
         DomesticSchemeRules.requireSchemeCurrency(command.amount)
+        // ADR-0335 D5: a scoped initiator pays only from its configured account; an undeclared
+        // machine pays from none. Before anything is persisted or any key is claimed.
+        if (!command.initiatorScope.permits(command.debtorAccountId)) {
+            throw InitiatorScopeViolationException(command.debtorAccountId)
+        }
         return checkNotNull(
             createPaymentInternal(
                 command = command,
@@ -390,3 +395,7 @@ class DomesticPaymentService(
     private fun generateEndToEndId(priority: DomesticPaymentPriority): String =
         "DOM${priority.name.take(1)}${clock.millis()}${(1000..9999).random()}"
 }
+
+/** ADR-0335 D5: the caller may not pay from this debtor account (403). */
+class InitiatorScopeViolationException(debtorAccountId: java.util.UUID) :
+    RuntimeException("Caller may not initiate a payment from debtor account $debtorAccountId")

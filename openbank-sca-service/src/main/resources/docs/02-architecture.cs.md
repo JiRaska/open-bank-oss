@@ -71,3 +71,12 @@ Zápis do outboxu pro `DEVICE_ENROLLED` je záměrně **oddělená transakce** o
 - **Fail-closed verifikátor** — implementace `DeviceAssertionVerifier` musí při jakémkoli vadném klíči/podpisu vrátit `false`, nikdy neprojít výjimkou do úspěšné cesty.
 - **Odolnost** — publikace outboxu je obalena MicroProfile Fault Tolerance (bulkhead, circuit breaker, retry, timeout).
 - **Pozorovatelnost** — Micrometer/Prometheus metriky, OpenTelemetry trasy (OTLP), strukturované JSON logy s `traceId`/`spanId`.
+
+## Omezení spotřebitelé (ADR-0335 D1)
+
+Každé spotřebování odvodí z principálu `ConsumerScope`. `service-account-openbank-pension` je
+`Reserved(PENSION)`: smí spotřebovat jen výzvu `APPROVAL`, jejíž zařízením podepsané
+`approvalRequestId` začíná `pension-`. Každý jiný principál je `General` a smí spotřebovat cokoli
+kromě tohoto jmenného prostoru. Odmítnutý pokus vrátí 403 ještě před compare-and-consume, takže výzvu
+nespálí. Rozsah deklaruje `rules.yaml: scoped_sca_consumers` a `ConsumerScopesRulesParityTest` drží
+kód v souladu. Flyway V17 rozšiřuje sloupec approval id.
