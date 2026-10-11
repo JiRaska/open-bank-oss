@@ -110,17 +110,17 @@ allowed_reasons contains "service-ledger-read" if {
 # Staff only — a service-account holding ROLE_OPERATOR or ROLE_VIEWER is NOT staff here; the
 # machine callers are named by identity, one rule each.
 allowed_reasons contains "ledger-close-inspect-read" if {
-	input.principal.type == "HUMAN"
-	not startswith(object.get(input.principal, "id", ""), "service-account-")
-	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_VIEWER", "ROLE_AUDITOR"}
-	role in input.principal.roles
-	input.action == "ledger.close.inspect"
+    input.principal.type == "HUMAN"
+    not startswith(object.get(input.principal, "id", ""), "service-account-")
+    some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_VIEWER", "ROLE_AUDITOR"}
+    role in input.principal.roles
+    input.action == "ledger.close.inspect"
 }
 
 allowed_reasons contains "service-ledger-close-inspect" if {
-	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-services"
-	input.action == "ledger.close.inspect"
+    input.principal.type == "HUMAN"
+    input.principal.id == "service-account-openbank-services"
+    input.action == "ledger.close.inspect"
 }
 
 # Operators and admins may perform routine ledger writes. Close DRAFT creation has a
