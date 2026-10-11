@@ -48,7 +48,6 @@ import argparse
 import pathlib
 import sys
 import tempfile
-from unittest.mock import patch
 
 import yaml
 
@@ -84,25 +83,29 @@ def _load(path: pathlib.Path) -> dict | None:
         return None
 
 
-def base_ports() -> dict[str, int | None]:
+def base_ports(base_config: pathlib.Path = BASE_CONFIG) -> dict[str, int | None]:
     """Ports the shared openbank-libs-runtime base opens for every service that inherits it."""
-    doc = _load(BASE_CONFIG)
+    doc = _load(base_config)
     return _ports_of(doc) if doc is not None else {"http": None, "management": None}
 
 
-def service_ports() -> dict[str, dict[str, int | None]]:
-    """{service: {"http": port, "management": port}}, service file layered over the shared base."""
-    base = base_ports()
+def service_ports(repo: pathlib.Path = REPO) -> dict[str, dict[str, int | None]]:
+    """{service: {"http": port, "management": port}}, service file layered over the shared base.
+
+    `repo` is a parameter only so the self-test can run this exact function over a synthetic tree.
+    """
+    base_config = repo / BASE_CONFIG.relative_to(REPO)
+    base = base_ports(base_config)
     out: dict[str, dict[str, int | None]] = {}
-    for path in gatelib.glob(REPO, "openbank-*/src/main/resources/application.yaml"):
-        if path == BASE_CONFIG:
+    for path in gatelib.glob(repo, "openbank-*/src/main/resources/application.yaml"):
+        if path == base_config:
             continue  # the base is not a service
         doc = _load(path)
         if doc is None:
             continue
         own = _ports_of(doc)
         # The service's own value wins where it sets one; the base fills the rest.
-        out[path.parts[len(REPO.parts)]] = {
+        out[path.parts[len(repo.parts)]] = {
             k: own[k] if own[k] is not None else base[k] for k in ("http", "management")
         }
     return out
@@ -258,31 +261,35 @@ def selftest() -> int:
               f"{BASE_CONFIG.relative_to(REPO)} no longer parses, and every inheriting service "
               "would be flagged for a port that is in fact open.")
         return 1
-    # Exercise the real loader independently of whether today's fleet repeats the base value.
-    with tempfile.TemporaryDirectory(prefix="probe-port-layering-") as directory:
-        root = pathlib.Path(directory)
-        fixture_base = root / "openbank-libs-runtime/src/main/resources/application.yaml"
-        fixture_base.parent.mkdir(parents=True)
-        fixture_base.write_text("quarkus:\n  http:\n    port: 8080\n  management:\n    port: 8085\n")
-        for name, content in {
-            "openbank-inherited": "quarkus:\n  http:\n    port: 8140\n",
-            "openbank-overridden": "quarkus:\n  management:\n    port: 8086\n",
-        }.items():
-            path = root / name / "src/main/resources/application.yaml"
-            path.parent.mkdir(parents=True)
-            path.write_text(content)
-        with patch.dict(globals(), REPO=root, BASE_CONFIG=fixture_base):
-            layered = service_ports()
+    # #3686 layering, exercised through service_ports() itself over a synthetic tree. It used to
+    # require some LIVE service to inherit the base's management port, and went red on main the
+    # day the last one (tax-reporting, #12461) legitimately declared its own — a self-test whose
+    # precondition is a fact about the fleet fails for reasons unrelated to the gate.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        files = {
+            BASE_CONFIG.relative_to(REPO): "quarkus:\n  management:\n    port: 8085\n",
+            pathlib.Path("openbank-inherits-service/src/main/resources/application.yaml"):
+                "quarkus:\n  http:\n    port: 8140\n",
+            pathlib.Path("openbank-overrides-service/src/main/resources/application.yaml"):
+                "quarkus:\n  http:\n    port: 8141\n  management:\n    port: 9000\n",
+        }
+        for rel, text in files.items():
+            (root / rel).parent.mkdir(parents=True, exist_ok=True)
+            (root / rel).write_text(text, encoding="utf-8")
+        layered = service_ports(root)
         expected = {
-            "openbank-inherited": {"http": 8140, "management": 8085},
-            "openbank-overridden": {"http": 8080, "management": 8086},
+            "openbank-inherits-service": {"http": 8140, "management": 8085},
+            "openbank-overrides-service": {"http": 8141, "management": 9000},
         }
         if layered != expected:
-            print(f"selftest FAIL: config layering returned {layered!r}, expected {expected!r}")
+            print(f"selftest FAIL: base layering produced {layered}, expected {expected} — an "
+                  "inheriting service would be flagged for a port that is in fact open (#3686).")
             return 1
-    print(f"selftest OK: {len(cases)} cases, both directions; "
-          f"base inheritance and service overrides verified; "
-          f"{len(configs)} service config(s), {len(workloads())} workload(s) parsed.")
+    inheritors = [s for s, p in configs.items() if (_load(REPO / s / "src/main/resources/application.yaml")
+                  or {}).get("quarkus", {}).get("management") is None and p["management"] is not None]
+    print(f"selftest OK: {len(cases)} cases + base layering (inherit and override), both directions; "
+          f"{len(configs)} service config(s) ({len(inheritors)} inheriting management="f"{base['management']} from the shared base), {len(workloads())} workload(s) parsed.")
     return 0
 
 
