@@ -17,3 +17,15 @@ cae11688fbd8ab870c3f60da4ff8beb3b5679fc0:pacts/openbank-pension-service-openbank
 1d39e1380116978e534b05ec69a90a76d4bdf2f1:pacts/openbank-pension-service-openbank-pension-fund-service.json:generic-api-key:528
 1d39e1380116978e534b05ec69a90a76d4bdf2f1:pacts/openbank-pension-service-openbank-pension-fund-service.json:generic-api-key:612
 1d39e1380116978e534b05ec69a90a76d4bdf2f1:pacts/openbank-pension-service-openbank-pension-fund-service.json:generic-api-key:711
+
+# FALSE POSITIVES: pension negative ownership fixtures, not customer input. The
+# sequential-account fixture is used by the dev/test-only StubParticipantAccountAdapter
+# and fake ownership tests (PaymentMandateAndSettlementTest / IdentityChecksTest).
+# The account Pact's unknown-IBAN fixture is paired with a provider state that seeds
+# no account (AccountPactFolderProviderVerificationTest.noAccountForUnknownIban).
+# Exact historical findings only: no path or IBAN-pattern exemption is introduced;
+# new IBAN additions in these files are still scanned. Existing Pact tests exercise
+# owned, foreign-party and unknown-account outcomes independently.
+cf3e065ac99ab8c2d8d715fa1de5955e9c3edc1b:pacts/openbank-pension-service-openbank-account-service.json:iban-real:74
+e4d465c0f7c06f8143ea237b3f8672f585ca113a:openbank-pension-service/src/main/kotlin/com/openbank/pension/infrastructure/payments/ParticipantAccountAdapters.kt:iban-real:43
+b046cb5ede0bc7f535de8165d02083a3a5c49e9c:pacts/openbank-pension-service-openbank-account-service.json:iban-real:37
