@@ -43,6 +43,7 @@ dependencies {
     implementation(libs.quarkus.scheduler)
     testImplementation(libs.quarkus.junit5)
     testImplementation(libs.quarkus.test.security)
+    testImplementation(libs.quarkus.test.security.oidc)
     testImplementation(libs.rest.assured.kotlin)
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)

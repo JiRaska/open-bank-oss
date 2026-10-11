@@ -67,7 +67,11 @@ test_viewer_may_not_create_party if {
 	not allow.allow with input as {"principal": viewer, "action": "party.create"}
 }
 
-# --- the edge rule is unchanged ---
+# --- customer-edge is also a named party creator for individual onboarding ---
+
+test_edge_creates_party if {
+	"service-edge-party-m2m" in allowed_reasons with input as {"principal": {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_API"]}, "action": "party.create"}
+}
 
 test_edge_keeps_consent_update if {
 	"service-edge-party-m2m" in allowed_reasons with input as {"principal": {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_API"]}, "action": "party.consent.update"}

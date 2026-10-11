@@ -12,6 +12,7 @@ import jakarta.ws.rs.ForbiddenException
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatCode
 import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.eclipse.microprofile.jwt.JsonWebToken
 import org.junit.jupiter.api.Test
 import java.io.File
 
@@ -23,15 +24,54 @@ import java.io.File
  */
 class PartyCreateCallerGuardTest {
 
-    private fun identity(name: String, vararg roles: String) = QuarkusSecurityIdentity.builder()
-        .setPrincipal(QuarkusPrincipal(name))
-        .addRoles(roles.toSet())
-        .build()
+    /**
+     * #12448: a `service-account-<client>` name becomes that client's OWN verified service-account
+     * token (`azp` = client, `preferred_username` = the name, `sub` set) — the only shape the guard
+     * admits. Any other name stays a plain, non-JWT principal.
+     */
+    private fun identity(name: String, vararg roles: String) = if (name.startsWith("service-account-")) {
+        jwtIdentity(name.removePrefix("service-account-"), name, *roles)
+    } else {
+        QuarkusSecurityIdentity.builder().setPrincipal(QuarkusPrincipal(name)).addRoles(roles.toSet()).build()
+    }
+
+    private fun jwtIdentity(azp: String?, username: String?, vararg roles: String, sub: String? = "sa-subject") =
+        QuarkusSecurityIdentity.builder()
+            .setPrincipal(TestJwt(mapOf("azp" to azp, "preferred_username" to username, "sub" to sub)))
+            .addRoles(roles.toSet())
+            .build()
+
+    private class TestJwt(private val claims: Map<String, Any?>) : JsonWebToken {
+        override fun getName(): String = claims["preferred_username"] as? String ?: "anonymous"
+        override fun getClaimNames(): Set<String> = claims.filterValues { it != null }.keys
+
+        @Suppress("UNCHECKED_CAST")
+        override fun <T : Any?> getClaim(claimName: String): T = claims[claimName] as T
+    }
+
+    @Test
+    fun `staff role on an unrelated machine token cannot bypass client binding`() {
+        val machine = jwtIdentity(
+            "openbank-unrelated",
+            "service-account-openbank-unrelated",
+            "ROLE_OPERATOR",
+            "ROLE_API",
+        )
+        assertThatThrownBy { requireNamedPartyCreateCaller(machine) }.isInstanceOf(ForbiddenException::class.java)
+        assertThatThrownBy { requireNamedPartyCreateCaller(identity("u-staff", "ROLE_OPERATOR")) }
+            .isInstanceOf(ForbiddenException::class.java)
+    }
 
     @Test
     fun `kyb's own principal with ROLE_API only may create a party`() {
         assertThatCode { requireNamedPartyCreateCaller(identity("service-account-openbank-kyb", "ROLE_API")) }
             .doesNotThrowAnyException()
+    }
+
+    @Test
+    fun `customer-edge own principal may create a party even when it has an operator role`() {
+        val edge = identity("service-account-openbank-edge", "ROLE_API", "ROLE_OPERATOR")
+        assertThatCode { requireNamedPartyCreateCaller(edge) }.doesNotThrowAnyException()
     }
 
     @Test
@@ -51,7 +91,7 @@ class PartyCreateCallerGuardTest {
     @Test
     fun `staff roles keep the pre-#10486 behaviour`() {
         listOf("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC").forEach { role ->
-            assertThatCode { requireNamedPartyCreateCaller(identity("u-staff", role)) }
+            assertThatCode { requireNamedPartyCreateCaller(jwtIdentity("openbank-admin-ui", "u-staff", role)) }
                 .describedAs(role)
                 .doesNotThrowAnyException()
         }
@@ -67,10 +107,32 @@ class PartyCreateCallerGuardTest {
     @Test
     fun `the Kotlin caller set and the rego identity rule list the same principals`() {
         val rego = File("../openbank-infra/gitops/components/party/party_rest_ext.rego").readText()
-        val rule = rego.substringAfter("allowed_reasons contains \"service-kyb-party-m2m\"")
-            .substringBefore("\n}")
-        val inRego = Regex("\"(service-account-[a-z0-9-]+)\"").findAll(rule).map { it.groupValues[1] }.toSet()
-        assertThat(rule).contains("\"party.create\"")
+        val rules = listOf("service-kyb-party-m2m", "service-edge-party-m2m").map { reason ->
+            rego.substringAfter("allowed_reasons contains \"$reason\"").substringBefore("\n}")
+        }
+        val inRego = rules.flatMap { rule ->
+            assertThat(rule).contains("\"party.create\"")
+            Regex("\"(service-account-[a-z0-9-]+)\"").findAll(rule).map { it.groupValues[1] }.toList()
+        }.toSet()
         assertThat(inRego).isEqualTo(PARTY_CREATE_CALLERS)
+    }
+
+    @Test
+    fun `an allowed principal's name on a token issued to another client is refused`() {
+        val impostor = jwtIdentity("openbank-admin-ui", "service-account-openbank-kyb", "ROLE_API")
+        assertThatThrownBy { requireNamedPartyCreateCaller(impostor) }.isInstanceOf(ForbiddenException::class.java)
+    }
+
+    @Test
+    fun `a human token issued through an allowed client, or a non-JWT principal so named, is refused`() {
+        val human = jwtIdentity("openbank-kyb", "alice", "ROLE_API")
+        assertThatThrownBy { requireNamedPartyCreateCaller(human) }.isInstanceOf(ForbiddenException::class.java)
+        val named = QuarkusSecurityIdentity.builder()
+            .setPrincipal(QuarkusPrincipal("service-account-openbank-kyb"))
+            .addRole("ROLE_API")
+            .build()
+        assertThatThrownBy { requireNamedPartyCreateCaller(named) }.isInstanceOf(ForbiddenException::class.java)
+        val noSubject = jwtIdentity("openbank-kyb", "service-account-openbank-kyb", "ROLE_API", sub = null)
+        assertThatThrownBy { requireNamedPartyCreateCaller(noSubject) }.isInstanceOf(ForbiddenException::class.java)
     }
 }

@@ -458,10 +458,15 @@ class AuthorizeInterceptor {
 
     private fun buildQuery(ctx: InvocationContext, annotation: Authorize): AuthzQuery {
         val sc = securityContext.get()
+        // The machine flag comes from VERIFIED claims only, never from the name above.
+        val machineClient = ServiceAccountIdentity.machineClientId(identity.get().principal)
         val principal = Principal(
             id = sc.userPrincipal?.name ?: "anonymous",
             type = principalType(sc, identity.get()),
             roles = identity.get().roles.toList(),
+            // FAIL CLOSED: anything not positively verified as a person is a machine.
+            serviceAccount = !ServiceAccountIdentity.isVerifiedPerson(identity.get()),
+            clientId = machineClient?.takeIf { it.isNotEmpty() },
         )
         val resource = annotation.resource.takeIf { it.isNotEmpty() }?.let { expr ->
             extractResource(ctx, annotation, expr)
@@ -553,7 +558,7 @@ private fun resolveResourceField(target: Any, fieldName: String, log: Logger): A
 }
 
 /** Keycloak's service-account username convention: `service-account-<clientId>`. */
-internal const val SERVICE_ACCOUNT_PREFIX = "service-account-"
+internal const val SERVICE_ACCOUNT_PREFIX = ServiceAccountIdentity.PRINCIPAL_PREFIX
 
 /**
  * #10486: the INFO line that proves, per request, WHICH machine identity an enforced decision was
@@ -604,11 +609,8 @@ internal fun m2mDecisionLine(action: String, principalId: String, outcome: Strin
  */
 private fun makerActorKind(query: AuthzQuery, authenticatedIdentity: SecurityIdentity): MakerActorKind {
     val jwt = authenticatedIdentity.principal as? JsonWebToken
-    val clientId = jwt?.getClaim<String>("azp")
     val preferredUsername = jwt?.getClaim<String>("preferred_username")
-    val verifiedServiceAccount = jwt?.subject?.isNotBlank() == true &&
-        !clientId.isNullOrBlank() &&
-        preferredUsername == "$SERVICE_ACCOUNT_PREFIX$clientId"
+    val verifiedServiceAccount = ServiceAccountIdentity.verifiedClientId(authenticatedIdentity) != null
     return when {
         query.principal.type == "AI_AGENT" -> MakerActorKind.AI_AGENT
         verifiedServiceAccount -> MakerActorKind.SERVICE_ACCOUNT

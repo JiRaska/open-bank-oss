@@ -189,3 +189,9 @@ Each Kafka record carries `ce-id` (= event id), `idempotency-key` (= event id) a
 - `openapi.yaml` `IssueCardRequest` omits `productCode`, `cardholderName`, `currency`, `dailyLimitMinorUnits`, `monthlyLimitMinorUnits` which the code requires/accepts, and models `deliveryAddress` as an object whereas the code uses a string.
 - The `cardNetwork` enum in `IssueCardRequest` is still narrower than the domain (`AMEX`, `UNIONPAY` missing). `cardType` and `status` were reconciled with the domain in `info.version` 1.1.0.
 - `GET /api/v1/cards` (list all) and the role/`X-Operator-Id` semantics are not fully described in the spec.
+
+## Card read caller identity
+
+The single-card read admits the delegation service account, while the party-card list admits the party service account. Both require a verified JWT whose `azp` identifies the named client and whose subject and Keycloak service-account username agree. Staff read roles are accepted only for verified interactive user sessions. A different service holding a staff role cannot use that role to bypass the named caller check.
+
+Card-read HTTP test fixtures provide interactive staff JWT claims together with their roles, so tests exercise the same caller binding as the resource guard.

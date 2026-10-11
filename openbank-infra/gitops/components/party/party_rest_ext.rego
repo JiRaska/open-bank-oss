@@ -51,6 +51,8 @@ allowed_reasons contains "operator-party-write" if {
 # would over-grant these actions to any operator session.
 #
 #   - customer-edge (client-id "openbank-edge" -> principal.id "service-account-openbank-edge"):
+#       party.create — creates the customer's individual party during onboarding
+#         (OnboardingResource -> UpstreamClient.postAnonymous).
 #       party.consent.update — the app's Profile-screen marketing-consent toggle is forwarded to
 #         party-service through the edge's own M2M token (CustomerEdgeResource, PATCH
 #         /api/v1/parties/{id}/consent).
@@ -64,6 +66,7 @@ allowed_reasons contains "service-edge-party-m2m" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-edge"
 	input.action in {
+        "party.create",
 		"party.consent.update",
 		"party:resolve",
 	}

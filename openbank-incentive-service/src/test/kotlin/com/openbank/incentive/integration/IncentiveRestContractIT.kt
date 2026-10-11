@@ -7,10 +7,15 @@ import com.openbank.incentive.it.IncentivePostgresTestResource
 import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
 import com.openbank.libs.persistence.outbox.SentOutboxRetention
 import io.micrometer.core.instrument.MeterRegistry
+import io.quarkus.security.runtime.QuarkusSecurityIdentity
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
+import io.quarkus.test.security.oidc.OidcTestSecurityIdentityAugmentor
 import io.quarkus.vertx.VertxContextSupport
 import io.restassured.module.kotlin.extensions.Extract
 import io.restassured.module.kotlin.extensions.Given
@@ -34,6 +39,7 @@ import org.junit.jupiter.api.Test
 import java.nio.charset.StandardCharsets
 import java.time.Duration
 import java.time.Instant
+import java.util.Optional
 import java.util.concurrent.Callable
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
@@ -42,7 +48,15 @@ import javax.sql.DataSource
 @QuarkusTest
 @QuarkusTestResource(IncentivePostgresTestResource::class)
 @QuarkusTestResource(IncentiveRestContractIT.InMemoryKafkaResource::class)
+// #12448: customer-incentive calls are admitted only from customer-edge's own service-account token.
 @TestSecurity(user = "maker@openbank.test", roles = ["ROLE_OPERATOR", "ROLE_API"])
+@OidcSecurity(
+    claims = [
+        Claim(key = "sub", value = "5f0c2a8e-7d1b-4c3e-9a6f-2b8d4e1c7a90"),
+        Claim(key = "azp", value = "openbank-edge"),
+        Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+    ],
+)
 class IncentiveRestContractIT {
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> =
@@ -52,6 +66,8 @@ class IncentiveRestContractIT {
     }
 
     @Inject lateinit var dataSource: DataSource
+
+    @Inject lateinit var testIdentity: TestIdentityAssociation
 
     @Inject lateinit var meterRegistry: MeterRegistry
 
@@ -66,6 +82,7 @@ class IncentiveRestContractIT {
     @Suppress("LongMethod")
     @Test
     fun `published inventory reserves once under concurrency then releases commits and expires`() {
+        useStaffIdentity("maker@openbank.test")
         val publicationsBefore = meterRegistry.counter("openbank.incentive.offers.published").count()
         val effectiveFrom = Instant.now().minusSeconds(60)
         val expiresAt = Instant.now().plusSeconds(86_400)
@@ -120,7 +137,7 @@ class IncentiveRestContractIT {
         assertThat(meterRegistry.counter("openbank.incentive.offers.published").count())
             .isEqualTo(publicationsBefore)
 
-        TestJsonWebToken.actor = "checker@openbank.test"
+        useStaffIdentity("checker@openbank.test")
         Given { contentType("application/json") }
             .When { post("/api/v1/incentives/offers/$offerId/publish") }
             .Then {
@@ -166,6 +183,7 @@ class IncentiveRestContractIT {
         assertThat(ids.toSet()).hasSize(1)
         assertThat(count("select count(*) from promo_reservation where offer_id = '$offerId'")).isEqualTo(1)
 
+        useEdgeIdentity()
         val customerParty = java.util.UUID.randomUUID()
         val attributionRef = java.util.UUID.randomUUID()
         Given {
@@ -284,6 +302,7 @@ class IncentiveRestContractIT {
             where id = '$attributedId'
             """.trimIndent(),
         )
+        useStaffIdentity("checker@openbank.test")
         Given { contentType("application/json") }
             .When { post("/api/v1/incentives/maintenance/expire") }
             .Then { statusCode(200) }
@@ -297,6 +316,7 @@ class IncentiveRestContractIT {
             ),
         ).isZero()
 
+        useEdgeIdentity()
         val qualifiedAt = Instant.now().minusSeconds(2)
         Given {
             contentType("application/json")
@@ -359,6 +379,7 @@ class IncentiveRestContractIT {
         assertThat(string("select digest from promo_code_inventory where offer_id = '$offerId' limit 1"))
             .doesNotContain("SUMMER")
 
+        useStaffIdentity("checker@openbank.test")
         Given {
             contentType("application/json")
             header("Idempotency-Key", "checkout-$offerId")
@@ -524,6 +545,24 @@ class IncentiveRestContractIT {
         assertThat(string("select status from incentive_outbox where id = '$raceEventId'")).isEqualTo("SENT")
     }
 
+    private fun useStaffIdentity(username: String) = useIdentity("openbank-admin-ui", username, "ROLE_OPERATOR")
+
+    private fun useEdgeIdentity() = useIdentity("openbank-edge", "service-account-openbank-edge", "ROLE_API")
+
+    private fun useIdentity(clientId: String, username: String, role: String) {
+        val base = QuarkusSecurityIdentity.builder().setPrincipal { username }.addRole(role).build()
+        val annotation = OidcSecurity(
+            claims = arrayOf(
+                Claim(key = "azp", value = clientId),
+                Claim(key = "sub", value = username),
+                Claim(key = "preferred_username", value = username),
+            ),
+        )
+        val identity = OidcTestSecurityIdentityAugmentor(Optional.empty()).augment(base, arrayOf(annotation))
+        TestJsonWebToken.actor = username
+        testIdentity.setTestIdentity(identity)
+    }
+
     private fun <T> onVertxContext(block: suspend () -> T): T = VertxContextSupport.subscribeAndAwait {
         CoroutineScope(Dispatchers.Unconfined).async { block() }.asUni()
     }
@@ -532,8 +571,28 @@ class IncentiveRestContractIT {
         String(metadata.headers.lastHeader(name).value(), StandardCharsets.UTF_8)
 
     @Test
-    @TestSecurity(user = "other-service", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-other", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "0b7e3c51-2f4a-4d8e-9c16-7a5b3e2d1f08"),
+            Claim(key = "azp", value = "openbank-other"),
+            Claim(key = "preferred_username", value = "service-account-openbank-other"),
+        ],
+    )
     fun `customer reservation refuses a different api workload principal`() {
+        customerReservationRequest(java.util.UUID.randomUUID().toString()).Then { statusCode(403) }
+    }
+
+    @Test
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "5f0c2a8e-7d1b-4c3e-9a6f-2b8d4e1c7a90"),
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
+    fun `customer reservation refuses the edge's name on a token issued to another client (#12448)`() {
         customerReservationRequest(java.util.UUID.randomUUID().toString()).Then { statusCode(403) }
     }
 
