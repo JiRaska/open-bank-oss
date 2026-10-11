@@ -74,6 +74,10 @@ data class ProfitAndLossDto(
     val managementFees: BigDecimal,
     val profitLoss: BigDecimal,
     val linesUnavailableReason: String?,
+    /** Deprecated 1.1.0 field — gains + positive other result; see [FundProfitAndLoss.income]. */
+    val income: BigDecimal,
+    /** Deprecated 1.1.0 field — losses + fees + negative other result; see [FundProfitAndLoss.expenses]. */
+    val expenses: BigDecimal,
 )
 
 data class UnitsDto(
@@ -149,6 +153,8 @@ data class FundPeriodFiguresResponse(
                 r.profitAndLossYtd.managementFees,
                 r.profitAndLossYtd.profitLoss,
                 r.profitAndLossYtd.linesUnavailableReason,
+                r.profitAndLossYtd.income,
+                r.profitAndLossYtd.expenses,
             ),
             units = UnitsDto(
                 r.units.opening,

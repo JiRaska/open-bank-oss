@@ -12,6 +12,7 @@ import io.restassured.RestAssured.given
 import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.config.ConfigProvider
 import org.hamcrest.Matchers.equalTo
+import org.hamcrest.Matchers.notNullValue
 import org.junit.jupiter.api.MethodOrderer
 import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
@@ -177,6 +178,9 @@ class PensionFundApiIT {
             .body("flows.subscriptions", equalTo(1000.0f))
             .body("participants.holders", equalTo(1))
             .body("portfolio.holdingsCount", equalTo(0))
+            // Deprecated 1.1.0 fields stay on the wire (required, non-null) so 1.2.0 is additive.
+            .body("profitAndLossYtd.income", notNullValue())
+            .body("profitAndLossYtd.expenses", notNullValue())
             .extract().asString()
         // Aggregate only: the contract the IT subscribed for appears nowhere in the payload.
         assertThat(body).doesNotContain(contract.toString())

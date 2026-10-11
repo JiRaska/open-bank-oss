@@ -53,7 +53,42 @@ data class FundProfitAndLoss(
     val managementFees: BigDecimal,
     val profitLoss: BigDecimal,
     val linesUnavailableReason: String? = null,
-)
+) {
+    /**
+     * DEPRECATED (API 1.1.0 shape, kept so 1.2.0 stays additive): the gross positive result. Never
+     * negative, never null (1.1.0 published it as a required non-null number), and always
+     * `income - expenses == profitLoss`.
+     *
+     * With the separate lines known: [revaluationGains] plus the positive part of
+     * [otherInvestmentResult]. With them unknown ([linesUnavailableReason] set) only the netted
+     * investment result `profitLoss + managementFees` is known, so its positive part goes here and
+     * its negative part to [expenses] — a netted figure, and the reason field says so.
+     */
+    val income: BigDecimal
+        get() = Precision.money(
+            if (revaluationGains != null && otherInvestmentResult != null) {
+                revaluationGains + otherInvestmentResult.max(BigDecimal.ZERO)
+            } else {
+                netInvestmentResult().max(BigDecimal.ZERO)
+            },
+        )
+
+    /**
+     * DEPRECATED counterpart of [income]: [managementFees] plus [revaluationLosses] plus the
+     * negative part of [otherInvestmentResult] (or, with the lines unknown, the negative part of the
+     * netted investment result), as a positive number. Never negative, never null.
+     */
+    val expenses: BigDecimal
+        get() = Precision.money(
+            managementFees + if (revaluationLosses != null && otherInvestmentResult != null) {
+                revaluationLosses + otherInvestmentResult.min(BigDecimal.ZERO).negate()
+            } else {
+                netInvestmentResult().min(BigDecimal.ZERO).negate()
+            },
+        )
+
+    private fun netInvestmentResult(): BigDecimal = profitLoss + managementFees
+}
 
 data class UnitRollForward(
     val opening: BigDecimal,
