@@ -86,11 +86,17 @@ class CatalogPensionOidcTestResource : QuarkusTestResourceLifecycleManager {
             "clients" to listOf(
                 client("openbank-pension", secret, catalogRead = true),
                 client("unrelated-service", secret, catalogRead = true),
+                client("unmarked-service", secret, catalogRead = true).toMutableMap().apply {
+                    put("defaultClientScopes", listOf("basic", "catalog:read"))
+                },
                 adminClient(secret),
             ),
             "users" to listOf(
                 serviceUser("openbank-pension"),
                 serviceUser("unrelated-service"),
+                serviceUser("unmarked-service").toMutableMap().apply {
+                    put("realmRoles", emptyList<String>())
+                },
                 humanUser("legal-reviewer", secret, "ROLE_PENSION_LEGAL_COUNSEL"),
                 humanUser("product-reviewer", secret, "ROLE_PENSION_PRODUCT_OWNER"),
             ),

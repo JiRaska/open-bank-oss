@@ -10,11 +10,12 @@ The catalog OPA policy permits pension approval-evidence reads by the named
 pension service client and excludes this action from generic operator and
 compliance read grants. This policy is **advisory by default** in
 product-catalog (`AUTHZ_ENFORCE=false`): the approval-evidence GET endpoint's
-mandatory gates are `CATALOG_SCOPE_READ` and a verified JWT client/username
-check for service accounts. Another service's token with `catalog:read` cannot
-read approval evidence even while OPA enforcement is off. Human catalog
-readers with the read role can view it. With `AUTHZ_ENFORCE=true`, OPA also
-checks the policy's caller and claim conditions.
+mandatory gates are `CATALOG_SCOPE_READ` and a verified JWT reader check. The
+reader must be the named pension service account or an Admin UI human with a
+matching pension approval role and scope. Another service's token with
+`catalog:read` cannot read approval evidence even when it omits service-account
+name and role claims. With `AUTHZ_ENFORCE=true`, OPA also checks its policy's
+caller and claim conditions.
 
 Catalog approval decisions are separately human-only and require the legal or
 product-owner role together with its matching scope. The endpoint checks the
