@@ -33,7 +33,8 @@ import javax.sql.DataSource
 object FinrepFrozenMonthPactSeed {
     val REPORTING_MONTH: LocalDate = LocalDate.of(2000, 6, 30)
 
-    internal fun requestPlan(paths: List<String>): Pair<LocalDate, Boolean> {
+    // Shared by the separately compiled provider Pact source set.
+    fun requestPlan(paths: List<String>): Pair<LocalDate, Boolean> {
         val months = paths.mapNotNull {
             Regex("/MONTH/(\\d{4}-\\d{2}-\\d{2})/").find(it)?.groupValues?.get(1)
         }.toSet()
