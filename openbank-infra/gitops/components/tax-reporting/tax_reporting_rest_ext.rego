@@ -28,13 +28,13 @@ import rego.v1
 # before this rename: rules.yaml still excludes it from operator-read-any, and #12488 excludes
 # service-accounts from compliance-read-any. Keep both controls until old images have drained.
 #
-# Machine exclusion is the id-prefix test; move to `not principal_is_machine` once #12537 lands.
+# Machine exclusion is the verified flag (`not principal_is_machine`, fail closed), never the id.
 allowed_reasons contains "staff-tax-filing-read" if {
 	input.principal.type == "HUMAN"
 	not principal_is_machine
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_AUDITOR", "ROLE_VIEWER", "ROLE_COMPLIANCE"}
 	role in input.principal.roles
-    input.action in {"tax.filing.inspect", "tax.filing.read"}
+	input.action in {"tax.filing.inspect", "tax.filing.read"}
 }
 
 # Real operators freeze and file a period. No service-account, whatever roles it holds.

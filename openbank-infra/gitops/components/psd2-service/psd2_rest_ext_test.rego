@@ -41,7 +41,7 @@ test_tpp_reads_balances if {
 	"psd2-tpp-eidas-qwac" in allowed_reasons with input as {
 		"principal": tpp,
 		"action": "psd2.read",
-		"resource": {"service_account": false, "type": "psd2", "id": "CZ6508000000192000145399"},
+		"resource": {"type": "psd2", "id": "CZ6508000000192000145399"},
 	}
 }
 
@@ -57,7 +57,7 @@ test_tpp_deletes_consent if {
 	"psd2-tpp-eidas-qwac" in allowed_reasons with input as {
 		"principal": tpp,
 		"action": "psd2.delete",
-		"resource": {"service_account": false, "type": "psd2", "id": "c-1"},
+		"resource": {"type": "psd2", "id": "c-1"},
 	}
 }
 
@@ -104,7 +104,7 @@ test_admin_cannot_delete_consent if {
 	count(allowed_reasons) == 0 with input as {
 		"principal": admin,
 		"action": "psd2.delete",
-		"resource": {"service_account": false, "type": "psd2", "id": "c-1"},
+		"resource": {"type": "psd2", "id": "c-1"},
 	}
 }
 
@@ -123,6 +123,6 @@ test_services_m2m_cannot_delete_consent if {
 	count(allowed_reasons) == 0 with input as {
 		"principal": services_m2m,
 		"action": "psd2.delete",
-		"resource": {"service_account": false, "type": "psd2", "id": "c-1"},
+		"resource": {"type": "psd2", "id": "c-1"},
 	}
 }

@@ -76,7 +76,7 @@ test_context_assignment_allows_human_admin if {
 	decision := rest.allow with input as {
 		"principal": {"service_account": false, "id": "admin-7", "type": "HUMAN", "roles": ["ROLE_ADMIN"]},
 		"action": "context.assignment.decide",
-		"resource": {"service_account": false, "type": "context", "id": "proposal-1"},
+		"resource": {"type": "context", "id": "proposal-1"},
 	}
 		with data.openbank.bundle as bundle
 	decision.allow

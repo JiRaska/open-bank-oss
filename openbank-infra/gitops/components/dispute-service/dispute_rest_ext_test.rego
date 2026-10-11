@@ -39,7 +39,7 @@ test_operator_updates_dispute if {
 	"dispute-staff-write" in allowed_reasons with input as {
 		"principal": operator,
 		"action": "dispute.update",
-		"resource": {"service_account": false, "type": "dispute", "id": "d-1"},
+		"resource": {"type": "dispute", "id": "d-1"},
 	}
 }
 
@@ -47,7 +47,7 @@ test_operator_resolves_dispute if {
 	"dispute-staff-write" in allowed_reasons with input as {
 		"principal": operator,
 		"action": "dispute.resolve",
-		"resource": {"service_account": false, "type": "dispute", "id": "d-1"},
+		"resource": {"type": "dispute", "id": "d-1"},
 	}
 }
 
@@ -55,7 +55,7 @@ test_operator_updates_complaint if {
 	"dispute-staff-write" in allowed_reasons with input as {
 		"principal": operator,
 		"action": "complaint.update",
-		"resource": {"service_account": false, "type": "complaint", "id": "c-1"},
+		"resource": {"type": "complaint", "id": "c-1"},
 	}
 }
 
@@ -63,7 +63,7 @@ test_admin_resolves_dispute if {
 	"dispute-staff-write" in allowed_reasons with input as {
 		"principal": admin,
 		"action": "dispute.resolve",
-		"resource": {"service_account": false, "type": "dispute", "id": "d-1"},
+		"resource": {"type": "dispute", "id": "d-1"},
 	}
 }
 
@@ -77,7 +77,7 @@ test_edge_m2m_cannot_resolve_dispute if {
 	count(allowed_reasons) == 0 with input as {
 		"principal": edge_m2m,
 		"action": "dispute.resolve",
-		"resource": {"service_account": false, "type": "dispute", "id": "d-1"},
+		"resource": {"type": "dispute", "id": "d-1"},
 	}
 }
 
@@ -85,7 +85,7 @@ test_edge_m2m_cannot_update_dispute if {
 	count(allowed_reasons) == 0 with input as {
 		"principal": edge_m2m,
 		"action": "dispute.update",
-		"resource": {"service_account": false, "type": "dispute", "id": "d-1"},
+		"resource": {"type": "dispute", "id": "d-1"},
 	}
 }
 
@@ -93,7 +93,7 @@ test_edge_m2m_cannot_close_complaint if {
 	count(allowed_reasons) == 0 with input as {
 		"principal": edge_m2m,
 		"action": "complaint.update",
-		"resource": {"service_account": false, "type": "complaint", "id": "c-1"},
+		"resource": {"type": "complaint", "id": "c-1"},
 	}
 }
 
@@ -101,7 +101,7 @@ test_services_m2m_cannot_resolve_dispute if {
 	count(allowed_reasons) == 0 with input as {
 		"principal": services_m2m,
 		"action": "dispute.resolve",
-		"resource": {"service_account": false, "type": "dispute", "id": "d-1"},
+		"resource": {"type": "dispute", "id": "d-1"},
 	}
 }
 
@@ -128,7 +128,7 @@ test_viewer_cannot_write if {
 	count(allowed_reasons) == 0 with input as {
 		"principal": viewer,
 		"action": "dispute.resolve",
-		"resource": {"service_account": false, "type": "dispute", "id": "d-1"},
+		"resource": {"type": "dispute", "id": "d-1"},
 	}
 }
 
@@ -166,7 +166,7 @@ test_edge_m2m_account_scoped_list_covered_by_base_rule if {
 	"operator-read-any" in allowed_reasons with input as {
 		"principal": edge_m2m,
 		"action": "dispute.list",
-		"resource": {"service_account": false, "type": "dispute", "id": "a-1"},
+		"resource": {"type": "dispute", "id": "a-1"},
 	}
 }
 
