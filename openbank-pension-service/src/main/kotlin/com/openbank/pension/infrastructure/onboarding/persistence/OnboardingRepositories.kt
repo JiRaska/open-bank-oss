@@ -14,6 +14,7 @@ import com.openbank.pension.application.onboarding.TransferRequestRepository
 import com.openbank.pension.domain.onboarding.OnboardingApplication
 import com.openbank.pension.domain.onboarding.OnboardingStatus
 import com.openbank.pension.domain.onboarding.SuitabilityAssessment
+import com.openbank.pension.domain.transfer.TransferDirection
 import com.openbank.pension.domain.transfer.TransferRequest
 import com.openbank.pension.domain.transfer.TransferStatus
 import io.quarkus.hibernate.reactive.panache.Panache
@@ -219,9 +220,24 @@ class TransferRequestRepositoryImpl(private val json: PayloadMapper) :
             query.range(0, limit - 1).list()
         }.awaitSuspending().map { it.toDomain() }
 
-    override suspend fun findByParty(partyId: UUID, limit: Int): List<TransferRequest> =
-        Panache.withSession { find("partyId = ?1 order by createdAt desc", partyId).range(0, limit - 1).list() }
-            .awaitSuspending().map { it.toDomain() }
+    override suspend fun findByParty(
+        partyId: UUID,
+        direction: TransferDirection?,
+        statuses: Set<TransferStatus>?,
+        limit: Int,
+    ): List<TransferRequest> = Panache.withSession {
+        val clauses = mutableListOf("partyId = :party")
+        val params = mutableMapOf<String, Any>("party" to partyId)
+        if (direction != null) {
+            clauses += "direction = :direction"
+            params["direction"] = direction.name
+        }
+        if (statuses != null) {
+            clauses += "status in :statuses"
+            params["statuses"] = statuses.map { it.name }
+        }
+        find(clauses.joinToString(" and ") + " order by createdAt desc", params).range(0, limit - 1).list()
+    }.awaitSuspending().map { it.toDomain() }
 
     private fun TransferRequestEntity.toDomain(): TransferRequest =
         json.read(payload, TransferRequest::class.java).copy(version = version)

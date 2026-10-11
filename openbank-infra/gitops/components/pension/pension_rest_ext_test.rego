@@ -570,3 +570,61 @@ test_read_controls_match_base_identity_policy if {
 	rest.allow with input as {"principal": pension_principal("alice", ["ROLE_COMPLIANCE"]), "action": "pension.contract.read"}
 		with data.rules as no_exclusions
 }
+
+# ---------------------------------------------------------------------------------------------
+# The customer edge is allowed EXACTLY the actions its routes use — no more, no fewer (#12435).
+# `pension_actions` is every `@Authorize(action = "pension.…")` in pension-service's src/main;
+# `PensionOpaActionInventoryTest` fails the build when the two drift, so a new action cannot reach
+# production without being classified here as an edge action or not.
+# ---------------------------------------------------------------------------------------------
+pension_actions := {
+	"pension.annuity.cancel", "pension.annuity.inspect", "pension.annuity.quote", "pension.annuity.select",
+	"pension.contract.beneficiaries", "pension.contract.inspect", "pension.contract.resume",
+	"pension.contract.schedule", "pension.contract.strategy", "pension.contract.suspend",
+	"pension.death.approve", "pension.death.inspect", "pension.death.notify", "pension.death.verify",
+	"pension.exit.inspect", "pension.exit.payout", "pension.exit.terminate",
+	"pension.funding.declare", "pension.funding.ingest", "pension.funding.inspect", "pension.funding.mandate",
+	"pension.funding.operate",
+	"pension.onboarding.inspect", "pension.onboarding.kid", "pension.onboarding.questionnaire",
+	"pension.onboarding.sign", "pension.onboarding.start", "pension.onboarding.strategy",
+	"pension.onboarding.withdraw",
+	"pension.operator.annuity-approve", "pension.operator.annuity-purchase", "pension.operator.annuity-read",
+	"pension.operator.annuity-write", "pension.operator.contribution", "pension.operator.exit-read",
+	"pension.operator.inspect", "pension.operator.mandate-read", "pension.operator.transfer",
+	"pension.simulation.run",
+	"pension.transfer.consent", "pension.transfer.inspect", "pension.transfer.provider-request",
+	"pension.transfer.request-out", "pension.transfer.withdraw",
+}
+
+# What customer-edge's pension routes call (CustomerPensionResource, CustomerPensionChangeResource,
+# CustomerPensionTransferResource → pension-service paths → that route's @Authorize action).
+edge_route_actions := {
+	"pension.annuity.cancel", "pension.annuity.inspect", "pension.annuity.quote", "pension.annuity.select",
+	"pension.contract.beneficiaries", "pension.contract.inspect", "pension.contract.resume",
+	"pension.contract.schedule", "pension.contract.strategy", "pension.contract.suspend",
+	"pension.exit.inspect", "pension.exit.payout", "pension.exit.terminate",
+	"pension.funding.declare", "pension.funding.inspect", "pension.funding.mandate",
+	"pension.onboarding.inspect", "pension.onboarding.kid", "pension.onboarding.questionnaire",
+	"pension.onboarding.sign", "pension.onboarding.start", "pension.onboarding.strategy",
+	"pension.onboarding.withdraw",
+	"pension.simulation.run",
+	"pension.transfer.consent", "pension.transfer.inspect", "pension.transfer.request-out",
+	"pension.transfer.withdraw",
+}
+
+edge_allowed_pension_actions := {action |
+	some action in pension_actions
+	rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": pension_edge, "roles": ["ROLE_API"]},
+		"action": action,
+	}
+}
+
+test_edge_is_allowed_exactly_the_actions_its_routes_use if {
+	edge_allowed_pension_actions == edge_route_actions
+}
+
+# Known-negative for the exactness test itself: a set one action short must NOT compare equal.
+test_edge_exactness_check_detects_a_missing_action if {
+	edge_allowed_pension_actions != edge_route_actions - {"pension.transfer.withdraw"}
+}

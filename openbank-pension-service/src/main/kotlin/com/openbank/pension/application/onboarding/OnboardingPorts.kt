@@ -13,6 +13,7 @@ import com.openbank.pension.domain.onboarding.OnboardingStatus
 import com.openbank.pension.domain.onboarding.SuitabilityAssessment
 import com.openbank.pension.domain.transfer.FundsArrival
 import com.openbank.pension.domain.transfer.IncentiveHistoryEntry
+import com.openbank.pension.domain.transfer.TransferDirection
 import com.openbank.pension.domain.transfer.TransferRequest
 import com.openbank.pension.domain.transfer.TransferStatus
 import java.time.LocalDate
@@ -48,8 +49,16 @@ interface TransferRequestRepository {
     suspend fun findByContract(contractId: UUID): List<TransferRequest>
     suspend fun findByStatus(status: TransferStatus?, limit: Int): List<TransferRequest>
 
-    /** One participant's transfers, newest first. */
-    suspend fun findByParty(partyId: UUID, limit: Int): List<TransferRequest>
+    /**
+     * One participant's transfers, newest first, filtered IN THE QUERY (a filter applied after the
+     * limit would hide an older pending transfer behind newer ended ones).
+     */
+    suspend fun findByParty(
+        partyId: UUID,
+        direction: TransferDirection?,
+        statuses: Set<TransferStatus>?,
+        limit: Int,
+    ): List<TransferRequest>
 }
 
 /** The onboarding extension of each loaded jurisdiction pack, by the core pack's pinned key. */
