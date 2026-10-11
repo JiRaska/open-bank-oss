@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.42.0](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.41.0...tax-reporting-service-v0.42.0) (2026-10-10)
+
+
+### Features
+
+* **tax-reporting:** pension regulatory returns (ČNB PSP/PEF) on the statutory-filing lifecycle ([#12428](https://github.com/JiRaska/open-bank-oss/issues/12428)) ([6332b99](https://github.com/JiRaska/open-bank-oss/commit/6332b9918c4dfbdc04594156678ea006732ff785))
+
+## [0.41.0](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.40.3...tax-reporting-service-v0.41.0) (2026-10-10)
+
+
+### Features
+
+* **tax-reporting:** declare tax-reporting-service deployment ([#12461](https://github.com/JiRaska/open-bank-oss/issues/12461)) ([eb1b25e](https://github.com/JiRaska/open-bank-oss/commit/eb1b25e6c611aff5ab669250c97c4f301c84c9dd))
+
+
+### Bug Fixes
+
+* **docs:** keep every runnable service documentation current ([#11989](https://github.com/JiRaska/open-bank-oss/issues/11989)) ([88b6e08](https://github.com/JiRaska/open-bank-oss/commit/88b6e087386cd885badf22f75cc4694faa0f30bd))
+
 ## [0.40.3](https://github.com/JiRaska/open-bank-oss/compare/v0.40.2...v0.40.3) (2026-10-04)
 
 
