@@ -351,6 +351,13 @@ on an invariant nothing distinguishes" pattern, just one layer up from where it 
 > availability dependency for the OBO path — its outage fails closed (no OBO calls), mirroring
 > the consent-validate stance.
 
+The OBO boundary also requires positive human-token evidence before making a staff principal for
+OPA: the verified JWT must come through an interactive staff client with a human username, in
+addition to the live subject/JTI session, MCP audience and bounded role checks. Tokens without that
+evidence are refused before a PDP query; only admitted OBO contexts send
+`input.principal.service_account=false`. Agent contexts keep the machine default. Phase-2 policy
+rules must wait for the separate verified image rollout before reading this flag.
+
 Collected in one place because in this service they outnumber the enforced ones, and because a
 reader skimming `agents.yaml` would reasonably assume all of them work:
 

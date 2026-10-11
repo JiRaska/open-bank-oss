@@ -236,6 +236,21 @@ gates:
     run: |
       python3 .github/scripts/run-gates.py --self-test
 
+  # Phase 1 must keep the ancestry and consumer-derivation probe executable on every PR.
+  # The actual desired/live rollout check remains a Phase 2 precondition: it is expected
+  # to fail until every libs-runtime consumer has been rebuilt and deployed.
+  - id: pdp-flag-rollout-probe-self-test
+    name: "PDP service-account rollout probe stays executable (#12448, enforced)"
+    group: security
+    mode: enforced
+    budget_seconds: 30
+    min_subjects: 1
+    rationale: "A broken rollout probe could falsely declare all PEP images current and let Phase 2 policy read a field that old PEPs never send. Its fixtures test current, stale and unresolved pins before deployment."
+    review_after: "2027-04-11"
+    selftest_exempt: "is-a-test-suite — the run is check-pdp-flag-rollout.sh --self-test"
+    run: |
+      bash .github/scripts/check-pdp-flag-rollout.sh --self-test
+
   # Critical-alert RCA ledger guards (ADR-0241 D1/D3, #5869 / #5875). These self-tests
   # were written and wired ONLY as steps inside the scheduled workflows that use them —
   # `alert-rca-weekly.yml` (Mondays) and `standing-critical-digest.yml` (daily). Both

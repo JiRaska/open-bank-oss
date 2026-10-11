@@ -50,6 +50,24 @@ object ServiceAccountIdentity {
             jwt.name == username
     }
 
+    /**
+     * MCP OBO requires positive evidence of an interactive staff token before assigning a human
+     * principal. Absence of machine indicators alone is insufficient: an unfamiliar client with
+     * a non-service-account username must not acquire staff policy grants through a live session.
+     */
+    fun isInteractiveHumanToken(principal: Principal?): Boolean {
+        val jwt = principal as? JsonWebToken ?: return false
+        return runCatching {
+            val clientId = jwt.claimString(CLAIM_AZP)
+            val username = jwt.claimString(CLAIM_PREFERRED_USERNAME)
+            clientId in HUMAN_CLIENT_IDS &&
+                !jwt.subject.isNullOrBlank() &&
+                !username.isNullOrBlank() &&
+                !username.startsWith(PRINCIPAL_PREFIX) &&
+                machineClientId(jwt) == null
+        }.getOrDefault(false)
+    }
+
     /** The client id whose OWN service-account issued this token, or `null` if it is not one. */
     fun verifiedClientId(identity: SecurityIdentity?): String? = verifiedClientId(identity?.principal)
 
