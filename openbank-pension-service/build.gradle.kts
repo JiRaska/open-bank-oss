@@ -106,6 +106,11 @@ tasks.withType<Test>().configureEach {
 // The repeatable demo reuses the journey suite in a fresh test JVM/database per synthetic company.
 // No production setting or normal test default is changed.
 tasks.named<Test>("test") {
+    // PensionOpaActionInventoryTest reads the policy test outside this module; declare it, or a
+    // rego-only edit leaves :test UP-TO-DATE and the inventory check never re-runs locally.
+    inputs.file(rootProject.file("openbank-infra/gitops/components/pension/pension_rest_ext_test.rego"))
+        .withPropertyName("pensionRegoTest")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
     // The cross-service journey builds and launches a second Quarkus application separately.
     exclude("**/DipPublishedCatalogJourneyIT.class")
     providers.gradleProperty("pensionDemoCompany").orNull?.let {
