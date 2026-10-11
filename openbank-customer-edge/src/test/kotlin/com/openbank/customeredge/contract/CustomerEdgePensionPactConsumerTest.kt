@@ -444,6 +444,7 @@ class CustomerEdgePensionPactConsumerTest {
     private companion object {
         const val PARTY_ID = "11111111-1111-4111-8111-111111111111"
         const val CONTRACT_ID = "44444444-4444-4444-8444-444444444444"
+
         // pension-service refuses any provider but its configured legal entity; this is the
         // synthetic fixture identity its test, dev and sandbox profiles share (application.yaml).
         const val PROVIDER_ID = "00000000-0000-4000-8000-000000000001"

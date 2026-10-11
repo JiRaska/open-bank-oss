@@ -80,7 +80,10 @@ class CustomerPensionRoutingIT {
         StubUpstreamResource.stub("$API/contracts/$FOREIGN", body = contract(FOREIGN, STRANGER))
 
         When { get("/customer/v1/pension/contracts/$FOREIGN") } Then { statusCode(404) }
-        Given { json(); header("Idempotency-Key", "k-foreign") } When {
+        Given {
+            json()
+            header("Idempotency-Key", "k-foreign")
+        } When {
             post("/customer/v1/pension/contracts/$FOREIGN/termination/quote")
         } Then { statusCode(404) }
 
@@ -111,7 +114,10 @@ class CustomerPensionRoutingIT {
         Given { json() } When { post("/customer/v1/pension/contracts/$OWN/termination/quote") } Then { statusCode(400) }
         assertThat(StubUpstreamResource.requests("$API/contracts/$OWN/exit/termination/quote")).isEmpty()
 
-        Given { json(); header("Idempotency-Key", "k-quote-1") } When {
+        Given {
+            json()
+            header("Idempotency-Key", "k-quote-1")
+        } When {
             post("/customer/v1/pension/contracts/$OWN/termination/quote")
         } Then {
             statusCode(201)
@@ -126,7 +132,10 @@ class CustomerPensionRoutingIT {
     fun `pausing without SCA answers SCA_REQUIRED with the edge-bound linking and never suspends`() {
         StubUpstreamResource.stub("$API/contracts/$OWN", body = contract(OWN, PARTICIPANT))
 
-        Given { json(); header("Idempotency-Key", "k-pause-1") } When {
+        Given {
+            json()
+            header("Idempotency-Key", "k-pause-1")
+        } When {
             post("/customer/v1/pension/contracts/$OWN/pause")
         } Then {
             statusCode(403)
