@@ -254,6 +254,9 @@ openbank-admin-ui/dora.json
 # committed.
 openbank-admin-ui/gate-health.json
 openbank-admin-ui/gate-catalog.json
+# Platform versions (EKS/node group/Loki) PARSED from the infra sources of truth at build time
+# (scripts/generate-platform-versions.mjs). Derived - never committed, never hand-edited.
+openbank-admin-ui/platform-versions.json
 # Generated code-derived dependency graph baked at build time
 # (scripts/generate-service-graph.mjs, ADR-0029 D1). Derived — never committed.
 openbank-admin-ui/service-graph.json
