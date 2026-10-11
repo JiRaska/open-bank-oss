@@ -27,7 +27,7 @@ import java.util.UUID
 /**
  * Period-end fund figures for statutory reporting (#12425, ADR-0336 D4). Aggregate only.
  *
- * `pension-fund.reporting.read` is served to staff and to tax-reporting-service's OWN client
+ * `pension-fund.reporting.inspect` is served to staff and to tax-reporting-service's OWN client
  * (pension_fund_rest_ext.rego); it is excluded from `operator-read-any` in rules.yaml, so the
  * shared service-account does not reach it.
  */
@@ -43,7 +43,7 @@ class FundReportingResource {
     @Path("/{fundId}/period-figures")
     @Operation(summary = "A fund's balance sheet, YTD P&L, unit roll-forward, portfolio and flows for one period")
     @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN, Roles.COMPLIANCE, Roles.AUDITOR)
-    @Authorize(action = "pension-fund.reporting.read", resource = "#fundId")
+    @Authorize(action = "pension-fund.reporting.inspect", resource = "#fundId")
     suspend fun periodFigures(
         @PathParam("fundId") fundId: UUID,
         @QueryParam("periodStart") periodStart: String?,
