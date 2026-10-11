@@ -348,3 +348,14 @@ is the **authentication assurance gate** for payments and consent — defeating 
   PENDING approval can never be decided or claimed, so it ages out on the same clock. A still-live
   approval never matches, because the cutoff lies in the past. The outbox events are not touched. A legal hold is `openbank.sca.approval-purge.enabled=false`. **Rollback:** revert
   the binary with four-eyes enforcement off; keep `sca_operator_approvals` and its outbox rows.
+- **2026-10-11** — **The 8443 listener no longer accepts a client certificate as a login (#12511).**
+  `client-auth: required` (2026-09-20 entries above) also registers Quarkus's mTLS authentication
+  mechanism, which turned any certificate the private CA had signed into an authenticated
+  `SecurityIdentity`: a workload holding a fleet-CA certificate and NO bearer reached `/api/*` as a
+  logged-in principal (measured: 403 from authz instead of 401). `%prod` now restricts `/api/*` to
+  `auth-mechanism: bearer` (the #12506 pattern), so the certificate is transport authentication only and
+  the OIDC bearer is the only identity a route or OPA sees, identically on 8443 and the plain port.
+  **STRIDE-S/E:** closes a spoofing / elevation path; callers are unaffected because every 8443 caller
+  already sends its own bearer. Proven by `ScaListenerAuthParityIT` (production listener shape, real
+  HTTP; 1 of 4 failing without the change, 4 of 4 with it) and gated fleet-wide by `mtls-bearer-only`.
+  Rollback: revert the commit (re-opens the path).
