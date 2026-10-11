@@ -134,6 +134,11 @@ internal object PactContractSeed {
     }
 
     fun reset() = jdbc { conn ->
+        // The transfer-out interaction leaves a request on the contract; it must go first (FK).
+        conn.prepareStatement("delete from pension_transfer_requests where contract_id = ?").use {
+            it.setObject(1, CONTRACT)
+            it.executeUpdate()
+        }
         conn.prepareStatement("delete from pension_strategy_elections where contract_id = ?").use {
             it.setObject(1, CONTRACT)
             it.executeUpdate()

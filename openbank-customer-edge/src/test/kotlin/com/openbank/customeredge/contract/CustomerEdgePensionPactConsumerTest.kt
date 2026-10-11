@@ -19,6 +19,7 @@ import au.com.dius.pact.core.model.annotations.Pact
 import com.openbank.customeredge.infrastructure.rest.CustomerPartyResolver
 import com.openbank.customeredge.infrastructure.rest.CustomerPensionChangeResource
 import com.openbank.customeredge.infrastructure.rest.CustomerPensionResource
+import com.openbank.customeredge.infrastructure.rest.CustomerPensionTransferResource
 import com.openbank.customeredge.infrastructure.rest.UpstreamClient
 import com.sun.net.httpserver.HttpServer
 import io.mockk.every
@@ -285,6 +286,63 @@ class CustomerEdgePensionPactConsumerTest {
         .toPact()
 
     @Pact(consumer = "openbank-customer-edge", provider = "openbank-pension-service")
+    fun requestTransferOut(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(ACTIVE_STATE).readById("ACTIVE")
+        .given(ACTIVE_STATE)
+        .uponReceiving("POST a signed transfer-out of the contract to another provider")
+        .path("/api/v2/pension/transfers/out")
+        .method("POST")
+        .headers(mapOf("Content-Type" to "application/json", "X-Customer-Party-Id" to PARTY_ID))
+        .matchHeader("Idempotency-Key", ".+", "pact-key")
+        .body(
+            newJsonBody { b ->
+                b.stringValue("contractId", CONTRACT_ID)
+                b.stringValue("receivingProviderId", "PF-B")
+                b.stringValue("receivingProviderName", "Fund B")
+                b.stringValue("receivingContractNumber", "B-42")
+                b.stringValue("scaChallengeId", TRANSFER_CHALLENGE_ID)
+            }.build(),
+        )
+        .willRespondWith()
+        .status(202)
+        .body(
+            newJsonBody { t ->
+                t.uuid("transferId")
+                t.stringValue("direction", "OUT")
+                t.stringValue("contractId", CONTRACT_ID)
+                t.stringValue("counterpartyProviderId", "PF-B")
+                t.stringValue("counterpartyContractNumber", "B-42")
+                t.stringType("status", "REQUESTED")
+            }.build(),
+        )
+        .toPact()
+
+    @Pact(consumer = "openbank-customer-edge", provider = "openbank-pension-service")
+    fun unknownTransfer(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(NO_CONTRACT_STATE)
+        .uponReceiving("GET a pension transfer the customer party does not hold")
+        .path("/api/v2/pension/transfers/$UNKNOWN_ID")
+        .method("GET")
+        .headers(mapOf("X-Customer-Party-Id" to PARTY_ID))
+        .willRespondWith()
+        .status(404)
+        .toPact()
+
+    @Pact(consumer = "openbank-customer-edge", provider = "openbank-pension-service")
+    fun declareCapUsage(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(ACTIVE_STATE).readById("ACTIVE")
+        .given(ACTIVE_STATE)
+        .uponReceiving("PUT the shared tax cap used at other providers for a past tax year")
+        .path("/api/v2/pension/funding/contracts/$CONTRACT_ID/tax-years/$PAST_YEAR/external-cap-usage")
+        .method("PUT")
+        .headers(mapOf("Content-Type" to "application/json", "X-Customer-Party-Id" to PARTY_ID))
+        .matchHeader("Idempotency-Key", ".+", "pact-key")
+        .body(newJsonBody { b -> b.`object`("usage") { u -> u.stringValue("DPS_DIP_LIFE", "12000") } }.build())
+        .willRespondWith()
+        .status(200)
+        .toPact()
+
+    @Pact(consumer = "openbank-customer-edge", provider = "openbank-pension-service")
     fun unknownContract(builder: PactDslWithProvider): RequestResponsePact = builder
         .given(NO_CONTRACT_STATE)
         .uponReceiving("GET a pension contract the customer party does not hold")
@@ -389,6 +447,39 @@ class CustomerEdgePensionPactConsumerTest {
     }
 
     @Test
+    @PactTestFor(pactMethod = "requestTransferOut")
+    fun `a signed transfer-out matches the provider`(mockServer: MockServer) {
+        val response = transfers(mockServer).requestTransferOut(
+            CONTRACT_ID,
+            """{"receivingProviderId":"PF-B","receivingProviderName":"Fund B","receivingContractNumber":"B-42"}""",
+            "pact-key",
+            TRANSFER_CHALLENGE_ID,
+        )
+
+        assertThat(response.status).isEqualTo(202)
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "unknownTransfer")
+    fun `an unknown transfer is NOT_FOUND at the provider and at the edge`(mockServer: MockServer) {
+        assertThat(transfers(mockServer).transferStatus(UNKNOWN_ID).status).isEqualTo(404)
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "declareCapUsage")
+    fun `a cap declaration matches the provider`(mockServer: MockServer) {
+        val response = transfers(mockServer).declareExternalCapUsage(
+            CONTRACT_ID,
+            PAST_YEAR.toString(),
+            """{"usage":{"DPS_DIP_LIFE":"12000"}}""",
+            "pact-key",
+            CHALLENGE_ID,
+        )
+
+        assertThat(response.status).isEqualTo(200)
+    }
+
+    @Test
     @PactTestFor(pactMethod = "unknownContract")
     fun `an unknown contract is NOT_FOUND at the provider and at the edge`(mockServer: MockServer) {
         assertThat(resource(mockServer).contract(UNKNOWN_ID).status).isEqualTo(404)
@@ -431,6 +522,20 @@ class CustomerEdgePensionPactConsumerTest {
         return CustomerPensionChangeResource(upstream, parties).apply { pensionServiceUrl = mockServer.getUrl() }
     }
 
+    private fun transfers(mockServer: MockServer): CustomerPensionTransferResource {
+        val upstream = UpstreamClient().apply {
+            tokenEndpointBase = "http://127.0.0.1:${tokenStub.address.port}"
+            clientId = "openbank-customer-edge"
+            clientSecret = "pact"
+            tlsTrustCertificateFile = Optional.empty()
+        }
+        val parties = mockk<CustomerPartyResolver> { every { resolve(null) } returns UUID.fromString(PARTY_ID) }
+        return CustomerPensionTransferResource(upstream, parties).apply {
+            pensionServiceUrl = mockServer.getUrl()
+            scaServiceUrl = "http://127.0.0.1:${tokenStub.address.port}"
+        }
+    }
+
     private fun PactDslWithState.readById(status: String) =
         uponReceiving("GET the pension contract to prove the customer holds it").readById(status)
 
@@ -451,6 +556,8 @@ class CustomerEdgePensionPactConsumerTest {
         const val UNKNOWN_ID = "99999999-9999-4999-8999-999999999999"
         const val CHALLENGE_ID = "77777777-7777-4777-8777-777777777777"
         const val FUTURE_DATE = "2099-01-01"
+        const val TRANSFER_CHALLENGE_ID = "88888888-8888-4888-8888-888888888888"
+        const val PAST_YEAR = 2025
 
         /** pension-service's answer to a non-conservative strategy with no assessment on file. */
         const val STRATEGY_REFUSAL = 403

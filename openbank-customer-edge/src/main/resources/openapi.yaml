@@ -956,6 +956,132 @@ paths:
         '409': {description: 'INVALID_CONTRACT_STATE'}
         '401': {description: Missing or invalid bearer token}
         '502': {description: Pension service unavailable}
+  /pension/contracts/{contractId}/transfers-out:
+    post:
+      tags: [Pension]
+      operationId: requestPensionTransferOut
+      summary: 'Ask for the contract to be moved to another provider'
+      description: >-
+        Proxies pension-service POST /transfers/out. Document-bound SCA over
+        pension-transfer-out:<contractId>:<receivingProviderId>:<receivingContractNumber>, payloadSha256 =
+        SHA-256 of that id.
+      security:
+        - customerOidc: [pension:write]
+      parameters:
+        - $ref: '#/components/parameters/PensionContractId'
+        - {name: X-SCA-Challenge-Id, in: header, required: false, schema: {type: string, format: uuid}, description: 'An approved APPROVAL challenge raised with the scaLinking a request without one returns (docs/ux/pension-client-flows.md); forwarded to and spent by pension-service, never by the edge'}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 256}, description: 'Forwarded to pension-service; missing -> 400'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [receivingProviderId, receivingProviderName, receivingContractNumber]
+              properties:
+                receivingProviderId: {type: string, pattern: '^[A-Za-z0-9_./-]{1,64}$'}
+                receivingProviderName: {type: string, maxLength: 128}
+                receivingContractNumber: {type: string, pattern: '^[A-Za-z0-9_./-]{1,64}$'}
+      responses:
+        '202':
+          description: Accepted; the transfer
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PensionTransfer'}
+        '400': {description: 'Invalid input or missing Idempotency-Key'}
+        '403': {description: 'SCA_REQUIRED (no challenge; body carries scaLinking {purpose APPROVAL, approvalRequestId, payloadSha256}), SCA_REJECTED, or PENSION_CHANGE_REFUSED'}
+        '404': {description: No such contract for the caller}
+        '409': {description: 'INVALID_CONTRACT_STATE (e.g. a transfer-out is already in progress)'}
+        '401': {description: Missing or invalid bearer token}
+        '502': {description: Pension service unavailable}
+  /pension/transfers/{transferId}:
+    get:
+      tags: [Pension]
+      operationId: getPensionTransfer
+      summary: 'One of the caller''s transfers, e.g. a receiving provider''s request awaiting consent'
+      description: 'Proxies pension-service GET /transfers/{id}, which is scoped to the caller''s party.'
+      security:
+        - customerOidc: [pension:read]
+      parameters:
+        - {name: transferId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PensionTransfer'}
+        '404': {description: No such transfer for the caller}
+        '401': {description: Missing or invalid bearer token}
+        '502': {description: Pension service unavailable}
+  /pension/transfers/{transferId}/consent:
+    post:
+      tags: [Pension]
+      operationId: consentPensionTransferOut
+      summary: 'Consent to a transfer-out a receiving provider requested'
+      description: >-
+        Proxies pension-service POST /transfers/{id}/consent. Document-bound SCA over
+        pension-transfer-out:<contractId>:<providerId>:<contractNumber>:<transferId>, payloadSha256 = SHA-256
+        of that id. Without consent the request stays AWAITING_CONSENT and nothing moves.
+      security:
+        - customerOidc: [pension:write]
+      parameters:
+        - {name: transferId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: X-SCA-Challenge-Id, in: header, required: false, schema: {type: string, format: uuid}, description: 'An approved APPROVAL challenge raised with the scaLinking a request without one returns (docs/ux/pension-client-flows.md); forwarded to and spent by pension-service, never by the edge'}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 256}, description: 'Forwarded to pension-service; missing -> 400'}
+      responses:
+        '202':
+          description: Accepted; the transfer
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PensionTransfer'}
+        '400': {description: 'Missing Idempotency-Key'}
+        '403': {description: 'SCA_REQUIRED (no challenge; body carries scaLinking {purpose APPROVAL, approvalRequestId, payloadSha256}), SCA_REJECTED, or PENSION_CHANGE_REFUSED'}
+        '404': {description: No such transfer for the caller}
+        '409': {description: 'INVALID_CONTRACT_STATE (not awaiting consent)'}
+        '401': {description: Missing or invalid bearer token}
+        '502': {description: Pension service unavailable}
+  /pension/contracts/{contractId}/tax-years/{year}/external-cap-usage:
+    put:
+      tags: [Pension]
+      operationId: declarePensionExternalCapUsage
+      summary: 'Declare the shared tax cap used at other providers in a tax year'
+      description: >-
+        Proxies pension-service PUT /funding/contracts/{id}/tax-years/{year}/external-cap-usage. Edge-bound
+        SCA (pension.declare-cap:<contractId>, bound to the exact year and usage). Returns the recomputed
+        tax-year summary.
+      security:
+        - customerOidc: [pension:write]
+      parameters:
+        - $ref: '#/components/parameters/PensionContractId'
+        - {name: year, in: path, required: true, schema: {type: integer, minimum: 2000}}
+        - {name: X-SCA-Challenge-Id, in: header, required: false, schema: {type: string, format: uuid}, description: 'An approved APPROVAL challenge raised with the scaLinking a request without one returns; consumed by the edge'}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 256}, description: 'Forwarded to pension-service; missing -> 400'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [usage]
+              properties:
+                usage:
+                  type: object
+                  description: 'Cap group code -> amount used elsewhere (non-negative decimal string, at most 2 decimals)'
+                  additionalProperties: {type: string, pattern: '^[0-9]+(\.[0-9]{1,2})?$'}
+                  minProperties: 1
+                  maxProperties: 8
+      responses:
+        '200':
+          description: The tax-year summary after the declaration
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        '400': {description: 'Invalid input, missing Idempotency-Key, or PENSION_RULE_REFUSED'}
+        '403': {description: 'SCA_REQUIRED (no challenge; body carries scaLinking {purpose APPROVAL, approvalRequestId, payloadSha256}), SCA_REJECTED, or PENSION_CHANGE_REFUSED'}
+        '404': {description: No such contract for the caller}
+        '409': {description: 'INVALID_CONTRACT_STATE (the tax year is already certified)'}
+        '401': {description: Missing or invalid bearer token}
+        '502': {description: Pension service unavailable}
   /pension/contracts/{contractId}/annual-statements/{year}:
     get:
       tags: [Pension]
@@ -6542,6 +6668,24 @@ components:
           schema: {$ref: '#/components/schemas/PensionContract'}
 
   schemas:
+    PensionTransfer:
+      type: object
+      properties:
+        transferId: {type: string, format: uuid}
+        direction: {type: string, enum: [IN, OUT]}
+        origin: {type: string}
+        contractId: {type: string, format: uuid}
+        counterpartyProviderId: {type: string}
+        counterpartyProviderName: {type: string}
+        counterpartyContractNumber: {type: string}
+        status: {type: string}
+        deadline: {type: string, format: date}
+        grossAmount: {type: number, nullable: true}
+        fee: {type: number, nullable: true}
+        netAmount: {type: number, nullable: true}
+        currency: {type: string}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
     PensionProduct:
       type: object
       properties:

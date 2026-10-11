@@ -20,7 +20,7 @@ The Czech question sets and packs are **REQUIRES_LEGAL_REVIEW** until compliance
 - **Every POST that changes something sends an `Idempotency-Key`** per user intent, reused on retry.
 - **Money is a decimal string.** Never parse it to a float.
 - **Every state change needs SCA.** Two shapes:
-  - *Edge-bound* (pause / resume, application withdrawal): the edge answers 403 `SCA_REQUIRED` with
+  - *Edge-bound* (pause / resume, application withdrawal, tax-cap declaration): the edge answers 403 `SCA_REQUIRED` with
     `scaLinking`; raise the challenge with it and repeat the identical request.
   - *Document-bound*: pension-service consumes the challenge itself. Raise an sca-service
     `APPROVAL` challenge with exactly the `approvalRequestId` and `payloadSha256` below — the
@@ -30,7 +30,8 @@ The Czech question sets and packs are **REQUIRES_LEGAL_REVIEW** until compliance
 | Operation | Route | `approvalRequestId` | `payloadSha256` |
 |---|---|---|---|
 | Sign the application | `POST /onboarding/applications/{id}/sign` | `pension-onboarding:{applicationId}:{documentId}` | the key-information document's SHA-256 |
-| Transfer out | `POST /transfers/out`, `POST /transfers/{id}/consent` | `pension-transfer-out:{contractId}:{providerId}:{contractNumber}` | SHA-256 of that id |
+| Transfer out (participant's request) | `POST /transfers/out` | `pension-transfer-out:{contractId}:{providerId}:{contractNumber}` | SHA-256 of that id |
+| Transfer out (consent to a receiving provider's request) | `POST /transfers/{id}/consent` | `pension-transfer-out:{contractId}:{providerId}:{contractNumber}:{transferId}` | SHA-256 of that id |
 | Termination, payout confirm, payout-account change | `.../termination/{n}/sign`, `.../payouts/{p}/confirm`, `PUT .../payouts/{p}/account` | `pension-exit:{hash}` | `hash` = the quote's signing hash (covers quote AND payout IBAN) |
 | Strategy change | `PUT /contracts/{id}/strategy` | `pension-strategy-change:{hash}` | SHA-256 of `pension-strategy-change\|contractId\|strategyCode\|effectiveFrom\|sorted,acknowledged,warnings` |
 | Contribution schedule change | `POST /contracts/{id}/contribution-schedule/changes` | `pension-schedule-change:{documentSha256}` | `documentSha256` from the preview |
@@ -228,6 +229,10 @@ answers 415 otherwise.
 | `POST /contracts/{c}/contribution-mandates/{m}/cancel` | `POST /funding/.../mandates/{m}/cancel` | yes | doc |
 | `GET /contracts/{c}/tax-summary?year=` | `GET /funding/contracts/{c}/tax-years/{year}` (contributions, state contribution, deductible) | | |
 | `GET /contracts/{c}/annual-statements/{year}` | same | | |
+| `PUT /contracts/{c}/tax-years/{year}/external-cap-usage` | `PUT /funding/contracts/{c}/tax-years/{year}/external-cap-usage` (`{"usage":{"<capGroup>":"<amount>"}}`, returns the recomputed tax-year summary) | yes | edge (`pension.declare-cap:{c}`) |
+| `POST /contracts/{c}/transfers-out` | `POST /transfers/out` (`receivingProviderId`, `receivingProviderName`, `receivingContractNumber`) | yes | doc |
+| `GET /transfers/{t}` | `GET /transfers/{t}` (party-scoped; another party's transfer is 404) | | |
+| `POST /transfers/{t}/consent` | `POST /transfers/{t}/consent` | yes | doc |
 | `POST /contracts/{c}/termination/quote` | `POST .../exit/termination/quote` | yes | |
 | `GET /contracts/{c}/termination/{n}` | `GET .../exit/termination/{n}` | | |
 | `POST /contracts/{c}/termination/{n}/sign` | `POST .../exit/termination/{n}/sign` | yes | fwd |
@@ -242,6 +247,15 @@ answers 415 otherwise.
 | `POST /contracts/{c}/payouts/{p}/annuity/selection`, `/cancellation` | same | yes | doc |
 
 Early termination has no separate confirm step: the signed notice (`.../sign`) is the confirmation.
+
+**Transfer out.** The participant either asks for the move (`POST /contracts/{c}/transfers-out`) or
+is shown a receiving provider's request (`GET /transfers/{t}`, status `AWAITING_CONSENT`, opened
+from the notification that carries `t`) and consents with SCA. Not consenting is the refusal:
+the request stays `AWAITING_CONSENT` until its `deadline` and nothing is valued, sold or paid.
+pension-service has no route to withdraw a consent once given, and none to list pending requests.
+
+**Tax-cap declaration.** Amounts already used of the shared CZ tax cap at other providers in a
+closed or current tax year, so the deductible amount is not overstated. A certified year is a 409.
 
 ## Edge error codes
 
