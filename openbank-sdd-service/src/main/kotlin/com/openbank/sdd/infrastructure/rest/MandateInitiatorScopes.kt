@@ -4,6 +4,7 @@
 
 package com.openbank.sdd.infrastructure.rest
 
+import com.openbank.libs.authz.ServiceAccountIdentity
 import com.openbank.sdd.domain.model.MandateInitiatorScope
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.enterprise.context.ApplicationScoped
@@ -21,12 +22,13 @@ class MandateInitiatorScopes(
 ) {
     fun of(identity: SecurityIdentity): MandateInitiatorScope {
         val principal = identity.principal?.name ?: return MandateInitiatorScope.Denied
+        // Positive matches bind to the verified client (azp), never the principal NAME (#12448).
         return when {
-            principal == PENSION_PRINCIPAL -> MandateInitiatorScope.Scoped(
+            ServiceAccountIdentity.isPrincipal(identity, PENSION_PRINCIPAL) -> MandateInitiatorScope.Scoped(
                 PENSION_PRINCIPAL,
                 pensionCreditor.orElse("").trim().ifEmpty { null },
             )
-            principal == "service-account-openbank-edge" -> MandateInitiatorScope.General
+            ServiceAccountIdentity.isPrincipal(identity, EDGE_PRINCIPAL) -> MandateInitiatorScope.General
             principal.startsWith("service-account-") -> MandateInitiatorScope.Denied
             principal.isNotBlank() && (identity.hasRole("ROLE_OPERATOR") || identity.hasRole("ROLE_ADMIN")) ->
                 MandateInitiatorScope.General
@@ -36,6 +38,7 @@ class MandateInitiatorScopes(
 
     companion object {
         const val PENSION_PRINCIPAL = "service-account-openbank-pension"
+        private const val EDGE_PRINCIPAL = "service-account-openbank-edge"
         const val PENSION_CREDITOR_KEY = "openbank.sdd.scoped-initiators.pension.creditor-identifier"
         val DECLARED: Map<String, String> = mapOf(PENSION_PRINCIPAL to PENSION_CREDITOR_KEY)
     }

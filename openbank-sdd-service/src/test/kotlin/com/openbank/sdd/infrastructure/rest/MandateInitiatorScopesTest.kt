@@ -9,6 +9,7 @@ import io.mockk.every
 import io.mockk.mockk
 import io.quarkus.security.identity.SecurityIdentity
 import org.assertj.core.api.Assertions.assertThat
+import org.eclipse.microprofile.jwt.JsonWebToken
 import org.junit.jupiter.api.Test
 import org.yaml.snakeyaml.Yaml
 import java.io.File
@@ -19,8 +20,34 @@ import java.util.Optional
 class MandateInitiatorScopesTest {
     private fun identity(name: String, operator: Boolean = false) = mockk<SecurityIdentity>().also {
         every { it.hasRole(any()) } answers { operator && firstArg<String>() == "ROLE_OPERATOR" }
-        every { it.principal } returns
-            Principal { name }
+        every { it.principal } returns principalFor(name)
+    }
+
+    /** A verified service-account JWT for `service-account-<azp>` names, a plain principal otherwise. */
+    private fun principalFor(name: String): Principal = if (name.startsWith("service-account-")) {
+        TestJwt(mapOf("azp" to name.removePrefix("service-account-"), "preferred_username" to name, "sub" to "sa"))
+    } else {
+        Principal { name }
+    }
+
+    private class TestJwt(private val claims: Map<String, Any?>) : JsonWebToken {
+        override fun getName(): String = claims["preferred_username"] as? String ?: "anonymous"
+        override fun getClaimNames(): Set<String> = claims.filterValues { it != null }.keys
+
+        @Suppress("UNCHECKED_CAST")
+        override fun <T : Any?> getClaim(claimName: String): T = claims[claimName] as T
+    }
+
+    @Test
+    fun `plain principals merely NAMED like pension or edge are denied`() {
+        val scopes = MandateInitiatorScopes(Optional.of("CZ00ZZZPENSION01"))
+        listOf("service-account-openbank-pension", "service-account-openbank-edge").forEach { name ->
+            val impostor = mockk<SecurityIdentity>().also {
+                every { it.principal } returns Principal { name }
+                every { it.hasRole(any()) } returns false
+            }
+            assertThat(scopes.of(impostor)).isEqualTo(MandateInitiatorScope.Denied)
+        }
     }
 
     @Test

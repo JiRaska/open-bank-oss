@@ -9,6 +9,7 @@ import io.mockk.every
 import io.mockk.mockk
 import io.quarkus.security.identity.SecurityIdentity
 import org.assertj.core.api.Assertions.assertThat
+import org.eclipse.microprofile.jwt.JsonWebToken
 import org.junit.jupiter.api.Test
 import org.yaml.snakeyaml.Yaml
 import java.io.File
@@ -21,8 +22,32 @@ class InitiatorScopesTest {
     private val payout = UUID.randomUUID()
 
     private fun identity(name: String, vararg roles: String) = mockk<SecurityIdentity>().also { id ->
-        every { id.principal } returns Principal { name }
+        every { id.principal } returns principalFor(name)
         every { id.hasRole(any()) } answers { firstArg<String>() in roles }
+    }
+
+    /** A verified service-account JWT for `service-account-<azp>` names, a plain principal otherwise. */
+    private fun principalFor(name: String): Principal = if (name.startsWith("service-account-")) {
+        TestJwt(mapOf("azp" to name.removePrefix("service-account-"), "preferred_username" to name, "sub" to "sa"))
+    } else {
+        Principal { name }
+    }
+
+    private class TestJwt(private val claims: Map<String, Any?>) : JsonWebToken {
+        override fun getName(): String = claims["preferred_username"] as? String ?: "anonymous"
+        override fun getClaimNames(): Set<String> = claims.filterValues { it != null }.keys
+
+        @Suppress("UNCHECKED_CAST")
+        override fun <T : Any?> getClaim(claimName: String): T = claims[claimName] as T
+    }
+
+    @Test
+    fun `a plain principal merely NAMED like pension is not scoped to its account`() {
+        val impostor = mockk<SecurityIdentity>().also { id ->
+            every { id.principal } returns Principal { "service-account-openbank-pension" }
+            every { id.hasRole(any()) } returns false
+        }
+        assertThat(InitiatorScopes(Optional.of(payout.toString())).of(impostor)).isEqualTo(InitiatorScope.Undeclared)
     }
 
     @Test

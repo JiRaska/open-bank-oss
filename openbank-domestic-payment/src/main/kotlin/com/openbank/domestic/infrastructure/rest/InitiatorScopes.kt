@@ -5,6 +5,7 @@
 package com.openbank.domestic.infrastructure.rest
 
 import com.openbank.domestic.domain.model.InitiatorScope
+import com.openbank.libs.authz.ServiceAccountIdentity
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
@@ -22,8 +23,8 @@ class InitiatorScopes(
     private val pensionDebtorAccount: Optional<String>,
 ) {
     fun of(identity: SecurityIdentity): InitiatorScope {
-        val principal = identity.principal?.name
-        if (principal == PENSION_PRINCIPAL) {
+        // Bound to the verified client (azp), never the principal NAME (#12448).
+        if (ServiceAccountIdentity.isPrincipal(identity, PENSION_PRINCIPAL)) {
             val account = pensionDebtorAccount.orElse("").trim().takeIf { it.isNotEmpty() }
                 ?.let { runCatching { UUID.fromString(it) }.getOrNull() }
             return InitiatorScope.Scoped(PENSION_PRINCIPAL, account)
