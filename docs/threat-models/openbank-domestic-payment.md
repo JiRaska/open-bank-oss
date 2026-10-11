@@ -696,4 +696,8 @@ environment variable cannot upgrade an image built without it. Preserve the HTTP
 during rollout. First publish a compatible signed provider image, then configure the
 private-CA listener and certificate rotation, and finally switch pension callers to HTTPS.
 OIDC and policy checks continue to authorize business operations independently of TLS trust.
+The HTTPS listener's trusted client certificate authenticates only the transport peer: the
+production `/api/*` permission selects the bearer mechanism so a certificate without an OIDC
+token receives 401, as on the preserved HTTP listener. `ListenerAuthParityIT` exercises both
+listeners with an ephemeral trusted certificate and signed bearer token (#12511).
 Roll back caller URLs before removing the provider listener or reverting its image.
