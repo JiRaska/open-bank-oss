@@ -8,23 +8,22 @@ import { FileCode, RefreshCw, CheckCircle2, XCircle, MinusCircle, ChevronDown, C
 import { svcUrl } from '@/lib/services/bff'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
+import { buildRegistry } from '@/lib/services/registry'
 
-// UI short-id → Kubernetes Deployment/Service name (the BFF's canonical key).
-// All but `catalog` carry a `specId` of the form `openbank-<k8s-name>`, so we
-// derive the key from it and special-case the catalog (port 8104). See ADR-0056.
-// `k8sName` overrides that derivation for the one service where it does not
-// hold — `specId` names the repo module directory (so the code-derived catalog
-// lookup below can find it), and `security-scanner` deploys under a different
-// k8s workload name than its directory (see src/lib/services/registry.ts).
+// Card → Kubernetes Deployment/Service name (the BFF's canonical key, ADR-0056).
+// `specId` is the repo module directory (so the code-derived catalog lookup below can
+// find it) and the key derives from it; `k8sName` carries the registry's override for
+// the module whose workload name differs from its directory (see
+// src/lib/services/registry.ts).
 function k8sName(svc: { specId: string | null; k8sName?: string }): string {
   if (svc.k8sName) return svc.k8sName
   return svc.specId ? svc.specId.replace(/^openbank-/, '') : 'product-catalog'
 }
 
-// A catalog card. The editorial entries below carry rich presentation metadata
-// (port, group, hand-written description); services discovered ONLY from the
-// code-derived catalog (ADR-0029 D3) are rendered with `derived: true` and the
-// facts the catalog actually knows (api title, versions) — no hardcoded port/group.
+// A catalog card. Modules with editorial prose (EDITORIAL below) carry a group and a
+// hand-written description; modules discovered ONLY from the code-derived catalog
+// (ADR-0029 D3) are rendered with `derived: true` and the facts the catalog actually
+// knows (api title, versions) — no hardcoded group.
 interface Service {
   id: string
   name: string
@@ -57,36 +56,41 @@ function prettyName(short: string): string {
     .join(' ')
 }
 
-const SERVICES: Service[] = [
-  { id: 'account',      name: 'Account Service',       port: 8100, group: 'Core Banking',    version: 'v1', desc: 'Account lifecycle, IBAN, authorizations (Core system for bank accounts)',    specId: 'openbank-account-service' },
-  { id: 'ledger',       name: 'Ledger Service',         port: 8101, group: 'Core Banking',    version: 'v1', desc: 'GL accounts, journal entries, double-entry (Financial book of record)',          specId: 'openbank-ledger-service' },
-  { id: 'transaction',  name: 'Transaction Service',    port: 8102, group: 'Core Banking',    version: 'v1', desc: 'Transaction processing, partitioned storage (Payment execution engine)',          specId: 'openbank-transaction-service' },
-  { id: 'balance',      name: 'Balance Service',        port: 8103, group: 'Core Banking',    version: 'v1', desc: 'Real-time balances, holds management (Current funds availability)',              specId: 'openbank-balance-service' },
-  { id: 'catalog',      name: 'Product Catalog',        port: 8104, group: 'Core Banking',    version: 'v1', desc: 'Banking products, pricing, limits (Product definitions and fees)',               specId: null },
-  { id: 'pid',          name: 'PID Service',            port: 8105, group: 'Identity',        version: 'v1', desc: 'Party identity documents, external IDs (Identity resolution)',                   specId: 'openbank-pid-service' },
-  { id: 'consent',      name: 'Consent Service',        port: 8106, group: 'PSD2',            version: 'v1', desc: 'PSD2 consent management, AIS/PIS/CBPII (Open Banking user approvals)',           specId: 'openbank-consent-service' },
-  { id: 'psd2',         name: 'PSD2 Service',           port: 8107, group: 'PSD2',            version: 'v1', desc: 'Berlin Group NextGenPSD2 API gateway (Regulated API interface)',                 specId: 'openbank-psd2-service' },
-  { id: 'tpp',          name: 'TPP Registry',           port: 8108, group: 'PSD2',            version: 'v1', desc: 'Third Party Provider registry, EBA sync (Verified external consumers)',          specId: 'openbank-tpp-registry-service' },
-  { id: 'agent',        name: 'Agent Service (MCP)',    port: 8109, group: 'Platform',        version: 'v1', desc: 'AI agent MCP server, OpenBank tools (Intelligent assistant backend)',            specId: 'openbank-agent-service' },
-  { id: 'sca',          name: 'SCA Service',            port: 8110, group: 'PSD2',            version: 'v1', desc: 'Strong Customer Authentication, OTP (Multi-factor auth provider)',               specId: 'openbank-sca-service' },
-  { id: 'party',        name: 'Party Service',          port: 8111, group: 'Identity',        version: 'v1', desc: 'Customer/company master data, PEP flags (Central customer record)',              specId: 'openbank-party-service' },
-  { id: 'notification', name: 'Notification Service',   port: 8112, group: 'Platform',        version: 'v1', desc: 'Email/SMS/Push notifications (Omnichannel delivery)',                           specId: 'openbank-notification-service' },
-  { id: 'audit',        name: 'Audit Service',          port: 8113, group: 'Compliance',      version: 'v1', desc: 'Immutable audit trail, EBA ICT Risk (Regulated action logging)',                 specId: 'openbank-audit-service' },
-  { id: 'kyc',          name: 'KYC Service',            port: 8114, group: 'Compliance',      version: 'v1', desc: 'KYC/CDD/EDD case management (Know Your Customer reviews)',                      specId: 'openbank-kyc-service' },
-  { id: 'sepa',         name: 'SEPA Payment',           port: 8115, group: 'Payments',        version: 'v1', desc: 'SEPA Credit Transfer, SCT Inst (Euro-zone standard payments)',                   specId: 'openbank-sepa-payment' },
-  { id: 'domestic',     name: 'Domestic Payment',       port: 8116, group: 'Payments',        version: 'v1', desc: 'Czech domestic payments (Local clearing network)',                               specId: 'openbank-domestic-payment' },
-  { id: 'aml',          name: 'AML Service',            port: 8117, group: 'Compliance',      version: 'v1', desc: 'AML screening, sanctions, SAR filing (Anti-Money Laundering engine)',            specId: 'openbank-aml-service' },
-  { id: 'card-issuance',name: 'Card Issuance Service',  port: 8118, group: 'Cards',           version: 'v1', desc: 'Card issuance and lifecycle management (Physical and virtual cards)',            specId: 'openbank-card-issuance-service' },
-  { id: 'fx',           name: 'FX Service',             port: 8119, group: 'Core Banking',    version: 'v1', desc: 'Foreign exchange rates and conversion (Currency trading engine)',                 specId: 'openbank-fx-service' },
-  { id: 'security-scanner',name: 'Security Scanner',    port: 8120, group: 'Platform',        version: 'v1', desc: 'Continuous vulnerability scanning (Infrastructure security)',                    specId: 'openbank-security-scanner', k8sName: 'security-scanner-service' },
-  { id: 'standing-order',name:'Standing Order Service', port: 8121, group: 'Payments',        version: 'v1', desc: 'Recurring payments and scheduled transfers (Automated clearing)',                specId: 'openbank-standing-order-service' },
-  { id: 'swift',        name: 'SWIFT Service',          port: 8122, group: 'Payments',        version: 'v1', desc: 'SWIFT MT/MX messaging (International wire transfers)',                           specId: 'openbank-swift-service' },
-  { id: 'sanctions',    name: 'Sanctions Service',      port: 8123, group: 'Compliance',      version: 'v1', desc: 'Real-time sanctions list screening (Embargo & blocklist checks)',                specId: 'openbank-sanctions-service' },
-  { id: 'clearing',     name: 'Clearing Service',       port: 8124, group: 'Payments',        version: 'v1', desc: 'Interbank clearing and settlement (Payment finality)',                           specId: 'openbank-clearing-service' },
-  { id: 'interest',     name: 'Interest Service',       port: 8125, group: 'Core Banking',    version: 'v1', desc: 'Interest calculation and accrual (Yield and fee engine)',                        specId: 'openbank-interest-service' },
-  { id: 'dispute',      name: 'Dispute Service',        port: 8135, group: 'Cards',           version: 'v1', desc: 'Card disputes and chargebacks (Fraud recovery process)',                         specId: 'openbank-dispute-service' },
-  { id: 'sepa-instant', name: 'SEPA Instant Service',   port: 8127, group: 'Payments',        version: 'v1', desc: 'Real-time EUR payment processing (SCT Inst clearing)',                           specId: 'openbank-sepa-instant' },
-]
+// Editorial PROSE overlay (display name, group, description) keyed by registry id - NOT the service
+// list. The page renders one card per runnable catalog module (buildRegistry over
+// /api/catalog/services); a module with no entry here still gets a card (`derived`), with the OpenAPI
+// title as its description. Ports, module names and workload names are never typed: they come from
+// the catalog (application.yaml / build scripts).
+const EDITORIAL: Record<string, { name: string; group: string; version: string; desc: string }> = {
+  'account': { name: 'Account Service', group: 'Core Banking', version: 'v1', desc: 'Account lifecycle, IBAN, authorizations (Core system for bank accounts)' },
+  'ledger': { name: 'Ledger Service', group: 'Core Banking', version: 'v1', desc: 'GL accounts, journal entries, double-entry (Financial book of record)' },
+  'transaction': { name: 'Transaction Service', group: 'Core Banking', version: 'v1', desc: 'Transaction processing, partitioned storage (Payment execution engine)' },
+  'balance': { name: 'Balance Service', group: 'Core Banking', version: 'v1', desc: 'Real-time balances, holds management (Current funds availability)' },
+  'product-catalog': { name: 'Product Catalog', group: 'Core Banking', version: 'v1', desc: 'Banking products, pricing, limits (Product definitions and fees)' },
+  'pid': { name: 'PID Service', group: 'Identity', version: 'v1', desc: 'Party identity documents, external IDs (Identity resolution)' },
+  'consent': { name: 'Consent Service', group: 'PSD2', version: 'v1', desc: 'PSD2 consent management, AIS/PIS/CBPII (Open Banking user approvals)' },
+  'psd2': { name: 'PSD2 Service', group: 'PSD2', version: 'v1', desc: 'Berlin Group NextGenPSD2 API gateway (Regulated API interface)' },
+  'tpp-registry': { name: 'TPP Registry', group: 'PSD2', version: 'v1', desc: 'Third Party Provider registry, EBA sync (Verified external consumers)' },
+  'agent': { name: 'Agent Service (MCP)', group: 'Platform', version: 'v1', desc: 'AI agent MCP server, OpenBank tools (Intelligent assistant backend)' },
+  'sca': { name: 'SCA Service', group: 'PSD2', version: 'v1', desc: 'Strong Customer Authentication, OTP (Multi-factor auth provider)' },
+  'party': { name: 'Party Service', group: 'Identity', version: 'v1', desc: 'Customer/company master data, PEP flags (Central customer record)' },
+  'notification': { name: 'Notification Service', group: 'Platform', version: 'v1', desc: 'Email/SMS/Push notifications (Omnichannel delivery)' },
+  'audit': { name: 'Audit Service', group: 'Compliance', version: 'v1', desc: 'Immutable audit trail, EBA ICT Risk (Regulated action logging)' },
+  'kyc': { name: 'KYC Service', group: 'Compliance', version: 'v1', desc: 'KYC/CDD/EDD case management (Know Your Customer reviews)' },
+  'sepa-payment': { name: 'SEPA Payment', group: 'Payments', version: 'v1', desc: 'SEPA Credit Transfer, SCT Inst (Euro-zone standard payments)' },
+  'domestic-payment': { name: 'Domestic Payment', group: 'Payments', version: 'v1', desc: 'Czech domestic payments (Local clearing network)' },
+  'aml': { name: 'AML Service', group: 'Compliance', version: 'v1', desc: 'AML screening, sanctions, SAR filing (Anti-Money Laundering engine)' },
+  'card-issuance': { name: 'Card Issuance Service', group: 'Cards', version: 'v1', desc: 'Card issuance and lifecycle management (Physical and virtual cards)' },
+  'fx': { name: 'FX Service', group: 'Core Banking', version: 'v1', desc: 'Foreign exchange rates and conversion (Currency trading engine)' },
+  'security-scanner': { name: 'Security Scanner', group: 'Platform', version: 'v1', desc: 'Continuous vulnerability scanning (Infrastructure security)' },
+  'standing-order': { name: 'Standing Order Service', group: 'Payments', version: 'v1', desc: 'Recurring payments and scheduled transfers (Automated clearing)' },
+  'swift': { name: 'SWIFT Service', group: 'Payments', version: 'v1', desc: 'SWIFT MT/MX messaging (International wire transfers)' },
+  'sanctions': { name: 'Sanctions Service', group: 'Compliance', version: 'v1', desc: 'Real-time sanctions list screening (Embargo & blocklist checks)' },
+  'clearing': { name: 'Clearing Service', group: 'Payments', version: 'v1', desc: 'Interbank clearing and settlement (Payment finality)' },
+  'interest': { name: 'Interest Service', group: 'Core Banking', version: 'v1', desc: 'Interest calculation and accrual (Yield and fee engine)' },
+  'dispute': { name: 'Dispute Service', group: 'Cards', version: 'v1', desc: 'Card disputes and chargebacks (Fraud recovery process)' },
+  'sepa-instant': { name: 'SEPA Instant Service', group: 'Payments', version: 'v1', desc: 'Real-time EUR payment processing (SCT Inst clearing)' },
+}
 
 // Czech translations for the editorial SERVICES `desc` prose, keyed by service id.
 // Kept here as data so the English original can stay verbatim in SERVICES above;
@@ -96,19 +100,19 @@ const SERVICE_DESC_CS: Record<string, string> = {
   ledger:            'GL účty, účetní zápisy, podvojné účetnictví (Finanční kniha záznamů)',
   transaction:       'Zpracování transakcí, partitionované úložiště (Engine pro provádění plateb)',
   balance:           'Zůstatky v reálném čase, správa blokací (Aktuální dostupnost prostředků)',
-  catalog:           'Bankovní produkty, ceny, limity (Definice produktů a poplatků)',
+  'product-catalog':           'Bankovní produkty, ceny, limity (Definice produktů a poplatků)',
   pid:               'Identifikační doklady klienta, externí ID (Rozlišení identity)',
   consent:           'Správa souhlasů PSD2, AIS/PIS/CBPII (Schválení uživatele v Open Bankingu)',
   psd2:              'API brána Berlin Group NextGenPSD2 (Regulované API rozhraní)',
-  tpp:               'Registr poskytovatelů třetích stran, synchronizace s EBA (Ověření externí konzumenti)',
+  'tpp-registry':               'Registr poskytovatelů třetích stran, synchronizace s EBA (Ověření externí konzumenti)',
   agent:             'AI agent MCP server, nástroje OpenBank (Backend inteligentního asistenta)',
   sca:               'Silné ověření klienta, OTP (Poskytovatel vícefaktorového ověření)',
   party:             'Kmenová data klientů/firem, příznaky PEP (Centrální záznam klienta)',
   notification:      'E-mailové/SMS/Push notifikace (Omnikanálové doručování)',
   audit:             'Neměnná auditní stopa, EBA ICT Risk (Logování regulovaných akcí)',
   kyc:               'Správa případů KYC/CDD/EDD (Prověření Poznej svého klienta)',
-  sepa:              'SEPA úhrada, SCT Inst (Standardní platby v eurozóně)',
-  domestic:          'České tuzemské platby (Lokální clearingová síť)',
+  'sepa-payment':              'SEPA úhrada, SCT Inst (Standardní platby v eurozóně)',
+  'domestic-payment':          'České tuzemské platby (Lokální clearingová síť)',
   aml:               'AML screening, sankce, podání SAR (Engine proti praní špinavých peněz)',
   'card-issuance':   'Vydávání a správa životního cyklu karet (Fyzické a virtuální karty)',
   fx:                'Devizové kurzy a konverze (Engine pro obchodování s měnami)',
@@ -433,9 +437,9 @@ export default function ApiCatalogPage() {
   // one (not the stale hardcoded "v1"). Falls back silently if not bundled.
   const [catalog, setCatalog] = useState<Record<string, { releaseVersion: string | null; apiVersion: string | null; moneyPath: boolean; gaps: string[] }>>({})
   // Services present in the code-derived catalog but NOT in the editorial list
-  // above — rendered as cards so the catalog is COMPLETE (all ~33 services), not
+  // above — rendered as cards so the catalog is COMPLETE, not
   // silently truncated to the hand-maintained subset.
-  const [derived, setDerived] = useState<Service[]>([])
+  const [services, setServices] = useState<Service[]>([])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -443,7 +447,7 @@ export default function ApiCatalogPage() {
     // note above) — then per-service OpenAPI/info enrichment over the BFF.
     const snapshot = await loadHealthSnapshot()
     const results = await Promise.allSettled(
-      [...SERVICES, ...derived].map(async svc => {
+      services.map(async svc => {
         const k8s = k8sName(svc)
         const healthState = healthFor(snapshot, k8s)
         try {
@@ -491,7 +495,7 @@ export default function ApiCatalogPage() {
     })
     setStatuses(map)
     setLoading(false)
-  }, [derived])
+  }, [services])
 
   useEffect(() => { load() }, [load])
 
@@ -509,23 +513,29 @@ export default function ApiCatalogPage() {
           map[s.name] = { releaseVersion: s.releaseVersion ?? null, apiVersion: s.apiVersion ?? null, moneyPath: !!s.moneyPath, gaps: s.gaps ?? [] }
         }
         setCatalog(map)
-        const known = new Set(SERVICES.map(s => s.specId ?? 'openbank-product-catalog'))
-        // Build full cards for catalog services the editorial list omits, using
-        // only what the catalog actually knows (no fabricated port/group).
-        setDerived(
-          data.services
-            .filter((s: { name: string; kind: string }) => s.kind === 'service' && !known.has(s.name))
-            .map((s: { name: string; short: string; apiVersion: string | null; apiTitle: string | null }): Service => ({
-              id: s.short,
-              name: prettyName(s.short),
-              port: null,
-              group: 'Other',
-              version: s.apiVersion ? `v${String(s.apiVersion).split('.')[0]}` : 'v1',
-              desc: s.apiTitle ?? '',
-              specId: s.name,
-              derived: true,
-            })),
+        // One card per runnable catalog module; editorial prose is layered on where it exists.
+        const registry = buildRegistry(data.services)
+        const apiInfo = new Map<string, { apiVersion: string | null; apiTitle: string | null }>(
+          data.services.map((m: { name: string; apiVersion: string | null; apiTitle: string | null }) => [m.name, m]),
         )
+        const cards = registry.map((r): Service => {
+          const ed = EDITORIAL[r.id]
+          const api = apiInfo.get(r.container)
+          return {
+            id: r.id,
+            name: ed?.name ?? prettyName(r.container),
+            port: r.port,
+            group: ed?.group ?? 'Other',
+            version: ed?.version ?? (api?.apiVersion ? `v${String(api.apiVersion).split('.')[0]}` : 'v1'),
+            desc: ed?.desc ?? api?.apiTitle ?? '',
+            specId: r.container,
+            k8sName: r.k8sName,
+            derived: !ed,
+          }
+        })
+        // Editorial cards first (in their authored narrative order), derived extras after.
+        const rank = (c: Service) => { const i = Object.keys(EDITORIAL).indexOf(c.id); return i === -1 ? Infinity : i }
+        setServices(cards.sort((x, y) => (rank(x) === rank(y) ? x.id.localeCompare(y.id) : rank(x) - rank(y))))
       })
       .catch(() => { /* catalog snapshot absent — cards keep editorial defaults */ })
     return () => { alive = false }
@@ -550,7 +560,8 @@ export default function ApiCatalogPage() {
   }, [])
 
   // Editorial cards first (rich metadata, port-ordered), catalog-derived extras last.
-  const allServices = [...SERVICES, ...derived]
+  const allServices = services
+  const derivedCount = services.filter(s => s.derived).length
   const groups = ['all', ...Array.from(new Set(allServices.map(s => s.group)))]
   const normalizedQuery = query.trim().toLocaleLowerCase()
   const filtered = allServices.filter(svc => {
@@ -649,7 +660,7 @@ export default function ApiCatalogPage() {
       )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        {groupFilter === 'all' && derived.length > 0 && (
+        {groupFilter === 'all' && derivedCount > 0 && (
           <div style={{
             display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 14px', marginBottom: '12px',
             background: 'var(--accent-bg)', border: '1px solid var(--border)',
@@ -658,8 +669,8 @@ export default function ApiCatalogPage() {
             <span>ℹ</span>
             <span>
               {t(
-                `Zobrazeno ${allServices.length} služeb — z toho ${derived.length} odvozeno z code-derived katalogu (ADR-0029), bez ručního zápisu.`,
-                `Showing ${allServices.length} services — ${derived.length} of them derived from the code-derived catalog (ADR-0029), with no hand-maintained entry.`,
+                `Zobrazeno ${allServices.length} služeb — z toho ${derivedCount} odvozeno z code-derived katalogu (ADR-0029), bez ručního zápisu.`,
+                `Showing ${allServices.length} services — ${derivedCount} of them derived from the code-derived catalog (ADR-0029), with no hand-maintained entry.`,
               )}
             </span>
           </div>

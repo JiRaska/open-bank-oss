@@ -8,6 +8,7 @@ import com.openbank.pensionfund.application.port.NotFoundException
 import com.openbank.pensionfund.application.port.PensionFundStore
 import com.openbank.pensionfund.domain.model.FundPeriodCalculator
 import com.openbank.pensionfund.domain.model.FundPeriodReport
+import com.openbank.pensionfund.domain.model.effectiveClasses
 import jakarta.enterprise.context.ApplicationScoped
 import java.time.LocalDate
 import java.util.UUID
@@ -23,8 +24,16 @@ class FundReportingService(private val store: PensionFundStore) {
         require(!periodEnd.isBefore(periodStart)) { "periodEnd must not be before periodStart" }
         val navs = store.publishedNavsUpTo(fundId, periodEnd)
         val transactions = store.transactionsPricedAtAny(navs.map { it.id })
+        // The YTD P&L revalues every NAV interval of the year, from the last NAV before it.
+        val yearStart = LocalDate.of(periodEnd.year, 1, 1)
+        val firstNeeded = navs.lastOrNull { it.valuationDate.isBefore(yearStart) }?.valuationDate ?: yearStart
         val closing = navs.lastOrNull { !it.valuationDate.isBefore(periodStart) }
-        val positions = closing?.takeIf { it.positionsRecorded }?.let { store.navPositions(it.id) }
-        return FundPeriodCalculator.calculate(fund, periodStart, periodEnd, navs, transactions, positions)
+        val withPositions = navs
+            .filter { it.positionsRecorded && (!it.valuationDate.isBefore(firstNeeded) || it.id == closing?.id) }
+            .map { it.id }
+        val recorded = store.navPositionsOf(withPositions)
+        val positions = effectiveClasses(recorded, store.classificationCorrections(recorded.map { it.id }))
+        val byNav = withPositions.associateWith { id -> positions.filter { it.navId == id } }
+        return FundPeriodCalculator.calculate(fund, periodStart, periodEnd, navs, transactions, byNav)
     }
 }

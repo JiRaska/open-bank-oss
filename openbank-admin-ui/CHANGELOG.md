@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.277.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.277.2...admin-ui-v0.277.3) (2026-10-11)
+
+
+### Bug Fixes
+
+* **admin-ui:** derive the service registry from the catalog instead of eight hand-kept lists ([#12487](https://github.com/JiRaska/open-bank-oss/issues/12487)) ([6bb5662](https://github.com/JiRaska/open-bank-oss/commit/6bb5662771c96c5954e3078e39c56b9c107352ae))
+
+## [0.277.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.277.1...admin-ui-v0.277.2) (2026-10-11)
+
+
+### Bug Fixes
+
+* **admin-ui:** derive platform versions from infra sources instead of literals ([#12469](https://github.com/JiRaska/open-bank-oss/issues/12469)) ([fff7b94](https://github.com/JiRaska/open-bank-oss/commit/fff7b94ca61a86ce8e5aea0a4f1ec6780895acc8))
+
 ## [0.277.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.277.0...admin-ui-v0.277.1) (2026-10-08)
 
 

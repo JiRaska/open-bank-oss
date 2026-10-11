@@ -1,0 +1,36 @@
+{
+  "period": "MONTH:2025-01",
+  "from": "",
+  "to": "",
+  "totalDebit": "550000.00",
+  "totalCredit": "550000.00",
+  "balanced": true,
+  "accountCount": 3,
+  "contentHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "lines": [
+    {
+      "code": "1000",
+      "type": "ASSET",
+      "currency": "CZK",
+      "totalDebit": "300000.00",
+      "totalCredit": "250000.00",
+      "net": "50000.00"
+    },
+    {
+      "code": "5000",
+      "type": "EXPENSE",
+      "currency": "CZK",
+      "totalDebit": "250000.00",
+      "totalCredit": "0.00",
+      "net": "250000.00"
+    },
+    {
+      "code": "6000",
+      "type": "INCOME",
+      "currency": "CZK",
+      "totalDebit": "0.00",
+      "totalCredit": "300000.00",
+      "net": "-300000.00"
+    }
+  ]
+}
