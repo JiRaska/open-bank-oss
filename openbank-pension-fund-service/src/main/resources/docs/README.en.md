@@ -53,3 +53,20 @@ This stage provides server authentication; it does not establish mutual TLS.
 `ServerTlsIT` proves PEM loading, TLS 1.3 negotiation, rejection of an untrusted
 certificate, and continued HTTP service with ephemeral test keys. Deployment
 declarations and this test do not prove that a cluster Certificate is ready.
+
+
+## Period reporting
+
+`GET /api/v1/reporting/funds/{fundId}/period-figures` accepts required
+`periodStart` and `periodEnd` dates. It exposes aggregate fund figures for
+tax-reporting-service: balance sheet, year-to-date profit and loss, unit
+roll-forward, portfolio and flows. The endpoint requires an allowed reporting
+role and the `pension-fund.reporting.inspect` authorization policy.
+
+The calculation uses published NAVs and transactions priced at those NAVs,
+bucketed by valuation date. A period without a published NAV is not reportable;
+it must not be presented as zero activity. Positions are stored with newly
+calculated NAVs. For older NAVs without recorded positions, portfolio figures
+are unknown rather than an empty portfolio. Basis NAV identifiers and a
+fingerprint identify the report inputs. This read model supplies figures;
+it does not submit a statutory return to the regulator.
