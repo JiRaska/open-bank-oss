@@ -243,13 +243,6 @@ export async function fetchPairVerification(baseUrl, auth, consumer, consumerVer
 
   const body = await res.json()
   const rows = Array.isArray(body?.matrix) ? body.matrix : []
-  if (rows.length === 0 && committedPact) {
-    const equivalentVersion = await equivalentMainConsumerVersion(baseUrl, auth, consumer, provider, committedPact)
-    if (equivalentVersion && equivalentVersion !== consumerVersion) {
-      const latest = await fetchPairVerification(baseUrl, auth, consumer, equivalentVersion, provider)
-      return { ...latest, consumerVersion: equivalentVersion }
-    }
-  }
   const verifs = rows.map(r => r?.verificationResult).filter(Boolean)
   const providerVersion = rows.map(r => r?.providerVersion?.number).find(version => typeof version === 'string') ?? null
 
@@ -260,6 +253,15 @@ export async function fetchPairVerification(baseUrl, auth, consumer, consumerVer
   if (verifs.length > 0 && verifs.every(v => v.success === true)) {
     const at = verifs.map(v => v.verifiedAt).filter(Boolean).sort().pop() ?? null
     return { status: 'passed', verifiedAt: at, providerVersion }
+  }
+  // A matrix row can exist without any verification result. Its presence must not
+  // prevent proving that a newer main version published the identical Pact content.
+  if (verifs.length === 0 && committedPact) {
+    const equivalentVersion = await equivalentMainConsumerVersion(baseUrl, auth, consumer, provider, committedPact)
+    if (equivalentVersion && equivalentVersion !== consumerVersion) {
+      const latest = await fetchPairVerification(baseUrl, auth, consumer, equivalentVersion, provider)
+      return { ...latest, consumerVersion: equivalentVersion }
+    }
   }
   if (!(await providerHasMainVersion(baseUrl, auth, provider))) {
     return {

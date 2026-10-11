@@ -623,6 +623,12 @@ jobs:
               api "https://api.github.com/repos/${REPO}/actions/runs/${browser_run_id}/artifacts?per_page=100" \
                 | python3 -c "import json,sys; [print(a['id'],a['name']) for a in json.load(sys.stdin).get('artifacts',[]) if a['name'].startswith('test-intelligence-run-openbank-admin-ui-') and not a['expired'] and (a.get('workflow_run') or {}).get('head_branch') == 'main']" 2>/dev/null || true
             fi
+            synthetic_run_id="$(api "https://api.github.com/repos/${REPO}/actions/workflows/synthetic-journeys.yml/runs?branch=main&status=completed&per_page=1" \
+              | python3 -c "import json,sys; a=[r for r in json.load(sys.stdin).get('workflow_runs',[]) if r.get('head_branch') == 'main']; print(a[0]['id'] if a else '')" 2>/dev/null || true)"
+            if [ -n "${synthetic_run_id}" ]; then
+              api "https://api.github.com/repos/${REPO}/actions/runs/${synthetic_run_id}/artifacts?per_page=100" \
+                | python3 -c "import json,sys; [print(a['id'],a['name']) for a in json.load(sys.stdin).get('artifacts',[]) if a['name'].startswith('test-intelligence-run-openbank-platform-') and not a['expired'] and (a.get('workflow_run') or {}).get('head_branch') == 'main']" 2>/dev/null || true
+            fi
             for page in 1 2 3 4 5; do
               api "https://api.github.com/repos/${REPO}/actions/artifacts?per_page=100&page=${page}" \
                 | python3 -c "import json,sys; [print(a['id'],a['name']) for a in json.load(sys.stdin).get('artifacts',[]) if a['name'].startswith('test-intelligence-run-') and not a['expired'] and (a.get('workflow_run') or {}).get('head_branch') == 'main']" 2>/dev/null || true

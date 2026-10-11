@@ -25,7 +25,7 @@ class PostgresTestResource : QuarkusTestResourceLifecycleManager {
             .withPassword("openbank_secret")
         postgres = pg
         pg.start()
-        TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "started")
+        TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "started", containerId = pg.containerId)
         val host = pg.host
         val port = pg.getMappedPort(PostgreSQLContainer.POSTGRESQL_PORT)
         return mapOf(
@@ -39,8 +39,9 @@ class PostgresTestResource : QuarkusTestResourceLifecycleManager {
 
     override fun stop() {
         postgres?.let {
+            val containerId = it.containerId
             it.stop()
-            TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "stopped")
+            TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "stopped", containerId = containerId)
         }
     }
 

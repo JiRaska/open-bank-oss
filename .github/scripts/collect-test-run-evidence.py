@@ -658,6 +658,11 @@ def observations(service: Path) -> list[dict]:
                         # no run.json (#11850). Never echo a recorder-supplied value to CI logs.
                         print("collect-test-run-evidence: ignoring unsupported runtime resource", file=sys.stderr)
                         continue
+                    # The recorder may supply the same transient Docker id as the daemon
+                    # stream. Keep it only for exact in-process correlation; never publish it.
+                    container_id = item.pop("containerId", None)
+                    if file.name == "testcontainers.jsonl" and container_id:
+                        item["_dockerContainerId"] = container_id
                     item["image"] = public_runtime_image(resource, item.get("image", ""))
                     result.append((0 if file.name == "testcontainers.jsonl" else 1, item))
             except json.JSONDecodeError:
@@ -689,6 +694,7 @@ def observations(service: Path) -> list[dict]:
     for observed_at, item in recorder:
         duplicate = any(
             same_lifecycle(observed_at, item, previous_at, previous)
+            and item.get("_dockerContainerId") == previous.get("_dockerContainerId")
             and (not item.get("resourceScopeId") or not previous.get("resourceScopeId")
                  or item["resourceScopeId"] == previous["resourceScopeId"])
             for previous_at, previous in deduplicated_recorder
@@ -696,15 +702,32 @@ def observations(service: Path) -> list[dict]:
         if not duplicate:
             deduplicated_recorder.append((observed_at, item))
 
-    # Suppress a daemon event only for an unambiguous one-to-one recorder pairing. A raw stream
-    # with two different daemon ids near one recorder is evidence of two physical containers,
-    # not a reason to hide one. Legacy streams without an id retain the former compatibility
-    # behaviour, because their ambiguity cannot be resolved retrospectively.
+    # Exact container identity wins even when readiness delayed the recorder timestamp.
+    # Old recorder files have no id; preserve their conservative one-to-one time pairing.
+    # Never infer an id for a recorder that supplied a different one.
     published = list(deduplicated_recorder)
     for observed_at, item in docker:
-        matches = [(previous_at, previous) for previous_at, previous in deduplicated_recorder
-                   if same_lifecycle(observed_at, item, previous_at, previous)]
         docker_id = item.get("_dockerContainerId")
+        exact_matches = [previous for _, previous in deduplicated_recorder
+                         if docker_id and previous.get("_dockerContainerId") == docker_id
+                         and previous["resource"] == item["resource"]
+                         and runtime_image_identity(previous["image"]) == runtime_image_identity(item["image"])
+                         and previous["lifecycle"] == item["lifecycle"]]
+        exact_docker_count = sum(1 for _, other in docker
+                                 if docker_id and other.get("_dockerContainerId") == docker_id
+                                 and other["resource"] == item["resource"]
+                                 and runtime_image_identity(other["image"]) == runtime_image_identity(item["image"])
+                                 and other["lifecycle"] == item["lifecycle"])
+        if len(exact_matches) == 1 and exact_docker_count == 1:
+            continue
+        if exact_matches:
+            # Duplicate exact claims are ambiguous; a nearby legacy recorder must
+            # not make that ambiguity disappear.
+            published.append((observed_at, item))
+            continue
+        matches = [(previous_at, previous) for previous_at, previous in deduplicated_recorder
+                   if not previous.get("_dockerContainerId")
+                   and same_lifecycle(observed_at, item, previous_at, previous)]
         same_recorder_raw_count = sum(
             1 for other_at, other in docker
             if same_lifecycle(other_at, other, matches[0][0], matches[0][1])
@@ -1195,6 +1218,49 @@ def main() -> None:
             assert public_runtime_image("postgres", "registry.openbank.invalid/team/postgres@sha256:" + "A" * 64) == "postgres@sha256:" + "a" * 64
             assert public_runtime_image("postgres", "registry.openbank.invalid/team/postgres:tag?credential=secret") == "postgres"
             assert all("containerId" not in item and "_dockerContainerId" not in item for item in observed)
+            # Two same-image containers overlap. The recorder identifies only the
+            # first, and its readiness timestamp is deliberately outside the old
+            # duplicate window; only that exact daemon lifecycle may disappear.
+            exact_service = service / "exact-container"
+            exact_runtime = exact_service / "build/test-intelligence/runtime"
+            exact_runtime.mkdir(parents=True)
+            (exact_runtime / "docker-events.jsonl").write_text(
+                '{"image":"postgres:18.6-alpine","containerId":"pg-a","lifecycle":"start","observedAtUnix":1787433000}\n'
+                '{"image":"postgres:18.6-alpine","containerId":"pg-b","lifecycle":"start","observedAtUnix":1787433001}\n'
+                '{"image":"postgres:18.6-alpine","containerId":"pg-a","lifecycle":"die","observedAtUnix":1787433060}\n'
+                '{"image":"postgres:18.6-alpine","containerId":"pg-b","lifecycle":"die","observedAtUnix":1787433061}\n'
+            )
+            recorder_file = exact_runtime / "testcontainers.jsonl"
+            recorder_file.write_text(
+                '{"resource":"postgres","image":"postgres:18.6-alpine","containerId":"pg-a","lifecycle":"started","observedAt":"2026-08-22T21:12:00Z"}\n'
+                '{"resource":"postgres","image":"postgres:18.6-alpine","containerId":"pg-a","lifecycle":"stopped","observedAt":"2026-08-22T21:13:00Z"}\n'
+            )
+            exact_observed = observations(exact_service)
+            assert [item["lifecycle"] for item in exact_observed].count("started") == 2
+            assert [item["lifecycle"] for item in exact_observed].count("stopped") == 2
+            assert all("containerId" not in item and "_dockerContainerId" not in item for item in exact_observed)
+            recorder_file.write_text(recorder_file.read_text().replace("pg-a", "pg-other"))
+            unmatched_observed = observations(exact_service)
+            assert [item["lifecycle"] for item in unmatched_observed].count("started") == 3
+            assert [item["lifecycle"] for item in unmatched_observed].count("stopped") == 3
+            recorder_only_service = service / "distinct-recorder-containers"
+            recorder_only_runtime = recorder_only_service / "build/test-intelligence/runtime"
+            recorder_only_runtime.mkdir(parents=True)
+            recorder_rows = [
+                {"resource": "postgres", "image": "postgres:18.6-alpine", "containerId": identity,
+                 "lifecycle": lifecycle, "observedAt": timestamp}
+                for lifecycle, timestamp in (("started", "2026-08-22T21:12:00Z"),
+                                             ("stopped", "2026-08-22T21:13:00Z"))
+                for identity in ("pg-a", "pg-b", "pg-a")
+            ]
+            (recorder_only_runtime / "testcontainers.jsonl").write_text(
+                "\n".join(json.dumps(item) for item in recorder_rows) + "\n"
+            )
+            recorder_only_observed = observations(recorder_only_service)
+            assert [item["lifecycle"] for item in recorder_only_observed].count("started") == 2
+            assert [item["lifecycle"] for item in recorder_only_observed].count("stopped") == 2
+            assert all("containerId" not in item and "_dockerContainerId" not in item
+                       for item in recorder_only_observed)
             pact_runtime = runtime / "providerPactTest"
             pact_runtime.mkdir()
             (pact_runtime / "testcontainers.jsonl").write_text(
