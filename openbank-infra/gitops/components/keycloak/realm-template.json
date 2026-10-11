@@ -1628,6 +1628,26 @@
       "defaultClientScopes": ["openid", "profile", "email", "roles", "acr"],
       "attributes": { "minimum.acr.value": "mfa" },
       "authenticationFlowBindingOverrides": { "browser": "d735dbf2-1d7b-4ee2-8374-d682069e994a" }
+    },
+    {
+      "clientId": "openbank-pension",
+      "name": "OpenBank Pension Service",
+      "description": "Per-service M2M client for pension-service's fund calls and catalog strategy reads (ADR-0334). Holds ROLE_API and the narrow catalog:read scope; OPA grants catalog reads to this identity alone.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles",
+        "catalog:read"
+      ],
+      "secret": "__PENSION_CLIENT_SECRET__"
     }
   ],
   "clientScopeMappings": {
@@ -1964,6 +1984,14 @@
       "enabled": true,
       "serviceAccountClientId": "openbank-mcp-service",
       "realmRoles": []
+    },
+    {
+      "username": "service-account-openbank-pension",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-pension",
+      "realmRoles": [
+        "ROLE_API"
+      ]
     }
   ],
   "attributes": {

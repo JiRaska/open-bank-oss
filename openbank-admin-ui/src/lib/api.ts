@@ -5,6 +5,7 @@
 import type { Account, AccountBalance, CursorPage, Transaction, JournalEntry, ServiceInfo, ServiceHealth, ServiceSnapshot, ServiceConfigResponse, ServiceConfigSnapshot } from '@/types'
 import type { GovernanceManifestEntry } from '@/lib/governance/manifest'
 import { classifyBffFailure, type BffFailure } from '@/lib/services/bff'
+import { buildRegistry, type CatalogFleetModule } from '@/lib/services/registry'
 
 const ACCOUNT_SERVICE = '/api/svc/account-service'
 const TRANSACTION_SERVICE = '/api/svc/transaction-service'
@@ -15,43 +16,21 @@ const NOTIFICATION_SERVICE = '/api/svc/notification-service'
 // which same-origin API operation the browser calls.
 const pathSegment = (value: string): string => encodeURIComponent(value)
 
-export const SERVICES: { name: string; port: number }[] = [
-  { name: 'account-service',        port: 8100 },
-  { name: 'ledger-service',         port: 8101 },
-  { name: 'transaction-service',    port: 8102 },
-  { name: 'balance-service',        port: 8103 },
-  { name: 'product-catalog',        port: 8104 },
-  { name: 'pid-service',            port: 8105 },
-  { name: 'consent-service',        port: 8106 },
-  { name: 'psd2-service',           port: 8107 },
-  { name: 'tpp-registry-service',   port: 8108 },
-  { name: 'sca-service',            port: 8110 },
-  { name: 'party-service',          port: 8111 },
-  { name: 'notification-service',   port: 8112 },
-  { name: 'audit-service',          port: 8113 },
-  { name: 'kyc-service',            port: 8114 },
-  { name: 'sepa-payment',           port: 8115 },
-  { name: 'domestic-payment',       port: 8116 },
-  { name: 'aml-service',            port: 8117 },
-  { name: 'card-issuance-service',  port: 8118 },
-  { name: 'fx-service',             port: 8119 },
-  { name: 'security-scanner',       port: 8120 },
-  { name: 'standing-order-service', port: 8121 },
-  { name: 'swift-service',          port: 8122 },
-  { name: 'sanctions-service',      port: 8123 },
-  { name: 'clearing-service',       port: 8124 },
-  { name: 'interest-service',       port: 8125 },
-  { name: 'dispute-service',        port: 8135 },
-  { name: 'sepa-instant',           port: 8127 },
-  { name: 'vop-service',            port: 8149 },
-  { name: 'agent-service',          port: 8109 },
-  // Extended / reporting — were missing from the probe list before ADR-0071.
-  { name: 'lending-service',        port: 8128 },
-  { name: 'statement-service',      port: 8136 },
-  { name: 'onboarding-service',     port: 8130 },
-  { name: 'anacredit-service',      port: 8137 },
-  { name: 'sdd-service',            port: 8132 },
-]
+/**
+ * The fleet to list when the live snapshot endpoint is unavailable. DERIVED from the code-generated
+ * catalog (the same artifact every other service view reads) - never a list typed into this file.
+ * An absent catalog yields an empty list: the caller degrades honestly rather than invent services.
+ */
+async function fleetFromCatalog(): Promise<{ name: string; port: number }[]> {
+  try {
+    const res = await fetch('/api/catalog/services', { cache: 'no-store' })
+    if (!res.ok) return []
+    const body = await res.json() as { services?: CatalogFleetModule[] }
+    return buildRegistry(body.services ?? []).map(s => ({ name: s.container.replace(/^openbank-/, ''), port: s.port }))
+  } catch {
+    return []
+  }
+}
 
 export async function fetchAllServiceConfigSnapshots(): Promise<ServiceConfigSnapshot[]> {
   const res = await fetch('/api/services/config', { cache: 'no-store' })
@@ -242,7 +221,7 @@ export async function fetchAllServiceSnapshots(): Promise<ServiceSnapshot[]> {
   const evidence = await fetchAllServiceSnapshotsEvidence()
   return evidence.ok
     ? evidence.snapshots
-    : SERVICES.map(s => ({ name: s.name, port: s.port, info: null, health: null, rateLimitMax: null, rateLimitRemaining: null, apiVersion: null, latencyMs: null, reachable: false }))
+    : (await fleetFromCatalog()).map(s => ({ name: s.name, port: s.port, info: null, health: null, rateLimitMax: null, rateLimitRemaining: null, apiVersion: null, latencyMs: null, reachable: false }))
 }
 
 export type ServiceSnapshotsEvidence =

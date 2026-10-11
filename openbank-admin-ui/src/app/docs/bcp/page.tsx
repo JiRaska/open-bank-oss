@@ -9,6 +9,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 import { PrintDocumentButton } from '@/components/docs/PrintDocumentButton'
 import { CatalogDriftBanner } from '@/components/governance/CatalogDriftBanner'
+import { buildRegistry, k8sNameOf, type CatalogFleetModule } from '@/lib/services/registry'
 
 type Bilingual = [cs: string, en: string]
 
@@ -209,6 +210,20 @@ export default function BcpPage() {
           }
         }
       }
+      // The tiers name a module by its directory (`security-scanner`); a cluster inventory names it by
+      // its workload (`security-scanner-service`). Alias through the catalog registry so a renamed
+      // workload does not read UNKNOWN in one of the two modes.
+      try {
+        const cat = await fetch('/api/catalog/services', { cache: 'no-store' })
+        if (cat.ok) {
+          const body = await cat.json() as { services?: CatalogFleetModule[] }
+          for (const r of buildRegistry(body.services ?? [])) {
+            const short = r.container.replace(/^openbank-/, '')
+            const k8s = k8sNameOf(r)
+            if (mapped[short] === undefined && mapped[k8s] !== undefined) mapped[short] = mapped[k8s]
+          }
+        }
+      } catch { /* no catalog snapshot - names resolve as reported */ }
       // Infra: /api/infra/status is already keyed by the stable infra id
       // (postgres, kafka, keycloak, …) — the same ids the Tier 0/5 entries use.
       if (infraRes.status === 'fulfilled' && infraRes.value.ok) {
