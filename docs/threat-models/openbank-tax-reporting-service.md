@@ -35,7 +35,7 @@ NetworkPolicy admits admin-ui and the platform scrapers only, no ingress); servi
   `tax_reporting_rest_ext.rego` grants `tax.filing.inspect` to real staff (operator, admin, auditor,
   viewer, compliance) and `tax.filing.assemble` / `tax.filing.file` to a real operator. Both rules
   exclude `service-account-*`, so the shared M2M account cannot read, freeze or file a return.
-  The read verb is deliberately not `.read`: it was `tax.filing.read` until it was found that base
+  The read verb is deliberately not `.read`: it carried that suffix until it was found that base
   `compliance-read-any` grants every `.read` to any HUMAN principal with `ROLE_COMPLIANCE`, which the
   shared service-account holds in at least one realm, and `operator_read_any_excluded_actions` only
   vetoes `operator-read-any`. A non-read verb is reachable only through the extension's rule.
