@@ -4,6 +4,14 @@ REST kontrakt je formalizován v [`openapi.yaml`](../openapi.yaml) (OpenAPI 3.1.
 
 Základní cesta: `/api/v1/lending`. Všechny endpointy vyžadují Keycloak bearer JWT (`bearerAuth`).
 
+V produkci používá `/api/*` na běžném HTTP i na mTLS portu 8443 autentizační mechanismus bearer.
+Port 8443 nadále vyžaduje důvěryhodný klientský certifikát při TLS handshake, ale samotný
+certifikát volajícího k API nepřihlásí: požadavek s certifikátem a bez bearer tokenu vrací 401.
+Platný bearer token poskytuje identitu pro API. Kontrola rolí na trasách zůstává povinná;
+zamítavé rozhodnutí OPA blokuje požadavek jen při `AUTHZ_ENFORCE=true` (`authz.enforce` má
+výchozí hodnotu `false`). Autentizace přenosu tak zůstává oddělená od identity v API, aniž by
+se změnilo stávající nastavení autorizace.
+
 ## Autorizace
 
 Třída resource je role-gated; **jednající principal je vždy ověřený JWT subjekt** (`SecurityIdentity.principal.name`), nikdy pole z requestu. Role na úrovni třídy: `ROLE_LENDING_OFFICER`, `ROLE_CREDIT_RISK`, `ROLE_COMPLIANCE`, `ROLE_ADMIN`. Per-endpoint override toto zužuje:
