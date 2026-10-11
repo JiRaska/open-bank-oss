@@ -1,6 +1,6 @@
 # API
 
-Všechny endpointy jsou pod `/api/v1/consents`. Major verze kontraktu (`1`) mapuje na URL prefix `/api/v1` (`openbank.api.version=1`, ADR 0048). Content type je `application/json`.
+Endpointy souhlasů a potlačení komunikace jsou pod `/api/v1/consents` a `/api/v1/suppressions`. Major verze kontraktu (`1`) mapuje na URL prefix `/api/v1` (`openbank.api.version=1`, ADR 0048). Content type je `application/json`.
 
 > **Stav kontraktu:** se službou se dodává `openapi.yaml`, který je ovšem aktuálně **částečně zastaralý** oproti implementovanému resourcu (předchází SCA-gated životnímu cyklu — např. ukazuje `expiresAt`/`accountIds` a status `PENDING`, zatímco kód používá `validTo`/`accountIbans` a `PENDING_SCA` a vystavuje `/activate` a `/reject`). Popisy níže jsou **odvozeny z reálného `ConsentResource.kt`** a jsou autoritativní; sladění `openapi.yaml` s tímto stavem je evidovaný follow-up.
 
@@ -16,6 +16,10 @@ Všechny endpointy jsou pod `/api/v1/consents`. Major verze kontraktu (`1`) mapu
 | `POST` | `/api/v1/consents/{id}/reject?reason={text}` | Odmítnutí → emituje `ConsentRejected` | `200` |
 | `DELETE` | `/api/v1/consents/{id}?partyId={uuid}` | Odvolání → emituje `ConsentRevoked` | `200` |
 | `POST` | `/api/v1/consents/{id}/validate` | Validace přístupu (scope/účet/příjemce) | `200` |
+
+## Autorizace potlačení komunikace
+
+Endpointy potlačení komunikace vyžadují bearer token i v poradním režimu interceptoru OPA. `GET /api/v1/suppressions/party/{partyId}` přijímá role `ROLE_API`, `ROLE_OPERATOR` a `ROLE_ADMIN`. `POST /api/v1/suppressions` a `POST /api/v1/suppressions/{id}/revoke` přijímají pouze `ROLE_OPERATOR` a `ROLE_ADMIN`. OPA vyhodnocuje `suppression.read` a `suppression.manage`; zamítavá rozhodnutí vynucuje při `AUTHZ_ENFORCE=true`, jinak jsou poradní. Požadavek bez autentizace vrací `401`; autentizovaný volající bez požadované role dostane `403`.
 
 ## Vytvoření souhlasu
 
