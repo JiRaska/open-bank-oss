@@ -74,8 +74,11 @@ class StateContributionReturnService(
      * Registers the return an executed early exit owes (§18(3)). Idempotent on [sourceKey].
      *
      * [amount] is what S5 wrote back to the ledger: the whole net state balance. Part of that
-     * balance may already be owed through an ineligibility return that is registered but not yet
-     * settled (§18(2)). That part is netted off, so MF is paid each crown once. The months the
+     * balance may already be owed through an ineligibility return (§18(2)) whose money the ledger
+     * had not yet returned when S5 read the balance — still open, or settled only after S5 wrote
+     * its entries (then the settlement wrote no ledger row). That part is netted off, so MF is paid
+     * each crown once. An ineligibility return whose own RETURNED ledger entry exists was already
+     * out of the balance S5 read, so it is not netted again. The months the
      * exit covers are recorded under the (contract, month) key that ineligibility also uses.
      */
     suspend fun registerTermination(
@@ -88,8 +91,9 @@ class StateContributionReturnService(
         val contract = directory.find(contractId) ?: throw ContractNotFoundException(contractId)
         repeat(REGISTRATION_ATTEMPTS) {
             returns.bySourceKey("exit:$sourceKey")?.let { return it }
+            val ledgerReturned = incentives.ledgerReturns(contractId).claimIds
             val open = returns.byContract(contractId)
-                .filter { it.cause == ReturnCause.INELIGIBILITY_DISCOVERED && it.status != ReturnStatus.SETTLED }
+                .filter { it.cause == ReturnCause.INELIGIBILITY_DISCOVERED && it.claimId !in ledgerReturned }
             val net = amount - open.fold(BigDecimal.ZERO) { a, r -> a + r.amount }
             if (net.signum() <= 0) return null
             val covered = returns.coveredMonths(contractId)
@@ -213,12 +217,11 @@ class StateContributionReturnService(
         item.claimId?.let { claimId ->
             val claim = claims.findById(claimId)
             if (claim?.status == ClaimStatus.RECEIVED) {
-                val exitWroteLedger = returns.byContract(item.contractId).any {
-                    it.cause ==
-                        ReturnCause.CONTRACT_TERMINATED
-                }
                 // After an exit, S5 has already written the whole balance back to the ledger
-                // (this month included). Writing it again would return it twice.
+                // (this month included). Writing it again would return it twice. Asked of the
+                // LEDGER, not of the return rows: S5 writes its entries before it registers the
+                // exit return, so a settlement landing in between would otherwise write it again.
+                val exitWroteLedger = incentives.ledgerReturns(item.contractId).exitClawbackWritten
                 if (exitWroteLedger) claims.update(claim.markReturned(now())) else incentives.returnClaim(claimId)
             }
         }
