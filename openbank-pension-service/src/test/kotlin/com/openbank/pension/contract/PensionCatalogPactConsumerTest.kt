@@ -115,6 +115,24 @@ class PensionCatalogPactConsumerTest {
         )
         .toPact()
 
+    @Pact(consumer = CONSUMER, provider = PROVIDER)
+    fun missingPublishedRevisionPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("no product exists with id $MISSING_OFFERING_ID")
+        .uponReceiving("GET effective pension strategy revision for an unknown offering")
+        .path("/api/v2/products/$MISSING_OFFERING_ID")
+        .query("effectiveAt=$AT")
+        .method("GET")
+        .willRespondWith()
+        .status(404)
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "missingPublishedRevisionPact")
+    fun `unknown offering has no usable published strategy revision`(mockServer: MockServer) {
+        given().baseUri(mockServer.getUrl()).queryParam("effectiveAt", AT)
+            .get("/api/v2/products/$MISSING_OFFERING_ID").then().statusCode(404)
+    }
+
     @Test
     @PactTestFor(pactMethod = "offeringsPact")
     fun `catalog discovery supplies typed offering IDs`(mockServer: MockServer) {
@@ -170,6 +188,7 @@ class PensionCatalogPactConsumerTest {
         const val STATE = "a published DIP strategy revision has separate legal and product approvals"
         const val OFFERING_ID = "20000000-0000-0000-0000-000000000084"
         const val REVISION_ID = "30000000-0000-0000-0000-000000000084"
+        const val MISSING_OFFERING_ID = "00000000-0000-0000-0000-000000000fff"
         const val AT = "2026-10-09T10:00:00Z"
         val DIGEST = "b".repeat(64)
     }

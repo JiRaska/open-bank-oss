@@ -287,6 +287,26 @@
         },
         "status": 200
       }
+    },
+    {
+      "description": "GET effective pension strategy revision for an unknown offering",
+      "providerStates": [
+        {
+          "name": "no product exists with id 00000000-0000-0000-0000-000000000fff"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/products/00000000-0000-0000-0000-000000000fff",
+        "query": {
+          "effectiveAt": [
+            "2026-10-09T10:00:00Z"
+          ]
+        }
+      },
+      "response": {
+        "status": 404
+      }
     }
   ],
   "metadata": {
