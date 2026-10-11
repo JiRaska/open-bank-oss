@@ -24,16 +24,7 @@
 import { promises as fs } from 'fs'
 import path from 'path'
 import { parse as parseYaml } from 'yaml'
-
-// Money-path services (source: openbank-libs/governance/rules.yaml →
-// money_path_services). A flag on one of these is classified MONEY_PATH and a
-// flip would require four-eyes (ADR-0067 §5, enforcement tracked in #419).
-const MONEY_PATH = new Set([
-  'ledger-service', 'transaction-service', 'account-service', 'balance-service',
-  'sepa-payment', 'sepa-instant', 'domestic-payment', 'clearing-service',
-  'swift-service', 'fx-service', 'lending-service', 'sca-service', 'consent-service',
-  'fraud-service',
-])
+import { loadMoneyPathServices } from './moneyPath'
 
 export type FlagClassification = 'money-path' | 'feature'
 
@@ -96,7 +87,7 @@ function serviceOf(cm: Record<string, unknown>): string {
 
 /** Parse one feature-flags.yaml ConfigMap into FlagMeta rows. Defensive: a malformed
  *  file yields no rows rather than throwing — a registry must not 500 on bad input. */
-function parseConfigMap(yamlText: string): FlagMeta[] {
+function parseConfigMap(yamlText: string, moneyPath: ReadonlySet<string>): FlagMeta[] {
   let cm: Record<string, unknown>
   try {
     cm = parseYaml(yamlText) as Record<string, unknown>
@@ -114,7 +105,7 @@ function parseConfigMap(yamlText: string): FlagMeta[] {
   const flags = parsed.flags ?? {}
 
   const service = serviceOf(cm)
-  const classification: FlagClassification = MONEY_PATH.has(service) ? 'money-path' : 'feature'
+  const classification: FlagClassification = moneyPath.has(service.replace(/^openbank-/, '')) ? 'money-path' : 'feature'
 
   return Object.entries(flags).map(([key, def]) => ({
     service,
@@ -129,11 +120,12 @@ function parseConfigMap(yamlText: string): FlagMeta[] {
 
 /** Load the whole fleet's feature-flag catalog, sorted by service then key. */
 export async function loadFlagCatalog(): Promise<FlagMeta[]> {
+  const moneyPath = await loadMoneyPathServices()
   const src = await flagsSource()
   if (!src) return []
   const files = await flagFiles(src)
   const all = await Promise.all(
-    files.map(async f => parseConfigMap(await fs.readFile(f, 'utf-8'))),
+    files.map(async f => parseConfigMap(await fs.readFile(f, 'utf-8'), moneyPath)),
   )
   return all.flat().sort((a, b) => a.service.localeCompare(b.service) || a.key.localeCompare(b.key))
 }
