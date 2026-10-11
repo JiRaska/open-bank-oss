@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.27.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.26.0...risk-engine-v0.27.0) (2026-10-10)
+
+
+### Features
+
+* **risk-engine:** keep limit-event dedup in its own table so risk_outbox can purge SENT rows ([#11905](https://github.com/JiRaska/open-bank-oss/issues/11905)) ([f35e14d](https://github.com/JiRaska/open-bank-oss/commit/f35e14d2991e681cfa159cf037e3245b03d61b2e))
+
 ## [0.26.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.25.0...risk-engine-v0.26.0) (2026-10-05)
 
 
