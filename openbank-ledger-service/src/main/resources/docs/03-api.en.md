@@ -4,6 +4,8 @@ REST contract served at `/api/v1/journals` and `/api/v1/ledger/fx-revaluation`. 
 
 > **Contract note:** the bundled `openapi.yaml` currently documents only the read endpoints (`GET /journals`, `GET /journals/{journalId}`, `GET /journals/sub-ledger-balances`, `GET /journals/transaction/{transactionId}`). The `GET /journals/trial-balance`, `POST /journals`, `POST /journals/{journalId}/reverse` and `POST /ledger/fx-revaluation` endpoints exist in `LedgerResource` / `FxRevaluationResource` but are **not yet reflected in the OpenAPI file** — closing that gap is a tracked follow-up (the resource classes are the source of truth below).
 
+Regulatory period reads under `/api/v1/ledger/periods/MONTH/{date}` distinguish balances from flows. `frozen-closing-balance` and `closing-balance` provide cumulative stock for F01/COREP. `frozen-year-to-date-trial-balance` provides January-through-report-month F02 flow only after every monthly close is attested and reconciled to the same-year journal; it rejects dates before month end. `year-to-date-trial-balance` provides a mutable working preview through the exact date. These routes do not substitute for a monthly movement read or for each other's evidence level.
+
 ## Versioning (ADR-0048)
 
 - URL prefix `/api/v1` — `v{major}` == `openbank.api.version` (`"1"`) == `openapi.yaml:info.version` major.

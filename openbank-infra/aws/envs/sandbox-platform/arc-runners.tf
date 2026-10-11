@@ -196,7 +196,7 @@ locals {
   # because fs.aio-max-nr is a non-namespaced kernel parameter (CAP_SYS_ADMIN).
   aio_sysctl_init_container = {
     name            = "init-aio-sysctl"
-    image           = "public.ecr.aws/docker/library/busybox:1.36"
+    image           = "public.ecr.aws/docker/library/busybox:1.36" # pull-through-exempt: ARC helm value, Kyverno mutates only the runner Pod (untracked by tofu)
     command         = ["sh", "-c", "sysctl -w fs.aio-max-nr=1048576 && echo 'fs.aio-max-nr raised to 1048576'"]
     securityContext = { privileged = true }
   }
@@ -210,7 +210,7 @@ locals {
   # Actions cache upload) this drives CI NAT download cost toward the floor.
   gradle_home_init_container = {
     name  = "init-gradle-home"
-    image = "public.ecr.aws/docker/library/busybox:1.36"
+    image = "public.ecr.aws/docker/library/busybox:1.36" # pull-through-exempt: ARC helm value, Kyverno mutates only the runner Pod (untracked by tofu)
     # Chowns both node-local caches in a single init container:
     # - gradle-home-cache: Gradle wrapper + Maven metadata (~150 MB per node)
     # - runner-tool-cache: JDK 21 + JDK 25 (~380 MB per node) — fixes the
@@ -299,7 +299,7 @@ locals {
   # The hosts.toml files are mounted from a ConfigMap so no init script is needed.
   dind_container = {
     name  = "dind"
-    image = "public.ecr.aws/docker/library/docker:dind"
+    image = "public.ecr.aws/docker/library/docker:dind" # pull-through-exempt: ARC helm value, Kyverno mutates only the runner Pod (untracked by tofu)
     args = [
       "dockerd",
       "--host=unix:///var/run/docker.sock",
