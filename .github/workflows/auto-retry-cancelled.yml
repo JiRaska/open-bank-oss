@@ -201,12 +201,23 @@ jobs:
             rm -rf "$dir"
           }
           for workflow in services-ci.yml security.yml dependency-submission.yml; do
-            gh_retry 3 -- fetch_pages "$workflow" "$created_query" "${RUNNER_TEMP}/${workflow}.pages.json"
-            # The API caps a filtered search at 1,000 runs. An incomplete page set cannot be
-            # treated as "no spot kills"; fail visibly rather than silently drop candidates.
-            python3 .github/scripts/select-ci-reconcile-candidates.py \
-              --flatten-pages "${RUNNER_TEMP}/${workflow}.pages.json" \
-              > "${RUNNER_TEMP}/${workflow}.json"
+            # A fixed created range prevents page drift from NEW runs, but GitHub can
+            # index an already-created run between pages and change total_count. Re-read
+            # the entire snapshot, never accept a partial page set as "no spot kills".
+            for snapshot_attempt in 1 2 3; do
+              gh_retry 3 -- fetch_pages "$workflow" "$created_query" "${RUNNER_TEMP}/${workflow}.pages.json"
+              if python3 .github/scripts/select-ci-reconcile-candidates.py \
+                --flatten-pages "${RUNNER_TEMP}/${workflow}.pages.json" \
+                > "${RUNNER_TEMP}/${workflow}.json" 2> "${RUNNER_TEMP}/${workflow}.validation.err"; then
+                break
+              fi
+              cat "${RUNNER_TEMP}/${workflow}.validation.err" >&2
+              if (( snapshot_attempt == 3 )); then
+                echo "::error::${workflow} API snapshot remained incomplete after 3 reads" >&2
+                exit 2
+              fi
+              sleep 2
+            done
           done
           jq -s 'add' "${RUNNER_TEMP}"/*.yml.json > "${RUNNER_TEMP}/runs.json"
           echo "query_elapsed_seconds=$(($(date +%s) - started_at))" >> "$GITHUB_STEP_SUMMARY"
