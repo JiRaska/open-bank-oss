@@ -445,6 +445,12 @@ spec:
         - record: openbank:cnpg_cluster_expected
           expr: vector(1)
           labels:
+            namespace: tax-reporting
+            cluster: tax-reporting-db
+            origin: manifest
+        - record: openbank:cnpg_cluster_expected
+          expr: vector(1)
+          labels:
             namespace: temporal
             cluster: temporal-db
             origin: manifest
@@ -809,6 +815,11 @@ spec:
           labels:
             namespace: statements
             cluster: statements-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: tax-reporting
+            cluster: tax-reporting-db
         - record: openbank:cnpg_cluster_instances_declared
           expr: vector(2)
           labels:
