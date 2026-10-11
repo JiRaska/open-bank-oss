@@ -228,6 +228,7 @@ openbank-admin-ui/test-run-history/
 openbank-admin-ui/cost-report.json
 # Build-derived FinOps showback taxonomy from rules.yaml; never hand-edit.
 openbank-admin-ui/finops-cost-groups.json
+openbank-admin-ui/finops-money-path.json
 # Generated repo-derived production-readiness scorecard baked at build time
 # (scripts/prod-readiness-collector.py). Derived — never committed (rule #7).
 openbank-admin-ui/prod-readiness.json

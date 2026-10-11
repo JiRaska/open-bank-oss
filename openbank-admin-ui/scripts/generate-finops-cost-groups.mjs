@@ -16,11 +16,16 @@ const arg = (flag, fallback) => {
 }
 const repo = path.resolve(arg('--repo', path.resolve(here, '..', '..')))
 const out = path.resolve(arg('--out', path.resolve(here, '..', 'finops-cost-groups.json')))
+const moneyPathOut = path.resolve(arg('--money-path-out', path.resolve(here, '..', 'finops-money-path.json')))
 
-export function deriveCostGroups(source) {
+function parseRules(source) {
   const document = parseDocument(source, { uniqueKeys: true })
   if (document.errors.length) throw new Error(`invalid rules.yaml: ${document.errors[0].message}`)
-  const groups = document.toJS()?.finops_cost_groups
+  return document.toJS()
+}
+
+export function deriveCostGroups(source) {
+  const groups = parseRules(source)?.finops_cost_groups
   if (!groups || typeof groups !== 'object' || Array.isArray(groups) || !Object.keys(groups).length) {
     throw new Error('rules.yaml:finops_cost_groups must be a nonempty mapping')
   }
@@ -39,12 +44,27 @@ export function deriveCostGroups(source) {
   })
 }
 
+/** Service-card ids omit the openbank- prefix and conventional -service suffix. */
+export function deriveMoneyPathT0(source) {
+  const declared = parseRules(source)?.money_path_services
+  if (!Array.isArray(declared) || !declared.length ||
+      declared.some(name => typeof name !== 'string' || !/^openbank-[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) ||
+      new Set(declared).size !== declared.length) {
+    throw new Error('rules.yaml:money_path_services must be a nonempty unique service list')
+  }
+  const ids = declared.map(name => name.replace(/^openbank-/, '').replace(/-service$/, ''))
+  if (new Set(ids).size !== ids.length) throw new Error('money-path service-card ids collide')
+  return ids.sort()
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     const source = readFileSync(path.join(repo, 'openbank-libs/governance/rules.yaml'), 'utf8')
     const groups = deriveCostGroups(source)
+    const moneyPath = deriveMoneyPathT0(source)
     writeFileSync(out, JSON.stringify(groups, null, 2) + '\n')
-    console.log(`finops-cost-groups: ${groups.length} derived flows`)
+    writeFileSync(moneyPathOut, JSON.stringify(moneyPath, null, 2) + '\n')
+    console.log(`finops-cost-groups: ${groups.length} derived flows, ${moneyPath.length} money-path T0 services`)
   } catch (error) {
     console.error(`finops-cost-groups generation failed: ${error instanceof Error ? error.message : String(error)}`)
     process.exitCode = 1
