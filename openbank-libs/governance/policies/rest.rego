@@ -333,16 +333,16 @@ allowed_reasons contains "pension-catalog-m2m-read" if {
 }
 
 allowed_reasons contains "pension-catalog-m2m-read-approval" if {
-	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-pension"
-	"ROLE_API" in input.principal.roles
-	"CATALOG_SCOPE_READ" in input.principal.roles
-	input.action == "catalog.pensionApproval.read"
-	input.resource.id
-	input.attributes.azp == "openbank-pension"
-	input.attributes.preferred_username == "service-account-openbank-pension"
-	is_string(input.attributes.subject)
-	input.attributes.subject != ""
+    input.principal.type == "HUMAN"
+    input.principal.id == "service-account-openbank-pension"
+    "ROLE_API" in input.principal.roles
+    "CATALOG_SCOPE_READ" in input.principal.roles
+    input.action == "catalog.pensionApproval.read"
+    input.resource.id
+    input.attributes.azp == "openbank-pension"
+    input.attributes.preferred_username == "service-account-openbank-pension"
+    is_string(input.attributes.subject)
+    input.attributes.subject != ""
 }
 
 # Authenticated customers may perform any `customer.*` action (initiate payments, enroll
