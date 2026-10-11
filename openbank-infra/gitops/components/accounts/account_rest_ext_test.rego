@@ -182,3 +182,51 @@ test_shared_role_api_only_denied_account_list if {
 	rest.allow == false with input as {"principal": sa_api("services"), "action": "account.list"}
 		with data.rules as b5_rules
 }
+
+# --- ADR-0335 D2: pension-service gets the ownership projection and nothing else ---
+
+pension := {"type": "HUMAN", "id": "service-account-openbank-pension", "roles": ["ROLE_API"]}
+
+billing_sa := {"type": "HUMAN", "id": "service-account-openbank-billing", "roles": ["ROLE_API"]}
+
+pension_as_agent := {"type": "AI_AGENT", "id": "service-account-openbank-pension", "roles": ["ROLE_API"]}
+
+verify_input(principal) := {
+	"principal": principal,
+	"action": "account.verifyOwnership",
+	"resource": {"type": "account", "id": "00000000-0000-0000-0000-0000000000aa"},
+}
+
+test_pension_may_verify_ownership if {
+	rest.allow with input as verify_input(pension) with data.rules as rules_mock
+	"service-account-verify-ownership" in rest.allowed_reasons with input as verify_input(pension)
+		with data.rules as rules_mock
+}
+
+test_pension_may_not_read_or_list_accounts if {
+	every action in {
+		"account.read", "account.list", "account.search", "account.create", "account.update",
+		"account.close", "account.freeze", "account.unfreeze", "account.authorize",
+	} {
+		not rest.allow with input as {"principal": pension, "action": action, "resource": {"type": "account", "id": "a-1"}}
+			with data.rules as rules_mock
+	}
+}
+
+test_other_machines_may_not_verify_ownership if {
+	every principal in [shared, edge, billing_sa, pension_as_agent] {
+		not rest.allow with input as verify_input(principal) with data.rules as rules_mock
+	}
+}
+
+test_operator_may_verify_ownership if {
+	rest.allow with input as verify_input(operator) with data.rules as rules_mock
+}
+
+sdd_sa := {"type": "HUMAN", "id": "service-account-openbank-sdd", "roles": ["ROLE_API"]}
+
+test_sdd_may_verify_ownership_and_nothing_else if {
+	rest.allow with input as verify_input(sdd_sa) with data.rules as rules_mock
+	not rest.allow with input as {"principal": sdd_sa, "action": "account.read", "resource": {"type": "account", "id": "a-1"}}
+		with data.rules as rules_mock
+}

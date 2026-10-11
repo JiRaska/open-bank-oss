@@ -153,3 +153,16 @@ sequenceDiagram
 3. **Žádná vzdálená volání v TX** — synchronně v rámci request-response, asynchronně přes outbox + Kafka.
 4. **Idempotentní vytvoření** — `idempotencyKey` je unikátní v DB; opakované vytvoření vrátí existující příkaz.
 5. **Oddělené provádění** — tato služba zaznamenává záměr; navazující služby provádějí platbu.
+
+## Interní TLS komunikace
+
+Produkční profil sestavuje HTTPS listener s povinným ověřením klientského certifikátu.
+Quarkus tuto volbu určuje při sestavení: proměnná prostředí při spuštění nepřidá ověřování
+klientských certifikátů do nekompatibilního obrazu. Po nasazení klíčů serveru vydaných privátní
+CA musí volající předložit důvěryhodný klientský certifikát. OIDC a politiky nadále nezávisle
+rozhodují o oprávnění k obchodním operacím.
+
+HTTP listener zůstává během postupné migrace zapnutý. Nejprve publikujte a ověřte kompatibilní
+podepsaný obraz, potom nastavte HTTPS listener a obnovování certifikátů; pension klienty přepněte
+až po přípravě listeneru a síťových politik. Při rollbacku nejprve obnovte URL klientů a teprve
+potom vraťte obraz poskytovatele nebo odstraňte jeho TLS listener.

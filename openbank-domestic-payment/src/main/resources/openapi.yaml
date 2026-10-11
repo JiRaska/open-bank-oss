@@ -7,7 +7,8 @@ info:
   # machine-readable 409 for unsafe Idempotency-Key reuse. No request/response field was removed.
   # 1.9.0 -> 1.10.0 (#11588): additive verified makerActorKind on approval responses.
   # 1.10.0 -> 1.11.0 (#12059): additive 400 CURRENCY_NOT_ALLOWED on the CZK-only domestic rail.
-  version: 1.11.0
+  # 1.11.0 -> 1.11.1 (ADR-0335 D5): documents scoped ROLE_API initiators on create; no shape change.
+  version: 1.11.1
   description: >-
     Czech domestic payment lifecycle (CZ-specific rails, SIPO). On create, debtor and creditor names
     are synchronously screened against the sanctions lists (ADR-0032): a clean payment is returned
@@ -34,6 +35,9 @@ paths:
         X-Idempotency-Replayed=true. Reusing the key for a different normalized payment command,
         actor scope, delegation or reservation is refused with 409 IDEMPOTENCY_KEY_REUSED. A
         pre-upgrade row without a durable request fingerprint also fails closed with that response.
+        A ROLE_API machine may create only as a scoped initiator declared in rules.yaml
+        scoped_payment_initiators (ADR-0335 D5, e.g. pension-service), and only from its one
+        configured debtor account; anything else is 403 before the key is claimed.
       operationId: createDomesticPayment
       parameters:
         - name: Idempotency-Key
