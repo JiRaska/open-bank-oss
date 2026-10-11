@@ -408,7 +408,10 @@
       ]
     },
     "openbank-tax-reporting-service": {
-      "release-type": "simple"
+      "component": "tax-reporting-service",
+      "exclude-paths": [
+        "openbank-tax-reporting-service/src/test"
+      ]
     },
     "openbank-tpp-registry-service": {
       "component": "tpp-registry-service",
@@ -468,6 +471,12 @@
       "component": "pension-service",
       "exclude-paths": [
         "openbank-pension-service/src/test"
+      ]
+    },
+    "openbank-pension-fund-service": {
+      "component": "pension-fund-service",
+      "exclude-paths": [
+        "openbank-pension-fund-service/src/test"
       ]
     }
   }

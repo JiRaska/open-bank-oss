@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: Apache-2.0
+# Per-service governance manifest (ADR-0071). Declarative, curatorial facts only.
+# Schema: openbank-libs/governance/governance.schema.json
+dataDomain: open-banking
+primaryDatastore: PostgreSQL
+databaseName: openbank_pension_fund
+dataLineageRole: producer
+dataClassification: confidential
+retentionPolicy: 10 years
+evidenceExported: false
+# No `lineage:` block yet: pension-service's FundAdministrationPort adapter (ADR-0334 §1) is not
+# built, and a lineage edge with no backing code is the #889 failure class.
+databaseLineage:
+  ownedDatabases:
+    - openbank_pension_fund
+  dependentDatabases: []

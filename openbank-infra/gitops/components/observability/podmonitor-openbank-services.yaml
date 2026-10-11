@@ -101,9 +101,11 @@ spec:
       - sdd
       - security-scanner
       - statements
+      - tax-reporting
       - tpp-registry
       - treasury
       - wealth
+      - pension-fund
   podMetricsEndpoints:
     - port: management
       path: /q/metrics
