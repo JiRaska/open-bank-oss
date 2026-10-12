@@ -367,8 +367,14 @@ class Finding:
 def scan_text(path: str, text: str, top_level: set[str], resolvable,
               slug_state: dict[str, tuple[str, str]] | None = None) -> list[Finding]:
     """Pure core, shared by the repo scan and the self-test."""
+    return scan_comments(path, comments_of(path, text), top_level, resolvable, slug_state)
+
+
+def scan_comments(path: str, comments: list[tuple[int, str]], top_level: set[str], resolvable,
+                  slug_state: dict[str, tuple[str, str]] | None = None) -> list[Finding]:
+    """Check one parsed comment stream without rescanning the source file."""
     out: list[Finding] = []
-    for line, comment in comments_of(path, text):
+    for line, comment in comments:
         if WAIVER.search(comment):
             continue
         for cand in path_candidates(comment, top_level):
@@ -419,13 +425,14 @@ def run(root: Path, want_network: bool) -> list[Finding]:
             text = (root / f).read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
-        for line, comment in comments_of(f, text):
+        parsed_comments = comments_of(f, text)
+        for line, comment in parsed_comments:
             if WAIVER.search(comment):
                 continue
             for m in REPO_SLUG.finditer(comment):
                 slugs.add(m.group(1))
                 hits.append((f, line, m.group(1)))
-        raw.extend(scan_text(f, text, top_level, resolvable))
+        raw.extend(scan_comments(f, parsed_comments, top_level, resolvable))
 
     # R1: drop build outputs git already knows about.
     ignored = gitignored(root, sorted({x.ref for x in raw if x.rule == "path"}))
