@@ -243,6 +243,10 @@ TEST_MARKERS
   fm 0001 0001 | sed '/^## Context$/d' > "$d/0001-first.md"
   printf '## Con\000text\n' >> "$d/0001-first.md"
   expect "an ADR containing NUL is rejected before shell text checks" "$d" 1 "contains a NUL byte"
+  d=$(mkdir_fixture late-nul)
+  fm 0001 0001 > "$d/0001-first.md"
+  printf '%8192s\000' '' >> "$d/0001-first.md"
+  expect "a late NUL is rejected after the complete file is scanned" "$d" 1 "contains a NUL byte"
 
   # SUPERSESSION must be declared on BOTH sides. Declared one way only, the superseded ADR
   # still reads as live to anyone who opens it — the reader has no way to know.
@@ -283,6 +287,18 @@ if [[ ${#adrs[@]} -eq 0 ]]; then
   echo "::error::check-adr-registry: no numbered ADRs found in '$ADR_DIR'." >&2
   exit 1
 fi
+
+# Validate the full registry bytes once before Bash text reads can discard a NUL.
+# A temporary byte snapshot keeps this portable and fails closed on unreadable input.
+_adr_nul_scan=$(mktemp)
+trap 'rm -f -- "$_adr_nul_scan"' EXIT
+cat -- "${adrs[@]}" > "$_adr_nul_scan"
+if ! LC_ALL=C tr -d '\000' <"$_adr_nul_scan" | cmp -s "$_adr_nul_scan" -; then
+  err "registry contains a NUL byte or could not be read safely; refusing shell text checks."
+  exit 1
+fi
+rm -f -- "$_adr_nul_scan"
+trap - EXIT
 
 # --- 1. Unique numbers -------------------------------------------------------
 # Collect the NNNN prefix of every ADR; any number appearing >1 is a collision.
@@ -498,12 +514,6 @@ for f in "${adrs[@]}"; do
   # DIGEST.md tier rests on, so the placeholder would have been published as this
   # ADR's entry in the decision history. Same for the TEMPLATE.md body prompts.
   # These markers exist only in the scaffolding, so they cannot false-positive.
-  # Bash variables cannot retain NUL bytes: command substitution silently drops them, which
-  # could join `## Con\0text` into a false `## Context` match below. Reject binary content
-  # before reading it into the variable. `tr` and `cmp` are portable on the supported shells.
-  if ! LC_ALL=C tr -d '\000' <"$f" | cmp -s "$f" -; then
-    err "$base: contains a NUL byte or could not be read safely; refusing shell text checks."
-  fi
   # Read once; quoted pattern operands retain grep -F literal substring semantics.
   # Bash 3.2 supports this built-in file read and requires no process per marker.
   adr_text=$(<"$f")
