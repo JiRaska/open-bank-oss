@@ -40,7 +40,7 @@ class DelayedNavEligibilityIT {
     @Order(1)
     @TestSecurity(user = "nav-maker", roles = ["ROLE_OPERATOR"])
     fun `maker queues orders on two trade dates and calculates delayed prior-day NAV`() {
-        val isin = "CZ" + UUID.randomUUID().toString().replace("-", "").take(10).uppercase()
+        val isin = "CZ" + UUID.randomUUID().toString().replace("-", "").take(9).uppercase() + "0"
         fund = given().contentType("application/json")
             .body(
                 """{"name":"Delayed NAV test","isin":"$isin","lei":"315700ABCDEF12345678",
