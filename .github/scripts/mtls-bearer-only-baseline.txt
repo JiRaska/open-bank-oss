@@ -4,6 +4,5 @@
 openbank-ap2-service
 openbank-consent-service
 openbank-domestic-payment
-openbank-lending-service
 openbank-sdd-service
 openbank-standing-order-service
