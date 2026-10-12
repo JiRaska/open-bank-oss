@@ -4,117 +4,120 @@
 # src/lib/docs/bpmn/schema.ts at build time. `slug` is the filename.
 
 name: Standing Order Execution
-desc: Automatické zpracování trvalého příkazu
+desc: Denní plánování splatných příkazů a odeslání platby podle skutečně podporované trasy
 regulation: PSD2
 services:
   - standing-order-service
   - account-service
-  - ledger-service
-  - audit-service
   - sepa-payment
+  - transaction-service
 steps:
   - id: start
     type: start
     x: 60
     y: 100
-    label: Trigger
-  - id: load
+    label: Denní scheduler
+  - id: schedule
     type: task
-    x: 180
+    x: 200
     y: 100
-    label: Načtení příkazu
+    label: Splatné příkazy a outbox
     lane: payment
-    apis:
-      - GET /api/v1/standing-orders/{id}
     relatedServices:
       - standing-order-service
-  - id: balance
+    emits:
+      - standing-order.due.v1
+  - id: consume
     type: task
-    x: 320
+    x: 370
     y: 100
-    label: Kontrola zůstatku
-    lane: core
-    apis:
-      - GET /api/v1/accounts/{id}/balance
+    label: Převzetí due události
+    lane: payment
     relatedServices:
-      - account-service
-  - id: gw1
+      - standing-order-service
+    consumes:
+      - standing-order.due.v1
+  - id: rail
     type: gateway
-    x: 440
+    x: 530
     y: 100
-    label: Dostatek?
-  - id: reject
-    type: end-err
-    x: 440
-    y: 220
-    label: Nedostatek
-  - id: debit
-    type: task
-    x: 560
-    y: 100
-    label: Debit
-    lane: core
-    apis:
-      - POST /api/v1/ledger/post
-    relatedServices:
-      - ledger-service
-  - id: transfer
+    label: Podporovaná trasa?
+  - id: sepa
     type: task
     x: 700
-    y: 100
-    label: Credit Transfer
+    y: 20
+    label: SEPA CREDIT (EUR)
     lane: payment
     apis:
-      - POST /api/v1/sepa/outward
+      - POST /api/v1/sepa-payments
     relatedServices:
       - sepa-payment
-  - id: update
+  - id: own-account
     type: task
-    x: 840
-    y: 100
-    label: Další spuštění
-    lane: payment
+    x: 700
+    y: 150
+    label: IBAN účtu téže strany
+    lane: core
     apis:
-      - PUT /api/v1/standing-orders/{id}
+      - GET /api/v1/accounts/iban/{iban}
     relatedServices:
-      - standing-order-service
-  - id: audit
+      - account-service
+  - id: transfer
     type: task
-    x: 960
-    y: 100
-    label: Audit Log
-    lane: compliance
+    x: 870
+    y: 150
+    label: Převod mezi vlastními účty
+    lane: core
     apis:
-      - POST /api/v1/audit/log
+      - POST /api/v1/transactions
     relatedServices:
-      - audit-service
-    consumes:
-      - openbank.transactions.transaction.initiated
-  - id: end
+      - transaction-service
+  - id: result
+    type: gateway
+    x: 1040
+    y: 100
+    label: Platba přijata?
+  - id: success
     type: end
-    x: 1060
-    y: 100
-    label: Hotovo
+    x: 1200
+    y: 30
+    label: Potvrzení příkazu
+  - id: failure
+    type: end-err
+    x: 1200
+    y: 200
+    label: Záznam selhání
 flows:
   - from: start
-    to: load
-  - from: load
-    to: balance
-  - from: balance
-    to: gw1
-  - from: gw1
-    to: reject
-    label: Ne
-  - from: gw1
-    to: debit
-    label: Ano
-  - from: debit
-    to: transfer
-  - from: transfer
-    to: update
-  - from: update
-    to: audit
+    to: schedule
+  - from: schedule
+    to: consume
     kind: async
-    topic: openbank.transactions.transaction.initiated
-  - from: audit
-    to: end
+    topic: openbank.standing-orders.order.event
+  - from: consume
+    to: rail
+  - from: rail
+    to: sepa
+    label: SEPA_CREDIT
+  - from: rail
+    to: own-account
+    label: DOMESTIC / INTERNAL
+  - from: rail
+    to: failure
+    label: Jiná trasa
+  - from: own-account
+    to: transfer
+    label: Stejná strana
+  - from: own-account
+    to: failure
+    label: Cizí či nenalezený účet
+  - from: sepa
+    to: result
+  - from: transfer
+    to: result
+  - from: result
+    to: success
+    label: Ano
+  - from: result
+    to: failure
+    label: Ne

@@ -202,4 +202,35 @@ describe('bpmn manifests', () => {
     expect(unservedRoutes(stale, 'interest-service', interestPaths))
       .toEqual(['POST /api/v1/interest/calculate'])
   })
+
+  it('shows standing-order execution through the outbox and supported payment rails', () => {
+    const diagram = loadBpmnProcess('standing-order')
+    for (const service of ['standing-order-service', 'account-service', 'sepa-payment', 'transaction-service']) {
+      expect(unservedRoutes(diagram, service, servicePaths(service)), service).toEqual([])
+    }
+    expect(diagram.steps.find((step) => step.id === 'schedule')?.emits).toEqual(['standing-order.due.v1'])
+    expect(diagram.steps.find((step) => step.id === 'consume')?.consumes).toEqual(['standing-order.due.v1'])
+    expect(diagram.flows.find((flow) => flow.from === 'schedule' && flow.to === 'consume'))
+      .toMatchObject({ kind: 'async', topic: 'openbank.standing-orders.order.event' })
+    expect(diagram.steps.find((step) => step.id === 'sepa')?.apis).toEqual(['POST /api/v1/sepa-payments'])
+    expect(diagram.steps.find((step) => step.id === 'own-account')?.apis)
+      .toEqual(['GET /api/v1/accounts/iban/{iban}'])
+    expect(diagram.steps.find((step) => step.id === 'transfer')?.apis)
+      .toEqual(['POST /api/v1/transactions'])
+    expect(diagram.flows.find((flow) => flow.from === 'own-account' && flow.to === 'failure')?.label)
+      .toBe('Cizí či nenalezený účet')
+    for (const obsolete of ['balance', 'debit', 'update', 'audit']) {
+      expect(diagram.steps.some((step) => step.id === obsolete)).toBe(false)
+    }
+
+    const staleLedger = {
+      ...diagram,
+      steps: [...diagram.steps, {
+        id: 'debit', type: 'task' as const, x: 0, y: 0, label: 'Debit',
+        apis: ['POST /api/v1/ledger/post'], relatedServices: ['ledger-service'],
+      }],
+    }
+    expect(unservedRoutes(staleLedger, 'ledger-service', servicePaths('ledger-service')))
+      .toEqual(['POST /api/v1/ledger/post'])
+  })
 })
