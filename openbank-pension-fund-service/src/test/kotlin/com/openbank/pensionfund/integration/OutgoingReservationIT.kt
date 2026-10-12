@@ -16,6 +16,8 @@ import org.junit.jupiter.api.Test
 import java.nio.charset.StandardCharsets
 import java.sql.Connection
 import java.sql.DriverManager
+import java.time.LocalDate
+import java.time.ZoneOffset
 import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -48,6 +50,116 @@ class OutgoingReservationIT {
         assertThat(orderIds[0]).isNotBlank()
         assertThat(orderIds[1]).isEqualTo(orderIds[0])
         assertSingleReservation(contract)
+    }
+
+    @Test
+    fun `NAV settlement and a new reservation retain the unreserved unit invariant`() {
+        val contract = UUID.randomUUID()
+        val fund = createFund()
+        val navId = UUID.randomUUID()
+        connection().use { db ->
+            seedHolding(db, contract, fund)
+        }
+        assertThat(redeem(contract, fund, "before-nav", 40).statusCode).isEqualTo(202)
+        connection().use { db -> seedCalculatedNav(db, fund, navId) }
+
+        connection().use { db ->
+            db.autoCommit = false
+            lockHolding(db, contract, fund)
+            val executor = Executors.newFixedThreadPool(2)
+            try {
+                val publish = executor.submit<Response> {
+                    given().post("/api/v1/navs/$navId/approve")
+                }
+                awaitHoldingWaiters(db, 1)
+                val reserve = executor.submit<Response> { redeem(contract, fund, "during-nav", 60) }
+                awaitHoldingWaiters(db, 2)
+                assertThat(publish.isDone).isFalse()
+                assertThat(reserve.isDone).isFalse()
+                db.commit()
+                assertThat(publish.get(15, TimeUnit.SECONDS).statusCode).isEqualTo(200)
+                assertThat(reserve.get(15, TimeUnit.SECONDS).statusCode).isEqualTo(202)
+            } finally {
+                db.rollback()
+                executor.shutdownNow()
+            }
+        }
+        connection().use { db ->
+            db.prepareStatement("SELECT units FROM unit_holdings WHERE contract_id = ? AND fund_id = ?").use { st ->
+                st.setObject(1, contract)
+                st.setObject(2, fund)
+                st.executeQuery().use { rows ->
+                    assertThat(rows.next()).isTrue()
+                    assertThat(rows.getBigDecimal(1)).isEqualByComparingTo("60")
+                }
+            }
+            db.prepareStatement(
+                "SELECT status, units FROM unit_orders WHERE contract_id = ? ORDER BY idempotency_key",
+            ).use { st ->
+                st.setObject(1, contract)
+                st.executeQuery().use { rows ->
+                    assertThat(rows.next()).isTrue()
+                    assertThat(rows.getString(1)).isEqualTo("SETTLED")
+                    assertThat(rows.getBigDecimal(2)).isEqualByComparingTo("40")
+                    assertThat(rows.next()).isTrue()
+                    assertThat(rows.getString(1)).isEqualTo("PENDING")
+                    assertThat(rows.getBigDecimal(2)).isEqualByComparingTo("60")
+                    assertThat(rows.next()).isFalse()
+                }
+            }
+        }
+    }
+
+    private fun seedHolding(db: Connection, contract: UUID, fund: UUID) {
+        val holding = UUID.nameUUIDFromBytes("holding:$contract:$fund".toByteArray(StandardCharsets.UTF_8))
+        db.prepareStatement("INSERT INTO unit_holdings (id, contract_id, fund_id, units) VALUES (?, ?, ?, 100)")
+            .use { statement ->
+                statement.setObject(1, holding)
+                statement.setObject(2, contract)
+                statement.setObject(3, fund)
+                statement.executeUpdate()
+            }
+    }
+
+    private fun lockHolding(db: Connection, contract: UUID, fund: UUID) {
+        val holding = UUID.nameUUIDFromBytes("holding:$contract:$fund".toByteArray(StandardCharsets.UTF_8))
+        db.prepareStatement("SELECT id FROM unit_holdings WHERE id = ? FOR UPDATE").use { statement ->
+            statement.setObject(1, holding)
+            statement.executeQuery().use { assertThat(it.next()).isTrue() }
+        }
+    }
+
+    private fun seedCalculatedNav(db: Connection, fund: UUID, nav: UUID) {
+        db.prepareStatement(
+            """INSERT INTO fund_navs (id, fund_id, valuation_date, gross_assets, accrued_management_fee,
+                other_liabilities, net_assets, units_outstanding, nav_per_unit, status, calculated_by, calculated_at)
+                VALUES (?, ?, ?, 100, 0, 0, 100, 100, 1, 'CALCULATED', 'nav-maker', now())""",
+        ).use { st ->
+            st.setObject(1, nav)
+            st.setObject(2, fund)
+            st.setObject(3, LocalDate.now(ZoneOffset.UTC))
+            st.executeUpdate()
+        }
+    }
+
+    private fun awaitHoldingWaiters(db: Connection, expected: Int) {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+        var waiting = 0
+        while (System.nanoTime() < deadline) {
+            db.createStatement().use { statement ->
+                statement.executeQuery(
+                    """SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()
+                        AND wait_event_type = 'Lock' AND query ILIKE '%unit_holdings%'""",
+                ).use { rows ->
+                    rows.next()
+                    waiting = rows.getInt(1)
+                }
+            }
+            if (waiting >= expected) return
+            db.createStatement().use { it.execute("SELECT pg_stat_clear_snapshot()") }
+            Thread.sleep(25)
+        }
+        assertThat(waiting).describedAs("requests blocked on the holding row").isGreaterThanOrEqualTo(expected)
     }
 
     private fun concurrentReservations(contract: UUID, fund: UUID, keys: List<String>): List<Response> =
@@ -122,10 +234,11 @@ class OutgoingReservationIT {
         assertThat(waiting).describedAs("two outgoing requests blocked on the holding row").isGreaterThanOrEqualTo(2)
     }
 
-    private fun redeem(contract: UUID, fund: UUID, key: String): Response = given().contentType("application/json")
-        .header("Idempotency-Key", key)
-        .body("""{"fundId":"$fund","type":"REDEEM","units":60}""")
-        .post("/api/v1/contracts/$contract/orders")
+    private fun redeem(contract: UUID, fund: UUID, key: String, units: Int = 60): Response =
+        given().contentType("application/json")
+            .header("Idempotency-Key", key)
+            .body("""{"fundId":"$fund","type":"REDEEM","units":$units}""")
+            .post("/api/v1/contracts/$contract/orders")
 
     private fun createFund(): UUID {
         val isin = "RS" + UUID.randomUUID().toString().replace("-", "").take(9).uppercase() + "0"
