@@ -4,10 +4,16 @@
 
 package com.openbank.audit.integration
 
+import com.openbank.audit.infrastructure.persistence.AuditRepository
 import com.openbank.audit.it.AgentAuditKafkaTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
+import io.quarkus.vertx.VertxContextSupport
+import io.smallrye.mutiny.coroutines.uni
+import jakarta.inject.Inject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import org.apache.kafka.clients.admin.Admin
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.apache.kafka.clients.consumer.KafkaConsumer
@@ -26,6 +32,8 @@ import java.util.concurrent.TimeUnit
 @QuarkusTest
 @TestProfile(AgentAuditKafkaIT.RealKafkaProfile::class)
 class AgentAuditKafkaIT {
+    @Inject lateinit var repository: AuditRepository
+
     class RealKafkaProfile : QuarkusTestProfile {
         override fun disableGlobalTestResources() = true
         override fun testResources() =
@@ -76,6 +84,7 @@ class AgentAuditKafkaIT {
                     .get(15, TimeUnit.SECONDS)
                 awaitCommitted(admin, firstRecord.topic(), firstRecord.partition(), firstRecord.offset() + 1)
                 assertStored(first, "resource-$first", 1)
+                assertChainIntact(first, expectedRows = 1)
 
                 val constraint = "reject_${rejected.toString().replace("-", "")}"
                 sql(
@@ -121,6 +130,7 @@ class AgentAuditKafkaIT {
                     .get(15, TimeUnit.SECONDS)
                 awaitCommitted(admin, replay.topic(), replay.partition(), replay.offset() + 1)
                 assertStored(rejected, "resource-$rejected", 1)
+                assertChainIntact(first, expectedRows = 2)
             }
         }
     }
@@ -189,6 +199,19 @@ class AgentAuditKafkaIT {
     }
 
     private fun config(name: String) = ConfigProvider.getConfig().getValue(name, String::class.java)
+
+    private fun assertChainIntact(fromEntryId: UUID, expectedRows: Int) {
+        val verification = VertxContextSupport.subscribeAndAwait {
+            uni(CoroutineScope(Dispatchers.Unconfined)) { repository.verifyChain(fromEntryId = fromEntryId) }
+        }
+        assertThat(verification.intact)
+            .describedAs("broker-ingested audit entries must verify in the append-only hash chain")
+            .isTrue()
+        assertThat(verification.checked).isEqualTo(expectedRows.toLong())
+        assertThat(verification.unchained).isZero()
+        assertThat(verification.unverifiableLegacy).isZero()
+        assertThat(verification.anchorNotFound).isFalse()
+    }
 
     private fun jdbc() = DriverManager.getConnection(
         config("quarkus.datasource.jdbc.url"),
