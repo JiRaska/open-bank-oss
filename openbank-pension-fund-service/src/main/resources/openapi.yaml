@@ -7,7 +7,8 @@ info:
   #        correction route — additive; income/expenses stay as deprecated fields.
   # 1.2.1: clarify same-currency fund switch validation (this branch's 1.1.1, re-taken on 1.2.0);
   #        no schema change.
-  version: 1.2.1
+  # 1.3.0: atomic multi-fund subscription acceptance with a durable batch receipt (#12474).
+  version: 1.3.0
   description: |
     Provider side of the pension platform (ADR-0334 §1): segregated funds, fund strategies with
     lifecycle glide paths, the unit register and NAV.
@@ -325,6 +326,32 @@ paths:
         '200': { description: Applied, content: { application/json: { schema: { $ref: '#/components/schemas/Strategy' } } } }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/contracts/{contractId}/orders/subscriptions:
+    parameters: [ { $ref: '#/components/parameters/ContractId' } ]
+    post:
+      tags: [Unit register]
+      operationId: placeSubscriptionBatch
+      summary: Atomically accept all subscription legs, or none
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Batch key; a repeated key returns the original orders, and a changed allocation is 409.
+          schema: { type: string, maxLength: 512 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SubscriptionBatchRequest' }
+      responses:
+        '202':
+          description: Accepted together, unpriced
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/SubscriptionBatchOrder' } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
   /api/v1/contracts/{contractId}/orders:
     parameters: [ { $ref: '#/components/parameters/ContractId' } ]
     post:
@@ -545,6 +572,31 @@ components:
         nav: { $ref: '#/components/schemas/Nav' }
         settledOrders: { type: integer }
         corrections: { type: array, items: { $ref: '#/components/schemas/Correction' } }
+    SubscriptionBatchRequest:
+      type: object
+      required: [amount, currency, legs]
+      properties:
+        amount: { type: number, exclusiveMinimum: 0 }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        legs:
+          type: array
+          minItems: 1
+          maxItems: 32
+          items: { $ref: '#/components/schemas/SubscriptionBatchLeg' }
+    SubscriptionBatchLeg:
+      type: object
+      required: [fundId, amount, idempotencyKey]
+      properties:
+        fundId: { type: string, format: uuid }
+        amount: { type: number, exclusiveMinimum: 0 }
+        idempotencyKey: { type: string, minLength: 1, maxLength: 128 }
+    SubscriptionBatchOrder:
+      type: object
+      required: [id, fundId, amount]
+      properties:
+        id: { type: string, format: uuid }
+        fundId: { type: string, format: uuid }
+        amount: { type: number }
     OrderRequest:
       type: object
       required: [fundId, type]

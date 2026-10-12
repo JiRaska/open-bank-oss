@@ -8,6 +8,8 @@ import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import com.openbank.pensionfund.application.usecase.ContractValuation
 import com.openbank.pensionfund.application.usecase.PlaceOrderCommand
+import com.openbank.pensionfund.application.usecase.SubscriptionBatchLeg
+import com.openbank.pensionfund.application.usecase.SubscriptionBatchService
 import com.openbank.pensionfund.application.usecase.UnitRegisterService
 import com.openbank.pensionfund.domain.model.UnitOrder
 import com.openbank.pensionfund.domain.model.UnitTransaction
@@ -38,6 +40,37 @@ class ContractUnitResource {
 
     @Inject
     lateinit var register: UnitRegisterService
+
+    @Inject
+    lateinit var subscriptionBatches: SubscriptionBatchService
+
+    @POST
+    @Path("/orders/subscriptions")
+    @Operation(summary = "Atomically accept every subscription leg of one frozen allocation")
+    @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "pension-fund.order.place", resource = "#contractId")
+    suspend fun placeSubscriptions(
+        @PathParam("contractId") contractId: UUID,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        request: SubscriptionBatchDto?,
+    ): Response {
+        val key = requireNotNull(idempotencyKey?.takeIf { it.isNotBlank() }) { "header 'Idempotency-Key' is required" }
+        val body = requireNotNull(request) { "request body is required" }
+        val orders = subscriptionBatches.place(
+            contractId,
+            key,
+            requireNotNull(body.amount) { "field 'amount' is required" },
+            requireNotNull(body.currency) { "field 'currency' is required" },
+            requireNotNull(body.legs) { "field 'legs' is required" }.map { leg ->
+                SubscriptionBatchLeg(
+                    requireNotNull(leg.fundId) { "field 'fundId' is required" },
+                    requireNotNull(leg.amount) { "field 'amount' is required" },
+                    requireNotNull(leg.idempotencyKey) { "field 'idempotencyKey' is required" },
+                )
+            },
+        )
+        return Response.status(Response.Status.ACCEPTED).entity(orders).build()
+    }
 
     @POST
     @Path("/orders")
@@ -87,3 +120,15 @@ class ContractUnitResource {
     suspend fun transactions(@PathParam("contractId") contractId: UUID): List<UnitTransaction> =
         register.transactions(contractId)
 }
+
+data class SubscriptionBatchDto(
+    val amount: java.math.BigDecimal? = null,
+    val currency: String? = null,
+    val legs: List<SubscriptionBatchLegDto>? = null,
+)
+
+data class SubscriptionBatchLegDto(
+    val fundId: UUID? = null,
+    val amount: java.math.BigDecimal? = null,
+    val idempotencyKey: String? = null,
+)
