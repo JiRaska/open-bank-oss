@@ -7,7 +7,7 @@ openapi: "3.1.0"
 
 info:
   title: OpenBank Copilot Service API
-  version: "1.4.0"
+  version: "1.4.1"
   description: |
     Customer-facing AI assistant (mobile copilot), per ADR-0089.
 
@@ -51,11 +51,13 @@ paths:
               schema:
                 $ref: "#/components/schemas/ChatReply"
         "401":
-          description: Authenticated token carries no usable subject
+          description: Missing bearer token or authenticated token with no usable subject
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
+                oneOf:
+                  - $ref: "#/components/schemas/ProblemDetail"
+                  - $ref: "#/components/schemas/ErrorResponse"
         "501":
           description: Capability not yet enabled (feature flag off)
           content:
@@ -142,11 +144,13 @@ paths:
               schema:
                 $ref: "#/components/schemas/ActionConfirmation"
         "401":
-          description: Authenticated token carries no usable subject
+          description: Missing bearer token or authenticated token with no usable subject
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
+                oneOf:
+                  - $ref: "#/components/schemas/ProblemDetail"
+                  - $ref: "#/components/schemas/ErrorResponse"
         "403":
           description: OPA policy denied the action, or the token belongs to another customer
           content:
@@ -173,6 +177,44 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    ProblemDetail:
+      type: object
+      description: Shared libs-runtime authentication error, emitted before the resource runs.
+      required: [status, code, message, traceId, timestamp]
+      not:
+        required: [error]
+      properties:
+        status:
+          type: integer
+        code:
+          type: string
+        message:
+          type: string
+        traceId:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        details:
+          type: array
+          items:
+            type: object
+        type:
+          type: string
+        title:
+          type: string
+        detail:
+          type: string
+        instance:
+          type: string
+        correlationId:
+          type: string
+        retryable:
+          type: boolean
+        violations:
+          type: array
+          items:
+            type: object
     ChatRequest:
       type: object
       required: [message]
