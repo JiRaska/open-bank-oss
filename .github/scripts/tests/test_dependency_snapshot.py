@@ -105,7 +105,7 @@ class RunnerTests(unittest.TestCase):
     def run_case(self, case):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            for i in range(5):
+            for i in range(9):
                 module = root / f'openbank-test-{i}'
                 module.mkdir()
                 (module / 'build.gradle.kts').write_text('')
@@ -167,6 +167,8 @@ class RunnerTests(unittest.TestCase):
                     result = subject.generate(root, output, env)
                     self.assertEqual(result['sha'], SHA)
                     self.assertEqual(len(calls), 2)
+                    self.assertEqual([sum(arg.endswith(':OpenBankResolveDependencyGraph')
+                                              for arg in command) for command in calls], [9, 1])
                     self.assertEqual(timeouts, [240, 10] if case == 'budget-truncated' else [240, 180])
                     self.assertTrue((output / 'merged.json').is_file())
                     self.assertTrue(all('--continue' not in cmd for cmd in calls))

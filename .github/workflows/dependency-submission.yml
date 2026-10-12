@@ -8,7 +8,7 @@
 # resolution and submission. Resolve every fleet project in bounded processes,
 # validate complete coverage, and publish one snapshot for the checked-out SHA.
 # An incomplete graph fails the job and is never published as a successful scan.
-name: Dependency submission
+name: Dependency batch8 hosted proof
 
 on:
   # DELIBERATELY UNFILTERED (issue #2833). This trigger used to carry the same
@@ -99,7 +99,7 @@ jobs:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
     timeout-minutes: 30
     permissions:
-      contents: write # required by the dependency-submission API
+      contents: read # isolated benchmark does not submit a snapshot
     env:
       # Bound each resolver process independently; the full fleet is never retained
       # in one Gradle heap. The generator records incomplete shards as failures.
@@ -160,6 +160,7 @@ jobs:
           # the fleet regardless of cache state, so the #1449 stale-graph alarm below is
           # unaffected.
           cache-read-only: true
+          cache-disabled: true
           # Generate only: partial shards must never be submitted by the post action.
           dependency-graph: generate
           dependency-graph-continue-on-failure: false
@@ -218,7 +219,10 @@ jobs:
           [ -n "${GITHUB_DEPENDENCY_GRAPH_SHA:-}" ] || { echo "::error::setup-gradle did not export GITHUB_DEPENDENCY_GRAPH_SHA; the resolution guard test cannot run."; exit 1; }
           python3 .github/scripts/tests/test_dependency_resolution_guard.py
 
-      # Bound retained Gradle resolution state to four modules per process. The
+      - name: Record cold runner memory budget
+        run: python3 .github/scripts/capture-dependency-runner-memory.py before
+
+      # Bound retained Gradle resolution state to eight modules per process. The
       # resolver rejects unresolved dependencies and records each intended project.
       # Only a complete, matching set becomes the single snapshot we publish.
       - name: Resolve and validate fleet dependency graph
@@ -232,6 +236,7 @@ jobs:
           --out "${RUNNER_TEMP}/dependency-snapshot-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
 
       - name: Submit complete fleet snapshot
+        if: github.ref != 'refs/heads/codex/dependency-batch8-hosted-proof'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -241,6 +246,22 @@ jobs:
           GH_RETRY_MAX_WAIT_SECONDS=15 gh_retry 3 -- gh api --method POST \
             "repos/${GITHUB_REPOSITORY}/dependency-graph/snapshots" \
             --input "${RUNNER_TEMP}/dependency-snapshot-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/merged.json"
+
+      - name: Record runner peak memory
+        if: always()
+        run: python3 .github/scripts/capture-dependency-runner-memory.py after
+
+      - name: Retain hosted benchmark counters
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dependency-batch8-counters-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/dependency-runner-memory/
+            ${{ runner.temp }}/dependency-snapshot-${{ github.run_id }}-${{ github.run_attempt }}/results.json
+            ${{ runner.temp }}/dependency-snapshot-${{ github.run_id }}-${{ github.run_attempt }}/inventory.json
+          retention-days: 3
+          if-no-files-found: error
 
       - name: Retain dependency graph diagnostics
         if: always()
@@ -270,7 +291,7 @@ jobs:
   raise-issue:
     name: Raise issue on submission failure
     needs: submit
-    if: ${{ failure() && github.event_name != 'pull_request' }}
+    if: ${{ failure() && github.event_name != 'pull_request' && github.ref != 'refs/heads/codex/dependency-batch8-hosted-proof' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5  # API calls only
     permissions:

@@ -194,24 +194,24 @@ def generate(repo, output, env, extra_arguments=()):
     if env.get('DEPENDENCY_GRAPH_EXCLUDE_CONFIGURATIONS') != excluded:
         raise ValueError('unexpected dependency configuration policy')
     modules = inventory(repo)
-    # Nineteen serial shards can otherwise consume 58 minutes under their
-    # individual caps, while the Actions job ends after 30. Reserve ten minutes
+    # Serial shards can exceed the Actions job budget if each consumes its
+    # individual cap. Reserve ten minutes
     # for setup, validation and submission; never publish a partial graph.
     deadline = time.monotonic() + 20 * 60
     (output / 'inventory.json').write_text(json.dumps(modules, indent=2))
-    expected = [f'shard-{i // 4:02}' for i in range(0, len(modules), 4)]
+    expected = [f'shard-{i // 8:02}' for i in range(0, len(modules), 8)]
     identity = {'version': 0, 'sha': sha, 'ref': env['GITHUB_DEPENDENCY_GRAPH_REF'],
                     'job': {'id': env['GITHUB_DEPENDENCY_GRAPH_JOB_ID'], 'correlator': correlator},
                     'detector': {'name': 'GitHub Dependency Graph Gradle Plugin', 'version': '1.5.0',
                                   'url': 'https://github.com/gradle/github-dependency-graph-gradle-plugin'}}
     parts, receipts = {}, []
-    for i in range(0, len(modules), 4):
-        shard = output / expected[i // 4]
+    for i in range(0, len(modules), 8):
+        shard = output / expected[i // 8]
         shard.mkdir()
         reports, coverage = shard / 'reports', shard / 'coverage'
         reports.mkdir()
         coverage.mkdir()
-        projects = [':' + module for module in modules[i:i + 4]]
+        projects = [':' + module for module in modules[i:i + 8]]
         if i == 0:
             projects.insert(0, ':')
         tasks = [p.rstrip(':') + ':OpenBankResolveDependencyGraph'
