@@ -236,7 +236,7 @@ jobs:
           --out "${RUNNER_TEMP}/dependency-snapshot-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
 
       - name: Submit complete fleet snapshot
-        if: github.ref != 'refs/heads/codex/dependency-batch8-hosted-proof'
+        if: github.ref != 'refs/heads/codex/dependency-batch8-hosted-proof' && github.head_ref != 'codex/dependency-batch8-hosted-proof'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
