@@ -6,15 +6,21 @@ package com.openbank.pensionfund.application.usecase
 
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.pensionfund.application.port.MarketPricePort
+import com.openbank.pensionfund.application.port.NavEvent
 import com.openbank.pensionfund.application.port.NotFoundException
+import com.openbank.pensionfund.application.port.PensionFundMetrics
 import com.openbank.pensionfund.application.port.PensionFundStore
+import com.openbank.pensionfund.application.port.PriceLookupOutcome
 import com.openbank.pensionfund.application.port.StoreChanges
 import com.openbank.pensionfund.domain.model.ForwardPricer
 import com.openbank.pensionfund.domain.model.FundStatus
+import com.openbank.pensionfund.domain.model.InstrumentClass
 import com.openbank.pensionfund.domain.model.NavCalculator
 import com.openbank.pensionfund.domain.model.NavInput
+import com.openbank.pensionfund.domain.model.NavPosition
 import com.openbank.pensionfund.domain.model.NavRecord
 import com.openbank.pensionfund.domain.model.NavStatus
+import com.openbank.pensionfund.domain.model.OrderStatus
 import com.openbank.pensionfund.domain.model.Precision
 import com.openbank.pensionfund.domain.model.PricedPosition
 import com.openbank.pensionfund.domain.model.TransactionCorrection
@@ -24,6 +30,9 @@ import com.openbank.pensionfund.domain.model.UnitTransaction
 import jakarta.enterprise.context.ApplicationScoped
 import java.math.BigDecimal
 import java.time.Clock
+import java.time.Duration
+import java.time.LocalDate
+import java.time.ZoneOffset
 import java.time.temporal.ChronoUnit
 import java.util.UUID
 
@@ -35,7 +44,12 @@ data class NavPublication(val nav: NavRecord, val settledOrders: Int, val correc
  * and re-prices every transaction that settled at it, adjusting holdings by the difference.
  */
 @ApplicationScoped
-class NavService(private val store: PensionFundStore, private val prices: MarketPricePort, private val clock: Clock) {
+class NavService(
+    private val store: PensionFundStore,
+    private val prices: MarketPricePort,
+    private val clock: Clock,
+    private val metrics: PensionFundMetrics,
+) {
     suspend fun calculate(fundId: UUID, request: NavCalculationRequest, actor: String): NavRecord {
         val fund = store.fund(fundId) ?: throw NotFoundException("fund $fundId not found")
         check(fund.status == FundStatus.ACTIVE) { "fund $fundId is closed" }
@@ -54,14 +68,7 @@ class NavService(private val store: PensionFundStore, private val prices: Market
         val accrualDays =
             previous?.let { ChronoUnit.DAYS.between(it.valuationDate, request.valuationDate).toInt() } ?: 1
 
-        val positions = request.positions.map { line ->
-            val price = line.price
-                ?: prices.price(line.instrumentId, request.valuationDate, fund.currency)
-                ?: throw IllegalArgumentException(
-                    "no market price for ${line.instrumentId} on ${request.valuationDate}",
-                )
-            PricedPosition(line.instrumentId, line.quantity, price)
-        }
+        val positions = price(request, fund.currency)
         // A correction values the SAME units the original did: the units outstanding at that date
         // are the ones the original NAV priced, not whatever the register holds today.
         val units = original?.figures?.unitsOutstanding ?: store.unitsOutstanding(fundId)
@@ -85,9 +92,43 @@ class NavService(private val store: PensionFundStore, private val prices: Market
             calculatedBy = actor,
             calculatedAt = clock.instant(),
             correctsNavId = original?.id,
+            positionsRecorded = true,
         )
-        store.commit(StoreChanges(navs = listOf(nav)))
+        store.commit(
+            StoreChanges(
+                navs = listOf(nav),
+                navPositions = positions.map {
+                    NavPosition(Ids.newId(), nav.id, it.instrumentId, it.quantity, it.price, it.instrumentClass)
+                },
+            ),
+        )
+        metrics.navEvent(fund.isin, NavEvent.CALCULATED, nav.isCorrection)
         return nav
+    }
+
+    /** One port lookup, counted by outcome; a throw is counted and rethrown, never swallowed. */
+    @Suppress("TooGenericExceptionCaught") // any port failure is FAILED; it is rethrown unchanged
+    private suspend fun lookUpPrice(instrumentId: String, valuationDate: LocalDate, currency: String): BigDecimal? {
+        val price = try {
+            prices.price(instrumentId, valuationDate, currency)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            metrics.marketPriceLookup(PriceLookupOutcome.FAILED)
+            throw e
+        }
+        metrics.marketPriceLookup(if (price == null) PriceLookupOutcome.MISSING else PriceLookupOutcome.FOUND)
+        return price
+    }
+
+    private suspend fun isin(fundId: UUID): String =
+        store.fund(fundId)?.isin ?: throw NotFoundException("fund $fundId not found")
+
+    private suspend fun price(request: NavCalculationRequest, currency: String) = request.positions.map { line ->
+        val price = line.price
+            ?: lookUpPrice(line.instrumentId, request.valuationDate, currency)
+            ?: throw IllegalArgumentException("no market price for ${line.instrumentId} on ${request.valuationDate}")
+        PricedPosition(line.instrumentId, line.quantity, price, line.instrumentClass ?: InstrumentClass.UNCLASSIFIED)
     }
 
     suspend fun nav(id: UUID): NavRecord = store.nav(id) ?: throw NotFoundException("NAV $id not found")
@@ -97,15 +138,34 @@ class NavService(private val store: PensionFundStore, private val prices: Market
     suspend fun reject(id: UUID, actor: String): NavRecord {
         val rejected = nav(id).reject(actor)
         store.commit(StoreChanges(navs = listOf(rejected)))
+        metrics.navEvent(isin(rejected.fundId), NavEvent.REJECTED, rejected.isCorrection)
         return rejected
     }
 
     suspend fun publish(id: UUID, actor: String): NavPublication {
         val published = nav(id).publish(actor, clock.instant())
-        return if (published.isCorrection) publishCorrection(published) else publishAndSettle(published)
+        val fund = store.fund(published.fundId) ?: throw NotFoundException("fund ${published.fundId} not found")
+        val isin = fund.isin
+        val publication =
+            if (published.isCorrection) {
+                publishCorrection(
+                    published,
+                )
+            } else {
+                publishAndSettle(published, isin, fund.currency)
+            }
+        // Counted only after the commit returned: a publication that rolled back published nothing.
+        metrics.navEvent(isin, NavEvent.PUBLISHED, published.isCorrection)
+        if (published.isCorrection) {
+            metrics.navCorrectionRepriced(isin, publication.corrections.size)
+        } else {
+            val dayEnded = published.valuationDate.plusDays(1).atStartOfDay().toInstant(ZoneOffset.UTC)
+            metrics.navPublicationLag(isin, Duration.between(dayEnded, checkNotNull(published.publishedAt)))
+        }
+        return publication
     }
 
-    private suspend fun publishAndSettle(nav: NavRecord): NavPublication {
+    private suspend fun publishAndSettle(nav: NavRecord, isin: String, currency: String): NavPublication {
         val pending = store.pendingOrders(nav.fundId).filter { it.placedAt.isBefore(nav.publishedAt) }
         val holdings = mutableMapOf<UUID, UnitHolding>()
         val orders = mutableListOf<UnitOrder>()
@@ -130,6 +190,16 @@ class NavService(private val store: PensionFundStore, private val prices: Market
                 holdings = holdings.values.toList(),
             ),
         )
+        orders.filter { it.status == OrderStatus.SETTLED }.forEach { metrics.order(isin, it.type, OrderStatus.SETTLED) }
+        // A switch-in leg is a new PENDING order of the TARGET fund, counted under that fund.
+        orders.filter {
+            it.status == OrderStatus.PENDING
+        }.forEach { metrics.order(isin(it.fundId), it.type, OrderStatus.PENDING) }
+        transactions.forEach { tx ->
+            pending.firstOrNull {
+                it.id == tx.orderId
+            }?.let { metrics.settledAmount(isin, it.type, tx.amount, currency) }
+        }
         return NavPublication(nav, pending.size, emptyList())
     }
 

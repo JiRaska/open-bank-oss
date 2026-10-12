@@ -18,6 +18,7 @@ import io.quarkus.security.identity.SecurityIdentity
 import jakarta.ws.rs.ForbiddenException
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.eclipse.microprofile.jwt.JsonWebToken
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.security.Principal
@@ -34,15 +35,26 @@ class ContractAccessGuardTest {
         "BALANCED", emptyList(), LocalDate.parse("2026-10-09"), Instant.EPOCH,
     )
 
-    private fun guard(principal: String, vararg roles: String) = ContractAccessGuard().apply {
+    private fun guard(principal: Principal, vararg roles: String) = ContractAccessGuard().apply {
         identity = mockk<SecurityIdentity> {
-            every { this@mockk.principal } returns Principal { principal }
+            every { this@mockk.principal } returns principal
             every { hasRole(any()) } answers { firstArg<String>() in roles }
         }
-        trustedRelays = listOf(ContractAccessGuard.DEFAULT_RELAY)
+        trustedRelayClients = listOf(ContractAccessGuard.DEFAULT_RELAY_CLIENT)
     }
 
-    private val edge = guard(ContractAccessGuard.DEFAULT_RELAY, "ROLE_API")
+    private fun guard(name: String, vararg roles: String) = guard(Principal { name }, *roles)
+
+    private fun jwt(azp: String?, preferredUsername: String?, sub: String? = UUID.randomUUID().toString()) =
+        mockk<JsonWebToken> {
+            every { name } returns (preferredUsername ?: "anon")
+            every { subject } returns sub
+            every { getClaim<String?>("azp") } returns azp
+            every { getClaim<String?>("preferred_username") } returns preferredUsername
+        }
+
+    private val relayName = ContractAccessGuard.SERVICE_ACCOUNT_PREFIX + ContractAccessGuard.DEFAULT_RELAY_CLIENT
+    private val edge = guard(jwt(ContractAccessGuard.DEFAULT_RELAY_CLIENT, relayName), "ROLE_API")
 
     @Test
     fun `the owner sees the contract and another party gets not-found`() {
@@ -71,5 +83,34 @@ class ContractAccessGuardTest {
         assertThatThrownBy { other.actingParticipant(owner.toString()) }.isInstanceOf(ForbiddenException::class.java)
         val staffWithHeader = guard("alice", "ROLE_OPERATOR")
         assertThatThrownBy { staffWithHeader.readerFor(owner.toString()) }.isInstanceOf(ForbiddenException::class.java)
+    }
+
+    @Test
+    fun `the relay's NAME on a token issued to a different client is forbidden`() {
+        val impostor = guard(jwt(azp = "openbank-admin-ui", preferredUsername = relayName), "ROLE_API")
+        assertThatThrownBy { impostor.readerFor(owner.toString()) }.isInstanceOf(ForbiddenException::class.java)
+        assertThatThrownBy { impostor.actingParticipant(owner.toString()) }.isInstanceOf(ForbiddenException::class.java)
+    }
+
+    @Test
+    fun `a non-JWT principal carrying the relay's name is forbidden`() {
+        val named = guard(relayName, "ROLE_API")
+        assertThatThrownBy { named.readerFor(owner.toString()) }.isInstanceOf(ForbiddenException::class.java)
+    }
+
+    @Test
+    fun `a human user token issued through the relay client is forbidden`() {
+        val human = guard(jwt(azp = ContractAccessGuard.DEFAULT_RELAY_CLIENT, preferredUsername = "alice"), "ROLE_API")
+        assertThatThrownBy { human.readerFor(owner.toString()) }.isInstanceOf(ForbiddenException::class.java)
+        val noAzp = guard(jwt(azp = null, preferredUsername = relayName), "ROLE_API")
+        assertThatThrownBy { noAzp.readerFor(owner.toString()) }.isInstanceOf(ForbiddenException::class.java)
+        val noSubject = guard(jwt(ContractAccessGuard.DEFAULT_RELAY_CLIENT, relayName, sub = null), "ROLE_API")
+        assertThatThrownBy { noSubject.readerFor(owner.toString()) }.isInstanceOf(ForbiddenException::class.java)
+    }
+
+    @Test
+    fun `the relay's own service-account token is trusted`() {
+        assertThat(edge.readerFor(owner.toString())).isEqualTo(Caller.customer(owner))
+        assertThat(edge.actingParticipant(owner.toString())).isEqualTo(Caller.customer(owner))
     }
 }

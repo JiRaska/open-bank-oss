@@ -99,13 +99,16 @@ resource "helm_release" "karpenter" {
     }
   }
 
-  name                = "karpenter"
-  namespace           = "kube-system"
-  repository          = "oci://public.ecr.aws/karpenter"
-  repository_username = data.aws_ecrpublic_authorization_token.karpenter_chart.user_name
-  repository_password = data.aws_ecrpublic_authorization_token.karpenter_chart.password
-  chart               = "karpenter"
-  version             = var.karpenter_version
+  name      = "karpenter"
+  namespace = "kube-system"
+  # Registry auth is on the helm PROVIDER (`registries`, providers.tf), not here: a
+  # resource-level repository_password is persisted in state, and the ECR Public token
+  # is new on every run, so it was a perpetual in-place diff (#11370). Provider config
+  # is never stored or diffed, and still logs in on every plan/apply — including the
+  # chart fetch for a karpenter_version bump.
+  repository = "oci://public.ecr.aws/karpenter"
+  chart      = "karpenter"
+  version    = var.karpenter_version
 
   set = [
     # Single replica for sandbox FinOps; prod should run 2 for HA.
