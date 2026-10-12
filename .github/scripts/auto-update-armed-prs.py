@@ -55,10 +55,11 @@ needs: see the PR that introduced this script for the measured evidence.
 
 HARD COST BUDGET
 ----------------
-`--max-updates` limits one workflow run only. `--max-updates-per-pr` also counts GitHub's
-server-side main-merge commits in the PR's own history, across workflow runs. At the cap the
-script cannot trigger another CI restart from that branch history. Unreadable or truncated commit
-history fails closed. A human can decide whether to rebase, close, or merge the PR after review.
+`--max-updates` limits one workflow run only. `--max-updates-per-pr` counts consecutive GitHub
+server-side main-merge commits at the PR head, across workflow runs. An author commit resets this
+consecutive count. The bounded first-parent read takes at most cap+1 API calls, regardless of PR
+length. An unreadable budget skips only that PR. At the cap, the author must push a substantive
+change or rebase the branch, then let normal review and CI run.
 
 MODES
 -----
@@ -218,45 +219,72 @@ def self_test() -> int:
     import io
     from unittest.mock import patch
 
-    update = {"sha": "a" * 40, "commit": {"message": "Merge branch 'main' into agent/example",
-                         "committer": {"name": "GitHub"}}, "parents": [{}, {}]}
-    renamed = {**update, "sha": "b" * 40, "commit": {**update["commit"],
-                                    "message": "Merge branch 'main' into codex/renamed"}}
-    with patch.dict(globals(), {"get": lambda *_: [update, renamed]}):
-        used = branch_update_count("example/repo", 42, "main", 2, "b" * 40)
-    ok = used == 2
-    failures += not ok
-    print(f"{'PASS' if ok else 'FAIL'}  update budget persists in PR commits: {used}")
-    history = [{**update, "sha": f"{i:040x}"} for i in range(1, 235)]
-    def paged_get(path: str) -> object:
-        page = int(path.rsplit("&page=", 1)[1])
-        return history[(page - 1) * 100:page * 100]
-
-    with patch.dict(globals(), {"get": paged_get}):
-        used = branch_update_count("example/repo", 42, "main", 234, history[-1]["sha"])
-        ok = used == 234
-        failures += not ok
-        print(f"{'PASS' if ok else 'FAIL'}  234-commit history read across all three pages: {used}")
-    def duplicate_page(path: str) -> object:
-        page = int(path.rsplit("&page=", 1)[1])
-        return history[:100] if page == 2 else paged_get(path)
-    with patch.dict(globals(), {"get": duplicate_page}):
-        try:
-            branch_update_count("example/repo", 42, "main", 234, history[-1]["sha"])
-        except ValueError:
-            print("PASS  duplicated middle page fails closed")
-        else:
-            failures += 1
-            print("FAIL  duplicated middle page passed")
-    for name, get_commits, total, head in [
-        ("missing final page", lambda path: history[:100] if path.endswith("&page=1") else history[100:133],
-         134, history[133]["sha"]),
-        ("head changed during read", lambda path: history[:34], 34, "b" * 40),
-        ("API history cap", lambda path: [update] * 100, 251, "a" * 40),
+    sha = lambda n: f"{n:040x}"
+    def commit(n: int, merge: bool, parent: int | None = None, *, committer: str = "GitHub") -> dict:
+        return {"sha": sha(n), "commit": {
+            "message": "Merge branch 'main' into codex/example" if merge else "fix: author change",
+            "committer": {"name": committer, "email": "noreply@github.com"},
+            "verification": {"verified": True, "reason": "valid"}},
+            "parents": ([{"sha": sha(parent)}, {"sha": sha(1000)}] if merge else
+                        ([{"sha": sha(parent)}] if parent is not None else []))}
+    author = commit(1, False)
+    chain = {sha(1): author}
+    for i in range(2, 8):
+        chain[sha(i)] = commit(i, True, i - 1)
+    calls: list[str] = []
+    def commit_api(_method: str, path: str, _body: dict | None = None) -> tuple[int, object]:
+        calls.append(path)
+        return (200, chain[path.rsplit("/", 1)[1]])
+    for name, head, cap, want, want_reads in [
+        ("author tip resets prior merge streak", sha(1), 4, 0, 1),
+        ("one update then author push", sha(2), 4, 1, 2),
+        ("cap minus one", sha(4), 4, 3, 4),
+        ("cap", sha(5), 4, 4, 5),
+        ("longer than cap stays bounded", sha(7), 4, 4, 5),
     ]:
-        with patch.dict(globals(), {"get": get_commits}):
+        calls.clear()
+        with patch.dict(globals(), {"api": commit_api}):
+            used = branch_update_count("example/repo", 42, "main", cap, head)
+        ok = used == want and len(calls) == want_reads and all("/pulls/" not in c for c in calls)
+        failures += not ok
+        print(f"{'PASS' if ok else 'FAIL'}  {name}: {used}, {len(calls)} bounded reads")
+    chain[sha(8)] = commit(8, False, 7)
+    with patch.dict(globals(), {"api": commit_api}):
+        used = branch_update_count("example/repo", 42, "main", 4, sha(8))
+    ok = used == 0
+    failures += not ok
+    print(f"{'PASS' if ok else 'FAIL'}  new author push resets a saturated chain")
+    chain[sha(9)] = commit(9, True, 8)
+    chain[sha(10)] = commit(10, True, 9, committer="User")
+    with patch.dict(globals(), {"api": commit_api}):
+        used = branch_update_count("example/repo", 42, "main", 4, sha(10))
+    ok = used == 0
+    failures += not ok
+    print(f"{'PASS' if ok else 'FAIL'}  user-spoofed merge message does not consume budget")
+    forged = commit(11, True, 9)
+    forged["commit"]["verification"] = {"verified": False, "reason": "unsigned"}
+    chain[sha(11)] = forged
+    with patch.dict(globals(), {"api": commit_api}):
+        used = branch_update_count("example/repo", 42, "main", 4, sha(11))
+    ok = used == 0
+    failures += not ok
+    print(f"{'PASS' if ok else 'FAIL'}  unsigned forged GitHub committer does not consume budget")
+    for name, response in [("API error", (503, "unavailable")),
+                           ("mismatched SHA", (200, author)),
+                           ("malformed parent", (200, {**chain[sha(2)], "parents": [{}, {}]})),
+                           ("missing verification", (200, {**author, "commit": {
+                               "message": "fix: author change", "committer": {"name": "User", "email": "user@example.com"}}})),
+                           ("missing committer", (200, {**author, "commit": {
+                               "message": "fix: author change", "verification": {"verified": False}}})),
+                           ("missing message", (200, {**author, "commit": {
+                               "committer": {"name": "User", "email": "user@example.com"},
+                               "verification": {"verified": False}}}))]:
+        def broken_api(*_args, response=response):
+            return response
+        with patch.dict(globals(), {"api": broken_api}):
             try:
-                branch_update_count("example/repo", 42, "main", total, head)
+                branch_update_count("example/repo", 42, "main", 4,
+                                    sha(2) if name in ("malformed parent", "mismatched SHA") else sha(1))
             except ValueError:
                 print(f"PASS  {name} fails closed")
             else:
@@ -268,18 +296,15 @@ def self_test() -> int:
             return [{"number": 42, "auto_merge": {"merge_method": "squash"}, "draft": False}]
         if path.endswith("/pulls/42"):
             return {"draft": False, "auto_merge": {"merge_method": "squash"}, "mergeable_state": "behind",
-                    "commits": 1,
                     "head": {"sha": "a" * 40, "ref": "agent/example",
                              "repo": {"full_name": "example/repo"}}}
-        if "/pulls/42/commits?" in path:
-            return [{"sha": "a" * 40, "commit": {"message": "test", "committer": {"name": "User"}},
-                     "parents": [{}]}]
         if "/commits/" in path:
             return {"commit": {"committer": {"date": old.isoformat()}}}
         raise AssertionError(f"unexpected API read {path}")
 
     with patch.dict(globals(), {"required_policy": lambda *_: (["Gitleaks"], True),
-                                "get": fixture_get, "head_checks": lambda *_: {"Gitleaks": "success"}}):
+                                "get": fixture_get, "head_checks": lambda *_: {"Gitleaks": "success"},
+                                "branch_update_count": lambda *_: 0}):
         for status, want in ((403, 1), (409, 0)):
             with patch.dict(globals(), {"api": lambda *_args, code=status: (code, "denied")}):
                 output = io.StringIO()
@@ -288,23 +313,69 @@ def self_test() -> int:
                 ok = result == want and (("::error::FAILED" in output.getvalue()) == (status == 403))
                 failures += not ok
                 print(f"{'PASS' if ok else 'FAIL'}  update-branch HTTP {status} -> exit {result}")
-    def capped_get(path: str) -> object:
-        if path.endswith("/pulls/42"):
-            full = fixture_get(path)
-            return {**full, "commits": 2, "head": {**full["head"], "sha": renamed["sha"]}}
-        if "/pulls/42/commits?" in path:
-            return [update, renamed]
-        return fixture_get(path)
+    def capped_count(*_args):
+        return 2
     with patch.dict(globals(), {"required_policy": lambda *_: (["Gitleaks"], True),
-                                "get": capped_get, "head_checks": lambda *_: {"Gitleaks": "success"},
+                                "get": fixture_get, "head_checks": lambda *_: {"Gitleaks": "success"},
+                                "branch_update_count": capped_count,
                                 "api": lambda *_args, **_kwargs: (_ for _ in ()).throw(
                                     AssertionError("exhausted budget called update-branch"))}):
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
             result = run("example/repo", "main", 5, 0, False, 20, max_updates_per_pr=2)
-        ok = result == 0 and "branch-history update budget exhausted (2/2)" in output.getvalue()
+        ok = (result == 0 and "branch-history update budget exhausted (2/2)" in output.getvalue()
+              and "push a substantive author change" in output.getvalue())
         failures += not ok
         print(f"{'PASS' if ok else 'FAIL'}  exhausted budget never calls update-branch")
+    # One unreadable PR must not poison the run or prevent an unrelated green PR.
+    import tempfile
+    def two_pr_get(path: str) -> object:
+        if "/pulls?" in path:
+            return [{"number": n, "auto_merge": {"merge_method": "squash"}, "draft": False}
+                    for n in (42, 43)]
+        if path.endswith("/pulls/43"):
+            return {**fixture_get("/pulls/42"), "head": {"sha": "b" * 40, "ref": "codex/other",
+                       "repo": {"full_name": "example/repo"}}}
+        if "/commits/" in path:
+            return {"commit": {"committer": {"date": old.isoformat()}}}
+        return fixture_get(path)
+    def one_unreadable(_repo: str, number: int, *_args) -> int:
+        if number == 42:
+            raise ValueError("#42: commit unavailable")
+        return 0
+    updated_numbers = []
+    def put_update(_method: str, path: str, _body: dict | None = None):
+        updated_numbers.append(int(path.split("/pulls/")[1].split("/")[0]))
+        return 202, {}
+    with tempfile.TemporaryDirectory() as tmp:
+        summary_path = pathlib.Path(tmp) / "summary.md"
+        with patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(summary_path)}), patch.dict(
+                globals(), {"required_policy": lambda *_: (["Gitleaks"], True),
+                            "get": two_pr_get, "head_checks": lambda *_: {"Gitleaks": "success"},
+                            "branch_update_count": one_unreadable, "api": put_update}):
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                result = run("example/repo", "main", 5, 0, False, 20)
+        summary = summary_path.read_text()
+    ok = (result == 0 and updated_numbers == [43] and "#42: unreadable budget" in summary
+          and "::warning::#42" in output.getvalue())
+    failures += not ok
+    print(f"{'PASS' if ok else 'FAIL'}  unreadable budget skips only #42; #43 updates; summary records hold")
+    with tempfile.TemporaryDirectory() as tmp:
+        summary_path = pathlib.Path(tmp) / "summary.md"
+        with patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(summary_path)}), patch.dict(
+                globals(), {"required_policy": lambda *_: (["Gitleaks"], True),
+                            "get": fixture_get, "head_checks": lambda *_: {"Gitleaks": "success"},
+                            "branch_update_count": capped_count,
+                            "api": lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                                AssertionError("exhausted budget called update-branch"))}):
+            with contextlib.redirect_stdout(io.StringIO()):
+                result = run("example/repo", "main", 5, 0, False, 20, max_updates_per_pr=2)
+        summary = summary_path.read_text()
+    ok = result == 0 and "#42: branch-history update budget exhausted (2/2)" in summary \
+        and "normal review and CI" in summary
+    failures += not ok
+    print(f"{'PASS' if ok else 'FAIL'}  exhausted budget summary gives unblock instruction")
     with patch.dict(globals(), {"required_policy": lambda *_: (["Gitleaks"], False),
                                 "get": lambda *_: (_ for _ in ()).throw(
                                     AssertionError("non-strict mode enumerated PRs"))}):
@@ -451,39 +522,74 @@ def parse_ts(s: str) -> dt.datetime:
     return dt.datetime.fromisoformat(s.replace("Z", "+00:00"))
 
 
-def branch_update_count(repo: str, number: int, branch: str, expected_count: int,
+def branch_update_count(repo: str, number: int, branch: str, limit: int,
                         expected_head: str) -> int:
-    """Count server-side base merges on this PR; fail closed on truncated history.
+    """Count consecutive GitHub base merges on the head's first-parent chain.
 
-    The count lives in the PR commit graph, so a new workflow run cannot reset it.
-    Human branch updates count too: they consume the same CI budget. The PR commits API
-    returns at most 100 per page and caps its history at 250 commits. Verify both the
-    reported total and final SHA so a partial or racing read cannot reset the budget.
+    Never scan PR commits: GitHub caps that endpoint at 250 entries. A regular author
+    commit ends the streak. Validate each SHA and edge, fail closed on unreadable data,
+    and stop after at most limit+1 reads even when the PR has thousands of commits.
     """
-    if not isinstance(expected_count, int) or not 1 <= expected_count <= 250:
-        raise ValueError(f"#{number}: PR commit history is unreadable or truncated")
-    commits: list[dict] = []
+    if limit < 0 or not isinstance(expected_head, str) or not re.fullmatch(r"[0-9a-f]{40}", expected_head):
+        raise ValueError(f"#{number}: invalid branch-update budget or head")
+    sha = expected_head
     seen: set[str] = set()
-    for page in range(1, (expected_count - 1) // 100 + 2):
-        batch = get(f"/repos/{repo}/pulls/{number}/commits?per_page=100&page={page}")
-        want = min(100, expected_count - len(commits))
-        if not isinstance(batch, list) or len(batch) != want or any(not isinstance(c, dict) for c in batch):
-            raise ValueError(f"#{number}: PR commit history is unreadable or truncated")
-        for commit in batch:
-            sha = commit.get("sha")
-            if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha) or sha in seen:
-                raise ValueError(f"#{number}: PR commit history is duplicate or malformed")
-            seen.add(sha)
-        commits.extend(batch)
-    if len(commits) != expected_count or commits[-1].get("sha") != expected_head:
-        raise ValueError(f"#{number}: PR commit history is unreadable or truncated")
     marker = f"Merge branch '{branch}' into "
-    return sum(
-        commit.get("commit", {}).get("message", "").partition("\n")[0].startswith(marker)
-        and commit.get("commit", {}).get("committer", {}).get("name") == "GitHub"
-        and len(commit.get("parents", [])) == 2
-        for commit in commits
-    )
+    for used in range(limit + 1):
+        if sha in seen:
+            raise ValueError(f"#{number}: cyclic first-parent chain")
+        seen.add(sha)
+        try:
+            code, commit = api("GET", f"/repos/{repo}/commits/{sha}")
+        except (OSError, ValueError) as error:
+            raise ValueError(f"#{number}: commit {sha[:9]} is unreadable: {error}") from error
+        if code != 200 or not isinstance(commit, dict) or commit.get("sha") != sha:
+            raise ValueError(f"#{number}: commit {sha[:9]} is unreadable")
+        details = commit.get("commit")
+        parents = commit.get("parents")
+        if not isinstance(details, dict) or not isinstance(parents, list):
+            raise ValueError(f"#{number}: malformed commit {sha[:9]}")
+        message = details.get("message")
+        committer = details.get("committer")
+        verification = details.get("verification")
+        if (not isinstance(message, str) or not isinstance(committer, dict)
+                or not isinstance(committer.get("name"), str)
+                or not isinstance(committer.get("email"), str)
+                or not isinstance(verification, dict)
+                or not isinstance(verification.get("verified"), bool)
+                or any(not isinstance(p, dict) or not isinstance(p.get("sha"), str)
+                       or not re.fullmatch(r"[0-9a-f]{40}", p["sha"]) for p in parents)):
+            raise ValueError(f"#{number}: malformed commit metadata {sha[:9]}")
+        is_update = (message.partition("\n")[0].startswith(marker)
+                     and committer.get("name") == "GitHub"
+                     and committer.get("email") == "noreply@github.com"
+                     and verification.get("verified") is True
+                     and len(parents) == 2)
+        if not is_update:
+            return used
+        if used == limit:
+            return used
+        parent = parents[0]
+        sha = parent.get("sha") if isinstance(parent, dict) else None
+        if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha):
+            raise ValueError(f"#{number}: malformed first parent")
+    raise AssertionError("bounded branch-update count did not terminate")
+
+
+def budget_instruction(number: int, used: int, limit: int) -> str:
+    return (f"#{number}: branch-history update budget exhausted ({used}/{limit}); "
+            "push a substantive author change or rebase the branch to reset the tip streak, "
+            "then obtain normal review and CI")
+
+
+def write_budget_summary(lines: list[str]) -> None:
+    target = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not target or not lines:
+        return
+    with open(target, "a", encoding="utf-8") as summary:
+        summary.write("\n### Armed PR branch-update budget holds\n\n")
+        for line in lines:
+            summary.write(f"- {line}\n")
 
 
 def run(repo: str, branch: str, max_updates: int, debounce: int, dry_run: bool,
@@ -501,7 +607,7 @@ def run(repo: str, branch: str, max_updates: int, debounce: int, dry_run: bool,
     armed = [p for p in pulls if p.get("auto_merge") and not p.get("draft")]
     print(f"{len(pulls)} open PR(s) against {branch}, {len(armed)} armed and non-draft")
     failed_updates = 0
-    entries, shas, budgets = [], {}, {}
+    entries, shas, budgets, budget_holds = [], {}, {}, []
     for p in armed:
         n = p["number"]
         full = get(f"/repos/{repo}/pulls/{n}")
@@ -531,16 +637,16 @@ def run(repo: str, branch: str, max_updates: int, debounce: int, dry_run: bool,
                 ok, why = decide(pr, required, checks, now, committed, debounce)
         if ok:
             try:
-                used = branch_update_count(repo, n, branch, full["commits"], sha)
+                used = branch_update_count(repo, n, branch, max_updates_per_pr, sha)
             except ValueError as error:
-                failed_updates += 1
                 ok, why = False, f"unreadable update budget: {error}"
-                print(f"::error::{error}; refusing an unbudgeted branch update")
+                budget_holds.append(f"#{n}: unreadable budget; inspect its first-parent history before updating")
+                print(f"::warning::{error}; skipping this PR only")
             else:
                 budgets[n] = used
                 if used >= max_updates_per_pr:
-                    ok, why = False, ("branch-history update budget exhausted "
-                                      f"({used}/{max_updates_per_pr}); manual resolution required")
+                    ok, why = False, budget_instruction(n, used, max_updates_per_pr)
+                    budget_holds.append(why)
         since = (full["auto_merge"] or {}).get("enabled_at") or full.get("created_at") or ""
         print(f"CLASS  #{n} {sha[:9]}: {kind}{' (no build-matrix check runs: none selected or not started -> small)' if kind == 'unknown' else ''}"
               f"{', build in flight' if building else ''}, armed since {since or '?'}")
@@ -569,7 +675,9 @@ def run(repo: str, branch: str, max_updates: int, debounce: int, dry_run: bool,
         else:
             failed_updates += 1
             print(f"::error::FAILED #{n} {sha[:9]}: update-branch -> {code}: {data}")
-    print(f"done: {updated} update(s), {failed_updates} failed update(s)")
+    write_budget_summary(budget_holds)
+    print(f"done: {updated} update(s), {failed_updates} failed update(s), "
+          f"{len(budget_holds)} budget hold(s)")
     return 1 if failed_updates else 0
 
 
@@ -581,7 +689,7 @@ def main() -> int:
     ap.add_argument("--branch", default="main")
     ap.add_argument("--max-updates", type=int, default=5)
     ap.add_argument("--max-updates-per-pr", type=int, default=4,
-                    help="hard lifetime cap from server-side merge commits on the PR")
+                    help="cap on consecutive server-side base merges at the PR head")
     ap.add_argument("--debounce-minutes", type=int, default=20)
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--full-fleet-threshold", type=int, default=20,
