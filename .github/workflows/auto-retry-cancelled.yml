@@ -310,6 +310,7 @@ jobs:
           # at PR time.
           GH_REPO: ${{ github.repository }}
           RETRY_CANDIDATES: ${{ needs.discover.outputs.retry }}
+          RETRY_DECISIONS_FILE: ${{ runner.temp }}/retry-decisions.jsonl
           # Cap on a SINGLE wait inside gh-retry.sh. Kept under the job's timeout-minutes above
           # with room for four of them plus the calls themselves.
           GH_RETRY_MAX_WAIT_SECONDS: "600"
@@ -324,6 +325,9 @@ jobs:
         # and why a rate limit must be told from a permission denial by message text.
         run: |
           set -euo pipefail
+          if ! : > "$RETRY_DECISIONS_FILE"; then
+            echo "::warning::Could not initialize retry decision evidence; retry verdicts remain authoritative."
+          fi
           failed=0
           while IFS=$'\t' read -r run_id run_url conclusion run_event; do
             echo "::group::Classify ${run_url}"
@@ -334,6 +338,15 @@ jobs:
             echo "::endgroup::"
           done < <(jq -r '.[] | [.run_id, .run_url, .conclusion, .event] | @tsv' <<< "${RETRY_CANDIDATES}")
           exit "${failed}"
+
+      - name: Retain retry decisions
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: retry-decisions-a${{ github.run_attempt }}
+          path: ${{ runner.temp }}/retry-decisions.jsonl
+          retention-days: 14
+          if-no-files-found: warn
 
   # ── The alarm (issue #2901) ───────────────────────────────────────────────────
   # Why this exists: this workflow failed 208 times without anyone noticing. It is
