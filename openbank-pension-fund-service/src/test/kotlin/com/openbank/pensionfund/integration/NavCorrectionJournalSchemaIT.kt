@@ -10,11 +10,17 @@ import io.quarkus.test.junit.QuarkusTest
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.eclipse.microprofile.config.ConfigProvider
+import org.flywaydb.core.Flyway
 import org.junit.jupiter.api.Test
 import java.sql.Connection
 import java.sql.DriverManager
 import java.sql.SQLException
 import java.util.UUID
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+import java.util.concurrent.Future
+import java.util.concurrent.TimeUnit
 
 /** Real PostgreSQL proves the immutable calculated evidence constraints before a writer is enabled. */
 @QuarkusTest
@@ -71,14 +77,169 @@ class NavCorrectionJournalSchemaIT {
         assertCashDraft(fixture)
     }
 
+    @Test
+    fun `source price edit and journal insert serialize at read committed`() {
+        val worker = Executors.newSingleThreadExecutor()
+        try {
+            journalInsertWins(worker)
+            priceEditWins(worker)
+        } finally {
+            worker.shutdownNow()
+        }
+    }
+
+    private fun journalInsertWins(worker: ExecutorService) {
+        val journalFirst = Fixture()
+        jdbc().use { seed(it, journalFirst) }
+        jdbc().use { journalConnection ->
+            journalConnection.transactionIsolation = Connection.TRANSACTION_READ_COMMITTED
+            journalConnection.autoCommit = false
+            insertJournal(journalConnection, journalFirst)
+            insertDraft(journalConnection, journalFirst, "50.000000")
+
+            val backend = ArrayBlockingQueue<Int>(1)
+            val attemptedEdit: Future<Throwable?> = worker.submit<Throwable?> {
+                jdbc().use { editor ->
+                    editor.transactionIsolation = Connection.TRANSACTION_READ_COMMITTED
+                    editor.autoCommit = false
+                    editor.createStatement().use { it.execute("SET LOCAL statement_timeout = '8s'") }
+                    backend.put(backendPid(editor))
+                    runCatching {
+                        editor.createStatement().use { sql ->
+                            sql.executeUpdate(
+                                "UPDATE fund_navs SET nav_per_unit = 3 WHERE id = '${journalFirst.original}'",
+                            )
+                        }
+                        editor.commit()
+                    }.exceptionOrNull()
+                }
+            }
+            assertWaitingOnSourceLock(backend, attemptedEdit)
+            journalConnection.commit()
+            assertThat(attemptedEdit.get(8, TimeUnit.SECONDS))
+                .isInstanceOf(SQLException::class.java)
+                .hasMessageContaining("NAV price used by correction journal is immutable")
+        }
+    }
+
+    private fun priceEditWins(worker: ExecutorService) {
+        val priceFirst = Fixture()
+        jdbc().use { seed(it, priceFirst) }
+        jdbc().use { editor ->
+            editor.transactionIsolation = Connection.TRANSACTION_READ_COMMITTED
+            editor.autoCommit = false
+            editor.createStatement().use { sql ->
+                sql.executeUpdate("UPDATE fund_navs SET nav_per_unit = 3 WHERE id = '${priceFirst.original}'")
+            }
+
+            val backend = ArrayBlockingQueue<Int>(1)
+            val attemptedJournal: Future<Throwable?> = worker.submit<Throwable?> {
+                jdbc().use { writer ->
+                    writer.transactionIsolation = Connection.TRANSACTION_READ_COMMITTED
+                    writer.autoCommit = false
+                    writer.createStatement().use { it.execute("SET LOCAL statement_timeout = '8s'") }
+                    backend.put(backendPid(writer))
+                    runCatching {
+                        insertJournal(writer, priceFirst)
+                        insertDraft(writer, priceFirst, "50.000000")
+                        writer.commit()
+                    }.exceptionOrNull()
+                }
+            }
+            assertWaitingOnSourceLock(backend, attemptedJournal)
+            editor.commit()
+            assertThat(attemptedJournal.get(8, TimeUnit.SECONDS))
+                .isInstanceOf(SQLException::class.java)
+                .hasMessageContaining("snapshot does not match priced source")
+        }
+        jdbc().use { assertThat(count(it, priceFirst)).isZero() }
+    }
+
+    @Test
+    fun `V5 migrates existing priced history without rewriting it`() {
+        val schema = "nav_correction_${UUID.randomUUID().toString().replace("-", "")}"
+        val fixture = Fixture()
+        assertThat(flyway(schema, "4").migrate().migrationsExecuted).isEqualTo(4)
+        jdbc().use { connection ->
+            connection.schema = schema
+            seed(connection, fixture)
+            assertThat(pricedAmount(connection, fixture)).isEqualTo("100.00")
+        }
+
+        assertThat(flyway(schema, "5").migrate().migrationsExecuted).isEqualTo(1)
+        jdbc().use { connection ->
+            connection.schema = schema
+            assertThat(pricedAmount(connection, fixture)).isEqualTo("100.00")
+            connection.autoCommit = false
+            insertJournal(connection, fixture)
+            insertDraft(connection, fixture, "50.000000")
+            connection.commit()
+            assertThat(count(connection, fixture)).isEqualTo(1)
+            assertThat(pricedAmount(connection, fixture)).isEqualTo("100.00")
+        }
+    }
+
+    private fun flyway(schema: String, target: String): Flyway = ConfigProvider.getConfig().let { config ->
+        Flyway.configure()
+            .dataSource(
+                config.getValue("quarkus.datasource.jdbc.url", String::class.java),
+                config.getValue("quarkus.datasource.username", String::class.java),
+                config.getValue("quarkus.datasource.password", String::class.java),
+            )
+            .schemas(schema)
+            .createSchemas(true)
+            .locations("classpath:db/migration")
+            .target(target)
+            .load()
+    }
+
+    private fun pricedAmount(connection: Connection, fixture: Fixture): String =
+        connection.createStatement().use { sql ->
+            sql.executeQuery("SELECT amount FROM unit_transactions WHERE id = '${fixture.transaction}'").use { rows ->
+                assertThat(rows.next()).isTrue()
+                rows.getBigDecimal(1).setScale(2).toPlainString()
+            }
+        }
+
+    private fun backendPid(connection: Connection): Int = connection.createStatement().use { sql ->
+        sql.executeQuery("SELECT pg_backend_pid()").use { rows ->
+            rows.next()
+            rows.getInt(1)
+        }
+    }
+
+    private fun assertWaitingOnSourceLock(backend: ArrayBlockingQueue<Int>, attempt: Future<Throwable?>) {
+        val pid = requireNotNull(backend.poll(5, TimeUnit.SECONDS)) { "writer backend did not start" }
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+        val blocked = jdbc().use { observer ->
+            while (System.nanoTime() < deadline) {
+                if (blockingCount(observer, pid) > 0) return@use true
+                Thread.sleep(20)
+            }
+            false
+        }
+        assertThat(blocked).describedAs("writer backend must wait on a PostgreSQL lock").isTrue()
+        assertThat(attempt.isDone).isFalse()
+    }
+
+    private fun blockingCount(observer: Connection, pid: Int): Int =
+        observer.prepareStatement("SELECT cardinality(pg_blocking_pids(?))").use { sql ->
+            sql.setInt(1, pid)
+            sql.executeQuery().use { rows ->
+                rows.next()
+                rows.getInt(1)
+            }
+        }
+
     private fun seed(connection: Connection, fixture: Fixture) {
+        val isin = "CZ${fixture.fund.toString().replace("-", "").take(10)}"
         connection.createStatement().use { sql ->
             sql.executeUpdate(
                 """INSERT INTO funds
                    (id, name, isin, lei, depositary_reference, custody_account_reference,
                     currency, risk_class, mandatory_conservative, management_fee_rate,
                     launch_nav_per_unit, status, created_at, updated_at)
-                   VALUES ('${fixture.fund}', 'Journal test', 'CZ0000000001', '12345678901234567890',
+                   VALUES ('${fixture.fund}', 'Journal test', '$isin', '12345678901234567890',
                            'test-depositary', 'test-custody', 'CZK', 3, false, 0.01, 1,
                            'ACTIVE', now(), now())""",
             )
