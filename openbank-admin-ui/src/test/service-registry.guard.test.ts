@@ -192,13 +192,6 @@ function catalogShorts(): Set<string> {
   return new Set(parsed.services.map(s => s.short))
 }
 
-/** Catalog module `name`s (the full `openbank-*` directory name, generate-catalog.mjs's key). */
-function catalogNames(): Set<string> {
-  const raw = readFileSync(path.join(ADMIN_UI, 'catalog.json'), 'utf-8')
-  const parsed = JSON.parse(raw) as { services: { name: string }[] }
-  return new Set(parsed.services.map(s => s.name))
-}
-
 function catalogModules(): CatalogFleetModule[] {
   const raw = readFileSync(path.join(ADMIN_UI, 'catalog.json'), 'utf-8')
   return (JSON.parse(raw) as { services: CatalogFleetModule[] }).services
