@@ -6,6 +6,7 @@
 #            openbank-infra/gitops/components/ledger/ledger_rest_ext.rego \
 #            openbank-infra/gitops/components/ledger-pension-co/ledger_pension_co_rest_ext.rego \
 #            openbank-infra/gitops/components/ledger-pension-co/ledger_pension_co_rest_ext_test.rego
+# opa-test-with: openbank-infra/gitops/components/ledger/ledger_rest_ext.rego
 #
 # The mock grants ROLE_OPERATOR the ledger writes via the matrix and keeps operator-read-any
 # live, so the shared client has a FIRING reason on every case below — the veto must beat it.
