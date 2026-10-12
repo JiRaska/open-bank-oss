@@ -56,6 +56,13 @@ class NavCorrectionJournalSchemaIT {
             assertThat(count(connection, fixture)).isZero()
 
             insertJournal(connection, fixture)
+            assertThatThrownBy { connection.commit() }
+                .isInstanceOf(SQLException::class.java)
+                .hasMessageContaining("correction journal units draft is missing")
+            connection.rollback()
+            assertThat(count(connection, fixture)).isZero()
+
+            insertJournal(connection, fixture)
             insertDraft(connection, fixture, "50.000000")
             connection.commit()
             assertThat(count(connection, fixture)).isEqualTo(1)
@@ -128,6 +135,16 @@ class NavCorrectionJournalSchemaIT {
                         "UPDATE unit_transactions SET amount = 101 WHERE id = '${fixture.transaction}'",
                     )
                 }.isInstanceOf(SQLException::class.java)
+                assertThatThrownBy {
+                    sql.executeUpdate(
+                        "UPDATE fund_navs SET nav_per_unit = 3 WHERE id = '${fixture.original}'",
+                    )
+                }.isInstanceOf(SQLException::class.java)
+                assertThatThrownBy {
+                    sql.executeUpdate(
+                        "UPDATE fund_navs SET nav_per_unit = 3 WHERE id = '${fixture.replacement}'",
+                    )
+                }.isInstanceOf(SQLException::class.java)
                 assertThatThrownBy { sql.execute("TRUNCATE nav_correction_obligation_drafts") }
                     .isInstanceOf(SQLException::class.java)
                 assertThatThrownBy {
@@ -178,6 +195,7 @@ class NavCorrectionJournalSchemaIT {
         val order = UUID.randomUUID()
         val transaction = UUID.randomUUID()
         jdbc().use { connection ->
+            connection.autoCommit = false
             connection.createStatement().use { sql ->
                 sql.executeUpdate(
                     """INSERT INTO unit_orders
@@ -204,6 +222,7 @@ class NavCorrectionJournalSchemaIT {
                                2, 1, 2, 2, 0, 4, 2, -2, 0, 'pricing correction', 'test-v1',
                                'maker', 'checker', now(), now())""",
                 )
+                val beforeInvalidDraft = connection.setSavepoint()
                 assertThatThrownBy {
                     sql.executeUpdate(
                         """INSERT INTO nav_correction_obligation_drafts
@@ -213,6 +232,7 @@ class NavCorrectionJournalSchemaIT {
                                    '${fixture.fund}', 'CZK', 'CASH', -2.001)""",
                     )
                 }.isInstanceOf(SQLException::class.java)
+                connection.rollback(beforeInvalidDraft)
                 sql.executeUpdate(
                     """INSERT INTO nav_correction_obligation_drafts
                        (replacement_nav_id, original_transaction_id, contract_id, fund_id,
@@ -221,6 +241,7 @@ class NavCorrectionJournalSchemaIT {
                                '${fixture.fund}', 'CZK', 'CASH', -2.00)""",
                 )
             }
+            connection.commit()
         }
     }
 

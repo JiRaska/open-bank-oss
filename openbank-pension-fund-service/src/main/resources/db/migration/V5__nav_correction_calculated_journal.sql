@@ -1,8 +1,8 @@
 -- #12473: append-only calculated correction evidence and obligation drafts. These rows are NOT
 -- payout instructions or confirmations. Publication stays disabled until the application commits
 -- the complete journal, unit/cash accounting and external instruction lifecycle atomically.
--- Rollback: DROP TRIGGERs, DROP FUNCTION reject_nav_correction_draft_mutation(), DROP TABLE
--- nav_correction_obligation_drafts, DROP TABLE nav_correction_journal, DROP INDEXes below.
+-- Rollback: drop the V5 triggers and functions, then obligation drafts and journal tables,
+-- then the three V5 identity indexes. Keep V1 source tables and their priced rows intact.
 -- Rolling back after writes destroys correction evidence and requires fund-accounting approval.
 
 -- Composite references make the original transaction belong to the recorded NAV/contract/fund,
@@ -104,7 +104,8 @@ BEGIN
       JOIN funds fund ON fund.id = tx.fund_id
      WHERE tx.id = NEW.original_transaction_id
        AND original.id = NEW.original_nav_id
-       AND replacement.corrects_nav_id = original.id;
+       AND replacement.corrects_nav_id = original.id
+     FOR SHARE OF tx, original, replacement, fund;
     IF NOT FOUND THEN
         RAISE EXCEPTION 'correction journal has no priced source';
     END IF;
@@ -126,6 +127,25 @@ CREATE TRIGGER nav_correction_journal_matches_source
     BEFORE INSERT ON nav_correction_journal
     FOR EACH ROW EXECUTE FUNCTION check_nav_correction_journal_snapshot();
 
+-- The snapshot trigger locks both NAV source rows until commit. A concurrent price edit must
+-- wait, then this guard sees the committed journal and rejects the edit. Status transitions are
+-- intentionally still allowed; only the source price used as correction evidence is frozen.
+CREATE FUNCTION reject_nav_correction_source_price_mutation() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.nav_per_unit IS DISTINCT FROM OLD.nav_per_unit AND EXISTS (
+        SELECT 1 FROM nav_correction_journal
+        WHERE original_nav_id = OLD.id OR replacement_nav_id = OLD.id
+    ) THEN
+        RAISE EXCEPTION 'NAV price used by correction journal is immutable';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER nav_correction_source_price_immutable
+    BEFORE UPDATE OF nav_per_unit ON fund_navs
+    FOR EACH ROW EXECUTE FUNCTION reject_nav_correction_source_price_mutation();
+
 CREATE FUNCTION check_nav_correction_draft_delta() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE
     expected NUMERIC;
@@ -144,6 +164,34 @@ $$;
 CREATE TRIGGER nav_correction_draft_delta_matches_journal
     BEFORE INSERT ON nav_correction_obligation_drafts
     FOR EACH ROW EXECUTE FUNCTION check_nav_correction_draft_delta();
+
+-- A journal line with a nonzero delta cannot commit without its matching draft. The constraint
+-- is deferred so the journal and both drafts can be inserted in one database transaction.
+-- This only proves calculated draft completeness, not accounting or payment atomicity.
+CREATE FUNCTION check_nav_correction_draft_completeness() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.cash_delta <> 0 AND NOT EXISTS (
+        SELECT 1 FROM nav_correction_obligation_drafts
+        WHERE replacement_nav_id = NEW.replacement_nav_id
+          AND original_transaction_id = NEW.original_transaction_id AND kind = 'CASH'
+    ) THEN
+        RAISE EXCEPTION 'correction journal cash draft is missing';
+    END IF;
+    IF NEW.units_delta <> 0 AND NOT EXISTS (
+        SELECT 1 FROM nav_correction_obligation_drafts
+        WHERE replacement_nav_id = NEW.replacement_nav_id
+          AND original_transaction_id = NEW.original_transaction_id AND kind = 'UNITS'
+    ) THEN
+        RAISE EXCEPTION 'correction journal units draft is missing';
+    END IF;
+    RETURN NULL;
+END;
+$$;
+
+CREATE CONSTRAINT TRIGGER nav_correction_drafts_complete_at_commit
+    AFTER INSERT ON nav_correction_journal
+    DEFERRABLE INITIALLY DEFERRED
+    FOR EACH ROW EXECUTE FUNCTION check_nav_correction_draft_completeness();
 
 CREATE FUNCTION reject_nav_correction_draft_mutation() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
