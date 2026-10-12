@@ -17,9 +17,8 @@ edit to libs-runtime's OutboxDeadLetterAlertNamingTest cost a full-fleet run on 
               probe broke (exit 1). Used as the gate's run.
   --self-test known-positive + known-negative fixtures, including a consumed testFixtures.
 
-`src/testFixtures/` is dropped too, but ONLY for a library no build script consumes via
-`testFixtures(project(":<lib>"))` — a consumed fixture is another module's test input and
-stays code-global. Anything unrecognised stays in the output (over-build is the safe side).
+`src/testFixtures/` remains code-global for every shared library, as required by #11560.
+Anything unrecognised stays in the output (over-build is the safe side).
 """
 from __future__ import annotations
 
@@ -54,7 +53,7 @@ def keep(paths: list[str], consumed: set[str]) -> list[str]:
     kept = []
     for p in paths:
         m = LIB_TEST.match(p)
-        if m and (m.group(2) == "test" or m.group(1) not in consumed):
+        if m and m.group(2) == "test":
             continue
         kept.append(p)
     return kept
@@ -88,7 +87,7 @@ def self_test() -> int:
           "openbank-card-processing-service/src/main/x/A.kt"],
          ["openbank-card-processing-service", "openbank-libs-runtime"]),
         (["openbank-libs-testing/src/testFixtures/x/Kit.kt"], mods),        # consumed
-        (["openbank-libs-runtime/src/testFixtures/x/Kit.kt"], ["openbank-libs-runtime"]),
+        (["openbank-libs-runtime/src/testFixtures/x/Kit.kt"], mods),
         (["openbank-libs-runtime/build.gradle.kts"], mods),
         (["openbank-libs-runtime/src/test/x/T.kt", "gradle/libs.versions.toml"], mods),
     ]
@@ -111,10 +110,9 @@ def main(argv: list[str]) -> int:
     root = Path(__file__).resolve().parents[2]
     if "--census" in argv:
         libs = sorted(d.name for d in root.glob("openbank-libs*") if (d / "src/test").is_dir())
-        consumed = consumed_fixtures(root)
         print(f"SUBJECTS={len(libs)}")
         for lib in libs:
-            fx = "code-global (consumed)" if lib in consumed else "per-module"
+            fx = "code-global"
             print(f"  {lib}: src/test per-module; testFixtures {fx}")
         return 0 if libs else 1
     paths = [ln.strip() for ln in sys.stdin if ln.strip()]
