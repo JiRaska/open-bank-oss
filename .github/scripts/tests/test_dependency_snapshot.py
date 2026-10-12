@@ -136,11 +136,11 @@ class RunnerTests(unittest.TestCase):
                 if case == 'second-fails' and len(calls) == 2:
                     raise RuntimeError('producer failed')
                 coverage = Path(child_env['DEPENDENCY_GRAPH_COVERAGE_DIR'])
-                tasks = [arg for arg in command if arg.endswith(':ForceDependencyResolutionPlugin_resolveProjectDependencies')]
+                tasks = [arg for arg in command if arg.endswith(':OpenBankResolveDependencyGraph')]
                 for index, task in enumerate(tasks):
                     if case == 'missing-receipt' and index == 0:
                         continue
-                    project = task.removesuffix(':ForceDependencyResolutionPlugin_resolveProjectDependencies') or ':'
+                    project = task.removesuffix(':OpenBankResolveDependencyGraph') or ':'
                     receipt = {'version': 1, 'sha': SHA, 'project': project, 'configurations': ['runtimeClasspath']}
                     if case == 'wrong-receipt':
                         receipt['sha'] = '2' * 40
@@ -170,6 +170,8 @@ class RunnerTests(unittest.TestCase):
                     self.assertEqual(timeouts, [240, 10] if case == 'budget-truncated' else [240, 180])
                     self.assertTrue((output / 'merged.json').is_file())
                     self.assertTrue(all('--continue' not in cmd for cmd in calls))
+                    self.assertTrue(all('--configure-on-demand' in cmd for cmd in calls))
+                    self.assertTrue(all('--no-configure-on-demand' not in cmd for cmd in calls))
                 else:
                     with self.assertRaises((ValueError, RuntimeError)):
                         subject.generate(root, output, env)

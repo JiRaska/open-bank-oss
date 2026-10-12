@@ -80,8 +80,6 @@ class BuildscriptFreeMarkerTests(unittest.TestCase):
                 "buildscript { repositories { maven { url = uri('repo') } }; "
                 f"dependencies {{ classpath 'org.freemarker:freemarker:{version}' }} }}\n"
             )
-            if resolver:
-                build += "tasks.register('ForceDependencyResolutionPlugin_resolveProjectDependencies')\n"
             (fixture / 'build.gradle').write_text(build)
             artifact = fixture / 'repo/org/freemarker/freemarker' / version
             artifact.mkdir(parents=True)
@@ -91,7 +89,7 @@ class BuildscriptFreeMarkerTests(unittest.TestCase):
             )
             with ZipFile(artifact / f'freemarker-{version}.jar', 'w') as jar:
                 jar.writestr('META-INF/MANIFEST.MF', 'Manifest-Version: 1.0\n')
-            task = ('ForceDependencyResolutionPlugin_resolveProjectDependencies'
+            task = ('OpenBankResolveDependencyGraph'
                     if resolver else 'VerifyBuildscriptFreeMarker')
             env = dict(os.environ, GRADLE_USER_HOME=str(self.gradle_home))
             # A daemon can keep writing into the temporary Gradle home after this
@@ -131,7 +129,7 @@ class BuildscriptFreeMarkerTests(unittest.TestCase):
         result = self.run_case('2.3.35', resolver=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertLess(result.stdout.index(':VerifyBuildscriptFreeMarker SKIPPED'),
-                        result.stdout.index(':ForceDependencyResolutionPlugin_resolveProjectDependencies SKIPPED'))
+                        result.stdout.index(':OpenBankResolveDependencyGraph SKIPPED'))
 
 
 # Needs the graph plugin setup-gradle injects; dependency-submission.yml runs it and fails
@@ -162,9 +160,9 @@ class ResolutionGuardTests(unittest.TestCase):
                        DEPENDENCY_GRAPH_COVERAGE_DIR=str(coverage))
             result = subprocess.run(
                 [str(ROOT / 'gradlew'), '-p', str(fixture), '--init-script', str(GUARD),
-                 '--no-daemon', '--no-configuration-cache', '--max-workers=1',
+                 '--no-daemon', '--no-configuration-cache', '--configure-on-demand', '--max-workers=1',
                  '-Dorg.gradle.jvmargs=-Xmx512m',
-                 ':ForceDependencyResolutionPlugin_resolveAllDependencies'],
+                 ':OpenBankResolveDependencyGraph'],
                 env=env, capture_output=True, text=True, timeout=120, check=False)
             receipts = [json.loads(p.read_text()) for p in coverage.glob('*.json')]
             return result, receipts

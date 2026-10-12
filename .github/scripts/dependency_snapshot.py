@@ -214,15 +214,15 @@ def generate(repo, output, env, extra_arguments=()):
         projects = [':' + module for module in modules[i:i + 4]]
         if i == 0:
             projects.insert(0, ':')
-        tasks = [p.rstrip(':') + ':ForceDependencyResolutionPlugin_resolveProjectDependencies'
+        tasks = [p.rstrip(':') + ':OpenBankResolveDependencyGraph'
                  for p in projects]
         child_env = dict(env, DEPENDENCY_GRAPH_REPORT_DIR=str(reports),
                          DEPENDENCY_GRAPH_COVERAGE_DIR=str(coverage))
-        # Graph plugin 1.5.0 registers resolver tasks in projectsEvaluated. Demand
-        # configuration cannot select those tasks (root and non-root shards both
-        # reproduced task-not-found); keep it off until registration is redesigned.
+        # Register our strict resolver before project evaluation so demand
+        # configuration can select it. The graph plugin still captures the
+        # resolved configurations and writes the snapshot after a successful build.
         command = ['./gradlew', '--init-script', str(repo / '.github/scripts/dependency-resolution-strict.init.gradle'),
-                   '--no-daemon', '--no-configuration-cache', '--no-configure-on-demand',
+                   '--no-daemon', '--no-configuration-cache', '--configure-on-demand',
                    '--max-workers=2', '-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g',
                    *extra_arguments, *tasks]
         started = time.monotonic()
