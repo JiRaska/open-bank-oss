@@ -138,6 +138,7 @@ Chyby používají `ApiError` z `openbank-libs` (`{ correlationId, status, code,
 |---|---|---|
 | 400 | (validace) | chybějící `Idempotency-Key`, vadné tělo / enum |
 | 400 | `AMOUNT_SCALE_EXCEEDED` / `CURRENCY_UNSUPPORTED` / `VALIDATION_ERROR` | `amount` + `currency` nelze sestavit jako kernel `Money` (více desetinných míst, než měna dovoluje, např. `100.005 CZK`; není kód ISO 4217 s dílčí jednotkou; chybí nebo je mimo rozsah), nebo je částka nulová či záporná (#11604). Odmítnuto před vyhledáním `Idempotency-Key`: nic se neuloží a opravený požadavek se stejným klíčem projde |
+| 400 | `CURRENCY_NOT_ALLOWED` | Platná měna jiná než CZK je na tuzemské platební cestě odmítnuta (#12059), včetně převodů na technický účet. Kontrola proběhne před navázáním `Idempotency-Key`; nic se neuloží a opravený požadavek v CZK se stejným klíčem projde. `violations[]` uvádí `currency` bez opakování hodnoty. |
 | 401 | unauthorized | chybějící / neplatný token |
 | 403 | forbidden | chybí role pro endpoint (nebo OPA deny v enforce módu) |
 | 404 | `NOT_FOUND` | id platby neexistuje (`DomesticPaymentNotFoundException`) |

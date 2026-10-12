@@ -109,7 +109,7 @@ class CommunicationStyleServiceTest {
     // @Test and does return a value, but the guard reads shape rather than intent, and a shape
     // that is unsafe on the tests next to it is not worth defending here (mirrors
     // SpendReservationServiceTest's `reserve()` helper).
-    private fun draft(maker: String = "editor-a"): StyleVersion {
+    private fun draft(maker: String = "editor-a", uiMessages: Map<String, String> = emptyMap()): StyleVersion {
         val command = DraftStyleVersionCommand(
             personaKey = persona.key,
             tone = "warm",
@@ -120,8 +120,54 @@ class CommunicationStyleServiceTest {
             forbiddenTerms = emptyList(),
             signature = "Vaše banka",
             maker = maker,
+            uiMessages = uiMessages,
         )
         return runBlocking { service.draft(command) }
+    }
+
+    @Test
+    fun `approved UI messages survive publication and draft cannot alter published copy`() {
+        val copy = mapOf("cs.status.loading" to "Už hledám.", "en.status.loading" to "Checking for you.")
+        val first = draft(uiMessages = copy)
+        runBlocking {
+            service.submit(first.id, "editor-a")
+            service.publish(first.id, "checker-b")
+        }
+        draft(uiMessages = mapOf("cs.status.loading" to "Nový koncept."))
+        assertThat(runBlocking { service.published(persona.key) }.uiMessages).isEqualTo(copy)
+        assertThat(events.published!!.uiMessages).isEqualTo(copy)
+    }
+
+    @Test
+    fun `invalid UI copy never persists`() {
+        listOf(
+            mapOf("cs.balance" to "0"),
+            mapOf("cs.pay.unknown.body" to "Platbu můžeš odeslat znovu."),
+            mapOf("en.err.moveUnknown" to "Try the transfer again now."),
+            mapOf("cs.status.loading" to "<b>Text</b>"),
+            mapOf("cs.status.loading" to " "),
+            mapOf("cs.status.loading" to "x".repeat(241)),
+        ).forEach { copy ->
+            assertThatThrownBy { draft(uiMessages = copy) }.isInstanceOf(IllegalArgumentException::class.java)
+        }
+        assertThat(styleVersions.rows).isEmpty()
+    }
+
+    @Test
+    fun `customer error and status copy spans core journeys`() {
+        val copy = mapOf(
+            "cs.app.sessionExpired" to "Přihlaste se prosím znovu.",
+            "en.home.acctLoadFailed" to "Accounts are temporarily unavailable.",
+            "cs.cards.err.network" to "Ke kartám se nyní nelze připojit.",
+            "en.loanApply.failed" to "We could not submit your application.",
+            "cs.sdd.statusSuspended" to "Inkaso je pozastavené.",
+            "en.deleg.err.NETWORK" to "Sharing is temporarily unavailable.",
+            "cs.fx.history.error" to "Historii kurzů nyní nelze načíst.",
+            "en.so.err.create" to "We could not create the standing order.",
+            "cs.msig.err.sign" to "Schválení se nepovedlo.",
+        )
+        draft(uiMessages = copy)
+        assertThat(styleVersions.rows.values.single().uiMessages).isEqualTo(copy)
     }
 
     @Test

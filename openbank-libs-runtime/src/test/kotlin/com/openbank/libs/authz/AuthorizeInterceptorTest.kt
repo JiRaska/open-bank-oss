@@ -10,6 +10,7 @@ import com.openbank.libs.approval.ApprovalStatus
 import com.openbank.libs.approval.ApprovalStore
 import com.openbank.libs.approval.InMemoryApprovalStore
 import com.openbank.libs.approval.InvalidApprovalStateException
+import com.openbank.libs.approval.MakerActorKind
 import com.openbank.libs.approval.PendingApproval
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.security.SecurityTelemetry
@@ -26,6 +27,7 @@ import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.assertj.core.api.Assertions.catchThrowableOfType
+import org.eclipse.microprofile.jwt.JsonWebToken
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.lang.reflect.Method
@@ -95,6 +97,7 @@ class AuthorizeInterceptorTest {
             clock = Clock.fixed(Instant.parse("2026-06-22T10:20:00Z"), ZoneOffset.UTC)
         }
         every { sc.userPrincipal } returns JavaPrincipal { "user-42" }
+        every { identity.principal } returns JavaPrincipal { "user-42" }
     }
 
     private fun makeCtx(method: Method, vararg params: Any?): InvocationContext {
@@ -567,6 +570,9 @@ class AuthorizeInterceptorTest {
     @Test
     fun `principal type AI_AGENT when sub starts with agent colon`() {
         every { sc.userPrincipal } returns JavaPrincipal { "agent:onboarding" }
+        every { identity.principal } returns mockk<JsonWebToken> {
+            every { subject } returns "agent:onboarding"
+        }
         every { identity.roles } returns setOf("ROLE_AGENT")
         val capturedQuery = mutableListOf<AuthzQuery>()
         val pdp = object : PolicyDecisionPoint {
@@ -696,9 +702,127 @@ class AuthorizeInterceptorTest {
         assertThat(thrown.response.status).isEqualTo(202)
         assertThat(store.created).hasSize(1)
         assertThat(store.created[0].makerId).isEqualTo("user-42")
+        assertThat(store.created[0].makerActorKind).isEqualTo(MakerActorKind.HUMAN)
         assertThat(store.created[0].action).isEqualTo("party.read")
         assertThat(counter("openbank.authz.four_eyes", "action", "party.read", "outcome", "pending_approval"))
             .isEqualTo(1.0)
+    }
+
+    @Test
+    fun `four-eyes records authenticated agent and service-account provenance distinctly`() {
+        every { identity.roles } returns setOf("ROLE_OPERATOR")
+        val store = InMemoryApprovalStore()
+        wirePdpAndStore(store)
+
+        every { sc.userPrincipal } returns JavaPrincipal { "Review Desk" }
+        every { identity.principal } returns mockk<JsonWebToken> {
+            every { subject } returns "agent:reviewer"
+            every { getClaim<String>("azp") } returns null
+            every { getClaim<String>("preferred_username") } returns null
+        }
+        catchThrowableOfType(WebApplicationException::class.java) {
+            interceptor.authorize(makeCtx(annotatedMethod))
+        }
+        every { sc.userPrincipal } returns JavaPrincipal { "Batch Worker" }
+        every { identity.principal } returns mockk<JsonWebToken> {
+            every { subject } returns "service-subject-id"
+            every { getClaim<String>("preferred_username") } returns "service-account-openbank-test"
+            every { getClaim<String>("azp") } returns "openbank-test"
+        }
+        catchThrowableOfType(WebApplicationException::class.java) {
+            interceptor.authorize(makeCtx(annotatedMethod))
+        }
+
+        assertThat(store.created.map { it.makerActorKind })
+            .containsExactly(MakerActorKind.AI_AGENT, MakerActorKind.SERVICE_ACCOUNT)
+    }
+
+    @Test
+    fun `four-eyes records an authenticated customer as customer party`() {
+        every { identity.roles } returns setOf("ROLE_CUSTOMER")
+        every { sc.userPrincipal } returns JavaPrincipal { "customer-42" }
+        every { identity.principal } returns mockk<JsonWebToken> {
+            every { subject } returns "customer-subject-42"
+            every { getClaim<String>("azp") } returns null
+            every { getClaim<String>("preferred_username") } returns null
+        }
+        val store = InMemoryApprovalStore()
+        wirePdpAndStore(store)
+
+        catchThrowableOfType(WebApplicationException::class.java) {
+            interceptor.authorize(makeCtx(annotatedMethod))
+        }
+
+        assertThat(store.created.map { it.makerActorKind }).containsExactly(MakerActorKind.CUSTOMER_PARTY)
+    }
+
+    @Test
+    fun `four-eyes does not trust an agent-looking display name without an agent subject`() {
+        every { identity.roles } returns setOf("ROLE_OPERATOR")
+        val store = InMemoryApprovalStore()
+        wirePdpAndStore(store)
+
+        every { sc.userPrincipal } returns JavaPrincipal { "agent:forged-display" }
+        every { identity.principal } returns mockk<JsonWebToken> {
+            every { subject } returns "human-subject-id"
+            every { getClaim<String>("azp") } returns null
+            every { getClaim<String>("preferred_username") } returns null
+        }
+        catchThrowableOfType(WebApplicationException::class.java) {
+            interceptor.authorize(makeCtx(annotatedMethod))
+        }
+        every { identity.principal } returns JavaPrincipal { "agent:unverified" }
+        catchThrowableOfType(WebApplicationException::class.java) {
+            interceptor.authorize(makeCtx(annotatedMethod))
+        }
+
+        assertThat(store.created.map { it.makerActorKind })
+            .containsExactly(MakerActorKind.HUMAN, MakerActorKind.UNKNOWN)
+    }
+
+    @Test
+    fun `four-eyes does not trust a service-account-looking display name without token provenance`() {
+        every { identity.roles } returns setOf("ROLE_OPERATOR")
+        val store = InMemoryApprovalStore()
+        wirePdpAndStore(store)
+
+        every { sc.userPrincipal } returns JavaPrincipal { "service-account-forged-display" }
+        every { identity.principal } returns mockk<JsonWebToken> {
+            every { subject } returns "human-subject-id"
+            every { getClaim<String>("preferred_username") } returns "human-user"
+            every { getClaim<String>("azp") } returns "openbank-test"
+        }
+        catchThrowableOfType(WebApplicationException::class.java) {
+            interceptor.authorize(makeCtx(annotatedMethod))
+        }
+        every { identity.principal } returns mockk<JsonWebToken> {
+            every { subject } returns "human-subject-id"
+            every { getClaim<String>("preferred_username") } returns "service-account-openbank-test"
+            every { getClaim<String>("azp") } returns "browser-client"
+        }
+        catchThrowableOfType(WebApplicationException::class.java) {
+            interceptor.authorize(makeCtx(annotatedMethod))
+        }
+        every { identity.principal } returns mockk<JsonWebToken> {
+            every { subject } returns "human-subject-id"
+            every { getClaim<String>("preferred_username") } returns "service-account-openbank-test"
+            every { getClaim<String>("azp") } returns null
+        }
+        catchThrowableOfType(WebApplicationException::class.java) {
+            interceptor.authorize(makeCtx(annotatedMethod))
+        }
+        every { identity.principal } returns JavaPrincipal { "service-account-unverified" }
+        catchThrowableOfType(WebApplicationException::class.java) {
+            interceptor.authorize(makeCtx(annotatedMethod))
+        }
+
+        assertThat(store.created.map { it.makerActorKind })
+            .containsExactly(
+                MakerActorKind.HUMAN,
+                MakerActorKind.UNKNOWN,
+                MakerActorKind.UNKNOWN,
+                MakerActorKind.UNKNOWN,
+            )
     }
 
     @Test

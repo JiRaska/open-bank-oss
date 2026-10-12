@@ -1,7 +1,8 @@
 openapi: "3.0.3"
 info:
   title: OpenBank Settlement Service
-  version: "1.9.0"
+  # 1.9 -> 1.10 (#11588): additive verified makerActorKind on approval responses.
+  version: "1.10.0"
   description: "Settlement orchestration service (ADR-0101 P3)"
 paths:
   /api/v1/settlements:
@@ -199,6 +200,7 @@ components:
         resourceId: { type: string, nullable: true }
         status: { type: string, enum: [PENDING, APPROVED, REJECTED, EXECUTED] }
         makerId: { type: string, nullable: true }
+        makerActorKind: { type: string, enum: [HUMAN, AI_AGENT, SERVICE_ACCOUNT, CUSTOMER_PARTY, UNKNOWN] }
         createdAt: { type: string, format: date-time, nullable: true }
         decidedBy: { type: string, nullable: true }
     SettlementApprovalDetail:
@@ -209,6 +211,7 @@ components:
         resourceId: { type: string, nullable: true }
         status: { type: string, enum: [PENDING, APPROVED, REJECTED, EXECUTED] }
         makerId: { type: string }
+        makerActorKind: { type: string, enum: [HUMAN, AI_AGENT, SERVICE_ACCOUNT, CUSTOMER_PARTY, UNKNOWN] }
         createdAt: { type: string, format: date-time }
         decidedBy: { type: string, nullable: true }
         decidedAt: { type: string, format: date-time, nullable: true }

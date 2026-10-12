@@ -115,6 +115,7 @@ class SettlementFourEyesFlowIT {
         given().get("$APPROVALS/$approvalId").then().statusCode(200)
             .body("status", equalTo("PENDING"))
             .body("makerId", equalTo(MAKER))
+            .body("makerActorKind", equalTo("HUMAN"))
             .body("summary", containsString(instruction.getValue("payerAccountId")))
             // Canonical JSON of the bound arguments: the amount renders as a plain number.
             .body("summary", containsString("\"amount\":250"))
@@ -166,6 +167,8 @@ class SettlementFourEyesFlowIT {
             .body("expired", equalTo(false))
         given().get("$APPROVALS/${UUID.randomUUID()}").then().statusCode(404)
         assertThat(evidence()).containsExactly("PENDING", "APPROVED", "EXECUTED")
+        assertThat(evidenceField("makerActorKind")).containsExactly("HUMAN", "HUMAN", "HUMAN")
+        assertThat(evidenceField("schemaVersion")).containsExactly("2", "2", "2")
     }
 
     private fun settlementCount(): Long = scalar(
@@ -189,9 +192,11 @@ class SettlementFourEyesFlowIT {
     }
 
     /** Status of each transition's outbox evidence for the approval, in commit order. */
-    private fun evidence(): List<String> = dataSource.connection.use { connection ->
+    private fun evidence(): List<String> = evidenceField("status")
+
+    private fun evidenceField(field: String): List<String> = dataSource.connection.use { connection ->
         connection.prepareStatement(
-            "SELECT payload::jsonb ->> 'status' FROM settlement_outbox " +
+            "SELECT payload::jsonb ->> '$field' FROM settlement_outbox " +
                 "WHERE event_type = 'SETTLEMENT_OPERATOR_APPROVAL_CHANGED' AND aggregate_id = ? ORDER BY id",
         ).use { query ->
             query.setObject(1, UUID.fromString(approvalId))

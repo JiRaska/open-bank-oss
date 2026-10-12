@@ -44,6 +44,7 @@ class InMemoryApprovalStore(
         makerId: String,
         ttlSeconds: Long,
         binding: ApprovalRequestBinding?,
+        makerActorKind: MakerActorKind,
     ): PendingApproval = synchronized(lock) {
         val open = backing.filterKeys { it.startsWith("$namespace:") }.values
             .count { it.status == ApprovalStatus.PENDING && it.action == action && it.makerId == makerId }
@@ -57,6 +58,7 @@ class InMemoryApprovalStore(
             createdAt = OffsetDateTime.parse("2026-06-22T10:20:00Z"),
             requestFingerprint = binding?.fingerprint,
             summary = binding?.summary,
+            makerActorKind = makerActorKind,
         )
         created += approval
         backing[key(approval.id)] = approval

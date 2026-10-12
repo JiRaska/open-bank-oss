@@ -9,6 +9,7 @@ import com.openbank.libs.approval.ApprovalRequestBinding
 import com.openbank.libs.approval.ApprovalStatus
 import com.openbank.libs.approval.ApprovalStore
 import com.openbank.libs.approval.InvalidApprovalStateException
+import com.openbank.libs.approval.MakerActorKind
 import com.openbank.libs.approval.PendingApproval
 import com.openbank.libs.approval.SelfApprovalNotAllowedException
 import com.openbank.libs.domain.identifiers.Ids
@@ -77,6 +78,7 @@ class RedisApprovalStore(
         makerId: String,
         ttlSeconds: Long,
         binding: ApprovalRequestBinding?,
+        makerActorKind: MakerActorKind,
     ): PendingApproval {
         val approval = PendingApproval(
             id = Ids.newId().toString(),
@@ -87,6 +89,7 @@ class RedisApprovalStore(
             createdAt = OffsetDateTime.now(clock),
             requestFingerprint = binding?.fingerprint,
             summary = binding?.summary,
+            makerActorKind = makerActorKind,
         )
         val created = redis.eval(
             CREATE_SCRIPT,
@@ -193,7 +196,7 @@ class RedisApprovalStore(
             .orElse(DEFAULT_MAX_PENDING_PER_MAKER_ACTION)
 
         // KEYS: item, pending index, maker index.
-        // ARGV: id, nowMs, ttlSeconds, limit, action, resourceId, makerId, status, createdAt, fp, summary.
+        // ARGV: id, nowMs, ttlSeconds, limit, action, resourceId, makerId, status, createdAt, fp, summary, actorKind.
         private const val CREATE_SCRIPT = """
             local now = tonumber(ARGV[2])
             local ttl = tonumber(ARGV[3])
@@ -201,6 +204,7 @@ class RedisApprovalStore(
             if redis.call('ZCARD', KEYS[3]) >= tonumber(ARGV[4]) then return 0 end
             redis.call('HSET', KEYS[1], 'action', ARGV[5], 'resourceId', ARGV[6], 'makerId', ARGV[7],
                 'status', ARGV[8], 'createdAt', ARGV[9], 'fp', ARGV[10], 'summary', ARGV[11],
+                'actorKind', ARGV[12],
                 'makerIndex', KEYS[3])
             redis.call('EXPIRE', KEYS[1], ttl)
             local expiry = now + ttl * 1000
@@ -233,7 +237,7 @@ class RedisApprovalStore(
             return {'OK'}
         """
 
-        // KEYS: legacy item, new item. ARGV: expected legacy value, 7 hash fields, decidedBy, decidedAt.
+        // KEYS: legacy item, new item. ARGV: expected legacy value, 8 hash fields, decidedBy, decidedAt.
         // Moves the record only if it is still exactly what was read, so no concurrent write is lost.
         private const val MIGRATE_SCRIPT = """
             if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
@@ -241,7 +245,7 @@ class RedisApprovalStore(
             if pttl <= 0 then return 0 end
             redis.call('HSET', KEYS[2], 'action', ARGV[2], 'resourceId', ARGV[3], 'makerId', ARGV[4],
                 'status', ARGV[5], 'createdAt', ARGV[6], 'fp', ARGV[7], 'summary', ARGV[8],
-                'decidedBy', ARGV[9], 'decidedAt', ARGV[10])
+                'actorKind', ARGV[9], 'decidedBy', ARGV[10], 'decidedAt', ARGV[11])
             redis.call('PEXPIRE', KEYS[2], pttl)
             redis.call('DEL', KEYS[1])
             return 1
@@ -289,6 +293,7 @@ private fun fields(a: PendingApproval): List<String> = listOf(
     a.createdAt.toString(),
     a.requestFingerprint.orEmpty(),
     a.summary.orEmpty(),
+    a.makerActorKind.name,
 )
 
 private fun decodeHash(id: String, f: Map<String, String>): PendingApproval? {
@@ -306,6 +311,8 @@ private fun decodeHash(id: String, f: Map<String, String>): PendingApproval? {
         decidedAt = f["decidedAt"]?.ifEmpty { null }?.let(OffsetDateTime::parse),
         requestFingerprint = f["fp"]?.ifEmpty { null },
         summary = f["summary"]?.ifEmpty { null },
+        makerActorKind = f["actorKind"]?.let { value -> MakerActorKind.entries.firstOrNull { it.name == value } }
+            ?: MakerActorKind.UNKNOWN,
     )
 }
 

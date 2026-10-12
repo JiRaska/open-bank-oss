@@ -14,6 +14,8 @@ import jakarta.enterprise.inject.Instance
 import jakarta.inject.Inject
 import java.math.BigDecimal
 import java.time.Duration
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Central façade for all OpenBank domain metrics (ADR-0077 Phase 2).
@@ -53,6 +55,8 @@ class DomainMetrics {
     lateinit var registryInstance: Instance<MeterRegistry>
 
     private fun reg(): MeterRegistry? = if (registryInstance.isResolvable) registryInstance.get() else null
+
+    private val outboxPurgeCapStates = ConcurrentHashMap<String, AtomicInteger>()
 
     companion object {
         /**
@@ -385,6 +389,40 @@ class DomainMetrics {
      */
     fun outboxDead(service: String) {
         counter("openbank.outbox.dead", "service", service)
+    }
+
+    /**
+     * Add [count] SENT outbox rows deleted by the retention job (ADR-0327 D8). A cold pod exposes
+     * no series until the first purge; alert on the job's workflow liveness, not on this counter —
+     * zero rows purged is the healthy reading for a quiet outbox.
+     *
+     * @param service the outbox's `retentionLabel`
+     */
+    fun outboxPurged(service: String, count: Long) {
+        if (count <= 0) return
+        reg()?.let {
+            Counter.builder(
+                "openbank.outbox.purged",
+            ).tags("service", service, "status", "SENT").register(it).increment(count.toDouble())
+        }
+    }
+
+    /** Increment when one outbox's SENT-row retention run fails; the other outboxes still run. */
+    fun outboxPurgeFailed(service: String) {
+        counter("openbank.outbox.purge.failed", "service", service)
+    }
+
+    /** A full retention cap cannot prove that every eligible SENT row was deleted; retain that state until a short run. */
+    fun outboxPurgeCapReached(service: String, reached: Boolean) {
+        val registry = reg() ?: return
+        val state = outboxPurgeCapStates.computeIfAbsent(service) {
+            AtomicInteger().also { value ->
+                Gauge.builder("openbank.outbox.purge.cap.reached", value) { it.get().toDouble() }
+                    .tag("service", service)
+                    .register(registry)
+            }
+        }
+        state.set(if (reached) 1 else 0)
     }
 
     /**

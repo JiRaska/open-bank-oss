@@ -124,12 +124,22 @@ class NotificationResourceRedactionTest {
 
     @Test
     fun `list - a partyId routes to the party-scoped query, not the unscoped one`(): Unit = runBlocking {
-        coEvery { repo.pageByParty(partyId, 2, 20) } returns Pair(emptyList(), 0L)
+        coEvery { repo.pageByParty(partyId, 2, 20) } returns Triple(emptyList(), 0L, 0L)
 
         resource.listNotifications(2, 20, partyId)
 
         coVerify(exactly = 1) { repo.pageByParty(partyId, 2, 20) }
         coVerify(exactly = 0) { repo.pageAll(any(), any()) }
+    }
+
+    @Test
+    fun `party list reports the exact unread count beyond the current page`(): Unit = runBlocking {
+        coEvery { repo.pageByParty(partyId, 0, 20) } returns Triple(emptyList(), 135L, 42L)
+
+        val view = body(resource.listNotifications(0, 20, partyId))
+
+        assertThat(view["total"]).isEqualTo(135L)
+        assertThat(view["unreadCount"]).isEqualTo(42L)
     }
 
     @Test

@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.14.1](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.14.0...sdd-service-v0.14.1) (2026-10-11)
+
+
+### Security
+
+* **sca:** scoped downstream access for pension-service (ADR-0335) ([#12419](https://github.com/JiRaska/open-bank-oss/issues/12419)) ([21bb0e9](https://github.com/JiRaska/open-bank-oss/commit/21bb0e9d2a9e44394ec9bb1d6eac8ca7f80556a0))
+
+## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.13.6...sdd-service-v0.14.0) (2026-10-09)
+
+
+### Features
+
+* **libs:** purge SENT outbox rows fleet-wide with one shared retention job ([#11899](https://github.com/JiRaska/open-bank-oss/issues/11899)) ([b322ed7](https://github.com/JiRaska/open-bank-oss/commit/b322ed7116137ecc8f132dc79cd79444c995bb2f))
+
 ## [0.13.6](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.13.5...sdd-service-v0.13.6) (2026-10-03)
 
 

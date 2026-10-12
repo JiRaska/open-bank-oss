@@ -6,6 +6,7 @@ package com.openbank.libs.approval.web
 
 import com.openbank.libs.approval.ApprovalStatus
 import com.openbank.libs.approval.InMemoryApprovalStore
+import com.openbank.libs.approval.MakerActorKind
 import com.openbank.libs.approval.SelfApprovalNotAllowedException
 import io.mockk.every
 import io.mockk.mockk
@@ -52,7 +53,12 @@ class ApprovalEndpointSupportTest {
 
     @Test
     fun `a different checker approves, and the response carries the wire shape`(): Unit = runBlocking {
-        val approval = store.create("opsmessage.compose", "res-1", "maker-1")
+        val approval = store.create(
+            "opsmessage.compose",
+            "res-1",
+            "maker-1",
+            makerActorKind = MakerActorKind.AI_AGENT,
+        )
 
         val response = support.decide(approval.id, DecideApprovalRequest(approve = true)) { identityOf("checker-1") }
 
@@ -67,6 +73,7 @@ class ApprovalEndpointSupportTest {
         assertThat(body.status).isEqualTo("APPROVED")
         assertThat(body.decidedBy).isEqualTo("checker-1")
         assertThat(body.makerId).isEqualTo("maker-1")
+        assertThat(body.makerActorKind).isEqualTo("AI_AGENT")
         assertThat(body.resourceId).isEqualTo("res-1")
         assertThat(body.createdAt).isEqualTo(approval.createdAt.toString())
     }

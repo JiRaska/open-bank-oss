@@ -35,6 +35,7 @@ data class DraftStyleVersionCommand(
     val forbiddenTerms: List<String>,
     val signature: String?,
     val maker: String,
+    val uiMessages: Map<String, String> = emptyMap(),
 )
 
 @ApplicationScoped
@@ -54,7 +55,9 @@ class CommunicationStyleService(
     suspend fun draft(command: DraftStyleVersionCommand): StyleVersion {
         val persona = personas.findByKey(command.personaKey)
             ?: throw PersonaNotFoundException("persona '${command.personaKey}' not found")
+        com.openbank.communication.domain.UiMessages.validate(command.personaKey, command.uiMessages)
         val fields = buildMap {
+            command.uiMessages.forEach { (k, v) -> put("uiMessages.$k", v) }
             put("tone", command.tone)
             put("formality", command.formality)
             put("formOfAddress", command.formOfAddress)
@@ -81,6 +84,7 @@ class CommunicationStyleService(
             forbiddenTerms = command.forbiddenTerms,
             signature = command.signature,
             maker = command.maker,
+            uiMessages = command.uiMessages,
             createdAt = now,
             decidedBy = null,
             decidedAt = null,
@@ -183,6 +187,7 @@ class CommunicationStyleService(
     private fun StyleVersion.toPublishedStyle(personaKey: String) = PublishedStyle(
         personaKey = personaKey,
         styleVersion = version,
+        uiMessages = uiMessages,
         tone = tone,
         formality = formality,
         formOfAddress = formOfAddress,

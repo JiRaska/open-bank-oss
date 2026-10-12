@@ -5,17 +5,17 @@
 package com.openbank.notification.infrastructure.push
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.security.EgressRequest
+import com.openbank.libs.security.EgressResolver
+import com.openbank.libs.security.SafeHttpClient
 import com.openbank.notification.application.port.out.PushMessage
 import com.openbank.notification.domain.model.PushResult
+import com.openbank.notification.infrastructure.egress.NotificationEgress
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
-import java.net.URI
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
 import java.security.PrivateKey
 import java.time.Duration
 import java.util.Base64
@@ -31,8 +31,9 @@ import java.util.Optional
  *
  * Auth flow: build a short-lived RS256 JWT assertion signed by the service-account private key,
  * exchange it for an OAuth2 access token (cached until 60s before expiry), then POST the message
- * to `/v1/projects/{projectId}/messages:send`. All I/O is non-blocking ([HttpClient.sendAsync]
- * bridged to Mutiny) so it composes inside the consumer's reactive chain.
+ * to `/v1/projects/{projectId}/messages:send`. Egress goes through [SafeHttpClient] (ADR-0320 P1):
+ * the token URI comes from the service-account JSON, so it must name an allow-listed host. The
+ * blocking call runs on the worker pool, so it composes inside the consumer's reactive chain.
  */
 @ApplicationScoped
 class FcmPushSender {
@@ -64,8 +65,20 @@ class FcmPushSender {
 
     private val account: ServiceAccount? by lazy { parseAccount() }
 
-    private val http: HttpClient by lazy {
-        HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build()
+    @ConfigProperty(
+        name = NotificationEgress.ALLOWED_HOSTS_PROPERTY,
+        defaultValue = NotificationEgress.DEFAULT_ALLOWED_HOSTS,
+    )
+    lateinit var allowedHosts: List<String>
+
+    /** Visible for testing: lets a unit test pin a stub host to loopback. */
+    internal var resolver: EgressResolver = EgressResolver.SYSTEM
+
+    /** Test seam for the fixed FCM endpoint; production always uses Google's URL. */
+    internal var testSendUrl: String? = null
+
+    private val http: SafeHttpClient by lazy {
+        NotificationEgress.client(allowedHosts, resolver, CONNECT_TIMEOUT, REQUEST_TIMEOUT, MAX_RESPONSE_BYTES)
     }
 
     @Volatile private var cachedToken: String? = null
@@ -91,20 +104,17 @@ class FcmPushSender {
             return Uni.createFrom().item(cached)
         }
         val assertion = buildAssertion(acct, now)
-        val request = HttpRequest.newBuilder()
-            .uri(URI.create(acct.tokenUri))
-            .header("Content-Type", "application/x-www-form-urlencoded")
-            .timeout(REQUEST_TIMEOUT)
-            .POST(
-                HttpRequest.BodyPublishers.ofString(
-                    "grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=$assertion",
-                ),
-            )
-            .build()
-        return Uni.createFrom().completionStage(http.sendAsync(request, HttpResponse.BodyHandlers.ofString()))
+        val request = EgressRequest(
+            method = "POST",
+            url = acct.tokenUri,
+            headers = mapOf("Content-Type" to "application/x-www-form-urlencoded"),
+            body = "grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=$assertion"
+                .toByteArray(Charsets.UTF_8),
+        )
+        return NotificationEgress.send({ http }, request)
             .map { resp ->
-                check(resp.statusCode() == 200) { "FCM token endpoint returned ${resp.statusCode()}" }
-                val node = objectMapper.readTree(resp.body())
+                check(resp.status == 200) { "FCM token endpoint returned ${resp.status}" }
+                val node = objectMapper.readTree(resp.bodyAsString())
                 val token = node.path("access_token").asText()
                 val expiresIn = node.path("expires_in").asLong(3600L)
                 cachedToken = token
@@ -135,16 +145,15 @@ class FcmPushSender {
                 ),
             ),
         )
-        val url = "https://fcm.googleapis.com/v1/projects/${acct.projectId}/messages:send"
-        val request = HttpRequest.newBuilder()
-            .uri(URI.create(url))
-            .header("Authorization", "Bearer $token")
-            .header("Content-Type", "application/json")
-            .timeout(REQUEST_TIMEOUT)
-            .POST(HttpRequest.BodyPublishers.ofString(payload))
-            .build()
-        return Uni.createFrom().completionStage(http.sendAsync(request, HttpResponse.BodyHandlers.ofString()))
-            .map { resp -> mapResponse(resp.statusCode(), resp.body()) }
+        val url = testSendUrl ?: "https://fcm.googleapis.com/v1/projects/${acct.projectId}/messages:send"
+        val request = EgressRequest(
+            method = "POST",
+            url = url,
+            headers = mapOf("Authorization" to "Bearer $token", "Content-Type" to "application/json"),
+            body = payload.toByteArray(Charsets.UTF_8),
+        )
+        return NotificationEgress.send({ http }, request)
+            .map { resp -> mapResponse(resp.status, resp.bodyAsString()) }
     }
 
     /** Visible for testing. Maps an FCM v1 HTTP response to a [PushResult]. */
@@ -185,5 +194,6 @@ class FcmPushSender {
         val CONNECT_TIMEOUT: Duration = Duration.ofSeconds(5)
         val REQUEST_TIMEOUT: Duration = Duration.ofSeconds(10)
         const val TOKEN_REFRESH_BUFFER_SEC = 60L
+        const val MAX_RESPONSE_BYTES = 1024 * 1024
     }
 }

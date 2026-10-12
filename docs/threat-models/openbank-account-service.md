@@ -74,6 +74,7 @@ is a deliberate follow-up flip, not bundled here (see ADR-0155).
 | **E**oP | The maker approves their own freeze request (self-approval defeats maker-checker) | `ApprovalStore.decide` throws `SelfApprovalNotAllowedException` (mapped to 403) when `decidedBy == makerId` — enforced in the domain port itself, not just the REST layer, and `makerId`/`decidedBy` both resolve via the same `.principal.name` extraction (interceptor vs. `SecurityIdentity`) so the comparison can't silently mismatch for the same real person |
 | **T**ampering | A stale, mismatched, or already-consumed `X-Approval-Id` is replayed to unlock a different request | `AuthorizeInterceptor` requires the approval's `action` + `resourceId` + `makerId` to match the CURRENT request exactly, `status == APPROVED`, and marks it `EXECUTED` (one-time use) on success; any mismatch re-issues a fresh pending approval instead of proceeding |
 | **R**epudiation | No record of who approved a gated freeze | `PendingApproval.decidedBy` + `decidedAt` recorded in the approval record itself (Redis, TTL-bounded — see ADR-0155 Negative consequences: not yet a permanent audit trail) |
+| **R**epudiation / **S**poofing | A display name or legacy approval is presented as proof that its maker was human or an AI agent | `makerActorKind` is captured when the authenticated request creates the approval, not inferred by Admin UI from `makerId`. A service-account caller remains `SERVICE_ACCOUNT`; the delegated savings-proposal path records `CUSTOMER_PARTY` because its party id alone does not prove a human session. Existing Redis records without provenance read as `UNKNOWN`. This field is informational and never changes the maker-checker id comparison or approval decision. |
 | **I**nfo disclosure | Approval id enumeration reveals account/action metadata to an unauthorized caller | `find`/`decide` require the caller to already hold a valid, role-gated session; the id itself is a random id (`RedisApprovalStore`, not sequential) |
 | **D**oS | Flooding `POST /{accountId}/freeze` to exhaust Redis with pending approvals | Bounded by the same rate-limit/idempotency controls as the gated endpoint itself; each `PendingApproval` is TTL-bounded (86400s) so abandoned records expire |
 
@@ -99,6 +100,8 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `account_outbox` kept every SENT row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; its v1 repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`. PENDING, FAILED, DISPATCHING and DEAD rows are never touched. Information disclosure: shrinks the window in which a database read (replica, backup, operator query) exposes past event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now comes from the broker or audit-service, not this table.
+
 - **2026-09-30** — Screening gate turned into an ALLOW-list (#8345 follow-up). The gate blocked
   only `HIT` and `REVIEW`; sanctions-service has never returned `REVIEW` (its vocabulary is
   `CLEAR | HIT | POTENTIAL_HIT | WHITELISTED | ESCALATED`), so a `POTENTIAL_HIT` (a 0.65+ fuzzy
@@ -110,6 +113,7 @@ not change any existing request's outcome until explicitly flipped.
   the blocked statuses, red against the old gate), `SanctionsScreeningAdapterTest` and the new
   consumer pact `AccountSanctionsScreenPactConsumerTest`, which pins `CLEAR` and `HIT` as exact
   values and is replayed by sanctions-service. No endpoint, edge or privilege changed.
+- **2026-09-30** — **Approval maker provenance (issue #11588).** The account approval response now exposes `makerActorKind` alongside `makerId`; the shared approval store keeps the original seven-field Redis value for old readers and stores provenance in a TTL-matched sidecar. A missing or unrecognized sidecar yields `UNKNOWN`, not a guessed human maker. The delegated savings-proposal path labels its verified party identifier `CUSTOMER_PARTY`, not `HUMAN`. The shared authorizer accepts `AI_AGENT` only when the authenticated JWT `sub` matches the `agent:` principal name; a display-name prefix without that claim no longer grants an agent policy type. An agent-looking name without a JWT becomes `UNKNOWN`, and a human JWT with a different subject remains `HUMAN`. This tightens the policy input but grants no new approver privilege, approval transition or money movement. The residual risk is that upstream identity systems may not attest an AI charter through the service-account token, so such requests must remain labeled as service accounts until a trusted claim is available. Rollback: old pods ignore the sidecar and continue reading the unchanged base record; sidecars expire with approvals.
 - **2026-09-28** — **pricing namespace admitted to product-catalog `:8104` (JiRaska/openbank-pricing#1).** The
   `pricing` namespace was adopted under GitOps and its NetworkPolicies are now generated from declared edges,
   which adds `pricing` to the product-catalog ingress allow-list in `accounts`. **Not a new flow:**
@@ -659,6 +663,18 @@ not change any existing request's outcome until explicitly flipped.
   serialisation-only and nothing persists it.
 - **2026-09-21** — **Own machine identity for the welcome-bonus credit (#10486 batch 1).** `TransactionServiceRestClient` now mints its bearer from the NAMED oidc-client `m2m`, Keycloak client `openbank-account` (realm role `ROLE_API` only). transaction-service grants that principal exactly `transaction.create` by identity (`service-account-transaction-create`). **STRIDE-S:** a new credential. Its secret is generated by Keycloak in the live realm, stored by the owner's provisioning script at Vault KV `keycloak/account-service` (`client_secret`), projected by the `account-service-m2m-oidc` ExternalSecret and never seen by the repo; the env ref is `optional: false`, so an unseeded entry blocks the new pod loudly (CreateContainerConfigError) rather than calling with an empty credential. Compromise of this secret reaches only `transaction.create`, against the shared secret's 54 money-path writes. **Repudiation improves:** the upstream's OPA decision reason and principal now name this service instead of "some caller on the shared client". The service's other rest-clients stay on the shared `openbank-services` client until their own edges migrate (asserted by `M2mOidcClientIdentityWiringTest`). Rollback: revert the commit (the clients return to the shared token).
 - **2026-09-21** — **Account reads admitted by named machine identity (#10486 batch 5).** `account_rest_ext.rego` adds six identity rules, one per caller that listed accounts through the shared `openbank-services` principal's `ROLE_OPERATOR` (base `operator-read-any`): analytics-sink, document, lending and party get `account.list`; billing and interest get `account.list` and `account.read`. Each principal holds `ROLE_API` only, and `AccountResource`'s RBAC already admitted `ROLE_API` on these reads, so no RBAC changes. **STRIDE-I:** `account.list` cannot be narrowed by query parameter at this layer (`/accounts/active` is the whole active book), so each rule is a real PII grant; it names one principal each, and `account_rest_ext_test.rego` asserts that another `ROLE_API` service account and the shared client with `ROLE_API` only are denied both reads (negative case run: widening one rule to a `service-account-` prefix turned two tests red). **Repudiation improves:** the decision line now names the reading service. Enforcement: `AUTHZ_ENFORCE` is on for account-service. Rollback: revert the commit.
+- **2026-10-11** — **The 8443 listener no longer accepts a client certificate as a login (#12511).**
+  `client-auth: required` (2026-09-20 entries above) also registers Quarkus's mTLS authentication
+  mechanism, which turned any certificate the private CA had signed into an authenticated
+  `SecurityIdentity`: a workload holding a fleet-CA certificate and NO bearer reached `/api/*` as a
+  logged-in principal (measured: 403 from authz instead of 401). `%prod` now restricts `/api/*` to
+  `auth-mechanism: bearer` (the #12506 pattern), so the certificate is transport authentication only and
+  the OIDC bearer is the only identity a route or OPA sees, identically on 8443 and the plain port.
+  **STRIDE-S/E:** closes a spoofing / elevation path; callers are unaffected because every 8443 caller
+  already sends its own bearer. Proven by `AccountListenerAuthParityIT` (production listener shape, real
+  HTTP; 1 of 4 failing without the change, 4 of 4 with it) and gated fleet-wide by `mtls-bearer-only`.
+  Rollback: revert the commit (re-opens the path).
+
 
 ## Delegation lifecycle ordering
 
@@ -961,3 +977,49 @@ than ten connections and compete with other account clients for that shared limi
 on nginx until the listener policy and 401/429 behavior have been checked on the Gateway
 address. Rollback is the coordinated DNS switch back to nginx; its Ingress and network
 allowance remain until Phase 5.
+
+## 2026-10-09 — Ownership-verification projection for pension-service (ADR-0335 D2)
+
+New endpoint `POST /api/v1/accounts/ownership-verifications`, under a new action
+`account.verifyOwnership`. It is granted to one machine identity,
+`service-account-openbank-pension` (ROLE_API), by `service-pension-account-verify-ownership`.
+Staff keep the action through `operator-account-write`. Pension is **not** granted
+`account.read`, `account.list` or any write.
+
+- **Information disclosure:** the answer is exactly `{owned, active}`. An unknown IBAN and
+  another party's IBAN both answer `owned=false, active=false`, and another party's account
+  status is never revealed. No balance, product, holder name or account id is returned. The IBAN
+  travels in the request body, so it stays out of access and ingress logs. A stolen pension
+  credential yields a membership oracle for (IBAN, party) pairs the attacker already holds. It
+  cannot enumerate accounts, and per-call audit makes a sweep visible.
+- **Elevation of privilege:** the shared `service-account-openbank-services` and
+  `service-account-openbank-edge` identities, every other service account, and an `AI_AGENT`
+  presenting the pension id are all denied. `account_rest_ext_test.rego` pins this.
+- **Repudiation:** each verification emits an `AuditEvent` with the calling principal as actor
+  and the claimed party as subject. The verdict goes in the payload; the IBAN never does.
+- **Tampering:** none. The endpoint is read-only.
+
+Tests: `OwnershipVerdictTest`, `AccountOwnershipResourceTest`, `AccountOwnershipVerificationIT`
+(real HTTP: route served, exact body, indistinguishable negatives, 400 not 500, 401 anonymous).
+
+
+Update the same day (ADR-0335 D2a): when `owned` is true, the answer also carries `accountId`, for
+the caller that binds a mandate to the account (#12387). It is never present for an unknown or
+foreign IBAN, so the no-oracle property holds. A second declared caller,
+`service-account-openbank-sdd`, verifies the debtor party of a scoped mandate initiator (D6).
+Every other identity is still denied (`account_rest_ext_test.rego`).
+
+
+### Pension client identity prerequisite (ADR-0335)
+
+The scoped pension ownership projection requires a token issuer that can mint the
+`openbank-pension` service-account identity. Both committed realm definitions now
+carry the same client and service-account user as the active pension integration
+(#12435), with only `ROLE_API` and the existing `catalog:read` client scope.
+Interactive login flows remain disabled. This establishes a reviewable issuer
+configuration prerequisite; it does not prove the live realm was imported, that
+credential material was supplied, or that a deployed token matches the policy.
+The account ownership projection still returns an account identifier only for an
+active account owned by the supplied party. A compromised pension credential can
+invoke its scoped projection; it does not acquire shared operator or compliance
+roles. Realm import and credential delivery must be verified before deployment.

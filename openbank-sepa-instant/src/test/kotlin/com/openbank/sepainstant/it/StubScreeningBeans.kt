@@ -7,6 +7,11 @@ package com.openbank.sepainstant.it
 import com.openbank.sepainstant.application.port.out.AmlCasePort
 import com.openbank.sepainstant.application.port.out.OpenAmlCaseCommand
 import com.openbank.sepainstant.application.port.out.SanctionsScreeningPort
+import com.openbank.sepainstant.application.port.out.SchemeGatewayPort
+import com.openbank.sepainstant.application.port.out.SchemeSubmissionOutcome
+import com.openbank.sepainstant.application.port.out.SettlementOutcome
+import com.openbank.sepainstant.application.port.out.SettlementPort
+import com.openbank.sepainstant.domain.model.SctInstPayment
 import com.openbank.sepainstant.domain.screening.ScreeningMatchStatus
 import com.openbank.sepainstant.domain.screening.ScreeningResult
 import com.openbank.sepainstant.domain.screening.ScreeningRole
@@ -14,6 +19,7 @@ import io.smallrye.mutiny.Uni
 import jakarta.annotation.Priority
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Alternative
+import java.util.UUID
 
 @ApplicationScoped
 @Alternative
@@ -26,8 +32,8 @@ class StubSanctionsScreeningPort : SanctionsScreeningPort {
                 role = role,
                 status = ScreeningMatchStatus.CLEAR,
                 score = 0.0,
-                matchedEntity = null
-            )
+                matchedEntity = null,
+            ),
         )
 }
 
@@ -35,6 +41,21 @@ class StubSanctionsScreeningPort : SanctionsScreeningPort {
 @Alternative
 @Priority(1)
 class StubAmlCasePort : AmlCasePort {
-    override fun openCase(command: OpenAmlCaseCommand): Uni<Void> =
-        Uni.createFrom().voidItem()
+    override fun openCase(command: OpenAmlCaseCommand): Uni<Void> = Uni.createFrom().voidItem()
+}
+
+@ApplicationScoped
+@Alternative
+@Priority(1)
+class StubSchemeGatewayPort : SchemeGatewayPort {
+    override fun submit(payment: SctInstPayment): Uni<SchemeSubmissionOutcome> =
+        Uni.createFrom().item(SchemeSubmissionOutcome(accepted = true, reasonCode = null))
+}
+
+@ApplicationScoped
+@Alternative
+@Priority(1)
+class StubSettlementPort : SettlementPort {
+    override fun settle(payment: SctInstPayment): Uni<SettlementOutcome> =
+        Uni.createFrom().item(SettlementOutcome(settled = true, transactionId = UUID.randomUUID()))
 }
