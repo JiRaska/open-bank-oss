@@ -195,6 +195,10 @@ jobs:
             gh api --method GET "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow}/runs" \
               -f per_page=100 -f page=1 -f "${filter}=${value}" > "$dir/1.json"
             total=$(jq -er '.total_count | select(type == "number" and . >= 0)' "$dir/1.json")
+            if [[ "$filter" == status ]] && (( total >= 100 )); then
+              echo "::error::${workflow} active-status search needs multiple mutable pages" >&2
+              return 2
+            fi
             if (( total >= 1000 )); then
               echo "::error::${workflow} ${filter} search reached the 1,000-result ceiling" >&2
               return 2
@@ -250,7 +254,7 @@ jobs:
               for snapshot_attempt in 1 2 3; do
                 gh_retry 3 -- fetch_pages "$workflow" status "$status" "${RUNNER_TEMP}/${workflow}.active.pages.json"
                 if python3 .github/scripts/select-ci-reconcile-candidates.py \
-                  --flatten-pages "${RUNNER_TEMP}/${workflow}.active.pages.json" \
+                  --flatten-pages "${RUNNER_TEMP}/${workflow}.active.pages.json" --active-snapshot \
                   > "$active_file" 2> "${RUNNER_TEMP}/${workflow}.active.validation.err"; then
                   break
                 fi

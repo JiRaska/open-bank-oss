@@ -18,7 +18,7 @@ GITHUB_SEARCH_CEILING = 1000
 MAX_CATCHUP_MINUTES = 48 * 60
 QUERY_CHUNK_HOURS = 6
 ACTIVE_ALARM_MINUTES = 23 * 60
-ACTIVE_STATUSES = ("requested", "pending", "queued", "waiting", "in_progress", "action_required")
+ACTIVE_STATUSES = ("requested", "pending", "queued", "waiting", "in_progress")
 
 
 def parse_time(value: str) -> dt.datetime:
@@ -68,7 +68,7 @@ def query_window(mode: str, now: dt.datetime, checkpoint: dt.datetime | None = N
     }
 
 
-def flatten_pages(pages: object) -> list[dict]:
+def flatten_pages(pages: object, active_snapshot: bool = False) -> list[dict]:
     """Reject an incomplete GitHub search instead of reporting an empty candidate set."""
     if not isinstance(pages, list) or not pages:
         raise ValueError("workflow-run API returned no pages")
@@ -83,6 +83,8 @@ def flatten_pages(pages: object) -> list[dict]:
         runs.extend(page["workflow_runs"])
     if len(set(counts)) != 1:
         raise ValueError("workflow-run API changed total_count during pagination")
+    if active_snapshot and (len(pages) != 1 or counts[0] >= 100):
+        raise ValueError("active workflow-run search exceeded one stable page")
     if counts[0] >= GITHUB_SEARCH_CEILING:
         raise ValueError("workflow-run search reached GitHub's 1,000-result ceiling")
     if len(runs) != counts[0]:
@@ -167,7 +169,7 @@ def verify_active_age(runs: list[dict], now: dt.datetime, live_pr_heads: set[str
             raise ValueError("active workflow-run search omitted head SHA")
         if event in {"pull_request", "pull_request_target"} and head_sha not in live_pr_heads:
             continue  # Closed or superseded PR run cannot be safely retried.
-        if event in {"push", "workflow_dispatch"} and head_sha != main_sha:
+        if event in {"push", "workflow_dispatch", "schedule"} and head_sha != main_sha:
             continue  # A later main commit has superseded this run.
         if parse_time(run["created_at"]) <= cutoff:
             raise ValueError(f"watched run {run['id']} is approaching the 24-hour created-search bound; manual backfill required")
@@ -264,13 +266,28 @@ def self_test() -> int:
         raise AssertionError("aged-out queued run produced a green scan")
     verify_active_age([old_active], now, set(), main_sha)  # Closed PR is not retryable.
     verify_active_age([old_active | {"event": "push", "head_sha": "c" * 40}], now, set(), main_sha)
+    verify_active_age([old_active | {"event": "schedule", "head_sha": "c" * 40}], now, set(), main_sha)
     try:
         verify_active_age([old_active | {"event": "push", "head_sha": main_sha}], now, set(), main_sha)
     except ValueError as exc:
         assert "manual backfill" in str(exc)
     else:
         raise AssertionError("current-main queued run aged out without alarm")
+    try:
+        verify_active_age([old_active | {"event": "schedule", "head_sha": main_sha}], now, set(), main_sha)
+    except ValueError as exc:
+        assert "manual backfill" in str(exc)
+    else:
+        raise AssertionError("current-main scheduled run aged out without alarm")
     assert parse_live_heads([[{"state": "open", "head": {"sha": "b" * 40}}]]) == {"b" * 40}
+    assert "action_required" not in ACTIVE_STATUSES  # GitHub treats it as a completed conclusion.
+    assert flatten_pages([{"total_count": 0, "workflow_runs": []}], active_snapshot=True) == []
+    try:
+        flatten_pages([{"total_count": 100, "workflow_runs": []}], active_snapshot=True)
+    except ValueError as exc:
+        assert "stable page" in str(exc)
+    else:
+        raise AssertionError("100 active runs were accepted as a stable snapshot")
     try:
         parse_live_heads([[{"state": "open", "head": {"sha": "b" * 40}}] * 100])
     except ValueError as exc:
@@ -337,8 +354,8 @@ def self_test() -> int:
         raise AssertionError("changing total_count was treated as a complete snapshot")
     recovered = select(flatten_pages(second_snapshot), now, 180)
     assert [x["run_id"] for x in recovered["retry"]] == [777]
-    print("SUBJECTS=30")
-    print("select-ci-reconcile-candidates self-test: 30 cases passed, 0 failed")
+    print("SUBJECTS=34")
+    print("select-ci-reconcile-candidates self-test: 34 cases passed, 0 failed")
     return 0
 
 
@@ -350,6 +367,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--query-mode", choices=("short", "deep"))
     parser.add_argument("--checkpoint", help="creation time of latest successful reconciliation run")
     parser.add_argument("--flatten-pages", type=Path)
+    parser.add_argument("--active-snapshot", action="store_true")
     parser.add_argument("--merge-chunks", nargs="+", type=Path)
     parser.add_argument("--active-statuses", action="store_true")
     parser.add_argument("--verify-active-runs", type=Path)
@@ -364,7 +382,7 @@ def main(argv: list[str]) -> int:
         return 0
     if args.flatten_pages:
         try:
-            print(json.dumps(flatten_pages(json.loads(args.flatten_pages.read_text())), separators=(",", ":")))
+            print(json.dumps(flatten_pages(json.loads(args.flatten_pages.read_text()), args.active_snapshot), separators=(",", ":")))
         except ValueError as exc:
             print(f"incomplete workflow-run API result: {exc}", file=sys.stderr)
             return 2
