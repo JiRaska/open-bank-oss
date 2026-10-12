@@ -115,4 +115,28 @@ describe('operational evidence independence', () => {
     expect(screen.getByText('Action')).toBeVisible()
     expect(screen.getByText(/Coverage: 1\/28\. Lowest observed error budget: -10%/)).toBeVisible()
   })
+
+  it.each([
+    { budget: -0.004, monitored: 1, expectedStatus: 'Action', displayedBudget: '0%' },
+    { budget: 0.249, monitored: 28, expectedStatus: 'Watch', displayedBudget: '25%' },
+  ])('classifies raw budget $budget before rounding its display', async ({ budget, monitored, expectedStatus, displayedBudget }) => {
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/pyrra/summary')) return Promise.resolve(response(200, {
+        available: true, configured: 28, monitored,
+        objectives: [{ name: 'openbank-transaction-availability', budgetRemaining: budget, availability: 0.9998 }],
+      }))
+      if (url.includes('/temporal/status')) return Promise.resolve(response(200, TEMPORAL))
+      if (url.includes('/tempo/api/search')) return Promise.resolve(response(200, TEMPO))
+      throw new Error(`unexpected fetch: ${url}`)
+    }))
+
+    render(<LanguageProvider initialLanguage="en"><OperationalEvidence /></LanguageProvider>)
+
+    expect(await screen.findByText(displayedBudget)).toBeVisible()
+    const pyrraCard = screen.getByRole('link', { name: 'Open SLOs' }).closest('article')
+    expect(pyrraCard).toHaveTextContent(expectedStatus)
+    expect(pyrraCard).toHaveTextContent(displayedBudget)
+    expect(pyrraCard).not.toHaveTextContent('Healthy')
+  })
 })

@@ -93,7 +93,8 @@ export function OperationalEvidence() {
   const sloMonitored = pyrra.data?.monitored ?? 0
   const sloCoverage = `${sloMonitored}/${sloConfigured}`
   const sloIncomplete = sloConfigured === 0 || sloMonitored !== sloConfigured
-  const pyrraStatus = budgetPct === null ? 'neutral' : budgetPct < 0 ? 'bad' : budgetPct < 25 ? 'warn' : sloIncomplete ? 'neutral' : 'good'
+  const rawBudget = worstBudget?.budgetRemaining
+  const pyrraStatus = rawBudget == null ? 'neutral' : rawBudget < 0 ? 'bad' : rawBudget < 0.25 ? 'warn' : sloIncomplete ? 'neutral' : 'good'
 
   const workflows = temporal.data?.metrics?.workflows
   const workflowProblems = workflows ? workflows.failed1h + workflows.timedOut1h : null
