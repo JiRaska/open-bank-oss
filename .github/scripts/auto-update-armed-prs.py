@@ -396,6 +396,26 @@ def self_test() -> int:
               and report["targets"][0]["updated_head_sha"] is None)
         failures += not ok
         print(f"{'PASS' if ok else 'FAIL'}  rejected update {status} cannot recover target")
+    for label, response, expected in (
+        ("changed", (200, {"head": {"sha": "b" * 40}}), 0),
+        ("unchanged", (200, {"head": {"sha": "a" * 40}}), 1),
+        ("malformed", (200, {"head": {"sha": "bad"}}), 1),
+        ("unreadable", (503, {}), 1),
+    ):
+        calls = []
+        def racing_api(method, path, body=None):
+            calls.append(method)
+            return (422, {"message": "expected head sha didn’t match current head ref."}) if method == "PUT" else response
+        report = {"targets": []}
+        with patch.dict(globals(), {"required_policy": lambda *_: (["Gitleaks"], True),
+                                    "get": fixture_get, "head_checks": lambda *_: {"Gitleaks": "success"},
+                                    "branch_update_count": lambda *_: 0, "api": racing_api}), \
+                contextlib.redirect_stdout(io.StringIO()):
+            result = run("example/repo", "main", 5, 0, False, 20, recovery_report=report)
+        ok = (result == expected and calls == ["PUT", "GET"]
+              and report["targets"][0]["updated"] is False)
+        failures += not ok
+        print(f"{'PASS' if ok else 'FAIL'}  HTTP 422 with {label} head preserves recovery and error semantics")
     def unreadable_count(*_args):
         raise ValueError("unreadable test history")
     with patch.dict(globals(), {"required_policy": lambda *_: (["Gitleaks"], True),
@@ -644,6 +664,18 @@ def parse_ts(s: str) -> dt.datetime:
     return dt.datetime.fromisoformat(s.replace("Z", "+00:00"))
 
 
+def head_changed_since(repo: str, number: int, expected_head: str) -> bool:
+    """A 422 can be a stale expected SHA; prove movement before treating it as a race."""
+    try:
+        code, data = api("GET", f"/repos/{repo}/pulls/{number}")
+    except (OSError, ValueError):
+        return False
+    head = data.get("head") if isinstance(data, dict) else None
+    sha = head.get("sha") if isinstance(head, dict) else None
+    return (code == 200 and isinstance(sha, str)
+            and re.fullmatch(r"[0-9a-f]{40}", sha) is not None and sha != expected_head)
+
+
 def branch_update_count(repo: str, number: int, branch: str, limit: int,
                         expected_head: str) -> int:
     """Count consecutive GitHub base merges on the head's first-parent chain.
@@ -854,8 +886,8 @@ def run(repo: str, branch: str, max_updates: int, debounce: int, dry_run: bool,
                     print(f"::warning::#{n}: update accepted but target head transition unverified")
             print(f"UPDATE #{n} {sha[:9]}: {why} "
                   f"(budget {used + 1}/{max_updates_per_pr})")
-        elif code == 409:
-            # A competing update changed the expected head. The next run re-reads it.
+        elif code == 409 or (code == 422 and head_changed_since(repo, n, sha)):
+            # Never retry against the new head: the next run must recheck CI and budget.
             print(f"SKIP   #{n} {sha[:9]}: head changed during update ({code})")
         else:
             failed_updates += 1
