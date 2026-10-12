@@ -97,7 +97,9 @@ on:
       - ".github/scripts/test-main-red-watch-order.cjs"
       - ".github/scripts/main-red-watch-checkpoint.cjs"
       - ".github/scripts/main-red-watch-catchup.cjs"
+      - ".github/scripts/main-red-watch-target.cjs"
       - ".github/scripts/test-main-red-watch-catchup.cjs"
+      - ".github/scripts/test-main-red-watch-target.cjs"
       - ".github/scripts/main-red-watch-reconcile.py"
   workflow_dispatch:
     inputs:
@@ -178,6 +180,7 @@ jobs:
           python3 .github/scripts/check-main-red-watch.py --self-test
           node .github/scripts/test-main-red-watch-order.cjs
           node .github/scripts/test-main-red-watch-catchup.cjs
+          node .github/scripts/test-main-red-watch-target.cjs
           python3 .github/scripts/main-red-watch-reconcile.py > /dev/null
       - name: Every push-on-main workflow is watched or declared
         run: python3 .github/scripts/check-main-red-watch.py --check-declaration

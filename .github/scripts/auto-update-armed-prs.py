@@ -258,6 +258,29 @@ def self_test() -> int:
                 ok = result == want and (("::error::FAILED" in output.getvalue()) == (status == 403))
                 failures += not ok
                 print(f"{'PASS' if ok else 'FAIL'}  update-branch HTTP {status} -> exit {result}")
+    with patch.dict(globals(), {"required_policy": lambda *_: (["Gitleaks"], True),
+                                "get": fixture_get, "head_checks": lambda *_: {}}):
+        report = {"targets": []}
+        with contextlib.redirect_stdout(io.StringIO()):
+            result = run("example/repo", "main", 5, 0, False, 20, recovery_report=report)
+        ok = result == 0 and report["targets"] == [{
+            "pr": 42, "head_sha": "a" * 40, "budget_validated": False,
+            "update_count": None, "history_error": False,
+        }]
+        failures += not ok
+        print(f"{'PASS' if ok else 'FAIL'}  missing context has no target-history evidence")
+    with patch.dict(globals(), {"required_policy": lambda *_: (["Gitleaks"], True),
+                                "get": fixture_get, "head_checks": lambda *_: {"Gitleaks": "success"},
+                                "api": lambda *_args, **_kwargs: (202, {})}):
+        report = {"targets": []}
+        with contextlib.redirect_stdout(io.StringIO()):
+            result = run("example/repo", "main", 5, 0, False, 20, recovery_report=report)
+        ok = result == 0 and report["targets"] == [{
+            "pr": 42, "head_sha": "a" * 40, "budget_validated": True,
+            "update_count": 0, "history_error": False,
+        }]
+        failures += not ok
+        print(f"{'PASS' if ok else 'FAIL'}  exact target history produces recovery evidence")
     def capped_get(path: str) -> object:
         if "/pulls/42/commits?" in path:
             return [update, update]
@@ -437,7 +460,8 @@ def branch_update_count(repo: str, number: int, branch: str) -> int:
 
 
 def run(repo: str, branch: str, max_updates: int, debounce: int, dry_run: bool,
-        fleet_threshold: int, max_updates_per_pr: int = 4) -> int:
+        fleet_threshold: int, max_updates_per_pr: int = 4,
+        recovery_report: dict | None = None) -> int:
     required, strict = required_policy(repo, branch)
     print(f"required contexts on {branch} (live): {required}; strict={strict}")
     if not required:
@@ -454,6 +478,7 @@ def run(repo: str, branch: str, max_updates: int, debounce: int, dry_run: bool,
     entries, shas, budgets = [], {}, {}
     for p in armed:
         n = p["number"]
+        budget_error = False
         full = get(f"/repos/{repo}/pulls/{n}")
         sha = shas[n] = full["head"]["sha"]
         pr = {"draft": full["draft"], "auto_merge": full["auto_merge"],
@@ -484,6 +509,7 @@ def run(repo: str, branch: str, max_updates: int, debounce: int, dry_run: bool,
                 used = branch_update_count(repo, n, branch)
             except ValueError as error:
                 failed_updates += 1
+                budget_error = True
                 ok, why = False, f"unreadable update budget: {error}"
                 print(f"::error::{error}; refusing an unbudgeted branch update")
             else:
@@ -496,6 +522,13 @@ def run(repo: str, branch: str, max_updates: int, debounce: int, dry_run: bool,
               f"{', build in flight' if building else ''}, armed since {since or '?'}")
         entries.append({"number": n, "ok": ok, "why": why, "kind": kind, "building": building,
                         "waiting_since": since})
+        if recovery_report is not None:
+            # This is evidence of reading the target's complete branch history, not evidence
+            # that a different PR was updated in the same successful workflow job.
+            recovery_report["targets"].append({
+                "pr": n, "head_sha": sha, "budget_validated": n in budgets,
+                "update_count": budgets.get(n), "history_error": budget_error,
+            })
     updated = 0
     for n, ok, why in plan(entries, max_updates):
         sha = shas[n]
@@ -534,6 +567,8 @@ def main() -> int:
                     help="hard lifetime cap from server-side merge commits on the PR")
     ap.add_argument("--debounce-minutes", type=int, default=20)
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--recovery-report", type=pathlib.Path,
+                    help="run-bound per-PR history evidence for main-red recovery")
     ap.add_argument("--full-fleet-threshold", type=int, default=20,
                     help="distinct build-matrix modules at which a PR counts as full-fleet")
     a = ap.parse_args()
@@ -547,8 +582,21 @@ def main() -> int:
     if a.max_updates < 0 or a.max_updates_per_pr < 0:
         print("::error::update caps must be nonnegative")
         return 1
-    return run(a.repo, a.branch, a.max_updates, a.debounce_minutes, a.dry_run,
-               a.full_fleet_threshold, a.max_updates_per_pr)
+    report = {
+        "version": 1,
+        "run_id": int(os.environ.get("GITHUB_RUN_ID", "0")),
+        "attempt": int(os.environ.get("GITHUB_RUN_ATTEMPT", "0")),
+        "main_sha": os.environ.get("GITHUB_SHA", ""),
+        "dry_run": a.dry_run,
+        "complete": False,
+        "targets": [],
+    }
+    result = run(a.repo, a.branch, a.max_updates, a.debounce_minutes, a.dry_run,
+                 a.full_fleet_threshold, a.max_updates_per_pr, recovery_report=report)
+    report["complete"] = True
+    if a.recovery_report:
+        a.recovery_report.write_text(json.dumps(report, sort_keys=True) + "\n", encoding="utf-8")
+    return result
 
 
 if __name__ == "__main__":

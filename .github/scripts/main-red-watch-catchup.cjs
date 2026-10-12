@@ -9,6 +9,8 @@ const { spawnSync } = require('node:child_process')
 const { unprocessedAttempts, remainingFailureLines, withFailureLines, mergeFailureLines, LatestRunLagError } =
   require('./main-red-watch-order.cjs')
 const { ensureStateBranch, readCheckpoint, writeCheckpoint } = require('./main-red-watch-checkpoint.cjs')
+const { WORKFLOW: TARGET_WORKFLOW, targetPrs, withTargets, targetsCovered, loadTargetEvidence } =
+  require('./main-red-watch-target.cjs')
 
 const MAX_ATTEMPTS = 200
 const BATCH_SIZE = 25
@@ -83,7 +85,7 @@ function redBody(verdict, marker, lines, context) {
   return { title, body }
 }
 
-async function applyVerdict(github, context, verdict) {
+async function applyVerdict(github, context, verdict, loadEvidence = loadTargetEvidence) {
   if (verdict.status === 'not-a-verdict') return
   const repo = context.repo
   const slug = verdict.workflow.toLowerCase().replace(/[^a-z0-9]+/g, '-')
@@ -107,29 +109,46 @@ async function applyVerdict(github, context, verdict) {
       }
       return
     }
+    if (verdict.workflow === TARGET_WORKFLOW) {
+      // The generic job and step can pass after the updater skips the PR whose
+      // history failed. A legacy issue with no target marker cannot auto-close.
+      if (!targetPrs(open.body)) return
+      const evidence = await loadEvidence(github, repo, verdict)
+      if (!targetsCovered(open.body, evidence)) return
+    }
     await github.rest.issues.createComment({ ...repo, issue_number: open.number,
       body: `\`${verdict.workflow}\` recovered every recorded failing job on main through run ${verdict.run_id} attempt ${verdict.attempt}.` })
     await github.rest.issues.update({ ...repo, issue_number: open.number, state: 'closed' })
     return
   }
   const current = failureLines(verdict)
+  const evidence = verdict.workflow === TARGET_WORKFLOW
+    ? await loadEvidence(github, repo, verdict) : null
+  const newTargets = evidence?.targets.filter(target => target.history_error).map(target => target.pr) || []
   if (open) {
     const outstanding = remainingFailureLines(open.body, verdict.successful_jobs)
     if (outstanding === null) throw new Error('Cannot read open main-red failure inventory')
     const merged = mergeFailureLines(outstanding, current)
     const { title, body } = redBody(verdict, marker, merged, context)
-    await github.rest.issues.update({ ...repo, issue_number: open.number, title, body })
+    const stillUnresolved = (targetPrs(open.body) || []).filter(pr =>
+      !evidence?.targets.some(target => target.pr === pr && target.budget_validated))
+    const targetBody = verdict.workflow === TARGET_WORKFLOW
+      ? withTargets(body, [...stillUnresolved, ...newTargets]) : body
+    await github.rest.issues.update({ ...repo, issue_number: open.number, title, body: targetBody })
     return
   }
   const { title, body } = redBody(verdict, marker, current, context)
+  const targetBody = verdict.workflow === TARGET_WORKFLOW ? withTargets(body, newTargets) : body
   const closed = await findByMarker('closed')
   const fresh = closed?.closed_at &&
     (Date.now() - Date.parse(closed.closed_at)) < REOPEN_WINDOW_DAYS * 864e5
   if (fresh) {
-    await github.rest.issues.update({ ...repo, issue_number: closed.number, title, body, state: 'open' })
+    await github.rest.issues.update({ ...repo, issue_number: closed.number, title,
+      body: targetBody, state: 'open' })
     return
   }
-  await github.rest.issues.create({ ...repo, title, body, labels: ['main-red', 'fleet-health'] })
+  await github.rest.issues.create({ ...repo, title, body: targetBody,
+    labels: ['main-red', 'fleet-health'] })
 }
 
 async function bootstrapCheckpoint(github, context, workflowId, event) {
