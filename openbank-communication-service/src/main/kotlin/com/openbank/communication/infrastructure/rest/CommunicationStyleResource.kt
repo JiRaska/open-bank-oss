@@ -121,16 +121,3 @@ class CommunicationStyleResource(
         return Response.ok(style).tag(style.styleVersion.toString()).build()
     }
 }
-
-/** Keeps the v1 published-copy read available to existing service consumers. */
-@Path("/api/v1/personas")
-@ApplicationScoped
-class PublishedStyleV1Resource(private val service: CommunicationStyleService) {
-    @GET
-    @Path("/{personaKey}/published")
-    @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMMS_EDITOR", "ROLE_COMMS_APPROVER")
-    suspend fun published(@PathParam("personaKey") personaKey: String): Response {
-        val style = service.published(personaKey)
-        return Response.ok(style).tag(style.styleVersion.toString()).build()
-    }
-}
