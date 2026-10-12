@@ -15,7 +15,7 @@ cat > "$tmp/curl" <<'STUB'
 url="${*: -1}"
 case "$url" in
   */versions/*)
-    if [ "${STUB_CLI_MODE:-}" = exact-success ]; then echo 200; else echo 404; fi ;;
+    if [ "${STUB_CLI_MODE:-}" = exact-success ] || [ "${STUB_CLI_MODE:-}" = no-main-present ]; then echo 200; else echo 404; fi ;;
   */pacticipants/*/latest-version/main) echo '{}' ;;
   */pacticipants/*) echo 200 ;;
   */environments) echo '{"_embedded":{"environments":[{"name":"sandbox"}]}}' ;;
@@ -26,7 +26,7 @@ cat > "$tmp/pact-broker" <<'STUB'
 #!/usr/bin/env bash
 case "${STUB_CLI_MODE:-}" in
   exact-success) echo 'All required verification results are published and successful'; exit 0 ;;
-  no-main) echo 'No version with tag main exists for openbank-demo-service' ;;
+  no-main|no-main-present) echo 'No version with tag main exists for openbank-demo-service' ;;
   no-counterpart)
     echo 'There is no verified pact between these versions'
     echo 'no version is currently recorded as deployed in sandbox' ;;
@@ -36,7 +36,7 @@ exit 1
 STUB
 chmod +x "$tmp/curl" "$tmp/pact-broker"
 
-for mode in no-main no-counterpart exact-success; do
+for mode in no-main no-main-present no-counterpart exact-success; do
   : > "$tmp/output"
   : > "$tmp/summary"
   ( cd "$root" && PATH="$tmp:$PATH" PACT_CLI_BIN="$tmp/pact-broker" \

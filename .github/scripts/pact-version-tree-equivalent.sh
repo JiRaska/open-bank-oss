@@ -55,7 +55,9 @@
 #                    documentation, load tests, fuzz harnesses, operator scripts, licence
 #                    texts — none is read by `:<svc>:quarkusBuild`. `pacts/` is irrelevant
 #                    to the image but IN SCOPE for --contract-inputs: a committed Pact may
-#                    change without a corresponding test-source change.
+#                    change without a corresponding test-source change. `openbank-contracts/`
+#                    is likewise IN SCOPE for --contract-inputs because notification's Pact
+#                    test reads its delegation AsyncAPI source.
 #   openbank-admin-ui/ openbank-api-gateway/ openbank-developer-portal/
 #   openbank-document-renderer/
 #                    not Gradle modules; separate build + deploy pipelines.
@@ -127,10 +129,11 @@ GLOBAL_IN_SCOPE_DIRS=(gradle config build-logic)
 # Contract publication/verification inputs beyond the service's Gradle tree. Keep pacts/
 # conservative across services: a renamed or newly committed consumer Pact must never be
 # waved through just because its source test did not move. The scripts listed here are the
-# helpers _service-ci.yml invokes for publishing and provider-version proof. The comparator
-# itself is intentionally not a historical Pact input: its new mode is what can prove an
+# helpers _service-ci.yml invokes for publishing and provider-version proof. Notification's
+# contract test reads openbank-contracts/.../asyncapi.yaml, so that tree is a Pact input too.
+# The comparator itself is intentionally not a historical Pact input: its new mode proves an
 # otherwise unchanged release-only transition after this fix lands.
-CONTRACT_EXTRA_SCOPE=(pacts .github/workflows/_service-ci.yml \
+CONTRACT_EXTRA_SCOPE=(pacts openbank-contracts .github/workflows/_service-ci.yml \
   .github/scripts/pact-broker-post.sh .github/scripts/prove-pact-provider-version.sh)
 
 # Which subpaths of a DEPENDENCY module are compile inputs. Not a new opinion: this is the repo's
@@ -517,7 +520,11 @@ selftest() {
   local c10; c10="$(_commit .github/scripts/pact-broker-post.sh changed)"
   _expect "contract mode refuses a Pact publish helper change" DIFFERENT --contract-inputs svc-a "$c9" "$c10"
 
-  [ "$fail" -eq 0 ] && echo "selftest OK: 42 cases (22 default + 8 --own-test-overlay + 10 --contract-inputs + 2 incompatible-mode refusals) on real git trees — release metadata changes only contract scope, while source, test, shared-library, committed Pact, workflow, root-build, ancestry and unknown-path guards remain fail-closed."
+  local c11; c11="$(_commit openbank-contracts/api.yaml changed)"
+  _expect "contract source outside the service does not alter image input" EQUIVALENT svc-a "$c10" "$c11"
+  _expect "contract mode refuses an AsyncAPI input change" DIFFERENT --contract-inputs svc-a "$c10" "$c11"
+
+  [ "$fail" -eq 0 ] && echo "selftest OK: 44 cases (23 default + 8 --own-test-overlay + 11 --contract-inputs + 2 incompatible-mode refusals) on real git trees — release metadata changes only contract scope, while source, test, shared-library, committed Pact, AsyncAPI, workflow, root-build, ancestry and unknown-path guards remain fail-closed."
   return "$fail"
 }
 

@@ -269,17 +269,9 @@ for svc in $(echo "$SERVICES" | jq -r '.[]'); do
     echo "  ✓ ${svc} deployable"
     deployable_list+=("$svc")
   else
-    # "No version with tag main exists": new service that has been registered as a
-    # Pacticipant (via record-deployment) but has never published a pact or been
-    # verified against one. Has the same semantics as a 404 Pacticipant — it cannot
-    # break any consumer/provider expectation. Treat as deployable.
-    # These first-deploy exceptions cannot override an exact-version failure for a known
-    # Pact participant. With no published or proven-equivalent version, a green here would
-    # repeat #12228's borrowed-verdict path even though the selector asked by SHA.
-    if [[ "$vpresent" = yes || "$vpresent" = equivalent:* ]] && \
-       echo "$cid_out" | grep -q "No version with tag"; then
-      echo "::warning::can-i-deploy: ${svc} has no 'main'-tagged version yet (new service, no pacts) — treating as deployable (ADR-0092)"
-      deployable_list+=("$svc")
+    # A known Pacticipant whose exact-version query fails with "No version with tag main"
+    # is NOT deployable. The broker's 404 Pacticipant exception was already handled above;
+    # a missing main tag cannot turn a failed --version query into a green verdict.
     # If every failure line is "no version is currently recorded as deployed/released
     # in this environment", the counterpart service has simply not been deployed to
     # sandbox yet and therefore cannot break any contract expectation. Treat it the
@@ -289,7 +281,7 @@ for svc in $(echo "$SERVICES" | jq -r '.[]'); do
     # pairs failed — folding the banner into the count made a single real failure
     # look like two, so the >= comparison below could never hold for exactly one
     # failing pair (issue surfaced by fraud-service/transaction-service, 2026-07-09).
-    elif [[ "$vpresent" = yes || "$vpresent" = equivalent:* ]] && \
+    if [[ "$vpresent" = yes || "$vpresent" = equivalent:* ]] && \
          [ "$(echo "$cid_out" | grep -c "There is no verified pact" || true)" -gt 0 ] && \
          [ "$(echo "$cid_out" | grep -c "no version is currently recorded" || true)" -ge "$(echo "$cid_out" | grep -c "There is no verified pact" || true)" ]; then
       echo "::warning::can-i-deploy: ${svc} has counterpart(s) not yet recorded in sandbox — treating as deployable (ADR-0092)"
