@@ -73,6 +73,8 @@ def action(pr: dict, head: str, base: str, required: list[str], reviews: int) ->
         raise ValueError("selected deploy PR carries a blocked deployment hold")
     if pr.get("headRefOid") != head or pr.get("baseRefOid") != base:
         raise ValueError("selected deploy PR head or base changed; retry selection")
+    if pr.get("baseRefName") != "main":
+        raise ValueError("selected deploy PR does not target main")
     head_name = str(pr.get("headRefName", ""))
     if head_name.startswith(DEPLOY_PREFIXES[1]):
         raise ValueError("Admin UI deploy held until #12211 image provenance is verified")
@@ -135,6 +137,7 @@ def self_test() -> None:
                   {"type": "pull_request", "parameters": {"required_approving_review_count": 1}}]}
     checks, reviews = required_policy(policy)
     pr = {"state": "OPEN", "isDraft": False, "headRefName": DEPLOY_PREFIXES[0] + base,
+          "baseRefName": "main",
           "headRefOid": sha, "baseRefOid": base, "mergeStateStatus": "CLEAN",
           "reviewDecision": "APPROVED", "statusCheckRollup": [{"name": "all-green", "conclusion": "SUCCESS"}]}
     assert (checks, reviews) == (["all-green"], 1)
@@ -160,6 +163,7 @@ def self_test() -> None:
     for bad, h, b, r in [
         ({**pr, "headRefOid": "c" * 40}, sha, base, 0),
         ({**pr, "baseRefOid": "c" * 40}, sha, base, 0),
+        ({**pr, "baseRefName": "release"}, sha, base, 0),
         ({**pr, "statusCheckRollup": []}, sha, base, 0),
         ({**pr, "labels": [{"name": "blocked"}]}, sha, base, 0),
         ({**pr, "reviewDecision": ""}, sha, base, 1),
@@ -225,7 +229,7 @@ def main(args: argparse.Namespace) -> None:
     if live_main(repo) != args.selected_main:
         raise ValueError("main changed after selection; retry next flush")
     pr = gh("pr", "view", str(args.number), "--repo", repo, "--json",
-            "state,isDraft,labels,headRefName,headRefOid,baseRefOid,mergeStateStatus,reviewDecision,statusCheckRollup,commits,id")
+            "state,isDraft,labels,headRefName,headRefOid,baseRefName,baseRefOid,mergeStateStatus,reviewDecision,statusCheckRollup,commits,id")
     listing = gh("api", f"repos/{repo}/rulesets")
     matches = [r for r in listing if r.get("name") == "main-protection" and r.get("enforcement") == "active"]
     if len(matches) != 1:
@@ -257,7 +261,7 @@ def main(args: argparse.Namespace) -> None:
     if live_main(repo) != args.selected_main:
         raise ValueError("main changed before deploy mutation; retry next flush")
     current = gh("pr", "view", str(args.number), "--repo", repo, "--json",
-                 "state,isDraft,labels,headRefName,headRefOid,baseRefOid,mergeStateStatus,reviewDecision,statusCheckRollup,commits,id")
+                 "state,isDraft,labels,headRefName,headRefOid,baseRefName,baseRefOid,mergeStateStatus,reviewDecision,statusCheckRollup,commits,id")
     if required_policy(gh("api", f"repos/{repo}/rulesets/{matches[0]['id']}")) != (required, reviews):
         raise ValueError("main ruleset changed during deploy verification; retry selection")
     if action(current, args.selected_head, args.selected_main, required, reviews) != choice:
@@ -268,7 +272,7 @@ def main(args: argparse.Namespace) -> None:
         if live_main(repo) != args.selected_main:
             raise ValueError("main changed before arming; retry next flush")
         latest = gh("pr", "view", str(args.number), "--repo", repo, "--json",
-                    "state,isDraft,labels,headRefName,headRefOid,baseRefOid,mergeStateStatus,reviewDecision,statusCheckRollup,id")
+                    "state,isDraft,labels,headRefName,headRefOid,baseRefName,baseRefOid,mergeStateStatus,reviewDecision,statusCheckRollup,id")
         if latest.get("id") != current["id"] or action(latest, args.selected_head,
                 args.selected_main, required, reviews) != "ARM":
             raise ValueError("deploy PR changed before arming; retry next flush")
