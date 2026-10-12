@@ -2,8 +2,9 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
-import { describe, expect, it } from 'vitest'
-import { readFileSync } from 'node:fs'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { gatusContainer } from '@/lib/services/gatus'
 import { buildRegistry, type CatalogFleetModule } from '@/lib/services/registry'
@@ -12,6 +13,15 @@ const catalog = JSON.parse(readFileSync(path.resolve(__dirname, '../../catalog.j
   services: CatalogFleetModule[]
 }
 const registry = buildRegistry(catalog.services)
+
+let temporaryCatalogDir: string | undefined
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+  delete process.env.OPENBANK_CATALOG
+  if (temporaryCatalogDir) rmSync(temporaryCatalogDir, { recursive: true, force: true })
+  temporaryCatalogDir = undefined
+})
 
 describe('Gatus endpoint resolution', () => {
   it.each([
@@ -74,5 +84,24 @@ describe('Gatus endpoint resolution', () => {
     'malformed',
   ])('does not invent an upstream for %s', key => {
     expect(gatusContainer(key, registry)).toBeUndefined()
+  })
+})
+
+describe('BCP Gatus route catalog requirement', () => {
+  it.each(['missing', 'empty'])('returns 503 before contacting Gatus when the catalog is %s', async state => {
+    temporaryCatalogDir = mkdtempSync(path.join(tmpdir(), 'openbank-bcp-catalog-'))
+    const file = path.join(temporaryCatalogDir, 'catalog.json')
+    if (state === 'empty') writeFileSync(file, JSON.stringify({ services: [] }))
+    process.env.OPENBANK_CATALOG = file
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { GET } = await import('@/app/api/bcp/health/route')
+    const response = await GET()
+
+    expect(response.status).toBe(503)
+    expect(response.headers.get('Cache-Control')).toBe('no-store')
+    await expect(response.json()).resolves.toEqual({ error: 'catalog_unavailable' })
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })

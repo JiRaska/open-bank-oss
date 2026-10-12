@@ -17,6 +17,14 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 export async function GET() {
+  const registry = getRegistry()
+  if (registry.length === 0) {
+    return NextResponse.json(
+      { error: 'catalog_unavailable' },
+      { status: 503, headers: { 'Cache-Control': 'no-store' } },
+    )
+  }
+
   try {
     const ctrl = new AbortController()
     const t = setTimeout(() => ctrl.abort(), 5000)
@@ -31,8 +39,6 @@ export async function GET() {
     const endpoints: GatusEndpoint[] = await res.json()
 
     const result: Record<string, 'healthy' | 'unhealthy'> = {}
-    const registry = getRegistry()
-
     for (const ep of endpoints) {
       const container = gatusContainer(ep.key, registry)
       if (!container) continue
