@@ -348,6 +348,59 @@ class CommunicationStyleRestContractIT {
         }
     }
 
+    @Test
+    @TestSecurity(user = "checker@openbank.test", roles = ["ROLE_COMMS_EDITOR", "ROLE_COMMS_APPROVER", "ROLE_API"])
+    fun `publishing a fresh draft replaces a still published row atomically`() {
+        val persona = "replace-${UUID.randomUUID()}"
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "insert into persona (id, key, display_name, channel, language, description) values (?, ?, ?, 'ADMIN', 'cs', '')",
+            ).use { statement ->
+                statement.setObject(1, UUID.randomUUID())
+                statement.setString(2, persona)
+                statement.setString(3, persona)
+                statement.executeUpdate()
+            }
+        }
+        fun draft(base: Int, tone: String): String = Given {
+            contentType("application/json")
+            body("""{"tone":"$tone","formality":"formal","formOfAddress":"vykani","basePublishedVersion":$base}""")
+        } When {
+            post("/api/v2/personas/$persona/style-versions")
+        } Then {
+            statusCode(201)
+        } Extract { path("id") }
+        fun publish(id: String) {
+            dataSource.connection.use { connection ->
+                connection.prepareStatement("update style_version set maker = 'editor@openbank.test' where id = ?")
+                    .use { statement ->
+                        statement.setObject(1, UUID.fromString(id))
+                        statement.executeUpdate()
+                    }
+            }
+            Given { this }.When { post("/api/v2/personas/style-versions/$id/submit") } Then { statusCode(200) }
+            Given { this }.When { post("/api/v2/personas/style-versions/$id/publish") } Then { statusCode(200) }
+        }
+
+        val first = draft(0, "warm")
+        publish(first)
+        val second = draft(1, "calm")
+        publish(second)
+        Given { this }.When { get("/api/v1/personas/$persona/published") } Then {
+            statusCode(200)
+            body("tone", equalTo("calm"))
+        }
+        dataSource.connection.use { connection ->
+            connection.prepareStatement("select status from style_version where id = ?").use { statement ->
+                statement.setObject(1, UUID.fromString(first))
+                statement.executeQuery().use { rows ->
+                    org.junit.jupiter.api.Assertions.assertTrue(rows.next())
+                    org.junit.jupiter.api.Assertions.assertEquals("RETIRED", rows.getString(1))
+                }
+            }
+        }
+    }
+
     private fun concurrentDrafts(): Pair<String, String> = Executors.newFixedThreadPool(2).use { executor ->
         val start = CountDownLatch(1)
         val firstDraft = executor.submit(
