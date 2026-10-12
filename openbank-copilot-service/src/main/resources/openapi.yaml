@@ -7,7 +7,7 @@ openapi: "3.1.0"
 
 info:
   title: OpenBank Copilot Service API
-  version: "1.4.0"
+  version: "1.4.1"
   description: |
     Customer-facing AI assistant (mobile copilot), per ADR-0089.
 
@@ -154,13 +154,18 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
-          description: Token not found (also returned for a malformed token id)
+          description: >-
+            Token not found, malformed id, or token already removed after expiry. The in-memory
+            store evicts at lookup and Redis expires keys by TTL; this response does not
+            distinguish those cases.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "422":
-          description: Token expired (the proposal must be re-issued by a new turn)
+          description: >-
+            A token was returned by the store but its expiresAt was already past when checked by
+            the resource. An expired token already removed by its store returns 404 instead.
           content:
             application/json:
               schema:
