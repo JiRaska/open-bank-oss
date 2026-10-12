@@ -80,19 +80,26 @@ function containerHost(name: string): string {
   return process.env.SERVICES_HOST === 'container' ? name : 'localhost'
 }
 
+// The local compose topology names infrastructure containers `openbank-<id>`.
+// Derive each hostname from its probe id; the protocol/port/health-path
+// declarations below retain their existing meaning.
+function localInfraHost(id: string): string {
+  return containerHost(`openbank-${id}`)
+}
+
 export const LOCAL_INFRA: InfraDef[] = [
-  { id: 'postgres',        probe: { kind: 'tcp',  host: containerHost('openbank-postgres'),         port: 5432 } },
-  { id: 'kafka',           probe: { kind: 'tcp',  host: containerHost('openbank-kafka'),             port: process.env.SERVICES_HOST === 'container' ? 9092 : 29092 } },
-  { id: 'keycloak',        probe: { kind: 'http', url: `http://${containerHost('openbank-keycloak')}:8080/realms/master`, okCodes: [200] } },
-  // Local docker-compose still ships Vault; the in-cluster store is OpenBao (runbook 0005).
-  { id: 'openbao',         probe: { kind: 'http', url: `http://${containerHost('openbank-vault')}:8200/v1/sys/health`, okCodes: [200, 429, 472, 473] } },
-  { id: 'valkey',          probe: { kind: 'tcp',  host: containerHost('openbank-valkey'),            port: 6379 } },
-  { id: 'schema-registry', probe: { kind: 'http', url: `http://${containerHost('openbank-schema-registry')}:8081/`, okCodes: [200, 302] } },
-  { id: 'grafana',         probe: { kind: 'http', url: `http://${containerHost('openbank-grafana')}:3000/api/health`, okCodes: [200] } },
-  { id: 'prometheus',      probe: { kind: 'http', url: `http://${containerHost('openbank-prometheus')}:9090/-/ready`, okCodes: [200] } },
-  { id: 'loki',            probe: { kind: 'http', url: `http://${containerHost('openbank-loki')}:3100/ready`, okCodes: [200] } },
-  { id: 'tempo',           probe: { kind: 'http', url: `http://${containerHost('openbank-tempo')}:3200/ready`, okCodes: [200] } },
-  { id: 'kafka-ui',        probe: { kind: 'http', url: `http://${containerHost('openbank-kafka-ui')}:8080/`, okCodes: [200, 302] } },
+  { id: 'postgres',        probe: { kind: 'tcp',  host: localInfraHost('postgres'),         port: 5432 } },
+  { id: 'kafka',           probe: { kind: 'tcp',  host: localInfraHost('kafka'),             port: process.env.SERVICES_HOST === 'container' ? 9092 : 29092 } },
+  { id: 'keycloak',        probe: { kind: 'http', url: `http://${localInfraHost('keycloak')}:8080/realms/master`, okCodes: [200] } },
+  // The checked-in compose topology runs OpenBao, not the legacy Vault host.
+  { id: 'openbao',         probe: { kind: 'http', url: `http://${localInfraHost('openbao')}:8200/v1/sys/health`, okCodes: [200, 429, 472, 473] } },
+  { id: 'valkey',          probe: { kind: 'tcp',  host: localInfraHost('valkey'),            port: 6379 } },
+  { id: 'schema-registry', probe: { kind: 'http', url: `http://${localInfraHost('schema-registry')}:8081/`, okCodes: [200, 302] } },
+  { id: 'grafana',         probe: { kind: 'http', url: `http://${localInfraHost('grafana')}:3000/api/health`, okCodes: [200] } },
+  { id: 'prometheus',      probe: { kind: 'http', url: `http://${localInfraHost('prometheus')}:9090/-/ready`, okCodes: [200] } },
+  { id: 'loki',            probe: { kind: 'http', url: `http://${localInfraHost('loki')}:3100/ready`, okCodes: [200] } },
+  { id: 'tempo',           probe: { kind: 'http', url: `http://${localInfraHost('tempo')}:3200/ready`, okCodes: [200] } },
+  { id: 'kafka-ui',        probe: { kind: 'http', url: `http://${localInfraHost('kafka-ui')}:8080/`, okCodes: [200, 302] } },
   // Platform control plane is Kubernetes-only — not part of the docker-compose
   // topology. Report UNKNOWN off-cluster rather than a misleading DOWN.
   { id: 'temporal',        probe: { kind: 'absent' } },
