@@ -106,6 +106,41 @@ class UnitRegisterFlowTest {
     }
 
     @Test
+    fun `delayed nav settles only orders eligible for its valuation day`(): Unit = runBlocking {
+        val fund = admin.createFund(definition("CZ0000000030"))
+        val first = register.place(
+            PlaceOrderCommand(contract, fund.id, OrderType.SUBSCRIBE, BigDecimal("10"), null, null, key()),
+        )
+        later(24 * 3600)
+        val second = register.place(
+            PlaceOrderCommand(contract, fund.id, OrderType.SUBSCRIBE, BigDecimal("20"), null, null, key()),
+        )
+        val firstNav = navs.calculate(
+            fund.id,
+            NavCalculationRequest(LocalDate.parse("2026-10-09"), emptyList(), BigDecimal.ZERO, BigDecimal.ZERO),
+            "maker",
+        )
+        later()
+        assertThat(navs.publish(firstNav.id, "checker").settledOrders).isEqualTo(1)
+        assertThat(store.orders.getValue(first.id).status).isEqualTo(OrderStatus.SETTLED)
+        assertThat(store.orders.getValue(second.id).status).isEqualTo(OrderStatus.PENDING)
+        assertThat(store.transactions.values.map { it.orderId }).containsExactly(first.id)
+        assertThat(register.valuation(contract).holdings.single().units).isEqualByComparingTo("10")
+
+        val secondNav = navs.calculate(
+            fund.id,
+            NavCalculationRequest(LocalDate.parse("2026-10-10"), emptyList(), BigDecimal("10"), BigDecimal.ZERO),
+            "maker",
+        )
+        later()
+        assertThat(navs.publish(secondNav.id, "checker").settledOrders).isEqualTo(1)
+        assertThat(store.orders.getValue(second.id).status).isEqualTo(OrderStatus.SETTLED)
+        assertThat(store.transactions.values.map { it.orderId }).containsExactly(first.id, second.id)
+        assertThat(register.valuation(contract).pendingOrders).isEmpty()
+        assertThat(register.valuation(contract).holdings.single().units).isEqualByComparingTo("30")
+    }
+
+    @Test
     fun `a switch settles in two forward-priced legs`(): Unit = runBlocking {
         val source = admin.createFund(definition("CZ0000000037"))
         val target = admin.createFund(definition("CZ0000000045"))

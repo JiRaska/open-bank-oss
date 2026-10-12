@@ -40,8 +40,8 @@ data class NavPublication(val nav: NavRecord, val settledOrders: Int, val correc
 
 /**
  * NAV lifecycle: calculate (maker) → publish (checker). Publishing an ordinary NAV settles every
- * order queued for the fund before that moment; publishing a CORRECTION supersedes the original
- * and re-prices every transaction that settled at it, adjusting holdings by the difference.
+ * eligible order queued for the fund before that moment. Correction publication stays blocked until
+ * durable compensation accounting can preserve the original transactions.
  */
 @ApplicationScoped
 class NavService(
@@ -166,7 +166,11 @@ class NavService(
     }
 
     private suspend fun publishAndSettle(nav: NavRecord, isin: String, currency: String): NavPublication {
-        val pending = store.pendingOrders(nav.fundId).filter { it.placedAt.isBefore(nav.publishedAt) }
+        val publishedAt = checkNotNull(nav.publishedAt)
+        val pending = store.pendingOrders(nav.fundId).filter {
+            it.placedAt.isBefore(publishedAt) &&
+                !it.placedAt.atZone(ZoneOffset.UTC).toLocalDate().isAfter(nav.valuationDate)
+        }
         val holdings = mutableMapOf<UUID, UnitHolding>()
         val orders = mutableListOf<UnitOrder>()
         val transactions = mutableListOf<UnitTransaction>()
