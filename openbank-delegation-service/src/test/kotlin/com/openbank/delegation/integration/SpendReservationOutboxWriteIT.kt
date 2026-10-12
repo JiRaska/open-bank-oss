@@ -192,16 +192,44 @@ class SpendReservationOutboxWriteIT {
         val grantId = seedGrant()
         reserve(grantId, "4000.00", "first")
 
-        RestAssured.given()
+        val refused = RestAssured.given()
             .contentType(ContentType.JSON)
             .header(CUSTOMER_PARTY_HEADER, grantee.toString())
             .body("""{"amount": 2000.00, "currency": "CZK", "idempotencyKey": "refused"}""")
             .post("/api/v1/delegations/$grantId/reservations")
-            .then().statusCode(HTTP_CONFLICT)
+            .then().statusCode(HTTP_CONFLICT).extract().response()
+        assertThat(refused.contentType).startsWith("application/json")
+        DocumentedErrorBody.assertConforms(
+            "/api/v1/delegations/{id}/reservations",
+            HTTP_CONFLICT,
+            "application/json",
+            refused.jsonPath().getMap(""),
+        )
 
         // Atomicity in the other direction: nothing committed, so nothing was audited. If the
         // event were published outside the transaction, this row would exist.
         assertThat(outboxPayloads(grantId, "SpendReserved")).hasSize(1)
+    }
+
+    @Test
+    @TestSecurity(user = "svc", roles = ["ROLE_API"])
+    fun `a reused reservation key returns the documented problem body`() {
+        val grantId = seedGrant()
+        reserve(grantId, "100.00", "same-key")
+
+        val conflict = RestAssured.given()
+            .contentType(ContentType.JSON)
+            .header(CUSTOMER_PARTY_HEADER, grantee.toString())
+            .body("""{"amount": 200.00, "currency": "CZK", "idempotencyKey": "same-key"}""")
+            .post("/api/v1/delegations/$grantId/reservations")
+            .then().statusCode(HTTP_CONFLICT).extract().response()
+        assertThat(conflict.contentType).startsWith("application/problem+json")
+        DocumentedErrorBody.assertConforms(
+            "/api/v1/delegations/{id}/reservations",
+            HTTP_CONFLICT,
+            "application/problem+json",
+            conflict.jsonPath().getMap(""),
+        )
     }
 
     /**

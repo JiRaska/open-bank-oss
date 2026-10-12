@@ -128,6 +128,13 @@ class BusinessSigningApiIT {
 
         assertThat(again.statusCode).isEqualTo(HTTP_CONFLICT)
         assertThat(again.jsonPath().getString("code")).isEqualTo("ALREADY_SIGNED")
+        assertThat(again.contentType).startsWith("application/json")
+        DocumentedErrorBody.assertConforms(
+            "/api/v1/entities/{entityId}/approval-requests/{approvalId}/signatures",
+            HTTP_CONFLICT,
+            "application/json",
+            again.jsonPath().getMap(""),
+        )
         assertThat(get(id).getString("status")).isEqualTo("PENDING")
         assertThat(get(id).getInt("collected")).isEqualTo(1)
     }
@@ -164,6 +171,12 @@ class BusinessSigningApiIT {
 
         assertThat(response.statusCode).isEqualTo(HTTP_FORBIDDEN)
         assertThat(response.jsonPath().getString("code")).isEqualTo("MANDATE_NOT_ACTIVE")
+        DocumentedErrorBody.assertConforms(
+            "/api/v1/entities/{entityId}/approval-requests/{approvalId}/signatures",
+            HTTP_FORBIDDEN,
+            "application/json",
+            response.jsonPath().getMap(""),
+        )
         assertThat(sca.consumeCalls).describedAs("a refused signer's ceremony is not spent").doesNotContain(challenge)
         assertThat(get(id).getString("status")).isEqualTo("PENDING")
     }
@@ -210,6 +223,22 @@ class BusinessSigningApiIT {
         )
         assertThat(response.statusCode).isEqualTo(HTTP_FORBIDDEN)
         assertThat(response.jsonPath().getString("code")).isEqualTo("SCA_NOT_VERIFIED")
+    }
+
+    @Test
+    fun `an unsatisfiable signing policy returns its documented HTTP error`() {
+        register.joint(entity, 3, alice, bob)
+
+        val response = post("/approval-requests", paymentBody(alice, sca.initiator(alice)))
+
+        assertThat(response.statusCode).isEqualTo(422)
+        assertThat(response.jsonPath().getString("code")).isEqualTo("POLICY_UNSATISFIABLE")
+        DocumentedErrorBody.assertConforms(
+            "/api/v1/entities/{entityId}/approval-requests",
+            422,
+            "application/json",
+            response.jsonPath().getMap(""),
+        )
     }
 
     // ------------------------------------------------------------------ guard: single-use release
