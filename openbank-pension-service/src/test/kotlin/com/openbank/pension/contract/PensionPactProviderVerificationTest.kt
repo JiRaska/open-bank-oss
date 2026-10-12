@@ -109,23 +109,7 @@ class PensionPactProviderVerificationTest {
      * the pact's literal transfer id, so the list and the withdrawal interactions can name it.
      */
     @State(PactContractSeed.AWAITING_CONSENT_STATE)
-    fun transferAwaitingConsent() {
-        PactContractSeed.reset()
-        PactContractSeed.insertActive()
-        val now = Instant.now()
-        val request = TransferRequest.request(
-            direction = TransferDirection.OUT,
-            origin = TransferOrigin.RECEIVING_PROVIDER,
-            contractId = PactContractSeed.CONTRACT,
-            partyId = PactContractSeed.PARTY,
-            counterparty = Counterparty("PF-B", "Fund B", "B-42"),
-            currency = "CZK",
-            signatureRef = null,
-            deadline = LocalDate.now().plusDays(30),
-            now = now,
-        ).copy(id = PactContractSeed.AWAITING_TRANSFER)
-        onWorker { transfers.save(request) }
-    }
+    fun transferAwaitingConsent() = PactContractSeed.insertAwaitingConsent(transfers)
 
     /** The overview's valuation and the transactions page read the in-memory unit register (%test). */
     @State(PactContractSeed.UNITS_STATE)
@@ -175,6 +159,29 @@ internal object PactContractSeed {
     private fun <T> jdbc(block: (java.sql.Connection) -> T): T {
         val url = ConfigProvider.getConfig().getValue("quarkus.datasource.jdbc.url", String::class.java)
         return DriverManager.getConnection(url, "openbank", "openbank_secret").use(block)
+    }
+
+    /**
+     * A receiving provider asked to move the contract out and waits for the participant's consent:
+     * the pact's literal transfer id, so the list and the withdrawal interactions can name it.
+     * Saved through the repository (its JSON payload is the domain's own serialisation).
+     */
+    fun insertAwaitingConsent(transfers: TransferRequestRepository) {
+        reset()
+        insertActive()
+        val now = Instant.now()
+        val request = TransferRequest.request(
+            direction = TransferDirection.OUT,
+            origin = TransferOrigin.RECEIVING_PROVIDER,
+            contractId = CONTRACT,
+            partyId = PARTY,
+            counterparty = Counterparty("PF-B", "Fund B", "B-42"),
+            currency = "CZK",
+            signatureRef = null,
+            deadline = LocalDate.now().plusDays(30),
+            now = now,
+        ).copy(id = AWAITING_TRANSFER)
+        onWorker { transfers.save(request) }
     }
 
     fun reset() = jdbc { conn ->

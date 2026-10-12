@@ -11,12 +11,15 @@ import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactBroker
+import com.openbank.pension.application.onboarding.TransferRequestRepository
 import com.openbank.pension.infrastructure.fund.InMemoryFundAdministrationAdapter
 import com.openbank.pension.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
@@ -36,7 +39,14 @@ import org.junit.jupiter.api.extension.ExtendWith
  */
 @QuarkusTest
 @QuarkusTestResource(PostgresTestResource::class)
-@TestSecurity(user = "edge", roles = ["ROLE_API"])
+@TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+@OidcSecurity(
+    claims = [
+        Claim(key = "sub", value = "edge-relay-subject"),
+        Claim(key = "azp", value = "openbank-edge"),
+        Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+    ],
+)
 @Provider("openbank-pension-service")
 @PactBroker(enablePendingPacts = "true")
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
@@ -84,6 +94,12 @@ class PensionPactBrokerProviderVerificationTest {
         PactContractSeed.insertActive()
         PactContractSeed.seedUnits(register)
     }
+
+    @Inject
+    lateinit var transfers: TransferRequestRepository
+
+    @State(PactContractSeed.AWAITING_CONSENT_STATE)
+    fun transferAwaitingConsent() = PactContractSeed.insertAwaitingConsent(transfers)
 
     @State(NEGATIVE_AUTH_STATE)
     fun stateNoValidM2mIdentity() {
