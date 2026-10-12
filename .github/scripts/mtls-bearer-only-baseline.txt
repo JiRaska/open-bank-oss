@@ -4,7 +4,6 @@
 openbank-ap2-service
 openbank-consent-service
 openbank-domestic-payment
-openbank-ledger-service
 openbank-lending-service
 openbank-party-service
 openbank-risk-engine
