@@ -7,6 +7,7 @@ package com.openbank.pensionfund.domain
 import com.openbank.pensionfund.domain.model.Fund
 import com.openbank.pensionfund.domain.model.FundStatus
 import com.openbank.pensionfund.domain.model.NavCorrectionBlocker
+import com.openbank.pensionfund.domain.model.NavCorrectionObligationKind
 import com.openbank.pensionfund.domain.model.NavCorrectionPlanner
 import com.openbank.pensionfund.domain.model.NavFigures
 import com.openbank.pensionfund.domain.model.NavRecord
@@ -320,5 +321,75 @@ class NavCorrectionPlannerTest {
         assertThat(otherCurrency.lines.single().linkedSwitchCurrency).isEqualTo("EUR")
         assertThat(otherCurrency.unresolved.map { it.blocker })
             .contains(NavCorrectionBlocker.CROSS_CURRENCY_SWITCH_POLICY_REQUIRED)
+    }
+
+    @Test
+    fun `unresolved recovery for one participant does not suppress another obligation draft`() {
+        val original = nav(sourceFund, "2.000000")
+        val replacement = nav(sourceFund, "4.000000", original)
+        val depleted = transaction(original, UnitTransactionType.SUBSCRIBE, "50.000000", "100.00")
+        val unaffected = transaction(original, UnitTransactionType.SUBSCRIBE, "100.000000", "200.00")
+            .copy(contractId = UUID.randomUUID())
+        val depletedOrder = order(checkNotNull(depleted.orderId), sourceFund, OrderType.SUBSCRIBE, amount = "100.00")
+        val unaffectedOrder = order(
+            checkNotNull(unaffected.orderId),
+            sourceFund,
+            OrderType.SUBSCRIBE,
+            amount = "200.00",
+        )
+            .copy(contractId = unaffected.contractId)
+        val holdings = listOf(
+            UnitHolding(contract, sourceFund, BigDecimal.ZERO),
+            UnitHolding(unaffected.contractId, sourceFund, BigDecimal("100.000000")),
+        )
+
+        fun calculate(transactions: List<UnitTransaction>, orders: List<UnitOrder>) = NavCorrectionPlanner.calculate(
+            original,
+            replacement,
+            fund(sourceFund, "CZK"),
+            transactions,
+            orders,
+            emptyList(),
+            emptyList(),
+            holdings,
+        )
+
+        val first = calculate(listOf(depleted, unaffected), listOf(depletedOrder, unaffectedOrder))
+        val replay = calculate(listOf(unaffected, depleted), listOf(unaffectedOrder, depletedOrder))
+        assertThat(first.unresolved.map { it.blocker }).containsExactly(NavCorrectionBlocker.INSUFFICIENT_HELD_UNITS)
+        assertThat(first.obligationDrafts).isEqualTo(replay.obligationDrafts)
+        assertThat(first.obligationDrafts).hasSize(1)
+        val draft = first.obligationDrafts.single()
+        assertThat(draft.key.replacementNavId).isEqualTo(replacement.id)
+        assertThat(draft.key.originalTransactionId).isEqualTo(unaffected.id)
+        assertThat(draft.key.kind).isEqualTo(NavCorrectionObligationKind.UNITS)
+        assertThat(draft.delta).isEqualByComparingTo("-50.000000")
+    }
+
+    @Test
+    fun `switch cash difference stays a blocked draft until both legs have an approved policy`() {
+        val original = nav(sourceFund, "2.000000")
+        val replacement = nav(sourceFund, "3.000000", original)
+        val outOrder = order(UUID.randomUUID(), sourceFund, OrderType.SWITCH_OUT, units = "2", target = targetFund)
+        val inOrder = order(UUID.randomUUID(), targetFund, OrderType.SWITCH_IN, amount = "4.00", parent = outOrder.id)
+        val outTx = transaction(original, UnitTransactionType.SWITCH_OUT, "2.000000", "4.00", outOrder.id)
+        val targetNav = nav(targetFund, "2.000000")
+        val inTx = transaction(targetNav, UnitTransactionType.SWITCH_IN, "2.000000", "4.00", inOrder.id)
+
+        val plan = NavCorrectionPlanner.calculate(
+            original,
+            replacement,
+            fund(sourceFund, "CZK"),
+            listOf(outTx),
+            listOf(outOrder, inOrder),
+            listOf(inTx),
+            listOf(fund(targetFund, "CZK")),
+            listOf(UnitHolding(contract, sourceFund, BigDecimal.ZERO)),
+        )
+
+        assertThat(plan.lines.single().cashDelta).isEqualByComparingTo("2.00")
+        assertThat(plan.unresolved.map { it.blocker })
+            .contains(NavCorrectionBlocker.SWITCH_COUNTERPART_REPRICE_REQUIRED)
+        assertThat(plan.obligationDrafts).isEmpty()
     }
 }

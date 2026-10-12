@@ -45,13 +45,77 @@ data class NavCorrectionIssue(
     val fundId: UUID,
 )
 
+enum class NavCorrectionObligationKind { CASH, UNITS }
+
+/** Natural key for a future durable obligation; a retry must address the same row. */
+data class NavCorrectionObligationKey(
+    val replacementNavId: UUID,
+    val originalTransactionId: UUID,
+    val kind: NavCorrectionObligationKind,
+)
+
+/** Calculation only: the sign says owed to (+) or recoverable from (-) the participant. */
+data class NavCorrectionObligationDraft(
+    val key: NavCorrectionObligationKey,
+    val contractId: UUID,
+    val fundId: UUID,
+    val currency: String,
+    val delta: BigDecimal,
+)
+
 data class NavCorrectionPlan(
     val originalNavId: UUID,
     val replacementNavId: UUID,
     val fundCurrency: String,
     val lines: List<NavCorrectionLine>,
     val unresolved: List<NavCorrectionIssue>,
-)
+) {
+    /**
+     * An unresolved line never becomes an obligation. A holding-level blocker covers every line
+     * for that participant/fund, while a switch or rounding blocker covers its one transaction.
+     * Other participants remain independently plannable. This is not a payment instruction or a
+     * persisted journal; publication still requires the durable accounting flow.
+     */
+    val obligationDrafts: List<NavCorrectionObligationDraft> get() = lines
+        .filter { line ->
+            unresolved.none { issue ->
+                issue.contractId == line.contractId &&
+                    issue.fundId == line.fundId &&
+                    (issue.originalTransactionId == null || issue.originalTransactionId == line.originalTransactionId)
+            }
+        }
+        .flatMap { line ->
+            listOfNotNull(
+                line.unitsDelta.takeIf { it.signum() != 0 }?.let {
+                    NavCorrectionObligationDraft(
+                        NavCorrectionObligationKey(
+                            replacementNavId,
+                            line.originalTransactionId,
+                            NavCorrectionObligationKind.UNITS,
+                        ),
+                        line.contractId,
+                        line.fundId,
+                        line.currency,
+                        it,
+                    )
+                },
+                line.cashDelta.takeIf { it.signum() != 0 }?.let {
+                    NavCorrectionObligationDraft(
+                        NavCorrectionObligationKey(
+                            replacementNavId,
+                            line.originalTransactionId,
+                            NavCorrectionObligationKind.CASH,
+                        ),
+                        line.contractId,
+                        line.fundId,
+                        line.currency,
+                        it,
+                    )
+                },
+            )
+        }
+        .sortedWith(compareBy({ it.key.originalTransactionId }, { it.key.kind }))
+}
 
 /**
  * Computes candidate differences without changing the original transaction or choosing a cash,
@@ -83,7 +147,7 @@ object NavCorrectionPlanner {
             relatedTransactions.associateBy { checkNotNull(it.orderId) },
             relatedFunds.associateBy { it.id },
         )
-        val calculations = originalTransactions.map { tx ->
+        val calculations = originalTransactions.sortedBy { it.id }.map { tx ->
             calculateLine(tx, replacement.navPerUnit, fund.currency, context)
         }
         val lines = calculations.map { it.first }
