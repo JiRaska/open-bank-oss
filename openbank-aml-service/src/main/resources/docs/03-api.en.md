@@ -21,6 +21,14 @@ All endpoints require a **Keycloak Bearer token** (realm `openbank`, OIDC). Muta
 
 The decision endpoint additionally carries `@Authorize(action = "amlCase.updateDecision", resource = "#caseId")` — an OPA policy check via the sidecar PDP (ADR-0034). Authz is **advisory** by default (`authz.enforce=false`): denies are logged at WARN and the request still proceeds; flip with `AUTHZ_ENFORCE=true`.
 
+### Production mTLS listener
+
+`/api/*` accepts OIDC bearer authentication on both the plain HTTP listener and
+the mTLS listener. A trusted client certificate authenticates the TLS connection
+only; callers must also send their bearer token. A certificate without a bearer
+token receives 401, while a missing trusted certificate fails the TLS handshake
+before HTTP. The endpoint roles and OPA authorization checks still apply.
+
 ## Idempotence
 
 `POST /api/v1/aml/cases` **requires** the header:
