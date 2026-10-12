@@ -88,3 +88,15 @@ podklady slouží čtecímu modelu reportingu, nepodávají zákonný výkaz.
 ### Opakování požadavků na korekci klasifikace
 
 POST operace návrhu, schválení a zamítnutí vyžadují neprázdný `Idempotency-Key` o nejvýše 128 znacích. Klíč je oddělen podle přihlášeného uživatele a operace. Opakování stejného pokynu vrátí původní odpověď i poté, co korekce změnila stav; změněný obsah se stejným klíčem vrátí 409. Původní odpověď a změna korekce se ukládají v jedné databázové transakci. Ze souběžného schválení a zamítnutí může být zapsáno jen jedno rozhodnutí.
+
+## Pozorovatelnost
+
+Služba publikuje metriky `openbank.pension_fund.*`: zpoždění, stáří a opravy
+publikace NAV, výsledky pokynů a změn strategie, vypořádané částky, opakované
+pokyny, dotazy na tržní ceny a konflikty optimistického zamykání na držbách
+jednotek (počítají je REST mappery před odpovědí 409). Stavové gauge (čistá
+aktiva, NAV na jednotku, jednotky v oběhu, čekající pokyny a stáří front)
+obnovuje každou minutu plánovaná úloha; neúspěšné obnovení ponechá předchozí
+hodnoty a nezaznamená úspěch, takže gauge živosti workflow zestárne a spustí
+alert. Pravidla alertů jsou v `prometheus-rules-pension-fund.yaml`, runbook v
+`docs/runbooks/pension-alerts.md`.
