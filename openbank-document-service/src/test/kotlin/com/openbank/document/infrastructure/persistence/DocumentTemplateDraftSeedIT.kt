@@ -22,6 +22,7 @@ import kotlinx.coroutines.async
 import org.assertj.core.api.Assertions.assertThat
 import org.hibernate.reactive.mutiny.Mutiny
 import org.junit.jupiter.api.Test
+import java.security.MessageDigest
 import java.util.UUID
 
 @QuarkusTest
@@ -38,6 +39,95 @@ class DocumentTemplateDraftSeedIT {
 
     private fun <T> onContext(block: suspend () -> T): T = VertxContextSupport.subscribeAndAwait {
         CoroutineScope(Dispatchers.Unconfined).async { block() }.asUni()
+    }
+
+    private suspend fun applyMigration(sql: String) {
+        sf.withTransaction { session ->
+            session.createNativeQuery<Any>(sql).executeUpdate()
+        }.awaitSuspending()
+    }
+
+    @Test
+    fun `migration fingerprints match the eight current seed bodies`() {
+        val migration = requireNotNull(
+            javaClass.classLoader.getResource("db/migration/V15__retire_unreviewed_pension_seed_publications.sql"),
+        ).readText()
+        val pattern = Regex("'([0-9a-f-]+)'::uuid, '([^']+)', '([0-9a-f]{32})'")
+        val fingerprints = pattern.findAll(migration).associate { match ->
+            match.groupValues[2] to (match.groupValues[1] to match.groupValues[3])
+        }
+        val actual = DocumentTemplateSeed.templates.filter { it.code.startsWith("pension-") }.associate { template ->
+            val digest = MessageDigest.getInstance("MD5").digest(template.bodyHtml.toByteArray(Charsets.UTF_8))
+                .joinToString("") { "%02x".format(it) }
+            template.code to (template.id.toString() to digest)
+        }
+        assertThat(fingerprints).hasSize(8).isEqualTo(actual)
+    }
+
+    @Test
+    fun `migration demotes all eight original publications but leaves changed revisions untouched`() {
+        val drafts = DocumentTemplateSeed.templates.filter { it.code.startsWith("pension-") }
+        val changedDraft = drafts.first()
+        val migration = requireNotNull(
+            javaClass.classLoader.getResource("db/migration/V15__retire_unreviewed_pension_seed_publications.sql"),
+        ).readText()
+
+        try {
+            onContext {
+                for (draft in drafts) {
+                    sf.withTransaction { session ->
+                        session.find(DocumentTemplateEntity::class.java, draft.id).invoke { row ->
+                            row.status = TemplateStatus.PUBLISHED
+                        }.replaceWithVoid()
+                    }.awaitSuspending()
+                }
+                applyMigration(migration)
+                for (draft in drafts) {
+                    assertThat(repo.findById(draft.id)?.status).isEqualTo(TemplateStatus.DRAFT)
+                }
+
+                // A changed body at the same fixed ID is not proven to be the original seed.
+                sf.withTransaction { session ->
+                    session.find(DocumentTemplateEntity::class.java, changedDraft.id).invoke { row ->
+                        row.bodyHtml += "<!-- changed after seeding -->"
+                        row.status = TemplateStatus.PUBLISHED
+                    }.replaceWithVoid()
+                }.awaitSuspending()
+                applyMigration(migration)
+                assertThat(repo.findById(changedDraft.id)?.status).isEqualTo(TemplateStatus.PUBLISHED)
+
+                sf.withTransaction { session ->
+                    session.find(DocumentTemplateEntity::class.java, changedDraft.id).invoke { row ->
+                        row.bodyHtml = changedDraft.bodyHtml
+                        row.createdBy = "reviewer"
+                    }.replaceWithVoid()
+                }.awaitSuspending()
+                applyMigration(migration)
+                assertThat(repo.findById(changedDraft.id)?.status).isEqualTo(TemplateStatus.PUBLISHED)
+
+                sf.withTransaction { session ->
+                    session.find(DocumentTemplateEntity::class.java, changedDraft.id).invoke { row ->
+                        row.createdBy = changedDraft.createdBy
+                        row.version = "1.0.1"
+                    }.replaceWithVoid()
+                }.awaitSuspending()
+                applyMigration(migration)
+                assertThat(repo.findById(changedDraft.id)?.status).isEqualTo(TemplateStatus.PUBLISHED)
+            }
+        } finally {
+            onContext {
+                for (draft in drafts) {
+                    sf.withTransaction { session ->
+                        session.find(DocumentTemplateEntity::class.java, draft.id).invoke { row ->
+                            row.bodyHtml = draft.bodyHtml
+                            row.status = TemplateStatus.DRAFT
+                            row.createdBy = draft.createdBy
+                            row.version = draft.version
+                        }.replaceWithVoid()
+                    }.awaitSuspending()
+                }
+            }
+        }
     }
 
     @Test
