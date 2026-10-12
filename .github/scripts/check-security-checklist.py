@@ -121,7 +121,10 @@ PCI_FIELD = re.compile(
     r"|\b[a-z]+(?:Pan|PAN|Card|Cvv|Cvc|CVV|CVC)(?:[A-Z][A-Za-z0-9]*)?\b"
     r"|\b(?:Pan|PAN|Card|Cvv|Cvc|CVV|CVC)(?:[A-Z][A-Za-z0-9]*)?\b"
     r"|\b(?:pan|card|cardholder|cvv|cvc)[A-Z][A-Za-z0-9_]*\b"
-    r"|\b[a-z0-9_]+_(?i:pan|card|cvv|cvc|track2)(?:_[a-z0-9]+)*\b",
+    r"|\b[a-z0-9_]+_(?i:pan|card|cvv|cvc|track2)(?:_[a-z0-9]+)*\b"
+    r"|\b[a-z]+PrimaryAccountNumber\b|\bPrimaryAccountNumber\b"
+    r"|\b[a-z0-9_]+_primary_account_number\b"
+    r"|\b(?i:pci)[A-Za-z0-9_]*\b",
 )
 
 
@@ -196,7 +199,9 @@ def item_of(text: str) -> str | None:
 
 def diff_lines(base: str) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
     """(added, removed) lines of the diff as (path, text). A deleted file's lines carry its old path."""
-    out = subprocess.run(["git", "diff", "-U0", "--no-color", f"{base}...HEAD"],
+    # Keep line evidence consistent with changed_files(): an identical rename must expose
+    # the old file's deleted lines and the new file's added lines for PCI detection.
+    out = subprocess.run(["git", "diff", "--no-renames", "-U0", "--no-color", f"{base}...HEAD"],
                          capture_output=True, text=True, check=True).stdout
     cur, old, add, rem = "", "", [], []
     for ln in out.splitlines():
@@ -704,6 +709,10 @@ def self_test() -> int:
         ("camel encrypted PAN", negative, [], [("src/main/X.kt", "val encryptedPan: String")], [], False, False),
         ("camel PAN hash", negative, [], [("src/main/X.kt", "val panHash: String")], [], False, False),
         ("camel primary account number", negative, [], [("src/main/X.kt", "val primaryAccountNumber: String")], [], False, False),
+        ("encrypted primary account number", negative, [], [("src/main/X.kt", "val encryptedPrimaryAccountNumber: String")], [], False, False),
+        ("snake encrypted primary account number", negative, [], [("src/main/X.kt", "val encrypted_primary_account_number: String")], [], False, False),
+        ("PCI annotation", negative, [], [("src/main/X.kt", "@PCI")], [], False, False),
+        ("PCI sensitive annotation", negative, [], [("src/main/X.kt", "@PciSensitive")], [], False, False),
         ("qualified camel PAN", negative, [], [("src/main/X.kt", "dto.encryptedPan = value")], [], False, False),
         ("camel cardholder ID", negative, [], [("src/main/X.kt", "val cardholderId: UUID")], [], False, False),
         ("removed snake PAN hash", negative, [], [], [("src/main/V3.sql", "  pan_hash varchar(64),")], False, False),
@@ -830,6 +839,41 @@ def self_test() -> int:
         print("self-test FAIL: removing maskedPan from a generic file passed negative PCI"); bad += 1
     if existing_pci_edit(rename=True) == 0:
         print("self-test FAIL: renaming Cardholder.kt to Money.kt passed negative PCI"); bad += 1
+
+    # A generic path carries no PCI signal in its name. Git's default rename detection
+    # suppresses identical content here, so prove both delete/add sides remain visible.
+    def generic_schema_rename(field: str) -> tuple[int, list[tuple[str, str]], list[tuple[str, str]]]:
+        with _tf.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / RULES).parent.mkdir(parents=True)
+            (root / RULES).write_text("money_path_services:\n  - " + svc + "\n", encoding="utf-8")
+            old = root / svc / "src/main/resources/old.yaml"
+            old.parent.mkdir(parents=True)
+            old.write_text(f"properties:\n  {field}:\n    type: string\n", encoding="utf-8")
+            env = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
+                   "GIT_COMMITTER_EMAIL": "t@t", "PATH": os.environ.get("PATH", "")}
+            def git(*a):
+                _sp.run(["git", "-C", str(root), *a], check=True, capture_output=True, env=env)
+            git("init", "-q", "-b", "base"); git("add", str(old.relative_to(root)))
+            git("commit", "-q", "-m", "base"); git("checkout", "-q", "-b", "head")
+            git("mv", str(old.relative_to(root)), str(old.with_name("new.yaml").relative_to(root)))
+            git("commit", "-q", "-m", "head")
+            cwd = os.getcwd()
+            try:
+                os.chdir(root)
+                added, removed = diff_lines("base")
+                return run(root, pci_body, "base", enforce=True), added, removed
+            finally:
+                os.chdir(cwd)
+
+    rc, added, removed = generic_schema_rename("maskedPan")
+    if rc == 0 or not any("maskedPan:" in text for _, text in added) or not any(
+        "maskedPan:" in text for _, text in removed
+    ):
+        print("self-test FAIL: identical generic PCI schema rename hid deleted/added content"); bad += 1
+    rc, _, _ = generic_schema_rename("balance")
+    if rc != 0:
+        print("self-test FAIL: ordinary generic schema rename rejected negative PCI"); bad += 1
 
     rc = fixture([f"{svc}/src/main/kotlin/Money.kt"], no_checklist,
                  live_body=lambda: ticked)
