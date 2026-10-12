@@ -7,18 +7,9 @@
 // plaintext service edge or trying to bypass Pyrra's user-facing identity gate.
 
 import { NextResponse } from 'next/server'
+import { moneyPathAvailabilitySlo } from '@/lib/governance/moneyPath'
 
 export const dynamic = 'force-dynamic'
-
-const TARGET = 0.999
-const CUSTOMER_JOURNEY_SLOS = [
-  'openbank-transaction-availability',
-  'openbank-ledger-availability',
-  'openbank-sepa-instant-availability',
-  'openbank-domestic-payment-availability',
-  'openbank-settlement-availability',
-  'openbank-fraud-availability',
-] as const
 
 type Sample = { metric: Record<string, string>; value: [number, string] }
 
@@ -27,7 +18,7 @@ function prometheusBase(): string {
   return process.env.PROMETHEUS_URL ?? 'http://localhost:9090'
 }
 
-async function queryVector(query: string, signal: AbortSignal): Promise<Map<string, number>> {
+async function queryVector(query: string, signal: AbortSignal, allowed: ReadonlySet<string>): Promise<Map<string, number>> {
   const response = await fetch(`${prometheusBase()}/api/v1/query?query=${encodeURIComponent(query)}`, {
     signal,
     headers: { Accept: 'application/json' },
@@ -40,7 +31,7 @@ async function queryVector(query: string, signal: AbortSignal): Promise<Map<stri
   for (const raw of payload.data.result as Sample[]) {
     const slo = raw?.metric?.slo
     const value = Array.isArray(raw?.value) ? Number(raw.value[1]) : Number.NaN
-    if (typeof slo !== 'string' || !CUSTOMER_JOURNEY_SLOS.includes(slo as typeof CUSTOMER_JOURNEY_SLOS[number]) || !Number.isFinite(value) || value < 0) {
+    if (typeof slo !== 'string' || !allowed.has(slo) || !Number.isFinite(value) || value < 0) {
       throw new Error('invalid prometheus sample')
     }
     rows.set(slo, value)
@@ -49,28 +40,37 @@ async function queryVector(query: string, signal: AbortSignal): Promise<Map<stri
 }
 
 export async function GET() {
+  let declared: ReturnType<typeof moneyPathAvailabilitySlo>
+  try {
+    declared = moneyPathAvailabilitySlo()
+  } catch {
+    return NextResponse.json({ available: false, error: 'slo_catalog_unavailable', configured: 0, monitored: 0, objectives: [] },
+      { status: 503, headers: { 'Cache-Control': 'no-store' } })
+  }
+  const allowed = new Set(declared.names)
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 8000)
-  const selector = 'openbank-(transaction|ledger|sepa-instant|domestic-payment|settlement|fraud)-availability'
+  const selector = declared.names.join('|')
+  const recordingRule = `traces_spanmetrics_calls:increase${declared.window}`
 
   try {
     const [totals, errors] = await Promise.all([
-      queryVector(`sum by (slo) (traces_spanmetrics_calls:increase30d{slo=~"${selector}"})`, controller.signal),
-      queryVector(`sum by (slo) (traces_spanmetrics_calls:increase30d{slo=~"${selector}",status_code="STATUS_CODE_ERROR"})`, controller.signal),
+      queryVector(`sum by (slo) (${recordingRule}{slo=~"${selector}"})`, controller.signal, allowed),
+      queryVector(`sum by (slo) (${recordingRule}{slo=~"${selector}",status_code="STATUS_CODE_ERROR"})`, controller.signal, allowed),
     ])
 
-    const objectives = CUSTOMER_JOURNEY_SLOS.map(name => {
+    const objectives = declared.names.map(name => {
       const total = totals.get(name)
       if (total === undefined || total === 0) {
-        return { name, target: TARGET, window: '30d', budgetRemaining: null, availability: null, requestCount: total ?? null }
+        return { name, target: declared.target, window: declared.window, budgetRemaining: null, availability: null, requestCount: total ?? null }
       }
       const errorCount = errors.get(name) ?? 0
       const errorRatio = errorCount / total
       return {
         name,
-        target: TARGET,
-        window: '30d',
-        budgetRemaining: 1 - errorRatio / (1 - TARGET),
+        target: declared.target,
+        window: declared.window,
+        budgetRemaining: 1 - errorRatio / (1 - declared.target),
         availability: 1 - errorRatio,
         requestCount: total,
       }
@@ -78,7 +78,7 @@ export async function GET() {
 
     return NextResponse.json({
       available: true,
-      configured: CUSTOMER_JOURNEY_SLOS.length,
+      configured: declared.names.length,
       monitored: objectives.filter(objective => objective.requestCount !== null).length,
       objectives,
     }, { headers: { 'Cache-Control': 'no-store' } })
@@ -86,7 +86,7 @@ export async function GET() {
     return NextResponse.json({
       available: false,
       error: error instanceof DOMException && error.name === 'AbortError' ? 'prometheus_timeout' : 'pyrra_evidence_unreachable',
-      configured: CUSTOMER_JOURNEY_SLOS.length,
+      configured: declared.names.length,
       monitored: 0,
       objectives: [],
     }, { status: 502, headers: { 'Cache-Control': 'no-store' } })

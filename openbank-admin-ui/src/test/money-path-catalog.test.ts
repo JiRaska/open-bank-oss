@@ -6,8 +6,8 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { parse as parseYaml } from 'yaml'
-import { moneyPathServices } from '@/lib/governance/moneyPath'
+import { parse as parseYaml, parseAllDocuments } from 'yaml'
+import { moneyPathAvailabilitySlo, moneyPathServices } from '@/lib/governance/moneyPath'
 import { loadFlagCatalog } from '@/lib/governance/flags'
 import { loadThreatModelIndex, missingThreatModels } from '@/lib/governance/docs'
 
@@ -50,12 +50,36 @@ describe('money-path classification from the generated catalog', () => {
 
   it('the generated catalog agrees exactly with the authoritative rules list', () => {
     const repo = path.resolve(__dirname, '../../..')
-    const rules = parseYaml(readFileSync(path.join(repo, 'openbank-libs/governance/rules.yaml'), 'utf-8')) as { money_path_services: string[] }
+    const rules = parseYaml(readFileSync(path.join(repo, 'openbank-libs/governance/rules.yaml'), 'utf-8')) as {
+      money_path_services: string[]; slo: { availability_target: string; availability_window: string }
+    }
     const generated = JSON.parse(readFileSync(path.join(repo, 'openbank-admin-ui/catalog.json'), 'utf-8')) as {
       services: Array<{ name: string; moneyPath: boolean }>
     }
     catalog(generated.services)
     expect([...moneyPathServices()].sort()).toEqual(rules.money_path_services.map(name => name.replace(/^openbank-/, '')).sort())
+  })
+
+  it('declares every governed availability SLO with its target and window', () => {
+    const repo = path.resolve(__dirname, '../../..')
+    const rules = parseYaml(readFileSync(path.join(repo, 'openbank-libs/governance/rules.yaml'), 'utf-8')) as {
+      money_path_services: string[]; slo: { availability_target: string; availability_window: string }
+    }
+    const declarations = parseAllDocuments(readFileSync(path.join(repo,
+      'openbank-infra/gitops/components/observability/pyrra-slo-money-path.yaml'), 'utf-8'))
+      .map(document => document.toJSON() as { metadata: { name: string } })
+      .filter(document => document?.metadata?.name?.endsWith('-availability'))
+      .map(document => document.metadata.name).sort()
+    const actual = moneyPathAvailabilitySlo()
+    expect(actual.names).toEqual(declarations)
+    expect(actual.names.length).toBe(rules.money_path_services.length)
+    expect(actual.target).toBeCloseTo(Number(rules.slo.availability_target) / 100, 12)
+    expect(actual.window).toBe(rules.slo.availability_window)
+  })
+
+  it('missing SLO policy cannot be reported as a configured budget', () => {
+    catalog([{ name: 'openbank-ledger-service', moneyPath: true }])
+    expect(() => moneyPathAvailabilitySlo()).toThrow(/no availability SLO/)
   })
 
   it('classifies flag rows from the derived set instead of the former fixed 14', async () => {

@@ -53,7 +53,14 @@ function loadGovernance() {
   if (!groups || typeof groups !== 'object' || Array.isArray(groups) || Object.keys(groups).length === 0) {
     throw new Error('rules.yaml finops_cost_groups is missing or empty')
   }
-  return { moneyPath: new Set(y.money_path_services), groups }
+  const targetPercent = Number(y?.slo?.availability_target)
+  const window = y?.slo?.availability_window
+  if (!Number.isFinite(targetPercent) || targetPercent <= 0 || targetPercent >= 100
+      || typeof window !== 'string' || !/^\d+d$/.test(window)) {
+    throw new Error('rules.yaml slo availability target/window is invalid')
+  }
+  return { moneyPath: new Set(y.money_path_services), groups,
+    availabilitySlo: { target: Number((targetPercent / 100).toPrecision(12)), window } }
 }
 
 // Read openapi.yaml info.{version,title} without trusting line order — parse it.
@@ -179,6 +186,7 @@ const catalog = {
   totals,
   services,
   finopsCostGroups,
+  availabilitySlo: gov.availabilitySlo,
 }
 
 // Duplicate listener ports among runnable modules are real in application.yaml; warn (never fail)

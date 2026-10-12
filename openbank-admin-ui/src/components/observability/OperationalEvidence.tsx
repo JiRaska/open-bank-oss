@@ -105,8 +105,8 @@ export function OperationalEvidence() {
           <div className={styles.icon}><Activity size={18} aria-hidden="true" /></div>
           <div>
             <div className={styles.eyebrow}>{t('Rozhodovací přehled', 'Decision brief')}</div>
-            <div className={styles.title} id="operational-evidence-title">{t('Spolehlivost zákaznické cesty', 'Customer journey reliability')}</div>
-            <div className={styles.subtitle}>{t('Rozpočet spolehlivosti, průchod workflow a nejpomalejší reálný požadavek.', 'Reliability budget, workflow completion and the slowest real request.')}</div>
+            <div className={styles.title} id="operational-evidence-title">{t('Spolehlivost platebních služeb', 'Money-path service reliability')}</div>
+            <div className={styles.subtitle}>{t('Chybový rozpočet služeb peněžních toků, průchod workflow a nejpomalejší reálný požadavek.', 'Money-path service error budgets, workflow completion and the slowest real request.')}</div>
           </div>
         </div>
         <button type="button" className="btn btn-secondary" onClick={load} disabled={refreshing} aria-busy={refreshing} aria-label={t('Obnovit provozní důkazy', 'Refresh operational evidence')}>
