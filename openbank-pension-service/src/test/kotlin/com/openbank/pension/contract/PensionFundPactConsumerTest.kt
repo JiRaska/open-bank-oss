@@ -370,7 +370,12 @@ class PensionFundPactConsumerTest {
             mapper.readValue(get(mock, clientPath("transactions", contractId.toString())))
     }
 
-    private fun adapter(mock: MockServer) = PensionFundOrders(register(mock), { null }, Clock.systemUTC())
+    private fun adapter(mock: MockServer) = PensionFundOrders(
+        register(mock),
+        { null },
+        Clock.systemUTC(),
+        com.openbank.pension.infrastructure.fund.TestSubscriptionPlans(),
+    )
 
     private fun get(mock: MockServer, path: String): String =
         given().baseUri(mock.getUrl()).get(path).then().statusCode(200).extract().asString()

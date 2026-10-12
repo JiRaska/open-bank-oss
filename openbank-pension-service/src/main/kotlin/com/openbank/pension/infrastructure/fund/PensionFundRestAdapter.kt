@@ -177,6 +177,9 @@ class PensionFundRestAdapter : FundAdministrationPort {
     @Inject
     lateinit var clock: Clock
 
+    @Inject
+    lateinit var plans: SubscriptionPlanRepository
+
     private val logic by lazy {
         PensionFundOrders(
             object : FundRegister {
@@ -191,6 +194,7 @@ class PensionFundRestAdapter : FundAdministrationPort {
             },
             { id -> contracts.findById(id)?.strategyOn(LocalDate.now(clock))?.strategyCode },
             clock,
+            plans,
         )
     }
 
@@ -215,6 +219,7 @@ class PensionFundOrders(
     private val client: FundRegister,
     private val strategyOf: suspend (UUID) -> String?,
     private val clock: Clock,
+    private val plans: SubscriptionPlanRepository,
 ) : FundAdministrationPort {
 
     override suspend fun valuation(contractId: UUID, currency: String): Valuation {
@@ -259,11 +264,21 @@ class PensionFundOrders(
         idempotencyKey: String,
     ): String {
         require(amount.signum() > 0) { "subscription amount must be positive" }
-        val code = strategyOf(contractId) ?: refuse("contract $contractId has no elected strategy")
-        val strategy = client.strategies().firstOrNull { it.name == code && it.status != "CLOSED" }
-            ?: refuse("strategy '$code' is not registered in pension-fund-service")
-        val legs = split(amount, strategy.allocations)
-        val ids = legs.map { (fundId, legAmount) ->
+        // Resolve an existing plan before consulting today's strategy: a replay belongs to the
+        // original decision date even when the election or fund allocation has since changed.
+        val saved = plans.find(contractId, idempotencyKey)
+        val plan = if (saved != null) {
+            saved
+        } else {
+            val code = strategyOf(contractId) ?: refuse("contract $contractId has no elected strategy")
+            val strategy = client.strategies().firstOrNull { it.name == code && it.status != "CLOSED" }
+                ?: refuse("strategy '$code' is not registered in pension-fund-service")
+            val legs = split(amount, strategy.allocations).map { (fundId, legAmount) ->
+                SubscriptionLeg(fundId, legAmount)
+            }
+            plans.insertIfAbsent(SubscriptionPlan(contractId, idempotencyKey, amount, currency, legs))
+        }.requireSameInstruction(amount, currency)
+        val ids = plan.legs.map { (fundId, legAmount) ->
             client.placeOrder(
                 contractId,
                 legKey(idempotencyKey, fundId),

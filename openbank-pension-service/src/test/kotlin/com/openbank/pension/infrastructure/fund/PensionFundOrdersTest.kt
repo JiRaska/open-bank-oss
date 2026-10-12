@@ -23,10 +23,12 @@ class PensionFundOrdersTest {
 
     private val equity = UUID.fromString("00000000-0000-4000-8000-0000000000e1")
     private val bonds = UUID.fromString("00000000-0000-4000-8000-0000000000b1")
+    private val cash = UUID.fromString("00000000-0000-4000-8000-0000000000c1")
     private val contract = UUID.randomUUID()
 
     private class FakeRegister(var holdings: List<HoldingDto>, val strategies: List<StrategyDto>) : FundRegister {
         val orders = linkedMapOf<String, OrderRequestDto>()
+        var failOnceOnFund: UUID? = null
 
         override suspend fun holdings(contractId: UUID) = ContractValuationDto(contractId, holdings)
 
@@ -35,6 +37,10 @@ class PensionFundOrdersTest {
             idempotencyKey: String,
             order: OrderRequestDto,
         ): UnitOrderDto {
+            if (failOnceOnFund == order.fundId) {
+                failOnceOnFund = null
+                error("transient placement failure")
+            }
             orders.putIfAbsent(idempotencyKey, order) // the register deduplicates on the key
             return UnitOrderDto(UUID.nameUUIDFromBytes(idempotencyKey.toByteArray()), "PENDING")
         }
@@ -55,7 +61,7 @@ class PensionFundOrdersTest {
     private val clock = Clock.fixed(Instant.parse("2026-10-09T10:00:00Z"), ZoneOffset.UTC)
 
     private fun orders(register: FakeRegister, strategy: String? = "BALANCED") =
-        PensionFundOrders(register, { strategy }, clock)
+        PensionFundOrders(register, { strategy }, clock, TestSubscriptionPlans())
 
     @Test
     fun `a subscription is split by the strategy weights and the legs sum to the amount exactly`(): Unit = runBlocking {
@@ -75,6 +81,31 @@ class PensionFundOrdersTest {
         orders(register).subscribe(contract, BigDecimal("100"), "CZK", "contribution:p-2")
         assertThat(register.orders).hasSize(2)
         assertThat(register.orders.keys).allSatisfy { assertThat(it).hasSize(64) }
+    }
+
+    @Test
+    fun `partial subscription retry cannot reroute to a newly effective strategy`(): Unit = runBlocking {
+        val dynamic = StrategyDto(
+            UUID.randomUUID(),
+            "DYNAMIC",
+            "ACTIVE",
+            listOf(AllocationTargetDto(cash, BigDecimal.ONE)),
+        )
+        val register = FakeRegister(emptyList(), listOf(balanced, dynamic))
+        var strategy = "BALANCED"
+        val orders = PensionFundOrders(register, { strategy }, clock, TestSubscriptionPlans())
+        register.failOnceOnFund = bonds
+
+        assertThatThrownBy {
+            runBlocking { orders.subscribe(contract, BigDecimal("100"), "CZK", "contribution:retry") }
+        }.hasMessageContaining("transient placement failure")
+        assertThat(register.orders.values.map { it.fundId }).containsExactly(equity)
+
+        strategy = "DYNAMIC"
+        orders.subscribe(contract, BigDecimal("100"), "CZK", "contribution:retry")
+        assertThat(register.orders.values.map { it.fundId }).containsExactlyInAnyOrder(equity, bonds)
+        assertThat(register.orders.values.fold(BigDecimal.ZERO) { sum, order -> sum + order.amount!! })
+            .isEqualByComparingTo("100")
     }
 
     @Test

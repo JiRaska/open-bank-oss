@@ -70,6 +70,7 @@ class PensionFundRestAdapterTest {
             it.contracts = repository
             it.client = client
             it.clock = Clock.fixed(asOf, ZoneOffset.UTC)
+            it.plans = TestSubscriptionPlans()
         }
     }
 
