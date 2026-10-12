@@ -14,15 +14,25 @@ import { parse } from 'yaml'
 import { loadAllBpmnProcesses, listBpmnSlugs, loadBpmnProcess } from '@/lib/docs/bpmn/load'
 import type { BpmnProcess } from '@/lib/docs/bpmn/schema'
 
-function unservedAccountRoutes(process: BpmnProcess, paths: Record<string, Record<string, unknown>>): string[] {
+function unservedRoutes(
+  process: BpmnProcess, service: string, paths: Record<string, Record<string, unknown>>,
+): string[] {
   return process.steps.flatMap((step) =>
-    step.relatedServices?.includes('account-service')
+    step.relatedServices?.includes(service)
       ? (step.apis ?? []).filter((api) => {
           const [method, route] = api.split(' ')
           return !method || !route || !paths[route]?.[method.toLowerCase()]
         })
       : [],
   )
+}
+
+function servicePaths(service: string): Record<string, Record<string, unknown>> {
+  const spec = parse(readFileSync(join(process.cwd(), '..', `openbank-${service}`,
+    'src', 'main', 'resources', 'openapi.yaml'), 'utf8')) as {
+    paths: Record<string, Record<string, unknown>>
+  }
+  return spec.paths
 }
 
 describe('bpmn manifests', () => {
@@ -74,16 +84,24 @@ describe('bpmn manifests', () => {
 
   it('keeps account-opening account calls on published account-service routes', () => {
     const diagram = loadBpmnProcess('account-opening')
-    const spec = parse(readFileSync(join(process.cwd(), '..', 'openbank-account-service',
-      'src', 'main', 'resources', 'openapi.yaml'), 'utf8')) as {
-      paths: Record<string, Record<string, unknown>>
-    }
-    expect(unservedAccountRoutes(diagram, spec.paths)).toEqual([])
+    const accountPaths = servicePaths('account-service')
+    const notificationPaths = servicePaths('notification-service')
+    expect(unservedRoutes(diagram, 'account-service', accountPaths)).toEqual([])
+    expect(unservedRoutes(diagram, 'notification-service', notificationPaths)).toEqual([])
     expect(diagram.steps.find((step) => step.id === 'create')?.apis).toContain('POST /api/v1/accounts')
+    expect(diagram.steps.find((step) => step.id === 'create')?.emits).toEqual([
+      'openbank.accounts.account.created', 'openbank.notification.requests',
+    ])
+    expect(diagram.steps.find((step) => step.id === 'notify')?.apis).toBeUndefined()
     expect(diagram.steps.some((step) => step.id === 'iban')).toBe(false)
-    expect(diagram.flows.find((flow) => flow.from === 'create' && flow.to === 'notify')).toMatchObject({
-      kind: 'async', topic: 'openbank.notification.requests',
+    expect(diagram.flows.find((flow) => flow.from === 'create' && flow.to === 'gw2')).toBeTruthy()
+    expect(diagram.steps.find((step) => step.id === 'gw2')?.label).toBe('Stav ACTIVE?')
+    expect(diagram.flows.find((flow) => flow.from === 'gw2' && flow.to === 'notify')).toMatchObject({
+      label: 'Ano', kind: 'async', topic: 'openbank.notification.requests',
     })
+    expect(diagram.flows.find((flow) => flow.from === 'gw2' && flow.to === 'pending')?.label).toBe('Ne')
+    expect(diagram.steps.find((step) => step.id === 'pending')?.label).toBe('Čeká na aktivaci')
+    expect(diagram.flows.some((flow) => flow.from === 'create' && flow.to === 'notify')).toBe(false)
     expect(diagram.flows.some((flow) => flow.from === 'iban' || flow.to === 'iban')).toBe(false)
 
     // The former BPMN route must fail this check against the real published spec.
@@ -94,6 +112,48 @@ describe('bpmn manifests', () => {
         apis: ['POST /api/v1/accounts/{id}/iban'], relatedServices: ['account-service'],
       }],
     }
-    expect(unservedAccountRoutes(stale, spec.paths)).toEqual(['POST /api/v1/accounts/{id}/iban'])
+    expect(unservedRoutes(stale, 'account-service', accountPaths)).toEqual(['POST /api/v1/accounts/{id}/iban'])
+    const staleNotification = {
+      ...diagram,
+      steps: diagram.steps.map((step) => step.id === 'notify'
+        ? { ...step, apis: ['POST /api/v1/notifications'] }
+        : step),
+    }
+    expect(unservedRoutes(staleNotification, 'notification-service', notificationPaths))
+      .toEqual(['POST /api/v1/notifications'])
+  })
+
+  it('keeps account closure on the implemented close operation and request topic', () => {
+    const diagram = loadBpmnProcess('account-closure')
+    const accountPaths = servicePaths('account-service')
+    const notificationPaths = servicePaths('notification-service')
+    expect(unservedRoutes(diagram, 'account-service', accountPaths)).toEqual([])
+    expect(unservedRoutes(diagram, 'notification-service', notificationPaths)).toEqual([])
+    expect(diagram.steps.find((step) => step.id === 'close')?.apis)
+      .toEqual(['POST /api/v1/accounts/{accountId}/close'])
+    expect(diagram.steps.find((step) => step.id === 'close')?.emits).toEqual([
+      'openbank.accounts.account.status-changed', 'openbank.notification.requests',
+    ])
+    expect(diagram.steps.find((step) => step.id === 'notify')?.consumes)
+      .toEqual(['openbank.notification.requests'])
+    expect(diagram.steps.find((step) => step.id === 'notify')?.apis).toBeUndefined()
+    expect(diagram.steps.find((step) => step.id === 'reject')?.label).toBe('Uzavření odmítnuto')
+    expect(diagram.flows.find((flow) => flow.from === 'gw1' && flow.to === 'notify')).toMatchObject({
+      kind: 'async', topic: 'openbank.notification.requests',
+    })
+    expect(diagram.flows.find((flow) => flow.from === 'gw1' && flow.to === 'reject')?.label).toBe('Ne')
+    for (const obsolete of ['transfer', 'freeze', 'ledger', 'archive']) {
+      expect(diagram.steps.some((step) => step.id === obsolete)).toBe(false)
+    }
+
+    const staleRoutes = ['PUT /api/v1/accounts/{id}/freeze', 'PUT /api/v1/accounts/{id}/archive']
+    const stale = {
+      ...diagram,
+      steps: [...diagram.steps, {
+        id: 'old', type: 'task' as const, x: 0, y: 0, label: 'old',
+        apis: staleRoutes, relatedServices: ['account-service'],
+      }],
+    }
+    expect(unservedRoutes(stale, 'account-service', accountPaths)).toEqual(staleRoutes)
   })
 })

@@ -71,23 +71,33 @@ steps:
       - account-service
     emits:
       - openbank.accounts.account.created
+      # AccountService.openAccount sends this request only for an ACTIVE account.
+      - openbank.notification.requests
   - id: notify
     type: task
-    x: 880
+    x: 900
     y: 100
     label: Notifikace
     lane: platform
-    apis:
-      - POST /api/v1/notifications
     relatedServices:
       - notification-service
     consumes:
       - openbank.notification.requests
   - id: end
     type: end
-    x: 980
+    x: 1050
     y: 100
     label: Aktivní
+  - id: gw2
+    type: gateway
+    x: 750
+    y: 100
+    label: Stav ACTIVE?
+  - id: pending
+    type: end
+    x: 750
+    y: 220
+    label: Čeká na aktivaci
 flows:
   - from: start
     to: id-check
@@ -102,8 +112,14 @@ flows:
     to: create
     label: Ano
   - from: create
+    to: gw2
+  - from: gw2
     to: notify
+    label: Ano
     kind: async
     topic: openbank.notification.requests
+  - from: gw2
+    to: pending
+    label: Ne
   - from: notify
     to: end
