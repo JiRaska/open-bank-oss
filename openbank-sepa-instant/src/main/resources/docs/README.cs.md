@@ -4,7 +4,7 @@
 
 Tato dokumentace je publikována přímo službou na management endpointu `/q/openbank/docs` (vzor Docs-as-Service — viz [ADR 0019](../../../../docs/adr/0019-docs-as-service.md)). Admin UI ji načítá při vykreslování stránky Service Docs.
 
-Části o outboxu popisují zdrojového kandidáta #12181. Nedokazují, že prošel review, byl sloučen do `main`, migrován či nasazen; před použitím těchto postupů ověř běžící revizi a historii Flyway.
+Změny outboxu z #12181 byly sloučeny do `main` v #12316 po změně auditního konzumenta v #12323. Zdrojový kód ani historie merge nedokazují provedení migrace či obsluhu provozu příslušnými obrazy; před použitím těchto postupů ověř běžící revize a historii Flyway.
 
 ## Obsah
 
@@ -21,7 +21,7 @@ Tato dokumentace je publikována přímo službou na management endpointu `/q/op
 
 - **Tech stack:** Kotlin / Quarkus 3.x / Hibernate Reactive (Panache) + reaktivní PostgreSQL / SmallRye Reactive Messaging (Kafka) — sestaveno přes konvenční plugin `openbank.quarkus-service`
 - **Port:** 8127 (app), 8085 (management — `/q`)
-- **Persistence:** dedikovaná databáze `openbank_sepa_instant`, deklarované schéma `sepa_instant_schema`, Flyway migrace V1..V5 ve zdrojovém kandidátu
+- **Persistence:** dedikovaná databáze `openbank_sepa_instant`, deklarované schéma `sepa_instant_schema`, Flyway migrace V1..V5 ve zdrojovém kódu `main`
 - **Události:** přechody platby s událostí a outbox řádky se commitují společně; dispatcher opakuje odeslání dosavadního čtyřpolového payloadu s klíčem id platby a hlavičkami `ce-id`/`idempotency-key` do `openbank.sepa.instant.events` (at-least-once; konzumenti deduplikují podle `ce-id`)
 - **Idempotence:** hlavička `Idempotency-Key` (fallback na pole v těle) → unique constraint na `sct_inst_payments.idempotency_key`
 - **Auth:** Keycloak OIDC (klient `openbank-services`); OPA autorizace (ADR-0034) ve výchozím stavu advisory; `@Authorize` na recallu

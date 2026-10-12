@@ -64,9 +64,9 @@ Otevření AML případu je **best-effort** (`openCaseQuietly`): výpadek case s
 
 ## Publikování do Kafky
 
-Zdrojový kandidát #12181 ukládá každý přechod platby s událostí a její outbox řádek v jedné PostgreSQL transakci. `SctInstOutboxDispatcher` pak řádek vyzvedne a opakuje doručení přes `KafkaSctInstEventPublisher` do `openbank.sepa.instant.events`. Doručení je at-least-once: potvrzení brokerem následované selháním před `markSent` může stejnou událost zopakovat. Dosavadní čtyřpolový Kafka payload se nemění; záznam je nově klíčován id platby (pořadí v rámci platby) a standardní outbox hlavičky nesou trvalé `ce-id` při každém pokusu. Audit-service použije toto ID před Kafka offsetem, pokud tělo nemá `eventId`, a proto musí být auditní konzument nasazen před producentem. Jde o popis zdrojového kódu, nikoli o důkaz schválení, merge či nasazení kandidáta.
+Implementace #12181 ukládá každý přechod platby s událostí a její outbox řádek v jedné PostgreSQL transakci. `SctInstOutboxDispatcher` pak řádek vyzvedne a opakuje doručení přes `KafkaSctInstEventPublisher` do `openbank.sepa.instant.events`. Doručení je at-least-once: potvrzení brokerem následované selháním před `markSent` může stejnou událost zopakovat. Dosavadní čtyřpolový Kafka payload se nemění; záznam je nově klíčován id platby (pořadí v rámci platby) a standardní outbox hlavičky nesou trvalé `ce-id` při každém pokusu. Audit-service použije toto ID před Kafka offsetem, pokud tělo nemá `eventId`, a proto musí být auditní konzument nasazen před producentem. Jde o popis sloučeného zdrojového kódu, nikoli o důkaz běžícího obrazu a migrace.
 
-| Přechod platby | Dosavadní doménová událost | Záruka v kandidátu |
+| Přechod platby | Dosavadní doménová událost | Záruka ve zdrojovém kódu |
 | --- | --- | --- |
 | Nová platba do `PROCESSING` | `SctInstPaymentSubmitted` | Platba a řádek události se potvrdí spolu; relay opakuje odeslání až do úspěchu nebo viditelného `DEAD`. |
 | Nová platba do `REJECTED` (screening nebo schéma) | `SctInstPaymentRejected` | Platba a řádek události se potvrdí spolu; stejná politika opakování. |

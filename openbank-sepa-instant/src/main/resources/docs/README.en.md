@@ -4,7 +4,7 @@
 
 This documentation is published directly by the service at the management endpoint `/q/openbank/docs` (Docs-as-Service pattern — see [ADR 0019](../../../../docs/adr/0019-docs-as-service.md)). The admin UI fetches it when rendering the Service Docs page.
 
-The outbox sections describe the #12181 source candidate. They do not establish that it has been reviewed, merged into `main`, migrated, or deployed; verify the running revision and Flyway history before using those procedures.
+The outbox changes from #12181 were merged into `main` by #12316 after the audit consumer change in #12323. Source and merge history do not establish that the migration ran or that the intended images serve traffic; verify the running revisions and Flyway history before using these procedures.
 
 ## Contents
 
@@ -21,7 +21,7 @@ The outbox sections describe the #12181 source candidate. They do not establish 
 
 - **Tech stack:** Kotlin / Quarkus 3.x / Hibernate Reactive (Panache) + Reactive PostgreSQL / SmallRye Reactive Messaging (Kafka) — built via the `openbank.quarkus-service` convention plugin
 - **Port:** 8127 (app), 8085 (management — `/q`)
-- **Persistence:** dedicated database `openbank_sepa_instant`, schema declared `sepa_instant_schema`, Flyway migrations V1..V5 in the candidate source
+- **Persistence:** dedicated database `openbank_sepa_instant`, schema declared `sepa_instant_schema`, Flyway migrations V1..V5 in `main` source
 - **Events:** event-producing payment transitions and outbox rows commit together; the dispatcher retries the existing four-field payload, keyed by payment id with `ce-id`/`idempotency-key` headers, to `openbank.sepa.instant.events` (at-least-once; consumers deduplicate on `ce-id`)
 - **Idempotency:** `Idempotency-Key` header (falls back to body field) → unique constraint on `sct_inst_payments.idempotency_key`
 - **Auth:** Keycloak OIDC (client `openbank-services`); OPA authz (ADR-0034) advisory by default; `@Authorize` on recall

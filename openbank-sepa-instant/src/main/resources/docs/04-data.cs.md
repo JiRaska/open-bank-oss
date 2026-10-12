@@ -41,10 +41,10 @@ Platební agregát. Jeden řádek na SCT Inst příkaz.
 
 Indexy: `idx_sct_inst_status(status)`, `idx_sct_inst_debtor(debtor_account_id)`, `idx_sct_inst_created(created_at DESC)` a parciální `idx_sct_inst_timeout(execution_timeout_at) WHERE status = 'PROCESSING'` (pohání watchdog provedení / `findTimedOut`).
 
-### `sct_inst_outbox` — obnovena ve zdrojovém kandidátu #12181 (V5)
+### `sct_inst_outbox` — obnovena změnou #12181 v main (V5)
 
 Nepoužívaná outbox tabulka a sekvence z V2 byly zrušeny ve V4 (issue #5127). Aditivní migrace V5
-je pro transakční cestu událostí v kandidátu znovu vytváří. Přechody platby s událostí vkládají
+je pro transakční cestu událostí znovu vytváří. Přechody platby s událostí vkládají
 řádek `PENDING` ve stejné transakci jako změnu platby; relay jej vyzvedne, opakuje neúspěšné
 odeslání a označí `SENT` nebo nakonec `DEAD`. Řádek uchovává dosavadní čtyřpolový Kafka payload
 a stav doručování (`event_id`, `aggregate_id`, stav, pokusy, časové údaje a chybu). Přítomnost

@@ -64,9 +64,9 @@ Opening the AML case is **best-effort** (`openCaseQuietly`): a case-store outage
 
 ## Kafka publishing
 
-The #12181 source candidate writes each event-producing payment transition and its outbox row in one PostgreSQL transaction. `SctInstOutboxDispatcher` later claims the row and retries delivery through `KafkaSctInstEventPublisher` to `openbank.sepa.instant.events`. This is at-least-once delivery: a broker acknowledgement followed by failure before `markSent` can replay the same event. The existing four-field Kafka payload stays unchanged; the record is now keyed by the payment id (per-payment ordering), and standard outbox headers carry the durable `ce-id` on every attempt. Audit-service uses that ID before the Kafka offset when the body has no `eventId`, so the audit consumer must be deployed before this producer. This describes source behavior, not proof that the candidate was reviewed, merged, or deployed.
+The #12181 implementation writes each event-producing payment transition and its outbox row in one PostgreSQL transaction. `SctInstOutboxDispatcher` later claims the row and retries delivery through `KafkaSctInstEventPublisher` to `openbank.sepa.instant.events`. This is at-least-once delivery: a broker acknowledgement followed by failure before `markSent` can replay the same event. The existing four-field Kafka payload stays unchanged; the record is now keyed by the payment id (per-payment ordering), and standard outbox headers carry the durable `ce-id` on every attempt. Audit-service uses that ID before the Kafka offset when the body has no `eventId`, so the audit consumer must be deployed before this producer. This describes merged source behavior, not proof that the matching image and migration are running.
 
-| Payment transition | Existing domain event | Candidate delivery guarantee |
+| Payment transition | Existing domain event | Source delivery guarantee |
 | --- | --- | --- |
 | New payment to `PROCESSING` | `SctInstPaymentSubmitted` | Payment and event row commit together; relay retries until sent or visible `DEAD`. |
 | New payment to `REJECTED` (screening or scheme) | `SctInstPaymentRejected` | Payment and event row commit together; same relay policy. |

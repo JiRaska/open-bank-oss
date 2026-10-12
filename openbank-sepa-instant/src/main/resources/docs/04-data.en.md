@@ -41,10 +41,10 @@ The payment aggregate. One row per SCT Inst instruction.
 
 Indexes: `idx_sct_inst_status(status)`, `idx_sct_inst_debtor(debtor_account_id)`, `idx_sct_inst_created(created_at DESC)`, and a partial `idx_sct_inst_timeout(execution_timeout_at) WHERE status = 'PROCESSING'` (powers the execution watchdog / `findTimedOut`).
 
-### `sct_inst_outbox` — restored by the #12181 source candidate (V5)
+### `sct_inst_outbox` — restored by #12181 on main (V5)
 
 The unused V2 outbox table and sequence were dropped in V4 (issue #5127). The additive V5
-migration recreates them for the candidate's transactional event path. Event-producing payment
+migration recreates them for the transactional event path. Event-producing payment
 transitions insert a `PENDING` row in the same transaction as the payment change; the relay claims
 it, retries a failed send, and marks it `SENT` or eventually `DEAD`. The row retains the existing
 four-field Kafka payload plus delivery state (`event_id`, `aggregate_id`, `status`, attempts,
