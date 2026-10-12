@@ -6,6 +6,7 @@ package com.openbank.pensionfund.application.usecase
 
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.pensionfund.application.port.NotFoundException
+import com.openbank.pensionfund.application.port.PensionFundMetrics
 import com.openbank.pensionfund.application.port.PensionFundStore
 import com.openbank.pensionfund.application.port.StoreChanges
 import com.openbank.pensionfund.domain.model.Fund
@@ -37,7 +38,11 @@ data class ContractValuation(
 )
 
 @ApplicationScoped
-class UnitRegisterService(private val store: PensionFundStore, private val clock: Clock) {
+class UnitRegisterService(
+    private val store: PensionFundStore,
+    private val clock: Clock,
+    private val metrics: PensionFundMetrics,
+) {
     suspend fun place(command: PlaceOrderCommand): UnitOrder {
         require(command.type != OrderType.SWITCH_IN) {
             "SWITCH_IN is created by a settled switch, never placed directly"
@@ -59,6 +64,7 @@ class UnitRegisterService(private val store: PensionFundStore, private val clock
         // caller bug, refused rather than silently answered with an order it did not ask for.
         store.orderByIdempotencyKey(command.contractId, command.idempotencyKey)?.let { existing ->
             check(existing.sameInstructionAs(order)) { "Idempotency-Key reused for a different order" }
+            metrics.orderReplay(existing.type)
             return existing
         }
         // A replay names an already accepted instruction. Its answer must remain available after
@@ -70,8 +76,12 @@ class UnitRegisterService(private val store: PensionFundStore, private val clock
                 "cross-currency switches are not supported: ${source.currency} to ${target.currency}"
             }
         }
-        if (order.isOutgoing) return store.reserveOutgoing(order)
+        if (order.isOutgoing) {
+            // Counted after the reservation returned, like the commit below (#12442).
+            return store.reserveOutgoing(order).also { metrics.order(source.isin, it.type, it.status) }
+        }
         store.commit(StoreChanges(orders = listOf(order)))
+        metrics.order(source.isin, order.type, order.status)
         return order
     }
 
