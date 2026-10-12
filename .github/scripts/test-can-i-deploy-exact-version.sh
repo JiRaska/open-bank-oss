@@ -15,7 +15,10 @@ cat > "$tmp/curl" <<'STUB'
 url="${*: -1}"
 case "$url" in
   */versions/*)
-    if [ "${STUB_CLI_MODE:-}" = exact-success ] || [ "${STUB_CLI_MODE:-}" = no-main-present ]; then echo 200; else echo 404; fi ;;
+    case "${STUB_CLI_MODE:-}" in
+      exact-success|no-main-present|no-counterpart-only|no-counterpart-mixed|no-counterpart-error) echo 200 ;;
+      *) echo 404 ;;
+    esac ;;
   */pacticipants/*/latest-version/main) echo '{}' ;;
   */pacticipants/*) echo 200 ;;
   */environments) echo '{"_embedded":{"environments":[{"name":"sandbox"}]}}' ;;
@@ -30,13 +33,27 @@ case "${STUB_CLI_MODE:-}" in
   no-counterpart)
     echo 'There is no verified pact between these versions'
     echo 'no version is currently recorded as deployed in sandbox' ;;
+  no-counterpart-only)
+    echo 'openbank-demo-service | abc123 | openbank-ledger-service | def456 | false'
+    echo 'There is no verified pact between these versions'
+    echo 'no version is currently recorded as deployed in sandbox' ;;
+  no-counterpart-mixed)
+    echo 'openbank-demo-service | abc123 | openbank-ledger-service | def456 | false'
+    echo 'openbank-demo-service | abc123 | openbank-account-service | ghi789 | false'
+    echo 'There is no verified pact between these versions'
+    echo 'no version is currently recorded as deployed in sandbox'
+    echo 'The verification for the pact between openbank-demo-service and openbank-ledger-service failed' ;;
+  no-counterpart-error)
+    echo 'There is no verified pact between these versions'
+    echo 'no version is currently recorded as deployed in sandbox'
+    echo 'Broker request failed after the matrix response' ;;
   *) exit 2 ;;
 esac
 exit 1
 STUB
 chmod +x "$tmp/curl" "$tmp/pact-broker"
 
-for mode in no-main no-main-present no-counterpart exact-success; do
+for mode in no-main no-main-present no-counterpart no-counterpart-only no-counterpart-mixed no-counterpart-error exact-success; do
   : > "$tmp/output"
   : > "$tmp/summary"
   ( cd "$root" && PATH="$tmp:$PATH" PACT_CLI_BIN="$tmp/pact-broker" \
@@ -48,7 +65,7 @@ for mode in no-main no-main-present no-counterpart exact-success; do
       PACT_WAIT_BUDGET_SECONDS=0 \
       bash .github/scripts/can-i-deploy-gate.sh > "$tmp/log" 2>&1 ) || true
   expected='deployable=[]'
-  if [ "$mode" = exact-success ]; then
+  if [ "$mode" = exact-success ] || [ "$mode" = no-counterpart-only ]; then
     expected='deployable=["openbank-demo-service"]'
   fi
   if ! grep -Fqx "$expected" "$tmp/output"; then

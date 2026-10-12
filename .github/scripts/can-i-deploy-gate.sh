@@ -281,9 +281,18 @@ for svc in $(echo "$SERVICES" | jq -r '.[]'); do
     # pairs failed — folding the banner into the count made a single real failure
     # look like two, so the >= comparison below could never hold for exactly one
     # failing pair (issue surfaced by fraud-service/transaction-service, 2026-07-09).
+    # Every such pair must have a matching missing-deployment reason. A second pair with
+    # an actual failed verification must never inherit this exception from the first.
+    missing_pacts="$(grep -cF 'There is no verified pact' <<< "$cid_out" || true)"
+    unrecorded_versions="$(grep -cF 'no version is currently recorded' <<< "$cid_out" || true)"
+    failed_rows="$(grep -Ec '\|[[:space:]]*false[[:space:]]*$' <<< "$cid_out" || true)"
     if [[ "$vpresent" = yes || "$vpresent" = equivalent:* ]] && \
-         [ "$(echo "$cid_out" | grep -c "There is no verified pact" || true)" -gt 0 ] && \
-         [ "$(echo "$cid_out" | grep -c "no version is currently recorded" || true)" -ge "$(echo "$cid_out" | grep -c "There is no verified pact" || true)" ]; then
+         [ "$missing_pacts" -gt 0 ] && \
+         [ "$unrecorded_versions" -eq "$missing_pacts" ] && \
+         [ "$failed_rows" -le "$missing_pacts" ] && \
+         ! grep -q "The verification for the pact" <<< "$cid_out" && \
+         ! grep -Eiq '(^|[[:space:]])(failed|failure|error)([[:space:]:.]|$)' <<< "$cid_out" && \
+         ! grep -q "No version with tag" <<< "$cid_out"; then
       echo "::warning::can-i-deploy: ${svc} has counterpart(s) not yet recorded in sandbox — treating as deployable (ADR-0092)"
       deployable_list+=("$svc")
     else
