@@ -10,27 +10,57 @@ import sys
 from pathlib import Path
 
 WATCHED = {"Services CI", "Security scan", "Dependency submission"}
-SHORT_MINUTES = 30
+SHORT_UPDATED_MINUTES = 30
 DEEP_CREATED_MINUTES = 24 * 60
 DEEP_UPDATED_MINUTES = 180
 GITHUB_SEARCH_CEILING = 1000
+MAX_CATCHUP_MINUTES = 48 * 60
+QUERY_CHUNK_HOURS = 6
 
 
 def parse_time(value: str) -> dt.datetime:
     return dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
-def query_window(mode: str, now: dt.datetime) -> dict[str, str | int]:
-    """Pair a cheap frequent scan with an hourly scan for long-running workflows."""
+def query_window(mode: str, now: dt.datetime, checkpoint: dt.datetime | None = None) -> dict[str, str | int | list[str]]:
+    """Cover every completion since the last successful reconciliation.
+
+    GitHub replaces a pending run in a concurrency group when another tick arrives,
+    even with cancel-in-progress:false. The checkpoint is the *creation* time of
+    the latest successful run, which precedes that run's discovery step and is
+    therefore a conservative boundary. A candidate may have been created up to
+    24 hours before completing, so extend the created range by that much too.
+    """
     if mode not in {"short", "deep"}:
         raise ValueError(f"unknown reconciliation mode: {mode}")
-    created_minutes = SHORT_MINUTES if mode == "short" else DEEP_CREATED_MINUTES
-    updated_minutes = SHORT_MINUTES if mode == "short" else DEEP_UPDATED_MINUTES
+    # The hourly deep tick may itself be replaced in the shared concurrency
+    # group. Every surviving tick must be able to see a long-running job that
+    # was created yesterday and only completed within its update window.
+    created_minutes = DEEP_CREATED_MINUTES
+    updated_minutes = SHORT_UPDATED_MINUTES if mode == "short" else DEEP_UPDATED_MINUTES
     cutoff = now - dt.timedelta(minutes=created_minutes)
+    if checkpoint is not None:
+        if checkpoint > now:
+            raise ValueError("reconciliation checkpoint is in the future")
+        if now - checkpoint > dt.timedelta(minutes=MAX_CATCHUP_MINUTES):
+            raise ValueError("successful reconciliation checkpoint is more than 48 hours old; manual backfill required")
+        # The normal short/deep windows remain cheap while ticks are healthy.
+        # When a queued tick is replaced or a runner waits longer than its
+        # overlap, the last successful tick becomes the lower bound instead.
+        if checkpoint < now - dt.timedelta(minutes=updated_minutes):
+            cutoff = min(cutoff, checkpoint - dt.timedelta(minutes=DEEP_CREATED_MINUTES))
+            updated_minutes = max(updated_minutes, int((now - checkpoint).total_seconds() / 60) + 2)
     start = cutoff.strftime("%Y-%m-%dT%H:%M:%SZ")
     end = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    ranges = []
+    cursor = cutoff
+    while cursor < now:
+        next_cursor = min(cursor + dt.timedelta(hours=QUERY_CHUNK_HOURS), now)
+        ranges.append(f"{cursor:%Y-%m-%dT%H:%M:%SZ}..{next_cursor:%Y-%m-%dT%H:%M:%SZ}")
+        cursor = next_cursor
     return {
         "created_query": f"{start}..{end}",
+        "created_queries": ranges,
         "updated_lookback_minutes": updated_minutes,
     }
 
@@ -105,11 +135,43 @@ def self_test() -> int:
     assert all(x["event"] == "pull_request" for x in got["retry"])
     short = query_window("short", now)
     deep = query_window("deep", now)
-    assert short == {"created_query": "2026-09-11T00:00:00Z..2026-09-11T00:30:00Z", "updated_lookback_minutes": 30}
-    assert deep == {"created_query": "2026-09-10T00:30:00Z..2026-09-11T00:30:00Z", "updated_lookback_minutes": 180}
+    assert short["created_query"] == "2026-09-10T00:30:00Z..2026-09-11T00:30:00Z"
+    assert len(short["created_queries"]) == 4
+    assert short["updated_lookback_minutes"] == 30
+    assert deep["created_query"] == "2026-09-10T00:30:00Z..2026-09-11T00:30:00Z"
+    assert len(deep["created_queries"]) == 4
+    assert deep["updated_lookback_minutes"] == 180
+    # A 65-minute hosted-runner wait and several replaced five-minute ticks
+    # must recover a run completed in the otherwise unobserved middle window.
+    checkpoint = parse_time("2026-09-10T23:25:00Z")
+    catchup = query_window("short", now, checkpoint)
+    assert catchup["created_query"] == "2026-09-09T23:25:00Z..2026-09-11T00:30:00Z"
+    assert len(catchup["created_queries"]) == 5
+    assert catchup["updated_lookback_minutes"] == 67
+    assert catchup["created_queries"][0].startswith("2026-09-09T23:25:00Z..")
+    assert catchup["created_queries"][-1].endswith("..2026-09-11T00:30:00Z")
+    assert all(left.split("..")[1] == right.split("..")[0]
+               for left, right in zip(catchup["created_queries"], catchup["created_queries"][1:]))
+    missed = base | {"id": 9, "name": "Services CI", "conclusion": "failure", "run_attempt": 1,
+                     "created_at": "2026-09-10T00:00:00Z", "updated_at": "2026-09-10T23:45:00Z"}
+    assert parse_time(catchup["created_queries"][0].split("..")[0]) <= parse_time(missed["created_at"])
+    assert select([missed], now, catchup["updated_lookback_minutes"])["retry"][0]["run_id"] == 9
+    assert query_window("short", now, parse_time("2026-09-11T00:20:00Z")) == short
+    try:
+        query_window("short", now, now + dt.timedelta(minutes=1))
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("future checkpoint was accepted")
+    try:
+        query_window("short", now, now - dt.timedelta(hours=49))
+    except ValueError as exc:
+        assert "manual backfill" in str(exc)
+    else:
+        raise AssertionError("old checkpoint silently truncated catch-up")
     long_run = base | {"id": 7, "name": "Services CI", "conclusion": "cancelled", "run_attempt": 1,
                        "created_at": "2026-09-10T23:10:00Z"}
-    assert parse_time(long_run["created_at"]) < parse_time(short["created_query"].split("..")[0])
+    assert parse_time(long_run["created_at"]) >= parse_time(short["created_query"].split("..")[0])
     assert parse_time(long_run["created_at"]) >= parse_time(deep["created_query"].split("..")[0])
     assert [x["run_id"] for x in select(flatten_pages([{"total_count": 1, "workflow_runs": [long_run]}]),
                                             now, 180)["retry"]] == [7]
@@ -149,8 +211,8 @@ def self_test() -> int:
         raise AssertionError("changing total_count was treated as a complete snapshot")
     recovered = select(flatten_pages(second_snapshot), now, 180)
     assert [x["run_id"] for x in recovered["retry"]] == [777]
-    print("SUBJECTS=17")
-    print("select-ci-reconcile-candidates self-test: 17 cases passed, 0 failed")
+    print("SUBJECTS=22")
+    print("select-ci-reconcile-candidates self-test: 22 cases passed, 0 failed")
     return 0
 
 
@@ -160,6 +222,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--now")
     parser.add_argument("--lookback-minutes", type=int, default=90)
     parser.add_argument("--query-mode", choices=("short", "deep"))
+    parser.add_argument("--checkpoint", help="creation time of latest successful reconciliation run")
     parser.add_argument("--flatten-pages", type=Path)
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args(argv)
@@ -175,7 +238,8 @@ def main(argv: list[str]) -> int:
     if args.query_mode:
         if not args.now:
             parser.error("--now is required with --query-mode")
-        print(json.dumps(query_window(args.query_mode, parse_time(args.now)), separators=(",", ":")))
+        print(json.dumps(query_window(args.query_mode, parse_time(args.now),
+                                      parse_time(args.checkpoint) if args.checkpoint else None), separators=(",", ":")))
         return 0
     if not args.runs_file or not args.now:
         parser.error("--runs-file and --now are required")

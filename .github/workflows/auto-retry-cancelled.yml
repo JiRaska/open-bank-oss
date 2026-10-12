@@ -13,13 +13,13 @@
 # conclusions, so the rerun is always the full one.
 #
 # WHAT THIS DOES
-# One five-minute reconciliation run reads a fixed creation window from each watched workflow
-# with one paginated query per workflow, selects recent completions locally, then re-runs
-# qualifying spot kills automatically. An hourly deep
-# scan also reads runs CREATED up to 24 hours ago, because GitHub's `created` query cannot filter
-# by completion time: a long matrix run can finish now after starting hours ago (#10262). The
-# deep scan retains a three-hour completion overlap; `run_attempt == 1` and the flake ledger marker
-# make repeated scans idempotent. Before #9645, `workflow_run: completed`
+# One five-minute reconciliation run reads a fixed 24-hour creation window from each watched
+# workflow, selects recent completions locally, then re-runs qualifying spot kills automatically.
+# Every tick needs that creation span: the hourly deep tick can be replaced in GitHub's shared
+# concurrency group, and a long matrix run can finish now after starting hours ago (#10262).
+# The hourly deep scan extends the completion overlap to three hours. When queued ticks are replaced or delayed,
+# discovery extends back to the previous successful reconciliation. `run_attempt == 1` and the
+# flake ledger marker make repeated scans idempotent. Before #9645, `workflow_run: completed`
 # created a new Actions run for every watched completion, including ordinary successes whose
 # jobs were all skipped. A PR burst exhausted the installation's 5,000-call API quota and made
 # unrelated security gates fail with rate-limit 403s.
@@ -164,15 +164,25 @@ jobs:
           set -euo pipefail
           source .github/scripts/gh-retry.sh
           started_at=$(date +%s)
+          checkpoint=$(gh_retry 3 -- gh api --method GET \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/auto-retry-cancelled.yml/runs" \
+            -f status=success -f branch=main -f per_page=1 \
+            --jq '.workflow_runs[0] | select(.conclusion == "success" and .head_branch == "main") | .created_at')
+          if [[ -z "$checkpoint" ]]; then
+            echo "::error::No successful reconciliation checkpoint; cannot prove complete catch-up" >&2
+            exit 2
+          fi
           mode=short
           if [[ "$RECONCILE_SCHEDULE" == '7 * * * *' || "$RECONCILE_DISPATCH_MODE" == deep ]]; then
             mode=deep
           fi
           plan=$(python3 .github/scripts/select-ci-reconcile-candidates.py \
-            --query-mode "$mode" --now "$(date -u +%Y-%m-%dT%H:%M:%SZ)")
+            --query-mode "$mode" --checkpoint "$checkpoint" \
+            --now "$(date -u +%Y-%m-%dT%H:%M:%SZ)")
           created_query=$(jq -r '.created_query' <<< "$plan")
+          mapfile -t created_queries < <(jq -r '.created_queries[]' <<< "$plan")
           lookback=$(jq -r '.updated_lookback_minutes' <<< "$plan")
-          echo "mode=$mode created_range=$created_query updated_lookback_minutes=$lookback" >> "$GITHUB_STEP_SUMMARY"
+          echo "mode=$mode checkpoint=$checkpoint created_range=$created_query query_chunks=${#created_queries[@]} updated_lookback_minutes=$lookback" >> "$GITHUB_STEP_SUMMARY"
           fetch_pages() {
             local workflow="$1" created_query="$2" output="$3"
             local page=1 total expected dir
@@ -204,20 +214,26 @@ jobs:
             # A fixed created range prevents page drift from NEW runs, but GitHub can
             # index an already-created run between pages and change total_count. Re-read
             # the entire snapshot, never accept a partial page set as "no spot kills".
-            for snapshot_attempt in 1 2 3; do
-              gh_retry 3 -- fetch_pages "$workflow" "$created_query" "${RUNNER_TEMP}/${workflow}.pages.json"
-              if python3 .github/scripts/select-ci-reconcile-candidates.py \
-                --flatten-pages "${RUNNER_TEMP}/${workflow}.pages.json" \
-                > "${RUNNER_TEMP}/${workflow}.json" 2> "${RUNNER_TEMP}/${workflow}.validation.err"; then
-                break
-              fi
-              cat "${RUNNER_TEMP}/${workflow}.validation.err" >&2
-              if (( snapshot_attempt == 3 )); then
-                echo "::error::${workflow} API snapshot remained incomplete after 3 reads" >&2
-                exit 2
-              fi
-              sleep 2
+            chunk_files=()
+            for index in "${!created_queries[@]}"; do
+              chunk_file="${RUNNER_TEMP}/${workflow}.${index}.json"
+              for snapshot_attempt in 1 2 3; do
+                gh_retry 3 -- fetch_pages "$workflow" "${created_queries[$index]}" "${RUNNER_TEMP}/${workflow}.pages.json"
+                if python3 .github/scripts/select-ci-reconcile-candidates.py \
+                  --flatten-pages "${RUNNER_TEMP}/${workflow}.pages.json" \
+                  > "$chunk_file" 2> "${RUNNER_TEMP}/${workflow}.validation.err"; then
+                  break
+                fi
+                cat "${RUNNER_TEMP}/${workflow}.validation.err" >&2
+                if (( snapshot_attempt == 3 )); then
+                  echo "::error::${workflow} API snapshot remained incomplete after 3 reads" >&2
+                  exit 2
+                fi
+                sleep 2
+              done
+              chunk_files+=("$chunk_file")
             done
+            jq -s 'add | unique_by(.id)' "${chunk_files[@]}" > "${RUNNER_TEMP}/${workflow}.json"
           done
           jq -s 'add' "${RUNNER_TEMP}"/*.yml.json > "${RUNNER_TEMP}/runs.json"
           echo "query_elapsed_seconds=$(($(date +%s) - started_at))" >> "$GITHUB_STEP_SUMMARY"
