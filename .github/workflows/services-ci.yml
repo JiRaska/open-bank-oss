@@ -428,6 +428,39 @@ jobs:
           fi
           python3 .github/scripts/check-service-docs-freshness.py --base "$BASE_SHA" --head "$HEAD_SHA"
 
+  deploy-source-freshness:
+    name: Verify exact-head GitOps image source
+    if: github.event_name == 'pull_request' && github.base_ref == 'main' && startsWith(github.head_ref, 'chore/gitops-auto-deploy-')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      # Run the verifier from the trusted event base, never from the deploy PR.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify immutable candidate image pins
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "$HEAD_SHA"
+          python3 .github/scripts/check-deploy-source-freshness.py \
+            --base "$BASE_SHA" --head "$HEAD_SHA"
+          git rev-list "$BASE_SHA..$HEAD_SHA" > "$RUNNER_TEMP/deploy-head-commits"
+          while IFS= read -r commit; do
+            verified=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${commit}" --jq '.commit.verification.verified')
+            if [ "$verified" != 'true' ]; then
+              echo "::error::Deploy head contains a commit without a verified signature: $commit"
+              exit 1
+            fi
+          done < "$RUNNER_TEMP/deploy-head-commits"
+
   publication-ready:
     name: Await exact-SHA Admin UI Pact publication
     # Only a hosted runner waits. The broker is private, so the published job's
@@ -562,13 +595,22 @@ jobs:
   # change. #3955 tracks that decision.
   all-green:
     name: all-green
-    needs: [changes, publication-ready, build, verification-metadata]
+    needs: [changes, publication-ready, build, verification-metadata, deploy-source-freshness]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
     permissions:
       actions: read
     steps:
+      - name: Require exact-head GitOps source freshness
+        if: github.event_name == 'pull_request' && github.base_ref == 'main' && startsWith(github.head_ref, 'chore/gitops-auto-deploy-')
+        env:
+          SOURCE_RESULT: ${{ needs.deploy-source-freshness.result }}
+        run: |
+          if [ "$SOURCE_RESULT" != 'success' ]; then
+            echo "::error::GitOps image source freshness was not proven for this PR head."
+            exit 1
+          fi
       - name: Verify no service failed
         run: |
           if [ "${{ needs.changes.result }}" != 'success' ] || [ "${{ needs.changes.outputs.admission }}" != 'true' ]; then
