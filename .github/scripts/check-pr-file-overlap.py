@@ -16,7 +16,7 @@
 #   currently a manual habit — a `git diff origin/main origin/<branch> -- <file>` somebody
 #   has to think of running. This gate makes it automatic and free: no model and no clone.
 #   The open-PR/file inventory is one paginated GraphQL snapshot rather than one REST call
-#   per PR; blob identities for actual overlaps are fetched in bounded GraphQL batches.
+#   per PR; blob identities for overlaps with the current PR are fetched in bounded GraphQL batches.
 #
 # WHAT IT IS NOT
 #   It is not a conflict detector. Git already reports textual conflicts, and the failures
@@ -48,7 +48,7 @@
 #   neighbouring list entries silently keeps ONE (.release-please-manifest.json went 56 ->
 #   55 entries that way). Those paths are called out separately in the output. The set is
 #   deliberately SHORT and hand-kept: it is a list of external facts about which files are
-#   shared registries, not the gate's scope — the gate reads every overlapping file either
+#   shared registries, not the gate's scope — the gate reads every file overlapping this PR either
 #   way, so a path missing from this list is still reported, just without the louder header.
 #   (repo lore: never let a gate's SCOPE be hand-kept; a hand-kept list of FACTS is fine.)
 #
@@ -175,14 +175,18 @@ query($id:ID!,$after:String) {
 """
 
 
-def _fill_overlap_oids(prs, graphql):
-    """Fetch blob oids only for paths that can affect the overlap verdict."""
+def _fill_overlap_oids(prs, graphql, focus_pr=None):
+    """Keep all owners of focused shared paths; foreign-only overlaps cannot affect its verdict."""
     owners = {}
     for pr in prs:
         for path in pr["files"]:
             owners.setdefault(path, []).append(pr)
+    focus_paths = None
+    if focus_pr is not None:
+        focus = next((pr for pr in prs if pr["number"] == focus_pr), None)
+        focus_paths = set(focus["files"]) if focus is not None else set()
     targets = [(pr, path) for path, path_prs in owners.items() if len(path_prs) > 1
-               for pr in path_prs]
+               and (focus_paths is None or path in focus_paths) for pr in path_prs]
     for offset in range(0, len(targets), 50):
         batch = targets[offset:offset + 50]
         declarations = ["$owner:String!", "$name:String!"]
@@ -201,7 +205,7 @@ def _fill_overlap_oids(prs, graphql):
             pr["files"][path] = obj.get("oid", "") if isinstance(obj, dict) else ""
 
 
-def fetch_open_prs(graphql=_graphql):
+def fetch_open_prs(graphql=_graphql, *, focus_pr=None):
     """[{number, title, files: {path: blob_sha}}] for every OPEN pull request."""
     owner, name = REPO.split("/", 1)
     out, after = [], None
@@ -220,7 +224,7 @@ def fetch_open_prs(graphql=_graphql):
         if not connection["pageInfo"]["hasNextPage"]:
             break
         after = connection["pageInfo"]["endCursor"]
-    _fill_overlap_oids(out, graphql)
+    _fill_overlap_oids(out, graphql, focus_pr)
     return out
 
 
@@ -466,7 +470,7 @@ def main():
         return 0
 
     try:
-        prs = fetch_open_prs()
+        prs = fetch_open_prs(focus_pr=number)
     except RuntimeError as e:
         # NOT a clean verdict. On GitHub a permission-shaped absence is byte-identical to a
         # real one, so the only honest answer is "could not check".
