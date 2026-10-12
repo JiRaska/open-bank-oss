@@ -108,6 +108,9 @@ jobs:
           OPEN_HEADS=$(gh api --paginate \
             "repos/$GITHUB_REPOSITORY/pulls?state=open&per_page=100" \
             --jq '.[].head.ref' | sort)
+          # Resolve literal storage refs once. Both `--branch name` and
+          # `--branch=name`, plus quoted YAML action inputs, are valid syntax.
+          STORAGE_BRANCHES=$(python3 .github/scripts/protected-storage-branches.py .github/workflows)
 
           DELETED=0
           SKIPPED=0
@@ -126,9 +129,9 @@ jobs:
             # public fuzz seed corpus). They are long-lived data, not stale work: the
             # 14-day age rule deleted the corpus branch twice and reddened every PR's
             # "Verify public fuzz seed corpus" with `Remote branch ... not found`.
-            # Derived from the workflows, so a new storage branch is kept automatically.
-            if git grep -hoE '(--branch|storage-repo-branch(-coverage)?:) +[A-Za-z0-9._/-]+' \
-                 -- .github/workflows | awk '{print $NF}' | grep -qxF "$branch"; then
+            # Derived from literal workflow refs, so newly named storage branches
+            # are kept without a second manually maintained allowlist.
+            if grep -qxF "$branch" <<< "$STORAGE_BRANCHES"; then
               echo "KEEP (storage): $branch"
               SKIPPED=$(( SKIPPED + 1 )); continue
             fi
