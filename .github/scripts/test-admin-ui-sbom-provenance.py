@@ -155,6 +155,20 @@ class SbomProvenanceTest(unittest.TestCase):
         subprocess.run(['git', 'commit', '-qm', 'metadata'], cwd=self.root, check=True)
         self.assertTrue(mod.inputs_changed(self.root, self.sha, mod.source_sha(self.root)))
 
+    def test_service_version_change_invalidates_sbom_provenance(self):
+        version = self.root / 'openbank-a-service/version.txt'
+        version.write_text('1.0.0\n')
+        subprocess.run(['git', 'add', 'openbank-a-service/version.txt'], cwd=self.root, check=True)
+        subprocess.run(['git', 'commit', '-qm', 'version baseline'], cwd=self.root, check=True)
+        before = mod.source_sha(self.root)
+        before_digest = mod.input_digest(self.root)
+
+        version.write_text('1.0.1\n')
+        subprocess.run(['git', 'add', 'openbank-a-service/version.txt'], cwd=self.root, check=True)
+        subprocess.run(['git', 'commit', '-qm', 'release version'], cwd=self.root, check=True)
+        self.assertTrue(mod.inputs_changed(self.root, before, mod.source_sha(self.root)))
+        self.assertNotEqual(before_digest, mod.input_digest(self.root))
+
     def test_stage_clears_stale_unselected_report(self):
         old = self.root / 'openbank-b-service/build/reports/bom.json'
         old.parent.mkdir(parents=True)
