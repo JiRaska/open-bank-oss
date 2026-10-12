@@ -10,6 +10,16 @@ This documentation is published by the service at the management endpoint `/q/op
 - **Ports:** 8159 (app), 8085 (management)
 - **Auth:** reads for operators, `ROLE_RISK` and `ROLE_FINANCE`; writes (snapshot runs, curve sets) for `ROLE_RISK`, `ROLE_OPERATOR` and `ROLE_ADMIN` humans only.
 
+## API authentication
+
+In the production profile, `/api/*` requires an OIDC bearer token on both the
+plain HTTP listener and the mTLS listener. On the mTLS listener, a trusted client
+certificate authenticates the transport; it does not replace the bearer token
+or grant API roles. A trusted certificate without a bearer token receives 401.
+Without a trusted client certificate, the TLS handshake is refused before HTTP.
+Callers using mTLS must therefore send both their client certificate and their
+bearer token. The role restrictions above still apply.
+
 ## Risk reads
 
 All reads hang off a snapshot run: `GET /api/v1/risk/snapshots/{id}/...` — `positions`, `instruments`, `cash-flows`, `irrbb`, `liquidity`, `liquidity-forecast`, `capital`, `min-reserves`, `limits`. A run that is not TIED_OUT answers 409; an unknown run or curve set answers 404.
