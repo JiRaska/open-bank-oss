@@ -17,6 +17,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.yaml.snakeyaml.Yaml
 import java.math.BigDecimal
 import java.sql.SQLException
 import java.util.UUID
@@ -73,6 +74,7 @@ class DomesticPaymentIdempotencyIT {
         assertThat(changed.statusCode).isEqualTo(409)
         assertThat(changed.contentType).startsWith("application/problem+json")
         assertThat(changed.jsonPath().getString("code")).isEqualTo("IDEMPOTENCY_KEY_REUSED")
+        assertConflictMatchesPublishedSchema(changed)
         assertThat(countPayments(key)).isEqualTo(1)
         assertThat(countOutbox(UUID.fromString(paymentId))).isEqualTo(1)
         assertThat(requestFingerprint(key)).matches("[0-9a-f]{64}")
@@ -176,6 +178,42 @@ class DomesticPaymentIdempotencyIT {
         .header("Idempotency-Key", key)
         .body(body)
         .post("/api/v1/domestic-payments")
+
+    @Suppress("UNCHECKED_CAST")
+    private fun assertConflictMatchesPublishedSchema(response: Response) {
+        val spec = javaClass.classLoader.getResourceAsStream("openapi.yaml")!!
+            .use { Yaml().load<Map<String, Any>>(it) }
+        val paths = spec.getValue("paths") as Map<String, Any>
+        val paymentPath = paths.getValue("/api/v1/domestic-payments") as Map<String, Any>
+        val post = paymentPath.getValue("post") as Map<String, Any>
+        val responses = post.getValue("responses") as Map<String, Any>
+        val conflict = responses.getValue("409") as Map<String, Any>
+        val content = conflict.getValue("content") as Map<String, Any>
+        val problem = content.getValue("application/problem+json") as Map<String, Any>
+        val ref = (problem.getValue("schema") as Map<String, String>).getValue("\$ref")
+        assertThat(ref).isEqualTo("#/components/schemas/IdempotencyConflictResponse")
+
+        val components = spec.getValue("components") as Map<String, Any>
+        val schemas = components.getValue("schemas") as Map<String, Any>
+        val schema = schemas.getValue(ref.substringAfterLast('/')) as Map<String, Any>
+        val required = schema.getValue("required") as List<String>
+        val properties = schema.getValue("properties") as Map<String, Map<String, Any>>
+        val body = response.jsonPath().getMap<String, Any>("")
+
+        assertThat(body.keys).containsAll(required)
+        assertThat(body.keys).isSubsetOf(properties.keys)
+        properties.forEach { (name, declaration) ->
+            val value = body[name] ?: return@forEach
+            when (declaration["type"]) {
+                "string" -> assertThat(value).describedAs(name).isInstanceOf(String::class.java)
+                "integer" -> assertThat(value).describedAs(name).isInstanceOf(Number::class.java)
+                else -> error("Unverified schema type for $name")
+            }
+            (declaration["enum"] as? List<Any>)?.let { allowed ->
+                assertThat(allowed).describedAs(name).contains(value)
+            }
+        }
+    }
 
     private fun requestBody(debtorAccountId: UUID, amount: BigDecimal): String =
         """
