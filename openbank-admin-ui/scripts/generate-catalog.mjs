@@ -26,6 +26,7 @@ import { readdirSync, statSync, readFileSync, writeFileSync } from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { parse as parseYaml } from 'yaml'
+import { deriveTemporalMigrationPhases, TEMPORAL_MIGRATION_SOURCE } from './derive-temporal-migration.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const args = process.argv.slice(2)
@@ -153,6 +154,10 @@ for (const name of entries) {
 // Financial showback must use the reviewed taxonomy, never a second list in the UI. Reject
 // unknown services here: dropping them at render time would understate a business flow's cost.
 const knownServices = new Set(services.map(service => service.short))
+const temporalMigration = deriveTemporalMigrationPhases(
+  readText(path.join(REPO, TEMPORAL_MIGRATION_SOURCE)),
+  new Set(services.map(service => service.name)),
+)
 const finopsCostGroups = Object.entries(gov.groups).map(([id, raw]) => {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)
       || typeof raw.label_en !== 'string' || !raw.label_en.trim()
@@ -186,6 +191,7 @@ const catalog = {
   totals,
   services,
   finopsCostGroups,
+  temporalMigration,
   availabilitySlo: gov.availabilitySlo,
 }
 

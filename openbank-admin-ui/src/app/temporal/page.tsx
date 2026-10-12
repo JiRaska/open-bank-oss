@@ -8,6 +8,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { RefreshCw, CheckCircle, Clock, AlertTriangle, Zap, Database, Shield, GitBranch, Activity, Server, ChevronRight, ArrowRight } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { MONEY_WORKFLOWS } from '@/lib/temporal/workflows'
+import { parseTemporalMigrationCatalog } from '@/lib/temporal/migration'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { PageHeader } from '@/components/ui/PageHeader'
 
@@ -46,12 +47,12 @@ type Tab = 'overview' | 'migration' | 'metrics' | 'architecture'
 // ─── migration phases ─────────────────────────────────────────────────────────
 
 const PHASES = [
+  // Phase completion and descriptions are an authored plan, not live deployment evidence.
   {
     id: 'P0',
     labelCs: 'Sdílená knihovna',
     labelEn: 'Shared Library',
     status: 'partial' as const,
-    services: ['openbank-libs'],
     descCs: 'Dodáno: klient a konfigurace (TemporalClientProducer, TemporalConfig). Saga DSL, OPA interceptor a deterministický RNG zatím ne.',
     descEn: 'Shipped: client and config (TemporalClientProducer, TemporalConfig). Saga DSL, OPA interceptor and deterministic RNG are not.',
   },
@@ -60,7 +61,6 @@ const PHASES = [
     labelCs: 'SEPA platby',
     labelEn: 'SEPA Payments',
     status: 'done' as const,
-    services: ['openbank-sepa-payment-service'],
     descCs: 'První migrace money-path workflowu — pilotní integrace a testování workflow',
     descEn: 'First money-path workflow migration — pilot integration and workflow testing',
   },
@@ -69,7 +69,6 @@ const PHASES = [
     labelCs: 'Tuzemské platby',
     labelEn: 'Domestic Payments',
     status: 'done' as const,
-    services: ['openbank-domestic-payment-service'],
     descCs: 'Domácí převody přesunuty do Temporal; outbox_saga_state tabulka degradována',
     descEn: 'Domestic transfers moved to Temporal; outbox_saga_state table deprecated',
   },
@@ -78,7 +77,6 @@ const PHASES = [
     labelCs: 'Settlement (2 approvaly)',
     labelEn: 'Settlement (2 approvals)',
     status: 'done' as const,
-    services: ['openbank-settlement-service'],
     descCs: 'Money-path — vyžaduje 2 approvaly + aktualizaci threat modelu (ADR-0030)',
     descEn: 'Money-path — requires 2 approvals + threat model update (ADR-0030)',
     moneyPath: true,
@@ -88,7 +86,6 @@ const PHASES = [
     labelCs: 'FX & výpisy',
     labelEn: 'FX & Statements',
     status: 'done' as const,
-    services: ['openbank-fx-service', 'openbank-statement-service'],
     descCs: 'FX konverze a EoD/EoM/EoY záverky přesunuty do Temporal',
     descEn: 'FX conversions and EoD/EoM/EoY closings moved to Temporal',
   },
@@ -97,7 +94,6 @@ const PHASES = [
     labelCs: 'Dekomisace legacy',
     labelEn: 'Decommission legacy',
     status: 'pending' as const,
-    services: ['openbank-libs'],
     descCs: 'Odstranění outbox_saga_state, SagaCoordinator a custom kompenzačních tabulek',
     descEn: 'Remove outbox_saga_state, SagaCoordinator and custom compensation tables',
   },
@@ -197,7 +193,7 @@ function MetricCard({ label, value, unit, status }: {
   )
 }
 
-function PhaseRow({ phase, t }: { phase: typeof PHASES[0]; t: (cs: string, en: string) => string }) {
+function PhaseRow({ phase, services, t }: { phase: typeof PHASES[0]; services: string[] | null; t: (cs: string, en: string) => string }) {
   const isDone = phase.status === 'done'
   return (
     <div style={{
@@ -240,13 +236,16 @@ function PhaseRow({ phase, t }: { phase: typeof PHASES[0]; t: (cs: string, en: s
           {t(phase.descCs, phase.descEn)}
         </div>
         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-          {phase.services.map(svc => (
+          {services?.map(svc => (
             <span key={svc} style={{
               fontSize: '11px', padding: '2px 8px', borderRadius: '6px',
               background: 'var(--surface-2)', color: 'var(--text-muted)',
               fontFamily: 'monospace', border: '1px solid var(--border)',
             }}>{svc}</span>
           ))}
+          {services === null && <span style={{ color: 'var(--warning-text)', fontSize: '12px' }}>
+            {t('Rozsah migrace nelze ověřit z katalogu', 'Migration scope unavailable from catalog')}
+          </span>}
         </div>
       </div>
     </div>
@@ -260,24 +259,28 @@ export default function TemporalPage() {
   const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [tab, setTab] = useState<Tab>('overview')
   const [status, setStatus] = useState<StatusData | null>(null)
+  const [phaseServices, setPhaseServices] = useState<Map<string, string[]> | null>(null)
   const [loading, setLoading] = useState(true)
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
-    try {
-      const res = await fetch('/api/temporal/status')
-      if (res.ok) {
-        setStatus(await res.json() as StatusData)
-      } else {
-        setStatus({ available: false, temporalDeployed: false, metrics: null })
-      }
-    } catch {
-      setStatus({ available: false, temporalDeployed: false, metrics: null })
-    } finally {
-      setLoading(false)
-      setLastRefresh(new Date())
-    }
+    const [statusResult, catalogResult] = await Promise.allSettled([
+      fetch('/api/temporal/status').then(async res => {
+        if (!res.ok) throw new Error('Temporal status unavailable')
+        return res.json() as Promise<StatusData>
+      }),
+      fetch('/api/catalog/services').then(async res => {
+        if (!res.ok) throw new Error('Service catalog unavailable')
+        return res.json() as Promise<unknown>
+      }),
+    ])
+    setStatus(statusResult.status === 'fulfilled'
+      ? statusResult.value : { available: false, temporalDeployed: false, metrics: null })
+    setPhaseServices(catalogResult.status === 'fulfilled'
+      ? parseTemporalMigrationCatalog(catalogResult.value) : null)
+    setLoading(false)
+    setLastRefresh(new Date())
   }, [])
 
   useEffect(() => {
@@ -539,7 +542,7 @@ export default function TemporalPage() {
             {/* Phase list */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               {PHASES.map(phase => (
-                <PhaseRow key={phase.id} phase={phase} t={t} />
+                <PhaseRow key={phase.id} phase={phase} services={phaseServices?.get(phase.id) ?? null} t={t} />
               ))}
             </div>
 
@@ -552,8 +555,8 @@ export default function TemporalPage() {
               <CheckCircle size={16} color="var(--success-text)" style={{ flexShrink: 0, marginTop: '1px' }} />
               <span>
                 {t(
-                  'Toto je referenční migrační plán z ADR-0100, ne živý stav běhů. Aktuální aktivitu a typy workflow potvrzují pouze metriky níže.',
-                  'This is the ADR-0100 reference migration plan, not live execution state. Only the metrics below confirm current activity and workflow types.',
+                  'Rozsah fází pochází z ADR-0101 a katalogu služeb; stav dokončení je referenční plán, ne ověřený stav nasazení. Aktuální aktivitu potvrzují pouze metriky níže.',
+                  'Phase scope comes from ADR-0101 and the service catalog; completion is a reference plan, not verified deployment state. Only the metrics below confirm current activity.',
                 )}
               </span>
             </div>
