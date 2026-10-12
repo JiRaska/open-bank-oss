@@ -15,6 +15,7 @@ import com.openbank.libs.idempotency.IdempotencyRequestInProgressException
 import com.openbank.libs.security.sanitizeForLog
 import io.quarkus.security.UnauthorizedException
 import jakarta.ws.rs.WebApplicationException
+import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.ext.ExceptionMapper
 import jakarta.ws.rs.ext.Provider
@@ -250,6 +251,9 @@ class PolicyDecisionExceptionMapper : ExceptionMapper<PolicyDecisionException> {
 class UnauthorizedExceptionMapper : ExceptionMapper<UnauthorizedException> {
     override fun toResponse(exception: UnauthorizedException): Response =
         Response.status(ErrorCode.UNAUTHORIZED.httpStatus)
+            // A resource may produce SSE; its success media type must not turn this error into
+            // text/event-stream and serialize ApiError.toString() instead of JSON.
+            .type(MediaType.APPLICATION_JSON_TYPE)
             .entity(
                 apiError(
                     ErrorCode.UNAUTHORIZED.httpStatus,

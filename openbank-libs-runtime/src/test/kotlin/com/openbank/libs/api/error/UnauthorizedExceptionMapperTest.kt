@@ -5,6 +5,7 @@
 package com.openbank.libs.api.error
 
 import io.quarkus.security.UnauthorizedException
+import jakarta.ws.rs.core.MediaType
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
@@ -27,6 +28,7 @@ class UnauthorizedExceptionMapperTest {
         val body = response.entity as ApiError
 
         assertThat(response.status).isEqualTo(401)
+        assertThat(response.mediaType).isEqualTo(MediaType.APPLICATION_JSON_TYPE)
         assertThat(body.status).isEqualTo(401)
         assertThat(body.code).isEqualTo(ErrorCode.UNAUTHORIZED.code)
         assertThat(body.message).isEqualTo("Authentication required")
