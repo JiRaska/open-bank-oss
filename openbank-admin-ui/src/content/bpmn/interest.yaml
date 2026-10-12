@@ -4,14 +4,12 @@
 # src/lib/docs/bpmn/schema.ts at build time. `slug` is the filename.
 
 name: Interest Accrual
-desc: Denní výpočet a připisování úroků na účty
+desc: Denní nabíhání úroku; připsání netto částky probíhá až při samostatné kapitalizaci
 regulation: Accounting Standards
 services:
   - interest-service
-  - ledger-service
   - account-service
   - balance-service
-  - notification-service
 steps:
   - id: start
     type: start
@@ -32,61 +30,23 @@ steps:
     type: task
     x: 320
     y: 100
-    label: Výpočet úroku
+    label: Výpočet a uložení accrualu
     lane: core
     apis:
-      - POST /api/v1/interest/calculate
+      - POST /api/v1/interest/accrue/all
+    # Scheduler calls the same accrueAll use case directly; the route is the manual trigger.
+    # The use case reads booked balances and saves accrual rows, but does not post to the ledger.
     relatedServices:
       - interest-service
-  - id: post
-    type: task
-    x: 460
-    y: 100
-    label: Journal Entry
-    lane: core
-    apis:
-      - POST /api/v1/ledger/post
-    relatedServices:
-      - ledger-service
-  - id: balance
-    type: task
-    x: 600
-    y: 100
-    label: Update Balance
-    lane: core
-    apis:
-      - PUT /api/v1/balance/update
-    relatedServices:
-      - balance-service
-  - id: notify
-    type: task
-    x: 740
-    y: 100
-    label: Notifikace
-    lane: platform
-    apis:
-      - POST /api/v1/notifications
-    relatedServices:
-      - notification-service
-    consumes:
-      - openbank.notification.requests
   - id: end
     type: end
-    x: 860
+    x: 460
     y: 100
-    label: Dokončeno
+    label: Accrual uložen
 flows:
   - from: start
     to: load
   - from: load
     to: calc
   - from: calc
-    to: post
-  - from: post
-    to: balance
-  - from: balance
-    to: notify
-    kind: async
-    topic: openbank.notification.requests
-  - from: notify
     to: end

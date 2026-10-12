@@ -179,4 +179,27 @@ describe('bpmn manifests', () => {
     expect(unservedRoutes(staleNotification, 'notification-service', notificationPaths))
       .toEqual(['POST /api/v1/notifications'])
   })
+
+  it('keeps daily interest accrual separate from capitalization and ledger credit', () => {
+    const diagram = loadBpmnProcess('interest')
+    const interestPaths = servicePaths('interest-service')
+    expect(unservedRoutes(diagram, 'interest-service', interestPaths)).toEqual([])
+    expect(diagram.steps.find((step) => step.id === 'calc')?.apis)
+      .toEqual(['POST /api/v1/interest/accrue/all'])
+    expect(diagram.flows.find((flow) => flow.from === 'calc' && flow.to === 'end')).toBeTruthy()
+    for (const obsolete of ['post', 'balance', 'notify']) {
+      expect(diagram.steps.some((step) => step.id === obsolete)).toBe(false)
+    }
+    expect(diagram.flows.some((flow) => flow.topic === 'openbank.notification.requests')).toBe(false)
+
+    // The former calculate route cannot be used to trigger the real accrual use case.
+    const stale = {
+      ...diagram,
+      steps: diagram.steps.map((step) => step.id === 'calc'
+        ? { ...step, apis: ['POST /api/v1/interest/calculate'] }
+        : step),
+    }
+    expect(unservedRoutes(stale, 'interest-service', interestPaths))
+      .toEqual(['POST /api/v1/interest/calculate'])
+  })
 })
