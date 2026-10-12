@@ -95,3 +95,15 @@ The proposal, approval, and rejection POSTs require a nonblank `Idempotency-Key`
 ## Integration tests and the fail-closed service-account flag
 
 OPA treats any principal whose token is not verifiably a person as a service account (`input.principal.service_account`, fail closed). A plain `@TestSecurity` identity carries no JWT, so it counts as a machine and loses human-only grants. Integration tests that act as real staff therefore add `@OidcSecurity` human claims, which is why this module tests with `quarkus-test-security-oidc`.
+
+## Observability
+
+The service publishes `openbank.pension_fund.*` metrics: NAV publication lag,
+age and corrections, order and strategy-change outcomes, settled amounts,
+order replays, market-price lookups and optimistic-lock conflicts on unit
+holdings (counted by the REST mappers before they answer 409). State gauges
+(net assets, NAV per unit, units outstanding, pending orders and queue ages)
+are refreshed every minute by a scheduled job; a refresh that fails keeps the
+previous values and stops recording success, so the workflow-liveness gauge
+goes stale and alerts. Alert rules live in `prometheus-rules-pension-fund.yaml`
+and the runbook in `docs/runbooks/pension-alerts.md`.
