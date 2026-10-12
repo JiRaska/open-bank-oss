@@ -79,3 +79,7 @@ GitOps via ArgoCD (manifests in `gitops/`). On merge-conflict for image tags, ta
 ## ČNB policy-rate evidence
 
 The audit consumer subscribes to `openbank.fx.cnb-policy-rate.published` alongside the existing FX topics. Keep this topic in the configured `audit-events-in` subscription when changing the consumer list: a newly published or revised policy-rate fact then has the same retained audit path as other business events. If records are absent, inspect the audit consumer group's lag and the topic's retention before replay.
+
+## API identity on the mTLS listener
+
+The audit API uses bearer authentication on both HTTP and mTLS listeners in production. A trusted client certificate is required for the TLS handshake but cannot replace the caller's bearer token. Missing bearer credentials return HTTP 401; route roles and OPA still decide what an authenticated caller may read. The listener parity test reads the production listener configuration and verifies no-certificate, certificate-only and valid-bearer requests over real HTTP.

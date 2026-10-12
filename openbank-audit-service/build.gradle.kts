@@ -59,6 +59,13 @@ dependencies {
     testImplementation(libs.testcontainers.redpanda)
 }
 
+// The production-listener parity profile needs a separate Quarkus boot from the
+// enforced-policy/Pact profiles. The complete suite exhausts Gradle's 512 MiB test default.
+// Bound only this test JVM; production heap and provider-Pact configuration are unchanged.
+tasks.named<Test>("test") {
+    maxHeapSize = "1g"
+}
+
 kover {
     reports {
         verify {

@@ -139,3 +139,12 @@ independent verification remains necessary.
 Residual: `@RolesAllowed` and the OPA rule both depend on realm role assignment; a realm that grants
 a staff client's tokens a non-`service-account-` id with an oversight role is outside this control.
 `AUTHZ_ENFORCE` for audit-service decides whether the OPA deny is enforced or advisory.
+
+### Bearer identity on the evidence listener (#11962, #12511)
+
+The production `/api/*` permission explicitly selects the bearer authentication mechanism.
+A trusted client certificate establishes transport trust only; it cannot authenticate an API
+caller without a bearer token. Resource role checks and OPA authorization remain in force.
+`AuditListenerAuthParityIT` reads the production HTTP-auth configuration and checks both
+listeners with real certificates and signed bearer tokens. Its policy mode is advisory to
+isolate listener identity; `AuditAuthzWiringIT` separately exercises enforced OPA decisions.

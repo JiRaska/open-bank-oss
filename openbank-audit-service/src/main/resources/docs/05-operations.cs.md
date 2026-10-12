@@ -79,3 +79,7 @@ GitOps přes ArgoCD (manifesty v `gitops/`). Při merge-konfliktu image tagů be
 ## Auditní stopa sazeb ČNB
 
 Auditní konzument odebírá `openbank.fx.cnb-policy-rate.published` spolu s ostatními FX topicy. Při úpravách odběru ponechte tento topic v konfiguraci `audit-events-in`: nově publikovaná i opravená sazba pak prochází stejnou archivovanou auditní cestou jako ostatní obchodní události. Pokud záznamy chybí, před opakováním odběru zkontrolujte lag skupiny auditního konzumenta a retenci topicu.
+
+## Identita volajícího na mTLS listeneru
+
+Auditní API v produkci používá bearer autentizaci na HTTP i mTLS listeneru. Důvěryhodný klientský certifikát je podmínkou TLS spojení, ale nenahrazuje bearer token volajícího. Bez bearer přihlašovacích údajů API vrací HTTP 401; role endpointu a OPA nadále rozhodují, co smí přihlášený volající číst. Test parity listenerů načítá produkční konfiguraci a přes skutečné HTTP ověřuje přístup bez certifikátu, pouze s certifikátem i s platným bearer tokenem.

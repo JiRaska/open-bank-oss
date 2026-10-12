@@ -330,3 +330,11 @@ opa:
       # Keep plain HTTP/8113 for existing callers and the probes: with client-auth REQUIRED Quarkus
       # otherwise defaults insecure-requests to `disabled` and drops that listener (#10441).
       insecure-requests: enabled
+      # A trusted workload certificate is transport identity, not an API login (#12511).
+      # Keep route-level role and OPA checks; select bearer as their caller identity.
+      auth:
+        permission:
+          bearer-only:
+            paths: /api/*
+            policy: permit
+            auth-mechanism: bearer
