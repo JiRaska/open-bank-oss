@@ -21,10 +21,7 @@ import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.config.inject.ConfigProperty
-import java.net.URLEncoder
-import java.nio.charset.StandardCharsets
 import java.util.UUID
-import java.util.regex.Pattern
 
 /**
  * The pension follow-up flows of `docs/ux/pension-client-flows.md` over pension-service API 1.2.0:
@@ -93,13 +90,11 @@ class CustomerPensionChangeResource(private val upstream: UpstreamClient, privat
         @QueryParam("strategyCode") strategyCode: String?,
         @QueryParam("lang") lang: String?,
     ): Response {
-        // An explicit java.util.regex guard: the value is a bare token before it reaches the URL.
-        if (strategyCode == null || !STRATEGY.matcher(strategyCode).matches()) {
-            return invalid("strategyCode is missing or malformed")
-        }
-        val code: String = strategyCode
+        // Parsed at the boundary: only the edge-built canonical form ever reaches the URL.
+        val code = PensionStrategyCode.parse(strategyCode)
+            ?: return invalid("strategyCode is missing or malformed")
         return application(id) { applicationId ->
-            upstream.get(withLang("${app(applicationId)}/warnings?strategyCode=${enc(code)}", lang, "&"), party())
+            upstream.get(withLang("${app(applicationId)}/warnings?strategyCode=${code.value}", lang, "&"), party())
         }
     }
 
@@ -459,12 +454,9 @@ class CustomerPensionChangeResource(private val upstream: UpstreamClient, privat
         const val NOT_FOUND = 404
         const val CONFLICT = 409
         const val BAD_GATEWAY = 502
-        val STRATEGY: Pattern = Pattern.compile("^[A-Z0-9_]{1,64}$")
 
         fun withLang(url: String, lang: String?, separator: String = "?"): String =
             PensionChangeInput.lang(lang)?.let { "$url${separator}lang=$it" } ?: url
-
-        fun enc(value: String): String = URLEncoder.encode(value, StandardCharsets.UTF_8)
 
         fun uuid(raw: String?): UUID? = raw?.let { runCatching { UUID.fromString(it) }.getOrNull() }
 

@@ -100,6 +100,31 @@ class CustomerPensionChangeResourceTest {
     }
 
     @Test
+    fun `a malformed strategyCode is 400 before any upstream call`() {
+        listOf(null, "", "dynamic", "DYN/../x", "DYN&lang=xx", "DYN%2F", "A".repeat(65), "DYN\u0000").forEach { raw ->
+            val upstream = mockk<UpstreamClient>()
+
+            val response = resource(upstream).warnings(applicationId.toString(), raw, null)
+
+            assertThat(response.status).describedAs("strategyCode=%s", raw).isEqualTo(400)
+            verify(exactly = 0) { upstream.get(any(), any()) }
+        }
+    }
+
+    @Test
+    fun `a valid strategyCode reaches exactly the canonical upstream warnings path`() {
+        val upstream = mockk<UpstreamClient>()
+        val url = slot<String>()
+        every { upstream.get(capture(url), caller.toString()) } returns ok("""{"warnings":[]}""")
+
+        val response = resource(upstream).warnings(applicationId.toString(), "DYNAMIC_2", "cs")
+
+        assertThat(response.status).isEqualTo(200)
+        assertThat(url.captured)
+            .isEqualTo("$api/onboarding/applications/$applicationId/warnings?strategyCode=DYNAMIC_2&lang=cs")
+    }
+
+    @Test
     fun `beneficiary shares must total exactly 100 before anything goes upstream`() {
         val upstream = mockk<UpstreamClient>()
 
