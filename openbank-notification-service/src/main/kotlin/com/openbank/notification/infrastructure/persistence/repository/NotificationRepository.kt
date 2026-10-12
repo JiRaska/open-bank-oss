@@ -38,6 +38,27 @@ class NotificationRepository : PanacheRepository<NotificationEntity> {
             }
         }.awaitSuspending()
 
+    /** Keyset paging keeps an arriving row from shifting a later global inbox page. */
+    suspend fun pageByPartyBefore(
+        partyId: UUID,
+        beforeCreatedAt: Instant,
+        beforeId: UUID,
+        size: Int,
+    ): Triple<List<NotificationEntity>, Long, Long> = Panache.withSession {
+        val query = find(
+            "partyId = ?1 and (createdAt < ?2 or (createdAt = ?2 and notificationId < ?3)) " +
+                "order by createdAt desc, notificationId desc",
+            partyId,
+            beforeCreatedAt,
+            beforeId,
+        )
+        find("partyId", partyId).count().flatMap { total ->
+            find("partyId = ?1 and readAt is null", partyId).count().flatMap { unread ->
+                query.page(0, size).list().map { items -> Triple(items, total, unread) }
+            }
+        }
+    }.awaitSuspending()
+
     suspend fun pageAll(page: Int, size: Int): Pair<List<NotificationEntity>, Long> = Panache.withSession {
         val query = findAll()
         query.count().flatMap { total -> query.page(page, size).list().map { items -> items to total } }
