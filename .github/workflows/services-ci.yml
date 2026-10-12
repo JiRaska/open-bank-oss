@@ -157,22 +157,8 @@ jobs:
               echo "Decision: push changed only inert paths (release/docs/admin-ui/infra/external workflows) -> build nothing."
               CHANGED=""
             else
-              # Scope the main-push build instead of always full-fleeting (#1208/#2039). Full-fleet
-              # on ANY build-relevant change is ~30 jobs and, on the 6-runner pool, wedges the queue
-              # for hours (a merged contract fix sits unverified behind it — the #1348 drain, #945).
-              # The safe direction is still over-build: the moment a changed path is NOT cleanly
-              # attributable to a module or a pact pair, fall back to full-fleet. Never under-build
-              # the Pact graph.
-              #   - code-global input (core libs, gradle, build-logic) -> full-fleet.
-              #     libs-lending and libs-iso20022 follow their declared Gradle consumers.
-              #     Lib test-only paths excepted (filter-lib-test-only-paths.py).
-              #   - pacts/<consumer>-<provider>.json changed -> build both Gradle modules. The
-              #     Admin UI consumer is not a Gradle module: its separate trusted Pact workflow
-              #     publishes it, so only its provider belongs in this matrix.
-              #   - <module>/... changed -> that module.
-              #   - openbank-libs/governance/ -> data for CI checks/admin-ui, not a compile input.
-              #   - the CI recipe itself -> canary below.
-              #   - anything else -> unattributable -> full-fleet (safety).
+              # Shared production/build inputs select the full fleet; unknown paths fail closed.
+              # Library-owned tests stay local, while all shared fixtures remain fleet-wide.
               FILES_CODE=$(grep -vE '^openbank-libs/governance/' <<< "$RELEVANT" || true)
               FILES_GLOBAL=$(python3 .github/scripts/filter-lib-test-only-paths.py <<< "$FILES_CODE")
               # An exact raised-floor-only diff stays local to libs-domain.
@@ -254,7 +240,10 @@ jobs:
             DIFF_BASE="$MB"
             FILES=$(git diff --name-only "$MB" HEAD)
             echo "Detect: base=$BASE merge-base=$MB changed-files=$(echo "$FILES" | grep -c . || true)"
-            echo "Changed files:"; echo "$FILES" | sed 's/^/  /'
+            echo "Changed files:"
+            while IFS= read -r changed_file; do
+              printf '  %s\n' "$changed_file"
+            done <<< "$FILES"
 
             # Code-global inputs every module compiles/tests against -> rebuild all.
             # Except a lib's own test sources (filter-lib-test-only-paths.py header).
@@ -416,7 +405,8 @@ jobs:
             echo "services=[]" >> "$GITHUB_OUTPUT"
             echo "any=false" >> "$GITHUB_OUTPUT"
           else
-            JSON=$(printf '%s\n' $CHANGED | sort -u | jq -R . | jq -cs .)
+            read -r -a changed_modules <<< "$CHANGED"
+            JSON=$(printf '%s\n' "${changed_modules[@]}" | sort -u | jq -R . | jq -cs .)
             echo "services=$JSON" >> "$GITHUB_OUTPUT"
             echo "any=true" >> "$GITHUB_OUTPUT"
           fi
