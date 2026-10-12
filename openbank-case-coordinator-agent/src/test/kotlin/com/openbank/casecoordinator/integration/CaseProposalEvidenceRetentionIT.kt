@@ -13,10 +13,13 @@ import org.flywaydb.core.Flyway
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import java.nio.charset.StandardCharsets
+import java.sql.Connection
 import java.sql.ResultSet
 import java.sql.Timestamp
 import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import javax.sql.DataSource
 
 /** Real PostgreSQL proof that proposal evidence survives deletion of a SENT delivery-buffer row. */
@@ -125,6 +128,78 @@ class CaseProposalEvidenceRetentionIT {
         } finally {
             dropSchema(schema)
         }
+    }
+
+    @Test
+    fun `V11 waits for in-flight writer before backfill and trigger creation`() {
+        val schema = "proposal_evidence_${UUID.randomUUID().toString().replace("-", "")}"
+        val event = UUID.randomUUID()
+        try {
+            flyway(schema, "10").migrate()
+            assertThat(migrateDuringWrite(schema, event)).isEqualTo(1)
+            assertThat(readEvidenceStatuses(schema)).containsEntry(event, "PENDING")
+        } finally {
+            dropSchema(schema)
+        }
+    }
+
+    private fun migrateDuringWrite(schema: String, event: UUID): Int {
+        val writer = dataSource.connection
+        val executor = Executors.newSingleThreadExecutor()
+        writer.autoCommit = false
+        try {
+            insertPending(writer, schema, event)
+            val migration = executor.submit<Int> { flyway(schema, "11").migrate().migrationsExecuted }
+            assertThat(waitForBackfillLock(schema)).isTrue()
+            writer.commit()
+            return migration.get(30, TimeUnit.SECONDS)
+        } finally {
+            writer.rollback()
+            writer.close()
+            executor.shutdownNow()
+        }
+    }
+
+    private fun flyway(schema: String, target: String): Flyway = Flyway.configure()
+        .dataSource(dataSource)
+        .schemas(schema)
+        .createSchemas(true)
+        .locations("classpath:db/migration")
+        .target(target)
+        .load()
+
+    private fun insertPending(writer: Connection, schema: String, event: UUID) {
+        writer.prepareStatement(
+            """
+            INSERT INTO $schema.case_outbox
+                (event_id, aggregate_id, event_type, payload, status, created_at, updated_at)
+            VALUES (?, ?, 'case-synthesis', '{}', 'PENDING', NOW(), NOW())
+            """.trimIndent(),
+        ).use { ps ->
+            ps.setObject(1, event)
+            ps.setObject(2, UUID.randomUUID())
+            ps.executeUpdate()
+        }
+    }
+
+    private fun waitForBackfillLock(schema: String): Boolean {
+        repeat(200) {
+            if (hasWaitingBackfillLock(schema)) return true
+            Thread.sleep(50)
+        }
+        return false
+    }
+
+    private fun hasWaitingBackfillLock(schema: String): Boolean = dataSource.connection.use { conn ->
+        conn.prepareStatement(
+            """
+            SELECT EXISTS (
+                SELECT 1 FROM pg_locks
+                WHERE relation = '$schema.case_outbox'::regclass
+                  AND mode = 'ShareRowExclusiveLock' AND NOT granted
+            )
+            """.trimIndent(),
+        ).use { ps -> ps.executeQuery().use { rs -> rs.next() && rs.getBoolean(1) } }
     }
 
     private fun seedHistoricalOutbox(schema: String, pendingId: UUID, sentId: UUID) {

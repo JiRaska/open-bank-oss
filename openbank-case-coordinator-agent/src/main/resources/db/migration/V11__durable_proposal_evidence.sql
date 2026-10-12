@@ -20,6 +20,11 @@ CREATE TABLE case_proposal_evidence (
 CREATE INDEX idx_case_proposal_evidence_aggregate_time
     ON case_proposal_evidence (aggregate_id, emitted_at, event_id);
 
+-- Flyway runs this migration in one transaction. A writer that committed before this lock is
+-- included in the backfill; a writer arriving afterward waits until the trigger exists.
+-- Without the lock, an insert or status change between the backfill and CREATE TRIGGER is lost.
+LOCK TABLE case_outbox IN SHARE ROW EXCLUSIVE MODE;
+
 INSERT INTO case_proposal_evidence (event_id, aggregate_id, event_type, delivery_status, emitted_at)
 SELECT event_id, aggregate_id, event_type, status, created_at FROM case_outbox;
 
