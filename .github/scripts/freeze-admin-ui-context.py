@@ -34,6 +34,12 @@ GENERATED_ROOT_JSON = (
 )
 
 
+def is_generated_sbom(relative: Path) -> bool:
+    """The Dockerfile collects only per-module CycloneDX reports at this path."""
+    return (len(relative.parts) == 4 and relative.parts[0].startswith("openbank-")
+            and relative.parts[1:] == ("build", "reports", "bom.json"))
+
+
 def paths(root: Path) -> set[Path]:
     proc = subprocess.run(["git", "ls-files", "-z"], cwd=root, check=True, capture_output=True)
     found = {Path(os.fsdecode(p)) for p in proc.stdout.split(b"\0") if p}
@@ -45,6 +51,14 @@ def paths(root: Path) -> set[Path]:
         directory = root / name
         if directory.exists():
             found.update(p.relative_to(root) for p in directory.rglob("*") if p.is_file())
+    # sbomAll writes ignored build outputs after checkout. Include only reports
+    # belonging to a tracked Gradle module; their bytes enter the signed manifest.
+    modules = {p.parts[0] for p in found if len(p.parts) == 2
+               and p.parts[1] == "build.gradle.kts" and p.parts[0].startswith("openbank-")}
+    for module in modules:
+        report = Path(module) / "build/reports/bom.json"
+        if (root / report).is_file():
+            found.add(report)
     others = subprocess.run(["git", "ls-files", "--others", "--exclude-standard", "-z"],
                             cwd=root, check=True, capture_output=True)
     non_inputs = (".app-src/", "sbom-downloads/")
@@ -94,8 +108,9 @@ def require_committed_content(relative: Path, content: bytes, blobs: dict[Path, 
     expected = blobs.get(relative)
     # These four evidence directories are produced after checkout and need not
     # have Git objects. Their bytes still enter the signed frozen inventory.
-    if expected is None and any(relative.is_relative_to(Path(directory))
-                                and relative != Path(directory) for directory in GENERATED_DIRS):
+    if expected is None and (is_generated_sbom(relative) or
+                            any(relative.is_relative_to(Path(directory))
+                                and relative != Path(directory) for directory in GENERATED_DIRS)):
         return
     digest = hashlib.new(object_format, b"blob " + str(len(content)).encode() + b"\0" + content).hexdigest()
     if expected != digest:

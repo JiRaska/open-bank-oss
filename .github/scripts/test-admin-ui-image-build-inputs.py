@@ -48,8 +48,11 @@ class AdminUiImageInputsTest(unittest.TestCase):
             changelog.parent.mkdir()
             dockerfile.write_text("FROM scratch\n")
             changelog.write_text("old release\n")
+            gradle_file = repo / "openbank-notification-service/build.gradle.kts"
+            gradle_file.write_text("plugins {}\n")
             subprocess.run(["git", "-C", str(repo), "add", "--", "openbank-admin-ui/Dockerfile",
-                            "openbank-notification-service/CHANGELOG.md"], check=True)
+                            "openbank-notification-service/CHANGELOG.md",
+                            "openbank-notification-service/build.gradle.kts"], check=True)
             subprocess.run(["git", "-C", str(repo), "-c", "commit.gpgsign=false", "commit", "-qm", "fixture"], check=True)
             source = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
                                     check=True, capture_output=True, text=True).stdout.strip()
@@ -58,6 +61,9 @@ class AdminUiImageInputsTest(unittest.TestCase):
             generated_evidence = repo / "openbank-admin-ui/client-test-evidence/run.json"
             generated_evidence.parent.mkdir()
             generated_evidence.write_text('{"completed":true}\n')
+            sbom = repo / "openbank-notification-service/build/reports/bom.json"
+            sbom.parent.mkdir(parents=True)
+            sbom.write_text('{"bomFormat":"CycloneDX","version":1}\n')
             for name in ("governance.json", "cost-footprints.json", "cluster-topology.json"):
                 (repo / "openbank-admin-ui" / name).write_text('{"generated":true}\n')
             context = base / "context"
@@ -70,6 +76,11 @@ class AdminUiImageInputsTest(unittest.TestCase):
                              '{"completed":true}\n')
             self.assertTrue(any(item["path"] == "openbank-admin-ui/client-test-evidence/run.json"
                                 for item in inventory))
+            sbom_path = "openbank-notification-service/build/reports/bom.json"
+            self.assertEqual((context / sbom_path).read_bytes(), sbom.read_bytes())
+            self.assertTrue(any(item["path"] == sbom_path for item in inventory))
+            self.assertEqual(next(item["sha256"] for item in inventory if item["path"] == sbom_path),
+                             hashlib.sha256(sbom.read_bytes()).hexdigest())
             for name in ("governance.json", "cost-footprints.json", "cluster-topology.json"):
                 self.assertTrue(any(item["path"] == "openbank-admin-ui/" + name for item in inventory))
                 self.assertTrue((context / "openbank-admin-ui" / name).is_file())
