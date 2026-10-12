@@ -26,3 +26,5 @@ formát logu znovu zavede surové pole `token=` / `tokenId=`.
 
 Pozn.: v `src/main` dnes nic proposal token nevydává (#5900), takže se tyto řádky objevují jen v
 testech, dokud nebude cesta potvrzení zapojena.
+
+Logy návrhů a rozhodnutí politik obsahují výsledek a hashovanou referenci tokenu, nikdy identitu zákazníka, názvy nástrojů, důvody rozhodnutí ani deserializovaný obsah. Zprávy výjimek a stack trace se v těchto cestách nezapisují, protože mohou obsahovat data požadavku. Pro diagnostiku zůstávají HTTP status, TTL tokenu a vygenerované identifikátory akcí.
