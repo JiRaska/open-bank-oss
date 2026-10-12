@@ -90,6 +90,29 @@ def flatten_pages(pages: object) -> list[dict]:
     return runs
 
 
+def merge_chunks(chunks: list[list[dict]]) -> list[dict]:
+    """Keep the newest state when inclusive created ranges repeat a boundary run."""
+    by_id: dict[int, dict] = {}
+    for chunk in chunks:
+        if not isinstance(chunk, list):
+            raise TypeError("workflow-run chunk is not an array")
+        for run in chunk:
+            if not isinstance(run, dict) or type(run.get("id")) is not int or run["id"] <= 0:
+                raise ValueError("workflow-run chunk has a malformed run ID")
+            old = by_id.get(run["id"])
+            if old is None or (
+                int(run.get("run_attempt") or 1),
+                run.get("status") == "completed",
+                parse_time(run["updated_at"]),
+            ) > (
+                int(old.get("run_attempt") or 1),
+                old.get("status") == "completed",
+                parse_time(old["updated_at"]),
+            ):
+                by_id[run["id"]] = run
+    return sorted(by_id.values(), key=lambda run: run["id"])
+
+
 def select(runs: list[dict], now: dt.datetime, lookback_minutes: int) -> dict[str, list[dict]]:
     cutoff = now - dt.timedelta(minutes=lookback_minutes)
     retry: dict[int, dict] = {}
@@ -156,6 +179,15 @@ def self_test() -> int:
                      "created_at": "2026-09-10T00:00:00Z", "updated_at": "2026-09-10T23:45:00Z"}
     assert parse_time(catchup["created_queries"][0].split("..")[0]) <= parse_time(missed["created_at"])
     assert select([missed], now, catchup["updated_lookback_minutes"])["retry"][0]["run_id"] == 9
+    delayed = now + dt.timedelta(minutes=15)
+    near_cutoff = missed | {"id": 10, "updated_at": "2026-09-10T23:26:00Z"}
+    assert [x["run_id"] for x in select([near_cutoff], now, catchup["updated_lookback_minutes"])["retry"]] == [10]
+    assert select([near_cutoff], delayed, catchup["updated_lookback_minutes"])["retry"] == []
+    boundary_pending = missed | {"id": 11, "status": "in_progress", "conclusion": None,
+                                 "updated_at": "2026-09-10T23:45:00Z"}
+    boundary_done = missed | {"id": 11, "status": "completed", "updated_at": "2026-09-10T23:46:00Z"}
+    assert [x["run_id"] for x in select(merge_chunks([[boundary_pending], [boundary_done]]), now, 67)["retry"]] == [11]
+    assert [x["run_id"] for x in select(merge_chunks([[boundary_done], [boundary_pending]]), now, 67)["retry"]] == [11]
     assert query_window("short", now, parse_time("2026-09-11T00:20:00Z")) == short
     try:
         query_window("short", now, now + dt.timedelta(minutes=1))
@@ -211,8 +243,8 @@ def self_test() -> int:
         raise AssertionError("changing total_count was treated as a complete snapshot")
     recovered = select(flatten_pages(second_snapshot), now, 180)
     assert [x["run_id"] for x in recovered["retry"]] == [777]
-    print("SUBJECTS=22")
-    print("select-ci-reconcile-candidates self-test: 22 cases passed, 0 failed")
+    print("SUBJECTS=24")
+    print("select-ci-reconcile-candidates self-test: 24 cases passed, 0 failed")
     return 0
 
 
@@ -224,6 +256,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--query-mode", choices=("short", "deep"))
     parser.add_argument("--checkpoint", help="creation time of latest successful reconciliation run")
     parser.add_argument("--flatten-pages", type=Path)
+    parser.add_argument("--merge-chunks", nargs="+", type=Path)
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args(argv)
     if args.self_test:
@@ -233,6 +266,13 @@ def main(argv: list[str]) -> int:
             print(json.dumps(flatten_pages(json.loads(args.flatten_pages.read_text())), separators=(",", ":")))
         except ValueError as exc:
             print(f"incomplete workflow-run API result: {exc}", file=sys.stderr)
+            return 2
+        return 0
+    if args.merge_chunks:
+        try:
+            print(json.dumps(merge_chunks([json.loads(path.read_text()) for path in args.merge_chunks]), separators=(",", ":")))
+        except (TypeError, ValueError, KeyError) as exc:
+            print(f"incomplete workflow-run chunks: {exc}", file=sys.stderr)
             return 2
         return 0
     if args.query_mode:

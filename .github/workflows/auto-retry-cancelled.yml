@@ -176,9 +176,10 @@ jobs:
           if [[ "$RECONCILE_SCHEDULE" == '7 * * * *' || "$RECONCILE_DISPATCH_MODE" == deep ]]; then
             mode=deep
           fi
+          plan_now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           plan=$(python3 .github/scripts/select-ci-reconcile-candidates.py \
             --query-mode "$mode" --checkpoint "$checkpoint" \
-            --now "$(date -u +%Y-%m-%dT%H:%M:%SZ)")
+            --now "$plan_now")
           created_query=$(jq -r '.created_query' <<< "$plan")
           mapfile -t created_queries < <(jq -r '.created_queries[]' <<< "$plan")
           lookback=$(jq -r '.updated_lookback_minutes' <<< "$plan")
@@ -233,17 +234,19 @@ jobs:
               done
               chunk_files+=("$chunk_file")
             done
-            jq -s 'add | unique_by(.id)' "${chunk_files[@]}" > "${RUNNER_TEMP}/${workflow}.json"
+            python3 .github/scripts/select-ci-reconcile-candidates.py \
+              --merge-chunks "${chunk_files[@]}" > "${RUNNER_TEMP}/${workflow}.json"
           done
           jq -s 'add' "${RUNNER_TEMP}"/*.yml.json > "${RUNNER_TEMP}/runs.json"
           echo "query_elapsed_seconds=$(($(date +%s) - started_at))" >> "$GITHUB_STEP_SUMMARY"
           echo "lookback=$lookback" >> "$GITHUB_OUTPUT"
+          echo "plan_now=$plan_now" >> "$GITHUB_OUTPUT"
       - name: Select bounded, deduplicated candidates
         id: select
         run: |
           set -euo pipefail
           candidates=$(python3 .github/scripts/select-ci-reconcile-candidates.py \
-            --runs-file "${RUNNER_TEMP}/runs.json" --now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --runs-file "${RUNNER_TEMP}/runs.json" --now "${{ steps.read-runs.outputs.plan_now }}" \
             --lookback-minutes "${{ steps.read-runs.outputs.lookback }}")
           echo "retry=$(jq -c '.retry' <<< "${candidates}")" >> "${GITHUB_OUTPUT}"
           echo "flakes=$(jq -c '.flakes' <<< "${candidates}")" >> "${GITHUB_OUTPUT}"
