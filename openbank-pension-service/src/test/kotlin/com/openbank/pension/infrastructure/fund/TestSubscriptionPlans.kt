@@ -7,12 +7,14 @@ package com.openbank.pension.infrastructure.fund
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
-class TestSubscriptionPlans : SubscriptionPlanRepository {
+class TestSubscriptionPlans(private val newMode: SubscriptionPlacementMode = SubscriptionPlacementMode.LEGACY) :
+    SubscriptionPlanRepository {
     private val plans = ConcurrentHashMap<Pair<UUID, String>, SubscriptionPlan>()
 
     override suspend fun find(contractId: UUID, idempotencyKey: String): SubscriptionPlan? =
         plans[contractId to idempotencyKey]
 
     override suspend fun insertIfAbsent(plan: SubscriptionPlan): SubscriptionPlan =
-        plans.putIfAbsent(plan.contractId to plan.idempotencyKey, plan) ?: plan
+        plans.putIfAbsent(plan.contractId to plan.idempotencyKey, plan.copy(placementMode = newMode))
+            ?: plan.copy(placementMode = newMode)
 }

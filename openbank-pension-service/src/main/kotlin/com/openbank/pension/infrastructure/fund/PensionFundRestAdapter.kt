@@ -61,6 +61,14 @@ interface PensionFundRestClient {
         order: OrderRequestDto,
     ): UnitOrderDto
 
+    @POST
+    @Path("/contracts/{contractId}/orders/subscriptions")
+    suspend fun placeSubscriptionBatch(
+        @PathParam("contractId") contractId: UUID,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String,
+        request: SubscriptionBatchRequestDto,
+    ): List<SubscriptionBatchOrderDto>
+
     @GET
     @Path("/strategies")
     suspend fun strategies(): List<StrategyDto>
@@ -93,6 +101,17 @@ data class OrderRequestDto(
     val amount: BigDecimal? = null,
     val units: BigDecimal? = null,
 )
+
+data class SubscriptionBatchRequestDto(
+    val amount: BigDecimal,
+    val currency: String,
+    val legs: List<SubscriptionBatchLegDto>,
+)
+
+data class SubscriptionBatchLegDto(val fundId: UUID, val amount: BigDecimal, val idempotencyKey: String)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class SubscriptionBatchOrderDto(val id: UUID, val fundId: UUID, val amount: BigDecimal)
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class UnitOrderDto(
@@ -136,6 +155,12 @@ interface FundRegister {
     suspend fun holdings(contractId: UUID): ContractValuationDto
 
     suspend fun placeOrder(contractId: UUID, idempotencyKey: String, order: OrderRequestDto): UnitOrderDto
+
+    suspend fun placeSubscriptionBatch(
+        contractId: UUID,
+        idempotencyKey: String,
+        request: SubscriptionBatchRequestDto,
+    ): List<SubscriptionBatchOrderDto>
 
     suspend fun strategies(): List<StrategyDto>
 
@@ -187,6 +212,12 @@ class PensionFundRestAdapter : FundAdministrationPort {
 
                 override suspend fun placeOrder(contractId: UUID, idempotencyKey: String, order: OrderRequestDto) =
                     client.placeOrder(contractId, idempotencyKey, order)
+
+                override suspend fun placeSubscriptionBatch(
+                    contractId: UUID,
+                    idempotencyKey: String,
+                    request: SubscriptionBatchRequestDto,
+                ) = client.placeSubscriptionBatch(contractId, idempotencyKey, request)
 
                 override suspend fun strategies() = client.strategies()
 
@@ -270,20 +301,45 @@ class PensionFundOrders(
         val plan = if (saved != null) {
             saved
         } else {
+            // Previously persisted LEGACY plans can have four decimal places; only a new atomic
+            // batch requires an exactly representable two-decimal instruction.
+            val exactAmount = amount.setScale(MONEY_SCALE, RoundingMode.UNNECESSARY)
             val code = strategyOf(contractId) ?: refuse("contract $contractId has no elected strategy")
             val strategy = client.strategies().firstOrNull { it.name == code && it.status != "CLOSED" }
                 ?: refuse("strategy '$code' is not registered in pension-fund-service")
-            val legs = split(amount, strategy.allocations).map { (fundId, legAmount) ->
+            val legs = split(exactAmount, strategy.allocations).map { (fundId, legAmount) ->
                 SubscriptionLeg(fundId, legAmount)
             }
-            plans.insertIfAbsent(SubscriptionPlan(contractId, idempotencyKey, amount, currency, legs))
+            plans.insertIfAbsent(
+                SubscriptionPlan(
+                    contractId,
+                    idempotencyKey,
+                    exactAmount,
+                    currency,
+                    legs,
+                    SubscriptionPlacementMode.BATCH,
+                ),
+            )
         }.requireSameInstruction(amount, currency)
-        val ids = plan.legs.map { (fundId, legAmount) ->
-            client.placeOrder(
+        val ids = when (plan.placementMode) {
+            SubscriptionPlacementMode.BATCH -> client.placeSubscriptionBatch(
                 contractId,
-                legKey(idempotencyKey, fundId),
-                OrderRequestDto(fundId, "SUBSCRIBE", amount = legAmount),
-            ).id.toString()
+                idempotencyKey,
+                SubscriptionBatchRequestDto(
+                    plan.amount,
+                    plan.currency,
+                    plan.legs.map { (fundId, legAmount) ->
+                        SubscriptionBatchLegDto(fundId, legAmount, legKey(idempotencyKey, fundId))
+                    },
+                ),
+            ).map { it.id.toString() }
+            SubscriptionPlacementMode.LEGACY -> plan.legs.map { (fundId, legAmount) ->
+                client.placeOrder(
+                    contractId,
+                    legKey(idempotencyKey, fundId),
+                    OrderRequestDto(fundId, "SUBSCRIBE", amount = legAmount),
+                ).id.toString()
+            }
         }
         return ids.joinToString(",").takeIf { it.length <= MAX_REF } ?: "${ids.first()}+${ids.size - 1}"
     }

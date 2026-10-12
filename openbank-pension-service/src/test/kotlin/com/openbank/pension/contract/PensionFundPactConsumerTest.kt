@@ -23,6 +23,9 @@ import com.openbank.pension.infrastructure.fund.OrderRequestDto
 import com.openbank.pension.infrastructure.fund.PensionFundOrders
 import com.openbank.pension.infrastructure.fund.PensionFundRestClient
 import com.openbank.pension.infrastructure.fund.StrategyDto
+import com.openbank.pension.infrastructure.fund.SubscriptionBatchLegDto
+import com.openbank.pension.infrastructure.fund.SubscriptionBatchOrderDto
+import com.openbank.pension.infrastructure.fund.SubscriptionBatchRequestDto
 import com.openbank.pension.infrastructure.fund.UnitOrderDto
 import com.openbank.pension.infrastructure.fund.UnitTransactionDto
 import io.restassured.RestAssured.given
@@ -184,6 +187,39 @@ class PensionFundPactConsumerTest {
     // --- orders -----------------------------------------------------------------------------
 
     @Pact(consumer = CONSUMER, provider = PROVIDER)
+    fun subscriptionBatchPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(PRICED_STATE)
+        .uponReceiving("POST a frozen subscription allocation as one atomic batch")
+        .path("/api/v1/contracts/$ORDER_CONTRACT/orders/subscriptions")
+        .method("POST")
+        .matchHeader("Idempotency-Key", "contribution:.+", "contribution:pact-batch")
+        .matchHeader("Content-Type", "application/json.*", "application/json")
+        .body(
+            newJsonBody { o ->
+                o.numberValue("amount", BigDecimal("1000.00"))
+                o.stringValue("currency", "CZK")
+                o.minArrayLike("legs", 1) { leg ->
+                    leg.stringValue("fundId", PRICED_FUND)
+                    leg.numberValue("amount", BigDecimal("1000.00"))
+                    leg.stringValue("idempotencyKey", "b".repeat(64))
+                }
+            }.build(),
+        )
+        .willRespondWith()
+        .status(202)
+        .matchHeader("Content-Type", "application/json.*", "application/json")
+        .body(
+            newJsonArrayMinLike(1) { array ->
+                array.`object` { order ->
+                    order.uuid("id")
+                    order.uuid("fundId", UUID.fromString(PRICED_FUND))
+                    order.numberValue("amount", BigDecimal("1000.00"))
+                }
+            }.build(),
+        )
+        .toPact()
+
+    @Pact(consumer = CONSUMER, provider = PROVIDER)
     fun subscribePact(builder: PactDslWithProvider): RequestResponsePact = builder
         .given(PRICED_STATE)
         .uponReceiving("POST a SUBSCRIBE unit order for a pension contract with an Idempotency-Key")
@@ -254,6 +290,29 @@ class PensionFundPactConsumerTest {
         .status(401)
         .toPact()
 
+    @Pact(consumer = CONSUMER, provider = PROVIDER)
+    fun batchWithoutIdentityPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(NEGATIVE_AUTH_STATE)
+        .uponReceiving("POST a pension subscription batch with no M2M identity")
+        .path("/api/v1/contracts/$ORDER_CONTRACT/orders/subscriptions")
+        .method("POST")
+        .matchHeader("Idempotency-Key", "contribution:.+", "contribution:unauthenticated")
+        .matchHeader("Content-Type", "application/json.*", "application/json")
+        .body(
+            newJsonBody { o ->
+                o.numberValue("amount", BigDecimal("1000.00"))
+                o.stringValue("currency", "CZK")
+                o.minArrayLike("legs", 1) { leg ->
+                    leg.stringValue("fundId", PRICED_FUND)
+                    leg.numberValue("amount", BigDecimal("1000.00"))
+                    leg.stringValue("idempotencyKey", "d".repeat(64))
+                }
+            }.build(),
+        )
+        .willRespondWith()
+        .status(401)
+        .toPact()
+
     // --- tests ------------------------------------------------------------------------------
 
     @Test
@@ -303,6 +362,31 @@ class PensionFundPactConsumerTest {
     }
 
     @Test
+    @PactTestFor(pactMethod = "subscriptionBatchPact")
+    fun `a frozen subscription allocation is accepted as one batch`(mock: MockServer) {
+        assertThat(clientPath("placeSubscriptionBatch", ORDER_CONTRACT))
+            .isEqualTo("/api/v1/contracts/$ORDER_CONTRACT/orders/subscriptions")
+        val orders = runBlocking {
+            register(mock).placeSubscriptionBatch(
+                UUID.fromString(ORDER_CONTRACT),
+                "contribution:pact-batch",
+                SubscriptionBatchRequestDto(
+                    BigDecimal("1000.00"),
+                    "CZK",
+                    listOf(
+                        SubscriptionBatchLegDto(
+                            UUID.fromString(PRICED_FUND),
+                            BigDecimal("1000.00"),
+                            "b".repeat(64),
+                        ),
+                    ),
+                ),
+            )
+        }
+        assertThat(orders.single().amount).isEqualByComparingTo("1000.00")
+    }
+
+    @Test
     @PactTestFor(pactMethod = "subscribePact")
     fun `a subscription order is accepted pending`(mock: MockServer) {
         assertThat(clientPath("placeOrder", ORDER_CONTRACT)).isEqualTo("/api/v1/contracts/$ORDER_CONTRACT/orders")
@@ -337,6 +421,20 @@ class PensionFundPactConsumerTest {
             .post(clientPath("placeOrder", ORDER_CONTRACT)).then().statusCode(401)
     }
 
+    @Test
+    @PactTestFor(pactMethod = "batchWithoutIdentityPact")
+    fun `a subscription batch without an identity is 401`(mock: MockServer) {
+        val request = SubscriptionBatchRequestDto(
+            BigDecimal("1000.00"),
+            "CZK",
+            listOf(SubscriptionBatchLegDto(UUID.fromString(PRICED_FUND), BigDecimal("1000.00"), "d".repeat(64))),
+        )
+        given().baseUri(mock.getUrl()).contentType("application/json")
+            .header("Idempotency-Key", "contribution:unauthenticated")
+            .body(mapper.writeValueAsString(request))
+            .post(clientPath("placeSubscriptionBatch", ORDER_CONTRACT)).then().statusCode(401)
+    }
+
     // --- helpers ----------------------------------------------------------------------------
 
     /** A [FundRegister] over plain HTTP to the mock, decoding exactly the DTOs the REST client uses. */
@@ -360,6 +458,18 @@ class PensionFundPactConsumerTest {
             val raw = given().baseUri(mock.getUrl()).contentType("application/json")
                 .header("Idempotency-Key", idempotencyKey).body(body)
                 .post(clientPath("placeOrder", contractId.toString())).then().statusCode(202).extract().asString()
+            return mapper.readValue(raw)
+        }
+
+        override suspend fun placeSubscriptionBatch(
+            contractId: UUID,
+            idempotencyKey: String,
+            request: SubscriptionBatchRequestDto,
+        ): List<SubscriptionBatchOrderDto> {
+            val raw = given().baseUri(mock.getUrl()).contentType("application/json")
+                .header("Idempotency-Key", idempotencyKey).body(mapper.writeValueAsString(request))
+                .post(clientPath("placeSubscriptionBatch", contractId.toString()))
+                .then().statusCode(202).extract().asString()
             return mapper.readValue(raw)
         }
 

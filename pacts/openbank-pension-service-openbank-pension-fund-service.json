@@ -679,6 +679,128 @@
       }
     },
     {
+      "description": "POST a frozen subscription allocation as one atomic batch",
+      "providerStates": [
+        {
+          "name": "a pension contract holds units priced at a published NAV"
+        }
+      ],
+      "request": {
+        "body": {
+          "amount": 1000.00,
+          "currency": "CZK",
+          "legs": [
+            {
+              "amount": 1000.00,
+              "fundId": "7a1e0000-0000-4000-8000-0000000000f1",
+              "idempotencyKey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          ]
+        },
+        "headers": {
+          "Content-Type": "application/json",
+          "Idempotency-Key": "contribution:pact-batch"
+        },
+        "matchingRules": {
+          "body": {
+            "$.legs": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 1
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json.*"
+                }
+              ]
+            },
+            "Idempotency-Key": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "contribution:.+"
+                }
+              ]
+            }
+          }
+        },
+        "method": "POST",
+        "path": "/api/v1/contracts/7a1e0000-0000-4000-8000-0000000000c3/orders/subscriptions"
+      },
+      "response": {
+        "body": [
+          {
+            "amount": 1000.00,
+            "fundId": "7a1e0000-0000-4000-8000-0000000000f1",
+            "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304"
+          }
+        ],
+        "generators": {
+          "body": {
+            "$[*].id": {
+              "type": "Uuid"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 1
+                }
+              ]
+            },
+            "$[*].fundId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$[*].id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json.*"
+                }
+              ]
+            }
+          }
+        },
+        "status": 202
+      }
+    },
+    {
       "description": "GET pension contract holdings with no M2M identity",
       "providerStates": [
         {
@@ -688,6 +810,69 @@
       "request": {
         "method": "GET",
         "path": "/api/v1/contracts/7a1e0000-0000-4000-8000-0000000000c1/holdings"
+      },
+      "response": {
+        "status": 401
+      }
+    },
+    {
+      "description": "POST a pension subscription batch with no M2M identity",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "body": {
+          "amount": 1000.00,
+          "currency": "CZK",
+          "legs": [
+            {
+              "amount": 1000.00,
+              "fundId": "7a1e0000-0000-4000-8000-0000000000f1",
+              "idempotencyKey": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+            }
+          ]
+        },
+        "headers": {
+          "Content-Type": "application/json",
+          "Idempotency-Key": "contribution:unauthenticated"
+        },
+        "matchingRules": {
+          "body": {
+            "$.legs": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 1
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json.*"
+                }
+              ]
+            },
+            "Idempotency-Key": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "contribution:.+"
+                }
+              ]
+            }
+          }
+        },
+        "method": "POST",
+        "path": "/api/v1/contracts/7a1e0000-0000-4000-8000-0000000000c3/orders/subscriptions"
       },
       "response": {
         "status": 401

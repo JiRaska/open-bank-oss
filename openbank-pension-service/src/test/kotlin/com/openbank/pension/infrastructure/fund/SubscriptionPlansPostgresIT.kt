@@ -65,6 +65,23 @@ class SubscriptionPlansPostgresIT {
     }
 
     @Test
+    fun `batch placement mode survives repository recreation`(): Unit = runBlocking {
+        val contract = seededContract()
+        val key = "contribution:${UUID.randomUUID()}"
+        val original = SubscriptionPlan(
+            contract,
+            key,
+            BigDecimal("100.00"),
+            "CZK",
+            listOf(SubscriptionLeg(UUID.randomUUID(), BigDecimal("100.00"))),
+            SubscriptionPlacementMode.BATCH,
+        )
+        val saved = PgSubscriptionPlans(pool, mapper).insertIfAbsent(original)
+        assertThat(saved.placementMode).isEqualTo(SubscriptionPlacementMode.BATCH)
+        assertThat(PgSubscriptionPlans(pool, mapper).find(contract, key)).isEqualTo(saved)
+    }
+
+    @Test
     fun `partial subscription retains original plan after restart`(): Unit = runBlocking {
         val contract = seededContract()
         val key = "contribution:${UUID.randomUUID()}"
@@ -108,18 +125,34 @@ class SubscriptionPlansPostgresIT {
                 sent.putIfAbsent(idempotencyKey, order)
                 return UnitOrderDto(UUID.nameUUIDFromBytes(idempotencyKey.toByteArray()), "PENDING")
             }
+
+            override suspend fun placeSubscriptionBatch(
+                contractId: UUID,
+                idempotencyKey: String,
+                request: SubscriptionBatchRequestDto,
+            ): List<SubscriptionBatchOrderDto> = error("legacy replay must use single-leg orders")
         }
 
+        PgSubscriptionPlans(pool, mapper).insertIfAbsent(
+            SubscriptionPlan(
+                contract,
+                key,
+                BigDecimal("100.1234"),
+                "CZK",
+                listOf(SubscriptionLeg(first, BigDecimal("60.07")), SubscriptionLeg(second, BigDecimal("40.05"))),
+            ),
+        )
+
         val initial = PensionFundOrders(register, { "BALANCED" }, Clock.systemUTC(), PgSubscriptionPlans(pool, mapper))
-        assertThatThrownBy { runBlocking { initial.subscribe(contract, BigDecimal("100"), "CZK", key) } }
+        assertThatThrownBy { runBlocking { initial.subscribe(contract, BigDecimal("100.1234"), "CZK", key) } }
             .hasMessageContaining("transient second-leg failure")
         assertThat(sent.values.map { it.fundId }).containsExactly(first)
 
         val restarted = PensionFundOrders(register, { "DYNAMIC" }, Clock.systemUTC(), PgSubscriptionPlans(pool, mapper))
-        restarted.subscribe(contract, BigDecimal("100"), "CZK", key)
+        restarted.subscribe(contract, BigDecimal("100.1234"), "CZK", key)
         assertThat(sent.values.map { it.fundId }).containsExactlyInAnyOrder(first, second)
         assertThat(sent.values.fold(BigDecimal.ZERO) { total, order -> total + order.amount!! })
-            .isEqualByComparingTo("100")
+            .isEqualByComparingTo("100.12")
     }
 
     @Test
