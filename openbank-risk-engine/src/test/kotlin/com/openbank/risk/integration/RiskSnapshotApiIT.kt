@@ -24,6 +24,7 @@ import org.hamcrest.Matchers.hasSize
 import org.hamcrest.Matchers.not
 import org.hamcrest.Matchers.startsWith
 import org.junit.jupiter.api.Test
+import org.yaml.snakeyaml.Yaml
 import java.sql.DriverManager
 import java.time.LocalDate
 import java.util.UUID
@@ -36,6 +37,12 @@ import java.util.UUID
 @QuarkusTestResource(RiskSnapshotApiIT.InMemoryKafkaResource::class)
 @QuarkusTestResource(PostgresTestResource::class)
 class RiskSnapshotApiIT {
+
+    @Suppress("UNCHECKED_CAST")
+    private val openApi: Map<String, Any?> by lazy {
+        requireNotNull(javaClass.getResourceAsStream("/openapi.yaml"))
+            .use { Yaml().load<Map<String, Any?>>(it) }
+    }
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> =
@@ -159,6 +166,82 @@ class RiskSnapshotApiIT {
             .then().statusCode(200)
             .body("mismatches[0].currency", equalTo("CZK"))
         assertThat(count("SELECT count(*) FROM snapshot_run WHERE id = ?::uuid AND status = 'UNTIED'", id)).isEqualTo(1)
+    }
+
+    @Test
+    @TestSecurity(user = "ops", roles = ["ROLE_OPERATOR"])
+    fun `every published Untied response is served as the same HTTP conflict body`() {
+        ledger.inputs = Fixtures.tiedOut().copy(subLedger = listOf(sl(Fixtures.ALICE, "CZK", "0", "1000.00")))
+        val asOf = "2028-02-28"
+        val id = create(asOf).then().statusCode(201).body("status", equalTo("UNTIED"))
+            .extract().path<String>("id")
+        val curveSetId = given().contentType("application/json").body(curveSetBody(asOf))
+            .`when`().post("/api/v1/risk/curve-sets").then().statusCode(201).extract().path<String>("id")
+        val suffixes = listOf(
+            "positions",
+            "instruments",
+            "cash-flows?curveSetId=$curveSetId",
+            "irrbb?curveSetId=$curveSetId",
+            "liquidity",
+            "liquidity-forecast?curveSetId=$curveSetId",
+            "capital",
+            "min-reserves",
+            "limits",
+        )
+        assertThat(publishedUntiedPaths()).containsExactlyInAnyOrderElementsOf(
+            suffixes.map { "/api/v1/risk/snapshots/{id}/" + it.substringBefore('?') },
+        )
+        for (suffix in suffixes) {
+            val path = "/api/v1/risk/snapshots/{id}/" + suffix.substringBefore('?')
+            val response = given().`when`().get("/api/v1/risk/snapshots/$id/$suffix")
+            assertThat(response.statusCode).describedAs(path).isEqualTo(409)
+            assertThat(response.contentType).describedAs(path).startsWith("application/json")
+            assertThat(publishedUntiedRef(path)).isEqualTo("#/components/schemas/Untied")
+            val body: Map<String, Any?> = response.jsonPath().getMap("")
+            assertThat(untiedViolations(body, id)).describedAs(path).isEmpty()
+        }
+    }
+
+    @Test
+    fun `Untied schema rejects a generic error body without mismatch evidence`() {
+        val id = UUID.randomUUID().toString()
+        assertThat(untiedViolations(mapOf("error" to "UNTIED", "runId" to id), id))
+            .contains("mismatches is required")
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun publishedUntiedPaths(): List<String> {
+        val paths = openApi["paths"] as Map<String, Map<String, Any?>>
+        return paths.keys.filter { publishedUntiedRef(it) == "#/components/schemas/Untied" }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun publishedUntiedRef(path: String): String? {
+        val paths = openApi["paths"] as Map<String, Map<String, Any?>>
+        val operation = paths.getValue(path)["get"] as? Map<String, Any?> ?: return null
+        val responses = operation["responses"] as Map<String, Map<String, Any?>>
+        val conflict = responses["409"] ?: return null
+        val content = conflict["content"] as? Map<String, Map<String, Any?>> ?: return null
+        val schema = content["application/json"]?.get("schema") as? Map<String, String>
+        return schema?.get("\$ref")
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun untiedViolations(body: Map<String, Any?>, expectedId: String): List<String> {
+        val components = openApi["components"] as Map<String, Any?>
+        val schemas = components["schemas"] as Map<String, Map<String, Any?>>
+        val schema = schemas.getValue("Untied")
+        val errors = (schema["required"] as List<String>).filterNot(body::containsKey)
+            .map { "$it is required" }.toMutableList()
+        if (body["error"] != "UNTIED") errors += "error must be UNTIED"
+        if (body["runId"] != expectedId) errors += "runId does not identify the run"
+        val mismatches = body["mismatches"] as? List<Map<String, Any?>>
+        if (mismatches == null || mismatches.isEmpty()) errors += "mismatches must be a nonempty array"
+        mismatches?.forEach { mismatch ->
+            val required = schemas.getValue("Mismatch")["required"] as List<String>
+            errors += required.filterNot(mismatch::containsKey).map { "mismatch.$it is required" }
+        }
+        return errors
     }
 
     @Test
