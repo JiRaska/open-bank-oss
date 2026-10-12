@@ -2,7 +2,7 @@
 # Threat model — openbank-pension-fund-service
 
 - **Status:** integration (ADR-0334 slices S4/S8), sandbox only — pension-service machine caller
-- **Last reviewed:** 2026-10-10 (#12425 reporting read model and #12435 integration)
+- **Last reviewed:** 2026-10-11 (#12425 reporting read model, #12435 integration, #12442 conflict metric on the REST mappers)
 - **Owner:** pension-fund-service CODEOWNERS
 - **Related ADRs:** ADR-0030, ADR-0034, ADR-0315, ADR-0334
 
@@ -61,8 +61,13 @@ contact data.
    derived from tax-reporting's `PENSION_FUND_SERVICE_URL`, which targets the private-CA TLS
    listener (8443, TLSv1.3; the caller trusts only `openbank-ca` and verifies the hostname).
    Disclosure: aggregate fund figures only, no holdings or participant data. Elevation: the
-   principal holds no other grant here — not holdings, orders or NAV writes. Residual: no
-   client-auth on 8443 yet, so the bearer token authenticates the caller.
+   principal holds no other grant here — not holdings, orders or NAV writes. 8443 requires a
+   client certificate (tax-reporting presents `tax-reporting-internal-tls`); the certificate is
+   transport authentication only and the OIDC bearer still identifies the caller.
+6. The REST exception mappers (#12442 observability) now count optimistic-lock conflicts on the
+   unit holding (`optimisticLockConflict("unit_holding")`) before answering 409. The boundary
+   itself is unchanged: same status, same body, no new route or caller; the metric carries a
+   fixed aggregate label only, never a contract id or a request value.
 
 ## STRIDE analysis
 
