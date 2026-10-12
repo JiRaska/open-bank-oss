@@ -157,10 +157,18 @@ class RiskLoanInstrumentIT {
         given().`when`().get("/api/v1/risk/snapshots/$runId").then().statusCode(200)
             .body("mismatches[0].glAccountCode", equalTo("1200"))
             .body("mismatches[0].difference", equalTo(-0.01f))
-        given().`when`().get("/api/v1/risk/snapshots/$runId/positions").then().statusCode(409)
-        given().`when`().get("/api/v1/risk/snapshots/$runId/instruments").then().statusCode(409)
-        given().`when`().get("/api/v1/risk/snapshots/$runId/cash-flows?curveSetId=${curveSet("2026-09-29")}")
-            .then().statusCode(409).body("error", equalTo("UNTIED"))
+        val setId = curveSet("2026-09-29")
+        listOf(
+            "/api/v1/risk/snapshots/$runId/positions",
+            "/api/v1/risk/snapshots/$runId/instruments",
+            "/api/v1/risk/snapshots/$runId/cash-flows?curveSetId=$setId",
+        ).forEach { path ->
+            given().`when`().get(path).then().statusCode(409)
+                .body("error", equalTo("UNTIED"))
+                .body("runId", equalTo(runId))
+                .body("mismatches", hasSize<Any>(1))
+                .body("mismatches[0].glAccountCode", equalTo("1200"))
+        }
     }
 
     @Test
