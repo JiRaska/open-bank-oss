@@ -4,7 +4,6 @@
 openbank-account-service
 openbank-aml-service
 openbank-ap2-service
-openbank-document-service
 openbank-domestic-payment
 openbank-ledger-service
 openbank-lending-service
