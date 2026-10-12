@@ -51,6 +51,7 @@ interface GoldenSetEntry {
 }
 
 const PROXY_BASE = '/api/svc/communication-service/api/v1/personas'
+const STYLE_WRITE_BASE = '/api/svc/communication-service/api/v2/personas'
 
 export default function CommunicationStyleEditorPage() {
   const { t } = useLanguage()
@@ -67,6 +68,7 @@ export default function CommunicationStyleEditorPage() {
   const [forbiddenTerms, setForbiddenTerms] = useState<string[]>([])
   const [loadingPublished, setLoadingPublished] = useState(true)
   const [publishedLoaded, setPublishedLoaded] = useState(false)
+  const [basePublishedVersion, setBasePublishedVersion] = useState<number | null>(null)
   const [loadAttempt, setLoadAttempt] = useState(0)
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
 
@@ -74,14 +76,19 @@ export default function CommunicationStyleEditorPage() {
     const controller = new AbortController()
     setLoadingPublished(true)
     setPublishedLoaded(false)
+    setBasePublishedVersion(null)
     setTone(''); setFormality(''); setFormOfAddress(''); setSignature(''); setMaxLength('')
     setUiMessages({}); setPreferredTerms({}); setForbiddenTerms([])
-    fetch(`${PROXY_BASE}/${encodeURIComponent(personaKey)}/published`, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(8_000)]) })
+    fetch(`${STYLE_WRITE_BASE}/${encodeURIComponent(personaKey)}/editor-state`, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(8_000)]) })
       .then(async res => {
-        if (res.status === 404) { if (!controller.signal.aborted) setPublishedLoaded(true); return }
-        if (!res.ok) throw new Error('Published style unavailable')
-        const published = await res.json()
+        if (!res.ok) throw new Error('Editor state unavailable')
+        const state = await res.json()
         if (controller.signal.aborted) return
+        if (!Number.isInteger(state.basePublishedVersion) || state.basePublishedVersion < 0) throw new Error('Invalid published style generation')
+        const published = state.published
+        if (published && (!Number.isInteger(published.styleVersion) || published.styleVersion !== state.basePublishedVersion)) throw new Error('Inconsistent editor state')
+        setBasePublishedVersion(state.basePublishedVersion)
+        if (!published) { setPublishedLoaded(true); return }
         setTone(published.tone ?? '')
         setFormality(published.formality ?? '')
         setFormOfAddress(published.formOfAddress ?? '')
@@ -116,7 +123,7 @@ export default function CommunicationStyleEditorPage() {
   const saveDraft = useCallback(async () => {
     setSaving(true); setError(null); setLintViolations(null)
     try {
-      const res = await fetch(`${PROXY_BASE}/${encodeURIComponent(personaKey)}/style-versions`, {
+      const res = await fetch(`${STYLE_WRITE_BASE}/${encodeURIComponent(personaKey)}/style-versions`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -128,6 +135,7 @@ export default function CommunicationStyleEditorPage() {
           preferredTerms,
           forbiddenTerms,
           uiMessages,
+          basePublishedVersion,
         }),
       })
       if (res.status === 400) {
@@ -150,13 +158,13 @@ export default function CommunicationStyleEditorPage() {
     } catch {
       setUnavailable({ kind: 'unreachable' })
     } finally { setSaving(false) }
-  }, [personaKey, tone, formality, formOfAddress, signature, maxLength, preferredTerms, forbiddenTerms, uiMessages, t])
+  }, [personaKey, tone, formality, formOfAddress, signature, maxLength, preferredTerms, forbiddenTerms, uiMessages, basePublishedVersion, t])
 
   const submitForReview = useCallback(async () => {
     if (!draft) return
     setSubmitting(true); setError(null)
     try {
-      const res = await fetch(`${PROXY_BASE}/style-versions/${encodeURIComponent(draft.id)}/submit`, {
+      const res = await fetch(`${STYLE_WRITE_BASE}/style-versions/${encodeURIComponent(draft.id)}/submit`, {
         method: 'POST',
       })
       if (!res.ok) {
@@ -177,7 +185,7 @@ export default function CommunicationStyleEditorPage() {
     try {
       const headers: Record<string, string> = {}
       if (approvalId) headers['x-approval-id'] = approvalId
-      const res = await fetch(`${PROXY_BASE}/style-versions/${encodeURIComponent(id)}/publish`, {
+      const res = await fetch(`${STYLE_WRITE_BASE}/style-versions/${encodeURIComponent(id)}/publish`, {
         method: 'POST',
         headers,
       })
@@ -191,6 +199,18 @@ export default function CommunicationStyleEditorPage() {
             'Publikace pozastavena — čeká na jiného schvalovatele na nástěnce.',
             'Publish paused — waiting for a different approver on the workbench.',
           ),
+        })
+        return
+      }
+      if (res.status === 409) {
+        const body = await res.json().catch(() => null)
+        const reason: string = typeof body?.error === 'string' ? body.error : ''
+        const stale = reason.includes('published style changed') || reason.includes('no known published base')
+        setPublishResult({
+          ok: false,
+          text: stale
+            ? t('Koncept vychází ze starší verze. Načtěte aktuální text a připravte nový koncept.', 'This draft is based on an older version. Reload the current copy and prepare a new draft.')
+            : t('Publikace byla odmítnuta. Ověřte stav verze a schvalovatele.', 'Publish was refused. Check the version status and approver.'),
         })
         return
       }
@@ -349,7 +369,7 @@ export default function CommunicationStyleEditorPage() {
 
             <div style={{ display: 'flex', gap: '8px' }}>
               {!draft && (
-                <button type="button" className="btn btn-primary" onClick={saveDraft} disabled={saving || loadingPublished || !tone || !formality || !formOfAddress}>
+                <button type="button" className="btn btn-primary" onClick={saveDraft} disabled={saving || !publishedLoaded || basePublishedVersion === null || !tone || !formality || !formOfAddress}>
                   <Save size={14} /> {saving ? t('Ukládám…', 'Saving…') : t('Uložit koncept', 'Save draft')}
                 </button>
               )}

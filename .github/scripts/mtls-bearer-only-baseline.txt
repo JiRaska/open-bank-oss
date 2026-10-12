@@ -4,7 +4,5 @@
 openbank-aml-service
 openbank-ap2-service
 openbank-domestic-payment
-openbank-lending-service
-openbank-sca-service
 openbank-sdd-service
 openbank-standing-order-service
