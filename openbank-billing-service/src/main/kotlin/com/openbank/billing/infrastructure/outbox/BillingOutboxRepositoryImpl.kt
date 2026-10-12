@@ -41,8 +41,9 @@ class BillingOutboxRepositoryImpl(private val assessments: BillingAssessmentRepo
     SentOutboxRetention by PanacheOutboxRetention(OutboxTableShape("billing_outbox")),
     PanacheRepository<BillingOutboxEntity> {
 
-    // The annual summary still uses a SENT outbox row as its rerun guard. Remove this exemption
-    // only after the durable issuance migration in #12311 is merged and deployed (#12187).
+    // The merged #12311 issuance key is the source-code rerun guard, but its deployment and
+    // complete historical coverage are not yet proven. Keep billing SENT retention exempt until
+    // those checks and the reviewed rollout are complete (#12187).
     override val sentRetentionExempt: Boolean = true
 
     private val mapper = jacksonObjectMapper().findAndRegisterModules()

@@ -42,8 +42,9 @@ RETENTION_EXEMPT_OVERRIDE = re.compile(
 # Each entry: why that outbox's SENT rows must not be purged yet. Measured 2026-10-03 (#11896).
 EXEMPT: dict[str, str] = {
     "openbank-billing-service": (
-        "Annual fee-summary reruns still use SENT billing_outbox rows as the issuance guard; "
-        "keep retention off until the durable account/year key in #12311 is merged and deployed (#12187)"
+        "The durable account/year issuance key merged in #12311, but deployment and complete "
+        "historical coverage are not yet proven; keep billing SENT retention off until both "
+        "are verified and the rollout is reviewed (#12187)"
     ),
     "openbank-lending-service": (
         "SENT rows ARE the ADR-0214 evidence bundle (LendingResource GET /applications/{id}/evidence "
