@@ -15,6 +15,7 @@ import io.restassured.path.json.JsonPath
 import io.smallrye.reactive.messaging.memory.InMemoryConnector
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.eclipse.microprofile.config.ConfigProvider
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -171,6 +172,7 @@ class BusinessSigningApiIT {
 
         assertThat(response.statusCode).isEqualTo(HTTP_FORBIDDEN)
         assertThat(response.jsonPath().getString("code")).isEqualTo("MANDATE_NOT_ACTIVE")
+        assertThat(response.contentType).startsWith("application/json")
         DocumentedErrorBody.assertConforms(
             "/api/v1/entities/{entityId}/approval-requests/{approvalId}/signatures",
             HTTP_FORBIDDEN,
@@ -233,12 +235,43 @@ class BusinessSigningApiIT {
 
         assertThat(response.statusCode).isEqualTo(422)
         assertThat(response.jsonPath().getString("code")).isEqualTo("POLICY_UNSATISFIABLE")
+        assertThat(response.contentType).startsWith("application/json")
         DocumentedErrorBody.assertConforms(
             "/api/v1/entities/{entityId}/approval-requests",
             422,
             "application/json",
             response.jsonPath().getMap(""),
         )
+    }
+
+    @Test
+    fun `an unavailable mandate directory returns the documented HTTP error`() {
+        register.joint(entity, 2, alice, bob)
+        register.unavailable = true
+
+        val response = post("/approval-requests", paymentBody(alice, sca.initiator(alice)))
+
+        assertThat(response.statusCode).isEqualTo(503)
+        assertThat(response.jsonPath().getString("code")).isEqualTo("MANDATES_UNAVAILABLE")
+        assertThat(response.contentType).startsWith("application/json")
+        DocumentedErrorBody.assertConforms(
+            "/api/v1/entities/{entityId}/approval-requests",
+            503,
+            "application/json",
+            response.jsonPath().getMap(""),
+        )
+    }
+
+    @Test
+    fun `the signing contract rejects a generic mapper body without error`() {
+        assertThatThrownBy {
+            DocumentedErrorBody.assertConforms(
+                "/api/v1/entities/{entityId}/approval-requests",
+                503,
+                "application/json",
+                mapOf("code" to "MANDATES_UNAVAILABLE", "status" to 503),
+            )
+        }.isInstanceOf(AssertionError::class.java).hasMessageContaining("error")
     }
 
     // ------------------------------------------------------------------ guard: single-use release

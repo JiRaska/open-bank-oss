@@ -8,6 +8,7 @@ import com.openbank.delegation.application.port.out.ActingForEntity
 import com.openbank.delegation.application.port.out.ApprovalLink
 import com.openbank.delegation.application.port.out.ApprovalScaVerifier
 import com.openbank.delegation.application.port.out.MandateDirectory
+import com.openbank.delegation.application.port.out.MandateDirectoryUnavailableException
 import com.openbank.delegation.application.port.out.ScaVerdict
 import com.openbank.delegation.domain.model.MandateAuthority
 import com.openbank.delegation.domain.model.RepresentationMandate
@@ -65,6 +66,9 @@ class FakeMandateDirectory : MandateDirectory {
     val mandates = ConcurrentHashMap<UUID, MutableList<RepresentationMandate>>()
     val names = ConcurrentHashMap<UUID, String>()
 
+    @Volatile
+    var unavailable = false
+
     fun joint(entity: UUID, required: Int, vararg agents: UUID) {
         mandates[entity] = agents.map { RepresentationMandate(it, MandateAuthority.JOINT, required) }.toMutableList()
     }
@@ -77,8 +81,10 @@ class FakeMandateDirectory : MandateDirectory {
         mandates[entity]?.removeIf { it.agentPartyId == agent }
     }
 
-    override suspend fun activeMandates(entityPartyId: UUID): List<RepresentationMandate> =
-        mandates[entityPartyId]?.toList().orEmpty()
+    override suspend fun activeMandates(entityPartyId: UUID): List<RepresentationMandate> {
+        if (unavailable) throw MandateDirectoryUnavailableException("mandate directory unavailable")
+        return mandates[entityPartyId]?.toList().orEmpty()
+    }
 
     val people = ConcurrentHashMap<UUID, String>()
 
