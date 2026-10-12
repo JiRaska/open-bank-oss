@@ -76,6 +76,11 @@ data "aws_iam_policy_document" "status_lambda" {
     resources = ["${aws_s3_bucket.status_data.arn}/state.json"]
   }
   statement {
+    sid       = "ReadSanitizedInternalVerdict"
+    actions   = ["s3:GetObject"]
+    resources = ["${aws_s3_bucket.status_data.arn}/internal-aggregate.json"]
+  }
+  statement {
     sid       = "WriteFunctionLogs"
     actions   = ["logs:CreateLogStream", "logs:PutLogEvents"]
     resources = ["${aws_cloudwatch_log_group.status_lambda.arn}:*"]

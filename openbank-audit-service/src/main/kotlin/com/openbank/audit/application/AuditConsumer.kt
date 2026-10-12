@@ -103,9 +103,15 @@ class AuditConsumer {
             ?.value()
             ?.toString(Charsets.UTF_8)
             ?.takeIf { it.isNotBlank() }
+        val ceId = record.headers
+            ?.lastHeader(OutboxKafkaHeaders.HEADER_EVENT_ID)
+            ?.value()
+            ?.toString(Charsets.UTF_8)
+            ?.takeIf { it.isNotBlank() }
         return EventAddress(
             topic = record.topic?.takeIf { it.isNotBlank() },
             ceType = ceType,
+            ceId = ceId,
             partition = record.partition,
             offset = record.offset,
         )

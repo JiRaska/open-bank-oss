@@ -19,7 +19,7 @@ class StatusStateTests(unittest.TestCase):
 
     def step(self, observed, offset):
         self.state = handler.update_state(self.state, observed, self.now + offset * 120)
-        return handler.public_state(self.state, self.now + offset * 120)
+        return handler.public_state(self.state, self.now + offset * 120, {key: "operational" for key in handler.INTERNAL_COMPONENTS})
 
     def test_failure_needs_three_samples_and_recovery_needs_two(self):
         self.assertEqual(self.step(self.all_good, 0)["status"], "operational")
@@ -37,7 +37,7 @@ class StatusStateTests(unittest.TestCase):
 
     def test_stale_data_is_unknown(self):
         self.step(self.all_good, 0)
-        public = handler.public_state(self.state, self.now + handler.STALE_SECONDS + 1)
+        public = handler.public_state(self.state, self.now + handler.STALE_SECONDS + 1, {key: "operational" for key in handler.INTERNAL_COMPONENTS})
         self.assertEqual(public["status"], "unknown")
         self.assertTrue(all(component["status"] == "unknown" for component in public["components"]))
 
@@ -50,6 +50,19 @@ class StatusStateTests(unittest.TestCase):
         self.assertEqual(window["availabilityPercent"], 50)
         self.assertTrue(any(bucket["total"] == 0 for bucket in window["buckets"]))
 
+    def test_internal_incident_survives_export_gap_and_recovers(self):
+        self.step(self.all_good, 0)
+        failing = {**self.all_good, "payment_services": False}
+        for minute in (1, 2, 3):
+            self.state = handler.update_state(self.state, failing, self.now + minute * 120)
+        self.assertEqual(self.state["components"]["payment_services"]["status"], "outage")
+        self.assertEqual(self.state["incidents"][0]["component"], "payment_services")
+        self.state = handler.update_state(self.state, self.all_good, self.now + 4 * 120)
+        self.assertEqual(self.state["components"]["payment_services"]["status"], "outage")
+        for minute in (5, 6):
+            self.state = handler.update_state(self.state, {**self.all_good, "payment_services": True}, self.now + minute * 120)
+        self.assertIsNotNone(self.state["incidents"][0]["resolvedAt"])
+
 
 class PublicApiContractTests(unittest.TestCase):
     def setUp(self):
@@ -57,9 +70,10 @@ class PublicApiContractTests(unittest.TestCase):
         self.state = handler.update_state(handler.empty_state(), {key: True for key in handler.COMPONENTS}, self.now)
         self.spec = yaml.safe_load((Path(__file__).parent.parent / "openapi.yaml").read_text())
 
-    def call(self, path, state=None):
+    def call(self, path, state=None, internal_verdicts=None, internal_checked_at=None):
         snapshot = self.state if state is None else state
-        fake_s3 = SimpleNamespace(get_object=lambda **_: {"Body": BytesIO(json.dumps(snapshot).encode())})
+        internal = {"schemaVersion": 1, "checkedAt": internal_checked_at or handler.timestamp(self.now), "components": internal_verdicts or {key: "operational" for key in handler.INTERNAL_COMPONENTS}}
+        fake_s3 = SimpleNamespace(get_object=lambda **kwargs: {"Body": BytesIO(json.dumps(internal if kwargs["Key"] == handler.INTERNAL_KEY else snapshot).encode())})
         with patch.dict(sys.modules, {"boto3": SimpleNamespace(client=lambda _: fake_s3)}), patch.object(handler.time, "time", return_value=self.now):
             return handler.handler({"rawPath": path}, None)
 
@@ -72,7 +86,7 @@ class PublicApiContractTests(unittest.TestCase):
                 self.assertIsInstance(body, dict)
                 if path == "/api/v1/health":
                     self.assertEqual(body["status"], "operational")
-                    self.assertEqual(len(body["components"]), len(handler.COMPONENTS))
+                    self.assertEqual(len(body["components"]), len(handler.COMPONENTS) + len(handler.INTERNAL_COMPONENTS))
                 if path == "/api/v1/status":
                     self.assertIn("history", body)
                     self.assertIn("incidents", body)
@@ -89,6 +103,26 @@ class PublicApiContractTests(unittest.TestCase):
         body = json.loads(self.call("/api/v1/health", state)["body"])
         self.assertEqual(body["status"], "unknown")
         self.assertEqual(self.call("/api/v1/freshness", state)["statusCode"], 503)
+
+    def test_missing_internal_report_cannot_be_green(self):
+        fake_s3 = SimpleNamespace(get_object=lambda **kwargs: {"Body": BytesIO(json.dumps(self.state).encode())} if kwargs["Key"] == handler.KEY else (_ for _ in ()).throw(KeyError("missing")))
+        with patch.dict(sys.modules, {"boto3": SimpleNamespace(client=lambda _: fake_s3)}), patch.object(handler.time, "time", return_value=self.now):
+            result = handler.handler({"rawPath": "/api/v1/health"}, None)
+        self.assertEqual(result["statusCode"], 503)
+        self.assertEqual(json.loads(result["body"])["status"], "unknown")
+
+    def test_internal_impact_is_visible_without_exposing_metric_labels(self):
+        result = self.call("/api/v1/health", internal_verdicts={"core_services": "operational", "payment_services": "outage"})
+        body = json.loads(result["body"])
+        self.assertEqual(result["statusCode"], 503)
+        self.assertEqual(body["status"], "partial_outage")
+        self.assertNotIn("container", result["body"])
+        self.assertNotIn("namespace", result["body"])
+
+    def test_stale_internal_report_is_unverified(self):
+        result = self.call("/api/v1/health", internal_checked_at=handler.timestamp(self.now - handler.STALE_SECONDS - 1))
+        self.assertEqual(result["statusCode"], 503)
+        self.assertEqual(json.loads(result["body"])["status"], "unknown")
 
 
 if __name__ == "__main__":

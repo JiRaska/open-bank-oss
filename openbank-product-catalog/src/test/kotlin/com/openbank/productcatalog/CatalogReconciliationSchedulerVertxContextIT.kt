@@ -31,6 +31,7 @@ import javax.sql.DataSource
 @QuarkusTestResource(
     value = PostgresTestResource::class,
     initArgs = [ResourceArg(name = "db", value = "openbank_catalog_scheduler")],
+    restrictToAnnotatedClass = true,
 )
 @TestProfile(CatalogReconciliationSchedulerVertxContextIT.FastReconciliationProfile::class)
 @TestSecurity(user = "scheduler-operator", roles = ["ROLE_OPERATOR"])

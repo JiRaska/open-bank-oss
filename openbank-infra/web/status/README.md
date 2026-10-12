@@ -5,11 +5,15 @@ from a separate private S3 bucket through CloudFront. A regional Lambda runs
 external checks every two minutes and stores public aggregate results in a
 separate private S3 bucket. The public API is a Lambda function URL accessible
 only through the CloudFront distribution's signed origin access control.
+An in-cluster CronJob queries the private Prometheus service and writes only
+two allowlisted service-reachability verdicts to one object in that private
+bucket. EKS Pod Identity grants write access to that object alone; the public
+API has read access alone. It has no route or credentials to query Prometheus.
 
-Deploy infrastructure with the `openbank-infra/aws/envs/web-prod` OpenTofu
-stack, then run `AWS_PROFILE=openbank ./openbank-infra/web/status/deploy.sh` from
-the repository root. The scheduled checker publishes its first sample within
-two minutes. The site remains **Unable to verify** until that sample arrives.
+Deploy the `web-prod` and `sandbox-platform` OpenTofu stacks before syncing the
+export CronJob, then run `./openbank-infra/web/status/deploy.sh` with the normal
+AWS profile from the repository root. The status remains **Unable to verify**
+until both the external checker and internal exporter have fresh samples.
 
 ## Public API
 
@@ -20,8 +24,8 @@ two minutes. The site remains **Unable to verify** until that sample arrives.
 - `GET /api/v1/incidents` returns the latest confirmed incident timeline.
 - `GET /api/v1/healthz` checks the status API itself, independent of upstream
   service state.
-- `GET /api/v1/freshness` returns 200 only while scheduled results are fresh,
-  regardless of whether monitored services are up or down.
+- `GET /api/v1/freshness` returns 200 only while both scheduled data sources
+  are fresh and verifiable, regardless of service impact.
 - `/openapi.yaml` is the public OpenAPI 3.1 contract.
 
 The website check requires both names to resolve via Cloudflare and Google DNS,
@@ -32,8 +36,14 @@ Three failed samples confirm an incident and two successful samples confirm
 recovery. No missing sample counts as uptime. Historical percentages cover only
 observed samples and begin when this checker first runs.
 
-Mobile customer journeys, payment success, real-user latency, and contractual
-SLA attainment are outside the public badge until they have appropriate public
+The two internal verdicts indicate that selected core and payment services
+respond to monitoring. They do not prove a completed customer journey or
+payment. Missing services, failed queries, or an old export become **unknown**;
+the health endpoint returns 503. No raw metric labels, service inventory, or
+internal endpoint is included in the public JSON.
+
+Mobile customer journeys, payment completion, real-user latency, and contractual
+SLA attainment are outside the public badge until they have appropriate
 measurements and disclosure review. The educational SLO calculator uses
 hypothetical targets and must never be presented as an OpenBank commitment.
 

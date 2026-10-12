@@ -45,6 +45,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 
 /**
  * Customer-facing edge proxy (ADR-0065). All customer app → cluster traffic goes through
@@ -503,13 +504,17 @@ class CustomerEdgeResource(
     @Blocking
     fun listProductOffers(@QueryParam("type") type: String?): Response {
         val customer = customer()
-        val requested = type?.takeIf { it.isNotBlank() }?.uppercase()
-        if (requested != null && requested !in CUSTOMER_PRODUCT_TYPES) {
+        val raw = type?.takeIf { it.isNotBlank() }?.uppercase()
+        // The query carries the edge's own constant, never the caller's string.
+        // Plain branches, not `raw?.let { }`: CodeQL's Kotlin model carries a receiver's taint
+        // through `let` to its result, which would make the constant read as caller-supplied.
+        val requested = if (raw == null) null else CUSTOMER_PRODUCT_TYPES.firstOrNull { it == raw }
+        if (raw != null && requested == null) {
             return Response.status(Response.Status.BAD_REQUEST)
                 .entity(mapOf("error" to "Unsupported product type"))
                 .build()
         }
-        val query = requested?.let { "?type=$it&status=ACTIVE" } ?: "?status=ACTIVE"
+        val query = if (requested == null) "?status=ACTIVE" else "?type=$requested&status=ACTIVE"
         val catalog = upstream.get("$productCatalogUrl/api/v1/products$query", customer.partyId.toString())
         if (catalog.status != 200) return productCatalogueUnavailable()
         val products = parseJson(catalog)?.takeIf { it.isArray } ?: return productCatalogueUnavailable()
@@ -1585,8 +1590,7 @@ class CustomerEdgeResource(
         if (!ownsAccount(accountId, customer.partyId)) {
             return forbidden("Account does not belong to caller")
         }
-        val ccy = currency.uppercase()
-        if (!isValidCurrency(ccy)) return badRequest("Invalid currency code")
+        val ccy = CurrencyCode.parse(currency.uppercase())?.value ?: return badRequest("Invalid currency code")
         // ADR-0109 safe-close: never strand money in a closed pocket. Refuse unless the
         // pocket balance is zero — the app routes the customer to convert to the primary
         // currency first. Fail-closed: if we can't confirm it's empty, we don't close.
@@ -1701,8 +1705,7 @@ class CustomerEdgeResource(
         if (!ownsAccount(accountId, customer.partyId)) {
             return forbidden("Account does not belong to caller")
         }
-        val ccy = ccyRaw.uppercase()
-        if (!isValidCurrency(ccy)) return badRequest("Invalid currency code")
+        val ccy = CurrencyCode.parse(ccyRaw.uppercase())?.value ?: return badRequest("Invalid currency code")
         return upstream.get(
             "$accountServiceUrl/api/v1/accounts/$accountId/pockets/resolve?currency=$ccy",
             customer.partyId.toString(),
@@ -1870,11 +1873,13 @@ class CustomerEdgeResource(
     private fun planExchange(
         accountId: UUID,
         partyId: UUID,
-        sellCcy: String,
-        toCcy: String,
+        sellCurrency: String,
+        toCurrency: String,
         sellAmount: java.math.BigDecimal,
     ): SweepPlan {
-        if (!isValidCurrency(sellCcy) || !isValidCurrency(toCcy)) {
+        val sellCcy = CurrencyCode.parse(sellCurrency)?.value
+        val toCcy = CurrencyCode.parse(toCurrency)?.value
+        if (sellCcy == null || toCcy == null) {
             return SweepPlan.Rejected(Response.Status.BAD_REQUEST, "invalid_currency", "Invalid currency code")
         }
         if (sellCcy == toCcy) {
@@ -1923,10 +1928,8 @@ class CustomerEdgeResource(
     // bid rate and compute the buy amount. Returns a Rejected with a precise reason/HTTP status
     // (own-account, fail-closed) so both the quote and the execute path render the same errors.
     private fun planSweep(accountId: UUID, partyId: UUID, currency: String): SweepPlan {
-        val sellCcy = currency.uppercase()
-        if (!isValidCurrency(sellCcy)) {
-            return SweepPlan.Rejected(Response.Status.BAD_REQUEST, "invalid_currency", "Invalid currency code")
-        }
+        val sellCcy = CurrencyCode.parse(currency.uppercase())?.value
+            ?: return SweepPlan.Rejected(Response.Status.BAD_REQUEST, "invalid_currency", "Invalid currency code")
         val primary = primaryPocketCurrency(accountId, partyId)
             ?: return SweepPlan.Rejected(
                 Response.Status.BAD_GATEWAY,
@@ -2158,8 +2161,9 @@ class CustomerEdgeResource(
     @Blocking
     fun deletePayee(@PathParam("iban") iban: String): Response {
         val customer = customer()
+        val payee = PayeeIban.parse(iban) ?: return badRequest("Invalid IBAN")
         return upstream.delete(
-            "$partyServiceUrl/api/v1/parties/${customer.partyId}/payees/$iban",
+            "$partyServiceUrl/api/v1/parties/${customer.partyId}/payees/$payee",
             customer.partyId.toString(),
         )
     }
@@ -2811,7 +2815,7 @@ class CustomerEdgeResource(
         if (!ownsAccount(accountId, customer.partyId)) {
             return forbidden("Account does not belong to caller")
         }
-        if (!isValidCurrency(currency)) return badRequest("Invalid currency")
+        val ccy = CurrencyCode.parse(currency)?.value ?: return badRequest("Invalid currency")
         val fmt = normalizeStatementFormat(format) ?: return badRequest("Unsupported format")
         // Send Accept: */* upstream. statement-service's resource is class-@Produces(application/json), so
         // a specific Accept (application/xml/text/plain) trips JAX-RS content negotiation → 406 before the
@@ -2819,7 +2823,7 @@ class CustomerEdgeResource(
         // which getRaw preserves — so */* matches, the document renders, and the client still gets the
         // correct application/xml or text/plain back.
         return upstream.getRaw(
-            "$statementServiceUrl/api/v1/statements/$accountId/$currency/$legalSequence?format=$fmt",
+            "$statementServiceUrl/api/v1/statements/$accountId/$ccy/$legalSequence?format=$fmt",
             customer.partyId.toString(),
             MediaType.WILDCARD,
         )
@@ -2857,6 +2861,14 @@ class CustomerEdgeResource(
         // (and weaker) question than the one this route has to ask.
         val amount = extractAmountField(objectMapper, body) ?: return badRequest("Missing amount")
         val currency = extractTextField(objectMapper, body, "currency") ?: "CZK"
+        // Refuse an unsupported rail before debit authority, a delegated spend reservation, or SCA
+        // consumes a one-use challenge. The domestic service enforces the same rule for direct callers.
+        if (currency.trim().uppercase() != "CZK") {
+            return Response.status(400)
+                .entity("""{"code":"CURRENCY_NOT_ALLOWED","error":"Domestic payments accept CZK only"}""")
+                .type(MediaType.APPLICATION_JSON)
+                .build()
+        }
         // Owner OR delegate (ADR-0232 D3/D5). `resolveDebitAuthority` returns the account JSON, the
         // party whose money is moving, and — when this is a delegated debit — the grant that
         // permitted it, or an audited refusal.
@@ -3583,16 +3595,39 @@ class CustomerEdgeResource(
         )
     }
 
+    /** A single inbox across the token holder and currently mandated entities. */
+    @GET
+    @Path("/notifications/unified")
+    @Authorize(action = "customer.notifications.read")
+    @Blocking
+    fun listUnifiedNotifications(
+        @QueryParam("limit") @DefaultValue("20") limit: Int,
+        @QueryParam("partyId") filterPartyId: UUID?,
+    ): Response {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(UNIFIED_NOTIFICATION_TIMEOUT_SECONDS)
+        val identity = customer()
+        val allowed = listOf(identity.human) + actingForResolver.profilesOfStrict(identity.human, deadline)
+            .map { it["partyId"] as UUID }
+        if (filterPartyId != null && filterPartyId !in allowed) {
+            return forbidden("Notification profile unavailable")
+        }
+        val parties = (filterPartyId?.let(::listOf) ?: allowed).distinct()
+        val remaining = deadline - System.nanoTime()
+        return UnifiedNotificationInbox(upstream, objectMapper, notificationServiceUrl, remaining)
+            .list(parties, limit.coerceIn(1, 100))
+    }
+
     /** Mark one notification read. partyId injected from the JWT — the service scopes by it (IDOR). */
     @PATCH
     @Path("/notifications/{id}/read")
     @Authorize(action = "customer.notifications.mark-read", resource = "#id")
     @Blocking
-    fun markNotificationRead(@PathParam("id") id: UUID): Response {
+    fun markNotificationRead(@PathParam("id") id: UUID, @QueryParam("partyId") originPartyId: UUID? = null): Response {
         val customer = customer()
+        val partyId = authorizedNotificationParty(customer, originPartyId)
         return upstream.patch(
-            "$notificationServiceUrl/api/v1/notifications/$id/read?partyId=${customer.partyId}",
-            customer.partyId.toString(),
+            "$notificationServiceUrl/api/v1/notifications/$id/read?partyId=$partyId",
+            partyId.toString(),
         )
     }
 
@@ -3622,20 +3657,26 @@ class CustomerEdgeResource(
     @Path("/notifications/{id}")
     @Authorize(action = "customer.notifications.read", resource = "#id")
     @Blocking
-    fun getNotification(@PathParam("id") id: UUID): Response {
+    fun getNotification(@PathParam("id") id: UUID, @QueryParam("partyId") originPartyId: UUID? = null): Response {
         val customer = customer()
+        val partyId = authorizedNotificationParty(customer, originPartyId)
         val resp = upstream.get(
-            "$notificationServiceUrl/api/v1/notifications/$id",
-            customer.partyId.toString(),
+            if (originPartyId == null) {
+                "$notificationServiceUrl/api/v1/notifications/$id"
+            } else {
+                "$notificationServiceUrl/api/v1/notifications/$id/self?partyId=$partyId"
+            },
+            partyId.toString(),
         )
         if (resp.status != 200) return forbidden("Notification not found")
         val node = runCatching { objectMapper.readTree(resp.entity?.toString() ?: "") }.getOrNull()
             ?: return forbidden("Notification not found")
-        if (node.get("partyId")?.asText() != customer.partyId.toString()) {
+        if (node.get("partyId")?.asText() != partyId.toString()) {
             return forbidden("Notification does not belong to caller")
         }
         val out = objectMapper.createObjectNode()
         out.put("id", node.get("id")?.asText())
+        if (originPartyId != null) out.put("partyId", partyId.toString())
         node.get("template")?.asText()?.let { out.put("template", it) }
         node.get("subject")?.asText()?.let { out.put("subject", it) }
         out.put("body", node.get("body")?.asText() ?: "")
@@ -3643,6 +3684,13 @@ class CustomerEdgeResource(
         node.get("readAt")?.asText()?.let { out.put("readAt", it) }
         node.get("createdAt")?.asText()?.let { out.put("createdAt", it) }
         return Response.ok(out).type(MediaType.APPLICATION_JSON).build()
+    }
+
+    private fun authorizedNotificationParty(customer: CustomerIdentity, requested: UUID?): UUID {
+        if (requested == null) return customer.partyId
+        if (requested == customer.human) return requested
+        if (actingForResolver.profilesOfStrict(customer.human).any { it["partyId"] == requested }) return requested
+        throw ForbiddenException("Notification profile unavailable")
     }
 
     /** The caller's push-notification preferences (#2). Party is taken from the JWT, never the client. */
@@ -4149,13 +4197,14 @@ class CustomerEdgeResource(
     @Blocking
     fun fxRate(@PathParam("base") base: String, @PathParam("quote") quote: String): Response {
         val customer = customer()
-        if (!isValidCurrency(base) || !isValidCurrency(quote)) return badRequest("Invalid currency")
-        val resp = upstream.get("$fxServiceUrl/api/v1/fx/rates/$base/$quote", customer.partyId.toString())
+        val baseCcy = CurrencyCode.parse(base)?.value ?: return badRequest("Invalid currency")
+        val quoteCcy = CurrencyCode.parse(quote)?.value ?: return badRequest("Invalid currency")
+        val resp = upstream.get("$fxServiceUrl/api/v1/fx/rates/$baseCcy/$quoteCcy", customer.partyId.toString())
         val upstreamBody = (resp.entity as? String).orEmpty()
         if (resp.status != 200) {
             return Response.status(resp.status).entity(upstreamBody).type(MediaType.APPLICATION_JSON).build()
         }
-        val mapped = mapFxRate(objectMapper, upstreamBody, base, quote)
+        val mapped = mapFxRate(objectMapper, upstreamBody, baseCcy, quoteCcy)
             ?: return Response.status(Response.Status.BAD_GATEWAY).entity("""{"error":"malformed fx rate"}""")
                 .type(MediaType.APPLICATION_JSON).build()
         return Response.ok(mapped).type(MediaType.APPLICATION_JSON).build()
@@ -4179,7 +4228,8 @@ class CustomerEdgeResource(
         @QueryParam("offset") offset: Int?,
     ): Response {
         val customer = customer()
-        if (!isValidCurrency(base) || !isValidCurrency(quote)) return badRequest("Invalid currency")
+        val baseCcy = CurrencyCode.parse(base)?.value ?: return badRequest("Invalid currency")
+        val quoteCcy = CurrencyCode.parse(quote)?.value ?: return badRequest("Invalid currency")
         if (from != null && !isValidInstant(from)) return badRequest("Invalid 'from' instant: $from")
         if (to != null && !isValidInstant(to)) return badRequest("Invalid 'to' instant: $to")
         val safeLimit = (limit ?: 90).coerceIn(1, 365)
@@ -4187,7 +4237,9 @@ class CustomerEdgeResource(
         val windowEnd = to ?: java.time.Instant.now().toString()
         val windowStart = from ?: threeMonthWindowStart(java.time.Instant.parse(windowEnd)).toString()
         val url = buildString {
-            append("$fxServiceUrl/api/v1/fx/rates/$base/$quote/history?source=CNB&limit=$safeLimit&offset=$safeOffset")
+            append(
+                "$fxServiceUrl/api/v1/fx/rates/$baseCcy/$quoteCcy/history?source=CNB&limit=$safeLimit&offset=$safeOffset",
+            )
             append("&from=${java.net.URLEncoder.encode(windowStart, "UTF-8")}")
             append("&to=${java.net.URLEncoder.encode(windowEnd, "UTF-8")}")
         }

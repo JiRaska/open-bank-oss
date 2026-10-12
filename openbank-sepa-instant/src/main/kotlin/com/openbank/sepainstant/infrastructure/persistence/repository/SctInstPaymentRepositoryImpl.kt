@@ -4,9 +4,14 @@
 
 package com.openbank.sepainstant.infrastructure.persistence.repository
 
+import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.libs.persistence.outbox.OutboxStatus
 import com.openbank.sepainstant.application.port.out.SctInstPaymentRepository
+import com.openbank.sepainstant.domain.event.SctInstEvent
 import com.openbank.sepainstant.domain.model.SctInstPayment
 import com.openbank.sepainstant.domain.model.SctInstStatus
+import com.openbank.sepainstant.infrastructure.kafka.SctInstEventPayloadCodec
+import com.openbank.sepainstant.infrastructure.persistence.entity.SctInstOutboxEntity
 import com.openbank.sepainstant.infrastructure.persistence.entity.SctInstPaymentEntity
 import com.openbank.sepainstant.infrastructure.persistence.mapper.SctInstMapper
 import io.quarkus.hibernate.reactive.panache.common.WithSession
@@ -24,12 +29,60 @@ class SctInstPaymentRepositoryImpl @Inject constructor(
     private val sf: Mutiny.SessionFactory,
     private val mapper: SctInstMapper,
     private val clock: Clock,
+    private val codec: SctInstEventPayloadCodec,
 ) : SctInstPaymentRepository {
 
     @WithTransaction
     override fun save(payment: SctInstPayment): Uni<SctInstPayment> {
         val entity = mapper.toEntity(payment)
         return sf.withTransaction { s -> s.persist(entity).map { mapper.toDomain(entity) } }
+    }
+
+    override fun saveWithEvent(payment: SctInstPayment, event: SctInstEvent): Uni<SctInstPayment> {
+        val entity = mapper.toEntity(payment)
+        val outbox = outboxEntity(event)
+        return sf.withTransaction { session ->
+            session.persist(entity).flatMap { session.persist(outbox) }.map { mapper.toDomain(entity) }
+        }
+    }
+
+    override fun updateWithEvent(
+        payment: SctInstPayment,
+        expectedStatus: SctInstStatus,
+        event: SctInstEvent,
+    ): Uni<SctInstPayment> {
+        val outbox = outboxEntity(event)
+        return sf.withTransaction { session ->
+            session.createQuery(
+                "FROM SctInstPaymentEntity WHERE paymentId = :id",
+                SctInstPaymentEntity::class.java,
+            ).setParameter("id", payment.paymentId)
+                .setLockMode(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+                .singleResultOrNull.flatMap { entity ->
+                    if (entity == null || entity.status != expectedStatus.name) {
+                        Uni.createFrom().failure(IllegalStateException("Payment status changed before event write"))
+                    } else {
+                        entity.status = payment.status.name
+                        entity.settledAt = payment.settledAt
+                        entity.recalledAt = payment.recalledAt
+                        entity.recallReason = payment.recallReason
+                        entity.updatedAt = OffsetDateTime.now(clock)
+                        session.persist(outbox).map { mapper.toDomain(entity) }
+                    }
+                }
+        }
+    }
+
+    private fun outboxEntity(event: SctInstEvent): SctInstOutboxEntity = SctInstOutboxEntity().also {
+        val now = clock.instant()
+        it.eventId = Ids.newId()
+        it.aggregateId = event.paymentId
+        it.eventType = event::class.simpleName ?: error("Unnamed SCT Inst event")
+        it.payload = codec.encode(event)
+        it.status = OutboxStatus.PENDING.name
+        it.attemptCount = 0
+        it.createdAt = now
+        it.updatedAt = now
     }
 
     @WithSession

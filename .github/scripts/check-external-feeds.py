@@ -376,6 +376,7 @@ NOT_PROBED = [
     ("https://glitchtip.open-bank.tech", "our own GlitchTip ingress"),
     ("https://langfuse.open-bank.tech", "our own Langfuse ingress"),
     ("https://pact.open-bank.tech", "our own Pact Broker ingress"),
+    ("https://status.open-bank.tech", "our own public status page and API, covered by dedicated blackbox probes"),
 ]
 
 URL_IN_TEXT = re.compile(r"https?://[^\s\"'}\)>,]+")

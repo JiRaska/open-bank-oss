@@ -52,7 +52,7 @@ spec:
         # provider calls; this appends openbank-ca to the same system bundle instead, so the public
         # roots the gateway trusts today are unchanged and exactly one private CA is added.
         - name: ca-bundle
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-litellm:v1.104.0@sha256:c05ae7e7a0f2c991e3a9a629e1a9bc912c2223f370b1f1c083afebde542f7703
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-litellm:v1.104.0@sha256:d51e574e4e83da66bd82dd5f7f9714df66a2e5428dd4f5791636292f99fe7a07
           imagePullPolicy: IfNotPresent
           command: ["sh", "-c", "cat /etc/ssl/certs/ca-certificates.crt /mnt/openbank-ca/ca.crt > /ca-bundle/ca-certificates.crt"]
           securityContext:
@@ -79,7 +79,7 @@ spec:
           # /opt/prisma, readable at uid 1000, so the writable site-packages copy that v1.74
           # needed is gone. Verified locally at uid 1000 against Postgres: /health/liveliness 200,
           # /key/generate persists a budgeted key.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-litellm:v1.104.0@sha256:c05ae7e7a0f2c991e3a9a629e1a9bc912c2223f370b1f1c083afebde542f7703
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-litellm:v1.104.0@sha256:d51e574e4e83da66bd82dd5f7f9714df66a2e5428dd4f5791636292f99fe7a07
           imagePullPolicy: IfNotPresent
           args: ["--config", "/etc/litellm/config.yaml", "--port", "4000"]
           ports:

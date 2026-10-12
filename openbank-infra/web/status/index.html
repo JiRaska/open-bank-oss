@@ -6,6 +6,11 @@
   <meta name="theme-color" content="#071933">
   <meta name="description" content="Live OpenBank service status, incident updates, and a clear guide to availability, SLOs, SLAs, and error budgets.">
   <link rel="canonical" href="https://status.open-bank.tech/">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="OpenBank Status">
+  <meta property="og:description" content="Live service checks and incident history, with the scope of each check clearly stated.">
+  <meta property="og:url" content="https://status.open-bank.tech/">
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebPage","name":"OpenBank Status","url":"https://status.open-bank.tech/","description":"Live OpenBank service checks and incident history.","isPartOf":{"@type":"WebSite","name":"OpenBank","url":"https://open-bank.tech/"}}</script>
   <link rel="icon" href="assets/ob-mark-complete.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
   <script src="app.js" defer></script>
@@ -26,7 +31,7 @@
         <div class="hero-copy">
           <div class="eyebrow"><span class="pulse-dot" aria-hidden="true"></span> LIVE SERVICE STATUS <span class="eyebrow-line"></span> OPENBANK</div>
           <h1 id="hero-title">A clearer view of <em>what's working.</em></h1>
-          <p class="hero-intro">External checks. Incident history.</p>
+          <p class="hero-intro">External and internal checks. Incident history.</p>
           <div id="overall-banner" class="overall-banner is-unknown" role="status" aria-live="polite">
             <span class="overall-icon" aria-hidden="true">?</span>
             <span><strong id="overall-label">Checking service status</strong><small id="overall-detail">Connecting to our independent status checks…</small></span>
@@ -54,7 +59,7 @@
         <article class="service-card skeleton"><div class="service-icon">◈</div><div class="skeleton-line"></div><div class="skeleton-line short"></div></article>
         <article class="service-card skeleton"><div class="service-icon">↗</div><div class="skeleton-line"></div><div class="skeleton-line short"></div></article>
       </div>
-      <p class="coverage-note"><strong>Scope:</strong> Website, sign-in, API edge. Mobile journeys and payments are not measured here.</p>
+      <p class="coverage-note"><strong>Scope:</strong> Web, sign-in, API edge, core and payment service reachability. Payment completion and mobile journeys untested.</p>
     </section>
 
     <section class="section history-section" aria-labelledby="history-title"><div class="shell">
@@ -77,6 +82,6 @@
 
     <section id="api" class="api-section"><div class="shell api-inner"><div><span class="kicker">05 / PUBLIC API</span><h2>Status in <em>JSON.</em></h2><p>No key. Health returns 503 for impact or stale data.</p></div><div class="api-list"><a href="/api/v1/health"><code>GET /api/v1/health</code><span>Current status ↗</span></a><a href="/api/v1/history"><code>GET /api/v1/history</code><span>24h and 30d checks ↗</span></a><a href="/api/v1/incidents"><code>GET /api/v1/incidents</code><span>Incident timeline ↗</span></a><a href="/api/v1/healthz"><code>GET /api/v1/healthz</code><span>Status API health ↗</span></a><a href="/openapi.yaml"><code>OpenAPI 3.1</code><span>Contract ↗</span></a></div></div></section>
   </main>
-  <footer class="site-footer"><div class="shell footer-inner"><div><a class="brand" href="https://open-bank.tech/"><img src="assets/ob-mark-complete.svg" width="36" height="26" alt="">OpenBank</a></div><div class="footer-links"><a href="https://open-bank.tech/">Website</a><a href="https://github.com/JiRaska/open-bank-oss">Open source</a><a href="#main">Back to top ↑</a></div><small>© <span id="year">2026</span> OpenBank · UTC</small></div></footer>
+  <footer class="site-footer"><div class="shell footer-inner"><div><a class="brand" href="https://open-bank.tech/"><img src="assets/ob-mark-complete.svg" width="36" height="26" alt="">OpenBank</a></div><div class="footer-links"><a href="https://open-bank.tech/">Website</a><a href="/privacy.html">Privacy</a><a href="https://github.com/JiRaska/open-bank-oss">Open source</a><a href="#main">Back to top ↑</a></div><small>© <span id="year">2026</span> OpenBank · UTC</small></div></footer>
 </body>
 </html>
