@@ -210,7 +210,7 @@ jobs:
                   fi
                   # Preserve cross-module test readers on main as well as on PRs.
                   CHANGED="$CHANGED $(python3 .github/scripts/derive-fleet-scanning-test-modules.py \
-                    --expand "$CHANGED" --input-paths-stdin <<< "$FILES_GLOBAL")"
+                    --expand "$CHANGED" --input-paths-stdin <<< "$(python3 .github/scripts/filter-lib-test-only-paths.py <<< "$FILES")")"
                   # Recipe-only change -> one canary (same as the PR path).
                   if [ -z "${CHANGED// /}" ] \
                      && grep -qE '^(\.github/workflows/(services-ci|_service-ci)\.yml|\.github/scripts/(service-ci-pact-modules\.sh|service-ci-library-dependents\.py|(test-)?await-admin-ui-pact-publication\.py))$' <<< "$FILES"; then
@@ -359,7 +359,7 @@ jobs:
               fi
               # Derive cross-module test readers from filtered inputs (#11513, #11560).
               CHANGED="$CHANGED $(python3 .github/scripts/derive-fleet-scanning-test-modules.py \
-                --expand "$CHANGED" --input-paths-stdin <<< "$FILES_GLOBAL")"
+                --expand "$CHANGED" --input-paths-stdin <<< "$(python3 .github/scripts/filter-lib-test-only-paths.py <<< "$FILES")")"
               # A change to the CI recipe itself (services-ci / _service-ci) can NOT
               # alter any service's compile/test inputs, so it does NOT warrant a
               # 28-module fan-out -- that is what turned the trivial #547 cache-flag
