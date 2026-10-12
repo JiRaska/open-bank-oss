@@ -130,7 +130,7 @@ class PensionFundMetricsFlowTest {
     }
 
     @Test
-    fun `a correction is counted as one, with the transactions it re-priced, and a rejection as a rejection`(): Unit =
+    fun `a rejected correction is counted but blocked publication records no success or repricing`(): Unit =
         runBlocking {
             val fund = admin.createFund(definition("CZ0000000103"))
             register.place(
@@ -145,10 +145,17 @@ class PensionFundMetricsFlowTest {
             assertThat(navEvents(fund.isin, "rejected", true)).isEqualTo(1.0)
 
             later()
-            navs.publish(calculate(fund.id, "10").id, "checker")
-            assertThat(navEvents(fund.isin, "published", true)).isEqualTo(1.0)
+            val correction = calculate(fund.id, "10")
+            val originalTransactions = store.transactions.toMap()
+            val originalHoldings = store.holdings.toMap()
+            assertThatThrownBy { runBlocking { navs.publish(correction.id, "checker") } }
+                .isInstanceOf(IllegalStateException::class.java)
+                .hasMessageContaining("durable compensation accounting")
+            assertThat(store.transactions).isEqualTo(originalTransactions)
+            assertThat(store.holdings).isEqualTo(originalHoldings)
+            assertThat(navEvents(fund.isin, "published", true)).isZero()
             assertThat(navEvents(fund.isin, "published", false)).isEqualTo(1.0)
-            assertThat(counter("openbank.pension_fund.nav.correction.repriced", "fund", fund.isin)).isEqualTo(1.0)
+            assertThat(counter("openbank.pension_fund.nav.correction.repriced", "fund", fund.isin)).isZero()
             // A correction's lag measures when the error was found, not the pipeline: not recorded.
             assertThat(registry.find("openbank.pension_fund.nav.publication.lag").timer()!!.count()).isEqualTo(1)
         }

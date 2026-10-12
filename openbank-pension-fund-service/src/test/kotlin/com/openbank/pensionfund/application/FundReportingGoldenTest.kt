@@ -17,6 +17,7 @@ import com.openbank.pensionfund.application.usecase.PositionLine
 import com.openbank.pensionfund.application.usecase.UnitRegisterService
 import com.openbank.pensionfund.domain.model.ForwardPricer
 import com.openbank.pensionfund.domain.model.FundPeriodReport
+import com.openbank.pensionfund.domain.model.NavStatus
 import com.openbank.pensionfund.domain.model.OrderType
 import com.openbank.pensionfund.domain.model.PeriodNotReportableException
 import kotlinx.coroutines.runBlocking
@@ -211,14 +212,14 @@ class FundReportingGoldenTest {
     }
 
     @Test
-    fun `the answer is reproducible, and a NAV correction changes the fingerprint`(): Unit = runBlocking {
+    fun `a blocked NAV correction leaves the published report and fingerprint unchanged`(): Unit = runBlocking {
         val (fund, _) = seedMonth()
         val from = LocalDate.parse("2026-10-01")
         val to = LocalDate.parse("2026-10-31")
         val first = reporting.periodReport(fund, from, to)
         assertThat(reporting.periodReport(fund, from, to)).isEqualTo(first)
 
-        // Correct the mid-month NAV: transactions re-price, the register restates, the fingerprint moves.
+        // Correction publication remains unavailable until the journal and obligations are durable.
         at("2026-11-02T08:00:00Z")
         val correction = navs.calculate(
             fund,
@@ -231,10 +232,15 @@ class FundReportingGoldenTest {
             "maker",
         )
         at("2026-11-02T09:00:00Z")
-        navs.publish(correction.id, "checker")
-        val restated = reporting.periodReport(fund, from, to)
-        assertReconciles(restated)
-        assertThat(restated.fingerprint).isNotEqualTo(first.fingerprint)
+        val originalTransactions = store.transactions.toMap()
+        val originalHoldings = store.holdings.toMap()
+        assertThatThrownBy { runBlocking { navs.publish(correction.id, "checker") } }
+            .isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("durable compensation accounting")
+        assertThat(navs.nav(correction.id).status).isEqualTo(NavStatus.CALCULATED)
+        assertThat(store.transactions).isEqualTo(originalTransactions)
+        assertThat(store.holdings).isEqualTo(originalHoldings)
+        assertThat(reporting.periodReport(fund, from, to)).isEqualTo(first)
     }
 
     @Test
