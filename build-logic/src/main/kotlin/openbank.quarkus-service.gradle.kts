@@ -2,6 +2,8 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
+import io.quarkus.gradle.tasks.QuarkusApplicationModelTask
+import io.quarkus.gradle.tooling.ProjectDescriptorBuilder
 import java.util.zip.ZipFile
 import javax.inject.Inject
 import org.gradle.api.file.FileSystemOperations
@@ -34,6 +36,15 @@ version = file("version.txt").readText().trim()
 // Quarkus captures the application coordinates when its plugin is applied.
 // Set the canonical version first so its model and runner use the same version.
 pluginManager.apply("io.quarkus")
+
+// Model collection appends to mutable workspace descriptors. Sharing a descriptor
+// between launch modes changes the next test model and can execute tests again.
+// Capture established Maven coordinates here and give each model task its own
+// provider before evaluation ends: buildForApp registers afterEvaluate source wiring.
+// Eager task configuration is intentional for that lifecycle boundary.
+tasks.withType<QuarkusApplicationModelTask>().all {
+    projectDescriptor.set(ProjectDescriptorBuilder.buildForApp(project))
+}
 
 abstract class QuarkusPackagingFileOperations {
     @get:Inject
