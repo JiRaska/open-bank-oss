@@ -33,8 +33,8 @@ import java.util.UUID
  * lost remittance never shows up as an error or a gap — it silently understates the tax withheld on
  * a return that then gets filed, and `auto.offset.reset: latest` rules out recovering it by replay.
  *
- * Each test below is written to discriminate, not to describe: run them against the pre-fix consumer
- * and the two behaviour tests go red while the malformed-payload test stays green on both sides.
+ * Both persistent write failures and malformed target records must reach the configured DLQ;
+ * neither may be acknowledged as a successful observation.
  */
 /** A named transient failure, so the tests below never `throw RuntimeException` (detekt). */
 private class FilingStoreUnavailable(message: String) : RuntimeException(message)
@@ -120,38 +120,37 @@ class WithholdingRemittedConsumerTest {
     }
 
     private suspend fun consumeAllMalformed() {
-        consumer.consume(record("not json"))
-        consumer.consume(record("""{"remittanceId":"not-a-uuid"}"""))
+        assertThrows<IllegalArgumentException> { runBlocking { consumer.consume(record("not json")) } }
+        assertThrows<IllegalArgumentException> {
+            runBlocking { consumer.consume(record("""{"remittanceId":"not-a-uuid"}""")) }
+        }
         // A strictly-decoded amount: a silent zero here would file a return understating the tax.
-        consumer.consume(
-            record(
-                """{"remittanceId":"$remittanceId","periodYear":2026,"periodMonth":7,"currency":"CZK",""" +
-                    """"totalTaxAmount":"twelve","itemCount":9,"dueDate":"2026-08-20"}""",
-            ),
+        val malformedAmount = record(
+            """{"remittanceId":"$remittanceId","periodYear":2026,"periodMonth":7,"currency":"CZK",""" +
+                """"totalTaxAmount":"twelve","itemCount":9,"dueDate":"2026-08-20"}""",
         )
+        val failure = assertThrows<IllegalArgumentException> {
+            runBlocking { consumer.consume(malformedAmount) }
+        }
+        assertThat(failure.message).doesNotContain("twelve", remittanceId.toString())
+        assertThat(failure.cause).isNull()
+        assertThat(malformedAmount.value()).contains("twelve")
+        assertThat(malformedAmount.headers().lastHeader(OutboxKafkaHeaders.HEADER_EVENT_TYPE)).isNotNull()
     }
 
     /**
-     * The other half of the split, and the reason this is not a blanket rethrow: an event this
-     * consumer cannot decode fails identically on every replay, so acking it is correct. Nothing
-     * downstream is called, so nothing is silently half-done.
-     *
-     * This one is deliberately GREEN against the pre-fix consumer too — that is what makes the three
-     * behaviour tests above meaningful rather than merely different. The poison-pill branch is the
-     * part of the old design that was right, and this asserts the fix did not take it away.
+     * A malformed target event must be nacked so the original bytes survive on the DLQ, and it
+     * must never reach the filing service with a zero or partial amount.
      */
     @Test
-    fun `a malformed payload is still acked and never reaches the filing service`(): Unit = runBlocking {
+    fun `a malformed target payload is nacked and never reaches the filing service`(): Unit = runBlocking {
         consumeAllMalformed()
 
         coVerify(exactly = 0) { filings.observe(any()) }
     }
 
     /**
-     * Separate from the ack assertion above on purpose: `malformed` is a NEW outcome label. Folding
-     * it into the previous test would have made that test go red against the pre-fix consumer for a
-     * reason that has nothing to do with acknowledgement, and the "green on both sides" claim above
-     * would have been false.
+     * Keep decode failures separate from storage failures for alert diagnosis. Both are nacked.
      */
     @Test
     fun `a malformed payload is counted apart from a failed write`(): Unit = runBlocking {

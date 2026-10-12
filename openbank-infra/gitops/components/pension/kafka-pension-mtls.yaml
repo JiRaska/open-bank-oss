@@ -1,0 +1,34 @@
+# Kafka mTLS identity + ACLs for openbank-pension-service (ADR-0137 Tier 2, ADR-0334, #12392).
+#
+# pension-service PRODUCES participant notices onto openbank.notification.requests
+# (delivery stays with notification-service). It consumes nothing, so it holds no
+# group and no Read grant; the Write is the whole of its Kafka surface.
+#
+# Identity model (ADR-0137): one KafkaUser = one mTLS client cert = one principal for
+# all of this service's Kafka traffic. The Strimzi User Operator mints the per-user
+# Secret of the same name in `messaging`; kafka-mtls-externalsecrets.yaml projects it
+# into `pension`.
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  annotations:
+    # Certs (KafkaUsers→Strimzi secrets→ESO projection) must land before the
+    # pension-service pods roll onto mTLS; lower waves sync first.
+    argocd.argoproj.io/sync-wave: "-2"
+  name: pension-service
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      # Produce participant notices → notification-service consumes (#12392).
+      - resource:
+          type: topic
+          name: openbank.notification.requests
+          patternType: literal
+        operations: [Write, Describe]

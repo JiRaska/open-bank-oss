@@ -9,7 +9,7 @@ Dokumentaci publikuje služba na management endpointu `/q/openbank/docs` (Docs-a
 - **Stack:** Kotlin / Quarkus 3.x / Hibernate Reactive Panache / PostgreSQL (`pension-fund-db`, CNPG)
 - **Porty:** 8162 (aplikace), 8090 (management)
 - **Události:** zatím žádné
-- **Autentizace:** správu fondů provádějí jen zaměstnanci (`ROLE_OPERATOR`/`ROLE_ADMIN`, nikdy service-account). Číst mohou také `ROLE_AUDITOR` a `ROLE_API`.
+- **Autentizace:** správu fondů provádějí jen zaměstnanci (`ROLE_OPERATOR`/`ROLE_ADMIN`, nikdy service-account). Držby, pokyny a transakce účastníků mohou číst zaměstnanci s `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_AUDITOR` nebo `ROLE_COMPLIANCE` a vlastní klient pension-service s `ROLE_API`. Chrání je akce `pension-fund.holding.inspect` (ne `.read`), takže obecná operátorská ani compliance čtecí práva nepustí sdílený service-account.
 - **Čtyři oči:** kdo NAV spočítá nebo navrhne změnu strategie, ten ji nemůže zveřejnit ani schválit (403). Vynucuje to doména i DB CHECK.
 - **Forward pricing:** pokyn se přijme bez ceny (202). Vypořádá se za PŘÍŠTÍ zveřejněnou NAV fondu.
 
@@ -53,3 +53,50 @@ neposkytuje vzájemné TLS.
 `ServerTlsIT` ověřuje načtení PEM, vyjednání TLS 1.3, odmítnutí nedůvěryhodného
 certifikátu a zachování HTTP s dočasnými testovacími klíči. Deklarace ani tento
 test nedokazují připravenost certifikátu v clusteru.
+
+
+## Výkazy za období
+
+`GET /api/v1/reporting/funds/{fundId}/period-figures` vyžaduje datum
+`periodStart` a `periodEnd`. Vrací agregované údaje fondu pro tax-reporting-service:
+rozvahu, výsledek hospodaření od začátku roku, pohyb jednotek, portfolio a toky.
+Přístup vyžaduje povolenou roli a autorizační politiku `pension-fund.reporting.inspect`.
+
+Výpočet používá zveřejněné NAV a transakce oceněné těmito NAV podle data ocenění.
+Období bez zveřejněné NAV není vykazatelné; nejde o nulovou aktivitu. S nově
+vypočtenou NAV se ukládají její pozice. U starších NAV bez zaznamenaných pozic
+jsou údaje portfolia neznámé, nikoli prázdné. Identifikátory podkladových NAV
+a fingerprint určují vstupy výkazu. Tento model poskytuje údaje; nepodává
+regulátorovi statutární výkaz.
+
+### Výsledovka a klasifikace pozic pro reporting
+
+Čtecí model period-figures zahrnuje kumulované zisky a ztráty z přecenění, ostatní
+investiční výsledek a poplatky za správu od začátku roku. Před použitím jednotlivých
+řádků zkontrolujte `profitAndLossYtd.linesUnavailableReason`; nedostupné členění
+neznamená naměřenou nulu.
+
+Zaznamenané pozice NAV nesou třídu instrumentu. Historické pozice a vstupy bez
+klasifikace zůstávají `UNCLASSIFIED`. Návrh opravy vytvoří
+`POST /api/v1/position-classification-corrections` (`positionId`, `toClass`, `reason`).
+Jiný schvalovatel jej rozhodne přes `/{correctionId}/approve` nebo
+`/{correctionId}/reject`. Návrh vyžaduje `pension-fund.nav.calculate`, rozhodnutí
+`pension-fund.nav.approve`; autor návrhu vlastní opravu rozhodnout nesmí. Tyto
+podklady slouží čtecímu modelu reportingu, nepodávají zákonný výkaz.
+
+
+### Opakování požadavků na korekci klasifikace
+
+POST operace návrhu, schválení a zamítnutí vyžadují neprázdný `Idempotency-Key` o nejvýše 128 znacích. Klíč je oddělen podle přihlášeného uživatele a operace. Opakování stejného pokynu vrátí původní odpověď i poté, co korekce změnila stav; změněný obsah se stejným klíčem vrátí 409. Původní odpověď a změna korekce se ukládají v jedné databázové transakci. Ze souběžného schválení a zamítnutí může být zapsáno jen jedno rozhodnutí.
+
+## Pozorovatelnost
+
+Služba publikuje metriky `openbank.pension_fund.*`: zpoždění, stáří a opravy
+publikace NAV, výsledky pokynů a změn strategie, vypořádané částky, opakované
+pokyny, dotazy na tržní ceny a konflikty optimistického zamykání na držbách
+jednotek (počítají je REST mappery před odpovědí 409). Stavové gauge (čistá
+aktiva, NAV na jednotku, jednotky v oběhu, čekající pokyny a stáří front)
+obnovuje každou minutu plánovaná úloha; neúspěšné obnovení ponechá předchozí
+hodnoty a nezaznamená úspěch, takže gauge živosti workflow zestárne a spustí
+alert. Pravidla alertů jsou v `prometheus-rules-pension-fund.yaml`, runbook v
+`docs/runbooks/pension-alerts.md`.
