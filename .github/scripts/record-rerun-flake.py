@@ -150,12 +150,16 @@ SERVICE_RE = re.compile(r"build \(([^)]+)\)")
 def extract_service(job_name: str) -> str | None:
     """`build (openbank-transaction-service)` -> `openbank-transaction-service`.
 
-    Only Services CI job names carry this shape (the JUnit-XML-producing lane from #4983); a
-    Security-scan or Dependency-submission job name returns None, and the caller records the
-    flake at job granularity without a per-test breakdown rather than guessing.
+    Services CI build jobs and explicit reusable provider contract jobs carry a service.
+    Security-scan or Dependency-submission jobs return None; the caller records the flake
+    at job granularity without guessing a per-test breakdown.
     """
     m = SERVICE_RE.search(job_name or "")
-    return m.group(1) if m else None
+    if m:
+        return m.group(1)
+    # Direct provider verification uses a reusable contract job without build(...).
+    contract = re.search(r"(?:^| / )(openbank-[a-z0-9-]+) \(contract\)$", job_name or "")
+    return contract.group(1) if contract else None
 
 
 # --------------------------------------------------------------------------------------------
