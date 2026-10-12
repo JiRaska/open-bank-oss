@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Clearing Simulator API
-  version: 1.1.0
+  version: 1.2.0
   description: >-
     NON-PRODUCTION scheme/clearing counterparty (ADR-0104 D2). Receives a real ISO 20022
     pacs.008 credit transfer, validates it against the XSD, decides settle/reject
@@ -44,6 +44,54 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+
+  /api/v1/clearing/receipted-credit-transfers/{rail}/{submissionId}:
+    post:
+      tags: [Clearing simulator]
+      summary: Submit a pacs.008 with a durable rail-scoped receipt
+      operationId: submitReceiptedCreditTransfer
+      description: >-
+        The first committed response is replayed byte for byte for the same rail, submissionId
+        and request bytes. Reusing the identity with changed request bytes returns 409. The
+        identity must be stable across retries, including a lost HTTP response.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: rail
+          required: true
+          schema:
+            type: string
+            enum: [SEPA_INSTANT, SEPA_CREDIT, DOMESTIC, SWIFT]
+        - in: path
+          name: submissionId
+          required: true
+          schema:
+            type: string
+            pattern: '^[A-Za-z0-9._:-]{1,70}$'
+      requestBody:
+        required: true
+        content:
+          application/xml:
+            schema:
+              type: string
+      responses:
+        '200':
+          description: Original committed pacs.002 verdict, including its original timestamp.
+          content:
+            application/xml:
+              schema:
+                type: string
+        '400':
+          description: Invalid rail or submission identity.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Submission identity already used for a different request.
+        '503':
+          description: Receipted submission has not been enabled in this environment.
 
   /api/v1/clearing/returns:
     post:

@@ -11,6 +11,8 @@ import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactBroker
+import com.openbank.clearingsimulator.PostgresTestResource
+import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import org.eclipse.microprofile.config.inject.ConfigProperty
@@ -42,6 +44,7 @@ import org.junit.jupiter.api.extension.ExtendWith
  * keeps running unconditionally, so PR-time contract coverage is unchanged by this addition.
  */
 @QuarkusTest
+@QuarkusTestResource(PostgresTestResource::class)
 @TestSecurity(user = "rail", roles = ["ROLE_API"])
 @Provider("openbank-clearing-simulator")
 @PactBroker

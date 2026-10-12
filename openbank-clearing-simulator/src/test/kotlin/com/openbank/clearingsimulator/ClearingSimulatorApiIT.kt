@@ -8,6 +8,7 @@ import com.openbank.libs.iso20022.ChargeBearer
 import com.openbank.libs.iso20022.CreditTransferInstruction
 import com.openbank.libs.iso20022.Pacs008Builder
 import com.openbank.libs.iso20022.SettlementMethod
+import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.module.kotlin.extensions.Given
@@ -18,6 +19,8 @@ import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
+import java.util.concurrent.Callable
+import java.util.concurrent.Executors
 
 /**
  * Boot smoke + functional IT (ADR-0104 D2). Proves the service boots, serves health/info, and that
@@ -25,6 +28,7 @@ import java.time.ZoneOffset
  * released-but-never-booted defect class (config/CDI bugs a unit test cannot catch).
  */
 @QuarkusTest
+@QuarkusTestResource(PostgresTestResource::class)
 class ClearingSimulatorApiIT {
 
     private fun pacs008Xml(amount: String): String = Pacs008Builder().build(
@@ -87,6 +91,59 @@ class ClearingSimulatorApiIT {
             post("/api/v1/clearing/credit-transfers")
         } Then {
             statusCode(401)
+        }
+    }
+
+    @Test
+    @TestSecurity(user = "rail", roles = ["ROLE_API"])
+    fun `lost response replays exact original verdict and changed request conflicts`() {
+        val path = "/api/v1/clearing/receipted-credit-transfers/SEPA_INSTANT/lost-response-1"
+        val first = Given {
+            contentType("application/xml")
+            body(pacs008Xml("12.34"))
+        }
+            .When { post(path) }.Then { statusCode(200) }.extract().body().asString()
+
+        // Treat the original response as lost. The second HTTP call must recover exactly the
+        // first committed XML, not recalculate a new report timestamp or verdict.
+        val replay = Given {
+            contentType("application/xml")
+            body(pacs008Xml("12.34"))
+        }
+            .When { post(path) }.Then { statusCode(200) }.extract().body().asString()
+        assertThat(replay).isEqualTo(first)
+
+        Given {
+            contentType("application/xml")
+            body(pacs008Xml("99.99"))
+        }
+            .When { post(path) }.Then { statusCode(409) }
+
+        val otherRail = Given {
+            contentType("application/xml")
+            body(pacs008Xml("99.99"))
+        }
+            .When { post(path.replace("SEPA_INSTANT", "SWIFT")) }
+            .Then { statusCode(200) }.extract().body().asString()
+        assertThat(otherRail).isNotEqualTo(first)
+    }
+
+    @Test
+    @TestSecurity(user = "rail", roles = ["ROLE_API"])
+    fun `concurrent same identity has one byte identical response`() {
+        val path = "/api/v1/clearing/receipted-credit-transfers/SEPA_INSTANT/concurrent-1"
+        Executors.newFixedThreadPool(4).use { pool ->
+            val calls = (1..8).map {
+                Callable {
+                    Given {
+                        contentType("application/xml")
+                        body(pacs008Xml("12.34"))
+                    }
+                        .When { post(path) }.Then { statusCode(200) }.extract().body().asString()
+                }
+            }
+            val responses = pool.invokeAll(calls).map { it.get() }
+            assertThat(responses.toSet()).hasSize(1)
         }
     }
 }

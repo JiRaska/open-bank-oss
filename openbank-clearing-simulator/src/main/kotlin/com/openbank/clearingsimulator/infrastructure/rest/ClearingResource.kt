@@ -7,14 +7,18 @@ package com.openbank.clearingsimulator.infrastructure.rest
 import com.openbank.clearingsimulator.application.ClearingSimulatorService
 import com.openbank.clearingsimulator.application.dto.ReturnRequest
 import com.openbank.clearingsimulator.infrastructure.client.SepaPaymentClient
+import com.openbank.clearingsimulator.infrastructure.persistence.SubmissionReceiptStore
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
+import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
+import jakarta.ws.rs.ServiceUnavailableException
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import org.eclipse.microprofile.rest.client.inject.RestClient
@@ -36,6 +40,12 @@ class ClearingResource {
     @RestClient
     lateinit var sepaPaymentClient: SepaPaymentClient
 
+    @Inject
+    lateinit var submissionReceipts: SubmissionReceiptStore
+
+    @ConfigProperty(name = "openbank.clearing.receipts.enabled", defaultValue = "false")
+    var receiptsEnabled: Boolean = false
+
     /**
      * Submit a `pacs.008` credit transfer; receive the `pacs.002` status report. A well-formed
      * transfer settles (`ACSC`) unless its amount triggers a deterministic reject; a message that
@@ -50,6 +60,26 @@ class ClearingResource {
     @Operation(summary = "Submit a pacs.008; receive a pacs.002 status report")
     fun submitCreditTransfer(pacs008Xml: String): Response =
         Response.ok(simulator.clear(pacs008Xml).statusReportXml).build()
+
+    /**
+     * Additive durable contract for callers that can supply an immutable rail-scoped submission
+     * identity. A replay returns the exact committed pacs.002, including its original timestamp.
+     * The legacy endpoint is retained until each caller has migrated under its own contract.
+     */
+    @POST
+    @Path("/receipted-credit-transfers/{rail}/{submissionId}")
+    @Consumes(MediaType.APPLICATION_XML)
+    @Produces(MediaType.APPLICATION_XML)
+    @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
+    @Operation(summary = "Submit a pacs.008 with a durable rail-scoped receipt")
+    fun submitReceiptedCreditTransfer(
+        @PathParam("rail") rail: String,
+        @PathParam("submissionId") submissionId: String,
+        pacs008Xml: String,
+    ): Response {
+        if (!receiptsEnabled) throw ServiceUnavailableException("Receipted submission is not enabled")
+        return Response.ok(submissionReceipts.submit(rail, submissionId, pacs008Xml)).build()
+    }
 
     /**
      * Simulate a `pacs.004` payment return (R-transaction). Generates a pacs.004 XML from the

@@ -20,12 +20,14 @@ dependencies {
     implementation(libs.quarkus.rest.client.reactive.jackson)
     implementation(libs.quarkus.config.yaml)
     implementation(libs.quarkus.smallrye.openapi)
+    implementation(libs.quarkus.jdbc.postgresql)
+    implementation(libs.quarkus.flyway)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
     // The ISO 20022 message core (builders + reader + XSD validation). The simulator builds NO
     // messages of its own — it reuses the shared library so the wire format is identical to the
-    // rail's (ADR-0104). No database: the simulator is a stateless, deterministic counterparty.
+    // rail's (ADR-0104). The optional receipted submission contract owns a durable PostgreSQL store.
     implementation(project(":openbank-libs"))
     // iso20022 left openbank-libs-domain for its own module (ADR-0317 phase 1); the aggregator
     // above deliberately does not re-export it.
@@ -36,6 +38,9 @@ dependencies {
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.rest.assured.kotlin)
+    testImplementation(libs.testcontainers)
+    testImplementation(libs.testcontainers.junit)
+    testImplementation(libs.testcontainers.postgresql)
     // Provider-side verification of the pacs.008/pacs.002 contract rail services publish
     // (ADR-0063, issue #468). Git-pact (@PactFolder), matching ledger-service — no broker needed.
     testImplementation(libs.pact.provider)
