@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.90.2](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.90.1...customer-edge-v0.90.2) (2026-10-12)
+
+
+### Security
+
+* **customer-edge:** build upstream URL segments only from closed value types ([#12614](https://github.com/JiRaska/open-bank-oss/issues/12614)) ([183f69b](https://github.com/JiRaska/open-bank-oss/commit/183f69b64eddb40c69f9d41f42e701fb0d8b2777))
+
 ## [0.90.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.90.0...customer-edge-v0.90.1) (2026-10-09)
 
 
