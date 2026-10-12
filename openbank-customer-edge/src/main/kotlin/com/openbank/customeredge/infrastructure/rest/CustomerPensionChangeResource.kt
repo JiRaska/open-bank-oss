@@ -24,6 +24,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.util.UUID
+import java.util.regex.Pattern
 
 /**
  * The pension follow-up flows of `docs/ux/pension-client-flows.md` over pension-service API 1.2.0:
@@ -92,7 +93,11 @@ class CustomerPensionChangeResource(private val upstream: UpstreamClient, privat
         @QueryParam("strategyCode") strategyCode: String?,
         @QueryParam("lang") lang: String?,
     ): Response {
-        val code = strategyCode?.takeIf(STRATEGY::matches) ?: return invalid("strategyCode is missing or malformed")
+        // An explicit java.util.regex guard: the value is a bare token before it reaches the URL.
+        if (strategyCode == null || !STRATEGY.matcher(strategyCode).matches()) {
+            return invalid("strategyCode is missing or malformed")
+        }
+        val code: String = strategyCode
         return application(id) { applicationId ->
             upstream.get(withLang("${app(applicationId)}/warnings?strategyCode=${enc(code)}", lang, "&"), party())
         }
@@ -454,7 +459,7 @@ class CustomerPensionChangeResource(private val upstream: UpstreamClient, privat
         const val NOT_FOUND = 404
         const val CONFLICT = 409
         const val BAD_GATEWAY = 502
-        val STRATEGY = Regex("^[A-Z0-9_]{1,64}$")
+        val STRATEGY: Pattern = Pattern.compile("^[A-Z0-9_]{1,64}$")
 
         fun withLang(url: String, lang: String?, separator: String = "?"): String =
             PensionChangeInput.lang(lang)?.let { "$url${separator}lang=$it" } ?: url

@@ -192,5 +192,10 @@ internal object PensionChangeInput {
         requireNotNull(runCatching { LocalDate.parse(raw) }.getOrNull()) { "$field must be an ISO date" }
 
     /** `lang` query parameter: cs or en only. */
-    fun lang(raw: String?): String? = raw?.takeIf { it == "cs" || it == "en" }
+    /** Mapped to a literal, so no caller-supplied text ever reaches an upstream URL. */
+    fun lang(raw: String?): String? = when (raw) {
+        "cs" -> "cs"
+        "en" -> "en"
+        else -> null
+    }
 }
