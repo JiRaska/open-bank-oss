@@ -155,3 +155,7 @@ Edge vrací malé JSON chybové obálky tvaru `{"error":"…"}`, které sám gen
 Anonymní `GET /customer/v1/app-copy` vrací pouze `{version, messages}` ze zveřejněného komunikačního stylu pro klienty. Neobsahuje osobní údaje ani interní instrukce persony. Zveřejněné odpovědi lze ukládat do cache na 60 sekund. Chybějící nebo vyřazená publikace vrací verzi nula a prázdnou mapu, což výslovně ruší klientské přepisy.
 
 Adresa komunikační služby se dodává při běhu přes `COMMUNICATION_SERVICE_URL`. Chybějící konfigurace nebo nedostupná služba vrací 503; neplatný dokument vrací 502. Klient v obou případech zachová ověřené uložené nebo vestavěné texty a tímto volitelným požadavkem neblokuje spuštění. Volání používá identitu služby bez hlavičky klientské party.
+
+## Validace hodnot v URL upstream služeb
+
+Kód měny tvoří tři velká ASCII písmena; kód země dvě ASCII písmena se zachováním velikosti. Identifikátor uloženého příjemce přijímá 1–34 ASCII písmen nebo číslic bez kontroly kontrolního součtu, aby bylo možné odstranit i dříve uložené hodnoty. Edge sestaví přijaté hodnoty z vlastní abecedy před vytvořením URL upstream služby. Neplatné hodnoty vrací HTTP 400 a do URL upstream služby se nedostanou.
