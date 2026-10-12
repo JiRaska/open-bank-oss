@@ -2,7 +2,7 @@
 # Threat model — openbank-pension-fund-service
 
 - **Status:** integration (ADR-0334 slices S4/S8), sandbox only — pension-service machine caller
-- **Last reviewed:** 2026-10-10 (#12425 reporting read model and #12435 integration)
+- **Last reviewed:** 2026-10-11 (#12425 reporting read model, #12435 integration, #12442 conflict metric on the REST mappers)
 - **Owner:** pension-fund-service CODEOWNERS
 - **Related ADRs:** ADR-0030, ADR-0034, ADR-0315, ADR-0334
 
@@ -57,6 +57,10 @@ contact data.
    `compliance-read-any` lets the shared service-account reach it. Proven by `opa test` (must-ALLOW/must-DENY) and by `opa eval`
    on the materialised bundle, including the sabotage run with the exclusion removed (the shared
    account is then admitted by `operator-read-any`).
+5. The REST exception mappers (#12442 observability) now count optimistic-lock conflicts on the
+   unit holding (`optimisticLockConflict("unit_holding")`) before answering 409. The boundary
+   itself is unchanged: same status, same body, no new route or caller; the metric carries a
+   fixed aggregate label only, never a contract id or a request value.
 
 ## STRIDE analysis
 

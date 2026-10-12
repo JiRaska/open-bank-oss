@@ -141,3 +141,93 @@ alert above has no data. Usually a build without the job, or the scrape dropping
 1. `/q/metrics` on the management port of a pension pod: look for
    `openbank_workflow_last_success_age_seconds{workflow="pension-state-gauges"}`.
 2. If present there but not in Prometheus, check the PodMonitor for the `pension` namespace.
+
+## Pension fund
+
+Alerts of the `openbank-pension-fund-alerts` PrometheusRule
+(`openbank-infra/gitops/components/observability/prometheus-rules-pension-fund.yaml`, #12424) for
+`openbank-pension-fund-service` (namespace `pension-fund`).
+
+Dashboards: **OpenBank — Pension fund administration** (NAV pipeline and cutoff, AUM and flows per
+fund, orders, four-eyes approvals) and **OpenBank — Pension fund technical** (RED, spans, JVM, price
+feed, optimistic-lock conflicts, replays, scheduler liveness, logs).
+
+### How the fund signals behave on a fresh pod
+
+The NAV-age, pending-order, AUM, units and approval-queue gauges are published by the
+`pension-fund-state-gauges` job every minute, and only after its first snapshot. Until then they are
+**absent**, not zero, so nothing fires from a restart. A fund that has never published a NAV has no
+net-assets, NAV-per-unit or last-published series at all; its units outstanding (0) and pending
+orders are measured. The `fund` label is the fund's ISIN (public, bounded); no contract, order or
+NAV id is ever a label. Find the items behind a count with the API, never the metrics.
+
+Depositary reconciliation is not modelled by the service, so there is no reconciliation-break signal.
+Reconcile units outstanding and the last published net assets against the depositary statement out of
+band.
+
+### PensionFundNavNotPublishedByCutoff
+
+The latest published NAV of a fund is older than the cutoff: the NAV of business day T is due by
+12:00 UTC on the next business day (Tue-Sat: yesterday's; Sunday and Monday: Friday's). Orders of the
+fund cannot settle until a NAV is published.
+
+1. `GET /api/v1/funds/{fundId}/navs`: is a NAV for the day `CALCULATED` and waiting for its checker?
+   Then it is an approval problem: a second operator publishes it (`POST /api/v1/navs/{navId}/approve`)
+   or rejects it. The maker cannot.
+2. Nothing calculated: the calculation failed or was never run. Check the price feed
+   (`PensionFundPriceFeedFailing`, the "Market-price lookups by outcome" panel); positions can be
+   priced manually in the calculation request.
+3. Public holidays are not modelled: on the business day after one, the rule fires once. Silence it
+   for that fund until the next cutoff rather than editing the rule.
+
+### PensionFundNavCorrectionIssued
+
+A corrected NAV superseded a published one and re-priced every transaction settled at it (the
+"Correction re-pricing volume" panel shows how many). A NAV error affects participants who traded at
+the wrong price.
+
+1. Find the correction: `GET /api/v1/funds/{fundId}/navs` (the new record carries `correctsNavId`).
+2. Record the cause and the size of the error; decide with compliance whether participants and the
+   supervisor must be informed. The re-priced transactions carry `correctedFromNavId`.
+
+### PensionFundNavApprovalAging
+
+A calculated NAV has waited more than 4 hours for its four-eyes checker. Publish or reject it from a
+second operator identity; a stale CALCULATED NAV also blocks a new calculation for the same day.
+
+### PensionFundOrdersPendingBeyondSettlement
+
+An order of a fund has been PENDING for more than 4 days. Orders settle at the next NAV published
+after they were placed; one pending this long means no NAV has been published since (see the cutoff
+alert for the same fund) or the publication failed to settle it.
+
+1. Check the fund's latest NAV and its publication time against the order's `placedAt`
+   (`GET /api/v1/contracts/{contractId}/orders`).
+2. If NAVs were published after the order and it is still PENDING, treat it as a defect: capture the
+   order and NAV ids and open an issue; do not settle by hand.
+
+### PensionFundStrategyChangeApprovalAging
+
+A strategy change has waited more than 5 days for approval. The participant notice period runs from
+approval, so the earliest effective date slips by every day it waits. Approve or reject it from a
+second operator (`POST /api/v1/strategy-changes/{id}/approve` or `/reject`).
+
+### PensionFundPriceFeedFailing
+
+Every market-price lookup in the last hour threw: the feed is unreachable or broken. NAVs needing a
+feed price cannot be calculated. A lookup answered with no price (`outcome="missing"`) is a data gap
+for that instrument and day, not an outage, and does not fire this alert.
+
+1. Check the market-price adapter's configuration and the vendor endpoint (the shipped adapter is a
+   stub; a deployment binds its own).
+2. If the cutoff is at risk, calculate with manually supplied prices from an independent source and
+   record the source.
+
+### PensionFundStateGaugesAbsent
+
+Pension-fund pods are up but no `pension-fund-state-gauges` heartbeat exists, so the cutoff, order
+and approval alerts have no data.
+
+1. `/q/metrics` on the management port (8090) of a pension-fund pod: look for
+   `openbank_workflow_last_success_age_seconds{workflow="pension-fund-state-gauges"}`.
+2. If present there but not in Prometheus, check the PodMonitor for the `pension-fund` namespace.
