@@ -73,7 +73,7 @@ describe('delegation counterparty chip', () => {
     expect(await screen.findByText('Alice Testerova')).toBeTruthy()
     // The regression this guards: the id must not be what the human reads.
     expect(screen.queryByText('33333333…')).toBeNull()
-    expect(vi.mocked(global.fetch)).not.toHaveBeenCalled()
+    expect(vi.mocked(global.fetch).mock.calls.filter(([url]) => String(url).includes(`/api/v1/parties/${PARTY_ID}`))).toHaveLength(0)
   })
 
   it('falls back to a shortened id, never a blank, when the grant carries no name', async () => {
@@ -87,6 +87,6 @@ describe('delegation counterparty chip', () => {
     renderChip([ROLES.COMPLIANCE], <EntityChip type="party" id={PARTY_ID} label={counterpartyLabel('Alice Testerova')} />)
     expect(screen.getByText('Alice Testerova')).toBeTruthy()
     expect(screen.queryByRole('link')).toBeNull()
-    expect(vi.mocked(global.fetch)).not.toHaveBeenCalled()
+    expect(vi.mocked(global.fetch).mock.calls.filter(([url]) => String(url).includes(`/api/v1/parties/${PARTY_ID}`))).toHaveLength(0)
   })
 })

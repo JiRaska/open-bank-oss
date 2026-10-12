@@ -9,6 +9,7 @@ import com.openbank.customeredge.infrastructure.rest.CustomerEdgeResource
 import com.openbank.customeredge.infrastructure.rest.PaymentSessionStore
 import com.openbank.customeredge.infrastructure.rest.UpstreamClient
 import com.openbank.customeredge.infrastructure.rest.inMemoryPaymentSessionStore
+import io.mockk.Called
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
@@ -222,6 +223,23 @@ class CustomerEdgeResourceTest {
         verify(exactly = 1) {
             upstream.put("http://balance/api/v1/balances/$acct/CZK/low-balance-alert", caller.toString(), body)
         }
+    }
+
+    @Test
+    fun `low balance alert currency cannot change the upstream path for reads or writes`() {
+        val caller = UUID.randomUUID()
+        val acct = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get("http://account/api/v1/accounts/$acct", caller.toString()) } returns
+            accountJson(acct, caller)
+        val resource = resourceFor(upstream, caller)
+
+        for (currency in listOf("CZK/../EUR", "CZK?partyId=other", "%2f", "czk", "EU")) {
+            assertThat(resource.getLowBalanceAlert(acct, currency).status).isEqualTo(400)
+            assertThat(resource.setLowBalanceAlert(acct, currency, "{}").status).isEqualTo(400)
+        }
+        verify(exactly = 0) { upstream.get(match { it.contains("low-balance-alert") }, any()) }
+        verify(exactly = 0) { upstream.put(any(), any(), any()) }
     }
 
     @Test
@@ -1108,6 +1126,24 @@ class CustomerEdgeResourceTest {
         every { upstream.get(match { it.contains("/parties/$caller") }, any()) } returns Response.ok(
             """{"id":"$caller","legalName":"Jan Novák"}""",
         ).build()
+    }
+
+    @Test
+    fun `non-CZK domestic request is refused before debit authority reservation or SCA`() {
+        val caller = UUID.randomUUID()
+        val acct = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+
+        val response = paymentResourceFor(upstream, caller)
+            .createDomesticPayment(
+                domesticBody(acct).replace("CZK", "EUR"),
+                "key-currency",
+                UUID.randomUUID().toString(),
+            )
+
+        assertThat(response.status).isEqualTo(400)
+        assertThat(mapper.readTree(response.entity.toString()).get("code").asText()).isEqualTo("CURRENCY_NOT_ALLOWED")
+        verify { upstream wasNot Called }
     }
 
     @Test

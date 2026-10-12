@@ -39,7 +39,8 @@ class NotificationModelTest {
         // Keycloak has resetPasswordAllowed=false and no SMTP), so nothing could produce it either.
         // +1 for DELEGATION_FIRST_USE and +1 for the reminder-only recertification task = 23.
         // +5 for the #10281 multi-signature approval templates = 28.
-        assertThat(NotificationTemplate.values()).hasSize(29)
+        // +6 pension notices and +1 owner-configured low-balance alert = 35.
+        assertThat(NotificationTemplate.values()).hasSize(35)
         assertThat(NotificationTemplate.values()).contains(
             NotificationTemplate.ACCOUNT_OPENED,
             NotificationTemplate.OTP_CODE,
@@ -88,6 +89,9 @@ class NotificationModelTest {
                 NotificationTemplate.PAYMENT_RELEASE_FAILED,
             ),
         ).allSatisfy { assertThat(it.category).isEqualTo(NotificationCategory.PAYMENTS) }
+        // #12392: redirecting where pension money is paid is a takeover signal - never mutable.
+        assertThat(NotificationTemplate.PENSION_PAYOUT_ACCOUNT_CHANGED.category)
+            .isEqualTo(NotificationCategory.SECURITY)
     }
 
     @Test
@@ -189,6 +193,7 @@ class NotificationModelTest {
             NotificationTemplate.TRANSACTION_FAILED,
             NotificationTemplate.DELEGATION_FIRST_USE,
             NotificationTemplate.PAYMENT_RELEASE_FAILED,
+            NotificationTemplate.PENSION_PAYOUT_ACCOUNT_CHANGED,
         )
         assertThat(NotificationTemplate.SCA_APPROVAL.noDeviceFallbackChannel).isNull()
         assertThat(NotificationTemplate.OTP_CODE.noDeviceFallbackChannel).isNull()

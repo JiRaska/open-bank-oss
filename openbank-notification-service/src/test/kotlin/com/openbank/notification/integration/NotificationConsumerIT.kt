@@ -187,6 +187,35 @@ class NotificationConsumerIT {
     }
 
     @Test
+    fun `pension inbox copy keeps Czech catalog rendering alongside managed templates`() {
+        val partyId = UUID.randomUUID()
+        val template = NotificationTemplate.PENSION_PAYOUT_ACCOUNT_CHANGED
+        val language = com.openbank.notification.domain.model.NotificationLanguage.CS
+        val variables = mapOf(
+            "contractId" to "contract-fixture",
+            "accountLast4" to "1234",
+            "effectiveFrom" to "2026-11-01",
+        )
+        consumeAndAwait(
+            NotificationRequest(
+                partyId = partyId,
+                channel = NotificationChannel.INBOX,
+                template = template,
+                recipient = partyId.toString(),
+                variables = variables,
+                language = language,
+                deduplicationKey = UUID.randomUUID(),
+            ),
+        )
+
+        assertThat(countFor(partyId)).isEqualTo(1)
+        assertThat(statusFor(partyId)).isEqualTo("VISIBLE")
+        assertThat(bodyFor(partyId))
+            .isEqualTo(com.openbank.notification.domain.PensionCopy.render(template, variables, language).second)
+        assertThat(templateRevisionFor(partyId)).isNull()
+    }
+
+    @Test
     fun `inbox-only row and VISIBLE outcome commit together and replay is idempotent`() {
         val partyId = UUID.randomUUID()
         val request = NotificationRequest(

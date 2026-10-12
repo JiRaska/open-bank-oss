@@ -10,6 +10,7 @@ import com.sun.net.httpserver.HttpServer
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.net.InetSocketAddress
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 class UpstreamClientTest {
@@ -78,6 +79,36 @@ class UpstreamClientTest {
             assertThat(req.headers["authorization"]).isEqualTo("Bearer test-token")
             assertThat(req.headers["x-customer-party-id"]).isEqualTo("party-9")
             assertThat(req.headers["accept"]).isEqualTo("application/json")
+        }
+    }
+
+    @Test
+    fun `cold token acquisition shares bounded get deadline with the party request`() {
+        withServer(tokenDelayMs = 200, serviceDelayMs = 400) { client, baseUrl, requests ->
+            val started = System.nanoTime()
+            val response = client.get("$baseUrl/notifications", "party-9", 500)
+            val elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
+            assertThat(response.status).isEqualTo(502)
+            assertThat(elapsedMs).isLessThan(1_000)
+            assertThat(tokenHits.get()).isEqualTo(1)
+            assertThat(requests.any { it.path == "/notifications" }).isTrue()
+        }
+    }
+
+    @Test
+    fun `expired token refresh cannot restart bounded get deadline`() {
+        withServer(
+            tokenResponse = """{"access_token":"test-token","expires_in":0}""",
+            tokenDelayMs = 200,
+            serviceDelayMs = 400,
+        ) { client, baseUrl, _ ->
+            assertThat(client.get("$baseUrl/notifications", "party-9").status).isEqualTo(200)
+            val started = System.nanoTime()
+            val response = client.get("$baseUrl/notifications", "party-9", 500)
+            val elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
+            assertThat(response.status).isEqualTo(502)
+            assertThat(elapsedMs).isLessThan(1_000)
+            assertThat(tokenHits.get()).isEqualTo(2)
         }
     }
 
@@ -279,6 +310,8 @@ class UpstreamClientTest {
         docBytes: ByteArray? = null,
         docContentType: String = "application/json",
         responseHeaders: Map<String, String> = emptyMap(),
+        tokenDelayMs: Long = 0,
+        serviceDelayMs: Long = 0,
         block: (UpstreamClient, String, List<CapturedRequest>) -> Unit,
     ) {
         tokenHits.set(0)
@@ -286,6 +319,7 @@ class UpstreamClientTest {
         val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         server.createContext("/realms/openbank/protocol/openid-connect/token") { exchange ->
             tokenHits.incrementAndGet()
+            if (tokenDelayMs > 0) Thread.sleep(tokenDelayMs)
             respond(exchange, 200, "application/json", tokenResponse.toByteArray(Charsets.UTF_8))
         }
         if (docBytes != null) {
@@ -304,6 +338,7 @@ class UpstreamClientTest {
                     ),
                 )
             }
+            if (serviceDelayMs > 0) Thread.sleep(serviceDelayMs)
             responseHeaders.forEach { (name, value) -> exchange.responseHeaders.add(name, value) }
             respond(exchange, 200, "application/json", "{}".toByteArray(Charsets.UTF_8))
         }

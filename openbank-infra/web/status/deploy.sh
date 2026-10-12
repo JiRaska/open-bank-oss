@@ -22,5 +22,13 @@ aws s3 cp "$HERE/index.html" "s3://$BUCKET/index.html" \
   --content-type "text/html; charset=utf-8" \
   --cache-control "public, max-age=0, must-revalidate"
 
+aws s3 cp "$HERE/privacy.html" "s3://$BUCKET/privacy.html" \
+  --content-type "text/html; charset=utf-8" \
+  --cache-control "public, max-age=86400"
+
+aws s3 cp "$HERE/openapi.yaml" "s3://$BUCKET/openapi.yaml" \
+  --content-type "application/yaml; charset=utf-8" \
+  --cache-control "public, max-age=86400"
+
 aws cloudfront create-invalidation --distribution-id "$DIST" --paths "/*" >/dev/null
 echo "Deployed https://status.open-bank.tech/"

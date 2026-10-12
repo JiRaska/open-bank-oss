@@ -43,8 +43,11 @@ Image skládá `.github/workflows/Dockerfile.deploy` z fast-jaru sestaveného na
 | `AUTHZ_ENFORCE` | `false` | `@Authorize` enforce vs advisory |
 | `BUILD_TIME` / `GIT_COMMIT` | `unknown` | build metadata pro `/api/v1/info` |
 | `QUARKUS_LOG_LEVEL` | `INFO` | úroveň logu |
+| `openbank.pid.eudi.trusted-list.allowed-hosts` | nenastaveno (prázdný seznam) | HTTPS hosty povolené pro stažení podepsaného seznamu důvěry |
 
 Bezpečnostní hlavičky (CSP, HSTS, X-Frame-Options DENY, nosniff, Referrer-Policy, Permissions-Policy) jsou nastaveny globálně v `application.yaml`.
+
+Při nastavení `openbank.pid.eudi.trusted-list.url` uveďte jeho externí host v `openbank.pid.eudi.trusted-list.allowed-hosts`; samotná URL stahování nepovolí. `SafeHttpClient` kontroluje veřejné DNS adresy, připojuje se k prověřené adrese, ověřuje TLS certifikát vůči původnímu jménu, odmítá přesměrování a omezuje velikost odpovědi. Selhání stažení nebo ověření podpisu ponechá aktuální úložiště důvěry beze změny. Zdroj podepsaného seznamu vložený přímo do konfigurace síťové spojení nepoužívá.
 
 ## Health checky
 
