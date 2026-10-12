@@ -70,15 +70,18 @@ class PensionRevisionApprovalResource(
         val pensionService = client == "openbank-pension" &&
             username == "service-account-openbank-pension" &&
             "ROLE_API" in identity.roles
-        val humanApprover = client == "openbank-admin-ui" &&
+        val humanReader = client == "openbank-admin-ui" &&
             username.isNotBlank() &&
             !username.startsWith("service-account-") &&
             !username.startsWith("agent:") &&
+            "ROLE_API" !in identity.roles &&
             subject?.startsWith("agent:") != true &&
             scopeMapper.roles(token.getClaim<Any?>(scopeClaim), identity.roles).any {
-                it == CatalogRoles.PENSION_LEGAL_APPROVER || it == CatalogRoles.PENSION_PRODUCT_OWNER
+                it == CatalogRoles.PENSION_LEGAL_APPROVER ||
+                    it == CatalogRoles.PENSION_PRODUCT_OWNER ||
+                    it == CatalogRoles.PUBLISH
             }
-        if (subject.isNullOrBlank() || (!pensionService && !humanApprover)) {
+        if (subject.isNullOrBlank() || (!pensionService && !humanReader)) {
             throw CatalogForbiddenException("pension approval evidence reader identity is required")
         }
     }

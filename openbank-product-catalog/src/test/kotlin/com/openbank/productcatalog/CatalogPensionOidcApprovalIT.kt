@@ -55,7 +55,8 @@ class CatalogPensionOidcApprovalIT {
         given().auth().oauth2(unrelated).get("/api/v2/offerings").then().statusCode(200)
         given().auth().oauth2(unrelated).get(path).then().statusCode(403)
         val unmarked = serviceToken("unmarked-service")
-        assertThat(jwtPayload(unmarked).path("scope").asText().split(' ')).contains("catalog:read")
+        assertThat(jwtPayload(unmarked).path("scope").asText().split(' '))
+            .contains("catalog:read", "catalog:publish")
         assertThat(jwtPayload(unmarked).has("preferred_username")).isFalse()
         assertThat(jwtPayload(unmarked).path("realm_access").path("roles").map { it.asText() })
             .doesNotContain("ROLE_API")
@@ -66,6 +67,16 @@ class CatalogPensionOidcApprovalIT {
         given().auth().oauth2(pension).get(path).then().statusCode(404)
         val legal = humanToken("legal-reviewer", "openid profile pension:legal-approve")
         given().auth().oauth2(legal).get(path).then().statusCode(404)
+        val checker = humanToken("catalog-checker", "openid profile catalog:read catalog:publish")
+        assertThat(jwtPayload(checker).path("scope").asText().split(' '))
+            .contains("catalog:read", "catalog:publish")
+        given().auth().oauth2(checker).get(path).then().statusCode(404)
+        given().auth().oauth2(checker).contentType("application/json").header("If-Match", "\"0\"")
+            .body("""{"reason":"unauthorized approval attempt"}""")
+            .post("$path/LEGAL_COUNSEL").then().statusCode(403)
+        val readOnlyHuman = humanToken("catalog-checker", "openid profile catalog:read")
+        given().auth().oauth2(readOnlyHuman).get("/api/v2/offerings").then().statusCode(200)
+        given().auth().oauth2(readOnlyHuman).get(path).then().statusCode(403)
     }
 
     @Test

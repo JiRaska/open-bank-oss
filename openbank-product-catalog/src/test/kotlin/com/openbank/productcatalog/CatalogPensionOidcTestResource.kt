@@ -57,6 +57,7 @@ class CatalogPensionOidcTestResource : QuarkusTestResourceLifecycleManager {
         "roles" to mapOf(
             "realm" to listOf(
                 mapOf("name" to "ROLE_API"),
+                mapOf("name" to "ROLE_OPERATOR"),
                 mapOf("name" to "ROLE_PENSION_LEGAL_COUNSEL"),
                 mapOf("name" to "ROLE_PENSION_PRODUCT_OWNER"),
             ),
@@ -66,7 +67,7 @@ class CatalogPensionOidcTestResource : QuarkusTestResourceLifecycleManager {
             client("openbank-pension", secret, catalogRead = true),
             client("unrelated-service", secret, catalogRead = true),
             client("unmarked-service", secret, catalogRead = true).toMutableMap().apply {
-                put("defaultClientScopes", listOf("basic", "catalog:read"))
+                put("defaultClientScopes", listOf("basic", "catalog:read", "catalog:publish"))
             },
             adminClient(secret),
         ),
@@ -78,6 +79,7 @@ class CatalogPensionOidcTestResource : QuarkusTestResourceLifecycleManager {
             },
             humanUser("legal-reviewer", secret, "ROLE_PENSION_LEGAL_COUNSEL"),
             humanUser("product-reviewer", secret, "ROLE_PENSION_PRODUCT_OWNER"),
+            humanUser("catalog-checker", secret, "ROLE_OPERATOR"),
         ),
     )
 
@@ -131,7 +133,7 @@ class CatalogPensionOidcTestResource : QuarkusTestResourceLifecycleManager {
                 ),
             ),
         ),
-    ) + listOf("catalog:read", "pension:legal-approve", "pension:product-approve")
+    ) + listOf("catalog:read", "catalog:publish", "pension:legal-approve", "pension:product-approve")
         .map { mapOf("name" to it, "protocol" to "openid-connect") }
 
     override fun stop() {
@@ -175,7 +177,12 @@ class CatalogPensionOidcTestResource : QuarkusTestResourceLifecycleManager {
         "directAccessGrantsEnabled" to true,
         "serviceAccountsEnabled" to false,
         "defaultClientScopes" to listOf("basic", "profile", "roles"),
-        "optionalClientScopes" to listOf("pension:legal-approve", "pension:product-approve"),
+        "optionalClientScopes" to listOf(
+            "catalog:read",
+            "catalog:publish",
+            "pension:legal-approve",
+            "pension:product-approve",
+        ),
     )
 
     private fun humanUser(username: String, password: String, role: String) = mapOf(
