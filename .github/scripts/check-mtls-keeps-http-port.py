@@ -158,7 +158,7 @@ def pension_management_ready(root: str, doc: dict) -> bool:
                 for peer in rule.get("from", []):
                     namespace = peer.get("namespaceSelector", {})
                     if namespace.get("matchLabels", {}).get("kubernetes.io/metadata.name") == "admin-ui":
-                        if namespace != {"matchLabels": {"kubernetes.io/metadata.name": "admin-ui"}}:
+                        if peer != {"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "admin-ui"}}}:
                             return False
                 admin_rule = True
                 if ports != [{"protocol": "TCP", "port": 8443}]:
@@ -311,6 +311,8 @@ def self_test() -> int:
         unmatched_deployment["spec"]["selector"]["matchLabels"]["app.kubernetes.io/tier"] = "missing"
         unmatched_admin_namespace = deepcopy(policy)
         unmatched_admin_namespace["spec"]["ingress"][0]["from"][0]["namespaceSelector"]["matchLabels"]["environment"] = "missing"
+        unmatched_admin_pod = deepcopy(policy)
+        unmatched_admin_pod["spec"]["ingress"][0]["from"][0]["podSelector"] = {"matchLabels": {"app.kubernetes.io/name": "missing"}}
         checks.extend([
             ("pension HTTPS-only with separate management probes passes", result() == []),
             ("management disabled is rejected", len(result(app=no_management)) == 1),
@@ -328,6 +330,7 @@ def self_test() -> int:
             ("Service selector missing the pod is rejected", len(result(svc=unmatched_service)) == 1),
             ("Deployment selector missing the pod is rejected", len(result(dep=unmatched_deployment)) == 1),
             ("admin namespace selector with extra labels is rejected", len(result(net=unmatched_admin_namespace)) == 1),
+            ("admin peer with unmatched pod selector is rejected", len(result(net=unmatched_admin_pod)) == 1),
             ("missing NetworkPolicy is rejected", len(result(net={"kind": "NetworkPolicy", "metadata": {"name": "other"}})) == 1),
         ])
         result()
