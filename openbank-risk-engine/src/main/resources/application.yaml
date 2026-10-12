@@ -818,7 +818,7 @@ authz:
         permission:
           bearer-only:
             paths: /api/*
-            policy: permit
+            policy: authenticated
             auth-mechanism: bearer
     # ledger-service terminates a private-CA mTLS listener on 8443 with client auth REQUIRED, so
     # the ledger rest-client names its own TLS bucket. Local/test fixtures speak plain HTTP, so
