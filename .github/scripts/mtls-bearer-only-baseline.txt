@@ -7,7 +7,6 @@ openbank-consent-service
 openbank-domestic-payment
 openbank-lending-service
 openbank-party-service
-openbank-product-catalog
 openbank-risk-engine
 openbank-sca-service
 openbank-sdd-service
