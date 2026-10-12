@@ -12,6 +12,7 @@ import com.openbank.devops.domain.model.DoraMetric
 import com.openbank.devops.domain.model.FindingSeverity
 import com.openbank.devops.domain.model.RemediationKind
 import com.openbank.devops.infrastructure.config.DevOpsConfig
+import com.openbank.libs.security.EgressResolver
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
 import io.mockk.every
@@ -26,6 +27,7 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
+import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.time.Instant
 import java.util.Base64
@@ -67,7 +69,11 @@ class RemediationProposalAdapterTest {
         every { ConfigProvider.getConfig() } returns cfg
     }
 
-    private fun adapter() = RemediationProposalAdapter(config).also { it.objectMapper = ObjectMapper() }
+    private fun adapter() = RemediationProposalAdapter(config).also {
+        it.objectMapper = ObjectMapper()
+        it.allowedHosts = listOf("stub.test:${server.address.port};http;private")
+        it.resolver = EgressResolver { listOf(InetAddress.getLoopbackAddress()) }
+    }
 
     private val finding = DevOpsFinding(
         id = "6f1c0b5e-0000-4000-8000-000000000042",
@@ -85,7 +91,7 @@ class RemediationProposalAdapterTest {
 
     @BeforeEach
     fun setUp() {
-        server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server = HttpServer.create(InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0)
         server.createContext("/") { handle(it) }
         server.start()
         routes = mutableListOf(
@@ -95,7 +101,7 @@ class RemediationProposalAdapterTest {
             Triple("/pulls", 201, """{"html_url":"https://github.com/JiRaska/open-bank-oss/pull/99"}"""),
         )
         config = mockk()
-        every { config.githubApiUrl() } returns "http://127.0.0.1:${server.address.port}"
+        every { config.githubApiUrl() } returns "http://stub.test:${server.address.port}"
         every { config.githubOwner() } returns "JiRaska"
         every { config.githubRepo() } returns "open-bank-oss"
         every { config.githubProposalDir() } returns "docs/devops-proposals"
