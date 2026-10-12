@@ -551,6 +551,22 @@ gates:
       # 8 self-test cases, both directions, including prose-in-a-comment near-misses.
       python3 .github/scripts/check-untrusted-pg-extension.py --enforce
 
+  - id: tofu-image-pull-through
+    name: "a tofu-managed image ref is already the ECR pull-through path (else Kyverno makes it a perpetual plan diff)"
+    group: gitops
+    budget_seconds: 10
+    mode: enforced
+    min_subjects: 30   # 72 .tf files under openbank-infra on origin/main today
+    rationale: "Kyverno's ecr-pull-through-rewrite-cel rewrites origin image refs on Pods and (autogen) pod controllers at admission; a tofu-owned controller writing the origin ref shows an in-place update on every plan and is rewritten back on every apply (kubernetes_cron_job_v1.arc_reaper did). Writing the pull-through path makes the policy a no-op."
+    review_after: "2027-04-10"
+    selftest: python3 .github/scripts/check-tofu-image-pull-through.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-tofu-image-pull-through.py"]
+    run: |
+      # Falsified both ways: 4 findings / exit 1 on origin/main before the fix (arc_reaper's
+      # alpine + three unmarked ARC helm values), 0 / exit 0 after. 8 self-test cases.
+      python3 .github/scripts/check-tofu-image-pull-through.py --enforce
+
   - id: eso-crd-api-version
     name: "an external-secrets.io v1beta1/v1alpha1 manifest cannot coexist with an ESO chart >= 0.17.0"
     group: gitops

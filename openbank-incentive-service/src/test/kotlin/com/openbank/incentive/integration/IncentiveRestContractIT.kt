@@ -5,6 +5,7 @@ import com.openbank.incentive.infrastructure.outbox.IncentiveOutboxDispatcher
 import com.openbank.incentive.infrastructure.persistence.OutboxEntities
 import com.openbank.incentive.it.IncentivePostgresTestResource
 import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
+import com.openbank.libs.persistence.outbox.SentOutboxRetention
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
@@ -470,6 +471,37 @@ class IncentiveRestContractIT {
         assertThat(count("select count(*) from incentive_outbox where status = 'SENT'")).isEqualTo(eventCount)
         onVertxContext { dispatcher.dispatchForTest() }
         assertThat(connector.sink<String>("incentive-events-out").received()).hasSize(eventCount.toInt())
+
+        // A real attributed reservation generated these audit and outbox rows in one transaction.
+        // Simulate the delivery age, then prove retention removes only delivery metadata: the
+        // transition evidence and current business facts remain queryable by reservation id.
+        execute(
+            """update incentive_outbox set published_at = now() - interval '8 days'
+                where aggregate_id = '$attributedId' and status = 'SENT'
+            """.trimIndent(),
+        )
+        val retention: SentOutboxRetention = outbox
+        assertThat(onVertxContext { retention.purgeSent(Duration.ofDays(7), 100, Instant.now()) })
+            .isGreaterThanOrEqualTo(2)
+        assertThat(count("select count(*) from incentive_outbox where aggregate_id = '$attributedId'"))
+            .isZero()
+        assertThat(
+            count(
+                """select count(*) from incentive_audit_event where aggregate_id = '$attributedId'
+                    and event_type in ('incentive.reservation.created.v2', 'incentive.reservation.committed.v2')
+                """.trimIndent(),
+            ),
+        ).isEqualTo(2)
+        assertThat(string("select status from promo_reservation where id = '$attributedId'"))
+            .isEqualTo("COMMITTED")
+        assertThat(string("select offer_id::text from promo_reservation where id = '$attributedId'"))
+            .isEqualTo(offerId)
+        assertThat(string("select attribution_ref::text from promo_reservation where id = '$attributedId'"))
+            .isEqualTo(attributionRef.toString())
+        assertThat(string("select party_ref from promo_reservation where id = '$attributedId'"))
+            .isEqualTo(customerParty.toString())
+        assertThat(string("select product_ref from promo_reservation where id = '$attributedId'"))
+            .isEqualTo("current-account")
 
         val raceOfferId = Given {
             contentType("application/json")

@@ -65,3 +65,18 @@ the other is the failure this section closes.
 The residual risk this document does **not** cover is the pepper's own lifecycle: rotating it
 invalidates every stored digest, and no rotation procedure exists yet. That is a real gap, stated
 here rather than omitted.
+
+## Change log
+
+- **2026-10-03** — **`incentive_outbox` SENT rows are purged after 7 days** (ADR-0329, #11902). The table was
+  exempt from fleet outbox retention pending one question: are its rows audit evidence? They are not. The
+  repudiation control above ("every transition writes an evidence row") is `incentive_audit_event`, which carries
+  the actor and is written in the same transaction; the outbox row carries no actor. Current reservation business
+  facts (offer, attribution, party, product, status) remain in `promo_reservation`. The generated outbox `eventId` is
+  not reconstructible after purge; `correlationId` equals the retained aggregate id. Nothing but the dispatcher reads
+  the outbox. Delivered
+  rows older than `openbank.outbox.retention.sent-days` (default 7, measured on `published_at`) are deleted nightly;
+  undelivered and DEAD rows, and the audit trail, are never touched. **STRIDE-R:** unchanged — the evidence row is
+  untouched (asserted with the business fields by `IncentiveRestContractIT`). **STRIDE-I:** shrinks the window in which
+  a database read
+  exposes past reservation payloads (party-linked references). No new endpoint, caller or privilege.
