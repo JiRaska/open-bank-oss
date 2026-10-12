@@ -74,6 +74,8 @@ instruction, but the irreversible debit lives downstream.
 
 ## 6. Change log
 
+- **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `sdd_outbox` kept every SENT row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; as a kernel (ADR-0327) repository since #11874 it is covered with no change of its own. PENDING, FAILED, DISPATCHING and DEAD rows are never touched. Information disclosure: shrinks the window in which a database read (replica, backup, operator query) exposes past event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now comes from the broker or audit-service, not this table.
+
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
   #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
   `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
@@ -145,3 +147,43 @@ instruction, but the irreversible debit lives downstream.
   `SddOutboxAtomicityIT`'s same-`xmin` proof still applies), and the publish bulkhead widens from
   1 to `OutboxDispatch.SEND_CONCURRENCY` (D), bounded per batch. Rollback: revert the commit; the
   additive column and indexes are inert under the v1 repository.
+
+## 2026-10-09 — Scoped mandate initiator: pension-service (ADR-0335 D6)
+
+- **Elevation of privilege / Spoofing:** `service-account-openbank-pension` may `sdd.create` and
+  `sdd.delete`, and nothing else; OPA's `service-scoped-payment-initiator` reads
+  `rules.yaml: scoped_payment_initiators`. On top of that, `ScopedMandateService` applies three
+  checks:
+  - pension may register only mandates whose creditor identifier is its configured SEPA
+    creditor identifier (`openbank.sdd.scoped-initiators.pension.creditor-identifier`). An
+    unset value permits nothing;
+  - pension must state the subject `partyId`. account-service's ownership projection, called as
+    `service-account-openbank-sdd`, must confirm that the debtor IBAN is owned and active by
+    that party, and that it is the very `accountId` being mandated;
+  - pension may cancel only mandates whose creditor is its own.
+
+  So pension can neither mandate a collection from another party's account, nor touch another
+  creditor's mandates. Each refusal is a 403 raised before anything is persisted
+  (`ScopedMandateServiceTest`).
+- **Denial of service:** registration now depends on account-service for this one caller. An
+  unreachable account-service fails the request. It never registers.
+- **New egress:** sdd to account-service (`ACCOUNT_SERVICE_URL`; the accounts NetworkPolicy was
+  regenerated).
+
+### Declared mandate initiators
+
+The pension service account receives its scoped mandate capability; the declared edge
+service account and authenticated human operators retain their existing general capability.
+An undeclared service account, anonymous principal or ordinary customer is denied before
+ownership checks, mandate listing or mutation. Operator roles do not elevate undeclared
+machine identities.
+
+### Provider TLS build and rollout
+
+The production build requires client certificates for an HTTPS listener when its server
+key material is configured. This property is fixed at build time; setting only a runtime
+environment variable cannot upgrade an image built without it. Preserve the HTTP listener
+during rollout. First publish a compatible signed provider image, then configure the
+private-CA listener and certificate rotation, and finally switch pension callers to HTTPS.
+OIDC and policy checks continue to authorize business operations independently of TLS trust.
+Roll back caller URLs before removing the provider listener or reverting its image.

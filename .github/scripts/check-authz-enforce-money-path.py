@@ -57,8 +57,6 @@ COMPONENTS = pathlib.Path("openbank-infra/gitops/components")
 # living only here would drift from the file a deployer actually reads.
 ADVISORY_ALLOWLIST = {
     "openbank-card-issuance-service": "2026-10-05",
-    "openbank-card-processing-service": "2026-10-05",
-    "openbank-standing-order-service": "2026-10-05",
 }
 
 ISSUE_REF = "#8470"
@@ -191,7 +189,7 @@ def self_test() -> int:
         root = pathlib.Path(td)
         (root / RULES.parent).mkdir(parents=True)
         (root / RULES).write_text("money_path_services:\n  - openbank-ok-service\n  - openbank-open-service\n"
-                                  "  - openbank-standing-order-service\n")
+                                  "  - openbank-card-issuance-service\n")
         (root / COMPONENTS / "x").mkdir(parents=True)
 
         def svc(name, app=None):
@@ -217,8 +215,8 @@ def self_test() -> int:
         svc("openbank-open-service", app='authz:\n  enforce: "${AUTHZ_ENFORCE:false}"\n')
         deploy("openbank-open-service")
         # Allowlisted advisory: honoured only while the manifest repeats the issue and the date.
-        svc("openbank-standing-order-service", app="authz:\n  enforce: true\n")
-        deploy("openbank-standing-order-service", "false",
+        svc("openbank-card-issuance-service", app="authz:\n  enforce: true\n")
+        deploy("openbank-card-issuance-service", "false",
                raw_extra="# Advisory while decision logs accumulate (#8470, flip target 2026-10-05).\n")
 
         violations, checked, missing = run(root)
@@ -228,10 +226,10 @@ def self_test() -> int:
 
         # The same allowlisted service WITHOUT the justification in its manifest must flag —
         # otherwise the allowlist quietly becomes a permanent waiver.
-        deploy("openbank-standing-order-service", "false")
+        deploy("openbank-card-issuance-service", "false")
         violations, _, _ = run(root)
         case("allowlist without in-file justification flags",
-             sorted(v[0] for v in violations), ["openbank-open-service", "openbank-standing-order-service"])
+             sorted(v[0] for v in violations), ["openbank-card-issuance-service", "openbank-open-service"])
 
         # A money-path service with NO workload at all is reported missing, never skipped.
         (root / COMPONENTS / "x" / "openbank-ok-service.yaml").unlink()
@@ -249,7 +247,7 @@ def self_test() -> int:
         root = pathlib.Path(td)
         (root / RULES.parent).mkdir(parents=True)
         (root / RULES).write_text(
-            "money_path_services:\n  - openbank-standing-order-service\n  - openbank-sanctions-service\n")
+            "money_path_services:\n  - openbank-card-issuance-service\n  - openbank-sanctions-service\n")
         (root / COMPONENTS / "x").mkdir(parents=True)
 
         def workload(name: str, comment: str = "") -> str:
@@ -258,7 +256,7 @@ def self_test() -> int:
                     '          env:\n          - name: AUTHZ_ENFORCE\n            value: "false"\n')
 
         (root / COMPONENTS / "x" / "shared-manifest.yaml").write_text(
-            workload("openbank-standing-order-service",
+            workload("openbank-card-issuance-service",
                      "# Advisory while decision logs accumulate (#8470, flip target 2026-10-05).\n")
             + "---\n" + workload("openbank-sanctions-service"))
         violations, _, _ = run(root)
@@ -266,7 +264,7 @@ def self_test() -> int:
         case("a sibling's justification in the same FILE does not cover an unjustified workload",
              flagged, ["openbank-sanctions-service"])
         case("the justified workload in that same file still passes",
-             "openbank-standing-order-service" not in flagged, True)
+             "openbank-card-issuance-service" not in flagged, True)
 
     if fails:
         for f in fails:

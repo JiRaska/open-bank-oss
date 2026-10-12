@@ -2858,6 +2858,14 @@ class CustomerEdgeResource(
         // (and weaker) question than the one this route has to ask.
         val amount = extractAmountField(objectMapper, body) ?: return badRequest("Missing amount")
         val currency = extractTextField(objectMapper, body, "currency") ?: "CZK"
+        // Refuse an unsupported rail before debit authority, a delegated spend reservation, or SCA
+        // consumes a one-use challenge. The domestic service enforces the same rule for direct callers.
+        if (currency.trim().uppercase() != "CZK") {
+            return Response.status(400)
+                .entity("""{"code":"CURRENCY_NOT_ALLOWED","error":"Domestic payments accept CZK only"}""")
+                .type(MediaType.APPLICATION_JSON)
+                .build()
+        }
         // Owner OR delegate (ADR-0232 D3/D5). `resolveDebitAuthority` returns the account JSON, the
         // party whose money is moving, and — when this is a delegated debit — the grant that
         // permitted it, or an audited refusal.

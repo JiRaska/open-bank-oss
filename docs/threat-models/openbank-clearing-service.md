@@ -87,6 +87,8 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `clearing_outbox` kept every SENT row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; as a kernel (ADR-0327) repository it is covered with no change of its own. PENDING, FAILED, DISPATCHING and DEAD rows are never touched. Information disclosure: shrinks the window in which a database read (replica, backup, operator query) exposes past event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now comes from the broker or audit-service, not this table.
+
 - **2026-10-03** — **A clearing batch is per (rail, currency) (#11974).** The cycle previously
   summed every pending item into one batch labelled with the first item's currency, so a cycle
   holding EUR and CZK items would have posted their arithmetic sum to one currency's settlement GL
