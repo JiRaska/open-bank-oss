@@ -38,6 +38,7 @@ jobs:
         run: |
           python3 .github/scripts/check-stuck-service-build.py --self-test
           python3 .github/scripts/check-superseded-pr-runs.py --self-test
+          python3 .github/scripts/test-superseded-run-live-guard.py
       - name: Force-cancel only superseded queued PR runs
         env:
           GH_TOKEN: ${{ github.token }}
@@ -66,6 +67,15 @@ jobs:
             live_sha=$(jq -r '.head.sha' <<<"$live")
             if [ "$live_state" = open ] && [ "$live_sha" = "$stale_sha" ]; then
               echo "retaining run ${run_id}: PR #${pr_number} now points at ${stale_sha}"
+              continue
+            fi
+            # A queued snapshot can start while the PR is being checked. Retain any
+            # run no longer queued; API errors abort rather than permit cancellation.
+            live_run=$(gh api "repos/${REPO}/actions/runs/${run_id}")
+            if ! jq -e --arg sha "$stale_sha" --argjson id "$run_id" \
+              '.id == $id and .status == "queued" and .head_sha == $sha and .event == "pull_request"' \
+              <<<"$live_run" >/dev/null; then
+              echo "retaining run ${run_id}: live run is no longer the queued candidate"
               continue
             fi
             if [ "$DRY_RUN" = true ]; then
