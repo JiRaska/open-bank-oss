@@ -171,3 +171,7 @@ Adresa komunikační služby se dodává při běhu přes `COMMUNICATION_SERVICE
 Penzijní změny s parametrem `Idempotency-Key` vyžadují neprázdný klíč volajícího: chybějící klíč odmítají a nenahrazují jej novým. Routy chráněné SCA vyžadují challenge header uvedený v OpenAPI. Podpis ukončení, potvrzení výplaty a změna výplatního účtu předávají challenge bez spotřebování v edge; upstream ověřuje podepsané podklady. Pozastavení/obnovení a odstoupení spotřebují challenge v edge (jmenný prostor `pension.<operace>:`).
 
 Jde o implementované routy, nikoli důkaz nasazení upstream služeb. Předpoklady rolloutů pension-service a pension-fund-service i zbývající stuby sleduje #12350 a příslušné PR; ilustrativní projekce není zárukou investičního výnosu.
+
+## Validace hodnot v URL upstream služeb
+
+Kód měny tvoří tři velká ASCII písmena; kód země dvě ASCII písmena se zachováním velikosti. Identifikátor uloženého příjemce přijímá 1–34 ASCII písmen nebo číslic bez kontroly kontrolního součtu, aby bylo možné odstranit i dříve uložené hodnoty. Edge sestaví přijaté hodnoty z vlastní abecedy před vytvořením URL upstream služby. Neplatné hodnoty vrací HTTP 400 a do URL upstream služby se nedostanou.
