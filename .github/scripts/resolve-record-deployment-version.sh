@@ -382,12 +382,89 @@ self_test() {
   local BLOBS_OK='{"truncated":false,"tree":[{"path":"src/main/A.kt","type":"blob","sha":"aaa"},{"path":"src","type":"tree","sha":"ttt"}]}'
   local BLOBS_TRUNC='{"truncated":true,"tree":[{"path":"src/main/A.kt","type":"blob","sha":"aaa"}]}'
 
-  local got
+  local got rc
   got="$(printf '%s' "$BLOBS_OK" | tree_blobs)"; check "blobs are listed, trees skipped" 0 $?
-  [ "$got" = "$(printf 'src/main/A.kt\taaa')" ]; check "the blob listing is path TAB sha" 0 $?
+  rc=0; [ "$got" = "$(printf 'src/main/A.kt\taaa')" ] || rc=1
+  check "the blob listing is path TAB sha" 0 "$rc"
   printf '%s' "$BLOBS_TRUNC" | tree_blobs >/dev/null; check "a TRUNCATED blob listing is refused" 1 $?
 
   rm -f "$A" "$B"
+
+  # Exercise main() end to end with a fake broker and GitHub tree API, entirely offline.
+  # The first successor changes release metadata only; the second changes a shared Pact
+  # build input while leaving the service subtree the same. The old resolver recorded both.
+  local fixture script_dir original_dir base release shared result fixture_rc=0
+  fixture="$(mktemp -d)" || return 1
+  original_dir="$(pwd)"
+  script_dir="$(pwd)/.github/scripts"
+  {
+    cd "$fixture" || return 1
+    git init -q
+    git config user.name 'Pact resolver fixture'
+    git config user.email 'fixture@example.invalid'
+    mkdir -p .github/scripts openbank-demo-service/src/main openbank-libs-testing
+    cp "$script_dir/pact-version-tree-equivalent.sh" .github/scripts/
+    printf 'plugins {}\n' >openbank-demo-service/build.gradle.kts
+    printf 'class Demo\n' >openbank-demo-service/src/main/Demo.kt
+    printf 'test dependency v1\n' >openbank-libs-testing/build.gradle.kts
+    printf '{"packages":{"openbank-demo-service":{"exclude-paths":["openbank-demo-service/src/test"]}}}\n' >release-please-config.json
+    git add .github/scripts/pact-version-tree-equivalent.sh openbank-demo-service/build.gradle.kts \
+      openbank-demo-service/src/main/Demo.kt openbank-libs-testing/build.gradle.kts release-please-config.json
+    git -c commit.gpgsign=false commit -qm base
+    base="$(git rev-parse HEAD)"
+    printf '1.0.1\n' >openbank-demo-service/version.txt
+    printf 'release only\n' >openbank-demo-service/CHANGELOG.md
+    git add openbank-demo-service/version.txt openbank-demo-service/CHANGELOG.md
+    git -c commit.gpgsign=false commit -qm release
+    release="$(git rev-parse HEAD)"
+    printf 'test dependency v2\n' >openbank-libs-testing/build.gradle.kts
+    git add openbank-libs-testing/build.gradle.kts
+    git -c commit.gpgsign=false commit -qm shared
+    shared="$(git rev-parse HEAD)"
+
+    # main() uses curl for broker presence/latest and gh for tree objects. Neither stub
+    # reaches the network or needs credentials; all object ids come from this fixture.
+    curl() {
+      case "${*: -1}" in
+        */versions/*) printf '404' ;;
+        */latest-version) printf '{"number":"%s"}\n' "$FAKE_PUBLISHED" ;;
+        *) return 1 ;;
+      esac
+    }
+    gh() {
+      [ "$1" = api ] || return 1
+      local object="${2##*/}" recursive=''
+      object="${object%%\?*}"
+      [ "$(git cat-file -t "$object" 2>/dev/null)" = tree ] && recursive='-r'
+      git ls-tree $recursive "$object" | python3 -c '
+import json,sys
+entries=[]
+for line in sys.stdin:
+    meta,path=line.rstrip("\n").split("\t",1)
+    _,kind,sha=meta.split()
+    entries.append({"path":path,"type":kind,"sha":sha})
+json.dump({"truncated":False,"tree":entries},sys.stdout)
+'
+    }
+    local PACT_BROKER_URL='https://fixture.invalid' PACT_BROKER_USERNAME=fixture \
+      PACT_BROKER_PASSWORD=fixture GH_REPO=fixture/repo FAKE_PUBLISHED
+    FAKE_PUBLISHED="$release"
+    result="$(main openbank-demo-service "$base" 2>/dev/null)"
+    [ "$result" = "equivalent:$release" ] || { printf 'fixture release verdict: %s\n' "$result" >&2; fixture_rc=1; }
+    FAKE_PUBLISHED="$shared"
+    result="$(main openbank-demo-service "$base" 2>/dev/null)"
+    [ "$result" = none ] || { printf 'fixture shared verdict: %s\n' "$result" >&2; fixture_rc=1; }
+    # Removing the build file only from the CURRENT checkout must not downgrade the
+    # historical Gradle service to the weaker service-subtree-only proof.
+    rm openbank-demo-service/build.gradle.kts
+    result="$(main openbank-demo-service "$base" 2>/dev/null)"
+    [ "$result" = none ] || { printf 'fixture removed-module verdict: %s\n' "$result" >&2; fixture_rc=1; }
+  }
+  cd "$original_dir" || return 1
+  unset -f curl gh
+  rm -rf -- "$fixture"
+  check 'offline broker: release-only records; shared input refuses even after module removal' 0 "$fixture_rc"
+
   # NOT TESTABLE HERE, and deliberately so: that this scope is pacticipant-only is a property of
   # main()'s ORDER, not of the comparison — the `/pacticipants/<svc>/latest-version` call above it
   # exits `none` for a service with no published version, so a non-pacticipant never reaches the
@@ -428,6 +505,41 @@ except Exception: print("")' <<<"$latest_json" 2>/dev/null)"
     *) echo "none"; return 0 ;;
   esac
   [ "$published" != "$deployed" ] || { echo "none"; return 0; }
+
+  # A missing historical commit cannot establish source identity. Do this before the
+  # Gradle-module test: testing only today's checkout could classify a removed service
+  # as non-Gradle and accidentally skip the stronger proof.
+  if ! git cat-file -e "${published}^{commit}" 2>/dev/null \
+    || ! git cat-file -e "${deployed}^{commit}" 2>/dev/null; then
+    echo "none"
+    return 0
+  fi
+
+  # The broker version carries a Pact/verification verdict, so equality of this service's
+  # subtree alone is insufficient. Shared libraries, build logic and Pact publication inputs
+  # can change the verdict while the service subtree stays byte-identical (#9898, #12228).
+  # The comparator requires an ancestor first; recording may legitimately look forward to a
+  # later published version, so orient the two commits before asking the same contract-input
+  # question as can-i-deploy. An unknown/nonlinear history or any changed input refuses.
+  if git cat-file -e "${published}:${svc}/build.gradle.kts" 2>/dev/null \
+    || git cat-file -e "${deployed}:${svc}/build.gradle.kts" 2>/dev/null \
+    || [ -f "${svc}/build.gradle.kts" ]; then
+    local older newer proof
+    if git merge-base --is-ancestor "$published" "$deployed"; then
+      older="$published"; newer="$deployed"
+    elif git merge-base --is-ancestor "$deployed" "$published"; then
+      older="$deployed"; newer="$published"
+    else
+      echo "::warning::${svc}: published and deployed commits have no proven ancestry; refusing an equivalent deployment record" >&2
+      echo "none"
+      return 0
+    fi
+    proof="$(bash .github/scripts/pact-version-tree-equivalent.sh --contract-inputs "$svc" "$older" "$newer")" || {
+      echo "::warning::${svc}: Pact inputs are not proven equivalent (${proof}); refusing an equivalent deployment record" >&2
+      echo "none"
+      return 0
+    }
+  fi
 
   # Tree objects, not the compare API (#4673): equal subtree shas prove the directory is
   # byte-identical, and nothing here is subject to a 300-entry cap.
