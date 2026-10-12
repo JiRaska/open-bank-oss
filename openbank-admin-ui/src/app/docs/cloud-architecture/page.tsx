@@ -3,10 +3,13 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 'use client'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Cloud, Info, CheckCircle2, CircleDashed, Circle, X, RefreshCw, Wifi, WifiOff, Minus } from 'lucide-react'
 import type { InfraStatusResult } from '@/lib/infra/probes'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { eksVersion, platformVersions } from '@/lib/platform-versions'
+import { LIVE_UNAVAILABLE_NOTE, nodesText, versionText, type Inventory, type PlatformView } from '@/lib/platform-view'
+import { usePlatformView } from '@/lib/use-platform-view'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 
 // Bilingual string tuple: [Czech, English] — spread into t(cs, en) at render.
@@ -25,11 +28,12 @@ type Bilingual = [string, string]
 //   planned = ADR-0027 target, not yet deployed
 // ---------------------------------------------------------------------------
 
-type Status = 'live' | 'partial' | 'planned'
+type Status = 'live' | 'partial' | 'planned' | 'declared'
 
 const STATUS_META: Record<Status, { label: Bilingual; color: string; bg: string; border: string; Icon: React.ElementType }> = {
   live:    { label: ['Živé (běží dnes)', 'Live (running today)'],            color: 'var(--success-text)', bg: 'var(--success-bg)', border: 'var(--success-border)', Icon: CheckCircle2 },
   partial: { label: ['Částečné (nasazeno, neúplné)', 'Partial (deployed, incomplete)'], color: 'var(--warning-text)', bg: 'var(--warning-bg)', border: 'var(--warning-border)', Icon: CircleDashed },
+  declared: { label: ['Deklarováno v IaC/GitOps (běh neověřen)', 'Declared in IaC/GitOps (running not verified)'], color: 'var(--text-secondary)', bg: 'var(--surface-2)', border: 'var(--border-default)', Icon: CircleDashed },
   planned: { label: ['Plánováno (ADR-0027)', 'Planned (ADR-0027)'],          color: 'var(--text-primary)', bg: 'var(--surface-3)', border: 'var(--border-strong)', Icon: Circle },
 }
 
@@ -56,33 +60,57 @@ const PROBE_META = {
 
 type Node = { id: string; name: Bilingual; status: Status; desc: Bilingual }
 
+const podsText = (view: PlatformView | null, ns: string, cs: boolean): string => {
+  const n = view?.podsRunningByNamespace?.[ns]
+  if (n === undefined) return cs ? `Počet podů v ns ${ns}: neznámý (Prometheus nedostupný).` : `Pod count in ns ${ns}: unknown (Prometheus unavailable).`
+  return cs ? `Živě: ${n} podů Running v ns ${ns}.` : `Live: ${n} pods Running in ns ${ns}.`
+}
+
+const dsText = (view: PlatformView | null, key: string, cs: boolean): string => {
+  const n = view?.daemonSetsReady?.[key]
+  if (n === undefined) return cs ? 'Počet připravených podů: neznámý (Prometheus nedostupný).' : 'Ready pods: unknown (Prometheus unavailable).'
+  return cs ? `Živě: ${n} připravených podů.` : `Live: ${n} ready pods.`
+}
+
 const node = (id: string, name: Bilingual, status: Status, desc: Bilingual): Node => ({ id, name, status, desc })
 
-// --- Edge / internet --------------------------------------------------------
-const EDGE: Node[] = [
-  node('route53', ['Route 53', 'Route 53'], 'planned', ['Autoritativní DNS pro veřejné bankovní + admin domény. Edge vrstva ADR-0027; zatím neprovisionováno.', 'Authoritative DNS for the public banking + admin domains. ADR-0027 edge tier; not provisioned yet.']),
-  node('cloudfront', ['CloudFront + WAF + Shield', 'CloudFront + WAF + Shield'], 'planned', ['CDN, pravidla OWASP WAF a ochrana proti DDoS (Shield) na okraji sítě. Pouze ADR-0027 — neprovisionováno.', 'CDN, OWASP WAF rules and DDoS (Shield) at the edge. ADR-0027 only — not provisioned.']),
-  node('alb', ['ALB (AWS LB Controller)', 'ALB (AWS LB Controller)'], 'planned', ['Veřejný L7 vstup k in-cluster ingressu. AWS Load Balancer Controller zatím není nainstalován; dnes se cluster dosahuje interně.', 'Public L7 entry to the in-cluster ingress. The AWS Load Balancer Controller is not installed yet; today the cluster is reached internally.']),
-  node('acm', ['ACM (TLS certifikáty)', 'ACM (TLS certs)'], 'planned', ['Spravované TLS certifikáty pro edge / ALB. Pouze ADR-0027.', 'Managed TLS certificates for the edge / ALB. ADR-0027 only.']),
+const iacNode = (inv: Inventory | null, key: keyof Inventory['iac'], id: string, name: string, what: string): Node[] => {
+  const envs = inv?.iac[key] ?? []
+  if (envs.length === 0) return []   // not defined/instantiated in IaC: no claim is made
+  return [node(id, [name, name], 'declared', [`${what} Definováno v IaC, instancováno v: ${envs.join(', ')}. Stav v AWS se zde neověřuje.`, `${what} Defined in IaC, instantiated in: ${envs.join(', ')}. Applied state in AWS is not verified here.`])]
+}
+
+// --- Edge / internet: derived from openbank-infra/aws (platform-versions.json inventory) -----------------
+const edgeNodes = (inv: Inventory | null): Node[] => [
+  ...iacNode(inv, 'route53', 'route53', 'Route 53', 'DNS zóna a záznamy.'),
+  ...iacNode(inv, 'cloudfront', 'cloudfront', 'CloudFront', 'CDN distribuce.'),
+  ...iacNode(inv, 'alb', 'alb', 'ALB', 'Aplikační load balancer.'),
+  ...iacNode(inv, 'acm', 'acm', 'ACM (TLS certifikáty)', 'Spravované TLS certifikáty.'),
 ]
 
 // --- AWS substrate (only AWS-managed layer per ADR-0027) --------------------
-const SUBSTRATE: Node[] = [
+// EKS / node-group rows depend on LIVE data (Prometheus) + declared (terraform), so they are built per render.
+const substrateNodes = (view: PlatformView | null, inv: Inventory | null): Node[] => {
+  const kubelets = view ? versionText(view.items.kubelet) : 'unknown (live unavailable)'
+  const k8s = view ? versionText(view.items.kubernetes) : `${eksVersion()} (${LIVE_UNAVAILABLE_NOTE})`
+  return [
   node('s3-state', ['S3 — tofu state', 'S3 — tofu state'], 'live', ['Vzdálený verzovaný bucket se stavem OpenTofu + bootstrap. Aplikováno.', 'Remote versioned OpenTofu state bucket + bootstrap. Applied.']),
   node('runner', ['EC2 / Mac mini CI runner', 'EC2 / Mac mini CI runner'], 'live', ['Self-hosted pool GitHub Actions runnerů (ADR-0040: Mac mini aktivní, EC2 studená záloha). Běží.', 'Self-hosted GitHub Actions runner pool (ADR-0040: Mac mini active, EC2 cold standby). Running.']),
   node('vpc', ['VPC — 3 AZ', 'VPC — 3 AZ'], 'live', ['modules/network: privátní adresní prostor, IGW, veřejné+privátní subnety napříč 3 AZ, jediný NAT (FinOps), S3 gateway + interface VPC endpointy. Aplikováno.', 'modules/network: private address space, IGW, public+private subnets across 3 AZ, single NAT (FinOps), S3 gateway + interface VPC endpoints. Applied.']),
-  node('eks', ['EKS control plane (1.35)', 'EKS control plane (1.35)'], 'live', ['aws_eks_cluster v1.35, ACTIVE. OIDC/IRSA, EKS Pod Identity, authentication_mode=API (žádný aws-auth configmap), logy control-plane do CloudWatch. Addony: vpc-cni, kube-proxy, coredns, pod-identity.', 'aws_eks_cluster v1.35, ACTIVE. OIDC/IRSA, EKS Pod Identity, authentication_mode=API (no aws-auth configmap), control-plane logs to CloudWatch. Addons: vpc-cni, kube-proxy, coredns, pod-identity.']),
-  node('nodegroup', ['Bootstrap node group (Graviton)', 'Bootstrap node group (Graviton)'], 'live', ['t4g.medium AL2023 spravovaná node group — 2 uzly Ready. Nese systémové pody, Karpenter controller a ArgoCD; zbytek provisionuje Karpenter.', 't4g.medium AL2023 managed node group — 2 nodes Ready. Carries system pods, Karpenter controller and ArgoCD; Karpenter provisions the rest.']),
+  node('eks', [`EKS control plane (${k8s})`, `EKS control plane (${k8s})`], 'live', [`aws_eks_cluster v${k8s} (control plane); node kubelets: ${kubelets}. OIDC/IRSA, EKS Pod Identity, authentication_mode=API (žádný aws-auth configmap), logy control-plane do CloudWatch. Addony: vpc-cni, kube-proxy, coredns, pod-identity.`, `aws_eks_cluster v${k8s} (control plane); node kubelets: ${kubelets}. OIDC/IRSA, EKS Pod Identity, authentication_mode=API (no aws-auth configmap), control-plane logs to CloudWatch. Addons: vpc-cni, kube-proxy, coredns, pod-identity.`]),
+  node('nodegroup', ['Bootstrap node group (Graviton)', 'Bootstrap node group (Graviton)'], 'live', [`AL2023 spravovaná node group (${nodesText(view)}). Nese systémové pody, Karpenter controller a ArgoCD; zbytek provisionuje Karpenter.`, `AL2023 managed node group (${nodesText(view)}). Carries system pods, Karpenter controller and ArgoCD; Karpenter provisions the rest.`]),
   node('kms', ['KMS CMK', 'KMS CMK'], 'live', ['Zákaznicky spravovaný klíč pro envelope šifrování EKS secrets (aws_kms_key.secrets). Aplikováno.', 'Customer-managed key for EKS secrets envelope encryption (aws_kms_key.secrets). Applied.']),
   node('iam', ['IAM (cluster/node, OIDC, Karpenter)', 'IAM (cluster/node, OIDC, Karpenter)'], 'live', ['Role clusteru + uzlů, IRSA OIDC provider, IAM pro Karpenter controller/node přes EKS Pod Identity, SQS interruption queue. Aplikováno.', 'Cluster + node roles, IRSA OIDC provider, Karpenter controller/node IAM via EKS Pod Identity, SQS interruption queue. Applied.']),
   node('ecr', ['ECR', 'ECR'], 'live', ['Privátní container registry pro všechny image openbank-*-service. Aktivně používáno — image pushovány přes build-push-service.sh. Zatím nespravováno přes IaC (ruční vytváření ECR repo); zapojení do IaC je follow-up.', 'Private container registry for all openbank-*-service images. Actively used — images are pushed via build-push-service.sh. Not yet managed via IaC (manual ECR repository creation); IaC wiring is a follow-up.']),
-  node('cloudtrail', ['CloudTrail + Config', 'CloudTrail + Config'], 'planned', ['Neměnný audit na úrovni účtu + config drift (podmínka go-live DORA čl. 12). Zatím není v IaC.', 'Immutable account-level audit + config drift (DORA Art. 12 go-live condition). Not yet in IaC.']),
-  node('worm', ['S3 Object Lock (WORM archiv)', 'S3 Object Lock (WORM archive)'], 'planned', ['Write-once compliance archiv. ADR-0027 — zatím není v IaC.', 'Write-once compliance archive. ADR-0027 — not yet in IaC.']),
-]
+  ...iacNode(inv, 'cloudtrail', 'cloudtrail', 'CloudTrail', 'Audit na úrovni účtu.'),
+  ...iacNode(inv, 'awsConfig', 'aws-config', 'AWS Config', 'Config recorder.'),
+  ...iacNode(inv, 'objectLock', 'worm', 'S3 Object Lock', 'Write-once archiv.'),
+  ]
+}
 
 // --- EKS platform bootstrap (sandbox-platform root, day-2) ------------------
-const BOOTSTRAP: Node[] = [
-  node('cert-manager', ['cert-manager', 'cert-manager'], 'live', ['Webhook/serving certifikáty pro ostatní operátory. 3 pody Running v ns cert-manager.', 'Webhook/serving certs for other operators. 3 pods Running in ns cert-manager.']),
+const bootstrapNodes = (view: PlatformView | null): Node[] => [
+  node('cert-manager', ['cert-manager', 'cert-manager'], 'live', [`Webhook/serving certifikáty pro ostatní operátory. ${podsText(view, 'cert-manager', true)}`, `Webhook/serving certs for other operators. ${podsText(view, 'cert-manager', false)}`]),
   node('karpenter', ['Karpenter (Graviton / Spot)', 'Karpenter (Graviton / Spot)'], 'live', ['Autoscaler uzlů. EC2NodeClass + NodePool READY=True: pouze arm64, Spot-first, agresivní konsolidace. Auth přes EKS Pod Identity.', 'Node autoscaler. EC2NodeClass + NodePool READY=True: arm64 only, Spot-first, aggressive consolidation. Auth via EKS Pod Identity.']),
   node('argocd', ['ArgoCD (vlastník app-of-apps)', 'ArgoCD (app-of-apps owner)'], 'live', ['Plný ArgoCD (controller, applicationset, repo-server, redis, server) Running v ns argocd. Vlastní veškerý stav platformy/aplikací přes app-of-apps — to je GitOps engine.', 'Full ArgoCD (controller, applicationset, repo-server, redis, server) Running in ns argocd. Owns all platform/app state via app-of-apps — this is the GitOps engine.']),
   node('arc', ['ARC (Actions Runner Controller)', 'ARC (Actions Runner Controller)'], 'live', ['In-cluster GitHub Actions runnery. Controller Running v ns arc-systems; runner scale-set je podmíněn GitHub App secretem vytvořeným mimo systém.', 'In-cluster GitHub Actions runners. Controller Running in ns arc-systems; runner scale-set gated behind a GitHub App secret created out-of-band.']),
@@ -91,14 +119,14 @@ const BOOTSTRAP: Node[] = [
 // --- Namespaces owned by ArgoCD app-of-apps (GitOps) ------------------------
 type NS = { id: string; label: string; note?: Bilingual; nodes: Node[] }
 
-const NAMESPACES: NS[] = [
+const namespaceGroups = (view: PlatformView | null, inv: Inventory | null): NS[] => [
   {
     id: 'mesh', label: 'ns: ingress-nginx',
-    note: ['Mesh odložen: používá se VPC-CNI, zatím žádné Istio/Cilium (portabilita na prvním místě dle ADR-0037).', 'Mesh deferred: VPC-CNI in use, no Istio/Cilium yet (portability-first per ADR-0037).'],
     nodes: [
-      node('nginx', ['nginx ingress', 'nginx ingress'], 'live', ['In-cluster ingress controller. ArgoCD app ingress-nginx Synced + Healthy. (Kong z ADR-0027 nebyl použit — gateway je nginx.)', 'In-cluster ingress controller. ArgoCD app ingress-nginx Synced + Healthy. (Kong from ADR-0027 was not used — nginx is the gateway.)']),
-      node('istio', ['Istio (STRICT mTLS)', 'Istio (STRICT mTLS)'], 'planned', ['Service mesh, STRICT mTLS napříč clusterem. Base manifest existuje v k8s/base; nenasazeno.', 'Service mesh, cluster-wide STRICT mTLS. Base manifest exists in k8s/base; not deployed.']),
-      node('cilium', ['Cilium (default-deny)', 'Cilium (default-deny)'], 'planned', ['CNI + default-deny NetworkPolicy. Cíl ADR-0027; dnes se používá VPC-CNI.', 'CNI + default-deny NetworkPolicy. ADR-0027 target; today VPC-CNI is used.']),
+      node('nginx', ['nginx ingress', 'nginx ingress'], inv?.gitops.apps.includes('ingress-nginx') ? 'declared' : 'planned', ['In-cluster ingress controller (GitOps app ingress-nginx).', 'In-cluster ingress controller (GitOps app ingress-nginx).']),
+      ...(inv?.gitops.apps.includes('envoy-gateway') ? [node('envoy-gateway', ['Envoy Gateway', 'Envoy Gateway'], 'declared', ['Gateway API implementace (GitOps apps envoy-gateway, envoy-gateway-crds, envoy-gateway-config).', 'Gateway API implementation (GitOps apps envoy-gateway, envoy-gateway-crds, envoy-gateway-config).'])] : []),
+      ...(inv?.gitops.istio ? [node('istio', ['Istio', 'Istio'], 'declared', ['Istio image/chart je přítomen v GitOps manifestech.', 'An Istio image/chart is present in the GitOps manifests.'])] : []),
+      ...(inv?.gitops.cilium ? [node('cilium', ['Cilium', 'Cilium'], 'declared', ['Cilium image/chart je přítomen v GitOps manifestech.', 'A Cilium image/chart is present in the GitOps manifests.'])] : []),
     ],
   },
   {
@@ -112,17 +140,17 @@ const NAMESPACES: NS[] = [
       node('keycloak', ['Keycloak', 'Keycloak'], 'live', ['OIDC identity provider + keycloak-db Running v ns iam. ArgoCD app keycloak Synced + Healthy.', 'OIDC identity provider + keycloak-db Running in ns iam. ArgoCD app keycloak Synced + Healthy.']),
       node('valkey', ['Valkey / Redis', 'Valkey / Redis'], 'live', ['Cache/zámky (redis) Running v ns accounts vedle služby, která ji používá.', 'Cache/locks (redis) Running in ns accounts alongside the service that uses it.']),
       node('vault', ['OpenBao + ESO (KMS unseal)', 'OpenBao + ESO (KMS unseal)'], 'live', ['ArgoCD app openbao Synced + Healthy. Pod OpenBao (openbao-0) běží v ns vault; AWS KMS auto-unseal zapojen (stejný klíč, jaký používal Vault). Nasazen External Secrets Operator (ArgoCD app external-secrets Synced). ESO → OpenBao živé: vault-kv ClusterSecretStore čte KV přes eso k8s-auth roli; 16 ExternalSecrets SecretSynced. Migrováno z HashiCorp Vaultu na LF/MPL fork OpenBao (runbook 0005).', 'ArgoCD app openbao Synced + Healthy. OpenBao pod (openbao-0) running in ns vault; AWS KMS auto-unseal wired (same key Vault used). External Secrets Operator deployed (ArgoCD app external-secrets Synced). ESO → OpenBao live: the vault-kv ClusterSecretStore reads KV via the eso k8s-auth role; 16 ExternalSecrets SecretSynced. Migrated off HashiCorp Vault to the LF/MPL OpenBao fork (runbook 0005).']),
-      node('clickhouse', ['ClickHouse', 'ClickHouse'], 'planned', ['Analytický sloupcový store. Cíl ADR-0027; nenasazeno.', 'Analytics columnar store. ADR-0027 target; not deployed.']),
+      ...(inv?.gitops.clickhouse ? [node('clickhouse', ['ClickHouse', 'ClickHouse'], 'declared', ['ClickHouse server image je přítomen v GitOps manifestech (analytics, ai-platform).', 'A ClickHouse server image is present in the GitOps manifests (analytics, ai-platform).'])] : []),
     ],
   },
   {
     id: 'banking', label: 'ns: accounts / admin-ui (+ per-domain)',
-    note: ['Doména = namespace (ADR-0037). Jeden vertikální řez je živý; zbytek flotily čeká na onboarding do GitOps.', 'Domain = namespace (ADR-0037). One vertical slice is live; the rest of the fleet is pending GitOps onboarding.'],
+    note: ['Doména = namespace (ADR-0037).', 'Domain = namespace (ADR-0037).'],
     nodes: [
       node('account-svc', ['account-service', 'account-service'], 'live', ['První Quarkus služba nasazená end-to-end: account-service + accounts-db (CNPG) + redis. ArgoCD app accounts Synced + Healthy.', 'First Quarkus service deployed end-to-end: account-service + accounts-db (CNPG) + redis. ArgoCD app accounts Synced + Healthy.']),
       node('admin-ui', ['admin-ui (tato aplikace)', 'admin-ui (this app)'], 'live', ['Operations konzole v Next.js, kterou právě používáte — nasazena in-cluster v ns admin-ui. ArgoCD app admin-ui Synced + Healthy.', 'The Next.js operations console you are using — deployed in-cluster in ns admin-ui. ArgoCD app admin-ui Synced + Healthy.']),
-      node('services', ['Nasazeno 10+ doménových vertikál', '10+ domain verticals deployed'], 'partial', ['Živé GitOps aplikace: ledger, balances, payments (sepa/domestic/instant), sca, consent, agent (platform ns), notifications (T2 scale-to-zero), product-catalog, security-scanner. ~24 zbývajících služeb (anacredit, lending, sdd, swift, party, kyc, aml, sanctions, audit, dispute, card-issuance, clearing, interest, statement, fx, tpp-registry, psd2, pid, standing-order, transaction a další) čeká na onboarding do GitOps.', 'GitOps apps live: ledger, balances, payments (sepa/domestic/instant), sca, consent, agent (platform ns), notifications (T2 scale-to-zero), product-catalog, security-scanner. ~24 remaining services (anacredit, lending, sdd, swift, party, kyc, aml, sanctions, audit, dispute, card-issuance, clearing, interest, statement, fx, tpp-registry, psd2, pid, standing-order, transaction, and others) pending GitOps onboarding.']),
-      node('notification-svc', ['Notification Service (T2)', 'Notification Service (T2)'], 'live', ['ArgoCD app notifications Synced. KEDA ScaledObject vlastní počet replik — ustálený stav je 0 podů (FinOps T2, ADR-0057). Probouzí se na lagu consumer-group openbank.notification.requests; vyprázdní se a vrátí na 0 po cooldownu.', 'ArgoCD app notifications Synced. KEDA ScaledObject owns replica count — steady state is 0 pods (FinOps T2, ADR-0057). Wakes on openbank.notification.requests consumer-group lag; drains and returns to 0 after cooldown.']),
+      node('services', [`GitOps aplikace (${inv?.gitops.apps.length ?? 0})`, `GitOps applications (${inv?.gitops.apps.length ?? 0})`], 'declared', [`Aplikace deklarované v openbank-infra/gitops/apps: ${(inv?.gitops.apps ?? []).join(', ')}.`, `Applications declared in openbank-infra/gitops/apps: ${(inv?.gitops.apps ?? []).join(', ')}.`]),
+      node('notification-svc', ['Notification Service (T2)', 'Notification Service (T2)'], 'live', ['ArgoCD app notifications Synced. KEDA ScaledObject vlastní počet replik — ustálený stav je scale-to-zero (žádné pody) (FinOps T2, ADR-0057). Probouzí se na lagu consumer-group openbank.notification.requests; vyprázdní se a vrátí na 0 po cooldownu.', 'ArgoCD app notifications Synced. KEDA ScaledObject owns replica count — steady state is scale-to-zero (no pods) (FinOps T2, ADR-0057). Wakes on openbank.notification.requests consumer-group lag; drains and returns to 0 after cooldown.']),
       node('security-scanner-svc', ['Security Scanner', 'Security Scanner'], 'live', ['ArgoCD app security-scanner Synced. Každých 30 min sonduje všechny /q/health endpointy flotily; report se čte přes REST, DORA ICT incidenty jdou do openbank.security.ict.incident. Report je bez perzistence (v paměti), ale DORA ICT incidenty se od V5__create_ict_incidents.sql ukládají do vlastní Postgres (#4728) — dřív žily jen v ConcurrentHashMap a restart podu je tiše smazal.', 'ArgoCD app security-scanner Synced. Probes all fleet /q/health endpoints every 30 min; the report is served over REST and DORA ICT incidents go to openbank.security.ict.incident. The probe report is unpersisted (in-memory), but DORA ICT incidents have had their own Postgres table since V5__create_ict_incidents.sql (#4728) — before that they lived only in a ConcurrentHashMap and a pod restart silently emptied the register.']),
     ],
   },
@@ -135,7 +163,7 @@ const NAMESPACES: NS[] = [
       node('loki', ['Loki', 'Loki'], 'live', ['ArgoCD app loki Synced + Healthy. Agregace logů ze všech podů. Chunky → in-cluster PVC (integrace s S3 je prod follow-up).', 'ArgoCD app loki Synced + Healthy. Log aggregation for all pods. Chunks → in-cluster PVC (S3 integration is a prod follow-up).']),
       node('tempo', ['Tempo', 'Tempo'], 'live', ['ArgoCD app tempo Synced + Healthy. Backend distribuovaného tracingu pro OTLP trasy z Quarkus služeb.', 'ArgoCD app tempo Synced + Healthy. Distributed tracing backend for OTLP traces from Quarkus services.']),
       node('otel', ['OpenTelemetry Collector', 'OpenTelemetry Collector'], 'live', ['ArgoCD app otel-collector Synced + Healthy. Pipeline: OTLP → Tempo (trasy) + Prometheus remote-write (metriky).', 'ArgoCD app otel-collector Synced + Healthy. Pipeline: OTLP → Tempo (traces) + Prometheus remote-write (metrics).']),
-      node('alloy', ['Grafana Alloy', 'Grafana Alloy'], 'live', ['ArgoCD app alloy Synced + Healthy. DaemonSet (18 podů) sbírá logy z uzlů a posílá je do Loki; běží v ns observability.', 'ArgoCD app alloy Synced + Healthy. DaemonSet (18 pods) collects node logs and ships them to Loki; runs in ns observability.']),
+      node('alloy', ['Grafana Alloy', 'Grafana Alloy'], 'live', [`DaemonSet sbírá logy z uzlů a posílá je do Loki (ns observability). ${dsText(view, 'observability/alloy', true)}`, `DaemonSet collects node logs and ships them to Loki (ns observability). ${dsText(view, 'observability/alloy', false)}`]),
       node('pyroscope', ['Pyroscope', 'Pyroscope'], 'live', ['ArgoCD app pyroscope Synced + Healthy. Continuous-profiling backend; StatefulSet Running v ns observability.', 'ArgoCD app pyroscope Synced + Healthy. Continuous-profiling backend; StatefulSet Running in ns observability.']),
       node('alertmanager', ['Alertmanager', 'Alertmanager'], 'live', ['Součástí kube-prometheus-stacku. StatefulSet Running v ns observability; směruje alerty z Prometheu.', 'Bundled in kube-prometheus-stack. StatefulSet Running in ns observability; routes alerts from Prometheus.']),
       node('pyrra', ['Pyrra (SLO)', 'Pyrra (SLO)'], 'live', ['ArgoCD app pyrra Synced + Healthy. SLO/error-budget engine nad Prometheem (pyrra-api + pyrra-kubernetes) Running v ns observability.', 'ArgoCD app pyrra Synced + Healthy. SLO/error-budget engine over Prometheus (pyrra-api + pyrra-kubernetes) Running in ns observability.']),
@@ -183,6 +211,12 @@ function ArchitectureArrow({ label }: { label?: string }) {
 export default function CloudArchitecturePage() {
   const { t, language } = useLanguage()
   const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
+  const view = usePlatformView()
+  const inventory = platformVersions?.inventory ?? null
+  const bootstrap = useMemo(() => bootstrapNodes(view), [view])
+  const namespaces = useMemo(() => namespaceGroups(view, inventory), [view, inventory])
+  const substrate = useMemo(() => substrateNodes(view, inventory), [view, inventory])
+  const k8sText = view ? versionText(view.items.kubernetes) : `${eksVersion()} (${LIVE_UNAVAILABLE_NOTE})`
   const [selected, setSelected] = useState<Node | null>(null)
   const [liveStatus, setLiveStatus] = useState<Record<string, InfraStatusResult> | null>(null)
   const [checkedAt, setCheckedAt] = useState<string | null>(null)
@@ -263,26 +297,26 @@ export default function CloudArchitecturePage() {
       <div style={{ display: 'grid', gridTemplateColumns: selected ? '1fr 320px' : '1fr', gap: '16px', alignItems: 'start' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0' }}>
           <ArchitectureZone title={t('Internet / Edge', 'Internet / Edge')} subtitle={t('Edge vrstva ADR-0027 — zatím neprovisionováno', 'ADR-0027 edge tier — not provisioned yet')} accent="var(--info-text)">
-            <div style={wrap}>{EDGE.map(n => <CloudNodeBox key={n.id} n={n} selectedId={selected?.id ?? null} liveStatus={liveStatus} t={t} onSelect={selectNode} />)}</div>
+            <div style={wrap}>{edgeNodes(inventory).map(n => <CloudNodeBox key={n.id} n={n} selectedId={selected?.id ?? null} liveStatus={liveStatus} t={t} onSelect={selectNode} />)}</div>
           </ArchitectureZone>
 
           <ArchitectureArrow label={t('TLS (ACM)', 'TLS (ACM)')} />
 
           <ArchitectureZone title={t('AWS substrate', 'AWS substrate')} subtitle={t('sandbox účet · regionální nasazení · jediná AWS-managed vrstva', 'sandbox account · regional deployment · the only AWS-managed layer')} accent="var(--warning-text)">
-            <div style={wrap}>{SUBSTRATE.map(n => <CloudNodeBox key={n.id} n={n} selectedId={selected?.id ?? null} liveStatus={liveStatus} t={t} onSelect={selectNode} />)}</div>
+            <div style={wrap}>{substrate.map(n => <CloudNodeBox key={n.id} n={n} selectedId={selected?.id ?? null} liveStatus={liveStatus} t={t} onSelect={selectNode} />)}</div>
           </ArchitectureZone>
 
           <ArchitectureArrow />
 
-          <ArchitectureZone title={t('EKS cluster — openbank-sandbox', 'EKS cluster — openbank-sandbox')} subtitle={t('k8s 1.35 · Karpenter Graviton/Spot autoscaling', 'k8s 1.35 · Karpenter Graviton/Spot autoscaling')} accent="var(--accent-text)">
+          <ArchitectureZone title={t('EKS cluster — openbank-sandbox', 'EKS cluster — openbank-sandbox')} subtitle={t(`k8s ${k8sText} · Karpenter Graviton/Spot autoscaling`, `k8s ${k8sText} · Karpenter Graviton/Spot autoscaling`)} accent="var(--accent-text)">
             <div style={{ marginBottom: '12px' }}>
               <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '6px' }}>
                 {t('Platform bootstrap (sandbox-platform → seeduje GitOps)', 'Platform bootstrap (sandbox-platform → seeds GitOps)')}
               </div>
-              <div style={wrap}>{BOOTSTRAP.map(n => <CloudNodeBox key={n.id} n={n} selectedId={selected?.id ?? null} liveStatus={liveStatus} t={t} onSelect={selectNode} />)}</div>
+              <div style={wrap}>{bootstrap.map(n => <CloudNodeBox key={n.id} n={n} selectedId={selected?.id ?? null} liveStatus={liveStatus} t={t} onSelect={selectNode} />)}</div>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {NAMESPACES.map(ns => (
+              {namespaces.map(ns => (
                 <div key={ns.id} style={{ border: '1px dashed var(--border)', borderRadius: '10px', padding: '10px 12px' }}>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginBottom: '8px', flexWrap: 'wrap' }}>
                     <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'monospace' }}>{ns.label}</span>

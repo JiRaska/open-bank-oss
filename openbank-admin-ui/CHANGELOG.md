@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.277.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.277.2...admin-ui-v0.277.3) (2026-10-11)
+
+
+### Bug Fixes
+
+* **admin-ui:** derive the service registry from the catalog instead of eight hand-kept lists ([#12487](https://github.com/JiRaska/open-bank-oss/issues/12487)) ([6bb5662](https://github.com/JiRaska/open-bank-oss/commit/6bb5662771c96c5954e3078e39c56b9c107352ae))
+
+## [0.277.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.277.1...admin-ui-v0.277.2) (2026-10-11)
+
+
+### Bug Fixes
+
+* **admin-ui:** derive platform versions from infra sources instead of literals ([#12469](https://github.com/JiRaska/open-bank-oss/issues/12469)) ([fff7b94](https://github.com/JiRaska/open-bank-oss/commit/fff7b94ca61a86ce8e5aea0a4f1ec6780895acc8))
+
+## [0.277.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.277.0...admin-ui-v0.277.1) (2026-10-08)
+
+
+### Bug Fixes
+
+* **infra:** improve public portal metadata and contrast ([#12279](https://github.com/JiRaska/open-bank-oss/issues/12279)) ([b94fee2](https://github.com/JiRaska/open-bank-oss/commit/b94fee283612664a84aada74464a0486cc91d5d4))
+
+## [0.277.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.276.2...admin-ui-v0.277.0) (2026-10-08)
+
+
+### Features
+
+* **communication:** publish editable app copy catalog ([#12276](https://github.com/JiRaska/open-bank-oss/issues/12276)) ([93a6479](https://github.com/JiRaska/open-bank-oss/commit/93a6479d28b56c57efb381b3f550e5c10aa92958))
+
 ## [0.276.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.276.1...admin-ui-v0.276.2) (2026-10-07)
 
 

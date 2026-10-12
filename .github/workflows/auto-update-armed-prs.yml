@@ -59,4 +59,4 @@ jobs:
           # shellcheck disable=SC2086  # DRY_RUN is empty or a single flag
           python3 .github/scripts/auto-update-armed-prs.py \
             --repo "${GITHUB_REPOSITORY}" --branch main \
-            --max-updates 5 --max-updates-per-pr 2 --debounce-minutes 20 ${DRY_RUN}
+            --max-updates 5 --max-updates-per-pr 4 --debounce-minutes 20 ${DRY_RUN}

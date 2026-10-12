@@ -41,15 +41,15 @@ The payment aggregate. One row per SCT Inst instruction.
 
 Indexes: `idx_sct_inst_status(status)`, `idx_sct_inst_debtor(debtor_account_id)`, `idx_sct_inst_created(created_at DESC)`, and a partial `idx_sct_inst_timeout(execution_timeout_at) WHERE status = 'PROCESSING'` (powers the execution watchdog / `findTimedOut`).
 
-### `sct_inst_outbox` — REMOVED (V2 created, V4 dropped)
+### `sct_inst_outbox` — restored by the #12181 source candidate (V5)
 
-A transactional outbox for at-least-once event publishing was created in V2 but never wired to
-any real call site — event publishing has always gone through the direct, synchronous
-`KafkaSctInstEventPublisher` instead (issue #1034). PR #1364 removed the dead
-`SctInstOutboxPort`/`SctInstOutboxDispatcher` code; the table itself (0 rows) and its
-`sct_inst_outbox_seq` sequence (added in V3 for the Hibernate Reactive/Panache id-allocation
-convention) were dropped in V4 (issue #5127). Kept here only as a schema-history note — there is
-no live outbox table on this service.
+The unused V2 outbox table and sequence were dropped in V4 (issue #5127). The additive V5
+migration recreates them for the candidate's transactional event path. Event-producing payment
+transitions insert a `PENDING` row in the same transaction as the payment change; the relay claims
+it, retries a failed send, and marks it `SENT` or eventually `DEAD`. The row retains the existing
+four-field Kafka payload plus delivery state (`event_id`, `aggregate_id`, `status`, attempts,
+timestamps and error). A committed V5 migration in this branch does not prove it has run in any
+deployed database. Check the deployed revision and Flyway history before relying on the table.
 
 ## Flyway migrations
 
@@ -59,6 +59,7 @@ no live outbox table on this service.
 | V2 | `V2__create_sct_inst_outbox.sql` | outbox table + 2 indexes (removed, see V4) | `DROP TABLE sct_inst_outbox;` |
 | V3 | `V3__hibernate_sequences.sql` | `sct_inst_outbox_seq` (removed, see V4) | `DROP SEQUENCE sct_inst_outbox_seq;` (stated in the migration) |
 | V4 | `V4__drop_sct_inst_outbox.sql` | drops the vestigial `sct_inst_outbox` table + `sct_inst_outbox_seq` sequence left behind by PR #1364 | recreates the V2/V3 table + sequence (stated in the migration) |
+| V5 | `V5__restore_sct_inst_outbox_v2.sql` | restores the durable event table, sequence and claim indexes | stop writers; retain a compatible relay and schema until recoverable rows have approved dispositions (migration note) |
 
 `flyway.migrate-at-start = true` with 10 connect retries (2 s interval). **Never rewrite a migration after it is applied to a live DB** (checksum mismatch → startup fail; repo gotcha).
 

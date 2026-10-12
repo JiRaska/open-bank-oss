@@ -39,7 +39,7 @@ const LINK_META: Record<string, { label: string; icon: React.ReactNode; openInNe
 
 /**
  * Map the short `name` used in the URL (e.g. "account") to the service id the
- * /api/svc proxy expects (e.g. "account-service"). The proxy's SERVICE_MAP uses
+ * /api/svc proxy expects (e.g. "account-service"). The proxy's derived allowlist uses
  * the -service suffix; the docs page uses the short form for nicer URLs. A
  * handful of services (sepa-instant, sepa-payment, domestic-payment,
  * product-catalog, security-scanner) don't carry the suffix at all.

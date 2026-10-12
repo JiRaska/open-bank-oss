@@ -190,3 +190,21 @@ spec:
               Do NOT reach for traces_spanmetrics_latency_bucket to confirm this. Its top finite
               bucket is 5 seconds, so for any job in this class it reports 5.00 whatever the truth
               is (#6169).
+
+        # A completed retention tick may still leave old SENT rows behind when every bounded
+        # delete returned a full batch. The gauge is seeded at zero on startup for each outbox,
+        # stays at one after a cap-full run, and clears only after a later short run. That avoids
+        # a range window shorter than the nightly job's period and survives triage after 12h.
+        - alert: OutboxSentRetentionCapReached
+          expr: max by (namespace, service) (openbank_outbox_purge_cap_reached) > 0
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "{{ $labels.service }} SENT outbox retention reached its batch cap"
+            description: >-
+              The nightly SENT outbox purge in {{ $labels.namespace }} exhausted every configured
+              batch. It may still have rows older than the retention window; a successful workflow
+              heartbeat only means the bounded run completed. Inspect the eligible backlog and
+              increase purge capacity or reduce incoming volume before stale rows accumulate.

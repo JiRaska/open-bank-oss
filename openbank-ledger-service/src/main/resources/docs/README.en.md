@@ -24,3 +24,32 @@ This documentation is published directly by the service at the management endpoi
 - **Outbox:** `ledger_outbox` → Kafka topic `openbank.ledger.journal.posted` (regulatory-grade dispatch, ADR-0050)
 - **Idempotency:** `idempotencyKey` field on the post-journal request → `ledger_idempotency` table (DB-backed, not Redis)
 - **Auth:** Keycloak OIDC (RS256 JWT). Reads gated to `ROLE_API`/`ROLE_AUDITOR`/`ROLE_VIEWER`/`ROLE_OPERATOR`/`ROLE_ADMIN`; posting/reversing/FX-revaluation are `ROLE_OPERATOR` only. No endpoint is unauthenticated (ADR-0018).
+
+
+## Monthly closing balances and movements
+
+The period APIs expose two distinct accounting quantities under `/api/v1/ledger/periods/MONTH/{date}`. The date selects its containing month; closing balances use that month's end.
+
+| Read | Quantity and evidence |
+|---|---|
+| `/trial-balance` | Selected month's journal movements |
+| `/frozen-trial-balance` | Selected month's hash-verified frozen movements |
+| `/closing-balance` | Live cumulative journal totals through month end |
+| `/frozen-closing-balance` | Cumulative totals assembled from hash-verified frozen monthly movements |
+
+Closing-balance reads support `MONTH`. The frozen closing balance requires the target month to have `FROZEN`/`LINES_V1` evidence, verifies each included monthly snapshot, and ties the sum to the cumulative journal totals per account and currency. Incomplete or invalid frozen evidence returns 409. The journal is a reconciliation guard; returned amounts come from the frozen snapshots. Legacy `HASH_ONLY` evidence cannot supply closing-balance lines.
+
+FINREP balance-sheet templates and COREP own funds use the closing-balance reads. FINREP F02.00 continues to read one month's movements. Consumers that already sum period movements must retain the movement endpoint; adding cumulative balances together would double-count earlier activity. Live reads do not certify a frozen close.
+
+### Frozen trial-balance authorization and disabled jobs
+
+`GET /api/v1/ledger/periods/{type}/{date}/frozen-trial-balance` requires the dedicated
+OPA action `ledger.close.inspect`. Generic read grants do not cover this action;
+the ledger policy declares its permitted staff roles and machine identity explicitly.
+It reads the immutable FROZEN trial balance without changing the close.
+
+Setting `openbank.ledger.accounting-day.cron`, `openbank.ledger.fx-revaluation.cron`
+or `openbank.ledger.tieout.cron` to `off` or `disabled` disables that trigger and
+omits its workflow-liveness heartbeat at startup. An absent heartbeat for a
+deliberately disabled job does not indicate a successful run. Other scheduler
+metrics retain their existing behavior.
