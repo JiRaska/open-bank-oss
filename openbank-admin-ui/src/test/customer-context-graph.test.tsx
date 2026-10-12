@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { CustomerContextGraph } from '@/components/party/CustomerContextGraph'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
-import { buildCustomerGraph } from '@/lib/context/customerGraph'
+import { buildCustomerGraph, parseLiveCustomerFacts } from '@/lib/context/customerGraph'
 import type { Customer360Evidence } from '@/lib/customer360/evidence'
 
 const PARTY = '11111111-1111-4111-8111-111111111111'
@@ -52,6 +52,11 @@ function installSources(failed = '', accountCount = 1) {
       amlCases: [{ id: 'case-alpha', screeningType: 'TRANSACTION_MONITORING', riskLevel: 'MEDIUM', status: 'CLEARED', alertCode: 'TM01', screenedAt: '2026-07-22T10:00:00Z' }],
       devices: [{ id: 'device-alpha', platform: 'IOS', status: 'ACTIVE', registeredAt: '2026-07-23T10:00:00Z' }],
       documents: [{ id: 'document-alpha', templateCode: 'ACCOUNT_AGREEMENT', templateVersion: '1', status: 'GENERATED', productRef: 'product-current', createdAt: '2026-07-20T10:00:00Z' }],
+      sourceProviders: {
+        accounts: 'account-service', cards: 'card-issuance-service',
+        notifications: 'notification-service', lending: 'lending-service',
+        aml: 'aml-service', devices: 'notification-service', documents: 'document-service',
+      },
       unavailable: failed ? [failed] : [], truncated: [],
     })
   })
@@ -66,6 +71,21 @@ function graph(data = evidence) {
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 describe('Customer context graph', () => {
+  it('uses response provenance and treats missing or invalid provider metadata as unknown', () => {
+    const live = parseLiveCustomerFacts({
+      accounts: [account], cards: [card],
+      sourceProviders: { accounts: 'actual-account-service', cards: 'card-issuance-service' },
+    })
+    const graph = buildCustomerGraph(evidence, live)
+    expect(graph.nodes.find(node => node.id === `account:${ACCOUNT_ID}`)?.source).toBe('actual-account-service')
+    expect(graph.nodes.find(node => node.id === `card:${CARD_ID}`)?.source).toBe('card-issuance-service')
+
+    const invalid = parseLiveCustomerFacts({
+      accounts: [account], sourceProviders: { accounts: 'https://untrusted.example' },
+    })
+    expect(buildCustomerGraph(evidence, invalid).nodes.find(node => node.id === `account:${ACCOUNT_ID}`)?.source).toBe('unknown')
+  })
+
   it('connects live accounts, products, cards and interactions to the customer', async () => {
     const fetchMock = installSources()
     graph()

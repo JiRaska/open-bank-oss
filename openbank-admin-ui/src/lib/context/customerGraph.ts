@@ -162,6 +162,21 @@ export interface DocumentFact {
   createdAt: string
 }
 
+export const GRAPH_SOURCES = ['accounts', 'cards', 'notifications', 'lending', 'aml', 'devices', 'documents'] as const
+export type GraphSource = typeof GRAPH_SOURCES[number]
+
+function parseSourceProviders(value: unknown): Partial<Record<GraphSource, string>> {
+  if (!isRecord(value)) return {}
+  const providers: Partial<Record<GraphSource, string>> = {}
+  for (const source of GRAPH_SOURCES) {
+    const provider = value[source]
+    if (typeof provider === 'string' && /^[a-z0-9][a-z0-9-]{0,63}$/.test(provider)) {
+      providers[source] = provider
+    }
+  }
+  return providers
+}
+
 export interface LiveCustomerFacts {
   accounts: AccountFact[]
   cards: CardFact[]
@@ -170,6 +185,7 @@ export interface LiveCustomerFacts {
   amlCases: AmlCaseFact[]
   devices: DeviceFact[]
   documents: DocumentFact[]
+  sourceProviders?: Partial<Record<GraphSource, string>>
   unavailable: string[]
   truncated: string[]
 }
@@ -190,6 +206,7 @@ export function parseLiveCustomerFacts(value: unknown): LiveCustomerFacts {
     amlCases: parseAmlCases(value.amlCases),
     devices: parseDevices({ items: value.devices }),
     documents: parseDocuments(value.documents),
+    sourceProviders: parseSourceProviders(value.sourceProviders),
     unavailable,
     truncated,
   }
@@ -198,7 +215,7 @@ export function parseLiveCustomerFacts(value: unknown): LiveCustomerFacts {
 export function emptyLiveCustomerFacts(unavailable: string[] = []): LiveCustomerFacts {
   return {
     accounts: [], cards: [], notifications: [], lendingApplications: [], amlCases: [],
-    devices: [], documents: [], unavailable, truncated: [],
+    devices: [], documents: [], sourceProviders: {}, unavailable, truncated: [],
   }
 }
 
@@ -335,6 +352,7 @@ export function buildCustomerGraph(
   const edges: CustomerGraphEdge[] = []
   const addEdge = (from: string, to: string, relation: string) =>
     edges.push({ id: `${from}:${relation}:${to}`, from, to, relation })
+  const provider = (source: GraphSource) => live.sourceProviders?.[source] ?? 'unknown'
 
   for (const domain of evidence.domains) {
     const id = `domain:${domain.aggregateType}`
@@ -369,7 +387,7 @@ export function buildCustomerGraph(
     const id = `account:${account.id}`
     accountNodeIds.add(id)
     nodes.push({
-      id, kind: 'account', label: account.accountNumber || account.id, source: 'account-service',
+      id, kind: 'account', label: account.accountNumber || account.id, source: provider('accounts'),
       href: recordHref('account', account.id),
       facts: [account.accountType, account.currencyCode, `Status: ${account.status}`, `Opened: ${account.openedAt}`],
     })
@@ -383,7 +401,7 @@ export function buildCustomerGraph(
   for (const card of live.cards.slice(0, 50)) {
     const id = `card:${card.id}`
     nodes.push({
-      id, kind: 'card', label: card.maskedPan || `${card.cardType} card`, source: 'card-issuance-service',
+      id, kind: 'card', label: card.maskedPan || `${card.cardType} card`, source: provider('cards'),
       href: recordHref('card', card.id),
       facts: [
         [card.cardType, card.network].filter(Boolean).join(' · '),
@@ -394,7 +412,7 @@ export function buildCustomerGraph(
         ...(card.blockedReason ? [`Block reason: ${card.blockedReason}`] : []),
       ].filter(Boolean),
     })
-    if (card.accountId) addEdge(ensureAccountReference(card.accountId, 'card-issuance-service'), id, 'HAS_CARD')
+    if (card.accountId) addEdge(ensureAccountReference(card.accountId, provider('cards')), id, 'HAS_CARD')
     else addEdge('customer', id, 'HAS_CARD')
     if (card.productCode) {
       products.add(card.productCode)
@@ -412,7 +430,7 @@ export function buildCustomerGraph(
   for (const notification of live.notifications.slice(0, 30)) {
     const id = `notification:${notification.id}`
     nodes.push({
-      id, kind: 'notification', label: notification.template || notification.channel, source: 'notification-service',
+      id, kind: 'notification', label: notification.template || notification.channel, source: provider('notifications'),
       facts: [
         `Channel: ${notification.channel}`,
         `Status: ${notification.status}`,
@@ -427,7 +445,7 @@ export function buildCustomerGraph(
   for (const application of live.lendingApplications.slice(0, 30)) {
     const id = `application:${application.id}`
     nodes.push({
-      id, kind: 'application', label: application.productKind || application.id, source: 'lending-service',
+      id, kind: 'application', label: application.productKind || application.id, source: provider('lending'),
       href: recordHref('application', application.id),
       facts: [`Status: ${application.status}`, `Created: ${application.createdAt}`],
     })
@@ -438,19 +456,19 @@ export function buildCustomerGraph(
   for (const amlCase of live.amlCases.slice(0, 30)) {
     const id = `case:${amlCase.id}`
     nodes.push({
-      id, kind: 'case', label: amlCase.screeningType || amlCase.id, source: 'aml-service',
+      id, kind: 'case', label: amlCase.screeningType || amlCase.id, source: provider('aml'),
       facts: [
         `Status: ${amlCase.status}`, `Risk: ${amlCase.riskLevel}`, `Alert: ${amlCase.alertCode}`,
         `Screened: ${amlCase.screenedAt}`,
       ],
     })
     addEdge('customer', id, 'SUBJECT_OF_AML_CASE')
-    if (amlCase.accountId) addEdge(ensureAccountReference(amlCase.accountId, 'aml-service'), id, 'SCREENED_IN_CASE')
+    if (amlCase.accountId) addEdge(ensureAccountReference(amlCase.accountId, provider('aml')), id, 'SCREENED_IN_CASE')
     if (amlCase.transactionId) {
       const transactionId = `domain-reference:transaction:${amlCase.transactionId}`
       if (!transactionReferences.has(transactionId)) {
         transactionReferences.add(transactionId)
-        nodes.push({ id: transactionId, kind: 'domain', label: amlCase.transactionId, source: 'aml-service', facts: ['Transaction reference from AML case'] })
+        nodes.push({ id: transactionId, kind: 'domain', label: amlCase.transactionId, source: provider('aml'), facts: ['Transaction reference from AML case'] })
       }
       addEdge(transactionId, id, 'TRIGGERED_CASE')
     }
@@ -459,7 +477,7 @@ export function buildCustomerGraph(
   for (const device of live.devices.slice(0, 20)) {
     const id = `device:${device.id}`
     nodes.push({
-      id, kind: 'device', label: device.platform || device.id, source: 'notification-service',
+      id, kind: 'device', label: device.platform || device.id, source: provider('devices'),
       facts: [
         `Status: ${device.status}`, `Registered: ${device.registeredAt}`,
         ...(device.appVersion ? [`App version: ${device.appVersion}`] : []),
@@ -474,7 +492,7 @@ export function buildCustomerGraph(
   for (const document of live.documents.slice(0, 30)) {
     const id = `document:${document.id}`
     nodes.push({
-      id, kind: 'document', label: document.templateCode || document.id, source: 'document-service',
+      id, kind: 'document', label: document.templateCode || document.id, source: provider('documents'),
       facts: [
         `Status: ${document.status}`, `Version: ${document.templateVersion}`, `Created: ${document.createdAt}`,
         ...(document.contentType ? [`Content type: ${document.contentType}`] : []),
@@ -488,7 +506,7 @@ export function buildCustomerGraph(
         products.add(document.productRef)
         nodes.push({
           id: `product:${document.productRef}`, kind: 'product', label: document.productRef,
-          source: 'document-service', facts: [`Product reference: ${document.productRef}`],
+          source: provider('documents'), facts: [`Product reference: ${document.productRef}`],
         })
       }
       addEdge(id, `product:${document.productRef}`, 'DOCUMENTS_PRODUCT')

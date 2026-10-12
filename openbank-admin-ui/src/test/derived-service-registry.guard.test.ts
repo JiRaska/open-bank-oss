@@ -50,7 +50,6 @@ const BASELINE = new Set([
   'src/app/api/customer-360/[partyId]/graph/route.ts',
   'src/app/docs/bcp/page.tsx',
   'src/app/temporal/page.tsx',
-  'src/lib/context/customerGraph.ts',
 ])
 
 /** Distinct quoted `openbank-*` module names in a source text. */

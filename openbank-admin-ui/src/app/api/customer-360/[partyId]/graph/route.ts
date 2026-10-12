@@ -5,7 +5,7 @@ import { auth } from '@/auth'
 import { hasPermission } from '@/lib/auth/roles'
 import {
   parseAccounts, parseAmlCases, parseCards, parseDevices, parseDocuments,
-  parseLendingApplications, parseNotifications,
+  parseLendingApplications, parseNotifications, type GraphSource,
 } from '@/lib/context/customerGraph'
 import { serverSvcUrl } from '@/lib/services/bff'
 
@@ -16,10 +16,9 @@ const TIMEOUT_MS = 5_000
 const MAX_SOURCE_BYTES = 1024 * 1024
 const LIMITS = { accounts: 50, cards: 50, notifications: 30, lending: 30, aml: 30, devices: 20, documents: 30 } as const
 
-type Source = 'accounts' | 'cards' | 'notifications' | 'lending' | 'aml' | 'devices' | 'documents'
-type ReadResult = { source: Source; body: unknown; available: boolean }
+type ReadResult = { source: GraphSource; provider: string; body: unknown; available: boolean }
 
-function sourceRows(source: Source, body: unknown): unknown[] | null {
+function sourceRows(source: GraphSource, body: unknown): unknown[] | null {
   if (source === 'accounts') {
     return body && typeof body === 'object' && 'data' in body && Array.isArray(body.data) ? body.data : null
   }
@@ -52,16 +51,19 @@ async function boundedJson(response: Response): Promise<unknown> {
   return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) as unknown
 }
 
-async function read(source: Source, url: string, authorization: string): Promise<ReadResult> {
+async function read(
+  source: GraphSource, provider: string, namespace: string, port: number,
+  path: string, query: Record<string, string>, authorization: string,
+): Promise<ReadResult> {
   try {
-    const response = await fetch(url, {
+    const response = await fetch(serverSvcUrl(provider, namespace, port, path, query), {
       headers: { authorization }, cache: 'no-store', signal: AbortSignal.timeout(TIMEOUT_MS),
     })
-    if (!response.ok) return { source, body: null, available: false }
+    if (!response.ok) return { source, provider, body: null, available: false }
     const body = await boundedJson(response)
-    return { source, body, available: sourceRows(source, body) !== null }
+    return { source, provider, body, available: sourceRows(source, body) !== null }
   } catch {
-    return { source, body: null, available: false }
+    return { source, provider, body: null, available: false }
   }
 }
 
@@ -76,25 +78,25 @@ export async function GET(_request: Request, { params }: { params: Promise<{ par
 
   const bearer = `Bearer ${session.user.accessToken}`
   const results = await Promise.all([
-    read('accounts', serverSvcUrl('account-service', 'accounts', 8100, '/api/v1/accounts', { partyId, limit: String(LIMITS.accounts + 1) }), bearer),
-    read('cards', serverSvcUrl('card-issuance-service', 'payments', 8118, `/api/v1/cards/party/${partyId}`, {
+    read('accounts', 'account-service', 'accounts', 8100, '/api/v1/accounts', { partyId, limit: String(LIMITS.accounts + 1) }, bearer),
+    read('cards', 'card-issuance-service', 'payments', 8118, `/api/v1/cards/party/${partyId}`, {
       limit: String(LIMITS.cards + 1),
-    }), bearer),
-    read('notifications', serverSvcUrl('notification-service', 'notifications', 8112, '/api/v1/notifications', {
+    }, bearer),
+    read('notifications', 'notification-service', 'notifications', 8112, '/api/v1/notifications', {
       partyId, page: '0', size: String(LIMITS.notifications + 1),
-    }), bearer),
-    read('lending', serverSvcUrl('lending-service', 'lending', 8126, '/api/v1/lending/applications', {
+    }, bearer),
+    read('lending', 'lending-service', 'lending', 8126, '/api/v1/lending/applications', {
       partyId, limit: String(LIMITS.lending + 1),
-    }), bearer),
-    read('aml', serverSvcUrl('aml-service', 'aml', 8117, '/api/v1/aml/cases', {
+    }, bearer),
+    read('aml', 'aml-service', 'aml', 8117, '/api/v1/aml/cases', {
       partyId, limit: String(LIMITS.aml + 1), offset: '0',
-    }), bearer),
-    read('devices', serverSvcUrl('notification-service', 'notifications', 8112, '/api/v1/devices', {
+    }, bearer),
+    read('devices', 'notification-service', 'notifications', 8112, '/api/v1/devices', {
       partyId, limit: String(LIMITS.devices + 1),
-    }), bearer),
-    read('documents', serverSvcUrl('document-service', 'documents', 8143, '/api/v1/documents', {
+    }, bearer),
+    read('documents', 'document-service', 'documents', 8143, '/api/v1/documents', {
       partyRef: partyId, page: '0', size: String(LIMITS.documents + 1),
-    }), bearer),
+    }, bearer),
   ])
   const bySource = new Map(results.map(result => [result.source, result]))
   const accounts = bySource.get('accounts')!
@@ -118,6 +120,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ par
     amlCases: parsed.aml.slice(0, LIMITS.aml),
     devices: parsed.devices.slice(0, LIMITS.devices),
     documents: parsed.documents.slice(0, LIMITS.documents),
+    // Use the same provider value that built each upstream URL. The browser's
+    // graph labels must not maintain a second, drifting owner list.
+    sourceProviders: Object.fromEntries(results.map(result => [result.source, result.provider])),
     unavailable: results.filter(result => !result.available).map(result => result.source),
     truncated: results.filter(result => result.available && sourceRows(result.source, result.body)!.length > LIMITS[result.source])
       .map(result => result.source),

@@ -70,6 +70,11 @@ describe('Customer graph live overlay route', () => {
     expect(body.amlCases).toHaveLength(1)
     expect(body.devices).toHaveLength(1)
     expect(body.documents).toHaveLength(1)
+    expect(body.sourceProviders).toEqual({
+      accounts: 'account-service', cards: 'card-issuance-service',
+      notifications: 'notification-service', lending: 'lending-service',
+      aml: 'aml-service', devices: 'notification-service', documents: 'document-service',
+    })
     expect(JSON.stringify(body)).not.toContain('secret@example.test')
     expect(JSON.stringify(body)).not.toContain('secret body')
     expect(JSON.stringify(body)).not.toContain('must-not-leak')
