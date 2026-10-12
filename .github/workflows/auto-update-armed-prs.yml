@@ -59,4 +59,14 @@ jobs:
           # shellcheck disable=SC2086  # DRY_RUN is empty or a single flag
           python3 .github/scripts/auto-update-armed-prs.py \
             --repo "${GITHUB_REPOSITORY}" --branch main \
-            --max-updates 5 --max-updates-per-pr 4 --debounce-minutes 20 ${DRY_RUN}
+            --max-updates 5 --max-updates-per-pr 4 --debounce-minutes 20 \
+            --recovery-report /tmp/auto-update-target-report.json ${DRY_RUN}
+
+      - name: Preserve target-specific recovery evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: auto-update-target-evidence-${{ github.run_attempt }}
+          path: /tmp/auto-update-target-report.json
+          if-no-files-found: ignore
+          retention-days: 14
