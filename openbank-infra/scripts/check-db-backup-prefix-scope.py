@@ -66,6 +66,14 @@ CROSS_PREFIX_READERS: dict[tuple[str, str], str] = {
 SCOPED_RESOURCE_RE = re.compile(r"\$\$\{aws:PrincipalTag/kubernetes-service-account\}")
 BUCKET_WIDE_OBJECT_RE = re.compile(r'resources\s*=\s*\[\s*"\$\{aws_s3_bucket\.db_backups\.arn\}/\*"\s*\]')
 SA_ENTRY_RE = re.compile(r'namespace\s*=\s*"([a-z0-9-]+)"\s*,\s*sa\s*=\s*"([a-z0-9-]+)"')
+TRUST_DOC_RE = re.compile(
+    r'data "aws_iam_policy_document" "db_backups_assume"\s*\{(.*?)\n\}', re.S)
+CLUSTER_TAG_CONDITION_RE = re.compile(
+    r'condition\s*\{\s*test\s*=\s*"StringEquals"\s*'
+    r'variable\s*=\s*"aws:RequestTag/eks-cluster-arn"\s*'
+    r'values\s*=\s*\["arn:aws:eks:\$\{local\.region\}:'
+    r'\$\{data\.aws_caller_identity\.current\.account_id\}:'
+    r'cluster/\$\{local\.cluster_name\}"\]\s*\}', re.S)
 
 
 def _rel(path: pathlib.Path) -> str:
@@ -130,6 +138,12 @@ def check(clusters: list[dict], tf_text: str) -> tuple[list[str], int]:
     if BUCKET_WIDE_OBJECT_RE.search(tf_text):
         findings.append("db-backups.tf: a statement grants objects bucket-wide "
                         "(\"${aws_s3_bucket.db_backups.arn}/*\") — that re-opens cross-cluster access")
+    trust = TRUST_DOC_RE.search(tf_text)
+    if not trust or not CLUSTER_TAG_CONDITION_RE.search(trust.group(1)):
+        findings.append("db-backups.tf: backup role trust must require the exact EKS "
+                        "cluster ARN request tag")
+    if re.search(r'\bdisable_session_tags\s*=\s*true\b', tf_text):
+        findings.append("db-backups.tf: disabled Pod Identity session tags break backup scope")
 
     entries = SA_ENTRY_RE.findall(tf_text)
     seen: dict[str, str] = {}
@@ -170,6 +184,16 @@ def self_test() -> int:
     good_tf = (
         'resources = ["${aws_s3_bucket.db_backups.arn}/${local.db_backup_own_prefix}/*"]\n'
         'db_backup_own_prefix = "$${aws:PrincipalTag/kubernetes-service-account}"\n'
+        'data "aws_iam_policy_document" "db_backups_assume" {\n'
+        '  statement {\n'
+        '    condition {\n'
+        '      test = "StringEquals"\n'
+        '      variable = "aws:RequestTag/eks-cluster-arn"\n'
+        '      values = ["arn:aws:eks:${local.region}:'
+        '${data.aws_caller_identity.current.account_id}:cluster/${local.cluster_name}"]\n'
+        '    }\n'
+        '  }\n'
+        '}\n'
         'a = { namespace = "ledger", sa = "ledger-db" }\n'
         'b = { namespace = "payments", sa = "card-processing-db" }\n'
     )
@@ -194,6 +218,10 @@ def self_test() -> int:
         good_tf + 'resources = ["${aws_s3_bucket.db_backups.arn}/*"]\n', True)
     run("duplicate SA across namespaces is flagged", [ok],
         good_tf + 'c = { namespace = "other", sa = "ledger-db" }\n', True)
+    run("wrong cluster tag fails", [ok],
+        good_tf.replace('aws:RequestTag/eks-cluster-arn', 'aws:RequestTag/eks-cluster-name'), True)
+    run("disabled session tags fail", [ok],
+        good_tf + 'disable_session_tags = true\n', True)
     drill = {"name": "ledger-db-drill", "namespace": "ledger", "file": "f", "dest": "",
              "external": [f"s3://{BACKUP_BUCKET}/ledger-db"]}
     run("declared cross-prefix reader is clean", [drill], good_tf, False)

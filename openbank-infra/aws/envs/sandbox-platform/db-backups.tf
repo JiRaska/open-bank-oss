@@ -133,6 +133,14 @@ data "aws_iam_policy_document" "db_backups_assume" {
       type        = "Service"
       identifiers = ["pods.eks.amazonaws.com"]
     }
+    # This shared role must only be issued to pods from this EKS cluster. EKS
+    # supplies the cluster ARN as an immutable Pod Identity session tag; a
+    # same-named ServiceAccount in another cluster must not inherit access.
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestTag/eks-cluster-arn"
+      values   = ["arn:aws:eks:${local.region}:${data.aws_caller_identity.current.account_id}:cluster/${local.cluster_name}"]
+    }
   }
 }
 
