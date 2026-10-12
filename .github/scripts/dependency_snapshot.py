@@ -218,6 +218,9 @@ def generate(repo, output, env, extra_arguments=()):
                  for p in projects]
         child_env = dict(env, DEPENDENCY_GRAPH_REPORT_DIR=str(reports),
                          DEPENDENCY_GRAPH_COVERAGE_DIR=str(coverage))
+        # Graph plugin 1.5.0 registers resolver tasks in projectsEvaluated. Demand
+        # configuration cannot select those tasks (root and non-root shards both
+        # reproduced task-not-found); keep it off until registration is redesigned.
         command = ['./gradlew', '--init-script', str(repo / '.github/scripts/dependency-resolution-strict.init.gradle'),
                    '--no-daemon', '--no-configuration-cache', '--no-configure-on-demand',
                    '--max-workers=2', '-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g',
