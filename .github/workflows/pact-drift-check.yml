@@ -30,6 +30,9 @@ on:
       - ".github/scripts/shard-pact-gradle-args.py"
       - ".github/scripts/test-shard-pact-gradle-args.py"
       - ".github/scripts/pact-js-contracts.py"
+      - ".github/scripts/pact-regeneration-scope.py"
+      - ".github/scripts/tests/test_pact_regeneration_scope.py"
+      - ".github/scripts/tests/test_pact_regeneration_workflow.py"
       - ".github/scripts/publish-admin-ui-pacts.py"
       - ".github/scripts/test-publish-admin-ui-pacts.py"
       - ".github/scripts/await-admin-ui-pact-publication.py"
@@ -55,6 +58,9 @@ on:
       - ".github/scripts/shard-pact-gradle-args.py"
       - ".github/scripts/test-shard-pact-gradle-args.py"
       - ".github/scripts/pact-js-contracts.py"
+      - ".github/scripts/pact-regeneration-scope.py"
+      - ".github/scripts/tests/test_pact_regeneration_scope.py"
+      - ".github/scripts/tests/test_pact_regeneration_workflow.py"
       - ".github/scripts/publish-admin-ui-pacts.py"
       - ".github/scripts/test-publish-admin-ui-pacts.py"
       - ".github/scripts/await-admin-ui-pact-publication.py"
@@ -71,7 +77,30 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  regeneration-scope:
+    runs-on: ubuntu-latest
+    outputs:
+      jvm_required: ${{ steps.scope.outputs.jvm_required }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Classify complete changed inputs
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s .github/scripts/tests -p test_pact_regeneration_scope.py
+          git diff --no-renames --name-only -z "$BASE_SHA" "$HEAD_SHA" > "${RUNNER_TEMP}/pact-inputs.bin"
+          required="$(python3 .github/scripts/pact-regeneration-scope.py < "${RUNNER_TEMP}/pact-inputs.bin")"
+          echo "jvm_required=$required" >> "$GITHUB_OUTPUT"
+
   gradle-pacts:
+    needs: regeneration-scope
+    if: needs.regeneration-scope.outputs.jvm_required == 'true'
+
     name: Regenerate JVM pacts (${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
     # A single 31-module invocation hit the 30-minute job timeout while still regenerating pacts.
@@ -128,19 +157,26 @@ jobs:
 
   drift-check:
     name: Regenerate consumer pacts and diff against committed
-    needs: gradle-pacts
+    needs: [regeneration-scope, gradle-pacts]
     if: always()
+    env:
+      JVM_REQUIRED: ${{ needs.regeneration-scope.outputs.jvm_required }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - name: Require every JVM shard to succeed
         env:
           SHARD_RESULT: ${{ needs.gradle-pacts.result }}
+          SCOPE_RESULT: ${{ needs.regeneration-scope.result }}
         run: |
-          [ "$SHARD_RESULT" = success ] || {
-            echo "::error::JVM pact regeneration did not complete in every shard: $SHARD_RESULT"
+          [ "$SCOPE_RESULT" = success ] || {
+            echo "::error::Pact input classification did not succeed"
             exit 1
           }
+          case "$JVM_REQUIRED:$SHARD_RESULT" in
+            true:success|false:skipped) ;;
+            *) echo "::error::Unexpected JVM scope/shard result: $JVM_REQUIRED:$SHARD_RESULT"; exit 1 ;;
+          esac
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -179,14 +215,18 @@ jobs:
           .github/scripts/derive-pact-drift-scope.sh --gated-pacts > "${RUNNER_TEMP}/expected-jvm-pacts.txt"
           .github/scripts/derive-pact-drift-scope.sh --uncovered > "${RUNNER_TEMP}/pact-uncovered.txt"
           python3 .github/scripts/pact-js-contracts.py --tests > "${RUNNER_TEMP}/pact-js-tests.txt"
+          python3 .github/scripts/pact-js-contracts.py --pacts > "${RUNNER_TEMP}/expected-js-pacts.txt"
+          touch "${RUNNER_TEMP}/pact-regen-marker"
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v6.2.1
+        if: env.JVM_REQUIRED == 'true'
         with:
           pattern: jvm-pacts-*
           merge-multiple: true
           path: ${{ runner.temp }}/jvm-pacts
 
       - name: Verify shard coverage and restore regenerated JVM contracts
+        if: env.JVM_REQUIRED == 'true'
         run: |
           set -euo pipefail
           : > "${RUNNER_TEMP}/observed-jvm-pacts.txt"
@@ -207,7 +247,6 @@ jobs:
             echo "::error::The JVM shards did not regenerate exactly the derived committed pact set"
             exit 1
           fi
-          touch "${RUNNER_TEMP}/pact-regen-marker"
           for shard in 0 1 2 3; do
             tar --touch -xf "${RUNNER_TEMP}/jvm-pacts/shard-${shard}.tar"
           done
@@ -250,6 +289,9 @@ jobs:
           uncovered="$(cat "${RUNNER_TEMP}/pact-uncovered.txt")"
           stale=""
           for f in pacts/*.json; do
+            if [ "$JVM_REQUIRED" = false ] && ! grep -qxF -- "$f" "${RUNNER_TEMP}/expected-js-pacts.txt"; then
+              continue
+            fi
             if [ -n "$uncovered" ] && printf '%s\n' "$uncovered" | grep -qxF -- "$f"; then
               continue
             fi
@@ -263,7 +305,7 @@ jobs:
             echo "::error::The JVM/PactJS derivation did not put this consumer in scope, or its test task was skipped. Run derive-pact-drift-scope.sh and pact-js-contracts.py locally to inspect the scope."
             exit 1
           fi
-          echo "Coverage OK — every committed pact except the declared exclusions was regenerated by this run."
+          echo "Coverage OK — every pact in the classified regeneration scope was rewritten (JVM required: $JVM_REQUIRED)."
 
       - name: Fail on drift between regenerated and committed pacts
         run: |
