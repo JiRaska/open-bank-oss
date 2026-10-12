@@ -46,6 +46,26 @@ class AdmissionTest(unittest.TestCase):
         self.assertIs(checkout['with']['persist-credentials'], False)
         self.assertIn('public-readiness.txt', admission['run'])
 
+    def test_security_scanners_wait_for_trusted_admission(self):
+        workflow = yaml.safe_load((Path(__file__).parents[1] / 'workflows/security.yml').read_text())
+        jobs = workflow['jobs']
+        gate = jobs['agent-admission']
+        checkout = gate['steps'][0]
+        decision = gate['steps'][1]
+        self.assertEqual(gate['permissions'], {'contents': 'read', 'pull-requests': 'read'})
+        self.assertEqual(checkout['with']['ref'], '${{ github.event.repository.default_branch }}')
+        self.assertIs(checkout['with']['persist-credentials'], False)
+        self.assertIn('--current-pr "$PR_NUMBER"', decision['run'])
+        self.assertIn('agent-admission.py', decision['run'])
+        for job_name in ('detect-deps', 'trivy'):
+            with self.subTest(job=job_name):
+                self.assertEqual(jobs[job_name]['needs'], 'agent-admission')
+                self.assertEqual(jobs[job_name]['if'],
+                                 "needs.agent-admission.outputs.proceed == 'true'")
+        for job_name in ('codeql', 'sbom', 'sbom-per-service'):
+            with self.subTest(job=job_name):
+                self.assertEqual(jobs[job_name]['needs'], 'detect-deps')
+
     def test_empty_queue(self):
         self.assertEqual(admission.admit([[]], self.prefixes, self.limit), (True, 0))
 
