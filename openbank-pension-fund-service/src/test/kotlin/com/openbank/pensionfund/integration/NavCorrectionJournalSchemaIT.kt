@@ -12,9 +12,11 @@ import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.eclipse.microprofile.config.ConfigProvider
 import org.flywaydb.core.Flyway
 import org.junit.jupiter.api.Test
+import java.math.BigDecimal
 import java.sql.Connection
 import java.sql.DriverManager
 import java.sql.SQLException
+import java.time.OffsetDateTime
 import java.util.UUID
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ExecutorService
@@ -33,6 +35,23 @@ class NavCorrectionJournalSchemaIT {
         val contract: UUID = UUID.randomUUID(),
         val order: UUID = UUID.randomUUID(),
         val transaction: UUID = UUID.randomUUID(),
+    )
+
+    private data class PricedHistory(val rowCount: Long, val transaction: PricedTransaction)
+
+    /** Every V1 column of the priced transaction, including its original instruction linkage. */
+    private data class PricedTransaction(
+        val id: UUID,
+        val orderId: UUID?,
+        val contractId: UUID,
+        val fundId: UUID,
+        val transactionType: String,
+        val units: BigDecimal,
+        val amount: BigDecimal,
+        val navId: UUID,
+        val navPerUnit: BigDecimal,
+        val pricedAt: OffsetDateTime,
+        val correctedFromNavId: UUID?,
     )
 
     private fun jdbc(): Connection = ConfigProvider.getConfig().let { config ->
@@ -160,22 +179,25 @@ class NavCorrectionJournalSchemaIT {
         val schema = "nav_correction_${UUID.randomUUID().toString().replace("-", "")}"
         val fixture = Fixture()
         assertThat(flyway(schema, "4").migrate().migrationsExecuted).isEqualTo(4)
-        jdbc().use { connection ->
+        val before = jdbc().use { connection ->
             connection.schema = schema
             seed(connection, fixture)
-            assertThat(pricedAmount(connection, fixture)).isEqualTo("100.00")
+            pricedHistory(connection, fixture)
         }
+        assertThat(before.rowCount).isEqualTo(1)
+        assertThat(before.transaction.id).isEqualTo(fixture.transaction)
+        assertThat(before.transaction.orderId).isEqualTo(fixture.order)
 
         assertThat(flyway(schema, "5").migrate().migrationsExecuted).isEqualTo(1)
         jdbc().use { connection ->
             connection.schema = schema
-            assertThat(pricedAmount(connection, fixture)).isEqualTo("100.00")
+            assertThat(pricedHistory(connection, fixture)).isEqualTo(before)
             connection.autoCommit = false
             insertJournal(connection, fixture)
             insertDraft(connection, fixture, "50.000000")
             connection.commit()
             assertThat(count(connection, fixture)).isEqualTo(1)
-            assertThat(pricedAmount(connection, fixture)).isEqualTo("100.00")
+            assertThat(pricedHistory(connection, fixture)).isEqualTo(before)
         }
     }
 
@@ -193,13 +215,40 @@ class NavCorrectionJournalSchemaIT {
             .load()
     }
 
-    private fun pricedAmount(connection: Connection, fixture: Fixture): String =
-        connection.createStatement().use { sql ->
-            sql.executeQuery("SELECT amount FROM unit_transactions WHERE id = '${fixture.transaction}'").use { rows ->
-                assertThat(rows.next()).isTrue()
-                rows.getBigDecimal(1).setScale(2).toPlainString()
+    private fun pricedHistory(connection: Connection, fixture: Fixture): PricedHistory {
+        val rowCount = connection.createStatement().use { sql ->
+            sql.executeQuery("SELECT count(*) FROM unit_transactions").use { rows ->
+                rows.next()
+                rows.getLong(1)
             }
         }
+        val transaction = connection.prepareStatement(
+            """SELECT id, order_id, contract_id, fund_id, transaction_type, units, amount,
+                      nav_id, nav_per_unit, priced_at, corrected_from_nav_id
+               FROM unit_transactions WHERE id = ?""",
+        ).use { sql ->
+            sql.setObject(1, fixture.transaction)
+            sql.executeQuery().use { rows ->
+                assertThat(rows.next()).isTrue()
+                val row = PricedTransaction(
+                    rows.getObject("id", UUID::class.java),
+                    rows.getObject("order_id", UUID::class.java),
+                    rows.getObject("contract_id", UUID::class.java),
+                    rows.getObject("fund_id", UUID::class.java),
+                    rows.getString("transaction_type"),
+                    rows.getBigDecimal("units"),
+                    rows.getBigDecimal("amount"),
+                    rows.getObject("nav_id", UUID::class.java),
+                    rows.getBigDecimal("nav_per_unit"),
+                    rows.getObject("priced_at", OffsetDateTime::class.java),
+                    rows.getObject("corrected_from_nav_id", UUID::class.java),
+                )
+                assertThat(rows.next()).isFalse()
+                row
+            }
+        }
+        return PricedHistory(rowCount, transaction)
+    }
 
     private fun backendPid(connection: Connection): Int = connection.createStatement().use { sql ->
         sql.executeQuery("SELECT pg_backend_pid()").use { rows ->
