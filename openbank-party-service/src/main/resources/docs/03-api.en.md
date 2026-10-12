@@ -12,6 +12,8 @@ The REST contract is described in [`openapi.yaml`](../openapi.yaml) (`info.versi
 
 All endpoints require a **Keycloak Bearer token** (realm `openbank`). Per-endpoint roles (`@RolesAllowed`):
 
+In production, `/api/*` selects the bearer authentication mechanism on both the HTTP and mTLS listeners. A trusted client certificate is required to establish the TLS connection on port 8443, but it does not identify an API caller by itself: a certificate without a bearer receives 401. A client needs both its certificate and a valid bearer on that listener; the existing HTTP listener still requires the bearer. This prevents a workload holding a trusted transport certificate from gaining an API identity without a token (#12511). `PartyListenerAuthParityIT` checks both listeners using real HTTP requests. This mechanism selection does not change the OPA advisory setting or the per-endpoint role checks below.
+
 | Endpoint | Roles |
 |---|---|
 | `GET /parties`, `GET /parties/search`, `GET /parties/{id}`, `GET /parties/{id}/documents` | `ROLE_VIEWER`, `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_KYC`, `ROLE_API` |
