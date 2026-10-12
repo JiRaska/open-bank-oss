@@ -5,6 +5,7 @@
 package com.openbank.pensionfund.application
 
 import com.openbank.pensionfund.application.port.MarketPricePort
+import com.openbank.pensionfund.application.port.PensionFundMetrics
 import com.openbank.pensionfund.application.port.StoreChanges
 import com.openbank.pensionfund.application.usecase.FundAdministrationService
 import com.openbank.pensionfund.application.usecase.FundDefinition
@@ -49,9 +50,9 @@ class FundReportingGoldenTest {
     private val prices = object : MarketPricePort {
         override suspend fun price(instrumentId: String, valuationDate: LocalDate, currency: String): BigDecimal? = null
     }
-    private val admin = FundAdministrationService(store, clock, 30)
-    private val navs = NavService(store, prices, clock)
-    private val register = UnitRegisterService(store, clock)
+    private val admin = FundAdministrationService(store, clock, 30, PensionFundMetrics.NONE)
+    private val navs = NavService(store, prices, clock, PensionFundMetrics.NONE)
+    private val register = UnitRegisterService(store, clock, PensionFundMetrics.NONE)
     private val reporting = FundReportingService(store)
     private val c1 = UUID.randomUUID()
     private val c2 = UUID.randomUUID()
