@@ -8,7 +8,7 @@ The committed `src/main/resources/openapi.yaml` defines the API contract. Read `
 
 ## Proposal evidence
 
-The case thread returned by `GET /cases/{caseId}` reads proposal events from `case_outbox`, including rows already marked `SENT`. Those rows remain part of the live read model for cases of any age. The shared seven-day SENT outbox purge therefore skips this service. Enable that purge only after proposal evidence has an independent durable source, or after a separately reviewed and tested change to the case-thread retention contract. The API currently reports retention coverage as unknown; it does not promise a seven-day evidence window.
+The case thread returned by `GET /cases/{caseId}` reads proposal metadata from `case_proposal_evidence`. Migration V11 backfills retained outbox rows, and a database trigger records future inserts and delivery status changes in the same transaction. Payloads remain in the outbox only. The shared seven-day SENT outbox purge still skips this service until the historical backfill, target deployment, and separate evidence retention policy are reviewed. The API reports retention coverage as unknown; it does not promise a seven-day evidence window.
 
 ## Build identity
 

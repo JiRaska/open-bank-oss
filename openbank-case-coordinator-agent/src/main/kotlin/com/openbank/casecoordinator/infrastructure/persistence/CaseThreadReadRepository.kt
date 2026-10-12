@@ -63,19 +63,19 @@ class CaseThreadReadRepository(private val dataSource: DataSource, private val o
 
     fun listProposalEvents(workflowId: String): List<ProposalEventRow> = query(
         """
-        SELECT o.event_id, o.event_type, o.status, o.created_at
-        FROM case_outbox o
-        JOIN case_workflow w ON w.id = o.aggregate_id
+        SELECT e.event_id, e.event_type, e.delivery_status, e.emitted_at
+        FROM case_proposal_evidence e
+        JOIN case_workflow w ON w.id = e.aggregate_id
         WHERE w.workflow_id = ?
-        ORDER BY o.created_at
+        ORDER BY e.emitted_at, e.event_id
         """.trimIndent(),
         { ps -> ps.setString(P1, workflowId) },
         { rs ->
             ProposalEventRow(
                 proposalId = rs.getObject("event_id", UUID::class.java).toString(),
                 proposalType = rs.getString("event_type"),
-                status = rs.getString("status"),
-                emittedAtEpochMs = rs.getTimestamp("created_at").toInstant().toEpochMilli(),
+                status = rs.getString("delivery_status"),
+                emittedAtEpochMs = rs.getTimestamp("emitted_at").toInstant().toEpochMilli(),
             )
         },
     )

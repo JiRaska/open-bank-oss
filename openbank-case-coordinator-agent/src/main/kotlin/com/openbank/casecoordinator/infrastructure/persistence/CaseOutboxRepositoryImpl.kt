@@ -16,8 +16,8 @@ import java.time.Clock
  * `FOR UPDATE SKIP LOCKED` (#1201, D3), next_attempt_at backoff (D4), batched `markSent` (D6),
  * the O(1) count and retention all live in [AbstractPanacheOutboxRepository]. Rows are written by
  * `CaseActivitiesImpl`'s native INSERT inside the workflow activity's transaction, and
- * `CaseThreadReadRepository` reads them back by status — including SENT — for every case age.
- * Until proposal evidence has a separate durable source, this repository must not purge SENT.
+ * Proposal metadata is copied to a separate read model by V11, but SENT retention remains exempt
+ * until historical coverage, the evidence retention policy, and rollout are reviewed.
  */
 @ApplicationScoped
 class CaseOutboxRepositoryImpl(clock: Clock) :
@@ -27,7 +27,6 @@ class CaseOutboxRepositoryImpl(clock: Clock) :
         clock,
     ),
     PanacheRepository<CaseOutboxEntity> {
-    // GET /cases/{caseId} projects proposal evidence directly from SENT case_outbox rows.
-    // Do not purge them until that evidence has an independent durable source.
+    // Do not enable purge until V11 is deployed and its backfill and evidence policy are verified.
     override val sentRetentionExempt: Boolean = true
 }
