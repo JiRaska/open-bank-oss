@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.1](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.19.0...product-catalog-v0.19.1) (2026-10-12)
+
+
+### Security
+
+* **product-catalog:** authenticate the API by bearer only on the mTLS listener ([#12526](https://github.com/JiRaska/open-bank-oss/issues/12526)) ([6af41b7](https://github.com/JiRaska/open-bank-oss/commit/6af41b7f26017f8875cbc9f5d202ad455502e9c9))
+
 ## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.18.10...product-catalog-v0.19.0) (2026-10-09)
 
 
