@@ -4,6 +4,7 @@
 
 package com.openbank.domestic.integration
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.redis.datasource.ReactiveRedisDataSource
 import io.quarkus.test.common.QuarkusTestResource
@@ -17,6 +18,8 @@ import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.yaml.snakeyaml.Yaml
+import java.io.File
 import java.math.BigDecimal
 import java.sql.SQLException
 import java.util.UUID
@@ -73,6 +76,7 @@ class DomesticPaymentIdempotencyIT {
         assertThat(changed.statusCode).isEqualTo(409)
         assertThat(changed.contentType).startsWith("application/problem+json")
         assertThat(changed.jsonPath().getString("code")).isEqualTo("IDEMPOTENCY_KEY_REUSED")
+        assertIdempotencyConflictMatchesPublishedSchema(changed)
         assertThat(countPayments(key)).isEqualTo(1)
         assertThat(countOutbox(UUID.fromString(paymentId))).isEqualTo(1)
         assertThat(requestFingerprint(key)).matches("[0-9a-f]{64}")
@@ -109,6 +113,7 @@ class DomesticPaymentIdempotencyIT {
         assertThat(response.statusCode).isEqualTo(409)
         assertThat(response.contentType).startsWith("application/problem+json")
         assertThat(response.jsonPath().getString("code")).isEqualTo("IDEMPOTENCY_KEY_REUSED")
+        assertIdempotencyConflictMatchesPublishedSchema(response)
         assertThat(countPayments(key)).isEqualTo(1)
     }
 
@@ -176,6 +181,30 @@ class DomesticPaymentIdempotencyIT {
         .header("Idempotency-Key", key)
         .body(body)
         .post("/api/v1/domestic-payments")
+
+    @Suppress("UNCHECKED_CAST")
+    private fun assertIdempotencyConflictMatchesPublishedSchema(response: Response) {
+        val spec = Yaml().load<Map<String, Any>>(File("src/main/resources/openapi.yaml").readText())
+        val components = spec["components"] as Map<String, Any>
+        val schemas = components["schemas"] as Map<String, Any>
+        val schema = schemas["IdempotencyConflictResponse"] as Map<String, Any>
+        val required = schema["required"] as List<String>
+        val properties = schema["properties"] as Map<String, Map<String, Any>>
+        val body = ObjectMapper().readTree(response.asString())
+
+        assertThat(required).containsExactlyInAnyOrder("type", "title", "status", "detail", "code", "error")
+        required.forEach { field ->
+            assertThat(body.hasNonNull(field))
+                .describedAs("required field %s", field)
+                .isTrue()
+        }
+        properties.forEach { (field, definition) ->
+            val allowed = definition["enum"] as? List<*> ?: return@forEach
+            assertThat(allowed.map { it.toString() }).contains(body.get(field).asText())
+        }
+        assertThat(body.get("status").isInt).isTrue()
+        assertThat(body.get("error").asText()).isEqualTo(body.get("detail").asText())
+    }
 
     private fun requestBody(debtorAccountId: UUID, amount: BigDecimal): String =
         """
