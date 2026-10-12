@@ -636,5 +636,5 @@ set) apply equally to the new `ledger.approval.decide` action.
   are the bank ledger's, unchanged. **Tampering/DoS:** every bank-only job (outbox dispatch, tie-out,
   FX revaluation, accounting-day lock, Kafka) is switched off and the `ledger-instance-switches-off` gate
   derives the switch list from source and fails if any is live. The chart of accounts is applied by a
-  Flyway `afterMigrate` callback mounted only into this instance, so no pension account reaches the
+  Flyway callback script mounted from a ConfigMap into this instance only, so no pension account reaches the
   bank's database. Rollback: delete the Argo app and its namespace; the bank's ledger is untouched.
