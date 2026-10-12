@@ -80,14 +80,13 @@ jobs:
       # goes stale with no error. Pass the repo explicitly so it works API-only.
       GH_REPO: ${{ github.repository }}
     steps:
-      # SHALLOW on purpose. The only things needed from the repo are two files —
-      # .github/scripts/resolve-record-deployment-version.sh and release-please-config.json —
-      # and the equivalence proof is made through the compare API, not through git history
-      # (#3223). A full-history checkout on every gitops merge would buy nothing here.
-      - name: Check out the resolver and the exclude-paths it reads
+      # Equivalence must cover shared Pact/build inputs as well as the service subtree.
+      # The contract-input comparator verifies ancestry and Git tree objects; a shallow
+      # checkout cannot establish either for the deployed and published revisions.
+      - name: Check out the Pact source identity proof
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5.0.1
         with:
-          fetch-depth: 1
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Record deployed services in the broker
