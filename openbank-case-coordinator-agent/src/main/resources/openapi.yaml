@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Case Coordinator Agent API
-  version: 1.7.0
+  version: 1.8.0
   description: >-
     Agent-swarm case coordination (ADR-0244): opens durable Temporal case workflows, accepts
     mid-flight agent signals (join / contribute / supersede / request-synthesis), and projects
@@ -78,15 +78,17 @@ paths:
         '202':
           description: Open accepted, workflow start pending
         '400':
-          description: Missing or invalid request field
+          description: Missing or invalid request field (libs-runtime validation envelope)
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorBody'
+                $ref: '#/components/schemas/ProblemDetail'
         '403':
           description: >-
             The authenticated caller may not act as the requested `openedBy` agent identity, or
-            case.open is denied by the capability gate, or the case class is not enabled.
+            case.open is denied by the capability gate, or the case class is not enabled. These
+            resource decisions carry ErrorBody; a role rejected before resource invocation has
+            an empty body.
           content:
             application/json:
               schema:
@@ -192,15 +194,17 @@ paths:
             Temporal client accepted the signal invocation. This does not assert that the workflow
             consumed the signal or persisted a contribution.
         '400':
-          description: Missing or invalid request field
+          description: Missing or invalid request field (libs-runtime validation envelope)
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorBody'
+                $ref: '#/components/schemas/ProblemDetail'
         '403':
           description: >-
             The authenticated caller may not act as the requested `agentId`, or the signal type is
-            denied by the OPA collaboration policy or the fail-safe local charter gate.
+            denied by the OPA collaboration policy or the fail-safe local charter gate. These
+            resource decisions carry ErrorBody; a role rejected before resource invocation has
+            an empty body.
           content:
             application/json:
               schema:
@@ -528,6 +532,54 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/KillSwitchScope'
+
+    ProblemDetail:
+      type: object
+      description: >-
+        Shared libs-runtime validation body. ApiError carries the five required members;
+        the ADR-0326 problem form is a superset. The resource's explicit 403/404/409/429/503
+        responses instead use ErrorBody. A role rejected by @RolesAllowed has an empty 403 body.
+      required: [status, code, message, traceId, timestamp]
+      additionalProperties: false
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code: { type: string }
+        correlationId: { type: string }
+        retryable: { type: boolean }
+        violations:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProblemViolation'
+        traceId: { type: string }
+        message: { type: string }
+        timestamp: { type: string, format: date-time }
+        details:
+          type: array
+          items:
+            $ref: '#/components/schemas/FieldError'
+
+    ProblemViolation:
+      type: object
+      required: [field, message]
+      additionalProperties: false
+      properties:
+        field: { type: string }
+        message: { type: string }
+        code: { type: string }
+
+    FieldError:
+      type: object
+      required: [field, message]
+      additionalProperties: false
+      properties:
+        field: { type: string }
+        message: { type: string }
+        rejectedValue:
+          description: Rejected input is never echoed.
 
     ErrorBody:
       type: object
