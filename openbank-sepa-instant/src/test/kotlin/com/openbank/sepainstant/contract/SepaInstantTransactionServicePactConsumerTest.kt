@@ -105,7 +105,7 @@ class SepaInstantTransactionServicePactConsumerTest {
     }
 
     /**
-     * TransactionNegativeAuthPactVerificationTest replays this state without @TestSecurity.
+     * TransactionNegativeAuthProviderVerificationTest replays this state without @TestSecurity.
      * Pin only the 401: the container rejects an absent M2M identity before an error mapper
      * can guarantee a response body.
      */
