@@ -8,6 +8,8 @@ package com.openbank.communication.application
 import com.openbank.communication.application.port.out.CommunicationAuditRepository
 import com.openbank.communication.application.port.out.CommunicationEventPublisher
 import com.openbank.communication.application.port.out.PersonaRepository
+import com.openbank.communication.application.port.out.StyleEditorState
+import com.openbank.communication.application.port.out.StylePublication
 import com.openbank.communication.application.port.out.StyleVersionRepository
 import com.openbank.communication.domain.Persona
 import com.openbank.communication.domain.PersonaPublishOutcome
@@ -36,30 +38,59 @@ private class InMemoryPersonaRepository(personas: List<Persona>) : PersonaReposi
 
 private class InMemoryStyleVersionRepository : StyleVersionRepository {
     val rows = ConcurrentHashMap<UUID, StyleVersion>()
-    override suspend fun create(styleVersion: StyleVersion): StyleVersion {
-        rows[styleVersion.id] = styleVersion
-        return styleVersion
+    override suspend fun createNext(personaId: UUID, make: (Int) -> StyleVersion): StyleVersion = synchronized(rows) {
+        val next = (rows.values.filter { it.personaId == personaId }.maxOfOrNull { it.version } ?: 0) + 1
+        val created = make(next)
+        rows[created.id] = created
+        created
     }
     override suspend fun find(id: UUID) = rows[id]
-    override suspend fun latestVersionNumber(personaId: UUID) =
-        rows.values.filter { it.personaId == personaId }.maxOfOrNull { it.version } ?: 0
     override suspend fun submit(id: UUID, at: Instant): StyleVersion? {
         val existing = rows[id] ?: return null
         val updated = existing.copy(status = StyleVersionStatus.IN_REVIEW)
         rows[id] = updated
         return updated
     }
-    override suspend fun publish(id: UUID, checker: String, at: Instant): StyleVersion? {
-        val existing = rows[id] ?: return null
-        val updated = existing.copy(
-            status = StyleVersionStatus.PUBLISHED,
-            decidedBy = checker,
-            decidedAt = at,
-            publishedAt = at,
-        )
-        rows[id] = updated
-        return updated
-    }
+    override suspend fun publishIfCurrent(id: UUID, checker: String, at: Instant): StylePublication =
+        synchronized(rows) {
+            val existing = rows[id] ?: throw StyleVersionConflictException("style version could not be published")
+            if (existing.maker ==
+                checker
+            ) {
+                throw StyleVersionConflictException("maker cannot publish their own style version")
+            }
+            if (existing.status !=
+                StyleVersionStatus.IN_REVIEW
+            ) {
+                throw StyleVersionConflictException("style version is not in review")
+            }
+            val current = rows.values.firstOrNull {
+                it.personaId == existing.personaId &&
+                    it.status == StyleVersionStatus.PUBLISHED
+            }
+            if (existing.basePublishedVersion ==
+                null
+            ) {
+                throw StyleVersionConflictException("draft has no known published base")
+            }
+            val generation = rows.values.filter {
+                it.personaId == existing.personaId &&
+                    it.status in setOf(StyleVersionStatus.PUBLISHED, StyleVersionStatus.RETIRED)
+            }.maxOfOrNull { it.version } ?: 0
+            if (existing.basePublishedVersion != generation) {
+                throw StyleVersionConflictException("published style changed since this draft was created")
+            }
+            val retired = current?.copy(status = StyleVersionStatus.RETIRED, retiredAt = at)
+            if (retired != null) rows[retired.id] = retired
+            val updated = existing.copy(
+                status = StyleVersionStatus.PUBLISHED,
+                decidedBy = checker,
+                decidedAt = at,
+                publishedAt = at,
+            )
+            rows[id] = updated
+            StylePublication(updated, retired)
+        }
     override suspend fun retire(id: UUID, checker: String, at: Instant): StyleVersion? {
         val existing = rows[id] ?: return null
         val updated = existing.copy(status = StyleVersionStatus.RETIRED, retiredAt = at)
@@ -68,6 +99,14 @@ private class InMemoryStyleVersionRepository : StyleVersionRepository {
     }
     override suspend fun findPublished(personaId: UUID) =
         rows.values.firstOrNull { it.personaId == personaId && it.status == StyleVersionStatus.PUBLISHED }
+
+    override suspend fun readEditorState(personaId: UUID): StyleEditorState = synchronized(rows) {
+        val current = rows.values.firstOrNull { it.personaId == personaId && it.status == StyleVersionStatus.PUBLISHED }
+        val generation = rows.values.filter {
+            it.personaId == personaId && it.status in setOf(StyleVersionStatus.PUBLISHED, StyleVersionStatus.RETIRED)
+        }.maxOfOrNull { it.version } ?: 0
+        StyleEditorState(generation, current)
+    }
 }
 
 private class RecordingAuditRepository : CommunicationAuditRepository {
@@ -121,6 +160,8 @@ class CommunicationStyleServiceTest {
             signature = "Vaše banka",
             maker = maker,
             uiMessages = uiMessages,
+            basePublishedVersion =
+            styleVersions.rows.values.firstOrNull { it.status == StyleVersionStatus.PUBLISHED }?.version ?: 0,
         )
         return runBlocking { service.draft(command) }
     }
@@ -185,6 +226,7 @@ class CommunicationStyleServiceTest {
                         forbiddenTerms = emptyList(),
                         signature = null,
                         maker = "editor-a",
+                        basePublishedVersion = 0,
                     ),
                 )
             }
@@ -233,6 +275,28 @@ class CommunicationStyleServiceTest {
         assertThat(firstReloaded?.status).isEqualTo(StyleVersionStatus.RETIRED)
         val published = runBlocking { service.published(persona.key) }
         assertThat(published.styleVersion).isEqualTo(second.version)
+    }
+
+    @Test
+    fun `two editors based on the same published version cannot overwrite the winner`() {
+        val original = draft()
+        runBlocking {
+            service.submit(original.id, "editor-a")
+            service.publish(original.id, "checker-b")
+        }
+        val first = draft(uiMessages = mapOf("cs.status.loading" to "První návrh."))
+        val stale = draft(uiMessages = mapOf("cs.status.loading" to "Starší návrh."))
+        runBlocking {
+            service.submit(first.id, "editor-a")
+            service.submit(stale.id, "editor-a")
+            service.publish(first.id, "checker-b")
+        }
+        assertThatThrownBy { runBlocking { service.publish(stale.id, "checker-b") } }
+            .isInstanceOf(StyleVersionConflictException::class.java)
+            .hasMessageContaining("published style changed")
+        assertThat(runBlocking { service.published(persona.key) }.uiMessages)
+            .containsEntry("cs.status.loading", "První návrh.")
+        assertThat(runBlocking { styleVersions.find(first.id) }?.status).isEqualTo(StyleVersionStatus.PUBLISHED)
     }
 
     @Test
