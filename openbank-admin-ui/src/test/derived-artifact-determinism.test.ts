@@ -15,7 +15,7 @@ import { sourceDate, sourceDateForSemanticInputs } from '../../scripts/lib/sourc
 // Regression guard for issue #2621.
 //
 // Three artifacts are GENERATED and COMMITTED (cluster-topology.json, infra-lifecycle.json,
-// infra-vulns.json). Each stamped `new Date().toISOString()`, so regeneration rewrote that
+// infra-vulns.json). The first two used to stamp `new Date().toISOString()`, so regeneration rewrote that
 // line every time — which makes any two concurrent PRs conflict BY CONSTRUCTION, with no
 // content disagreement whatsoever. #2247 was rebased three times over it and #2618 went
 // DIRTY on the timestamp hunk, not on the image tag everyone assumed.
@@ -143,8 +143,11 @@ describe('committed derived artifacts are a pure function of their inputs (#2621
     }
   })
 
-  it('no generator of a committed artifact reads the wall clock', () => {
-    for (const g of COMMITTED_GENERATORS) {
+  it('repo-derived generators do not read the wall clock', () => {
+    // infra-vulns.json is a checked-in UNAVAILABLE placeholder. An explicit
+    // --scan-infra image build replaces it with a real scan whose timestamp
+    // must be the actual scan time, not the GitOps input commit date (#12211).
+    for (const g of COMMITTED_GENERATORS.filter(g => g !== 'scan-infra-vulns.mjs')) {
       const src = readFileSync(path.join(ADMIN_UI, 'scripts', g), 'utf8')
       // Strip line comments so the prose above each call site (which necessarily names the
       // banned construct) cannot flag itself — the code-about-code precedence, decided here

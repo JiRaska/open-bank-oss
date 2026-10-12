@@ -2,8 +2,8 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
-// Grype CVE scan of the running infra images (ADR-0079). Resolves each component's full
-// image ref (name:tag) from the GitOps tree, runs `grype <ref> -o json`, and writes a
+// Grype CVE scan of the GitOps-declared infra images (ADR-0079). Resolves each full
+// image ref (name:tag) to an immutable registry digest, scans it, and writes a
 // COMPACT per-component summary (counts by severity + top high/critical) to
 // infra-vulns.json. Compact on purpose: the future ConfigMap path has a 1 MiB cap.
 //
@@ -14,9 +14,12 @@
 
 import { readdirSync, statSync, readFileSync, writeFileSync, existsSync } from 'fs'
 import path from 'path'
-import { execSync } from 'child_process'
+import { execFileSync } from 'child_process'
 import { fileURLToPath } from 'url'
-import { sourceDateForSemanticInputs } from './lib/source-date.mjs'
+import {
+  DIGEST, immutableImageRef, scanInstant, sha256, sha256File,
+  verifiedDbStatus, verifyInfraVulnSnapshot,
+} from './lib/grype-source-evidence.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const arg = (flag, def) => {
@@ -27,13 +30,8 @@ const REPO = path.resolve(arg('--repo', path.resolve(__dirname, '..', '..')))
 const OUT = path.resolve(arg('--out', path.resolve(__dirname, '..', 'infra-vulns.json')))
 const REGISTRY = path.resolve(__dirname, '..', 'src', 'lib', 'infra-lifecycle', 'registry.json')
 const GITOPS = path.join(REPO, 'openbank-infra', 'gitops')
-// Repo inputs whose newest commit time becomes `scannedAt` (issue #2621). A grype DB
-// refresh that changes the findings changes `images` too — a genuine diff. A rescan that
-// finds nothing new must not rewrite the file, or every deploy PR conflicts by construction.
-const INPUTS = [
-  'openbank-infra/gitops',
-  'openbank-admin-ui/src/lib/infra-lifecycle/registry.json',
-]
+// This script runs only for an explicit --scan-infra build. A real scan time
+// belongs in its uncommitted image input; the checked-in file is a placeholder.
 
 function walkFiles(dir, acc = []) {
   let entries = []
@@ -66,21 +64,39 @@ function resolveImageRef(imageGrep, files) {
   return null
 }
 
-function scan(ref) {
-  // grype <ref> -o json ; tolerate non-zero exit (grype exits non-zero on findings if a
-  // fail-on threshold is set — we don't set one, but be defensive).
+function output(command, args) {
+  return execFileSync(command, args, { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024,
+    stdio: ['ignore', 'pipe', 'pipe'] })
+}
+
+function registryDigest(ref) {
+  const digest = output('crane', ['digest', ref]).trim()
+  if (!DIGEST.test(digest)) throw new Error('registry returned no immutable image digest')
+  return digest
+}
+
+function scan(ref, digest) {
+  const immutable = immutableImageRef(ref, digest)
+  // Scan the immutable content, then re-resolve the tag. A tag moved during
+  // the scan must not be reported as the new image's CVE verdict.
   let raw
   try {
-    raw = execSync(`grype ${ref} -o json -q`, { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] })
+    raw = output('grype', [immutable, '-o', 'json', '-q'])
   } catch (e) {
-    if (e.stdout) raw = e.stdout.toString()
-    else return { error: e.message || 'grype failed' }
+    return { error: e.message || 'grype failed' }
   }
+  if (registryDigest(ref) !== digest) throw new Error('image tag moved during Grype scan')
   let doc
   try { doc = JSON.parse(raw) } catch { return { error: 'unparseable grype output' } }
+  if (!doc || typeof doc !== 'object' || Array.isArray(doc) || !Array.isArray(doc.matches) ||
+      !doc.matches.every(m => m && typeof m === 'object' && !Array.isArray(m) &&
+        m.vulnerability && typeof m.vulnerability === 'object' &&
+        typeof m.vulnerability.severity === 'string')) {
+    return { error: 'invalid Grype report shape' }
+  }
   const counts = { critical: 0, high: 0, medium: 0, low: 0, negligible: 0, unknown: 0 }
   const top = []
-  for (const m of doc.matches ?? []) {
+  for (const m of doc.matches) {
     const sev = String(m?.vulnerability?.severity ?? 'Unknown').toLowerCase()
     if (counts[sev] === undefined) counts.unknown++
     else counts[sev]++
@@ -94,36 +110,49 @@ function scan(ref) {
     }
   }
   const total = counts.critical + counts.high + counts.medium + counts.low + counts.negligible + counts.unknown
-  return { image: ref, critical: counts.critical, high: counts.high, medium: counts.medium, low: counts.low, total, top }
+  return { image: ref, imageDigest: digest, scannedImage: immutable,
+    scanAt: scanInstant(), reportSha256: sha256(Buffer.from(raw)),
+    critical: counts.critical, high: counts.high, medium: counts.medium, low: counts.low, total, top }
 }
 
-function main() {
+async function main() {
+  const version = JSON.parse(output('grype', ['version', '-o', 'json'])).version
+  const dbStatus = JSON.parse(output('grype', ['db', 'status', '-o', 'json']))
+  const db = verifiedDbStatus(dbStatus, await sha256File(dbStatus.path))
   const reg = JSON.parse(readFileSync(REGISTRY, 'utf8'))
   const files = existsSync(GITOPS) ? walkFiles(GITOPS) : []
   const images = {}
+  const expectedRefs = {}
   const skipped = []
   for (const c of reg.components) {
     if (c.versionSource !== 'gitops' || !c.imageGrep) { skipped.push(c.id); continue }
     const ref = resolveImageRef(c.imageGrep, files)
     if (!ref) { skipped.push(c.id); continue }
-    console.log(`[infra-vulns] scanning ${c.id}: ${ref}`)
-    const r = scan(ref)
-    if (r.error) { console.warn(`[infra-vulns] ${c.id}: ${r.error}`); skipped.push(c.id); continue }
+    const digest = registryDigest(ref)
+    console.log(`[infra-vulns] scanning ${c.id} at immutable registry digest`)
+    const r = scan(ref, digest)
+    // A resolved image whose scan fails is not an honest fleet snapshot. Do
+    // not let one successful image give the incomplete output a global time.
+    if (r.error) throw new Error(`Grype scan failed for ${c.id}: ${r.error}`)
     images[c.id] = r
+    expectedRefs[c.id] = ref
     console.log(`[infra-vulns] ${c.id}: ${r.critical}C ${r.high}H ${r.medium}M ${r.low}L`)
   }
+  if (!Object.keys(images).length) throw new Error('no infra image scan completed')
+  if ((await sha256File(dbStatus.path)) !== db.sha256) {
+    throw new Error('Grype vulnerability DB changed during scan')
+  }
   const out = {
-    schema: 'openbank.infra-vulns/v1',
-    source: 'grype (ADR-0079)',
-    scannedAt: sourceDateForSemanticInputs(
-      REPO, INPUTS, reg.components.filter(c => c.versionSource === 'gitops' && c.imageGrep).map(c => c.imageGrep),
-    ),
+    schema: 'openbank.infra-vulns/v2',
+    scanner: { name: 'grype', version, db },
+    scannedAt: scanInstant(),
     scanned: Object.keys(images),
     skipped,
     images,
   }
+  verifyInfraVulnSnapshot(out, expectedRefs)
   writeFileSync(OUT, JSON.stringify(out, null, 2))
   console.log(`[infra-vulns] ${Object.keys(images).length} scanned, ${skipped.length} skipped → ${OUT}`)
 }
 
-main()
+main().catch(error => { console.error(`[infra-vulns] ${error.message}`); process.exitCode = 1 })

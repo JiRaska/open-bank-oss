@@ -286,13 +286,10 @@ fi
 # requested, the committed placeholder stays and the UI honestly shows "not yet scanned".
 IV_OUT="openbank-admin-ui/infra-vulns.json"
 if [ "${SCAN_INFRA:-0}" = "1" ]; then
-  if command -v grype >/dev/null 2>&1; then
-    echo "==> scan infra images with Grype (ADR-0077)"
-    node openbank-admin-ui/scripts/scan-infra-vulns.mjs --repo "${REPO_ROOT}" --out "${IV_OUT}" || \
-      echo "    WARN: infra vuln scan had failures; kept whatever summary was produced." >&2
-  else
-    echo "    WARN: --scan-infra given but 'grype' not on PATH; keeping placeholder. Install: brew install grype" >&2
-  fi
+  command -v grype >/dev/null 2>&1 || { echo "ERROR: --scan-infra requires grype" >&2; exit 1; }
+  command -v crane >/dev/null 2>&1 || { echo "ERROR: --scan-infra requires crane" >&2; exit 1; }
+  echo "==> scan infra images with Grype (ADR-0077)"
+  node openbank-admin-ui/scripts/scan-infra-vulns.mjs --repo "${REPO_ROOT}" --out "${IV_OUT}"
 fi
 [ -f "${IV_OUT}" ] || echo '{"schema":"openbank.infra-vulns/v1","scannedAt":null,"images":{}}' > "${IV_OUT}"
 
