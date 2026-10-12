@@ -15,7 +15,7 @@ package com.openbank.customeredge.infrastructure.rest
  */
 private const val UPPER = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 private const val LETTERS = UPPER + "abcdefghijklmnopqrstuvwxyz"
-private const val ALPHANUMERIC = LETTERS + "0123456789"
+private val ALPHANUMERIC = LETTERS + ('0'..'9').joinToString("")
 
 /** [raw] rebuilt character by character from [alphabet], or null when any character is off-alphabet. */
 private fun canonical(raw: String?, alphabet: String, lengths: IntRange): String? {
