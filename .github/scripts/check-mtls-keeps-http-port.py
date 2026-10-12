@@ -92,6 +92,18 @@ def pension_management_ready(root: str, doc: dict) -> bool:
         service = next(r for r in resources if r.get("kind") == "Service" and r.get("metadata", {}).get("name") == "pension-service")
         if deployment["metadata"].get("namespace") != "pension" or service["metadata"].get("namespace") != "pension":
             return False
+        pod_labels = deployment["spec"]["template"]["metadata"]["labels"]
+        deployment_selector = deployment["spec"]["selector"]
+        deployment_labels = deployment_selector["matchLabels"]
+        if deployment_selector.get("matchExpressions") or not deployment_labels:
+            return False
+        if any(pod_labels.get(key) != value for key, value in deployment_labels.items()):
+            return False
+        service_selector = service["spec"]["selector"]
+        if not service_selector or service_selector.get("app.kubernetes.io/name") != "pension-service":
+            return False
+        if any(pod_labels.get(key) != value for key, value in service_selector.items()):
+            return False
         container = next(c for c in deployment["spec"]["template"]["spec"]["containers"] if c.get("name") == "pension-service")
         env = {e["name"]: e.get("value") for e in container["env"]}
         if len(env) != len(container["env"]):
@@ -125,7 +137,13 @@ def pension_management_ready(root: str, doc: dict) -> bool:
             and p.get("metadata", {}).get("name") == "pension-service-ingress-allow-list"
             and p.get("metadata", {}).get("namespace") == "pension"
         )
-        if policy["spec"]["podSelector"]["matchLabels"].get("app.kubernetes.io/name") != "pension-service":
+        policy_selector = policy["spec"]["podSelector"]
+        policy_labels = policy_selector["matchLabels"]
+        if policy_selector.get("matchExpressions") or not policy_labels:
+            return False
+        if policy_labels.get("app.kubernetes.io/name") != "pension-service":
+            return False
+        if any(pod_labels.get(key) != value for key, value in policy_labels.items()):
             return False
         admin_rule = False
         for rule in policy["spec"]["ingress"]:
@@ -137,6 +155,11 @@ def pension_management_ready(root: str, doc: dict) -> bool:
                 for peer in rule.get("from", [])
             )
             if from_admin:
+                for peer in rule.get("from", []):
+                    namespace = peer.get("namespaceSelector", {})
+                    if namespace.get("matchLabels", {}).get("kubernetes.io/metadata.name") == "admin-ui":
+                        if namespace != {"matchLabels": {"kubernetes.io/metadata.name": "admin-ui"}}:
+                            return False
                 admin_rule = True
                 if ports != [{"protocol": "TCP", "port": 8443}]:
                     return False
@@ -231,11 +254,14 @@ def self_test() -> int:
     }
     deployment = {
         "kind": "Deployment", "metadata": {"name": "pension-service", "namespace": "pension"},
-        "spec": {"template": {"spec": {"containers": [container]}}},
+        "spec": {"selector": {"matchLabels": {"app.kubernetes.io/name": "pension-service"}}, "template": {
+            "metadata": {"labels": {"app.kubernetes.io/name": "pension-service"}},
+            "spec": {"containers": [container]},
+        }},
     }
     service = {
         "kind": "Service", "metadata": {"name": "pension-service", "namespace": "pension"},
-        "spec": {"ports": [
+        "spec": {"selector": {"app.kubernetes.io/name": "pension-service"}, "ports": [
             {"name": "https", "port": 8443, "targetPort": "https"},
             {"name": "management", "port": 8090, "targetPort": "management"},
         ]},
@@ -277,6 +303,14 @@ def self_test() -> int:
         combined_management_disabled["%prod,%test"] = {"quarkus": {"management": {"enabled": False}}}
         stale_policy = deepcopy(policy)
         stale_policy["spec"]["ingress"][0]["ports"] = [{"protocol": "TCP", "port": 8171}]
+        unmatched_policy = deepcopy(policy)
+        unmatched_policy["spec"]["podSelector"]["matchLabels"]["app.kubernetes.io/tier"] = "missing"
+        unmatched_service = deepcopy(service)
+        unmatched_service["spec"]["selector"]["app.kubernetes.io/tier"] = "missing"
+        unmatched_deployment = deepcopy(deployment)
+        unmatched_deployment["spec"]["selector"]["matchLabels"]["app.kubernetes.io/tier"] = "missing"
+        unmatched_admin_namespace = deepcopy(policy)
+        unmatched_admin_namespace["spec"]["ingress"][0]["from"][0]["namespaceSelector"]["matchLabels"]["environment"] = "missing"
         checks.extend([
             ("pension HTTPS-only with separate management probes passes", result() == []),
             ("management disabled is rejected", len(result(app=no_management)) == 1),
@@ -290,6 +324,10 @@ def self_test() -> int:
             ("Service retaining HTTP port is rejected", len(result(svc={**service, "spec": {"ports": [*service["spec"]["ports"], {"name": "http", "port": 8171, "targetPort": "http"}]}})) == 1),
             ("missing Service is rejected", len(result(svc={"kind": "Service", "metadata": {"name": "other"}})) == 1),
             ("stale HTTP NetworkPolicy is rejected", len(result(net=stale_policy)) == 1),
+            ("NetworkPolicy selector missing the pod is rejected", len(result(net=unmatched_policy)) == 1),
+            ("Service selector missing the pod is rejected", len(result(svc=unmatched_service)) == 1),
+            ("Deployment selector missing the pod is rejected", len(result(dep=unmatched_deployment)) == 1),
+            ("admin namespace selector with extra labels is rejected", len(result(net=unmatched_admin_namespace)) == 1),
             ("missing NetworkPolicy is rejected", len(result(net={"kind": "NetworkPolicy", "metadata": {"name": "other"}})) == 1),
         ])
         result()
