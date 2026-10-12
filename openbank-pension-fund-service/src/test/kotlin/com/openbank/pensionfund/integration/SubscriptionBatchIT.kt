@@ -88,6 +88,30 @@ class SubscriptionBatchIT {
     }
 
     @Test
+    fun `lost response replays the committed receipt after a target fund closes`() {
+        val contract = UUID.randomUUID()
+        val first = fund()
+        val second = fund()
+        val key = "timeout-${UUID.randomUUID()}"
+
+        // The caller loses the response after commit and later retries its frozen request.
+        val committed = place(contract, key, first, second)
+        assertThat(committed.statusCode).isEqualTo(202)
+        connection().use { db ->
+            db.prepareStatement("UPDATE funds SET status = 'CLOSED' WHERE id = ?").use { statement ->
+                statement.setObject(1, second)
+                assertThat(statement.executeUpdate()).isEqualTo(1)
+            }
+        }
+
+        val replay = place(contract, key, first, second)
+        assertThat(replay.statusCode).isEqualTo(202)
+        assertThat(replay.body.asString()).isEqualTo(committed.body.asString())
+        assertThat(orderCount(contract)).isEqualTo(2)
+        assertThat(receiptCount(contract, key)).isEqualTo(1)
+    }
+
+    @Test
     fun `late leg key conflict rolls back the first insert and the batch receipt`() {
         val contract = UUID.randomUUID()
         val first = fund()

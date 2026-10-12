@@ -156,6 +156,92 @@ class SubscriptionPlansPostgresIT {
     }
 
     @Test
+    fun `lost batch response after remote acceptance replays one frozen plan after restart`(): Unit = runBlocking {
+        val contract = seededContract()
+        val key = "contribution:${UUID.randomUUID()}"
+        val first = UUID.randomUUID()
+        val second = UUID.randomUUID()
+        val cash = UUID.randomUUID()
+        val accepted = linkedMapOf<String, List<SubscriptionBatchOrderDto>>()
+        val requests = mutableListOf<SubscriptionBatchRequestDto>()
+        var loseFirstReply = true
+        var batchCalls = 0
+        val register = object : FundRegister {
+            override suspend fun holdings(contractId: UUID) = ContractValuationDto(contractId)
+
+            override suspend fun transactions(contractId: UUID): List<UnitTransactionDto> = emptyList()
+
+            override suspend fun strategies() = listOf(
+                StrategyDto(
+                    UUID.randomUUID(),
+                    "BALANCED",
+                    "ACTIVE",
+                    listOf(
+                        AllocationTargetDto(first, BigDecimal("0.6")),
+                        AllocationTargetDto(second, BigDecimal("0.4")),
+                    ),
+                ),
+                StrategyDto(
+                    UUID.randomUUID(),
+                    "DYNAMIC",
+                    "ACTIVE",
+                    listOf(AllocationTargetDto(cash, BigDecimal.ONE)),
+                ),
+            )
+
+            override suspend fun placeOrder(
+                contractId: UUID,
+                idempotencyKey: String,
+                order: OrderRequestDto,
+            ): UnitOrderDto = error("new plan must use atomic batch")
+
+            override suspend fun placeSubscriptionBatch(
+                contractId: UUID,
+                idempotencyKey: String,
+                request: SubscriptionBatchRequestDto,
+            ): List<SubscriptionBatchOrderDto> {
+                batchCalls++
+                requests += request
+                val receipt = accepted.getOrPut(idempotencyKey) {
+                    request.legs.map { leg ->
+                        SubscriptionBatchOrderDto(
+                            UUID.nameUUIDFromBytes(leg.idempotencyKey.toByteArray()),
+                            leg.fundId,
+                            leg.amount,
+                        )
+                    }
+                }
+                if (loseFirstReply) {
+                    loseFirstReply = false
+                    error("response lost after remote acceptance")
+                }
+                return receipt
+            }
+        }
+
+        val initial = PensionFundOrders(register, { "BALANCED" }, Clock.systemUTC(), PgSubscriptionPlans(pool, mapper))
+        assertThatThrownBy { runBlocking { initial.subscribe(contract, BigDecimal("100.01"), "CZK", key) } }
+            .hasMessageContaining("response lost after remote acceptance")
+        assertThat(PgSubscriptionPlans(pool, mapper).find(contract, key)?.placementMode)
+            .isEqualTo(SubscriptionPlacementMode.BATCH)
+
+        val restarted = PensionFundOrders(register, { "DYNAMIC" }, Clock.systemUTC(), PgSubscriptionPlans(pool, mapper))
+        val orderRef = restarted.subscribe(contract, BigDecimal("100.01"), "CZK", key)
+        assertThat(orderRef).isNotBlank()
+        assertThat(batchCalls).isEqualTo(2)
+        assertThat(accepted).hasSize(1)
+        assertThat(requests).hasSize(2)
+        assertThat(requests[1]).isEqualTo(requests[0])
+        assertThat(requests[1].legs.map { it.idempotencyKey }).allSatisfy { assertThat(it).hasSize(64) }
+        assertThat(accepted.getValue(key).map { it.fundId }).containsExactly(first, second)
+        assertThat(accepted.getValue(key).fold(BigDecimal.ZERO) { total, order -> total + order.amount })
+            .isEqualByComparingTo("100.01")
+        assertThatThrownBy { runBlocking { restarted.subscribe(contract, BigDecimal("100.02"), "CZK", key) } }
+            .hasMessageContaining("Idempotency-Key reused")
+        assertThat(batchCalls).isEqualTo(2)
+    }
+
+    @Test
     fun `concurrent different first plans persist exactly one winner`() {
         val contract = seededContract()
         val key = "contribution:${UUID.randomUUID()}"
