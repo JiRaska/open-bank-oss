@@ -64,7 +64,8 @@ class AdminUiImageInputsTest(unittest.TestCase):
             sbom = repo / "openbank-notification-service/build/reports/bom.json"
             sbom.parent.mkdir(parents=True)
             sbom.write_text('{"bomFormat":"CycloneDX","version":1}\n')
-            for name in ("governance.json", "cost-footprints.json", "cluster-topology.json"):
+            for name in ("governance.json", "cost-footprints.json", "cluster-topology.json",
+                         "infra-lifecycle-source-evidence.json"):
                 (repo / "openbank-admin-ui" / name).write_text('{"generated":true}\n')
             context = base / "context"
             manifest_path = base / "manifest.json"
@@ -84,7 +85,8 @@ class AdminUiImageInputsTest(unittest.TestCase):
                                 for item in inventory))
             self.assertEqual(next(item["sha256"] for item in inventory if item["path"] == sbom_path),
                              hashlib.sha256(sbom.read_bytes()).hexdigest())
-            for name in ("governance.json", "cost-footprints.json", "cluster-topology.json"):
+            for name in ("governance.json", "cost-footprints.json", "cluster-topology.json",
+                         "infra-lifecycle-source-evidence.json"):
                 self.assertTrue(any(item["path"] == "openbank-admin-ui/" + name for item in inventory))
                 self.assertTrue((context / "openbank-admin-ui" / name).is_file())
             changelog.write_text("new release\n")

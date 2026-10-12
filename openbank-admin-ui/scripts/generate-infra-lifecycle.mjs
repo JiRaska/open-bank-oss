@@ -17,6 +17,7 @@ import { readdirSync, statSync, readFileSync, writeFileSync, existsSync } from '
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { sourceDateForSemanticInputs } from './lib/source-date.mjs'
+import { canonicalEolUrl, makeEolEvidence, projectEolCycles, verifyEolEvidence } from './lib/eol-source-evidence.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const arg = (flag, def) => {
@@ -25,6 +26,7 @@ const arg = (flag, def) => {
 }
 const REPO = path.resolve(arg('--repo', path.resolve(__dirname, '..', '..')))
 const OUT = path.resolve(arg('--out', path.resolve(__dirname, '..', 'infra-lifecycle.json')))
+const EVIDENCE_OUT = arg('--source-evidence-out', null)
 const REGISTRY = path.resolve(__dirname, '..', 'src', 'lib', 'infra-lifecycle', 'registry.json')
 const GITOPS = path.join(REPO, 'openbank-infra', 'gitops')
 // Repo inputs whose newest commit time becomes `generatedAt` (issue #2621). The upstream
@@ -85,6 +87,7 @@ async function fetchEol(product) {
   // times with backoff so a transient blip can't silently leave a component with no
   // lifecycle data (which would read as a hollow card).
   let lastErr = 'fetch failed'
+  let lastEvidence = makeEolEvidence(product, null, new Date().toISOString(), null)
   for (let attempt = 0; attempt < 4; attempt++) {
     if (attempt > 0) await sleep(400 * attempt)
     try {
@@ -92,30 +95,49 @@ async function fetchEol(product) {
       // JSON (openbank.eolProduct), not attacker input — a fixed catalog string
       // like "node" or "postgresql" sent to a public, read-only lookup API.
       // codeql[js/file-access-to-http]
-      const res = await fetch(`https://endoflife.date/api/${product}.json`, {
+      const url = canonicalEolUrl(product)
+      const res = await fetch(url, {
         headers: { Accept: 'application/json' },
         signal: AbortSignal.timeout(15000),
+        redirect: 'error',
       })
-      if (!res.ok) { lastErr = `HTTP ${res.status}`; continue }
-      const cycles = await res.json()
+      if (res.url !== url) throw new Error('EOL response URL differs from canonical source')
+      const fetchedAt = new Date().toISOString()
+      if (!res.ok) {
+        lastEvidence = makeEolEvidence(product, res.status, fetchedAt, null)
+        lastErr = `HTTP ${res.status}`
+        continue
+      }
+      // Hash the exact wire bytes before parsing. The raw public response is
+      // retained in the image's signed source-evidence sidecar for replay.
+      const body = res.body?.getReader()
+      if (!body) throw new Error('EOL response has no body')
+      const chunks = []
+      let size = 0
+      for (;;) {
+        const { done, value } = await body.read()
+        if (done) break
+        size += value.byteLength
+        if (size > 2 * 1024 * 1024) {
+          await body.cancel()
+          throw new Error('EOL response exceeds 2 MiB')
+        }
+        chunks.push(value)
+      }
+      const raw = Buffer.concat(chunks)
+      lastEvidence = makeEolEvidence(product, res.status, fetchedAt, raw)
+      const cycles = projectEolCycles(raw)
       // Keep only the fields the UI needs, newest cycles first (endoflife returns them so).
       return {
-        cycles: cycles.map(c => ({
-          cycle: String(c.cycle),
-          releaseDate: c.releaseDate ?? null,
-          eol: c.eol ?? null,            // ISO date | true | false
-          latest: c.latest ?? null,
-          latestReleaseDate: c.latestReleaseDate ?? null,
-          lts: c.lts ?? false,          // ISO date | true | false
-          support: c.support ?? null,   // ISO date | true | false
-          link: c.link ?? null,
-        })),
+        lifecycle: { cycles },
+        evidence: lastEvidence,
       }
     } catch (e) {
       lastErr = e.message || 'fetch failed'
+      lastEvidence = makeEolEvidence(product, null, new Date().toISOString(), null)
     }
   }
-  return { error: lastErr }
+  return { lifecycle: { error: lastErr }, evidence: lastEvidence }
 }
 
 async function main() {
@@ -124,6 +146,7 @@ async function main() {
   if (!files.length) console.warn(`[infra-lifecycle] WARN: no GitOps files under ${GITOPS}`)
 
   const components = []
+  const sourceEvidence = { schema: 'openbank.eol-source-evidence/v1', products: {} }
   let eolHits = 0
   for (const c of reg.components) {
     const gitopsVersion = c.versionSource === 'gitops' && c.imageGrep
@@ -131,7 +154,9 @@ async function main() {
       : null
     let lifecycle = null
     if (c.eolProduct) {
-      lifecycle = await fetchEol(c.eolProduct)
+      const result = await fetchEol(c.eolProduct)
+      lifecycle = result.lifecycle
+      sourceEvidence.products[c.eolProduct] = result.evidence
       if (lifecycle && Array.isArray(lifecycle.cycles) && lifecycle.cycles.length) eolHits++
     }
     components.push({
@@ -151,6 +176,10 @@ async function main() {
       REPO, INPUTS, reg.components.filter(c => c.versionSource === 'gitops' && c.imageGrep).map(c => c.imageGrep),
     ),
     components,
+  }
+  if (EVIDENCE_OUT) {
+    verifyEolEvidence(out, sourceEvidence)
+    writeFileSync(path.resolve(EVIDENCE_OUT), JSON.stringify(sourceEvidence, null, 2))
   }
   writeFileSync(OUT, JSON.stringify(out, null, 2))
   console.log(`[infra-lifecycle] ${components.length} components (${eolHits} with lifecycle feed) → ${OUT}`)

@@ -264,6 +264,8 @@ openbank-admin-ui/service-graph.json
 # (scripts/generate-security-graph.mjs — derived from istio/network/kyverno
 # manifests, ADR-0029 governance-as-code). Derived — never committed.
 openbank-admin-ui/security-graph.json
+# Public upstream EOL feed bytes and fetch metadata, generated only for image attestation.
+openbank-admin-ui/infra-lifecycle-source-evidence.json
 # Generated per-service resource footprints baked at build time
 # (scripts/collect-cost-footprints.mjs, ADR-0062). Derived — never committed.
 openbank-admin-ui/cost-footprints.json

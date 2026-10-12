@@ -28,7 +28,8 @@ GENERATED_ROOT_JSON = (
     "catalog.json", "cluster-topology.json", "cost-footprints.json",
     "cost-report.json", "dora.json", "events.json", "gate-catalog.json",
     "gate-health.json", "governance.json", "infra-lifecycle.json",
-    "infra-vulns.json", "origination-graph.json", "prod-readiness.json",
+    "infra-vulns.json", "infra-lifecycle-source-evidence.json",
+    "origination-graph.json", "prod-readiness.json",
     "quality-report.json", "security-graph.json", "service-graph.json",
     "test-intelligence.json", "test-results.json",
 )

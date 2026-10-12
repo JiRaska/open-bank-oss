@@ -264,8 +264,10 @@ echo "    governance manifest: ${GOV_SVC_COUNT} services"
 # into infra-lifecycle.json. Outbound fetch to endoflife.date, zero creds. The generator
 # fails the build if zero lifecycle feeds resolve (the governance-empty lesson).
 IL_OUT="openbank-admin-ui/infra-lifecycle.json"
+IL_SOURCE_OUT="openbank-admin-ui/infra-lifecycle-source-evidence.json"
 echo "==> generate infra lifecycle snapshot (ADR-0077)"
-if ! node openbank-admin-ui/scripts/generate-infra-lifecycle.mjs --repo "${REPO_ROOT}" --out "${IL_OUT}" 2>&1; then
+if ! node openbank-admin-ui/scripts/generate-infra-lifecycle.mjs --repo "${REPO_ROOT}" \
+    --out "${IL_OUT}" --source-evidence-out "${IL_SOURCE_OUT}" 2>&1; then
   echo "ERROR: infra-lifecycle generator failed (endoflife.date unreachable?)." >&2
   exit 1
 fi

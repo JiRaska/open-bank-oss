@@ -404,6 +404,9 @@ COPY --chmod=0644 openbank-admin-ui/security-graph.json ./security-graph.json
 # src/app/api/infra/lifecycle/route.ts. build-push-admin-ui.sh runs the generator before
 # the build (and fails the build if it is empty), so this file always exists.
 COPY --chmod=0644 openbank-admin-ui/infra-lifecycle.json ./infra-lifecycle.json
+# Raw public EOL responses, source URLs, fetch times and response digests are
+# bound by the same frozen-context manifest and image attestation as the view.
+COPY --chmod=0644 openbank-admin-ui/infra-lifecycle-source-evidence.json ./infra-lifecycle-source-evidence.json
 # Grype CVE summary for the infra images (ADR-0077). Optional: present only when the
 # build ran with --scan-infra; otherwise an honest "not scanned" placeholder. The BFF
 # degrades gracefully when it is absent.
