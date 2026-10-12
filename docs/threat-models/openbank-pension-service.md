@@ -40,7 +40,7 @@ packs are code-reviewed data baked into the image, not runtime input).
 
 | Threat | Vector | Mitigation in S1 |
 |---|---|---|
-| **Spoofing** | A caller impersonates the participant to open or terminate a contract | Writes reachable only through the edge principal, which authenticates the human and stamps `X-Customer-Party-Id`; an absent header is a 400 (nullable param + `requireNotNull`, #3104) |
+| **Spoofing** | A caller impersonates the participant to open or terminate a contract | Writes reachable only through the edge principal, which authenticates the human and stamps `X-Customer-Party-Id`; an absent header is a 400 (nullable param + `requireNotNull`, #3104). The header is trusted only from the edge **client** identity — a verified JWT whose `azp` is a configured relay client and whose `preferred_username` is that client's own `service-account-<azp>` — never from the principal name alone, which derives from a username claim (`ContractAccessGuard`; `ContractAccessGuardTest`, `PensionContractApiIT`, falsified by reverting to a name match) |
 | **Spoofing / IDOR** | A customer reads or acts on another participant's contract by id | Every route resolves the caller: a caller without a staff role must carry `X-Customer-Party-Id` and is confined to that party's contracts; someone else's contract answers **404**, identical to an unknown id, so ids cannot be enumerated. Staff may read without the header; every change requires a participant caller. Covered by `PensionContractApiIT` (stranger → 404 on read and every action, owner → 200, operator → 200 read / 400 write), falsified by removing the check |
 | **Tampering** | Retried requests double-create or double-apply | `Idempotency-Key` is required on every POST; create deduplicates per participant (unique index), lifecycle actions are idempotent by state |
 | **Tampering** | Oversized or pathological amounts | Every caller-supplied amount bounded (≤ 1e9, ≤ 4 decimals); list/map inputs capped; codes restricted to `[A-Za-z0-9_-]{1,64}` |
@@ -65,10 +65,11 @@ order mis-states a participant's savings.
 
 **Authorization on the fund side:** `pension_fund_rest_ext.rego` (reason
 `service-pension-unit-register`) admits that one principal id, and only with `ROLE_API`, to
-`pension-fund.holding.read`, `pension-fund.order.place` and the reference reads `fund.read`,
+`pension-fund.holding.inspect`, `pension-fund.order.place` and the reference reads `fund.read`,
 `strategy.read`, `nav.read` — never NAV calculation/approval, fund or strategy administration.
-Every staff write excludes `service-account-*` principals, and `holding.read` is excluded from
-base `operator-read-any`, so the shared M2M account (`ROLE_OPERATOR`) is denied. Policy tests:
+Every staff write excludes `service-account-*` principals, and the holdings action uses a non-read
+verb so neither base `operator-read-any` nor `compliance-read-any` admits it: the shared M2M
+account is denied whether it holds `ROLE_OPERATOR`, `ROLE_COMPLIANCE` or `ROLE_ADMIN`. Policy tests:
 `pension_fund_rest_ext_test.rego` (`test_pension_service_places_orders_but_cannot_administer`).
 
 | Threat | Vector | Mitigation |

@@ -181,3 +181,11 @@ sequenceDiagram
 3. **Fail closed** — a sanctions-service outage holds the payment in `RECEIVED`; it is never auto-released.
 4. **No remote call inside the persistence transaction** — screening and AML-case calls happen between transactions.
 5. **Durable, actor-bound idempotency** — `Idempotency-Key` is mandatory; Postgres stores its normalized request fingerprint atomically with the payment/outbox, exact replays return that row, and mismatches fail with 409.
+
+## Scoped payment initiators (ADR-0335 D5)
+
+`rules.yaml: scoped_payment_initiators` declares pension-service for `domestic-payment.create`.
+The domain resolves an `InitiatorScope` from the principal: pension may pay only from its one
+configured debtor account (`OPENBANK_DOMESTIC_PAYMENT_SCOPED_INITIATORS_PENSION_DEBTOR_ACCOUNT_ID`),
+an unset value permits nothing, and any other ROLE_API-only machine is `Undeclared` and may pay from
+no account. The scope is checked before the `Idempotency-Key` is claimed.

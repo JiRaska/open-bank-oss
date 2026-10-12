@@ -90,6 +90,10 @@ export default auth((req) => {
   // deep links and the initial response cannot disagree about a destination's visibility.
   const permission = permissionForPath(pathname)
   if (permission && !hasPermission(roles, permission)) {
+    // Fetch callers get a JSON 403 rather than an HTML redirect they would try to parse.
+    if (pathname.startsWith("/api/")) {
+      return withCsp(NextResponse.json({ error: "forbidden" }, { status: 403 }))
+    }
     const forbidden = new URL("/auth/forbidden", req.url)
     forbidden.searchParams.set("path", pathname)
     return withCsp(NextResponse.redirect(forbidden))
