@@ -132,13 +132,15 @@ def classify(checks: dict[str, str | None], threshold: int) -> tuple[str, bool]:
 
 def plan(entries: list[dict], max_updates: int) -> list[tuple[int, bool, str]]:
     """Serialize full-fleet updates. Each entry: number, ok, why, kind, building, waiting_since.
-    Returns (number, update?, reason) in input order."""
+    Returns (number, update?, reason) oldest-armed first, then by PR number."""
     in_flight = sorted(e["number"] for e in entries if e["kind"] == "full-fleet" and e["building"])
     fleet_ok = sorted((e for e in entries if e["ok"] and e["kind"] == "full-fleet"),
                       key=lambda e: (e["waiting_since"], e["number"]))
     chosen = None if in_flight or not fleet_ok else fleet_ok[0]["number"]
     out, updated = [], 0
-    for e in entries:
+    # The API lists newest PRs first. Apply the bounded budget in waiting order so
+    # recurring new release/deploy PRs cannot indefinitely strand older green work.
+    for e in sorted(entries, key=lambda entry: (entry["waiting_since"], entry["number"])):
         ok, why = e["ok"], e["why"]
         if ok and e["kind"] == "full-fleet":
             if in_flight:
@@ -513,6 +515,18 @@ def self_test() -> int:
          {1: False, 3: True, 4: True}),
         ("unreadable classification -> small",
          [E(1, "full-fleet", ok=False, building=True), E(5, "unknown")], 5, {1: False, 5: True}),
+        ("new small PRs cannot consume the cap ahead of older armed work",
+         [E(30, "small", since="2026-09-03T00:00:00Z"),
+          E(20, "small", since="2026-09-02T00:00:00Z"), E(10, "small")], 2,
+         {30: False, 20: True, 10: True}),
+        ("equal small-PR arm time uses immutable PR number",
+         [E(30, "small"), E(20, "small")], 1, {30: False, 20: True}),
+        ("unknown-sized PR respects the same waiting order",
+         [E(30, "unknown", since="2026-09-03T00:00:00Z"), E(10, "small")], 1,
+         {30: False, 10: True}),
+        ("ineligible older PR does not consume the cap",
+         [E(30, "small", since="2026-09-03T00:00:00Z"), E(10, "small", ok=False)], 1,
+         {30: True, 10: False}),
         ("cap still applies", [E(3, "small"), E(4, "small")], 1, {3: True, 4: False}),
     ]
     for name, entries, cap, want in pcases:
