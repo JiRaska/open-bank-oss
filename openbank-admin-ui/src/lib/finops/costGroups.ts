@@ -4,10 +4,8 @@
 
 // FinOps cost-allocation taxonomy (ADR-0062).
 //
-// Read-only reflection of the PLAN: this mirrors `openbank-libs/governance/rules.yaml:
-// finops_cost_groups` (business flow -> services). The admin-ui DISPLAYS this; it does not
-// generate it (root CLAUDE.md rule #3 / #7). When a CI-generated catalog carries the
-// allocation taxonomy this module becomes a fallback — same trajectory as serverlessTiers.ts.
+// Read-only reflection of the PLAN: catalog.json carries the reviewed
+// `rules.yaml:finops_cost_groups` taxonomy into the runtime image. No UI-owned copy.
 //
 // CANONICAL service key = the manifest serviceName (NO `openbank-` prefix), which also equals
 // the gitops Deployment metadata.name. `canonicalServiceId()` strips a leading `openbank-` and
@@ -17,6 +15,8 @@
 
 import type { DataDomain } from '@/lib/governance/manifest'
 import { getGovernanceManifest } from '@/lib/governance/governanceLoader'
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
 
 export interface CostGroup {
   /** Stable id, e.g. `sepa-payment-flow`. */
@@ -29,38 +29,31 @@ export interface CostGroup {
   regulatoryRef?: string
 }
 
-// Mirror of rules.yaml:finops_cost_groups. Keep IN SYNC with that file; finops-taxonomy.test.ts
-// fails the build if any service id here is unknown to the governance manifest.
-export const COST_GROUPS: readonly CostGroup[] = [
-  { id: 'account-management', labelEn: 'Account Management', labelCs: 'Správa účtů',
-    services: ['account-service', 'party-service', 'kyc-service', 'sca-service'] },
-  { id: 'double-entry-ledger', labelEn: 'Double-Entry Ledger', labelCs: 'Podvojné účetnictví',
-    services: ['ledger-service', 'transaction-service'], regulatoryRef: 'CNB §4 — books of account' },
-  { id: 'balance-projection', labelEn: 'Balance Projection', labelCs: 'Projekce zůstatků',
-    services: ['balance-service', 'transaction-service'] },
-  { id: 'compliance-screening', labelEn: 'Compliance Gate (AML/Sanctions)', labelCs: 'Compliance brána (AML/sankce)',
-    services: ['aml-service', 'sanctions-service', 'kyc-service'], regulatoryRef: '5AMLD Art. 18 — screening before payout' },
-  { id: 'sepa-payment-flow', labelEn: 'SEPA Credit Transfer', labelCs: 'SEPA úhrada',
-    services: ['sepa-payment', 'transaction-service', 'ledger-service', 'account-service', 'balance-service', 'aml-service', 'sanctions-service', 'clearing-service'], regulatoryRef: 'PSD2 / pacs.008' },
-  { id: 'sepa-instant-flow', labelEn: 'SEPA Instant', labelCs: 'SEPA okamžitá platba',
-    services: ['sepa-instant', 'transaction-service', 'ledger-service', 'aml-service', 'sanctions-service', 'clearing-service'], regulatoryRef: 'PSD2 / 10s SLA' },
-  { id: 'domestic-payment-flow', labelEn: 'Domestic Payment', labelCs: 'Tuzemská platba',
-    services: ['domestic-payment', 'transaction-service', 'ledger-service', 'aml-service', 'sanctions-service'], regulatoryRef: 'CNB CERTIS' },
-  { id: 'swift-payment-flow', labelEn: 'SWIFT Cross-Border', labelCs: 'SWIFT zahraniční platba',
-    services: ['swift-service', 'transaction-service', 'ledger-service', 'aml-service', 'sanctions-service'], regulatoryRef: 'pacs.008 / cross-border' },
-  { id: 'fx-conversion', labelEn: 'FX Conversion', labelCs: 'Měnová konverze',
-    services: ['fx-service', 'transaction-service', 'ledger-service'] },
-  { id: 'card-issuance', labelEn: 'Card Issuance', labelCs: 'Vydávání karet',
-    services: ['card-issuance-service', 'account-service', 'dispute-service'], regulatoryRef: 'PCI DSS' },
-  { id: 'open-banking-psd2', labelEn: 'Open Banking (PSD2)', labelCs: 'Open Banking (PSD2)',
-    services: ['psd2-service', 'consent-service', 'sca-service', 'tpp-registry-service', 'pid-service'], regulatoryRef: 'PSD2 AISP/PISP' },
-  { id: 'interest-accrual', labelEn: 'Interest Accrual', labelCs: 'Úročení',
-    services: ['interest-service', 'account-service'] },
-  { id: 'standing-orders', labelEn: 'Standing Orders', labelCs: 'Trvalé příkazy',
-    services: ['standing-order-service', 'transaction-service'] },
-  { id: 'audit-trail', labelEn: 'Audit Trail', labelCs: 'Auditní stopa',
-    services: ['audit-service'], regulatoryRef: 'DORA Art. 17 — immutable' },
-]
+export function costGroupsFromCatalog(parsed: unknown): readonly CostGroup[] {
+  if (!parsed || typeof parsed !== 'object') throw new Error('derived catalog has no FinOps cost groups')
+  const groupsValue = (parsed as { finopsCostGroups?: unknown }).finopsCostGroups
+  if (!Array.isArray(groupsValue) || groupsValue.length === 0) {
+    throw new Error('derived catalog has no FinOps cost groups')
+  }
+  const groups = groupsValue as CostGroup[]
+  if (groups.some(g => !g || typeof g.id !== 'string' || !g.id
+      || typeof g.labelEn !== 'string' || !g.labelEn
+      || typeof g.labelCs !== 'string' || !g.labelCs
+      || !Array.isArray(g.services) || g.services.length === 0
+      || g.services.some(service => typeof service !== 'string' || !service))) {
+    throw new Error('derived catalog has an invalid FinOps cost group')
+  }
+  return groups
+}
+
+function loadCostGroups(): readonly CostGroup[] {
+  const file = process.env.OPENBANK_CATALOG ?? path.resolve(process.cwd(), 'catalog.json')
+  return costGroupsFromCatalog(JSON.parse(readFileSync(file, 'utf-8')))
+}
+
+// The cost allocation route and its pure allocator share the exact generated taxonomy.
+// A missing/malformed artifact fails closed instead of omitting a flow from showback.
+export const COST_GROUPS: readonly CostGroup[] = loadCostGroups()
 
 // service -> domain lookup, built once from the governance manifest (the domain source of truth).
 const DOMAIN_BY_SERVICE: ReadonlyMap<string, DataDomain> = new Map(

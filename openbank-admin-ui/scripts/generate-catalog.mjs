@@ -44,14 +44,16 @@ function readText(p) {
 // Money-path set + (optional) data-domain hints from the single governance source.
 function loadGovernance() {
   const raw = readText(path.join(REPO, 'openbank-libs', 'governance', 'rules.yaml'))
-  if (!raw) return { moneyPath: new Set() }
-  try {
-    const y = parseYaml(raw)
-    const mp = Array.isArray(y?.money_path_services) ? y.money_path_services : []
-    return { moneyPath: new Set(mp) }
-  } catch {
-    return { moneyPath: new Set() }
+  if (!raw) throw new Error('rules.yaml is required to derive the service catalog')
+  const y = parseYaml(raw)
+  if (!Array.isArray(y?.money_path_services) || y.money_path_services.length === 0) {
+    throw new Error('rules.yaml money_path_services is missing or empty')
   }
+  const groups = y?.finops_cost_groups
+  if (!groups || typeof groups !== 'object' || Array.isArray(groups) || Object.keys(groups).length === 0) {
+    throw new Error('rules.yaml finops_cost_groups is missing or empty')
+  }
+  return { moneyPath: new Set(y.money_path_services), groups }
 }
 
 // Read openapi.yaml info.{version,title} without trusting line order — parse it.
@@ -141,6 +143,24 @@ for (const name of entries) {
   })
 }
 
+// Financial showback must use the reviewed taxonomy, never a second list in the UI. Reject
+// unknown services here: dropping them at render time would understate a business flow's cost.
+const knownServices = new Set(services.map(service => service.short))
+const finopsCostGroups = Object.entries(gov.groups).map(([id, raw]) => {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)
+      || typeof raw.label_en !== 'string' || !raw.label_en.trim()
+      || typeof raw.label_cs !== 'string' || !raw.label_cs.trim()
+      || !Array.isArray(raw.services) || raw.services.length === 0
+      || raw.services.some(service => typeof service !== 'string' || !knownServices.has(service))) {
+    throw new Error(`invalid finops_cost_groups entry: ${id}`)
+  }
+  return {
+    id, labelEn: raw.label_en, labelCs: raw.label_cs,
+    services: raw.services,
+    ...(typeof raw.regulatory_ref === 'string' ? { regulatoryRef: raw.regulatory_ref } : {}),
+  }
+})
+
 const totals = {
   modules: services.length,
   services: services.filter(s => s.kind === 'service').length,
@@ -158,6 +178,7 @@ const catalog = {
   collectedAt: null,
   totals,
   services,
+  finopsCostGroups,
 }
 
 // Duplicate listener ports among runnable modules are real in application.yaml; warn (never fail)

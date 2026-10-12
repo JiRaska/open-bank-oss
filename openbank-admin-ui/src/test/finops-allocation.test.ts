@@ -46,6 +46,13 @@ describe('isComputeLine', () => {
 })
 
 describe('allocate', () => {
+  it('the derived SEPA Instant flow includes its real deployment in default showback', () => {
+    const r = allocate(report([{ name: 'Amazon Elastic Compute Cloud - Compute', amount: 10 }]), [
+      { service: 'sepa-instant', cpuMillis: 100, memMiB: 100 },
+    ])
+    expect(r.byFlow.find(flow => flow.id === 'sepa-instant-flow')?.amount).toBe(10)
+  })
+
   it('splits the COMPUTE pool by requests and keeps platform overhead separate', () => {
     const r = allocate(
       report([
