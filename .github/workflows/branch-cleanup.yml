@@ -122,6 +122,16 @@ jobs:
             [[ "$branch" == "main" ]]              && { SKIPPED=$(( SKIPPED + 1 )); continue; }
             [[ "$branch" == release-please--* ]]   && { SKIPPED=$(( SKIPPED + 1 )); continue; }
             [[ "$branch" == dependabot/* ]]         && { SKIPPED=$(( SKIPPED + 1 )); continue; }
+            # Storage branches other workflows clone by name (e.g. cflite-pr.yml's
+            # public fuzz seed corpus). They are long-lived data, not stale work: the
+            # 14-day age rule deleted the corpus branch twice and reddened every PR's
+            # "Verify public fuzz seed corpus" with `Remote branch ... not found`.
+            # Derived from the workflows, so a new storage branch is kept automatically.
+            if git grep -hoE '(--branch|storage-repo-branch(-coverage)?:) +[A-Za-z0-9._/-]+' \
+                 -- .github/workflows | awk '{print $NF}' | grep -qxF "$branch"; then
+              echo "KEEP (storage): $branch"
+              SKIPPED=$(( SKIPPED + 1 )); continue
+            fi
 
             # Active PRs
             if echo "$OPEN_HEADS" | grep -qxF "$branch"; then
