@@ -3,7 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 const assert = require('node:assert/strict')
-const { applyVerdict, runCatchup, waitForIndex } = require('./main-red-watch-catchup.cjs')
+const { applyVerdict, runCatchup, bootstrapCheckpoint, waitForIndex } = require('./main-red-watch-catchup.cjs')
 const { parseCheckpoint, readCheckpoint, writeCheckpoint } = require('./main-red-watch-checkpoint.cjs')
 const { LatestRunLagError, unprocessedAttempts } = require('./main-red-watch-order.cjs')
 
@@ -23,6 +23,16 @@ const verdict = (run_id, status, failing, successful_jobs = []) => ({
 })
 
 async function main() {
+  const firstEvent = { id: 102, created_at: '2026-10-11T01:00:00Z' }
+  const bootstrapApi = runs => ({ rest: { actions: { listWorkflowRuns: async () => ({ data: runs }) } } })
+  // A short Actions page can still claim older runs in total_count. It must
+  // never seed the cursor at 102 and silently skip the missing red 101.
+  await assert.rejects(bootstrapCheckpoint(bootstrapApi({ total_count: 2,
+    workflow_runs: [{ id: 102 }] }), context, 7, firstEvent), LatestRunLagError)
+  assert.deepEqual(await bootstrapCheckpoint(bootstrapApi({ total_count: 2,
+    workflow_runs: [{ id: 102 }, { id: 101 }] }), context, 7, firstEvent),
+  { run_id: 101, attempt: 0 })
+
   let indexReads = 0
   const sleeps = []
   assert.equal(await waitForIndex(async () => {

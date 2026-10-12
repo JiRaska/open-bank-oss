@@ -155,15 +155,31 @@ async function bootstrapCheckpoint(github, context, workflowId, event) {
   // this bounded bootstrap is too large, fail rather than silently skip it.
   const since = new Date(eventCreated - 48 * 3600 * 1000).toISOString()
   const recent = []
+  const seen = new Set()
+  let expectedTotal
   for (let page = 1; page <= 100; page++) {
     const response = await github.rest.actions.listWorkflowRuns({
       ...context.repo, workflow_id: workflowId, branch: 'main', event: 'push',
       created: `>=${since}`, per_page: 100, page,
     })
     const runs = response.data.workflow_runs
-    if (!Array.isArray(runs) || runs.length > 100) throw new Error('Malformed bootstrap runs page')
-    recent.push(...runs)
-    if (runs.length < 100 || recent.length === response.data.total_count) break
+    const total = response.data.total_count
+    if (!Number.isSafeInteger(total) || total < 0 ||
+        (expectedTotal !== undefined && total !== expectedTotal) ||
+        !Array.isArray(runs) || runs.length > 100) {
+      throw new LatestRunLagError('Incomplete or changing bootstrap runs inventory')
+    }
+    expectedTotal = total
+    for (const run of runs) {
+      if (!Number.isSafeInteger(run?.id) || run.id < 1 || seen.has(run.id)) {
+        throw new Error('Malformed or duplicate bootstrap run')
+      }
+      seen.add(run.id)
+      recent.push(run)
+    }
+    if (recent.length > total) throw new Error('Bootstrap runs exceed reported total_count')
+    if (recent.length === total) break
+    if (runs.length < 100) throw new LatestRunLagError('Incomplete bootstrap runs page')
     if (page === 100) throw new Error('Bootstrap exceeded 100 pages; refusing to skip source runs')
   }
   if (!recent.length || !recent.some(run => run.id === event.id)) {
