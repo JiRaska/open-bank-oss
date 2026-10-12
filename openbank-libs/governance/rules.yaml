@@ -2840,7 +2840,7 @@ finops_cost_groups:
   sepa-instant-flow:
     label_en: "SEPA Instant"
     label_cs: "SEPA okamžitá platba"
-    services: [sepa-instant-service, transaction-service, ledger-service, aml-service, sanctions-service, clearing-service]
+    services: [sepa-instant, transaction-service, ledger-service, aml-service, sanctions-service, clearing-service]
     regulatory_ref: "PSD2 / 10s SLA"
   domestic-payment-flow:
     label_en: "Domestic Payment"
