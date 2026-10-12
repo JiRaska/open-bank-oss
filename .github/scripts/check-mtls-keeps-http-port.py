@@ -53,14 +53,16 @@ INSECURE = "quarkus.http.insecure-requests"
 def findings_for(doc, *, pension_management_ready: bool = False) -> list[str]:
     if not isinstance(doc, dict):
         return []
-    profiles = {None: doc}
+    # Inspect every declaration. A combined profile must not overwrite a separate
+    # %prod block and hide its TLS setting (or its management override).
+    profiles = [(None, doc)]
     for k, v in doc.items():
         if isinstance(k, str) and k.startswith("%") and isinstance(v, dict):
             for name in k.split(","):
-                profiles[name.strip()] = v
+                profiles.append((name.strip(), v))
     base_ca, base_ins = _get(doc, CLIENT_AUTH), _get(doc, INSECURE)
     out = []
-    for name, node in profiles.items():
+    for name, node in profiles:
         ca = _get(node, CLIENT_AUTH) if name else base_ca
         ins = _get(node, INSECURE) if name else base_ins
         if name and ca is None:
@@ -97,7 +99,12 @@ def pension_management_ready(root: str, doc: dict) -> bool:
         management = _get(doc, "quarkus.management")
         management_port = int(management["port"])
         application_port = int(_get(doc, "quarkus.http.port"))
-        prod = doc.get("%prod", {})
+        prod_profiles = [
+            value for name, value in doc.items()
+            if isinstance(name, str) and "%prod" in [part.strip() for part in name.split(",")]
+        ]
+        if not prod_profiles or any(not isinstance(profile, dict) for profile in prod_profiles):
+            return False
         for key, expected in (
             ("quarkus.management.enabled", True),
             ("quarkus.management.host", "0.0.0.0"),
@@ -106,9 +113,35 @@ def pension_management_ready(root: str, doc: dict) -> bool:
             ("quarkus.smallrye-health.root-path", "/q/health"),
             ("quarkus.http.port", application_port),
         ):
-            override = _get(prod, key)
-            if override is not None and override != expected:
+            for profile in prod_profiles:
+                override = _get(profile, key)
+                if override is not None and override != expected:
+                    return False
+        policy_path = Path(root) / "openbank-infra/gitops/components/pension/network-policies.yaml"
+        policies = list(yaml.safe_load_all(policy_path.read_text(encoding="utf-8")))
+        policy = next(
+            p for p in policies
+            if p.get("kind") == "NetworkPolicy"
+            and p.get("metadata", {}).get("name") == "pension-service-ingress-allow-list"
+            and p.get("metadata", {}).get("namespace") == "pension"
+        )
+        if policy["spec"]["podSelector"]["matchLabels"].get("app.kubernetes.io/name") != "pension-service":
+            return False
+        admin_rule = False
+        for rule in policy["spec"]["ingress"]:
+            ports = rule.get("ports", [])
+            if any(int(p.get("port", 0)) == application_port for p in ports):
                 return False
+            from_admin = any(
+                peer.get("namespaceSelector", {}).get("matchLabels", {}).get("kubernetes.io/metadata.name") == "admin-ui"
+                for peer in rule.get("from", [])
+            )
+            if from_admin:
+                admin_rule = True
+                if ports != [{"protocol": "TCP", "port": 8443}]:
+                    return False
+        if not admin_rule:
+            return False
         container_ports = {p["name"]: int(p["containerPort"]) for p in container["ports"]}
         service_ports = {p["name"]: p for p in service["spec"]["ports"]}
         if len(container_ports) != len(container["ports"]) or len(service_ports) != len(service["spec"]["ports"]):
@@ -207,15 +240,28 @@ def self_test() -> int:
             {"name": "management", "port": 8090, "targetPort": "management"},
         ]},
     }
+    policy = {
+        "kind": "NetworkPolicy",
+        "metadata": {"name": "pension-service-ingress-allow-list", "namespace": "pension"},
+        "spec": {
+            "podSelector": {"matchLabels": {"app.kubernetes.io/name": "pension-service"}},
+            "ingress": [{
+                "from": [{"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "admin-ui"}}}],
+                "ports": [{"protocol": "TCP", "port": 8443}],
+            }],
+        },
+    }
     with tempfile.TemporaryDirectory() as root:
         app_path = Path(root) / "openbank-pension-service/src/main/resources/application.yaml"
         deployment_path = Path(root) / "openbank-infra/gitops/components/pension/pension-service.yaml"
+        policy_path = Path(root) / "openbank-infra/gitops/components/pension/network-policies.yaml"
         app_path.parent.mkdir(parents=True)
         deployment_path.parent.mkdir(parents=True)
 
-        def result(app=pension, dep=deployment, svc=service):
+        def result(app=pension, dep=deployment, svc=service, net=policy):
             app_path.write_text(yaml.safe_dump(app), encoding="utf-8")
             deployment_path.write_text(yaml.safe_dump_all([dep, svc]), encoding="utf-8")
+            policy_path.write_text(yaml.safe_dump(net), encoding="utf-8")
             return scan(root)[1]
 
         def with_container(**changes):
@@ -227,10 +273,15 @@ def self_test() -> int:
         no_management["quarkus"]["management"]["enabled"] = False
         prod_management_disabled = deepcopy(pension)
         prod_management_disabled["%prod"]["quarkus"]["management"] = {"enabled": False}
+        combined_management_disabled = deepcopy(pension)
+        combined_management_disabled["%prod,%test"] = {"quarkus": {"management": {"enabled": False}}}
+        stale_policy = deepcopy(policy)
+        stale_policy["spec"]["ingress"][0]["ports"] = [{"protocol": "TCP", "port": 8171}]
         checks.extend([
             ("pension HTTPS-only with separate management probes passes", result() == []),
             ("management disabled is rejected", len(result(app=no_management)) == 1),
             ("production management override is rejected", len(result(app=prod_management_disabled)) == 1),
+            ("combined production profile cannot hide disabled management", bool(result(app=combined_management_disabled))),
             ("probe on application port is rejected", len(result(dep=with_container(readinessProbe={"httpGet": {"path": "/q/health/ready", "port": 8171}}))) == 1),
             ("liveness probe on application port is rejected", len(result(dep=with_container(livenessProbe={"httpGet": {"path": "/q/health/live", "port": 8171}}))) == 1),
             ("deployment retaining HTTP port is rejected", len(result(dep=with_container(ports=[*container["ports"], {"name": "http", "containerPort": 8171}]))) == 1),
@@ -238,6 +289,8 @@ def self_test() -> int:
             ("deployment disabling management is rejected", len(result(dep=with_container(env=[*container["env"], {"name": "QUARKUS_MANAGEMENT_ENABLED", "value": "false"}]))) == 1),
             ("Service retaining HTTP port is rejected", len(result(svc={**service, "spec": {"ports": [*service["spec"]["ports"], {"name": "http", "port": 8171, "targetPort": "http"}]}})) == 1),
             ("missing Service is rejected", len(result(svc={"kind": "Service", "metadata": {"name": "other"}})) == 1),
+            ("stale HTTP NetworkPolicy is rejected", len(result(net=stale_policy)) == 1),
+            ("missing NetworkPolicy is rejected", len(result(net={"kind": "NetworkPolicy", "metadata": {"name": "other"}})) == 1),
         ])
         result()
         other_path = Path(root) / "openbank-other-service/src/main/resources/application.yaml"
