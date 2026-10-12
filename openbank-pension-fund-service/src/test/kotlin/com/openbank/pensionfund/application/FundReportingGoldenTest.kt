@@ -5,6 +5,7 @@
 package com.openbank.pensionfund.application
 
 import com.openbank.pensionfund.application.port.MarketPricePort
+import com.openbank.pensionfund.application.port.PensionFundMetrics
 import com.openbank.pensionfund.application.port.StoreChanges
 import com.openbank.pensionfund.application.usecase.FundAdministrationService
 import com.openbank.pensionfund.application.usecase.FundDefinition
@@ -49,9 +50,9 @@ class FundReportingGoldenTest {
     private val prices = object : MarketPricePort {
         override suspend fun price(instrumentId: String, valuationDate: LocalDate, currency: String): BigDecimal? = null
     }
-    private val admin = FundAdministrationService(store, clock, 30)
-    private val navs = NavService(store, prices, clock)
-    private val register = UnitRegisterService(store, clock)
+    private val admin = FundAdministrationService(store, clock, 30, PensionFundMetrics.NONE)
+    private val navs = NavService(store, prices, clock, PensionFundMetrics.NONE)
+    private val register = UnitRegisterService(store, clock, PensionFundMetrics.NONE)
     private val reporting = FundReportingService(store)
     private val c1 = UUID.randomUUID()
     private val c2 = UUID.randomUUID()
@@ -139,9 +140,15 @@ class FundReportingGoldenTest {
         // Balance sheet: assets = liabilities + equity.
         assertThat(r.balanceSheet.totalAssets)
             .isEqualByComparingTo(r.balanceSheet.totalLiabilities + r.balanceSheet.totalEquity)
-        // P&L: profit = income - expenses.
-        assertThat(r.profitAndLossYtd.profitLoss)
-            .isEqualByComparingTo(r.profitAndLossYtd.income - r.profitAndLossYtd.expenses)
+        // P&L: profit = gains - losses + other investment result - fees, every line accumulated on its own.
+        val pl = r.profitAndLossYtd
+        assertThat(pl.profitLoss).isEqualByComparingTo(
+            pl.revaluationGains!! - pl.revaluationLosses!! + pl.otherInvestmentResult!! - pl.managementFees,
+        )
+        // Deprecated 1.1.0 fields agree with the lines and stay non-negative.
+        assertThat(pl.income - pl.expenses).isEqualByComparingTo(pl.profitLoss)
+        assertThat(pl.income.signum()).isGreaterThanOrEqualTo(0)
+        assertThat(pl.expenses.signum()).isGreaterThanOrEqualTo(0)
         // Unit roll-forward.
         assertThat(r.units.closing).isEqualByComparingTo(r.units.opening + r.units.issued - r.units.cancelled)
         // Entitlement roll-forward; closing entitlements are the fund's equity.
@@ -191,7 +198,10 @@ class FundReportingGoldenTest {
         val ytd = q4.profitAndLossYtd
         val closingEquity = q4.balanceSheet.totalEquity
         assertThat(ytd.profitLoss).isLessThan(closingEquity)
-        assertThat(ytd.expenses.signum()).isPositive()
+        assertThat(ytd.managementFees.signum()).isPositive()
+        // CZ-BOND-1 is held across 15 -> 31 October and rose 151 -> 152 on 100 units.
+        assertThat(ytd.revaluationGains).isEqualByComparingTo("100.00")
+        assertThat(ytd.revaluationLosses).isEqualByComparingTo("0.00")
         val september = reporting.periodReport(fund, LocalDate.parse("2026-09-01"), LocalDate.parse("2026-09-30"))
         assertReconciles(september)
         assertThat(september.units.issued).isEqualByComparingTo("15000")
