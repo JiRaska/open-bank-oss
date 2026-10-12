@@ -52,6 +52,27 @@ class CopilotErrorBodySpecConformanceIT {
     }
 
     @Test
+    fun `unauthenticated chat carries documented shared authentication body`() {
+        val response = given().contentType(ContentType.JSON)
+            .body(mapOf("message" to "hello"))
+            .`when`().post("/api/v1/copilot/chat")
+            .then().statusCode(401).extract().jsonPath().getMap<String, Any?>("")
+        assertConforms(response, "/copilot/chat", 401)
+        assertThat(response["code"]).isEqualTo("UNAUTHORIZED")
+        assertThat(response).doesNotContainKey("error")
+    }
+
+    @Test
+    fun `unauthenticated confirmation carries documented shared authentication body`() {
+        val response = given().contentType(ContentType.JSON)
+            .`when`().post("/api/v1/copilot/actions/not-a-uuid/confirm")
+            .then().statusCode(401).extract().jsonPath().getMap<String, Any?>("")
+        assertConforms(response, "/copilot/actions/{tokenId}/confirm", 401)
+        assertThat(response["code"]).isEqualTo("UNAUTHORIZED")
+        assertThat(response).doesNotContainKey("error")
+    }
+
+    @Test
     @TestSecurity(user = "copilot-audit-customer")
     fun `malformed confirmation token returns the documented error body`() {
         val response = given().contentType(ContentType.JSON)
@@ -103,32 +124,47 @@ class CopilotErrorBodySpecConformanceIT {
 
     @Test
     fun `the documented schema rejects a mapper envelope lacking error`() {
-        val schema = documentedSchema("/copilot/chat", 501)
+        val schema = documentedSchemas("/copilot/chat", 501).single()
         val required = schema["required"] as List<*>
         assertThat(required).contains("error")
         assertThat(mapOf("code" to "VALIDATION_ERROR").keys).doesNotContain("error")
     }
 
     @Suppress("UNCHECKED_CAST")
-    private fun documentedSchema(path: String, status: Int): Map<String, Any?> {
+    private fun documentedSchemas(path: String, status: Int): List<Map<String, Any?>> {
         val paths = SPEC["paths"] as Map<String, Map<String, Any?>>
         val operation = paths.getValue(path)["post"] as Map<String, Any?>
         val responses = operation["responses"] as Map<String, Map<String, Any?>>
         val content = responses.getValue(status.toString())["content"] as Map<String, Map<String, Any?>>
-        val schema = content.getValue("application/json")["schema"] as Map<String, String>
+        val schema = content.getValue("application/json")["schema"] as Map<String, Any?>
+        val refs = (schema["oneOf"] as? List<Map<String, String>>)
+            ?: listOf(schema as Map<String, String>)
         val schemas = (SPEC["components"] as Map<String, Any?>)["schemas"] as Map<String, Map<String, Any?>>
-        return schemas.getValue(schema.getValue("\$ref").substringAfterLast('/'))
+        return refs.map { schemas.getValue(it.getValue("\$ref").substringAfterLast('/')) }
     }
 
     @Suppress("UNCHECKED_CAST")
     private fun assertConforms(body: Map<String, Any?>, path: String, status: Int) {
-        val schema = documentedSchema(path, status)
+        val candidates = documentedSchemas(path, status)
+        val failures = candidates.map { schema -> violations(body, schema) }
+        assertThat(failures).describedAs("response %s against %s %s", body, path, status)
+            .anySatisfy { assertThat(it).isEmpty() }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun violations(body: Map<String, Any?>, schema: Map<String, Any?>): List<String> {
         val required = schema["required"] as List<String>
-        assertThat(body.keys).containsAll(required)
         val props = schema["properties"] as Map<String, Map<String, Any?>>
+        val errors = required.filterNot(body::containsKey).map { "$it is required" }.toMutableList()
+        if (schema["additionalProperties"] == false) {
+            (body.keys - props.keys).forEach { errors += "$it is undeclared" }
+        }
         body.forEach { (name, value) ->
             val type = props[name]?.get("type")
-            if (type == "string") assertThat(value).describedAs(name).isInstanceOf(String::class.java)
+            if (type == "string" && value !is String) errors += "$name is not a string"
+            if (type == "integer" && value !is Int && value !is Long) errors += "$name is not an integer"
+            if (type == "boolean" && value !is Boolean) errors += "$name is not a boolean"
         }
+        return errors
     }
 }

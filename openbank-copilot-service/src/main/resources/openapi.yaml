@@ -7,7 +7,7 @@ openapi: "3.1.0"
 
 info:
   title: OpenBank Copilot Service API
-  version: "1.4.1"
+  version: "1.5.0"
   description: |
     Customer-facing AI assistant (mobile copilot), per ADR-0089.
 
@@ -51,11 +51,15 @@ paths:
               schema:
                 $ref: "#/components/schemas/ChatReply"
         "401":
-          description: Authenticated token carries no usable subject
+          description: >-
+            Unauthenticated requests receive the shared validation envelope before this resource
+            runs; a token authenticated without a usable subject receives ErrorResponse here.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
+                oneOf:
+                  - $ref: "#/components/schemas/ErrorResponse"
+                  - $ref: "#/components/schemas/ProblemDetail"
         "501":
           description: Capability not yet enabled (feature flag off)
           content:
@@ -142,11 +146,15 @@ paths:
               schema:
                 $ref: "#/components/schemas/ActionConfirmation"
         "401":
-          description: Authenticated token carries no usable subject
+          description: >-
+            Unauthenticated requests receive the shared validation envelope before this resource
+            runs; a token authenticated without a usable subject receives ErrorResponse here.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
+                oneOf:
+                  - $ref: "#/components/schemas/ErrorResponse"
+                  - $ref: "#/components/schemas/ProblemDetail"
         "403":
           description: OPA policy denied the action, or the token belongs to another customer
           content:
@@ -251,3 +259,45 @@ components:
           description: |
             Stable machine-readable code where one exists (`PROPOSAL_NOT_FOUND`,
             `PROPOSAL_EXPIRED`, `ACTION_DENIED`); otherwise a short human-readable reason.
+    ProblemDetail:
+      type: object
+      description: >-
+        Shared libs-runtime authentication body. ApiError carries the five required fields;
+        the ADR-0326 problem form is a superset with optional RFC 9457 members.
+      required: [traceId, status, code, message, timestamp]
+      additionalProperties: false
+      properties:
+        type: {type: string}
+        title: {type: string}
+        status: {type: integer}
+        detail: {type: string}
+        instance: {type: string}
+        code: {type: string}
+        correlationId: {type: string}
+        retryable: {type: boolean}
+        violations:
+          type: array
+          items: {$ref: '#/components/schemas/ProblemViolation'}
+        traceId: {type: string}
+        message: {type: string}
+        timestamp: {type: string, format: date-time}
+        details:
+          type: array
+          items: {$ref: '#/components/schemas/FieldError'}
+    ProblemViolation:
+      type: object
+      required: [field, message]
+      additionalProperties: false
+      properties:
+        field: {type: string}
+        message: {type: string}
+        code: {type: string}
+    FieldError:
+      type: object
+      required: [field, message]
+      additionalProperties: false
+      properties:
+        field: {type: string}
+        message: {type: string}
+        rejectedValue:
+          description: Rejected input is never echoed.
