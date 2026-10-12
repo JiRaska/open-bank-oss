@@ -156,4 +156,27 @@ describe('bpmn manifests', () => {
     }
     expect(unservedRoutes(stale, 'account-service', accountPaths)).toEqual(staleRoutes)
   })
+
+  it('keeps card issuance on its published route and card event, without invented PIN delivery', () => {
+    const diagram = loadBpmnProcess('card-issuance')
+    const cardPaths = servicePaths('card-issuance-service')
+    const notificationPaths = servicePaths('notification-service')
+    expect(unservedRoutes(diagram, 'card-issuance-service', cardPaths)).toEqual([])
+    expect(unservedRoutes(diagram, 'notification-service', notificationPaths)).toEqual([])
+    expect(diagram.steps.find((step) => step.id === 'issue')?.apis).toEqual(['POST /api/v1/cards'])
+    expect(diagram.steps.find((step) => step.id === 'issue')?.emits).toEqual(['card.issued.v1'])
+    expect(diagram.steps.some((step) => step.id === 'notify')).toBe(false)
+    expect(diagram.flows.find((flow) => flow.from === 'issue' && flow.to === 'end')).toBeTruthy()
+    expect(diagram.flows.some((flow) => flow.topic === 'openbank.notification.requests')).toBe(false)
+
+    const staleNotification = {
+      ...diagram,
+      steps: [...diagram.steps, {
+        id: 'notify', type: 'task' as const, x: 600, y: 100, label: 'Notifikace PINu',
+        apis: ['POST /api/v1/notifications'], relatedServices: ['notification-service'],
+      }],
+    }
+    expect(unservedRoutes(staleNotification, 'notification-service', notificationPaths))
+      .toEqual(['POST /api/v1/notifications'])
+  })
 })
