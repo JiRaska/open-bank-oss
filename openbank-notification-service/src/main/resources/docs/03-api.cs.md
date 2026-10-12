@@ -23,9 +23,9 @@ U řízení výpravy se **identita aktéra bere z autentizovaného JWT subjektu*
 
 Výpis notifikací, stránkovaný. Query parametry: `partyId` (uuid, volitelný), `page` (default 0), `size` (default 20, omezeno 1..100). Specifikace OpenAPI dokumentuje i `status` a `offset`/`limit`; implementace používá `page`/`size` a filtruje dle `partyId`.
 
-Vrací `{ items: [...], total, unreadCount, page, size }`. `total` a `unreadCount` se počítají nad celou historií vybrané osoby, ne pouze nad vrácenou stránkou. Řazení podle času vytvoření a ID je stabilní i při shodném čase. Každá položka: `id, partyId, channel, template, recipient, subject, status, sentAt, createdAt`.
+Vrací `{ items: [...], total, unreadCount, page, size, pageMode }`. `total` a `unreadCount` se počítají nad celou historií vybrané osoby, ne pouze nad vrácenou stránkou. Řazení podle času vytvoření a ID je stabilní i při shodném čase. Každá položka: `id, partyId, channel, template, recipient, subject, status, sentAt, createdAt`.
 
-Historie omezená na party přijímá společně `beforeCreatedAt` a `beforeId` pro stabilní stránkování i při nových záznamech.
+Historie omezená na party přijímá společně `beforeCreatedAt` a `beforeId` pro stabilní stránkování i při nových záznamech. Odpověď s kurzorem obsahuje `pageMode: KEYSET`, který customer edge vyžaduje před použitím stránky; starý provider bez keyset podpory selže uzavřeně.
 
 ### `GET /api/v1/notifications/{id}`
 

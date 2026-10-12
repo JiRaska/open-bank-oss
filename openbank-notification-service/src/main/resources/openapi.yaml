@@ -526,6 +526,10 @@ components:
           type: integer
         size:
           type: integer
+        pageMode:
+          type: string
+          enum: [OFFSET, KEYSET]
+          description: KEYSET confirms the provider applied both beforeCreatedAt and beforeId.
 
     NotificationResponse:
       type: object

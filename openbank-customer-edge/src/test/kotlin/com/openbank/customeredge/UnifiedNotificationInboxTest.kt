@@ -77,12 +77,15 @@ class UnifiedNotificationInboxTest {
         val upstream = mockk<UpstreamClient>()
         every { upstream.get(any(), human.toString(), any()) } answers {
             if (firstArg<String>().contains("beforeCreatedAt=")) {
-                page(human, "2026-10-08T08:00:00Z", 1)
+                page(human, "2026-10-08T08:00:00Z", 1, mode = "KEYSET")
             } else {
                 page(human, "2026-10-08T10:00:00Z", 1)
             }
         }
-        every { upstream.get(any(), company.toString(), any()) } returns page(company, "2026-10-08T09:00:00Z", 1)
+        every { upstream.get(any(), company.toString(), any()) } answers {
+            val mode = if (firstArg<String>().contains("beforeCreatedAt=")) "KEYSET" else "OFFSET"
+            page(company, "2026-10-08T09:00:00Z", 1, mode = mode)
+        }
         val inbox = UnifiedNotificationInbox(upstream, mapper, "http://notifications")
         val first = mapper.readTree(inbox.list(listOf(human, company), 1).entity as String)
         val cursor = first.path("nextCursor").asText()
@@ -95,6 +98,72 @@ class UnifiedNotificationInboxTest {
                 any(),
             )
         }
+    }
+
+    @Test
+    fun `old provider without keyset confirmation fails the whole cursor page`() {
+        val upstream = mockk<UpstreamClient>()
+        val firstId = UUID.randomUUID()
+        every { upstream.get(any(), human.toString(), any()) } answers {
+            if (firstArg<String>().contains("beforeCreatedAt=")) {
+                Response.ok(
+                    """{"items":[{"id":"${UUID.randomUUID()}","partyId":"$human","createdAt":"2026-10-08T08:00:00Z"}],"total":1,"unreadCount":1}""",
+                ).build() // old provider: no pageMode
+            } else {
+                page(human, "2026-10-08T10:00:00Z", 1, id = firstId)
+            }
+        }
+        every { upstream.get(any(), company.toString(), any()) } answers {
+            val mode = if (firstArg<String>().contains("beforeCreatedAt=")) "KEYSET" else "OFFSET"
+            page(company, "2026-10-08T09:00:00Z", 1, mode = mode)
+        }
+        val inbox = UnifiedNotificationInbox(upstream, mapper, "http://notifications")
+        val cursor = mapper.readTree(inbox.list(listOf(human, company), 1).entity as String)
+            .path("nextCursor").asText()
+        assertThat(inbox.list(listOf(human, company), 1, cursor).status).isEqualTo(502)
+    }
+
+    @Test
+    fun `provider keyset confirmation cannot excuse an equal cursor tuple`() {
+        val upstream = mockk<UpstreamClient>()
+        val firstId = UUID.randomUUID()
+        every { upstream.get(any(), human.toString(), any()) } answers {
+            if (firstArg<String>().contains("beforeCreatedAt=")) {
+                page(human, "2026-10-08T10:00:00Z", 1, id = firstId, mode = "KEYSET")
+            } else {
+                page(human, "2026-10-08T10:00:00Z", 1, id = firstId)
+            }
+        }
+        every { upstream.get(any(), company.toString(), any()) } answers {
+            val mode = if (firstArg<String>().contains("beforeCreatedAt=")) "KEYSET" else "OFFSET"
+            page(company, "2026-10-08T09:00:00Z", 1, mode = mode)
+        }
+        val inbox = UnifiedNotificationInbox(upstream, mapper, "http://notifications")
+        val cursor = mapper.readTree(inbox.list(listOf(human, company), 1).entity as String)
+            .path("nextCursor").asText()
+        assertThat(inbox.list(listOf(human, company), 1, cursor).status).isEqualTo(502)
+    }
+
+    @Test
+    fun `provider cursor page must be strictly descending`() {
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(any(), human.toString(), any()) } answers {
+            if (firstArg<String>().contains("beforeCreatedAt=")) {
+                Response.ok(
+                    """{"items":[{"id":"${UUID.randomUUID()}","partyId":"$human","createdAt":"2026-10-08T07:00:00Z"},{"id":"${UUID.randomUUID()}","partyId":"$human","createdAt":"2026-10-08T08:00:00Z"}],"total":3,"unreadCount":3,"pageMode":"KEYSET"}""",
+                ).build()
+            } else {
+                page(human, "2026-10-08T10:00:00Z", 1)
+            }
+        }
+        every { upstream.get(any(), company.toString(), any()) } answers {
+            val mode = if (firstArg<String>().contains("beforeCreatedAt=")) "KEYSET" else "OFFSET"
+            page(company, "2026-10-08T09:00:00Z", 1, mode = mode)
+        }
+        val inbox = UnifiedNotificationInbox(upstream, mapper, "http://notifications")
+        val cursor = mapper.readTree(inbox.list(listOf(human, company), 1).entity as String)
+            .path("nextCursor").asText()
+        assertThat(inbox.list(listOf(human, company), 1, cursor).status).isEqualTo(502)
     }
 
     @Test
@@ -461,7 +530,13 @@ class UnifiedNotificationInboxTest {
         }
     }
 
-    private fun page(party: UUID, createdAt: String, unread: Int): Response = Response.ok(
-        """{"items":[{"id":"${UUID.randomUUID()}","partyId":"$party","createdAt":"$createdAt"}],"total":1,"unreadCount":$unread}""",
+    private fun page(
+        party: UUID,
+        createdAt: String,
+        unread: Int,
+        id: UUID = UUID.randomUUID(),
+        mode: String = "OFFSET",
+    ): Response = Response.ok(
+        """{"items":[{"id":"$id","partyId":"$party","createdAt":"$createdAt"}],"total":1,"unreadCount":$unread,"pageMode":"$mode"}""",
     ).build()
 }

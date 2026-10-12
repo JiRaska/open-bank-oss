@@ -153,6 +153,7 @@ class NotificationResourceRedactionTest {
 
         assertThat(view["total"]).isEqualTo(135L)
         assertThat(view["unreadCount"]).isEqualTo(42L)
+        assertThat(view["pageMode"]).isEqualTo("KEYSET")
         coVerify(exactly = 1) { repo.pageByPartyBefore(partyId, before, beforeId, 20) }
         coVerify(exactly = 0) { repo.pageByParty(any(), any(), any()) }
     }

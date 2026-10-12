@@ -8,7 +8,11 @@ import com.openbank.notification.infrastructure.persistence.repository.Notificat
 import com.openbank.notification.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.junit.QuarkusTestProfile
+import io.quarkus.test.junit.TestProfile
+import io.quarkus.test.security.TestSecurity
 import io.quarkus.vertx.VertxContextSupport
+import io.restassured.RestAssured.given
 import io.smallrye.mutiny.Uni
 import jakarta.inject.Inject
 import kotlinx.coroutines.CoroutineScope
@@ -23,7 +27,13 @@ import javax.sql.DataSource
 
 @QuarkusTest
 @QuarkusTestResource(PostgresTestResource::class)
+@TestProfile(NotificationKeysetIT.AdvisoryAuthzProfile::class)
+@TestSecurity(user = "api@openbank.test", roles = ["ROLE_API"])
 class NotificationKeysetIT {
+    class AdvisoryAuthzProfile : QuarkusTestProfile {
+        override fun getConfigOverrides(): Map<String, String> = mapOf("authz.enforce" to "false")
+    }
+
     @Inject lateinit var repository: NotificationRepository
 
     @Inject lateinit var dataSource: DataSource
@@ -48,6 +58,40 @@ class NotificationKeysetIT {
         assertThat(before.first.map { it.notificationId }).containsExactly(sameSecondOlder, older)
         assertThat(before.second).isEqualTo(4)
         assertThat(before.third).isEqualTo(4)
+    }
+
+    @Test
+    fun `HTTP party keyset keeps history stable after a newer arrival`() {
+        val party = UUID.randomUUID()
+        val older = UUID.randomUUID()
+        val anchor = UUID.randomUUID()
+        val later = UUID.randomUUID()
+        val at = Instant.parse("2026-10-08T12:00:00Z")
+        insert(party, older, at.minusSeconds(1))
+        insert(party, anchor, at)
+
+        val first = given()
+            .queryParam("partyId", party)
+            .queryParam("size", 1)
+            .`when`().get("/api/v1/notifications")
+            .then().statusCode(200)
+            .extract().jsonPath()
+        assertThat(first.getList<String>("items.id")).containsExactly(anchor.toString())
+        assertThat(first.getString("pageMode")).isEqualTo("OFFSET")
+
+        insert(party, later, at.plusSeconds(1))
+        val second = given()
+            .queryParam("partyId", party)
+            .queryParam("size", 2)
+            .queryParam("beforeCreatedAt", at.toString())
+            .queryParam("beforeId", anchor)
+            .`when`().get("/api/v1/notifications")
+            .then().statusCode(200)
+            .extract().jsonPath()
+        assertThat(second.getList<String>("items.id")).containsExactly(older.toString())
+        assertThat(second.getString("pageMode")).isEqualTo("KEYSET")
+        assertThat(second.getInt("total")).isEqualTo(3)
+        assertThat(second.getInt("unreadCount")).isEqualTo(3)
     }
 
     private fun insert(party: UUID, id: UUID, createdAt: Instant) {
