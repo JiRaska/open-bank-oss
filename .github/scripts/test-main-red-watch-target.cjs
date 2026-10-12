@@ -24,12 +24,13 @@ const verdict = (run_id, status) => ({
   successful_jobs: status === 'green' ? [{ job, steps: [step] }] : [],
 })
 const report = (run_id, target) => ({
-  version: 1, run_id, attempt: 1, main_sha: sha, complete: true, dry_run: false,
+  version: 1, run_id, attempt: 1, main_sha: sha, complete: true, successful: true, dry_run: false,
   targets: [target],
 })
-const target = (budget_validated, history_error = false) => ({
+const target = (budget_validated, history_error = false, updated = false) => ({
   pr: 12435, head_sha: 'f7220d2ac0000000000000000000000000000000',
   budget_validated, update_count: budget_validated ? 3 : null, history_error,
+  updated, updated_head_sha: updated ? 'a'.repeat(40) : null,
 })
 
 async function main() {
@@ -42,10 +43,13 @@ async function main() {
     verdict(38260876231, 'green')), /mismatched/)
   assert.throws(() => validateEvidence({ ...report(38260876231, target(true)), main_sha: '0'.repeat(40) },
     verdict(38260876231, 'green')), /mismatched/)
+  assert.throws(() => validateEvidence({ ...report(38260876231, target(true)), successful: false },
+    verdict(38260876231, 'green')), /mismatched/)
   assert.throws(() => validateEvidence({ ...report(38260876231, target(true)),
     targets: [target(true), target(true)] }, verdict(38260876231, 'green')), /Malformed target entry/)
   assert.equal(targetsCovered(withTargets('issue body', [12435]), report(38260876231, target(false))), false)
-  assert.equal(targetsCovered(withTargets('issue body', [12435]), report(38260876231, target(true))), true)
+  assert.equal(targetsCovered(withTargets('issue body', [12435]), report(38260876231, target(true))), false)
+  assert.equal(targetsCovered(withTargets('issue body', [12435]), report(38260876231, target(true, false, true))), true)
   assert.equal(targetsCovered('legacy issue', report(38260876231, target(true))), false)
 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'main-red-target-test-'))
@@ -101,9 +105,13 @@ async function main() {
     async () => report(38260876231, target(false)))
   assert.equal(issues[0].state, 'open')
   assert.deepEqual(targetPrs(issues[0].body), [12435])
-  // A report from a later attempt that did validate the target's history may close it.
+  // Even a 202 and a validated budget leave the issue open until the target head changes.
+  await applyVerdict(github, context, verdict(38269999999, 'green'),
+    async () => report(38269999999, target(true)))
+  assert.equal(issues[0].state, 'open')
+  // A later observed and verified base merge may close it.
   await applyVerdict(github, context, verdict(38270000000, 'green'),
-    async () => report(38270000000, target(true)))
+    async () => report(38270000000, target(true, false, true)))
   assert.equal(issues[0].state, 'closed')
 
   // Legacy #12515 has no machine-readable target: even an all-green generic job
@@ -113,11 +121,11 @@ async function main() {
     .replace('### Recovered failing jobs', '### Unresolved failing jobs')
     .replace(/<!-- main-red-target-pr:12435 -->/, '')
   await applyVerdict(github, context, verdict(38270000001, 'green'),
-    async () => report(38270000001, target(true)))
+    async () => report(38270000001, target(true, false, true)))
   assert.equal(issues[0].state, 'open')
   issues[0].body = withTargets(issues[0].body, [12435])
   await applyVerdict(github, context, verdict(38270000002, 'red'),
-    async () => report(38270000002, target(true)))
+    async () => report(38270000002, target(true, false, true)))
   assert.equal(targetPrs(issues[0].body), null) // target validated, unrelated red remains
   console.log('main-red target-bound recovery: passed')
 }

@@ -76,6 +76,7 @@ import os
 import pathlib
 import re
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -321,22 +322,78 @@ def self_test() -> int:
         ok = result == 0 and report["targets"] == [{
             "pr": 42, "head_sha": "a" * 40, "budget_validated": False,
             "update_count": None, "history_error": False,
+            "updated": False, "updated_head_sha": None,
         }]
         failures += not ok
         print(f"{'PASS' if ok else 'FAIL'}  missing context has no target-history evidence")
     with patch.dict(globals(), {"required_policy": lambda *_: (["Gitleaks"], True),
                                 "get": fixture_get, "head_checks": lambda *_: {"Gitleaks": "success"},
                                 "branch_update_count": lambda *_: 0,
-                                "api": lambda *_args, **_kwargs: (202, {})}):
+                                "api": lambda *_args, **_kwargs: (202, {}),
+                                "observe_update": lambda *_: "b" * 40}):
         report = {"targets": []}
         with contextlib.redirect_stdout(io.StringIO()):
             result = run("example/repo", "main", 5, 0, False, 20, recovery_report=report)
         ok = result == 0 and report["targets"] == [{
             "pr": 42, "head_sha": "a" * 40, "budget_validated": True,
             "update_count": 0, "history_error": False,
+            "updated": True, "updated_head_sha": "b" * 40,
         }]
         failures += not ok
-        print(f"{'PASS' if ok else 'FAIL'}  exact target history produces recovery evidence")
+        print(f"{'PASS' if ok else 'FAIL'}  observed target head produces recovery evidence")
+    with patch.dict(globals(), {"required_policy": lambda *_: (["Gitleaks"], True),
+                                "get": fixture_get, "head_checks": lambda *_: {"Gitleaks": "success"},
+                                "branch_update_count": lambda *_: 0,
+                                "api": lambda *_args, **_kwargs: (202, {}),
+                                "observe_update": lambda *_: None}):
+        report = {"targets": []}
+        with contextlib.redirect_stdout(io.StringIO()):
+            result = run("example/repo", "main", 5, 0, False, 20, recovery_report=report)
+        ok = result == 0 and report["targets"][0]["updated"] is False
+        failures += not ok
+        print(f"{'PASS' if ok else 'FAIL'}  accepted 202 without changed head cannot recover")
+    old_head, new_head = "a" * 40, "b" * 40
+    def observed_api(_method: str, path: str, _body: dict | None = None):
+        if path.endswith("/pulls/42"):
+            return 200, {"head": {"sha": old_head}}
+        raise AssertionError(f"unexpected observation read {path}")
+    with patch.dict(globals(), {"api": observed_api}):
+        unchanged = observe_update("example/repo", 42, old_head, "main", 2, 0)
+    ok = unchanged is None
+    failures += not ok
+    print(f"{'PASS' if ok else 'FAIL'}  unchanged observed head remains unproved")
+    def merged_api(_method: str, path: str, _body: dict | None = None):
+        if path.endswith("/pulls/42"):
+            return 200, {"head": {"sha": new_head}}
+        if path.endswith(f"/commits/{new_head}"):
+            return 200, {"sha": new_head, "commit": {
+                "message": "Merge branch 'main' into agent/example",
+                "committer": {"name": "GitHub", "email": "noreply@github.com"},
+                "verification": {"verified": True}},
+                "parents": [{"sha": old_head}, {"sha": "e" * 40}]}
+        raise AssertionError(f"unexpected observation read {path}")
+    with patch.dict(globals(), {"api": merged_api}):
+        observed = observe_update("example/repo", 42, old_head, "main", 2, 0)
+    ok = observed == new_head
+    failures += not ok
+    print(f"{'PASS' if ok else 'FAIL'}  verified first-parent merge proves update")
+    with patch.dict(globals(), {"api": merged_api}):
+        wrong_parent = observe_update("example/repo", 42, "c" * 40, "main", 2, 0)
+    ok = wrong_parent is None
+    failures += not ok
+    print(f"{'PASS' if ok else 'FAIL'}  unrelated branch movement cannot recover target")
+    for status, expected in ((409, 0), (403, 1)):
+        report = {"targets": []}
+        with patch.dict(globals(), {"required_policy": lambda *_: (["Gitleaks"], True),
+                                    "get": fixture_get, "head_checks": lambda *_: {"Gitleaks": "success"},
+                                    "branch_update_count": lambda *_: 0,
+                                    "api": lambda *_args, code=status: (code, "denied")}), \
+                contextlib.redirect_stdout(io.StringIO()):
+            result = run("example/repo", "main", 5, 0, False, 20, recovery_report=report)
+        ok = (result == expected and report["targets"][0]["updated"] is False
+              and report["targets"][0]["updated_head_sha"] is None)
+        failures += not ok
+        print(f"{'PASS' if ok else 'FAIL'}  rejected update {status} cannot recover target")
     def unreadable_count(*_args):
         raise ValueError("unreadable test history")
     with patch.dict(globals(), {"required_policy": lambda *_: (["Gitleaks"], True),
@@ -348,6 +405,7 @@ def self_test() -> int:
         ok = result == 0 and report["targets"] == [{
             "pr": 42, "head_sha": "a" * 40, "budget_validated": False,
             "update_count": None, "history_error": True,
+            "updated": False, "updated_head_sha": None,
         }]
         failures += not ok
         print(f"{'PASS' if ok else 'FAIL'}  unreadable target history remains unverified")
@@ -385,6 +443,18 @@ def self_test() -> int:
     def put_update(_method: str, path: str, _body: dict | None = None):
         updated_numbers.append(int(path.split("/pulls/")[1].split("/")[0]))
         return 202, {}
+    report = {"targets": []}
+    with patch.dict(globals(), {"required_policy": lambda *_: (["Gitleaks"], True),
+                                "get": two_pr_get, "head_checks": lambda *_: {"Gitleaks": "success"},
+                                "branch_update_count": lambda *_: 0, "api": put_update,
+                                "observe_update": lambda *_: "c" * 40}), \
+            contextlib.redirect_stdout(io.StringIO()):
+        result = run("example/repo", "main", 1, 0, False, 20, recovery_report=report)
+    ok = (result == 0 and [t["pr"] for t in report["targets"]] == [42, 43]
+          and [t["updated"] for t in report["targets"]] == [True, False])
+    failures += not ok
+    print(f"{'PASS' if ok else 'FAIL'}  validated but cap-unselected target cannot recover")
+    updated_numbers.clear()
     with tempfile.TemporaryDirectory() as tmp:
         summary_path = pathlib.Path(tmp) / "summary.md"
         with patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(summary_path)}), patch.dict(
@@ -620,6 +690,50 @@ def budget_instruction(number: int, used: int, limit: int) -> str:
             "then obtain normal review and CI")
 
 
+def observe_update(repo: str, number: int, old_sha: str, branch: str,
+                   attempts: int = 6, delay_seconds: float = 2) -> str | None:
+    """A 202 only queues the update; prove the head became its base-merge child."""
+    for attempt in range(attempts):
+        if attempt:
+            time.sleep(delay_seconds)
+        try:
+            code, pr = api("GET", f"/repos/{repo}/pulls/{number}")
+        except OSError:
+            continue
+        if code != 200 or not isinstance(pr, dict):
+            continue
+        head = pr.get("head")
+        new_sha = head.get("sha") if isinstance(head, dict) else None
+        new_sha = new_sha.lower() if isinstance(new_sha, str) else ""
+        if new_sha == old_sha or not re.fullmatch(r"[0-9a-f]{40}", new_sha):
+            continue
+        try:
+            code, commit = api("GET", f"/repos/{repo}/commits/{new_sha}")
+        except OSError:
+            continue
+        if code != 200:
+            continue
+        details = commit.get("commit", {}) if isinstance(commit, dict) else {}
+        committer = details.get("committer") if isinstance(details, dict) else None
+        verification = details.get("verification") if isinstance(details, dict) else None
+        parents = commit.get("parents") if isinstance(commit, dict) else None
+        message = details.get("message") if isinstance(details, dict) else None
+        if (isinstance(commit, dict) and commit.get("sha") == new_sha
+                and isinstance(message, str)
+                and message.partition("\n")[0].startswith(f"Merge branch '{branch}' into ")
+                and isinstance(committer, dict) and committer.get("name") == "GitHub"
+                and committer.get("email") == "noreply@github.com"
+                and isinstance(verification, dict) and verification.get("verified") is True
+                and isinstance(parents, list) and len(parents) == 2
+                and isinstance(parents[0], dict) and parents[0].get("sha") == old_sha
+                and isinstance(parents[1], dict)
+                and re.fullmatch(r"[0-9a-f]{40}", parents[1].get("sha", ""))):
+            return new_sha
+        # Another actor moved this branch; that is not proof our request completed.
+        return None
+    return None
+
+
 def write_budget_summary(lines: list[str]) -> None:
     target = os.environ.get("GITHUB_STEP_SUMMARY")
     if not target or not lines:
@@ -699,6 +813,7 @@ def run(repo: str, branch: str, max_updates: int, debounce: int, dry_run: bool,
             recovery_report["targets"].append({
                 "pr": n, "head_sha": sha, "budget_validated": n in budgets,
                 "update_count": budgets.get(n), "history_error": budget_error,
+                "updated": False, "updated_head_sha": None,
             })
     updated = 0
     for n, ok, why in plan(entries, max_updates):
@@ -715,6 +830,14 @@ def run(repo: str, branch: str, max_updates: int, debounce: int, dry_run: bool,
         code, data = api("PUT", f"/repos/{repo}/pulls/{n}/update-branch", {"expected_head_sha": sha})
         if code == 202:
             updated += 1
+            if recovery_report is not None:
+                observed = observe_update(repo, n, sha, branch)
+                if observed:
+                    target = next(t for t in recovery_report["targets"] if t["pr"] == n)
+                    target["updated"] = True
+                    target["updated_head_sha"] = observed
+                else:
+                    print(f"::warning::#{n}: update accepted but target head transition unverified")
             print(f"UPDATE #{n} {sha[:9]}: {why} "
                   f"(budget {used + 1}/{max_updates_per_pr})")
         elif code == 409:
@@ -762,11 +885,13 @@ def main() -> int:
         "main_sha": os.environ.get("GITHUB_SHA", ""),
         "dry_run": a.dry_run,
         "complete": False,
+        "successful": False,
         "targets": [],
     }
     result = run(a.repo, a.branch, a.max_updates, a.debounce_minutes, a.dry_run,
                  a.full_fleet_threshold, a.max_updates_per_pr, recovery_report=report)
     report["complete"] = True
+    report["successful"] = result == 0
     if a.recovery_report:
         a.recovery_report.write_text(json.dumps(report, sort_keys=True) + "\n", encoding="utf-8")
     return result
