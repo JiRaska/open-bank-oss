@@ -11,6 +11,9 @@ import com.openbank.libs.testing.mtls.ProductionListenerProfile
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.TestProfile
+import jakarta.ws.rs.GET
+import jakarta.ws.rs.Path
+import jakarta.ws.rs.core.Response
 import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.config.ConfigProvider
 import org.junit.jupiter.api.Test
@@ -29,7 +32,7 @@ import java.util.UUID
 @TestProfile(ScaListenerAuthParityIT.Profile::class)
 @QuarkusTestResource(PostgresRedisTestResource::class)
 class ScaListenerAuthParityIT : ListenerAuthParityConformance() {
-    override val path = "/api/v1/sca/approvals"
+    override val path = "/api/v1/sca/listener-auth-probe"
 
     @Test
     fun `a trusted client certificate without a bearer cannot consume a challenge`() {
@@ -51,4 +54,11 @@ class ScaListenerAuthParityIT : ListenerAuthParityConformance() {
     }
 
     class Profile : ProductionListenerProfile()
+}
+
+/** A future SCA business endpoint without a role annotation must still require bearer auth. */
+@Path("/api/v1/sca/listener-auth-probe")
+class ScaListenerAuthProbe {
+    @GET
+    fun probe(): Response = Response.ok().build()
 }
