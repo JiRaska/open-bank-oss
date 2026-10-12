@@ -68,7 +68,10 @@ def _covers(pattern: str, path: str) -> bool:
     if pattern.endswith("/*"):
         stem = pattern[:-2]
         return path == stem or path.startswith(stem + "/")
-    return path == pattern
+    # A class-level @Path is only a root. Its methods may add @Path("/{id}"),
+    # which an exact Quarkus permission does not match. Require descendant
+    # coverage even when the exact root itself is protected.
+    return False
 
 
 def _normalize_pattern(pattern: str) -> str:
@@ -277,6 +280,11 @@ def self_test() -> int:
         "      auth:\n        permission:\n          x:\n            paths: /api/*\n"
         "            methods: GET\n            auth-mechanism: bearer\n"
     )
+    exact_root_only = yaml.safe_load(
+        '"%prod":\n  quarkus:\n    http:\n      ssl:\n        client-auth: required\n'
+        '      auth:\n        permission:\n          x:\n'
+        '            paths: /api/v1/sca\n            auth-mechanism: bearer\n'
+    )
     overridden = yaml.safe_load(
         '"%prod":\n  quarkus:\n    http:\n      ssl:\n        client-auth: required\n'
         "      auth:\n        permission:\n"
@@ -357,6 +365,9 @@ def self_test() -> int:
         ("inherited multi-path bearer-only passes", findings_for(inherited, ["/ap2/verify", "/api/v1/x"]) == []),
         ("auth-mechanism other than bearer flagged", len(findings_for(wrong_mech, api)) == 1),
         ("GET-only bearer permission does not protect POST", len(findings_for(get_only, api)) == 1),
+        ("exact bearer permission leaves resource descendants open to certificate identity",
+         len(findings_for(exact_root_only, api)) == 1 and
+         not _matches_permission("/api/v1/sca", "/api/v1/sca/123")),
         ("more-specific non-bearer path defeats broad bearer-only", len(findings_for(overridden, ["/api/v1/accounts"])) == 1),
         ("method-specific non-bearer path defeats same-path bearer-only",
          len(findings_for(method_override, ["/api/v1/accounts"])) == 1),
