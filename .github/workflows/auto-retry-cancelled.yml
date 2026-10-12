@@ -132,7 +132,8 @@ jobs:
   discover:
     name: Find recent runs requiring reconciliation
     runs-on: ubuntu-latest
-    # Room for the rate-limit waits below (3 calls x up to 2 waits of 120s) plus the calls.
+    # Hard ceiling shared by all HTTP retries and whole-snapshot rereads. Sustained
+    # rate limits can exhaust it before three snapshots; timeout remains a failure.
     timeout-minutes: 15
     outputs:
       retry: ${{ steps.select.outputs.retry }}
