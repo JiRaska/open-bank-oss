@@ -75,7 +75,7 @@ class ClearingResource {
     fun submitReceiptedCreditTransfer(
         @PathParam("rail") rail: String,
         @PathParam("submissionId") submissionId: String,
-        pacs008Xml: String,
+        pacs008Xml: ByteArray,
     ): Response {
         if (!receiptsEnabled) throw ServiceUnavailableException("Receipted submission is not enabled")
         return Response.ok(submissionReceipts.submit(rail, submissionId, pacs008Xml)).build()

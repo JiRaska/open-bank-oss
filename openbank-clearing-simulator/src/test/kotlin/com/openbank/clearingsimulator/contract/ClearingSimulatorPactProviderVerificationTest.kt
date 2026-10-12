@@ -35,7 +35,7 @@ import org.junit.jupiter.api.extension.ExtendWith
  * ["ROLE_API"])`).
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresTestResource::class)
+@QuarkusTestResource(PostgresTestResource::class, restrictToAnnotatedClass = true)
 @TestSecurity(user = "rail", roles = ["ROLE_API"])
 @Provider("openbank-clearing-simulator")
 @PactFolder("../pacts")

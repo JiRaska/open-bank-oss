@@ -7,6 +7,7 @@ package com.openbank.clearingsimulator.infrastructure.persistence
 import com.openbank.clearingsimulator.application.ClearingSimulatorService
 import io.agroal.api.AgroalDataSource
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.enterprise.inject.Instance
 import jakarta.inject.Inject
 import jakarta.ws.rs.BadRequestException
 import jakarta.ws.rs.ClientErrorException
@@ -18,23 +19,23 @@ import java.sql.Connection
 @ApplicationScoped
 class SubmissionReceiptStore {
     @Inject
-    lateinit var dataSource: AgroalDataSource
+    lateinit var dataSource: Instance<AgroalDataSource>
 
     @Inject
     lateinit var simulator: ClearingSimulatorService
 
-    fun submit(rail: String, submissionId: String, xml: String): String {
+    fun submit(rail: String, submissionId: String, xmlBytes: ByteArray): String {
         if (rail !in RAILS || !SUBMISSION_ID.matches(submissionId)) {
             throw BadRequestException("Invalid rail or submission identity")
         }
         // Fingerprint the exact received bytes. A changed request must never inherit an old
         // acceptance, including changes that leave the parsed ISO 20022 fields equivalent.
         val digest = MessageDigest.getInstance("SHA-256")
-            .digest(xml.toByteArray(StandardCharsets.UTF_8))
+            .digest(xmlBytes)
             .joinToString("") { "%02x".format(it) }
-        val candidate = simulator.clear(xml).statusReportXml
+        val candidate = simulator.clear(String(xmlBytes, StandardCharsets.UTF_8)).statusReportXml
 
-        val receipt = dataSource.connection.use { connection ->
+        val receipt = dataSource.get().connection.use { connection ->
             insertIfAbsent(connection, rail, submissionId, digest, candidate)
             readReceipt(connection, rail, submissionId)
         }

@@ -20,6 +20,8 @@ class PostgresTestResource : QuarkusTestResourceLifecycleManager {
             "quarkus.datasource.jdbc.url" to postgres.jdbcUrl,
             "quarkus.datasource.username" to postgres.username,
             "quarkus.datasource.password" to postgres.password,
+            "quarkus.datasource.active" to "true",
+            "quarkus.flyway.migrate-at-start" to "true",
             "openbank.clearing.receipts.enabled" to "true",
         )
     }

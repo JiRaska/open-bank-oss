@@ -8,7 +8,10 @@ before HTTP 200. PostgreSQL's unique key serializes requests from multiple pods.
 The existing `/credit-transfers` path is unchanged and remains stateless. SEPA Instant
 must not use automatic retry until its caller has persisted the original submission
 identity and request, switched to this endpoint, and proved ambiguous-response recovery.
-The new endpoint is disabled by default (`openbank.clearing.receipts.enabled=false`).
+The new endpoint is disabled by default (`openbank.clearing.receipts.enabled=false`),
+and the receipt datasource and Flyway are inactive by default
+(`CLEARING_RECEIPT_DB_ACTIVE=false`). This preserves the legacy boot path until the
+owned database is deployed.
 
 ## Deployment order and rollback
 
@@ -19,8 +22,10 @@ The new endpoint is disabled by default (`openbank.clearing.receipts.enabled=fal
    environment. Do not reuse another service's database or credential.
 3. Apply migration V1 and deploy the simulator with the endpoint still disabled. Verify
    startup, database ownership, backup health, and the legacy provider Pacts.
-4. Enable the endpoint only for a rail with a reviewed distinct caller identity and a
-   stable submission ID. Prove concurrent duplicate, changed-request conflict, restart,
+4. Bind each rail to a reviewed distinct authenticated client identity before enabling
+   the endpoint. The current shared `ROLE_API` token does not establish that boundary,
+   so the endpoint must remain disabled. Then require a stable submission ID and prove
+   concurrent duplicate, changed-request conflict, restart,
    and lost-response replay through the real network path.
 5. Migrate rail clients one at a time. Keep any automatic SEPA retry disabled until its
    own durable intent, booking idempotency and reconciliation proof are complete.

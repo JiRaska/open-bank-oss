@@ -44,7 +44,7 @@ import org.junit.jupiter.api.extension.ExtendWith
  * keeps running unconditionally, so PR-time contract coverage is unchanged by this addition.
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresTestResource::class)
+@QuarkusTestResource(PostgresTestResource::class, restrictToAnnotatedClass = true)
 @TestSecurity(user = "rail", roles = ["ROLE_API"])
 @Provider("openbank-clearing-simulator")
 @PactBroker

@@ -28,7 +28,7 @@ import java.util.concurrent.Executors
  * released-but-never-booted defect class (config/CDI bugs a unit test cannot catch).
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresTestResource::class)
+@QuarkusTestResource(PostgresTestResource::class, restrictToAnnotatedClass = true)
 class ClearingSimulatorApiIT {
 
     private fun pacs008Xml(amount: String): String = Pacs008Builder().build(

@@ -10,13 +10,18 @@ quarkus:
   application:
     name: openbank-clearing-simulator
   datasource:
+    # Staged rollout: the existing simulator has no database. Keep the datasource inactive
+    # until its owned cluster, credential, backup and network policy exist. The receipt
+    # endpoint has a separate default-off guard; both switches are required to enable it.
+    active: ${CLEARING_RECEIPT_DB_ACTIVE:false}
     db-kind: postgresql
     username: openbank
     password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
     jdbc:
       url: jdbc:postgresql://localhost:5432/openbank_clearing_simulator
   flyway:
-    migrate-at-start: true
+    # enabled is a build-time property, so only migration execution is gated at runtime.
+    migrate-at-start: ${CLEARING_RECEIPT_DB_ACTIVE:false}
     connect-retries: 10
     connect-retries-interval: 2S
   http:
