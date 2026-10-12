@@ -32,12 +32,22 @@ BASELINE_REL = ".github/scripts/peer-url-tls-baseline.txt"
 WORKLOAD_KINDS = {"Deployment", "StatefulSet", "DaemonSet", "Rollout", "Job", "CronJob"}
 
 
+# libyaml's C loader when present: the gitops tree is ~1.9k files and the pure-Python loader
+# dominated the run (33 s in CI against a 15 s budget). Same safe semantics either way.
+_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+_DOCS_CACHE: dict = {}
+
+
 def _docs(path):
-    try:
-        with open(path, encoding="utf-8") as fh:
-            return [d for d in yaml.safe_load_all(fh) if isinstance(d, dict)]
-    except (yaml.YAMLError, UnicodeDecodeError):
-        return []
+    """Parsed mapping documents of one file, memoised within one findings() pass (it reads every
+    file twice); findings() clears the cache, so an edited file is never served stale."""
+    if path not in _DOCS_CACHE:
+        try:
+            with open(path, encoding="utf-8") as fh:
+                _DOCS_CACHE[path] = [d for d in yaml.load_all(fh, Loader=_LOADER) if isinstance(d, dict)]
+        except (yaml.YAMLError, UnicodeDecodeError):
+            _DOCS_CACHE[path] = []
+    return _DOCS_CACHE[path]
 
 
 def _containers(doc):
@@ -64,6 +74,7 @@ def _tls_services(files):
 def findings(root):
     base = os.path.join(root, "openbank-infra", "gitops")
     files = sorted(glob.glob(os.path.join(base, "**", "*.yaml"), recursive=True))
+    _DOCS_CACHE.clear()
     tls = _tls_services(files)
     out = set()
     findings.subjects = 0
