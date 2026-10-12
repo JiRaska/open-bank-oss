@@ -11,6 +11,7 @@ import com.openbank.libs.testing.mtls.ProductionListenerProfile
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.TestProfile
+import io.restassured.RestAssured.given
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.core.Response
@@ -33,6 +34,12 @@ import java.util.UUID
 @QuarkusTestResource(PostgresRedisTestResource::class)
 class ScaListenerAuthParityIT : ListenerAuthParityConformance() {
     override val path = "/api/v1/sca/listener-auth-probe"
+
+    @Test
+    fun `public metadata remains accessible without bearer`() {
+        given().get("/api/v1/info").then().statusCode(200)
+        given().get("/api/v1/config").then().statusCode(200)
+    }
 
     @Test
     fun `a trusted client certificate without a bearer cannot consume a challenge`() {
