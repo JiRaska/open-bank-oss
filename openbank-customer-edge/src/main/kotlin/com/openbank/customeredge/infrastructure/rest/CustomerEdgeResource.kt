@@ -506,13 +506,15 @@ class CustomerEdgeResource(
         val customer = customer()
         val raw = type?.takeIf { it.isNotBlank() }?.uppercase()
         // The query carries the edge's own constant, never the caller's string.
-        val requested = raw?.let { r -> CUSTOMER_PRODUCT_TYPES.firstOrNull { it == r } }
+        // Plain branches, not `raw?.let { }`: CodeQL's Kotlin model carries a receiver's taint
+        // through `let` to its result, which would make the constant read as caller-supplied.
+        val requested = if (raw == null) null else CUSTOMER_PRODUCT_TYPES.firstOrNull { it == raw }
         if (raw != null && requested == null) {
             return Response.status(Response.Status.BAD_REQUEST)
                 .entity(mapOf("error" to "Unsupported product type"))
                 .build()
         }
-        val query = requested?.let { "?type=$it&status=ACTIVE" } ?: "?status=ACTIVE"
+        val query = if (requested == null) "?status=ACTIVE" else "?type=$requested&status=ACTIVE"
         val catalog = upstream.get("$productCatalogUrl/api/v1/products$query", customer.partyId.toString())
         if (catalog.status != 200) return productCatalogueUnavailable()
         val products = parseJson(catalog)?.takeIf { it.isArray } ?: return productCatalogueUnavailable()
@@ -4195,13 +4197,14 @@ class CustomerEdgeResource(
     @Blocking
     fun fxRate(@PathParam("base") base: String, @PathParam("quote") quote: String): Response {
         val customer = customer()
-        if (!isValidCurrency(base) || !isValidCurrency(quote)) return badRequest("Invalid currency")
-        val resp = upstream.get("$fxServiceUrl/api/v1/fx/rates/$base/$quote", customer.partyId.toString())
+        val baseCcy = CurrencyCode.parse(base)?.value ?: return badRequest("Invalid currency")
+        val quoteCcy = CurrencyCode.parse(quote)?.value ?: return badRequest("Invalid currency")
+        val resp = upstream.get("$fxServiceUrl/api/v1/fx/rates/$baseCcy/$quoteCcy", customer.partyId.toString())
         val upstreamBody = (resp.entity as? String).orEmpty()
         if (resp.status != 200) {
             return Response.status(resp.status).entity(upstreamBody).type(MediaType.APPLICATION_JSON).build()
         }
-        val mapped = mapFxRate(objectMapper, upstreamBody, base, quote)
+        val mapped = mapFxRate(objectMapper, upstreamBody, baseCcy, quoteCcy)
             ?: return Response.status(Response.Status.BAD_GATEWAY).entity("""{"error":"malformed fx rate"}""")
                 .type(MediaType.APPLICATION_JSON).build()
         return Response.ok(mapped).type(MediaType.APPLICATION_JSON).build()
@@ -4225,7 +4228,8 @@ class CustomerEdgeResource(
         @QueryParam("offset") offset: Int?,
     ): Response {
         val customer = customer()
-        if (!isValidCurrency(base) || !isValidCurrency(quote)) return badRequest("Invalid currency")
+        val baseCcy = CurrencyCode.parse(base)?.value ?: return badRequest("Invalid currency")
+        val quoteCcy = CurrencyCode.parse(quote)?.value ?: return badRequest("Invalid currency")
         if (from != null && !isValidInstant(from)) return badRequest("Invalid 'from' instant: $from")
         if (to != null && !isValidInstant(to)) return badRequest("Invalid 'to' instant: $to")
         val safeLimit = (limit ?: 90).coerceIn(1, 365)
@@ -4233,7 +4237,9 @@ class CustomerEdgeResource(
         val windowEnd = to ?: java.time.Instant.now().toString()
         val windowStart = from ?: threeMonthWindowStart(java.time.Instant.parse(windowEnd)).toString()
         val url = buildString {
-            append("$fxServiceUrl/api/v1/fx/rates/$base/$quote/history?source=CNB&limit=$safeLimit&offset=$safeOffset")
+            append(
+                "$fxServiceUrl/api/v1/fx/rates/$baseCcy/$quoteCcy/history?source=CNB&limit=$safeLimit&offset=$safeOffset",
+            )
             append("&from=${java.net.URLEncoder.encode(windowStart, "UTF-8")}")
             append("&to=${java.net.URLEncoder.encode(windowEnd, "UTF-8")}")
         }

@@ -63,11 +63,13 @@ class CustomerBusinessResource(
     fun schemes(@QueryParam("country") country: String?): Response {
         // ISO 3166-1 alpha-2 or nothing. Same reasoning as the invitation token below.
         val raw = country?.takeIf { it.isNotBlank() }
-        val filter = raw?.let { CountryCode.parse(it) }
+        // Plain branches, not `?.let { }`: CodeQL's Kotlin model carries a receiver's taint through
+        // `let` to its result, which would make the rebuilt code read as caller-supplied.
+        val filter = if (raw == null) null else CountryCode.parse(raw)
         require(raw == null || filter != null) {
             "country must be an ISO 3166-1 alpha-2 code"
         }
-        val q = filter?.let { "?country=$it" }.orEmpty()
+        val q = if (filter == null) "" else "?country=${filter.value}"
         return upstream.get("$kybServiceUrl$UPSTREAM/schemes$q", human().toString())
     }
 

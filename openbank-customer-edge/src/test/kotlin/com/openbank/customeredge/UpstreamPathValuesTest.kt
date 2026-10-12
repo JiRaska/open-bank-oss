@@ -210,4 +210,36 @@ class UpstreamPathValuesTest {
         resource(rec.upstream).listProductOffers("savings")
         assertThat(rec.urls.first()).isEqualTo("http://catalog/api/v1/products?type=SAVINGS&status=ACTIVE")
     }
+
+    // ── fxRate / fxRateHistory (base, quote) ───────────────────────────────────────────────────
+
+    @ParameterizedTest
+    @ValueSource(strings = ["EUR/..", "eur", "E%2F", "EURO"])
+    fun `fx rate and history refuse a non-currency pair with no upstream call`(raw: String) {
+        val rec = Recorder(party, account)
+        assertThat(resource(rec.upstream).fxRate(raw, "CZK").status).isEqualTo(400)
+        assertThat(resource(rec.upstream).fxRate("CZK", raw).status).isEqualTo(400)
+        assertThat(resource(rec.upstream).fxRateHistory(raw, "CZK", null, null, null, null).status).isEqualTo(400)
+        assertThat(resource(rec.upstream).fxRateHistory("CZK", raw, null, null, null, null).status).isEqualTo(400)
+        assertThat(rec.urls).isEmpty()
+    }
+
+    @Test
+    fun `fx rate and history fetch the exact canonical pair`() {
+        val rec = Recorder(party, account)
+        resource(rec.upstream).fxRate("EUR", "CZK")
+        assertThat(rec.urls.single()).isEqualTo("http://fx/api/v1/fx/rates/EUR/CZK")
+        resource(rec.upstream).fxRateHistory(
+            "EUR",
+            "CZK",
+            "2026-01-01T00:00:00Z",
+            "2026-02-01T00:00:00Z",
+            30,
+            0,
+        )
+        assertThat(rec.urls.last()).isEqualTo(
+            "http://fx/api/v1/fx/rates/EUR/CZK/history?source=CNB&limit=30&offset=0" +
+                "&from=2026-01-01T00%3A00%3A00Z&to=2026-02-01T00%3A00%3A00Z",
+        )
+    }
 }
