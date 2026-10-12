@@ -2892,7 +2892,8 @@ gates:
       so any certificate the trust store accepts becomes an authenticated identity on 8443. A workload
       holding a fleet-CA certificate and no bearer was "logged in" (treasury measured 403 where 401 was
       due, #12506). Every profile with client-auth must restrict its resource roots to
-      auth-mechanism: bearer. First run: 11 services, baselined against #12511, fixed one PR each.
+      policy: authenticated and auth-mechanism: bearer; a permit policy does not require a bearer.
+      First run: 11 services, baselined against #12511, fixed one PR each.
     review_after: '2027-04-10'
     min_subjects: 40
     budget_seconds: 15
