@@ -73,6 +73,7 @@ import datetime as dt
 import json
 import os
 import pathlib
+import re
 import sys
 import urllib.error
 import urllib.request
@@ -217,33 +218,62 @@ def self_test() -> int:
     import io
     from unittest.mock import patch
 
-    update = {"commit": {"message": "Merge branch 'main' into agent/example",
+    update = {"sha": "a" * 40, "commit": {"message": "Merge branch 'main' into agent/example",
                          "committer": {"name": "GitHub"}}, "parents": [{}, {}]}
-    renamed = {**update, "commit": {**update["commit"],
+    renamed = {**update, "sha": "b" * 40, "commit": {**update["commit"],
                                     "message": "Merge branch 'main' into codex/renamed"}}
     with patch.dict(globals(), {"get": lambda *_: [update, renamed]}):
-        used = branch_update_count("example/repo", 42, "main")
+        used = branch_update_count("example/repo", 42, "main", 2, "b" * 40)
     ok = used == 2
     failures += not ok
     print(f"{'PASS' if ok else 'FAIL'}  update budget persists in PR commits: {used}")
-    with patch.dict(globals(), {"get": lambda *_: [update] * 100}):
+    history = [{**update, "sha": f"{i:040x}"} for i in range(1, 235)]
+    def paged_get(path: str) -> object:
+        page = int(path.rsplit("&page=", 1)[1])
+        return history[(page - 1) * 100:page * 100]
+
+    with patch.dict(globals(), {"get": paged_get}):
+        used = branch_update_count("example/repo", 42, "main", 234, history[-1]["sha"])
+        ok = used == 234
+        failures += not ok
+        print(f"{'PASS' if ok else 'FAIL'}  234-commit history read across all three pages: {used}")
+    def duplicate_page(path: str) -> object:
+        page = int(path.rsplit("&page=", 1)[1])
+        return history[:100] if page == 2 else paged_get(path)
+    with patch.dict(globals(), {"get": duplicate_page}):
         try:
-            branch_update_count("example/repo", 42, "main")
+            branch_update_count("example/repo", 42, "main", 234, history[-1]["sha"])
         except ValueError:
-            print("PASS  truncated PR history fails closed")
+            print("PASS  duplicated middle page fails closed")
         else:
             failures += 1
-            print("FAIL  truncated PR history passed")
+            print("FAIL  duplicated middle page passed")
+    for name, get_commits, total, head in [
+        ("missing final page", lambda path: history[:100] if path.endswith("&page=1") else history[100:133],
+         134, history[133]["sha"]),
+        ("head changed during read", lambda path: history[:34], 34, "b" * 40),
+        ("API history cap", lambda path: [update] * 100, 251, "a" * 40),
+    ]:
+        with patch.dict(globals(), {"get": get_commits}):
+            try:
+                branch_update_count("example/repo", 42, "main", total, head)
+            except ValueError:
+                print(f"PASS  {name} fails closed")
+            else:
+                failures += 1
+                print(f"FAIL  {name} passed")
 
     def fixture_get(path: str) -> object:
         if "/pulls?" in path:
             return [{"number": 42, "auto_merge": {"merge_method": "squash"}, "draft": False}]
         if path.endswith("/pulls/42"):
             return {"draft": False, "auto_merge": {"merge_method": "squash"}, "mergeable_state": "behind",
+                    "commits": 1,
                     "head": {"sha": "a" * 40, "ref": "agent/example",
                              "repo": {"full_name": "example/repo"}}}
         if "/pulls/42/commits?" in path:
-            return []
+            return [{"sha": "a" * 40, "commit": {"message": "test", "committer": {"name": "User"}},
+                     "parents": [{}]}]
         if "/commits/" in path:
             return {"commit": {"committer": {"date": old.isoformat()}}}
         raise AssertionError(f"unexpected API read {path}")
@@ -259,8 +289,11 @@ def self_test() -> int:
                 failures += not ok
                 print(f"{'PASS' if ok else 'FAIL'}  update-branch HTTP {status} -> exit {result}")
     def capped_get(path: str) -> object:
+        if path.endswith("/pulls/42"):
+            full = fixture_get(path)
+            return {**full, "commits": 2, "head": {**full["head"], "sha": renamed["sha"]}}
         if "/pulls/42/commits?" in path:
-            return [update, update]
+            return [update, renamed]
         return fixture_get(path)
     with patch.dict(globals(), {"required_policy": lambda *_: (["Gitleaks"], True),
                                 "get": capped_get, "head_checks": lambda *_: {"Gitleaks": "success"},
@@ -418,14 +451,31 @@ def parse_ts(s: str) -> dt.datetime:
     return dt.datetime.fromisoformat(s.replace("Z", "+00:00"))
 
 
-def branch_update_count(repo: str, number: int, branch: str) -> int:
+def branch_update_count(repo: str, number: int, branch: str, expected_count: int,
+                        expected_head: str) -> int:
     """Count server-side base merges on this PR; fail closed on truncated history.
 
     The count lives in the PR commit graph, so a new workflow run cannot reset it.
-    Human branch updates count too: they consume the same CI budget.
+    Human branch updates count too: they consume the same CI budget. The PR commits API
+    returns at most 100 per page and caps its history at 250 commits. Verify both the
+    reported total and final SHA so a partial or racing read cannot reset the budget.
     """
-    commits = get(f"/repos/{repo}/pulls/{number}/commits?per_page=100")
-    if not isinstance(commits, list) or len(commits) >= 100:
+    if not isinstance(expected_count, int) or not 1 <= expected_count <= 250:
+        raise ValueError(f"#{number}: PR commit history is unreadable or truncated")
+    commits: list[dict] = []
+    seen: set[str] = set()
+    for page in range(1, (expected_count - 1) // 100 + 2):
+        batch = get(f"/repos/{repo}/pulls/{number}/commits?per_page=100&page={page}")
+        want = min(100, expected_count - len(commits))
+        if not isinstance(batch, list) or len(batch) != want or any(not isinstance(c, dict) for c in batch):
+            raise ValueError(f"#{number}: PR commit history is unreadable or truncated")
+        for commit in batch:
+            sha = commit.get("sha")
+            if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha) or sha in seen:
+                raise ValueError(f"#{number}: PR commit history is duplicate or malformed")
+            seen.add(sha)
+        commits.extend(batch)
+    if len(commits) != expected_count or commits[-1].get("sha") != expected_head:
         raise ValueError(f"#{number}: PR commit history is unreadable or truncated")
     marker = f"Merge branch '{branch}' into "
     return sum(
@@ -481,7 +531,7 @@ def run(repo: str, branch: str, max_updates: int, debounce: int, dry_run: bool,
                 ok, why = decide(pr, required, checks, now, committed, debounce)
         if ok:
             try:
-                used = branch_update_count(repo, n, branch)
+                used = branch_update_count(repo, n, branch, full["commits"], sha)
             except ValueError as error:
                 failed_updates += 1
                 ok, why = False, f"unreadable update budget: {error}"
