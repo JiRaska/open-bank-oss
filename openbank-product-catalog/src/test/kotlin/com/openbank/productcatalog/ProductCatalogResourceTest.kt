@@ -9,10 +9,12 @@ import io.quarkus.test.security.TestSecurity
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
+import io.restassured.response.Response
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
 import org.hamcrest.Matchers.equalTo
 import org.junit.jupiter.api.Test
+import org.yaml.snakeyaml.Yaml
 import javax.sql.DataSource
 
 // product-catalog now authenticates its callers (issue #401): reads need a valid token, writes need
@@ -27,6 +29,99 @@ import javax.sql.DataSource
 class ProductCatalogResourceTest {
     @Inject
     lateinit var dataSource: DataSource
+
+    @Suppress("UNCHECKED_CAST")
+    private val openApi: Map<String, Any?> by lazy {
+        requireNotNull(javaClass.getResourceAsStream("/openapi.yaml"))
+            .use { Yaml().load<Map<String, Any?>>(it) }
+    }
+
+    @Test
+    fun `all reachable legacy error refs match served HTTP bodies`() {
+        val missing = "missing-product-12078"
+        val valid = """{"code":"AUDIT_12078","name":"Audit","type":"SAVINGS","currency":"EUR"}"""
+        val cases = listOf(
+            Triple("get", "/api/v1/products/{id}", Given { this }.get("/api/v1/products/$missing")),
+            Triple(
+                "put",
+                "/api/v1/products/{id}",
+                Given {
+                    contentType("application/json")
+                    body(valid)
+                }.put("/api/v1/products/$missing"),
+            ),
+            Triple(
+                "get",
+                "/api/v1/products/by-code/{code}",
+                Given { this }.get("/api/v1/products/by-code/$missing"),
+            ),
+            Triple(
+                "post",
+                "/api/v1/products/{id}/activate",
+                Given { this }.post("/api/v1/products/$missing/activate"),
+            ),
+            Triple(
+                "post",
+                "/api/v1/products/{id}/deactivate",
+                Given { this }.post("/api/v1/products/$missing/deactivate"),
+            ),
+            Triple("get", "/api/v1/products/{id}/fees", Given { this }.get("/api/v1/products/$missing/fees")),
+        )
+        cases.forEach { (method, path, response) -> assertLegacyError(response, method, path, 404) }
+
+        val invalid = """{"code":"bad-code","name":"Audit","type":"SAVINGS","currency":"EUR"}"""
+        assertLegacyError(
+            Given {
+                contentType("application/json")
+                body(invalid)
+            }.post("/api/v1/products"),
+            "post",
+            "/api/v1/products",
+            409,
+        )
+        assertLegacyError(
+            Given {
+                contentType("application/json")
+                body(valid)
+            }.put("/api/v1/products/prod-001"),
+            "put",
+            "/api/v1/products/{id}",
+            409,
+        )
+    }
+
+    @Test
+    fun `legacy error schema rejects a generic body missing error`() {
+        assertThat(legacyViolations(mapOf("code" to "NOT_FOUND", "status" to 404)))
+            .contains("error is required")
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun assertLegacyError(response: Response, method: String, path: String, status: Int) {
+        assertThat(response.statusCode).describedAs("$method $path").isEqualTo(status)
+        assertThat(response.contentType).startsWith("application/json")
+        val paths = openApi["paths"] as Map<String, Map<String, Any?>>
+        val operation = paths.getValue(path)[method] as Map<String, Any?>
+        val responses = operation["responses"] as Map<String, Map<String, Any?>>
+        val content = responses.getValue(status.toString())["content"] as Map<String, Map<String, Any?>>
+        val schema = content.getValue("application/json")["schema"] as Map<String, Any?>
+        val refs = (schema["oneOf"] as? List<Map<String, String>>)?.map { it.getValue("\$ref") }
+            ?: listOf(schema["\$ref"] as String)
+        assertThat(refs).contains("#/components/schemas/LegacyError")
+        assertThat(legacyViolations(response.jsonPath().getMap("")))
+            .describedAs("$method $path published LegacyError body").isEmpty()
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun legacyViolations(body: Map<String, Any?>): List<String> {
+        val components = openApi["components"] as Map<String, Any?>
+        val schemas = components["schemas"] as Map<String, Map<String, Any?>>
+        val schema = schemas.getValue("LegacyError")
+        val required = schema["required"] as List<String>
+        val errors = required.filterNot(body::containsKey).map { "$it is required" }.toMutableList()
+        if (body.containsKey("error") && body["error"] !is String) errors += "error is not a string"
+        return errors
+    }
 
     @Test
     fun `GET products returns seed data`() {
