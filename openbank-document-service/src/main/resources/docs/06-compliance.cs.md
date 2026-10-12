@@ -47,8 +47,12 @@ vynucení retence/výmazu je sledovaný follow-up (viz reziduální rizika v thr
   pokrytí `@Authorize` na zbývajících endpointech je sledovaný follow-up.
 
 ## Bezpečnostní kontroly
-- ✅ AuthN: Keycloak OIDC bearer (realm `openbank`).
-- ✅ AuthZ: OPA sidecar (`@Authorize`); každý endpoint role-gated (reflexní guard test).
+- ✅ Autentizace API: Keycloak OIDC bearer (realm `openbank`). Na produkčním HTTPS listeneru
+  důvěryhodný klientský certifikát prokazuje identitu na transportní vrstvě, ale sám nestačí pro
+  autentizaci `/api/*`: oprávnění Quarkus vybírá mechanismus bearer na HTTP i HTTPS listeneru.
+  `DocumentListenerAuthParityIT` zkouší certifikát bez bearer tokenu i bearer na obou portech.
+- ✅ Autorizace: OPA sidecar (`@Authorize`) u výše popsaných anotovaných operací; tato změna
+  listeneru nerozšiřuje pokrytí OPA na ostatní endpointy.
 - ✅ Integrita obsahu: SHA-256 adresování obsahem; WORM úložiště plánováno (ADR-0161).
 - ✅ Mitigace SSTI/XSS: bezlogický renderer + HTML-escapování dosazovaných hodnot.
 - ✅ Transakční outbox s at-least-once doručením + resilience stack.
