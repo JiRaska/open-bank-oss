@@ -8,7 +8,6 @@ openbank-domestic-payment
 openbank-ledger-service
 openbank-lending-service
 openbank-party-service
-openbank-product-catalog
 openbank-sca-service
 openbank-sdd-service
 openbank-standing-order-service
