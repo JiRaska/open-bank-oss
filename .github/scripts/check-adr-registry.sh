@@ -238,6 +238,12 @@ TEST_MARKERS
     expect "inline $section is not an anchored section" "$d" 1 "missing a '## $section"
   done
 
+  # A heading split by a NUL must not become valid when Bash command substitution drops NULs.
+  d=$(mkdir_fixture nul-heading)
+  fm 0001 0001 | sed '/^## Context$/d' > "$d/0001-first.md"
+  printf '## Con\000text\n' >> "$d/0001-first.md"
+  expect "an ADR containing NUL is rejected before shell text checks" "$d" 1 "contains a NUL byte"
+
   # SUPERSESSION must be declared on BOTH sides. Declared one way only, the superseded ADR
   # still reads as live to anyone who opens it — the reader has no way to know.
   d=$(mkdir_fixture halfsuper)
@@ -492,6 +498,12 @@ for f in "${adrs[@]}"; do
   # DIGEST.md tier rests on, so the placeholder would have been published as this
   # ADR's entry in the decision history. Same for the TEMPLATE.md body prompts.
   # These markers exist only in the scaffolding, so they cannot false-positive.
+  # Bash variables cannot retain NUL bytes: command substitution silently drops them, which
+  # could join `## Con\0text` into a false `## Context` match below. Reject binary content
+  # before reading it into the variable. `tr` and `cmp` are portable on the supported shells.
+  if ! LC_ALL=C tr -d '\000' <"$f" | cmp -s "$f" -; then
+    err "$base: contains a NUL byte or could not be read safely; refusing shell text checks."
+  fi
   # Read once; quoted pattern operands retain grep -F literal substring semantics.
   # Bash 3.2 supports this built-in file read and requires no process per marker.
   adr_text=$(<"$f")
