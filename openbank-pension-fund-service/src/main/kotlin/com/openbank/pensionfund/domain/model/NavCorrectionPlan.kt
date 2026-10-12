@@ -32,6 +32,7 @@ enum class NavCorrectionBlocker {
     ROUNDING_RECONCILIATION_REQUIRED,
     INSUFFICIENT_HELD_UNITS,
     SWITCH_COUNTERPART_MISSING,
+    SWITCH_COUNTERPART_TRANSACTION_MISSING,
     SWITCH_COUNTERPART_REPRICE_REQUIRED,
     SWITCH_COUNTERPART_CURRENCY_UNVERIFIED,
     CROSS_CURRENCY_SWITCH_POLICY_REQUIRED,
@@ -127,13 +128,14 @@ object NavCorrectionPlanner {
         val cashDelta = proposedAmount - tx.amount
         val residual = roundingResidual(tx, price, proposedUnits, proposedAmount)
         val counterpart = switchCounterpart(tx, context)
+        val counterpartTransaction = counterpart?.id?.let(context.transactionsByOrder::get)
         val counterpartCurrency = counterpart?.fundId?.let { context.relatedFundsById[it]?.currency }
-        val issues = lineIssues(tx, residual, counterpart, counterpartCurrency, fundCurrency)
+        val issues = lineIssues(tx, residual, counterpart, counterpartTransaction, counterpartCurrency, fundCurrency)
         val line = NavCorrectionLine(
             originalTransactionId = tx.id,
             originalOrderId = tx.orderId,
             linkedSwitchOrderId = counterpart?.id,
-            linkedSwitchTransactionId = counterpart?.id?.let { context.transactionsByOrder[it]?.id },
+            linkedSwitchTransactionId = counterpartTransaction?.id,
             linkedSwitchCurrency = counterpartCurrency,
             contractId = tx.contractId,
             fundId = tx.fundId,
@@ -154,6 +156,7 @@ object NavCorrectionPlanner {
         tx: UnitTransaction,
         residual: BigDecimal,
         counterpart: UnitOrder?,
+        counterpartTransaction: UnitTransaction?,
         counterpartCurrency: String?,
         fundCurrency: String,
     ): List<NavCorrectionIssue> {
@@ -170,6 +173,8 @@ object NavCorrectionPlanner {
         if (tx.type == UnitTransactionType.SWITCH_IN || tx.type == UnitTransactionType.SWITCH_OUT) {
             val blocker = if (counterpart == null) {
                 NavCorrectionBlocker.SWITCH_COUNTERPART_MISSING
+            } else if (counterpartTransaction == null) {
+                NavCorrectionBlocker.SWITCH_COUNTERPART_TRANSACTION_MISSING
             } else {
                 NavCorrectionBlocker.SWITCH_COUNTERPART_REPRICE_REQUIRED
             }

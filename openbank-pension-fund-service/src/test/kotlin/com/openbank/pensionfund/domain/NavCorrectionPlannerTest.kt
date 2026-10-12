@@ -308,9 +308,14 @@ class NavCorrectionPlannerTest {
         }.isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("source fund must match")
 
         val unknownCurrency = plan()
+        assertThat(unknownCurrency.lines.single().linkedSwitchOrderId).isEqualTo(inOrder.id)
+        assertThat(unknownCurrency.lines.single().linkedSwitchTransactionId).isNull()
         assertThat(unknownCurrency.lines.single().linkedSwitchCurrency).isNull()
         assertThat(unknownCurrency.unresolved.map { it.blocker })
-            .contains(NavCorrectionBlocker.SWITCH_COUNTERPART_CURRENCY_UNVERIFIED)
+            .contains(
+                NavCorrectionBlocker.SWITCH_COUNTERPART_TRANSACTION_MISSING,
+                NavCorrectionBlocker.SWITCH_COUNTERPART_CURRENCY_UNVERIFIED,
+            ).doesNotContain(NavCorrectionBlocker.SWITCH_COUNTERPART_REPRICE_REQUIRED)
         val otherCurrency = plan(funds = listOf(fund(targetFund, "EUR")))
         assertThat(otherCurrency.lines.single().linkedSwitchCurrency).isEqualTo("EUR")
         assertThat(otherCurrency.unresolved.map { it.blocker })
