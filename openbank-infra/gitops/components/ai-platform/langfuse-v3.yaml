@@ -182,6 +182,11 @@ spec:
                 secretKeyRef:
                   name: langfuse-clickhouse-auth
                   key: CLICKHOUSE_PASSWORD
+            - name: REDIS_AUTH
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-valkey-auth
+                  key: VALKEY_PASSWORD
             # 3.225.11 OOMs at Node's default old-space (~500 MB under a 1Gi limit): measured
             # 2026-10-04, "Ineffective mark-compacts near heap limit". Heap 1.5 GB under a 2Gi limit.
             - name: NODE_OPTIONS
@@ -312,6 +317,11 @@ spec:
                 secretKeyRef:
                   name: langfuse-clickhouse-auth
                   key: CLICKHOUSE_PASSWORD
+            - name: REDIS_AUTH
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-valkey-auth
+                  key: VALKEY_PASSWORD
             # 3.225.11 OOMs at Node's default old-space (~500 MB under a 1Gi limit): measured
             # 2026-10-04, "Ineffective mark-compacts near heap limit". Heap 1.5 GB under a 2Gi limit.
             - name: NODE_OPTIONS
