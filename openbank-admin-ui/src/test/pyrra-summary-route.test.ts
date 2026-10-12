@@ -63,11 +63,28 @@ describe('Pyrra evidence summary route', () => {
 
     const result = await GET()
     const body = await result.json()
+    expect(body.monitored).toBe(1)
     expect(body.objectives).toContainEqual(expect.objectContaining({
       name: 'openbank-ledger-availability', availability: 1, budgetRemaining: 1,
     }))
     expect(body.objectives).toContainEqual(expect.objectContaining({
       name: 'openbank-fraud-availability', availability: null, budgetRemaining: null, requestCount: 0,
+    }))
+  })
+
+  it('does not count a zero-traffic SLO as monitored', async () => {
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(response([{ slo: 'openbank-ledger-availability', value: 0 }]))
+      .mockResolvedValueOnce(response([])))
+    const { GET } = await import('@/app/api/pyrra/summary/route')
+
+    const result = await GET()
+    const body = await result.json()
+    expect(result.status).toBe(200)
+    expect(body.configured).toBeGreaterThan(1)
+    expect(body.monitored).toBe(0)
+    expect(body.objectives).toContainEqual(expect.objectContaining({
+      name: 'openbank-ledger-availability', requestCount: 0, budgetRemaining: null,
     }))
   })
 

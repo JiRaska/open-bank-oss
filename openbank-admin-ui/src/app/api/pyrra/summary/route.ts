@@ -79,7 +79,7 @@ export async function GET() {
     return NextResponse.json({
       available: true,
       configured: declared.names.length,
-      monitored: objectives.filter(objective => objective.requestCount !== null).length,
+      monitored: objectives.filter(objective => objective.requestCount !== null && objective.requestCount > 0).length,
       objectives,
     }, { headers: { 'Cache-Control': 'no-store' } })
   } catch (error) {

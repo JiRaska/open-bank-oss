@@ -89,7 +89,11 @@ export function OperationalEvidence() {
   const budgets = pyrra.data?.objectives.flatMap(objective => objective.budgetRemaining === null ? [] : [objective]) ?? []
   const worstBudget = budgets.toSorted((a, b) => (a.budgetRemaining ?? 0) - (b.budgetRemaining ?? 0))[0]
   const budgetPct = worstBudget?.budgetRemaining == null ? null : Math.round(worstBudget.budgetRemaining * 100)
-  const pyrraStatus = budgetPct === null ? 'neutral' : budgetPct < 0 ? 'bad' : budgetPct < 25 ? 'warn' : 'good'
+  const sloConfigured = pyrra.data?.configured ?? 0
+  const sloMonitored = pyrra.data?.monitored ?? 0
+  const sloCoverage = `${sloMonitored}/${sloConfigured}`
+  const sloIncomplete = sloConfigured === 0 || sloMonitored !== sloConfigured
+  const pyrraStatus = budgetPct === null ? 'neutral' : budgetPct < 0 ? 'bad' : budgetPct < 25 ? 'warn' : sloIncomplete ? 'neutral' : 'good'
 
   const workflows = temporal.data?.metrics?.workflows
   const workflowProblems = workflows ? workflows.failed1h + workflows.timedOut1h : null
@@ -116,13 +120,16 @@ export function OperationalEvidence() {
       <div className={styles.grid}>
         <EvidenceCard
           icon={<Scale size={15} aria-hidden="true" />} source="Pyrra" hint={t('30denní SLO', '30-day SLO')}
-          loading={pyrra.loading} status={pyrraStatus} statusLabel={sourceLabel(pyrraStatus, t)}
-          value={budgetPct === null ? '—' : `${budgetPct}%`}
+          loading={pyrra.loading} status={pyrraStatus}
+          statusLabel={pyrraStatus === 'neutral' && pyrra.data?.available ? t('Neúplné', 'Incomplete') : sourceLabel(pyrraStatus, t)}
+          value={pyrra.data?.available && sloIncomplete && pyrraStatus === 'neutral' ? sloCoverage : budgetPct === null ? '—' : `${budgetPct}%`}
           label={pyrra.failed
             ? t('Důkazy z Pyrra nejsou dostupné; zbývající rozpočet nelze ověřit.', 'Pyrra evidence is unavailable; the remaining budget cannot be verified.')
             : budgetPct === null
-              ? t('SLO jsou nakonfigurovaná, zatím ale nemají dost provozních vzorků.', 'SLOs are configured but do not have enough traffic samples yet.')
-            : t(`Nejnižší zbývající error budget: ${worstBudget?.name ?? ''}.`, `Lowest remaining error budget: ${worstBudget?.name ?? ''}.`)}
+              ? t(`SLO jsou nakonfigurovaná, zatím ale nemají dost provozních vzorků. Pokrytí: ${sloCoverage}.`, `SLOs are configured but do not have enough traffic samples yet. Coverage: ${sloCoverage}.`)
+              : sloIncomplete
+                ? t(`Pokrytí: ${sloCoverage}. Nejnižší pozorovaný error budget: ${budgetPct}% (${worstBudget?.name ?? ''}); celkový stav nelze ověřit.`, `Coverage: ${sloCoverage}. Lowest observed error budget: ${budgetPct}% (${worstBudget?.name ?? ''}); fleet health cannot be verified.`)
+                : t(`Nejnižší zbývající error budget: ${worstBudget?.name ?? ''}.`, `Lowest remaining error budget: ${worstBudget?.name ?? ''}.`)}
           href="/tools/pyrra" link={t('Otevřít SLO', 'Open SLOs')}
         />
         <EvidenceCard
