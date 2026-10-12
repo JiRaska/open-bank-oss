@@ -150,5 +150,5 @@ authz:
         permission:
           bearer-only:
             paths: /api/*
-            policy: permit
+            policy: authenticated
             auth-mechanism: bearer
