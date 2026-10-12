@@ -9,12 +9,14 @@ import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
 import jakarta.inject.Inject
+import org.assertj.core.api.Assertions.assertThat
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.everyItem
 import org.hamcrest.Matchers.hasItem
 import org.hamcrest.Matchers.not
 import org.hamcrest.Matchers.notNullValue
 import org.junit.jupiter.api.Test
+import org.yaml.snakeyaml.Yaml
 import java.math.BigDecimal
 import java.sql.Timestamp
 import java.time.Instant
@@ -27,6 +29,14 @@ import javax.sql.DataSource
 class ReferralRestContractIT {
     @Inject
     lateinit var dataSource: DataSource
+
+    private companion object {
+        @Suppress("UNCHECKED_CAST")
+        val SPEC: Map<String, Any?> by lazy {
+            Thread.currentThread().contextClassLoader.getResourceAsStream("openapi.yaml")!!
+                .use { Yaml().load<Map<String, Any?>>(it) }
+        }
+    }
 
     // LongMethod: one continuous lifecycle (draft -> publish -> issue -> attribute -> qualify ->
     // idempotent replay) — splitting it into separate @Test methods would let them run out of
@@ -95,6 +105,16 @@ class ReferralRestContractIT {
             body("token", notNullValue())
         } Extract { path<String>("token") }
 
+        val selfConflict: Map<String, Any?> = Given {
+            contentType("application/json")
+            header("Idempotency-Key", "attribute-self-$programId")
+            body("""{"refereePartyId":"$referrer"}""")
+        } When { post("/api/v1/referrals/invites/$inviteToken/attribute") } Then {
+            statusCode(409)
+        } Extract { jsonPath().getMap("") }
+        assertConflictConforms(selfConflict, "/api/v1/referrals/invites/{token}/attribute")
+        assertThat(selfConflict["reason"]).isEqualTo("SELF")
+
         Given { contentType("application/json") }
             .header("Idempotency-Key", "attribute-$programId")
             .body("""{"refereePartyId":"$referee"}""")
@@ -124,14 +144,54 @@ class ReferralRestContractIT {
                 body("rewardReference", equalTo(rewardReference))
             }
 
-        Given { contentType("application/json") }
+        val keyConflict: Map<String, Any?> = Given { contentType("application/json") }
             .header("Idempotency-Key", "invite-$programId")
             .body("""{"referrerPartyId":"$referrer"}""")
             .When { post("/api/v1/referrals/programs/$programId/invites") }
             .Then {
                 statusCode(409)
                 body("reason", equalTo("IDEMPOTENCY_KEY_REUSED"))
+            }.Extract { jsonPath().getMap("") }
+        assertConflictConforms(keyConflict, "/api/v1/referrals/programs/{id}/invites")
+    }
+
+    @Test
+    fun `the published conflict schema rejects a shared mapper body with no error`() {
+        val schema = documentedConflict("/api/v1/referrals/invites/{token}/attribute")
+        assertThat(violations(mapOf("code" to "CONFLICT", "status" to 409), schema))
+            .contains("error is required")
+    }
+
+    private fun assertConflictConforms(body: Map<String, Any?>, path: String) {
+        assertThat(violations(body, documentedConflict(path)))
+            .describedAs("real 409 body %s against %s", body, path).isEmpty()
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun documentedConflict(path: String): Map<String, Any?> {
+        val paths = SPEC["paths"] as Map<String, Map<String, Any?>>
+        val operation = paths.getValue(path)["post"] as Map<String, Any?>
+        val responses = operation["responses"] as Map<String, Map<String, Any?>>
+        val content = responses.getValue("409")["content"] as Map<String, Map<String, Any?>>
+        val ref = (content.getValue("application/json")["schema"] as Map<String, String>)
+            .getValue("\$ref").substringAfterLast('/')
+        val schemas = (SPEC["components"] as Map<String, Any?>)["schemas"] as Map<String, Map<String, Any?>>
+        return schemas.getValue(ref)
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun violations(body: Map<String, Any?>, schema: Map<String, Any?>): List<String> {
+        val properties = schema["properties"] as Map<String, Map<String, Any?>>
+        val errors = (schema["required"] as List<String>).filterNot(body::containsKey)
+            .map { "$it is required" }.toMutableList()
+        body.forEach { (name, value) ->
+            when (properties[name]?.get("type")) {
+                "string" -> if (value !is String) errors += "$name is not a string"
             }
+            val allowed = properties[name]?.get("enum") as? List<String>
+            if (allowed != null && value !in allowed) errors += "$name is outside enum"
+        }
+        return errors
     }
 
     private fun seedDraft(id: UUID) {
