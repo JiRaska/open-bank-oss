@@ -23,6 +23,7 @@ import javax.sql.DataSource
 @QuarkusTestResource(
     value = PostgresTestResource::class,
     initArgs = [ResourceArg(name = "db", value = "openbank_catalog_cursor_order")],
+    restrictToAnnotatedClass = true,
 )
 class CatalogEventCursorOrderingTest {
     @Inject
