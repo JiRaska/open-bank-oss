@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.6](https://github.com/JiRaska/open-bank-oss/compare/control-liveness-sentinel-v0.7.5...control-liveness-sentinel-v0.7.6) (2026-10-12)
+
+
+### Bug Fixes
+
+* **egress:** allow-list third-party hosts and bound in-cluster HTTP responses ([#11740](https://github.com/JiRaska/open-bank-oss/issues/11740)) ([d81d1d8](https://github.com/JiRaska/open-bank-oss/commit/d81d1d8e362f49be4883bfca884f967c742de5d0))
+
 ## [0.7.5](https://github.com/JiRaska/open-bank-oss/compare/control-liveness-sentinel-v0.7.4...control-liveness-sentinel-v0.7.5) (2026-10-04)
 
 
