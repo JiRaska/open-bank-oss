@@ -98,7 +98,6 @@ Usage:  check-threat-model-claims.py [--enforce] [--report] [--root <dir>]
 from __future__ import annotations
 
 import argparse
-from functools import cache
 import importlib.util
 import pathlib
 import re
@@ -498,6 +497,7 @@ class Corpus:
         self.blobs: dict[str, str] = {}
         self.code: dict[str, str] = {}
         self._memo: dict[str, bool] = {}
+        self._stub_memo: dict[str, str | None] = {}
         for f in self.files:
             if f.endswith(DOCISH) or not f.endswith(CODEISH) or not is_backend(f):
                 continue
@@ -610,8 +610,12 @@ class Corpus:
         self._memo[sym] = hit
         return hit
 
-    @cache
     def stub_site(self, sym: str) -> str | None:
+        if sym not in self._stub_memo:
+            self._stub_memo[sym] = self._stub_site_uncached(sym)
+        return self._stub_memo[sym]
+
+    def _stub_site_uncached(self, sym: str) -> str | None:
         """A cited symbol whose own DECLARATION opens with a stub marker.
 
         Anchored on the declaration, not on any mention: `paymentId` appears in hundreds of
@@ -979,6 +983,7 @@ def self_test() -> int:
     ]:
         stub_corpus = Corpus.__new__(Corpus)
         stub_corpus.main = {"fixture": blob}
+        stub_corpus._stub_memo = {}
         case(label, stub_corpus.stub_site(symbol), expected)
         case(label + " on repeated lookup", stub_corpus.stub_site(symbol), expected)
 
