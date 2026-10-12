@@ -14,6 +14,7 @@ import { NextResponse } from 'next/server'
 import { promises as fs } from 'fs'
 import path from 'path'
 import { inCluster } from '@/lib/discovery'
+import { currentInfraDigests, verifiedRuntimeScans, type RuntimeSnapshot } from '@/lib/infra-vulns-runtime'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -149,11 +150,15 @@ type Urgency = 'current' | 'patch-available' | 'major-available' | 'vulnerable' 
 export async function GET() {
   const snap = await readJson<LifecycleSnapshot>('OPENBANK_INFRA_LIFECYCLE', 'infra-lifecycle.json')
   const vulns = await readJson<VulnSnapshot>('OPENBANK_INFRA_VULNS', 'infra-vulns.json')
+  const runtimeVulns = await readJson<RuntimeSnapshot>('OPENBANK_INFRA_VULNS_V2', 'infra-vulns-v2.json')
   if (!snap?.components?.length) {
     return NextResponse.json({ error: 'lifecycle snapshot unavailable' }, { status: 503 })
   }
 
   const probeOn = inCluster()
+  // A scanner-produced identity cannot prove it is still the running identity.
+  // Denied or unavailable Kubernetes reads return null for each component.
+  const liveImages = probeOn ? await currentInfraDigests() : {}
   const components = await Promise.all(snap.components.map(async c => {
     // 1. running version
     let running: string | null = null
@@ -201,10 +206,18 @@ export async function GET() {
     // 3. vulnerabilities
     // A snapshot with no scannedAt is the unpopulated placeholder: whatever it carries is not a
     // scan result, so the component must read "not yet scanned", never "0 vulnerabilities".
-    const v = vulns?.scannedAt ? (vulns.images?.[c.id] ?? null) : null
-    const cve = v
-      ? { scanned: true, critical: v.critical, high: v.high, medium: v.medium, low: v.low, total: v.total, top: v.top ?? [] }
-      : { scanned: false, critical: 0, high: 0, medium: 0, low: 0, total: 0, top: [] as VulnSummary['top'] }
+    const scans = verifiedRuntimeScans(runtimeVulns, c.id, liveImages[c.id] ?? null)
+    const old = vulns?.scannedAt ? (vulns.images?.[c.id] ?? null) : null
+    const cve = scans
+      ? { scanned: true, status: 'verified', critical: scans.reduce((n, s) => n + s.critical, 0),
+          high: scans.reduce((n, s) => n + s.high, 0), medium: scans.reduce((n, s) => n + s.medium, 0),
+          low: scans.reduce((n, s) => n + s.low, 0), total: scans.reduce((n, s) => n + s.total, 0),
+          top: scans.flatMap(s => s.top ?? []).slice(0, 12) }
+      : { scanned: false, status: old ? 'legacy-unverified' : 'unavailable',
+          critical: 0, high: 0, medium: 0, low: 0, total: 0,
+          top: [] as VulnSummary['top'],
+          legacy: old ? { critical: old.critical, high: old.high, medium: old.medium,
+            low: old.low, total: old.total } : undefined }
     const highCrit = cve.critical + cve.high
 
     // urgency (worst wins)
@@ -215,7 +228,7 @@ export async function GET() {
       else if (highCrit > 0) urgency = 'vulnerable'
       else if (majorAvailable) urgency = 'major-available'
       else if (patchAvailable) urgency = 'patch-available'
-      else urgency = 'current'
+      else urgency = cve.scanned ? 'current' : 'unknown'
     }
 
     return {
@@ -248,7 +261,8 @@ export async function GET() {
     {
       schema: 'openbank.infra-lifecycle.view/v1',
       lifecycleGeneratedAt: snap.generatedAt ?? null,
-      vulnScannedAt: vulns?.scannedAt ?? null,
+      vulnScannedAt: Object.keys(liveImages).some(id => verifiedRuntimeScans(runtimeVulns, id, liveImages[id]))
+        ? runtimeVulns?.scannedAt ?? null : null,
       probed: probeOn,
       components,
     },

@@ -162,6 +162,8 @@ spec:
             # (before the first scan run — BFF degrades to "not yet scanned").
             - name: OPENBANK_INFRA_VULNS
               value: /config/infra-vulns/infra-vulns.json
+            - name: OPENBANK_INFRA_VULNS_V2
+              value: /config/infra-vulns-v2/infra-vulns-v2.json
             # SBOM digest-identity drift (ADR-0030 D5 phase 1, issue #861): live
             # ConfigMap written daily by the sbom-drift-scanner CronJob. Absent
             # before the first scan run — BFF degrades to "not yet scanned".
@@ -216,6 +218,9 @@ spec:
             - name: infra-vulns
               mountPath: /config/infra-vulns
               readOnly: true
+            - name: infra-vulns-v2
+              mountPath: /config/infra-vulns-v2
+              readOnly: true
             - name: sbom-drift
               mountPath: /config/sbom-drift
               readOnly: true
@@ -265,6 +270,10 @@ spec:
         - name: infra-vulns
           configMap:
             name: infra-vulns
+            optional: true
+        - name: infra-vulns-v2
+          configMap:
+            name: infra-vulns-v2
             optional: true
         # Daily gitops-sync drift check written by the sbom-drift-scanner CronJob
         # (sbom-drift-scanner.yaml, ADR-0030 D5 phase 1). optional=true so the pod
