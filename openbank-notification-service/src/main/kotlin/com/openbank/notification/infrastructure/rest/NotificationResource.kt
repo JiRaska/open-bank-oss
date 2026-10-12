@@ -30,6 +30,7 @@ import java.util.UUID
 
 // Customer-edge fetches one lookahead row for a 100-item global page.
 private const val MAX_NOTIFICATION_PAGE_SIZE = 101
+private const val KEYSET_PAGE_MODE = "KEYSET"
 
 @Path("/api/v1/notifications")
 @Produces(MediaType.APPLICATION_JSON)
@@ -89,6 +90,7 @@ class NotificationResource {
                 "page" to boundedPage,
                 "size" to boundedSize,
                 "unreadCount" to unreadCount,
+                "pageMode" to if (beforeInstant != null) KEYSET_PAGE_MODE else "OFFSET",
             ),
         ).build()
     }

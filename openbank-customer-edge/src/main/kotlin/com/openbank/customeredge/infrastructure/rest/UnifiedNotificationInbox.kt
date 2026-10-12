@@ -4,6 +4,7 @@
 
 package com.openbank.customeredge.infrastructure.rest
 
+import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.ObjectNode
 import com.openbank.libs.web.MDC_SYNTHETIC
@@ -35,6 +36,10 @@ internal class UnifiedNotificationInbox(
     private val aggregateTimeoutNanos: Long = TimeUnit.SECONDS.toNanos(UNIFIED_NOTIFICATION_TIMEOUT_SECONDS),
 ) {
     private data class PartyPage(val items: List<ObjectNode>, val total: Long, val unread: Long)
+    private data class ItemKey(val createdAt: Instant, val id: String) {
+        fun isOlderThan(other: ItemKey): Boolean =
+            createdAt < other.createdAt || createdAt == other.createdAt && id < other.id
+    }
     private data class Cursor(val createdAt: Instant, val id: UUID, val profileScope: String) {
         fun encode(): String = Base64.getUrlEncoder().withoutPadding()
             .encodeToString("$createdAt|$id|$profileScope".toByteArray(Charsets.UTF_8))
@@ -150,20 +155,38 @@ internal class UnifiedNotificationInbox(
         )
         if (response.status != HTTP_OK) error("Notification feed unavailable")
         val page = mapper.readTree(response.entity as? String ?: error("Notification feed unavailable"))
+        // An older provider silently ignores before* and returns OFFSET pages. Require a
+        // provider assertion before consuming any cursor page during rolling deployment.
+        if (after != null && page.path("pageMode").asText() != KEYSET_PAGE_MODE) {
+            error("Notification keyset unavailable")
+        }
         val rows = page.path("items")
         if (!rows.isArray || !page.path("total").isNumber || !page.path("unreadCount").isNumber) {
             error("Notification feed unavailable")
         }
+        val items = validateRows(rows, party, after)
+        return PartyPage(items, page.path("total").asLong(), page.path("unreadCount").asLong())
+    }
+
+    private fun validateRows(rows: JsonNode, party: UUID, after: Cursor?): List<ObjectNode> {
+        var previous: ItemKey? = null
         val items = rows.map { row ->
             if (row !is ObjectNode || row.path("partyId").asText() != party.toString()) {
                 error("Notification party mismatch")
             }
-            // A singleton page never invokes the sort comparator; validate keys before returning it.
-            Instant.parse(row.path("createdAt").asText())
-            UUID.fromString(row.path("id").asText())
+            // Validate even a singleton page, where the merge comparator never runs.
+            val key = ItemKey(
+                Instant.parse(row.path("createdAt").asText()),
+                UUID.fromString(row.path("id").asText()).toString(),
+            )
+            if (after != null && !key.isOlderThan(ItemKey(after.createdAt, after.id.toString()))) {
+                error("Notification keyset boundary violated")
+            }
+            previous?.let { if (!key.isOlderThan(it)) error("Notification order violated") }
+            previous = key
             row.deepCopy().also { it.remove("recipient") }
         }
-        return PartyPage(items, page.path("total").asLong(), page.path("unreadCount").asLong())
+        return items
     }
 
     private fun profileScope(parties: List<UUID>): String {
@@ -191,6 +214,7 @@ internal class UnifiedNotificationInbox(
         const val MAX_CONCURRENT_FEEDS = 16
         const val MAX_QUEUED_FEEDS = 128
         const val HTTP_OK = 200
+        const val KEYSET_PAGE_MODE = "KEYSET"
         const val MAX_CURSOR_LENGTH = 220
         const val CURSOR_FIELD_COUNT = 3
         const val CURSOR_SCOPE_INDEX = 2
