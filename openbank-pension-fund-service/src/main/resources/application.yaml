@@ -144,3 +144,11 @@ authz:
         client-auth: required
       # Retain the HTTP compatibility listener until the reviewed caller cutover.
       insecure-requests: enabled
+      # A trusted transport certificate must not become the API caller identity. OIDC bearer
+      # authentication is required on both listeners, including the mTLS listener.
+      auth:
+        permission:
+          bearer-only:
+            paths: /api/*
+            policy: permit
+            auth-mechanism: bearer
