@@ -1,6 +1,6 @@
 # API
 
-REST kontrakt je formalizován v [`openapi.yaml`](../../openapi.yaml) (`Notification Service API`, OpenAPI 3.1.0, `info.version 1.2.0`). Všechny endpointy jsou pod `/api/v1` — major verze v URL se rovná `openbank.api.version` (`1`), dle [ADR 0048](../../../../docs/adr/0048-two-version-axes.md). Interaktivní Swagger UI je na `/api/docs`, surová specifikace na `/q/openapi`.
+REST kontrakt je formalizován v [`openapi.yaml`](../../openapi.yaml) (`Notification Service API`, OpenAPI 3.1.0, `info.version 1.13.0`). Všechny endpointy jsou pod `/api/v1` — major verze v URL se rovná `openbank.api.version` (`1`), dle [ADR 0048](../../../../docs/adr/0048-two-version-axes.md). Interaktivní Swagger UI je na `/api/docs`, surová specifikace na `/q/openapi`.
 
 > Většina business provozu **není** REST — je to Kafka consumer (`openbank.notification.requests`). REST plocha slouží registraci zařízení, čtecímu přístupu a break-glass workflow řízení výpravy.
 
@@ -24,6 +24,8 @@ U řízení výpravy se **identita aktéra bere z autentizovaného JWT subjektu*
 Výpis notifikací, stránkovaný. Query parametry: `partyId` (uuid, volitelný), `page` (default 0), `size` (default 20, omezeno 1..100). Specifikace OpenAPI dokumentuje i `status` a `offset`/`limit`; implementace používá `page`/`size` a filtruje dle `partyId`.
 
 Vrací `{ items: [...], total, unreadCount, page, size }`. `total` a `unreadCount` se počítají nad celou historií vybrané osoby, ne pouze nad vrácenou stránkou. Řazení podle času vytvoření a ID je stabilní i při shodném čase. Každá položka: `id, partyId, channel, template, recipient, subject, status, sentAt, createdAt`.
+
+Historie omezená na party přijímá společně `beforeCreatedAt` a `beforeId` pro stabilní stránkování i při nových záznamech.
 
 ### `GET /api/v1/notifications/{id}`
 

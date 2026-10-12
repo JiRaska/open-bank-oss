@@ -4,7 +4,7 @@
 
 - **Public base:** `https://customer.open-bank.tech/customer/v1` (sandbox)
 - **In-cluster app port:** 8128
-- **OpenAPI spec:** [`/q/openapi`](http://localhost:8128/q/openapi) — source: `src/main/resources/openapi.yaml` (`info.version: 1.6.0`)
+- **OpenAPI spec:** [`/q/openapi`](http://localhost:8128/q/openapi) — source: `src/main/resources/openapi.yaml` (`info.version: 1.79.0`)
 
 The contract **is** formalised in `openapi.yaml`. The URL prefix is `/customer/v1` (note: this is the edge's own customer-facing version axis, distinct from each upstream's `/api/v1`).
 
@@ -47,9 +47,10 @@ All paths are under `/customer/v1`. Scopes are the OAuth scopes declared in `ope
 | `GET /statements/{accountId}` | `accounts:read` | period-close list |
 | `GET /statements/{accountId}/{currency}/{legalSequence}?format=` | `accounts:read` | render camt.053 / MT940 / PDF; format & currency allow-listed |
 | `GET /notifications?limit=&page=` | `accounts:read` | party-scoped page, total and exact unread count |
-| `GET /notifications/unified?limit=&partyId=` | `accounts:read` | latest 1–100 items across the person and current company mandates; optional authorized origin filter |
+| `GET /notifications/unified?limit=&partyId=&cursor=` | `accounts:read` | newest 1–100 items across the person and current company mandates; optional authorized origin filter and keyset cursor |
 | `GET /notifications/{id}?partyId=` | `accounts:read` | notification detail; origin `partyId` from unified items selects an authorized profile |
 | `PATCH /notifications/{id}/read?partyId=` | `accounts:read` | mark an authorized origin notification read |
+| `PATCH /notifications/read-all?partyId=` | `accounts:read` | mark all notifications in the selected or authorized origin profile read |
 | `GET /profile` | `accounts:read` | the caller's own party profile |
 | `POST /domestic-payments` | `payments:initiate` | enriched; `Idempotency-Key` required |
 | `POST /sepa-payments` | `payments:initiate` | enriched; `Idempotency-Key` required |
@@ -73,7 +74,7 @@ All paths are under `/customer/v1`. Scopes are the OAuth scopes declared in `ope
 
 ### Unified notification inbox
 
-Omitting `partyId` merges the authenticated person and every company in the current mandate inventory. Each item carries its origin `partyId`; pass that value to the detail and mark-read routes when opening a company item. An explicit `partyId` filter must belong to the person or a current mandate. The response contains the latest 1–100 items with `page: 0`; use the existing selected-profile list for older history. `total` and `unreadCount` sum the party responses seen during this request, so concurrent writes do not form one atomic snapshot. A failed mandate inventory returns 503; an unauthorized filter returns 403; a failed or mismatched party feed returns 502 without partial items.
+Omitting `partyId` merges the authenticated person and every company in the current mandate inventory. Each item carries its origin `partyId`; pass that value to the detail and mark-read routes when opening a company item. An explicit `partyId` filter must belong to the person or a current mandate. The response contains up to 100 items with `page: 0` and an opaque `nextCursor`; send `nextCursor` as `cursor` to read older items. The cursor is bound to the authorized profile set, so a changed mandate inventory or profile filter requires starting again. New arrivals do not shift the older keyset page. `total` and `unreadCount` sum the party responses seen during this request, so concurrent writes do not form one atomic snapshot. A failed mandate inventory returns 503; an unauthorized filter returns 403; an invalid cursor returns 400; a failed or mismatched party feed returns 502 without partial items.
 
 ## Selected requests
 
@@ -150,7 +151,7 @@ The edge returns small JSON error envelopes of the shape `{"error":"…"}` it ge
 
 ## Versioning
 
-- **Customer API version in URL** (`/customer/v1`). The OpenAPI `info.version` (`1.6.0`) is the API-contract axis (ADR-0048), independent of the release `version.txt` (`0.9.0`).
+- **Customer API version in URL** (`/customer/v1`). The OpenAPI `info.version` (`1.79.0`) is the API-contract axis (ADR-0048), independent of the release `version.txt` (`0.89.0`).
 - Upstream calls target each service's own `/api/v1`.
 - **OpenAPI diff** in CI guards against breaking changes without a contract bump.
 

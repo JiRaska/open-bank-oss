@@ -44,7 +44,7 @@ info:
   # 1.74.0 -> 1.75.0 (#10016): additive — GET /capabilities (ADR-0310 D5).
   # 1.75.0 -> 1.76.0 (#11966): additive — /holdings, the customer write side of the declared
   # holdings that GET /net-worth reads (ADR-0301 D1).
-  version: 1.79.1
+  version: 1.80.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -1220,6 +1220,7 @@ paths:
       parameters:
         - {name: limit, in: query, required: false, schema: {type: integer, default: 20, minimum: 1, maximum: 100}}
         - {name: partyId, in: query, required: false, description: Filter to an authorized person or company, schema: {type: string, format: uuid}}
+        - {name: cursor, in: query, required: false, description: Opaque keyset cursor from nextCursor bound to the authorized profile set; arrivals do not shift history and a changed set requires restarting at page one, schema: {type: string}}
       responses:
         '200':
           description: >-
@@ -1252,6 +1253,9 @@ paths:
                   unreadCount: {type: integer, format: int64, minimum: 0}
                   size: {type: integer, minimum: 1, maximum: 100}
                   page: {type: integer, enum: [0]}
+                  nextCursor: {type: [string, 'null'], description: Opaque cursor for the next older page; null when there are no more items}
+        '400':
+          description: Invalid cursor or cursor from a different authorized profile set
         '403':
           description: Requested party is not authorized
         '502':
@@ -1280,13 +1284,17 @@ paths:
   /notifications/read-all:
     patch:
       tags: [Notifications]
-      summary: Mark all of the caller's notifications as read
+      summary: Mark all notifications in one authorized origin profile as read
       operationId: markAllNotificationsRead
       security:
         - customerOidc: [accounts:read]
+      parameters:
+        - {name: partyId, in: query, required: false, description: Authorized origin profile; defaults to the selected profile, schema: {type: string, format: uuid}}
       responses:
         '200':
           description: Count of notifications marked read
+        '403':
+          description: Requested origin profile is not authorized
 
   /notifications/{id}:
     get:

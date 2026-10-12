@@ -111,14 +111,14 @@ class NotificationResourceRedactionTest {
     }
 
     @Test
-    fun `list - page size is clamped into 1_100 before it reaches the repository`(): Unit = runBlocking {
-        coEvery { repo.pageAll(0, 100) } returns Pair(emptyList(), 0L)
+    fun `list - page size is clamped into 1_101 before it reaches the repository`(): Unit = runBlocking {
+        coEvery { repo.pageAll(0, 101) } returns Pair(emptyList(), 0L)
         coEvery { repo.pageAll(0, 1) } returns Pair(emptyList(), 0L)
 
         resource.listNotifications(0, 5_000, null)
         resource.listNotifications(0, 0, null)
 
-        coVerify(exactly = 1) { repo.pageAll(0, 100) }
+        coVerify(exactly = 1) { repo.pageAll(0, 101) }
         coVerify(exactly = 1) { repo.pageAll(0, 1) }
     }
 
@@ -140,6 +140,21 @@ class NotificationResourceRedactionTest {
 
         assertThat(view["total"]).isEqualTo(135L)
         assertThat(view["unreadCount"]).isEqualTo(42L)
+    }
+
+    @Test
+    fun `party keyset list uses strict before key and retains exact counts`(): Unit = runBlocking {
+        val before = java.time.Instant.parse("2026-10-08T10:00:00Z")
+        val beforeId = UUID.randomUUID()
+        coEvery { repo.pageByPartyBefore(partyId, before, beforeId, 20) } returns
+            Triple(emptyList(), 135L, 42L)
+
+        val view = body(resource.listNotifications(0, 20, partyId, before.toString(), beforeId))
+
+        assertThat(view["total"]).isEqualTo(135L)
+        assertThat(view["unreadCount"]).isEqualTo(42L)
+        coVerify(exactly = 1) { repo.pageByPartyBefore(partyId, before, beforeId, 20) }
+        coVerify(exactly = 0) { repo.pageByParty(any(), any(), any()) }
     }
 
     @Test
