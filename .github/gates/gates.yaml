@@ -2880,6 +2880,28 @@ gates:
     run: |
       python3 .github/scripts/check-mtls-keeps-http-port.py --enforce
 
+  # Negative controls: drop a module from mtls-bearer-only-baseline.txt and it exits 1 naming it
+  # (NEW); add a compliant module to the baseline and it exits 1 (STALE). Each service's
+  # *ListenerAuthParityIT (openbank-libs-testing ListenerAuthParityConformance) proves the behaviour.
+  - id: mtls-bearer-only
+    name: "a client-auth listener authenticates the API by bearer only (enforced, baseline-ratcheted)"
+    group: kotlin
+    mode: enforced
+    rationale: >-
+      With quarkus.http.ssl.client-auth on, Quarkus also registers its mTLS authentication mechanism,
+      so any certificate the trust store accepts becomes an authenticated identity on 8443. A workload
+      holding a fleet-CA certificate and no bearer was "logged in" (treasury measured 403 where 401 was
+      due, #12506). Every profile with client-auth must restrict its resource roots to
+      auth-mechanism: bearer. First run: 11 services, baselined against #12511, fixed one PR each.
+    review_after: '2027-04-10'
+    min_subjects: 40
+    budget_seconds: 15
+    selftest_inputs: [".github/scripts/check-mtls-bearer-only.py"]
+    selftest: |
+      python3 .github/scripts/check-mtls-bearer-only.py --self-test
+    run: |
+      python3 .github/scripts/check-mtls-bearer-only.py --enforce
+
   - id: restclient-url-supplied
     name: "a localhost rest-client URL fallback is supplied by the service's gitops env (enforced, baseline-ratcheted)"
     group: kotlin
