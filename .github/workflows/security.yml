@@ -140,11 +140,19 @@ jobs:
             emit_matrix true true; exit 0
           fi
           CHANGED="$(git diff --name-only "$BEFORE" "$SHA")"
-          # Dependency-affecting paths: Gradle build/version files, lockfiles, Dockerfiles.
-          if echo "$CHANGED" | grep -qE '(\.gradle\.kts$|gradle/libs\.versions\.toml$|gradle\.lockfile$|gradle/wrapper/|Dockerfile|package-lock\.json$|pnpm-lock\.yaml$|yarn\.lock$)'; then
+          # Use the exact predicate that the Admin UI's SBOM fingerprint uses.
+          # A separate regex missed gradle.properties and verification metadata.
+          if python3 .github/scripts/admin-ui-sbom-provenance.py inputs-changed \
+               --root . --before "$BEFORE" --after "$SHA"; then
             echo "run_sbom=true" >> "$GITHUB_OUTPUT"
           else
-            echo "run_sbom=false" >> "$GITHUB_OUTPUT"
+            status=$?
+            if [ "$status" -eq 1 ]; then
+              echo "run_sbom=false" >> "$GITHUB_OUTPUT"
+            else
+              echo "::warning::SBOM input diff failed; running full producer rather than skipping"
+              echo "run_sbom=true" >> "$GITHUB_OUTPUT"
+            fi
           fi
           classify "$CHANGED"
           if [ "$J" = "true" ] || [ "$S" = "true" ]; then
@@ -466,10 +474,14 @@ jobs:
             [ -f "$d/build/reports/bom.json" ] && cp "$d/build/reports/bom.json" "sboms/${svc}-sbom.cdx.json"
           done
           ls -la sboms/
+      - name: Record SBOM source and report digests
+        run: python3 .github/scripts/admin-ui-sbom-provenance.py produce --root . --reports sboms --output sboms/provenance.json
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: per-service-sboms
-          path: sboms/*.cdx.json
+          path: |
+            sboms/*.cdx.json
+            sboms/provenance.json
           # See note on the repo-wide SBOM above: 14d, not 90d. This artifact was the
           # dominant storage consumer (~6 GB across ~660 main-line runs).
           retention-days: 14

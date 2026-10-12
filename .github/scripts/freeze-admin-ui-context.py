@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 import shutil
@@ -31,7 +32,7 @@ GENERATED_ROOT_JSON = (
     "infra-vulns.json", "infra-lifecycle-source-evidence.json",
     "origination-graph.json", "prod-readiness.json",
     "quality-report.json", "security-graph.json", "service-graph.json",
-    "test-intelligence.json", "test-results.json",
+    "test-intelligence.json", "test-results.json", "sbom-source-provenance.json",
 )
 
 
@@ -131,6 +132,12 @@ def freeze(root: Path, output: Path, manifest: Path) -> dict:
         raise ValueError("output and manifest must not already exist")
     if output.is_relative_to(root) or manifest.is_relative_to(root):
         raise ValueError("frozen context and manifest must be outside the source tree")
+    # Check the producer proof against the exact reports that will be frozen.
+    spec = importlib.util.spec_from_file_location(
+        "admin_ui_sbom_provenance", Path(__file__).with_name("admin-ui-sbom-provenance.py"))
+    verifier = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(verifier)
+    verifier.verify(root)
     require_clean_source_inputs(root)
     blobs, object_format = committed_blobs(root)
     output.mkdir(parents=True)

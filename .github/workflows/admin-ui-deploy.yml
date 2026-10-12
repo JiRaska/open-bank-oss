@@ -45,7 +45,7 @@ on:
     # Services CI produces fleet envelopes; CI produces the Admin UI envelope.  Subscribe
     # to both: refreshing after Services CI alone can snapshot a stale Admin UI verdict
     # before the same main commit's UI test artifact is available.
-    workflows: ["Services CI", "CI"]
+    workflows: ["Services CI", "CI", "Security scan"]
     types: [completed]
   schedule:
     - cron: '17 3 * * *'
@@ -359,7 +359,7 @@ jobs:
             --bootstrap \
             --use
           docker buildx inspect ob-deploy-builder
-      - name: Stage per-service SBOMs from latest security run
+      - name: Stage verified per-service SBOMs from Security
         # security.yml uploads `per-service-sboms` (openbank-*-sbom.cdx.json). We download
         # and stage them as openbank-*/build/reports/bom.json so the Dockerfile
         # sbom-collector stage bundles them — without running Gradle here.
@@ -376,54 +376,16 @@ jobs:
         # was never uploaded there. This is the same by-name lookup the JUnit staging
         # step below already uses.
         #
-        # Provenance: per-service-sboms is uploaded only by security.yml's
-        # sbom-per-service job, which is gated on detect-deps and never runs on PRs —
-        # so the artifact always comes from a main push or a scheduled audit. The
-        # head_branch == main filter below asserts that here rather than depending on a
-        # condition in another workflow, because these SBOMs get baked into a shipped image.
-        #
-        # Best-effort: nothing to stage exits 0 (SBOMs degrade to "not available") but
-        # emits a ::warning:: — the previous silent exit is what let this bug hide.
-        #
-        # Uses curl + python3 (not gh CLI) because the self-hosted Mac mini runner user
-        # (/home/runner) does not have gh in PATH. curl and python3 are standard macOS tools.
-        # Requires actions: read permission on GITHUB_TOKEN (added to permissions above).
+        # The verifier checks the completed main Security run, artifact archive
+        # digest, producer source and dependency-input fingerprint, and each
+        # CycloneDX report before staging. Missing or stale proof stops the build.
+        # It pages past the first 20 named artifacts, which can contain no fresh
+        # SBOM because security.yml skips dependency-neutral pushes.
+        # Requires actions: read permission on GITHUB_TOKEN.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-        run: |
-          api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H "Accept: application/vnd.github+json" "$@"; }
-          staged=false
-          # Sort by created_at ourselves: the API's ordering is not contractual.
-          ARTIFACT=$(api \
-            "https://api.github.com/repos/${REPO}/actions/artifacts?name=per-service-sboms&per_page=20" \
-            | python3 -c "import json,sys; a=[x for x in json.load(sys.stdin).get('artifacts',[]) if not x['expired'] and (x.get('workflow_run') or {}).get('head_branch')=='main']; a.sort(key=lambda x: x['created_at'], reverse=True); print(str(a[0]['id'])+' '+a[0]['created_at'] if a else '')" \
-            2>/dev/null || true)
-          if [ -n "${ARTIFACT}" ]; then
-            ARTIFACT_ID="${ARTIFACT%% *}"
-            mkdir -p sbom-downloads
-            if api "https://api.github.com/repos/${REPO}/actions/artifacts/${ARTIFACT_ID}/zip" \
-                -L -o /tmp/per-service-sboms.zip 2>/dev/null; then
-              unzip -q /tmp/per-service-sboms.zip -d sbom-downloads/ 2>/dev/null || true
-              echo "Downloaded per-service-sboms artifact ${ARTIFACT_ID} (created ${ARTIFACT#* })"
-              staged=true
-            fi
-          fi
-
-          if [ "${staged}" != "true" ]; then
-            echo "::warning title=SBOM staging degraded::no non-expired per-service-sboms artifact from a main run — the admin-ui image ships without bundled per-service SBOMs (they will show as unavailable). security.yml's sbom-per-service job may not have run within the 14-day artifact retention."
-            exit 0
-          fi
-
-          for f in sbom-downloads/*.cdx.json; do
-            [ -f "$f" ] || continue
-            svc="$(basename "$f" "-sbom.cdx.json")"
-            mkdir -p "${svc}/build/reports"
-            cp "$f" "${svc}/build/reports/bom.json"
-            echo "  staged ${svc}/build/reports/bom.json"
-          done
-          echo "SBOM staging complete."
+        run: python3 .github/scripts/admin-ui-sbom-provenance.py stage --root . --repo "$REPO" --token "$GH_TOKEN"
 
       - name: Stage Test Intelligence evidence (per-service latest artifact)
         # services-ci.yml uploads one artifact per service: test-reports-{service}
@@ -991,6 +953,7 @@ jobs:
       - name: Build, collect, push
         id: build
         env:
+          GH_TOKEN: ${{ github.token }}
           # The build script's quality collector reads these only to fetch the
           # Pact Broker's per-Pact provider-verification verdict before the
           # immutable Test Intelligence snapshot is baked. Docker receives no

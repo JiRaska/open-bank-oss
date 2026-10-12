@@ -23,6 +23,7 @@ def load(name: str, file: str):
 
 
 freeze_mod = load("freeze_context", "freeze-admin-ui-context.py")
+sbom_mod = load("sbom_provenance", "admin-ui-sbom-provenance.py")
 verify_mod = load("verify_build", "verify-admin-ui-build-inputs.py")
 
 
@@ -49,7 +50,7 @@ class AdminUiImageInputsTest(unittest.TestCase):
             dockerfile.write_text("FROM scratch\n")
             changelog.write_text("old release\n")
             gradle_file = repo / "openbank-notification-service/build.gradle.kts"
-            gradle_file.write_text("plugins {}\n")
+            gradle_file.write_text('plugins { id("openbank.quarkus-service") }\n')
             subprocess.run(["git", "-C", str(repo), "add", "--", "openbank-admin-ui/Dockerfile",
                             "openbank-notification-service/CHANGELOG.md",
                             "openbank-notification-service/build.gradle.kts"], check=True)
@@ -63,7 +64,11 @@ class AdminUiImageInputsTest(unittest.TestCase):
             generated_evidence.write_text('{"completed":true}\n')
             sbom = repo / "openbank-notification-service/build/reports/bom.json"
             sbom.parent.mkdir(parents=True)
-            sbom.write_text('{"bomFormat":"CycloneDX","version":1}\n')
+            sbom.write_text('{"bomFormat":"CycloneDX","specVersion":"1.6",'
+                            '"components":[{"name":"library"}],"metadata":{"component":'
+                            '{"name":"openbank-notification-service",'
+                            '"purl":"pkg:maven/com.openbank/openbank-notification-service@1.0?project_path=%3Aopenbank-notification-service"}}}\n')
+            sbom_mod.local(repo)
             for name in ("governance.json", "cost-footprints.json", "cluster-topology.json",
                          "infra-lifecycle-source-evidence.json"):
                 (repo / "openbank-admin-ui" / name).write_text('{"generated":true}\n')

@@ -19,8 +19,8 @@
 # Usage:
 #   openbank-infra/scripts/build-push-admin-ui.sh [--no-bump] [--no-sbom] [--platform <p>]
 #
-#   --no-sbom  skip ./gradlew sbomAll and reuse whatever build/reports/bom.json
-#              files already exist (fast UI-only iteration).
+#   --no-sbom  skip ./gradlew sbomAll; requires verified source-bound provenance
+#              for every staged report (fast UI-only iteration).
 #
 # Env overrides (defaults match the live sandbox manifest):
 #   ECR_REGISTRY  265175468565.dkr.ecr.eu-north-1.amazonaws.com
@@ -93,18 +93,20 @@ echo "    platform: ${PLATFORM}"
 # openbank-*/build/reports/bom.json files — it has no JDK and never runs gradle. So
 # unless cyclonedxBom has been run first, the bundle ships empty and the Tech
 # Inventory SBOM viewer 404s ("SBOM not available") for every service. Generate the
-# CycloneDX SBOMs here (best-effort) so the bundle is populated reproducibly from the
-# same entry point that builds the image. Skip with --no-sbom for a fast UI-only
-# iteration that reuses whatever boms already exist on disk.
+# CycloneDX SBOMs here from the source commit. A failed generation must stop the
+# image build; an old ignored report cannot prove the current dependency graph.
 if [ "${GEN_SBOM}" -eq 1 ]; then
   echo "==> generate CycloneDX SBOMs (./gradlew sbomAll)"
-  # Best-effort: a single service failing to resolve must not abort the image build;
-  # the collector bundles whatever bom.json files exist.
-  ./gradlew sbomAll --console=plain -q || \
-    echo "    WARN: sbomAll had failures; bundling whatever SBOMs were produced." >&2
+  find . -path '*/build/reports/bom.json' -type f -delete
+  ./gradlew sbomAll --console=plain -q
   echo "    sbom reports present:"
   find . -path '*/build/reports/bom.json' 2>/dev/null | sort | sed 's/^/      /' || true
+  python3 .github/scripts/admin-ui-sbom-provenance.py local --root "$REPO_ROOT"
+else
+  python3 .github/scripts/admin-ui-sbom-provenance.py verify --root "$REPO_ROOT" --github-only \
+    --repo "${GITHUB_REPOSITORY:-}" --token "${GH_TOKEN:-}"
 fi
+python3 .github/scripts/admin-ui-sbom-provenance.py verify --root "$REPO_ROOT"
 
 # Test/coverage provenance: the admin-ui is a READ-ONLY consumer of CI test
 # results (src/app/api/test-results/route.ts) — it never runs tests itself. The

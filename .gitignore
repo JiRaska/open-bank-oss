@@ -379,3 +379,5 @@ reports/
 /style.css
 /com.openbank.*/
 **/*.kt.html
+# Generated source and artifact proof; included explicitly by the Admin UI context freezer.
+openbank-admin-ui/sbom-source-provenance.json
