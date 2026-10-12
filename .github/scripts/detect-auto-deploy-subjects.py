@@ -100,14 +100,19 @@ def evaluate(runs: list[dict], now: datetime | None = None) -> dict:
     active = []
     for service, observed in sorted(history.items()):
         newest = observed[0]
-        if newest["class"] not in DURABLE:
+        if newest["class"] not in DURABLE | {"UNKNOWN"}:
             continue
+        # UNKNOWN is not evidence of a contract regression, but repeated
+        # unclassified blocks must not silently strand a service. Keep its
+        # streak separate from known durable classes so an earlier regression
+        # cannot make a single UNKNOWN look persistent.
+        streak_classes = {"UNKNOWN"} if newest["class"] == "UNKNOWN" else DURABLE
         threshold = 1 if newest["money_path"] else 3
         streak = []
         for verdict in observed:
             if verdict["money_path"] != newest["money_path"]:
                 raise ValueError("money-path classification changed within watch window")
-            if verdict["class"] not in DURABLE:
+            if verdict["class"] not in streak_classes:
                 break
             streak.append(verdict)
         if len(streak) >= threshold:
@@ -202,6 +207,15 @@ def self_test() -> None:
     assert len(fresh(ordinary)["active"]) == 1
     assert fresh(ordinary[:2])["active"] == []
     assert fresh([ordinary[0], tick(2, "DEPLOYABLE", False), ordinary[2]])["active"] == []
+    unknown = [tick(6, "UNKNOWN", False), tick(5, "UNKNOWN", False),
+               tick(4, "UNKNOWN", False)]
+    assert fresh(unknown[:2])["active"] == []
+    unknown_active = fresh(unknown)["active"]
+    assert len(unknown_active) == 1 and unknown_active[0]["class"] == "UNKNOWN"
+    assert unknown_active[0]["blocked_on"] is None
+    assert fresh([tick(6, "UNKNOWN", False), tick(5, "UNKNOWN", False),
+                  tick(4, "REGRESSION", False)])["active"] == []
+    assert len(fresh([tick(6, "UNKNOWN", True)])["active"]) == 1
     # A green push and a tick that selected another service cannot clear the
     # subject's existing issue; neither is included in this service's streak.
     other = tick(4, "DEPLOYABLE", False, "openbank-card-service")
