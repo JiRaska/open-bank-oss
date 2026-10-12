@@ -24,6 +24,7 @@ dependencies {
     implementation(libs.quarkus.config.yaml)
     implementation(libs.quarkus.smallrye.openapi)
     implementation(libs.quarkus.smallrye.fault.tolerance)
+    implementation(libs.quarkus.scheduler)
 
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.reactive)
@@ -42,6 +43,9 @@ dependencies {
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(project(":openbank-libs-testing"))
+    // #12425: the provider replay of tax-reporting-service's consumer pact lands with that pact
+    // (stacked tax-reporting PR): check-pact-provider-replay.py rejects a replay class with no pact.
+    testImplementation(libs.pact.provider)
 }
 
 // twins, and the synthetic-taint profile), and the default 512m heap ran out on the fourth boot
@@ -49,6 +53,12 @@ dependencies {
 // account and balance.
 tasks.withType<Test> {
     maxHeapSize = "2g"
+    val opaBundle = rootProject.file("openbank-infra/gitops/components/pension-fund/pension-fund-opa-bundle.yaml")
+    val deployment = rootProject.file("openbank-infra/gitops/components/pension-fund/pension-fund-service.yaml")
+    inputs.file(opaBundle).withPropertyName("pensionFundOpaBundle").withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.file(deployment).withPropertyName("pensionFundDeployment").withPathSensitivity(PathSensitivity.RELATIVE)
+    systemProperty("openbank.test.pension-fund-opa-bundle", opaBundle.absolutePath)
+    systemProperty("openbank.test.pension-fund-deployment", deployment.absolutePath)
 }
 
 kover {
