@@ -1,13 +1,11 @@
 # ---------------------------------------------------------------------------
 # Infra vulnerability scanner — daily Grype scan of the infrastructure image
-# fleet, published as ConfigMap `infra-vulns` in the admin-ui namespace
+# fleet, published as ConfigMap `infra-vulns-v2` in the admin-ui namespace
 # (ADR-0077 §Architecture evolution, issue #671).
 #
-# The BFF at /api/infra/lifecycle mounts this ConfigMap as
-# OPENBANK_INFRA_VULNS=/config/infra-vulns/infra-vulns.json and prefers it
-# over the stale baked snapshot.  optional=true so the admin-ui pod starts
-# fine before the first scan completes — the BFF degrades to "not yet scanned"
-# per the graceful-state rule.
+# The BFF independently re-reads ready pod image IDs and accepts v2 findings
+# only when the complete digest set still matches. The old v1 ConfigMap is
+# retained as explicitly unverified legacy data during migration.
 #
 # RBAC design:
 #   - infra-vuln-scanner-configmap Role (admin-ui ns): write the single
@@ -19,9 +17,8 @@
 #     admin-ui SA gets a one-time read on the ConfigMap so the Next.js BFF can
 #     read the live scan result (no API change; the BFF already reads via fs).
 #
-# Image discovery strategy: for each component the script greps the image from
-# running pods in the target namespace.  Hardcoded fallback image is used only
-# when no pod is found (e.g. component not yet deployed in sandbox).
+# Image discovery uses Ready pod status.containerStatuses.imageID digests.
+# No tag or hardcoded fallback is treated as a current scan.
 # ---------------------------------------------------------------------------
 
 # ─── ServiceAccount ─────────────────────────────────────────────────────────
@@ -48,7 +45,7 @@ metadata:
 rules:
   - apiGroups: [""]
     resources: ["configmaps"]
-    resourceNames: ["infra-vulns"]
+    resourceNames: ["infra-vulns", "infra-vulns-v2"]
     verbs: ["get", "patch", "update"]
   # create: resourceNames cannot gate create — belt-and-braces for first-run
   - apiGroups: [""]
@@ -177,6 +174,87 @@ subjects:
     name: infra-vuln-scanner
     namespace: admin-ui
 
+---
+# The BFF independently reads current pod imageIDs to validate the scanner's
+# findings. Namespace bindings keep this read limited to the scanned infra fleet.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: admin-ui-infra-pod-reader
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin-ui-infra-pod-reader
+  namespace: accounts
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin-ui-infra-pod-reader
+subjects:
+  - kind: ServiceAccount
+    name: admin-ui
+    namespace: admin-ui
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin-ui-infra-pod-reader
+  namespace: messaging
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin-ui-infra-pod-reader
+subjects:
+  - kind: ServiceAccount
+    name: admin-ui
+    namespace: admin-ui
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin-ui-infra-pod-reader
+  namespace: iam
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin-ui-infra-pod-reader
+subjects:
+  - kind: ServiceAccount
+    name: admin-ui
+    namespace: admin-ui
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin-ui-infra-pod-reader
+  namespace: vault
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin-ui-infra-pod-reader
+subjects:
+  - kind: ServiceAccount
+    name: admin-ui
+    namespace: admin-ui
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin-ui-infra-pod-reader
+  namespace: observability
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin-ui-infra-pod-reader
+subjects:
+  - kind: ServiceAccount
+    name: admin-ui
+    namespace: admin-ui
 ---
 # ─── RBAC: admin-ui SA reads the live ConfigMap (for the BFF route) ─────────
 # The admin-ui Deployment mounts the ConfigMap as a volume (optional:true), so
@@ -311,113 +389,143 @@ spec:
                 # container because grype writes its vuln DB to $HOME/.cache).
                 - name: GRYPE_DB_CACHE_DIR
                   value: /tmp/grype-db
-                # Postgres image tag: resolved from CNPG GitOps; updated here when
-                # the cluster is upgraded (ADR-0106 / runbook 0003).
-                - name: POSTGRES_IMAGE
-                  value: "ghcr.io/cloudnative-pg/postgresql:18.6"
-                # Valkey fallback (accounts-service namespace valkey statefulset)
-                - name: VALKEY_IMAGE
-                  value: "valkey/valkey:8.1.10-alpine"
               args:
                 - |
                   set -eu
-                  NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-
-                  # Write the Python aggregator script (avoids quoting nightmares
-                  # with inline Python in a YAML block scalar).
+                  # The old v1 ConfigMap remains untouched while consumers learn v2.
                   cat > /tmp/agg.py << 'PYEOF'
-                  import json, subprocess, sys, os
+                  import hashlib, json, os, re, subprocess, sys
+                  from datetime import datetime, timezone
 
-                  # Component: (id, namespace, image-grep-substring, fallback-image-env)
-                  # namespace="" means skip kubectl discovery, use fallback env var only.
-                  COMPONENTS = [
-                      ("postgres",       "accounts",      "cloudnative-pg/postgresql", "POSTGRES_IMAGE"),
-                      ("valkey",         "",              "",                           "VALKEY_IMAGE"),
-                      ("kafka",          "messaging",     "strimzi/kafka:",             ""),
-                      ("schema-registry","messaging",     "apicurio-registry-sql",      ""),
-                      ("kafka-ui",       "messaging",     "kafka-ui",                   ""),
-                      ("keycloak",       "iam",           "keycloak/keycloak",          ""),
-                      ("openbao",        "vault",         "openbao/openbao",            ""),
-                      ("grafana",        "observability", "grafana/grafana",            ""),
-                      ("prometheus",     "observability", "prometheus/prometheus",       ""),
-                      ("loki",           "observability", "grafana/loki",               ""),
-                      ("tempo",          "observability", "grafana/tempo",              ""),
-                      ("alloy",          "observability", "grafana/alloy",              ""),
-                  ]
+                  COMPONENTS = {
+                      "postgres": ("accounts", "ghcr.io/cloudnative-pg/postgresql"),
+                      "valkey": ("accounts", "docker.io/valkey/valkey"),
+                      "kafka": ("messaging", "quay.io/strimzi/kafka"),
+                      "schema-registry": ("messaging", "docker.io/apicurio/apicurio-registry-sql"),
+                      "kafka-ui": ("messaging", "ghcr.io/kafbat/kafka-ui"),
+                      "keycloak": ("iam", "quay.io/keycloak/keycloak"),
+                      "openbao": ("vault", "quay.io/openbao/openbao"),
+                      "grafana": ("observability", "docker.io/grafana/grafana"),
+                      "prometheus": ("observability", "quay.io/prometheus/prometheus"),
+                      "loki": ("observability", "docker.io/grafana/loki"),
+                      "tempo": ("observability", "docker.io/grafana/tempo"),
+                      "alloy": ("observability", "docker.io/grafana/alloy"),
+                  }
+                  DIGEST = re.compile(r"@(?P<digest>sha256:[a-f0-9]{64})$")
 
-                  def discover_image(ns, grep):
-                      """kubectl get pods and grep the first matching image."""
-                      if not ns or not grep:
+                  def command(*args, timeout=120):
+                      p = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+                      if p.returncode != 0:
+                          raise RuntimeError(f"{args[0]} failed with exit {p.returncode}")
+                      return p.stdout
+
+                  def instant():
+                      return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+                  def repository(image):
+                      image = image.split("@", 1)[0]
+                      last_colon = image.rfind(":")
+                      return image[:last_colon] if last_colon > image.rfind("/") else image
+
+                  def normalized_repository(image):
+                      if not isinstance(image, str) or not re.fullmatch(r"[a-z0-9][a-z0-9._:/@-]*", image):
                           return None
-                      try:
-                          out = subprocess.run(
-                              ["kubectl", "get", "pods", "-n", ns,
-                               "-o", "jsonpath={range .items[*]}{range .spec.containers[*]}{.image}{'\\n'}{end}{end}"],
-                              capture_output=True, text=True, timeout=15
-                          )
-                          for line in out.stdout.splitlines():
-                              if grep in line:
-                                  return line.strip()
-                      except Exception as e:
-                          print(f"  WARN: kubectl discover failed for {ns}/{grep}: {e}", file=sys.stderr)
-                      return None
-
-                  def scan_image(image):
-                      """Run grype -o json and return parsed summary or None."""
-                      try:
-                          out = subprocess.run(
-                              ["grype", image, "-o", "json", "-q"],
-                              capture_output=True, text=True, timeout=600
-                          )
-                          if out.returncode != 0:
-                              print(f"  WARN: grype exit {out.returncode}: {out.stderr[:200]}", file=sys.stderr)
+                      ref = repository(image)
+                      parts = ref.split("/")
+                      if len(parts) < 2:
+                          return None
+                      host = parts.pop(0) if "." in parts[0] or ":" in parts[0] else "docker.io"
+                      if re.fullmatch(r"[a-z0-9-]+\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com", host):
+                          origin = parts.pop(0) if parts else ""
+                          if origin not in ("ghcr", "quay", "dockerhub"):
                               return None
-                          d = json.loads(out.stdout)
-                      except Exception as e:
-                          print(f"  WARN: scan failed: {e}", file=sys.stderr)
-                          return None
-                      matches = d.get("matches", [])
-                      counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "total": len(matches)}
+                          host = {"ghcr": "ghcr.io", "quay": "quay.io", "dockerhub": "docker.io"}[origin]
+                      return host + "/" + "/".join(parts)
+
+                  def active_images(pods, expected_repository):
+                      found = {}
+                      for pod in pods.get("items", []):
+                          status = pod.get("status", {})
+                          if status.get("phase") != "Running" or not any(
+                              c.get("type") == "Ready" and c.get("status") == "True"
+                              for c in status.get("conditions", [])):
+                              continue
+                          by_name = {c.get("name"): c for c in status.get("containerStatuses", [])}
+                          for spec in pod.get("spec", {}).get("containers", []):
+                              image = spec.get("image", "")
+                              if normalized_repository(image) != expected_repository:
+                                  continue
+                              entry = by_name.get(spec.get("name"), {})
+                              match = DIGEST.search(entry.get("imageID", "")) if entry.get("ready") else None
+                              if not match:
+                                  raise RuntimeError("ready infra container has no registry digest")
+                              digest = match.group("digest")
+                              ref = repository(image) + "@" + digest
+                              if digest in found and found[digest] != ref:
+                                  raise RuntimeError("ambiguous registry identity for digest")
+                              found[digest] = ref
+                      return found
+
+                  def grype_scan(ref):
+                      raw = command("grype", ref, "-o", "json", "-q", timeout=600)
+                      report = json.loads(raw)
+                      if not isinstance(report.get("matches"), list):
+                          raise RuntimeError("invalid Grype match report")
+                      counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "total": 0}
                       top = []
-                      for m in matches:
-                          sev = m.get("vulnerability", {}).get("severity", "Unknown").lower()
-                          if sev in counts:
-                              counts[sev] += 1
-                          if len(top) < 5 and sev in ("critical", "high"):
-                              v = m.get("vulnerability", {})
-                              fix_versions = v.get("fix", {}).get("versions", [])
-                              top.append({
-                                  "id": v.get("id", "?"),
-                                  "severity": sev,
-                                  "fixedIn": fix_versions[0] if fix_versions else None,
-                              })
-                      counts["top"] = top
-                      return counts
+                      for match in report["matches"]:
+                          severity = match.get("vulnerability", {}).get("severity")
+                          if not isinstance(severity, str):
+                              raise RuntimeError("missing Grype severity")
+                          severity = severity.lower()
+                          counts["total"] += 1
+                          if severity in counts:
+                              counts[severity] += 1
+                          if severity in ("critical", "high") and len(top) < 5:
+                              vuln = match["vulnerability"]
+                              fixes = vuln.get("fix", {}).get("versions", [])
+                              top.append({"id": vuln.get("id", "?"), "severity": severity,
+                                          "fixedIn": fixes[0] if fixes else None})
+                      return counts, top, hashlib.sha256(raw.encode()).hexdigest()
 
-                  results = {}
-                  for comp_id, ns, grep, fallback_env in COMPONENTS:
-                      print(f"[{comp_id}] discovering image...", flush=True)
-                      image = discover_image(ns, grep)
-                      if not image and fallback_env:
-                          image = os.environ.get(fallback_env, "")
-                      if not image:
-                          print(f"  SKIP {comp_id}: no image found", flush=True)
+                  version = json.loads(command("grype", "version", "-o", "json"))["version"]
+                  # The scanner's emptyDir starts without a database on every run.
+                  command("grype", "db", "update", timeout=600)
+                  db_fetched_at = instant()
+                  status = json.loads(command("grype", "db", "status", "-o", "json"))
+                  if status.get("valid") is not True or not status.get("path"):
+                      raise RuntimeError("Grype DB provenance unavailable")
+                  with open(status["path"], "rb") as db_file:
+                      db_hash = hashlib.file_digest(db_file, "sha256").hexdigest()
+                  namespaces = {ns for ns, _ in COMPONENTS.values()}
+                  pods = {ns: json.loads(command("kubectl", "get", "pods", "-n", ns, "-o", "json"))
+                          for ns in namespaces}
+                  images = {}
+                  for component, (namespace, expected_repository) in COMPONENTS.items():
+                      found = active_images(pods[namespace], expected_repository)
+                      if not found:
+                          # Missing components are explicit unknowns, not zeros.
                           continue
-                      print(f"  scanning {image}", flush=True)
-                      summary = scan_image(image)
-                      if summary is None:
-                          print(f"  SKIP {comp_id}: scan failed", flush=True)
-                          continue
-                      results[comp_id] = summary
-                      crit = summary["critical"]; high = summary["high"]; total = summary["total"]
-                      print(f"  ok: total={total} critical={crit} high={high}", flush=True)
-
-                  now = os.environ.get("NOW", "")
-                  snapshot = {"scannedAt": now, "images": results}
-                  out_path = "/results/infra-vulns.json"
-                  with open(out_path, "w") as f:
-                      json.dump(snapshot, f)
-                  print(f"Written {out_path}: {len(results)} components scanned", flush=True)
+                      scans = []
+                      for digest, ref in sorted(found.items()):
+                          counts, top, report_hash = grype_scan(ref)
+                          scans.append({"digest": digest, "reportSha256": report_hash,
+                                        "top": top, **counts})
+                      images[component] = {"scans": scans}
+                  if not images:
+                      raise RuntimeError("no live infrastructure image scanned")
+                  with open(status["path"], "rb") as db_file:
+                      if hashlib.file_digest(db_file, "sha256").hexdigest() != db_hash:
+                          raise RuntimeError("Grype DB changed during scan")
+                  snapshot = {"schema": "openbank.infra-vulns.runtime/v2",
+                              "scannedAt": instant(),
+                              "scanner": {"name": "grype", "version": version,
+                                          "db": {"schemaVersion": int(status["schemaVersion"]),
+                                                 "sha256": db_hash, "fetchedAt": db_fetched_at}},
+                              "images": images}
+                  with open("/results/infra-vulns-v2.json", "w") as out:
+                      json.dump(snapshot, out, separators=(",", ":"))
+                  print(f"Published-ready v2 scan: {len(images)} live components", flush=True)
                   PYEOF
 
                   python3 /tmp/agg.py
@@ -444,11 +552,10 @@ spec:
                   value: /tmp
               args:
                 - |
-                  echo "Publishing infra-vulns ConfigMap..."
-                  cat /results/infra-vulns.json
-                  kubectl create configmap infra-vulns \
+                  echo "Publishing infra-vulns-v2 ConfigMap..."
+                  kubectl create configmap infra-vulns-v2 \
                     --namespace admin-ui \
-                    --from-file=infra-vulns.json=/results/infra-vulns.json \
+                    --from-file=infra-vulns-v2.json=/results/infra-vulns-v2.json \
                     --dry-run=client -o yaml | kubectl apply -f -
                   echo "Done."
               volumeMounts:

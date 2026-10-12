@@ -33,7 +33,10 @@ export interface CompLifecycle {
       }
     | { available: false; product: null; reason: string }
   upgrade: { patchAvailable: boolean; majorAvailable: boolean; target: string | null; releaseNotesUrl: string | null }
-  cve: { scanned: boolean; critical: number; high: number; medium: number; low: number; total: number; top: { id: string; severity: string; fixedIn?: string | null }[] }
+  cve: { scanned: boolean; status?: 'verified' | 'legacy-unverified' | 'unavailable';
+    critical: number; high: number; medium: number; low: number; total: number;
+    legacy?: { critical: number; high: number; medium: number; low: number; total: number };
+    top: { id: string; severity: string; fixedIn?: string | null }[] }
   urgency: Urgency
 }
 
@@ -147,7 +150,9 @@ export function LifecycleStrip({ data, name, t, dateLocale = 'en-GB' }: { data: 
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11 }}>
         {!data.cve.scanned ? (
           <span style={{ color: 'var(--text-tertiary)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-            <ShieldAlert size={12} /> {t('CVE: zatím nesken.', 'CVE: not yet scanned')}
+            <ShieldAlert size={12} /> {data.cve.status === 'legacy-unverified' && data.cve.legacy
+              ? t(`CVE: starý neověřený sken (${data.cve.legacy.total})`, `CVE: legacy unverified scan (${data.cve.legacy.total})`)
+              : t('CVE: neověřeno', 'CVE: unverified')}
           </span>
         ) : data.cve.total === 0 ? (
           <span style={{ color: 'var(--success-text)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
