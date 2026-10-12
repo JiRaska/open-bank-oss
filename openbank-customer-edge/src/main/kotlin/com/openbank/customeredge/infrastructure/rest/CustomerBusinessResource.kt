@@ -62,11 +62,12 @@ class CustomerBusinessResource(
     @Blocking
     fun schemes(@QueryParam("country") country: String?): Response {
         // ISO 3166-1 alpha-2 or nothing. Same reasoning as the invitation token below.
-        val filter = country?.takeIf { it.isNotBlank() }
-        require(filter == null || COUNTRY.matches(filter)) {
+        val raw = country?.takeIf { it.isNotBlank() }
+        val filter = raw?.let { CountryCode.parse(it) }
+        require(raw == null || filter != null) {
             "country must be an ISO 3166-1 alpha-2 code"
         }
-        val q = filter?.let { "?country=${enc(it)}" }.orEmpty()
+        val q = filter?.let { "?country=$it" }.orEmpty()
         return upstream.get("$kybServiceUrl$UPSTREAM/schemes$q", human().toString())
     }
 
