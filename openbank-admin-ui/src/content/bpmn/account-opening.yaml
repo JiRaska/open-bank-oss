@@ -61,24 +61,16 @@ steps:
     type: task
     x: 600
     y: 100
-    label: Vytvoření účtu
+    label: Vytvoření účtu a přidělení IBAN
     lane: core
     apis:
       - POST /api/v1/accounts
+    # AccountService.openAccount generates and stores the IBAN in this operation.
+    # There is no separate POST /accounts/{id}/iban endpoint.
     relatedServices:
       - account-service
     emits:
       - openbank.accounts.account.created
-  - id: iban
-    type: task
-    x: 740
-    y: 100
-    label: Přidělení IBAN
-    lane: core
-    apis:
-      - POST /api/v1/accounts/{id}/iban
-    relatedServices:
-      - account-service
   - id: notify
     type: task
     x: 880
@@ -110,8 +102,6 @@ flows:
     to: create
     label: Ano
   - from: create
-    to: iban
-  - from: iban
     to: notify
     kind: async
     topic: openbank.notification.requests
