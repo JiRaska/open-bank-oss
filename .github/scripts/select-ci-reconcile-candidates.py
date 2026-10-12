@@ -167,8 +167,27 @@ def verify_active_age(runs: list[dict], now: dt.datetime, live_pr_heads: set[str
         head_sha = run.get("head_sha")
         if not isinstance(head_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", head_sha):
             raise ValueError("active workflow-run search omitted head SHA")
-        if event in {"pull_request", "pull_request_target"} and head_sha not in live_pr_heads:
-            continue  # Closed or superseded PR run cannot be safely retried.
+        if event in {"pull_request", "pull_request_target"}:
+            # A PR workflow can report its synthetic merge commit as head_sha.
+            # The associated PR head is the revision to compare with live PRs.
+            associations = run.get("pull_requests")
+            if associations is not None and not isinstance(associations, list):
+                raise ValueError("active PR run has malformed associations")
+            if associations:
+                associated_heads = []
+                for pr in associations:
+                    head = pr.get("head") if isinstance(pr, dict) else None
+                    sha = head.get("sha") if isinstance(head, dict) else None
+                    if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha):
+                        raise ValueError("active PR run omitted associated head SHA")
+                    associated_heads.append(sha)
+                if not any(sha in live_pr_heads for sha in associated_heads):
+                    continue  # Every associated PR head is closed or superseded.
+            elif head_sha not in live_pr_heads:
+                # No association means a merge-ref SHA cannot establish staleness.
+                if parse_time(run["created_at"]) <= cutoff:
+                    raise ValueError(f"watched PR run {run['id']} has no provable current head; manual backfill required")
+                continue
         if event in {"push", "workflow_dispatch", "schedule"} and head_sha != main_sha:
             continue  # A later main commit has superseded this run.
         if parse_time(run["created_at"]) <= cutoff:
@@ -264,7 +283,27 @@ def self_test() -> int:
         assert "manual backfill" in str(exc)
     else:
         raise AssertionError("aged-out queued run produced a green scan")
-    verify_active_age([old_active], now, set(), main_sha)  # Closed PR is not retryable.
+    associated = old_active | {"head_sha": "c" * 40,
+                               "pull_requests": [{"head": {"sha": "b" * 40}}]}
+    try:
+        verify_active_age([associated], now, {"b" * 40}, main_sha)
+    except ValueError as exc:
+        assert "manual backfill" in str(exc)
+    else:
+        raise AssertionError("current PR with synthetic merge SHA aged out without alarm")
+    verify_active_age([associated], now, set(), main_sha)  # Closed/superseded PR.
+    try:
+        verify_active_age([old_active], now, set(), main_sha)
+    except ValueError as exc:
+        assert "no provable current head" in str(exc)
+    else:
+        raise AssertionError("unassociated merge-ref run was silently treated as stale")
+    try:
+        verify_active_age([old_active | {"pull_requests": [{"head": None}]}], now, set(), main_sha)
+    except ValueError as exc:
+        assert "associated head SHA" in str(exc)
+    else:
+        raise AssertionError("malformed PR association produced a green scan")
     verify_active_age([old_active | {"event": "push", "head_sha": "c" * 40}], now, set(), main_sha)
     verify_active_age([old_active | {"event": "schedule", "head_sha": "c" * 40}], now, set(), main_sha)
     try:

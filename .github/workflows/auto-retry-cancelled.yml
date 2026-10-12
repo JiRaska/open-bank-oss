@@ -290,6 +290,19 @@ jobs:
             --lookback-minutes "${{ steps.read-runs.outputs.lookback }}")
           echo "retry=$(jq -c '.retry' <<< "${candidates}")" >> "${GITHUB_OUTPUT}"
           echo "flakes=$(jq -c '.flakes' <<< "${candidates}")" >> "${GITHUB_OUTPUT}"
+          # Retain bounded discovery evidence even when retry later fails or is skipped.
+          # This records selection only; it does not claim a rerun was accepted.
+          jq -c '{evidence_kind: "candidate_only", candidates: [.retry[] | {run_id, conclusion, event, head_sha}]}' \
+            <<< "${candidates}" > "${RUNNER_TEMP}/retry-candidates.json"
+
+      - name: Retain retry candidates
+        if: always() && steps.select.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: retry-candidates-a${{ github.run_attempt }}
+          path: ${{ runner.temp }}/retry-candidates.json
+          retention-days: 14
+          if-no-files-found: error
 
   retry:
     name: Re-run spot-killed run (once)
