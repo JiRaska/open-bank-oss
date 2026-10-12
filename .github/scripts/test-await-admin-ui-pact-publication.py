@@ -88,7 +88,12 @@ class PublicationWaitTest(unittest.TestCase):
         self.assertIn("needs.publication-ready.result == 'skipped'", build)
         self.assertIn("github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || ''", build)
         self.assertIn("github.event_name == 'push' || github.event_name == 'workflow_dispatch'", build)
-        self.assertIn("needs: [changes, publication-ready, build, verification-metadata]", all_green)
+        aggregate_needs = re.search(r"(?m)^    needs: \[([^\]\n]+)\]$", all_green)
+        self.assertIsNotNone(aggregate_needs)
+        prerequisites = {name.strip() for name in aggregate_needs.group(1).split(",")}
+        self.assertTrue({"changes", "publication-ready", "build", "verification-metadata",
+                         "deploy-source-freshness"}
+                        <= prerequisites, prerequisites)
         self.assertIn('needs.publication-ready.result }}" != "success"', all_green)
         self.assertNotIn("verify-admin-ui-providers:", pact)
         self.assertIn("needs: drift-check", job(pact, "publish-admin-ui"))
