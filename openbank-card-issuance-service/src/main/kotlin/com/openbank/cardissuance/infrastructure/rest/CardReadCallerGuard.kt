@@ -18,6 +18,8 @@ private val CARD_READ_STAFF_ROLES = setOf("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_
 internal val CARD_READ_CALLERS = setOf(
     // delegation-service: resource-ownership check before a card-scoped mandate (CardIssuanceRestClient).
     "service-account-openbank-delegation",
+    // card-processing: card owner/status lookup before deciding an authorization (#12328).
+    "service-account-openbank-card-processing",
 )
 
 /**

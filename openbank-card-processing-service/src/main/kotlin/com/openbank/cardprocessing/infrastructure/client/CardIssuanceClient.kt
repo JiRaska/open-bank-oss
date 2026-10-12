@@ -35,7 +35,7 @@ import java.util.UUID
  */
 @Path("/api/v1/cards")
 @RegisterRestClient(configKey = "card-issuance-api")
-@OidcClientFilter
+@OidcClientFilter("card-issuance")
 @RegisterProvider(SyntheticTaintClientFilter::class)
 @Produces(MediaType.APPLICATION_JSON)
 interface CardIssuanceClient {

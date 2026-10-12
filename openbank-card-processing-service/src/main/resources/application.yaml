@@ -50,8 +50,7 @@ quarkus:
     client-id: openbank-services
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
-  # Outbound M2M: card-issuance, transaction-service and fraud-service all authenticate their
-  # callers. An unauthenticated call would 401 and be indistinguishable from an outage.
+  # Transaction-service and fraud-service continue to use the established default identity.
   oidc-client:
     auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
     client-id: openbank-services
@@ -59,6 +58,13 @@ quarkus:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
     grant:
       type: client
+    card-issuance:
+      auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+      client-id: openbank-card-processing
+      credentials:
+        secret: ${OIDC_CARD_ISSUANCE_CLIENT_SECRET:UNCONFIGURED}
+      grant:
+        type: client
   rest-client:
     "card-issuance-api":
       url: ${CARD_ISSUANCE_SERVICE_URL:http://localhost:8118}

@@ -16,7 +16,7 @@ import java.io.File
 
 /**
  * #10486 batch 6: `GET /api/v1/cards/{id}` and `GET /api/v1/cards/party/{partyId}` admit ROLE_API so
- * delegation-service and party-service can read as their OWN principals once the shared
+ * delegation-service, card-processing and party-service can read as their OWN principals once the shared
  * `openbank-services` client loses ROLE_OPERATOR. ROLE_API is held by EVERY service account and
  * card-issuance runs OPA advisory, so the named-caller check is what refuses the rest.
  */
@@ -31,11 +31,15 @@ class CardReadCallerGuardTest {
     fun `each named principal with ROLE_API only may make its own read and not the other`() {
         val delegation = identity("service-account-openbank-delegation", "ROLE_API")
         val party = identity("service-account-openbank-party", "ROLE_API")
+        val cardProcessing = identity("service-account-openbank-card-processing", "ROLE_API")
         assertThatCode { requireNamedCardReader(delegation, CARD_READ_CALLERS) }.doesNotThrowAnyException()
+        assertThatCode { requireNamedCardReader(cardProcessing, CARD_READ_CALLERS) }.doesNotThrowAnyException()
         assertThatCode { requireNamedCardReader(party, CARD_PARTY_LIST_CALLERS) }.doesNotThrowAnyException()
         assertThatThrownBy { requireNamedCardReader(delegation, CARD_PARTY_LIST_CALLERS) }
             .isInstanceOf(ForbiddenException::class.java)
         assertThatThrownBy { requireNamedCardReader(party, CARD_READ_CALLERS) }
+            .isInstanceOf(ForbiddenException::class.java)
+        assertThatThrownBy { requireNamedCardReader(cardProcessing, CARD_PARTY_LIST_CALLERS) }
             .isInstanceOf(ForbiddenException::class.java)
     }
 
@@ -60,7 +64,7 @@ class CardReadCallerGuardTest {
     }
 
     @Test
-    fun `only the two machine reads admit ROLE_API`() {
+    fun `only the two card read endpoints admit ROLE_API`() {
         val methods = CardResource::class.java.declaredMethods
         val withApi = methods.filter { m ->
             m.getAnnotation(RolesAllowed::class.java)?.value?.contains("ROLE_API") == true
@@ -75,7 +79,9 @@ class CardReadCallerGuardTest {
             val rule = rego.substringAfter("allowed_reasons contains \"$reason\"").substringBefore("\n}")
             return Regex("\"(service-account-[a-z0-9-]+)\"").findAll(rule).map { it.groupValues[1] }.toSet()
         }
-        assertThat(principals("service-delegation-card-read")).isEqualTo(CARD_READ_CALLERS)
+        assertThat(
+            principals("service-delegation-card-read") + principals("service-card-processing-authorization"),
+        ).isEqualTo(CARD_READ_CALLERS)
         assertThat(principals("service-party-card-list")).isEqualTo(CARD_PARTY_LIST_CALLERS)
     }
 }

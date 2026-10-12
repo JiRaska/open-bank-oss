@@ -107,6 +107,73 @@ test_card_block_denied_for_ai_agent if {
 	}
 }
 
+# --- #12328: newly grantable card writes and viewer reads ---
+
+new_staff_actions := {
+    "card.cancel", "card.limits.update", "card.controls.update", "card.category-limits.update",
+}
+
+test_card_staff_operator_and_admin_receive_the_resource_writes if {
+    every role in {"ROLE_OPERATOR", "ROLE_ADMIN"} {
+        every action in new_staff_actions {
+            "staff-card-controls-write" in rest.allowed_reasons with input as {
+                "principal": {"type": "HUMAN", "id": "staff-person", "roles": [role]},
+                "action": action,
+            }
+        }
+    }
+}
+
+test_card_compliance_can_cancel_but_not_change_limits if {
+    "staff-compliance-card-cancel" in rest.allowed_reasons with input as {
+        "principal": {"type": "HUMAN", "id": "compliance-person", "roles": ["ROLE_COMPLIANCE"]},
+        "action": "card.cancel",
+    }
+    every action in {"card.limits.update", "card.controls.update", "card.category-limits.update"} {
+        count(rest.allowed_reasons) == 0 with input as {
+            "principal": {"type": "HUMAN", "id": "compliance-person", "roles": ["ROLE_COMPLIANCE"]},
+            "action": action,
+        }
+    }
+}
+
+test_card_edge_only_receives_its_observed_self_service_writes if {
+    every action in {"card.cancel", "card.limits.update", "card.controls.update"} {
+        "edge-card-self-service-write" in rest.allowed_reasons with input as {
+            "principal": {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]},
+            "action": action,
+        }
+    }
+    count(rest.allowed_reasons) == 0 with input as {
+        "principal": {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]},
+        "action": "card.category-limits.update",
+    }
+}
+
+test_card_other_service_accounts_do_not_inherit_new_writes if {
+    every name in {"service-account-openbank-services", "service-account-openbank-party"} {
+        every action in new_staff_actions {
+            count(rest.allowed_reasons) == 0 with input as {
+                "principal": {"type": "HUMAN", "id": name, "roles": ["ROLE_OPERATOR", "ROLE_COMPLIANCE"]},
+                "action": action,
+            }
+        }
+    }
+}
+
+test_card_viewer_reads_are_staff_only if {
+    every action in {"card.list", "card.read"} {
+        "staff-card-viewer-read" in rest.allowed_reasons with input as {
+            "principal": {"type": "HUMAN", "id": "demo-person", "roles": ["ROLE_VIEWER"]},
+            "action": action,
+        }
+        count(rest.allowed_reasons) == 0 with input as {
+            "principal": {"type": "HUMAN", "id": "service-account-openbank-demo", "roles": ["ROLE_VIEWER"]},
+            "action": action,
+        }
+    }
+}
+
 # --- card.outbox.requeue (#4005): ROLE_ADMIN only ---
 
 # The one grant. ROLE_ADMIN matches CardOutboxAdminResource.requeueDead's @RolesAllowed exactly.
@@ -143,7 +210,7 @@ test_card_outbox_requeue_denied_for_ai_agent if {
 	}
 }
 
-# --- #10486 batch 6: per-service card READ identities (ROLE_API only) ---
+# --- #10486/#12328: per-service issuer identities (ROLE_API only) ---
 
 b6_sa(name) := {"type": "HUMAN", "id": sprintf("service-account-openbank-%v", [name]), "roles": ["ROLE_API"]}
 
@@ -159,15 +226,16 @@ b6_rules := {
 b6_grants := {
 	"delegation": {"reason": "service-delegation-card-read", "actions": {"card.read"}},
 	"party": {"reason": "service-party-card-list", "actions": {"card.list"}},
+	"card-processing": {"reason": "service-card-processing-authorization", "actions": {"card.read", "card.authorization.decide"}},
 }
 
 b6_all_card_actions := {
 	"card.create", "card.read", "card.list", "card.details.read", "card.activate", "card.block",
 	"card.cancel", "card.suspend", "card.resume", "card.limits.update", "card.controls.update",
-	"card.outbox.requeue",
+	"card.outbox.requeue", "card.authorization.decide", "card.category-limits.update",
 }
 
-test_b6_each_identity_may_perform_its_granted_read if {
+test_b6_each_identity_may_perform_its_granted_action if {
 	every name, g in b6_grants {
 		every action in g.actions {
 			d := rest.allow with input as {"principal": b6_sa(name), "action": action}
@@ -190,9 +258,9 @@ test_b6_each_identity_denied_every_other_card_action if {
 
 # Another ROLE_API service account, and the shared client once it holds ROLE_API only, are denied
 # both card reads. Widen a rule's principal set to a prefix and this goes red.
-test_b6_other_role_api_sa_denied_card_reads if {
+test_b6_other_role_api_sa_denied_card_reads_and_decision if {
 	every p in ["mcp", "services", "kyb"] {
-		every action in {"card.read", "card.list", "card.details.read"} {
+		every action in {"card.read", "card.list", "card.details.read", "card.authorization.decide"} {
 			rest.allow == false with input as {"principal": b6_sa(p), "action": action}
 				with data.rules as b6_rules
 		}

@@ -49,14 +49,15 @@ All mutations require `Idempotency-Key` or `X-Operator-Id` header; resource-leve
 
 | Threat | Vector | Mitigation |
 |---|---|---|
-| **S**poofing | Caller impersonates operator to issue or block a card | OIDC bearer + mTLS; no anonymous mutation; `ROLE_COMPLIANCE` scoped to block only |
+| **S**poofing | Caller impersonates operator to issue or block a card | OIDC bearer + mTLS; no anonymous mutation; `ROLE_COMPLIANCE` is scoped to block/cancel |
 | **T**ampering | Forced lifecycle skip (e.g. PENDING→BLOCKED direct), limit mutation | Domain state-machine guards (`Card.activate/block/suspend/resume`) enforce legal transitions; DB constraints; `version` for optimistic locking (if added — see §5) |
 | **R**epudiation | Operator denies issuing or changing card status | `card.issued.v1` + `card.status_changed.v1` emitted for every mutation through transactional outbox (ADR-0050); `changedBy` field on status-change event carries operator identity |
-| **I**nfo disclosure | Cardholder name / maskedPan / limits leaked via list endpoint | `ROLE_VIEWER` read access; OPA `card.read/list` policy gates on operator; no PII in event subjects; sandbox: maskedPan is synthetic — not a mask of a real PAN |
+| **I**nfo disclosure | Cardholder name / maskedPan / limits leaked via list endpoint | `ROLE_VIEWER` read access; the proposed OPA policy grants `card.read/list` to non-service-account viewers and operators once deployed and enforced; no PII in event subjects; sandbox: maskedPan is synthetic — not a mask of a real PAN |
 | **I**nfo disclosure | Card enumeration via `GET /party/{partyId}` returns another party's cards | OPA `card.list` resource policy scoped to `#partyId` — operators see all; customer-facing access requires a customer-edge ownership check (see §5) |
 | **I**nfo disclosure | `cardholderName` / `embossedName` in Kafka events observed by unauthorized consumer | Kafka topic ACLs restrict consumption to authorized services; outbox events carry only `partyId`, `accountId`, `cardType`, `network`, `maskedPan`, `previousStatus`/`newStatus`, `changedBy` — no full name in event payload |
 | **D**oS | Mass card issuance churn | Idempotency on `issueCard` (duplicate `idempotencyKey` returns existing card, no second DB write); gateway rate limits; outbox decouples event load |
 | **E**oP | Viewer escalates to issue or block | Distinct roles enforced at JAX-RS layer (`@RolesAllowed`) + OPA; deny-by-default |
+| **E**oP | A backend holding `ROLE_OPERATOR` inherits customer card cancellation or limit changes | Proposed staff-only OPA rules exclude `service-account-` identities and grant customer-edge cancel/limits/controls by exact principal after its ownership/mandate checks (#12328). These rules are not active until the bundle is deployed; denial is not enforced until `AUTHZ_ENFORCE` is enabled. |
 | **T**ampering | Race between `suspend` and `block` on same card | Domain `require` guards throw `IllegalArgumentException` on illegal state; a concurrent block on a SUSPENDED card is valid by design; concurrent suspend+block both succeed on ACTIVE → last writer wins idempotently (both move toward frozen state) — acceptable; optimistic locking would make this exact (see §5) |
 
 ## 4a. Card authorization decision point (D3) — STRIDE supplement
@@ -74,7 +75,7 @@ customer to stop taking other precautions. Everything below exists to make those
 
 | STRIDE | Threat | Mitigation |
 |---|---|---|
-| **E**oP | A caller obtains approvals for a card it does not own | `@RolesAllowed(ROLE_API, ROLE_OPERATOR, ROLE_ADMIN)` + `@Authorize(action = "card.authorization.decide", resource = "#id")`; the customer-facing path reaches this only through the edge, which already enforces card ownership against the JWT party |
+| **E**oP | An unrelated backend asks the issuer to approve spend | The proposed issuer OPA rule pins `card.authorization.decide` to `service-account-openbank-card-processing`, but the bundle is not deployed and `AUTHZ_ENFORCE=false` means that decisions remain advisory today. The outer `@RolesAllowed(ROLE_API, ROLE_OPERATOR, ROLE_ADMIN)` still admits other `ROLE_API` service accounts, including the shared client. Keep this open until the dedicated credential is provisioned, every caller has a narrow grant, and enforcement is safely enabled (#12328). |
 | **T**ampering | The caller supplies its own spend totals, so a compromised caller could under-report and slip past a limit | Accepted and explicit: the totals are inputs, because this service holds no authorisation history. The trust boundary is that only trusted rails may call it (no `ROLE_CUSTOMER`). When spend tracking lands, the totals become server-derived and this row narrows — flagged in the response today as `spendTracking: false` so no client presents them as measured |
 | **S**poofing | An unknown card id is used to fish for a permissive default | An unknown card **declines** (`CARD_NOT_ACTIVE`) rather than 404s. The acquirer needs an answer, and the safe answer to "may this unknown card spend" is no; it also avoids an existence oracle on card ids |
 | **D**oS | A customer locks themselves out of every rail | `CHIP_AND_PIN` deliberately has no toggle. A customer able to disable every channel could not pay at any terminal and could not recover from one either |
@@ -82,7 +83,7 @@ customer to stop taking other precautions. Everything below exists to make those
 | **R**epudiation | A decline cannot be explained to the customer | The decision returns a specific `declineReason`, and the evaluation order is card state, then customer switches, then amounts — so the reason shown is the one the customer can act on ("you turned gambling off"), not a downstream limit they never set |
 | **I**nfo disclosure | The taxonomy leaks something sensitive | It is public bank policy — category ids, labels and MCC ranges. Serving it is the point: a client that hardcoded MCC sets would keep enforcing a stale policy on every installed build |
 
-**DFD update:** adds `acquirer rail → POST /cards/{id}/authorizations → decision` and
+**DFD update:** adds `acquirer rail → card-processing → POST /cards/{id}/authorizations → decision` and
 `customer (via edge) → PUT /cards/{id}/category-limits`. No new downstream dependency; the decision
 reads only this service's own tables.
 **Risk class:** integrity of a money-path control (an authorisation approve/decline).
