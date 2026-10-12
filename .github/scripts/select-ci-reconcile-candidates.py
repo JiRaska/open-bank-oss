@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -16,6 +17,8 @@ DEEP_UPDATED_MINUTES = 180
 GITHUB_SEARCH_CEILING = 1000
 MAX_CATCHUP_MINUTES = 48 * 60
 QUERY_CHUNK_HOURS = 6
+ACTIVE_ALARM_MINUTES = 23 * 60
+ACTIVE_STATUSES = ("requested", "pending", "queued", "waiting", "in_progress", "action_required")
 
 
 def parse_time(value: str) -> dt.datetime:
@@ -113,6 +116,63 @@ def merge_chunks(chunks: list[list[dict]]) -> list[dict]:
     return sorted(by_id.values(), key=lambda run: run["id"])
 
 
+def parse_live_heads(pages: object) -> set[str]:
+    """Accept only a complete paginated snapshot of open PR heads."""
+    if not isinstance(pages, list) or not pages:
+        raise ValueError("open-PR API returned no pages")
+    # A single sub-100 page is a complete snapshot. With multiple pages, PRs
+    # opening/closing during pagination can shift offsets without a total_count
+    # checksum, so fail rather than silently treat an omitted head as stale.
+    if len(pages) != 1 or (isinstance(pages[0], list) and len(pages[0]) >= 100):
+        raise ValueError("open-PR API pagination cannot prove a stable head snapshot")
+    heads = set()
+    for page in pages:
+        if not isinstance(page, list):
+            raise TypeError("open-PR API returned malformed page")
+        for pr in page:
+            if not isinstance(pr, dict) or pr.get("state") != "open":
+                raise ValueError("open-PR API returned malformed PR")
+            head = pr.get("head")
+            if not isinstance(head, dict):
+                raise TypeError("open-PR API omitted head object")
+            sha = head.get("sha")
+            if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha):
+                raise ValueError("open-PR API omitted head SHA")
+            heads.add(sha)
+    return heads
+
+
+def verify_active_age(runs: list[dict], now: dt.datetime, live_pr_heads: set[str], main_sha: str) -> None:
+    """Alarm before a watched run ages out of the bounded created search.
+
+    A later completion of an older active run is invisible to GitHub's
+    created-only workflow-run search. Discovery must not report a green scan
+    while such a run exists; the workflow's failure job keeps the alarm open.
+    This bounded guard cannot reconstruct an already-completed historical run
+    or an old manually rerun attempt that starts and finishes between ticks.
+    """
+    # One hour of margin exceeds the normal 30-minute completion overlap.
+    # Without it, a run could be 23h59m old at one successful tick, complete
+    # before the next tick, and disappear from both the active query and the
+    # next 24-hour created query.
+    cutoff = now - dt.timedelta(minutes=ACTIVE_ALARM_MINUTES)
+    if not re.fullmatch(r"[0-9a-f]{40}", main_sha):
+        raise ValueError("main head SHA is missing or malformed")
+    for run in runs:
+        if not isinstance(run, dict) or type(run.get("id")) is not int:
+            raise ValueError("active workflow-run search returned malformed run")
+        event = run.get("event")
+        head_sha = run.get("head_sha")
+        if not isinstance(head_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", head_sha):
+            raise ValueError("active workflow-run search omitted head SHA")
+        if event in {"pull_request", "pull_request_target"} and head_sha not in live_pr_heads:
+            continue  # Closed or superseded PR run cannot be safely retried.
+        if event in {"push", "workflow_dispatch"} and head_sha != main_sha:
+            continue  # A later main commit has superseded this run.
+        if parse_time(run["created_at"]) <= cutoff:
+            raise ValueError(f"watched run {run['id']} is approaching the 24-hour created-search bound; manual backfill required")
+
+
 def select(runs: list[dict], now: dt.datetime, lookback_minutes: int) -> dict[str, list[dict]]:
     cutoff = now - dt.timedelta(minutes=lookback_minutes)
     retry: dict[int, dict] = {}
@@ -183,6 +243,40 @@ def self_test() -> int:
     near_cutoff = missed | {"id": 10, "updated_at": "2026-09-10T23:26:00Z"}
     assert [x["run_id"] for x in select([near_cutoff], now, catchup["updated_lookback_minutes"])["retry"]] == [10]
     assert select([near_cutoff], delayed, catchup["updated_lookback_minutes"])["retry"] == []
+    # Just-before-threshold active run is inside the next checkpoint-anchored
+    # created range if it completes between ticks. At the threshold it must
+    # raise a persistent alarm instead of silently disappearing.
+    main_sha = "a" * 40
+    recent_active = missed | {"id": 12, "status": "queued", "event": "pull_request", "head_sha": "b" * 40,
+                              "created_at": "2026-09-10T01:31:00Z"}
+    verify_active_age([recent_active], now, {"b" * 40}, main_sha)
+    assert parse_time(recent_active["created_at"]) >= parse_time(catchup["created_query"].split("..")[0])
+    normal_next = query_window("short", now + dt.timedelta(minutes=29), now)
+    delayed_next = query_window("short", now + dt.timedelta(minutes=65), now)
+    assert parse_time(recent_active["created_at"]) >= parse_time(normal_next["created_query"].split("..")[0])
+    assert parse_time(recent_active["created_at"]) >= parse_time(delayed_next["created_query"].split("..")[0])
+    old_active = recent_active | {"created_at": "2026-09-10T01:30:00Z"}
+    try:
+        verify_active_age([old_active], now, {"b" * 40}, main_sha)
+    except ValueError as exc:
+        assert "manual backfill" in str(exc)
+    else:
+        raise AssertionError("aged-out queued run produced a green scan")
+    verify_active_age([old_active], now, set(), main_sha)  # Closed PR is not retryable.
+    verify_active_age([old_active | {"event": "push", "head_sha": "c" * 40}], now, set(), main_sha)
+    try:
+        verify_active_age([old_active | {"event": "push", "head_sha": main_sha}], now, set(), main_sha)
+    except ValueError as exc:
+        assert "manual backfill" in str(exc)
+    else:
+        raise AssertionError("current-main queued run aged out without alarm")
+    assert parse_live_heads([[{"state": "open", "head": {"sha": "b" * 40}}]]) == {"b" * 40}
+    try:
+        parse_live_heads([[{"state": "open", "head": {"sha": "b" * 40}}] * 100])
+    except ValueError as exc:
+        assert "pagination" in str(exc)
+    else:
+        raise AssertionError("unverifiable open-PR pagination was accepted")
     boundary_pending = missed | {"id": 11, "status": "in_progress", "conclusion": None,
                                  "updated_at": "2026-09-10T23:45:00Z"}
     boundary_done = missed | {"id": 11, "status": "completed", "updated_at": "2026-09-10T23:46:00Z"}
@@ -243,8 +337,8 @@ def self_test() -> int:
         raise AssertionError("changing total_count was treated as a complete snapshot")
     recovered = select(flatten_pages(second_snapshot), now, 180)
     assert [x["run_id"] for x in recovered["retry"]] == [777]
-    print("SUBJECTS=24")
-    print("select-ci-reconcile-candidates self-test: 24 cases passed, 0 failed")
+    print("SUBJECTS=30")
+    print("select-ci-reconcile-candidates self-test: 30 cases passed, 0 failed")
     return 0
 
 
@@ -257,10 +351,17 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--checkpoint", help="creation time of latest successful reconciliation run")
     parser.add_argument("--flatten-pages", type=Path)
     parser.add_argument("--merge-chunks", nargs="+", type=Path)
+    parser.add_argument("--active-statuses", action="store_true")
+    parser.add_argument("--verify-active-runs", type=Path)
+    parser.add_argument("--open-pr-pages", type=Path)
+    parser.add_argument("--main-sha")
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args(argv)
     if args.self_test:
         return self_test()
+    if args.active_statuses:
+        print("\n".join(ACTIVE_STATUSES))
+        return 0
     if args.flatten_pages:
         try:
             print(json.dumps(flatten_pages(json.loads(args.flatten_pages.read_text())), separators=(",", ":")))
@@ -273,6 +374,16 @@ def main(argv: list[str]) -> int:
             print(json.dumps(merge_chunks([json.loads(path.read_text()) for path in args.merge_chunks]), separators=(",", ":")))
         except (TypeError, ValueError, KeyError) as exc:
             print(f"incomplete workflow-run chunks: {exc}", file=sys.stderr)
+            return 2
+        return 0
+    if args.verify_active_runs:
+        if not args.now or not args.open_pr_pages or not args.main_sha:
+            parser.error("--now, --open-pr-pages and --main-sha are required with --verify-active-runs")
+        try:
+            verify_active_age(json.loads(args.verify_active_runs.read_text()), parse_time(args.now),
+                              parse_live_heads(json.loads(args.open_pr_pages.read_text())), args.main_sha)
+        except (TypeError, ValueError, KeyError) as exc:
+            print(f"active workflow-run coverage unverified: {exc}", file=sys.stderr)
             return 2
         return 0
     if args.query_mode:

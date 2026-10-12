@@ -185,18 +185,18 @@ jobs:
           lookback=$(jq -r '.updated_lookback_minutes' <<< "$plan")
           echo "mode=$mode checkpoint=$checkpoint created_range=$created_query query_chunks=${#created_queries[@]} updated_lookback_minutes=$lookback" >> "$GITHUB_STEP_SUMMARY"
           fetch_pages() {
-            local workflow="$1" created_query="$2" output="$3"
+            local workflow="$1" filter="$2" value="$3" output="$4"
             local page=1 total expected dir
             local -a page_files=()
             dir=$(mktemp -d)
-            # Fixed creation bounds make pagination stable; completion is filtered locally.
+            # Fixed creation bounds make normal pagination stable; completion is filtered locally.
             # The API's 1,000-result search ceiling permits at most 10 pages of 100. Refuse
             # the ceiling before fetching page 2, rather than trusting --paginate to stop.
             gh api --method GET "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow}/runs" \
-              -f per_page=100 -f page=1 -f "created=${created_query}" > "$dir/1.json"
+              -f per_page=100 -f page=1 -f "${filter}=${value}" > "$dir/1.json"
             total=$(jq -er '.total_count | select(type == "number" and . >= 0)' "$dir/1.json")
             if (( total >= 1000 )); then
-              echo "::error::${workflow} created-range search reached the 1,000-result ceiling" >&2
+              echo "::error::${workflow} ${filter} search reached the 1,000-result ceiling" >&2
               return 2
             fi
             expected=$(( (total + 99) / 100 ))
@@ -204,11 +204,11 @@ jobs:
             page_files+=("$dir/1.json")
             for (( page=2; page<=expected; page++ )); do
               gh api --method GET "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow}/runs" \
-                -f per_page=100 -f "page=${page}" -f "created=${created_query}" > "$dir/${page}.json"
+                -f per_page=100 -f "page=${page}" -f "${filter}=${value}" > "$dir/${page}.json"
               page_files+=("$dir/${page}.json")
             done
             jq -s '.' "${page_files[@]}" > "$output"
-            echo "workflow=$workflow runs=$total requests=$expected" >> "$GITHUB_STEP_SUMMARY"
+            echo "workflow=$workflow filter=$filter runs=$total requests=$expected" >> "$GITHUB_STEP_SUMMARY"
             rm -rf "$dir"
           }
           for workflow in services-ci.yml security.yml dependency-submission.yml; do
@@ -219,7 +219,7 @@ jobs:
             for index in "${!created_queries[@]}"; do
               chunk_file="${RUNNER_TEMP}/${workflow}.${index}.json"
               for snapshot_attempt in 1 2 3; do
-                gh_retry 3 -- fetch_pages "$workflow" "${created_queries[$index]}" "${RUNNER_TEMP}/${workflow}.pages.json"
+                gh_retry 3 -- fetch_pages "$workflow" created "${created_queries[$index]}" "${RUNNER_TEMP}/${workflow}.pages.json"
                 if python3 .github/scripts/select-ci-reconcile-candidates.py \
                   --flatten-pages "${RUNNER_TEMP}/${workflow}.pages.json" \
                   > "$chunk_file" 2> "${RUNNER_TEMP}/${workflow}.validation.err"; then
@@ -237,6 +237,42 @@ jobs:
             python3 .github/scripts/select-ci-reconcile-candidates.py \
               --merge-chunks "${chunk_files[@]}" > "${RUNNER_TEMP}/${workflow}.json"
           done
+          # GitHub filters workflow runs by creation time, not completion time.
+          # Refuse a green reconciliation while any watched nonterminal run has
+          # aged to 23 hours, leaving margin before the 24-hour creation bound.
+          # The failure job raises a persistent issue for manual backfill
+          # before such a completion vanishes.
+          mapfile -t active_statuses < <(python3 .github/scripts/select-ci-reconcile-candidates.py --active-statuses)
+          active_files=()
+          for workflow in services-ci.yml security.yml dependency-submission.yml; do
+            for status in "${active_statuses[@]}"; do
+              active_file="${RUNNER_TEMP}/${workflow}.${status}.active.json"
+              for snapshot_attempt in 1 2 3; do
+                gh_retry 3 -- fetch_pages "$workflow" status "$status" "${RUNNER_TEMP}/${workflow}.active.pages.json"
+                if python3 .github/scripts/select-ci-reconcile-candidates.py \
+                  --flatten-pages "${RUNNER_TEMP}/${workflow}.active.pages.json" \
+                  > "$active_file" 2> "${RUNNER_TEMP}/${workflow}.active.validation.err"; then
+                  break
+                fi
+                cat "${RUNNER_TEMP}/${workflow}.active.validation.err" >&2
+                if (( snapshot_attempt == 3 )); then
+                  echo "::error::${workflow} active-run API snapshot remained incomplete" >&2
+                  exit 2
+                fi
+                sleep 2
+              done
+              active_files+=("$active_file")
+            done
+          done
+          jq -s 'add | unique_by(.id)' "${active_files[@]}" > "${RUNNER_TEMP}/active-runs.json"
+          gh_retry 3 -- gh api --method GET "repos/${GITHUB_REPOSITORY}/pulls" \
+            -f state=open -f per_page=100 --paginate --slurp > "${RUNNER_TEMP}/open-pr-pages.json"
+          main_sha=$(gh_retry 3 -- gh api --method GET \
+            "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')
+          python3 .github/scripts/select-ci-reconcile-candidates.py \
+            --verify-active-runs "${RUNNER_TEMP}/active-runs.json" \
+            --open-pr-pages "${RUNNER_TEMP}/open-pr-pages.json" \
+            --main-sha "$main_sha" --now "$plan_now"
           jq -s 'add' "${RUNNER_TEMP}"/*.yml.json > "${RUNNER_TEMP}/runs.json"
           echo "query_elapsed_seconds=$(($(date +%s) - started_at))" >> "$GITHUB_STEP_SUMMARY"
           echo "lookback=$lookback" >> "$GITHUB_OUTPUT"
