@@ -16,6 +16,7 @@ import re
 import subprocess
 import sys
 import tempfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 WORKFLOW = "auto-deploy.yml"
@@ -26,6 +27,7 @@ DURABLE = {"REGRESSION", "UNVERIFIABLE", "PROVIDER_UNVERIFIED"}
 CLASSES = DURABLE | {"DEPLOYABLE", "PENDING_BUILD", "UNVERIFIED", "NOT_ASKED",
                      "NO_CONTRACTS", "UNKNOWN"}
 MAX_RUNS = 24
+MAX_SELECTED_AGE = timedelta(hours=6)
 
 
 def validate_artifact(doc: dict, run: dict) -> list[dict]:
@@ -74,9 +76,16 @@ def validate_artifact(doc: dict, run: dict) -> list[dict]:
     return rows
 
 
-def evaluate(runs: list[dict]) -> dict:
+def evaluate(runs: list[dict], now: datetime | None = None) -> dict:
     """Newest-first scheduled runs, each with a validated ``verdicts`` artifact."""
     if not runs:
+        return {"ready": False, "active": [], "observed_services": 0}
+    now = now or datetime.now(timezone.utc)
+    newest = datetime.fromisoformat(runs[0]["created_at"].replace("Z", "+00:00"))
+    if newest.tzinfo is None or newest > now or now - newest > MAX_SELECTED_AGE:
+        # A historical selected tick is evidence of a past block only. The
+        # lane watch handles missing scheduled ticks; keep subject issues open
+        # without refreshing them as though this verdict were current.
         return {"ready": False, "active": [], "observed_services": 0}
     history: dict[str, list[dict]] = {}
     for run in runs:
@@ -167,7 +176,8 @@ def fetch(repo: str) -> list[dict]:
                 raise ValueError("missing or unbounded verdict artifact")
             doc = json.loads(path.read_text())
         run = {"id": run_id, "head_sha": sha, "event": "schedule",
-               "status": "completed", "verdicts": doc}
+               "status": "completed", "created_at": item.get("created_at"),
+               "verdicts": doc}
         validate_artifact(doc, run)
         runs.append(run)
     return runs
@@ -179,24 +189,30 @@ def self_test() -> None:
         row = {"service": service, "class": cls, "blocked_on": None,
                "money_path": money, "head_sha": sha, "run_id": ident}
         return {"id": ident, "head_sha": sha, "event": "schedule", "status": "completed",
+                "created_at": "2026-10-12T12:00:00Z",
                 "verdicts": {"schema_version": 1, "head_sha": sha, "run_id": ident,
                              "services": [row]}}
 
-    assert evaluate([])["ready"] is False
-    assert len(evaluate([tick(3, "REGRESSION", True)])["active"]) == 1
+    now = datetime(2026, 10, 12, 13, tzinfo=timezone.utc)
+    fresh = lambda rows: evaluate(rows, now)
+    assert fresh([])["ready"] is False
+    assert len(fresh([tick(3, "REGRESSION", True)])["active"]) == 1
     ordinary = [tick(3, "REGRESSION", False), tick(2, "UNVERIFIABLE", False),
                 tick(1, "PROVIDER_UNVERIFIED", False)]
-    assert len(evaluate(ordinary)["active"]) == 1
-    assert evaluate(ordinary[:2])["active"] == []
-    assert evaluate([ordinary[0], tick(2, "DEPLOYABLE", False), ordinary[2]])["active"] == []
+    assert len(fresh(ordinary)["active"]) == 1
+    assert fresh(ordinary[:2])["active"] == []
+    assert fresh([ordinary[0], tick(2, "DEPLOYABLE", False), ordinary[2]])["active"] == []
     # A green push and a tick that selected another service cannot clear the
     # subject's existing issue; neither is included in this service's streak.
     other = tick(4, "DEPLOYABLE", False, "openbank-card-service")
-    assert len(evaluate([other, *ordinary])["active"]) == 1
+    assert len(fresh([other, *ordinary])["active"]) == 1
+    stale = tick(5, "REGRESSION", True)
+    stale["created_at"] = "2026-10-12T06:59:59Z"
+    assert fresh([stale])["ready"] is False
     try:
         bad = tick(5, "REGRESSION", True)
         bad["verdicts"]["head_sha"] = "f" * 40
-        evaluate([bad])
+        fresh([bad])
     except ValueError:
         pass
     else:
