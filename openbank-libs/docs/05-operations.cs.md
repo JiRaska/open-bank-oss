@@ -36,3 +36,5 @@ Konfigurace: `openbank.warmup.enabled` (výchozí true, v `%test` vypnuto), `ope
 Pro nedůvěryhodné XML používejte `SecureXml` z `openbank-libs-domain`; vydávané DOM, SAX, StAX, schema a transformer factory zakazují externí entity a externí DTD. DOM a SAX odmítnou celý DOCTYPE. Produkční parsování nesmí vytvářet vlastní JAXP factory. `SecureXmlTest` a `XxeRejectionTest` ověřují odmítnutí externích entit a DTD.
 
 `SafeHttpClient` z `openbank-libs-runtime` při HTTPS ověřuje certifikační řetězec pomocí JVM a kontroluje hostname. Testovací kořeny stále procházejí platformním PKIX trust managerem; volající nemůže předat vlastní trust manager ani TLS kontext.
+
+Klienti interních služeb s injektovaným JDK `HttpClient` (LLM gateway, obsahový guard, embeddingy, flagd a OPA sidecar) používají `BoundedBodyHandlers.ofString()` místo neomezeného `BodyHandlers.ofString()`. Výchozí limit činí 4 MiB; při jeho překročení handler ukončí odběr odpovědi a volání selže s `IOException`. Externí odchozí provoz patří přes `SafeHttpClient`, který omezuje tělo odpovědi a kontroluje cílové hosty.
