@@ -21,14 +21,18 @@ import com.openbank.pension.domain.transfer.TransferDirection
 import com.openbank.pension.domain.transfer.TransferOrigin
 import com.openbank.pension.domain.transfer.TransferRequest
 import com.openbank.pension.infrastructure.fund.InMemoryFundAdministrationAdapter
-import com.openbank.pension.infrastructure.onboarding.temporal.onWorker
 import com.openbank.pension.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.test.security.oidc.Claim
 import io.quarkus.test.security.oidc.OidcSecurity
+import io.quarkus.vertx.VertxContextSupport
+import io.smallrye.mutiny.coroutines.asUni
 import jakarta.inject.Inject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import org.eclipse.microprofile.config.ConfigProvider
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
@@ -181,7 +185,11 @@ internal object PactContractSeed {
             deadline = LocalDate.now().plusDays(30),
             now = now,
         ).copy(id = AWAITING_TRANSFER)
-        onWorker { transfers.save(request) }
+        // The provider-pact source set compiles apart from main, so main's `internal` onWorker
+        // is invisible here; a state callback carries no Vert.x context, so bridge explicitly.
+        VertxContextSupport.subscribeAndAwait {
+            CoroutineScope(Dispatchers.Unconfined).async { transfers.save(request) }.asUni()
+        }
     }
 
     fun reset() = jdbc { conn ->
