@@ -83,28 +83,41 @@ steps:
     x: 820
     y: 220
     label: Nevyrovnáno (409)
+  - id: draft
+    type: task
+    x: 930
+    y: 100
+    label: Návrh roční uzávěrky
+    lane: core
+    apis:
+      - POST /api/v1/ledger/close/{fiscalYear}
+    relatedServices:
+      - ledger-service
+  - id: review
+    type: gateway
+    x: 1040
+    y: 100
+    label: Jiný schvalovatel a hash beze změny?
+  - id: conflict
+    type: end-err
+    x: 1040
+    y: 220
+    label: Konflikt (409)
   - id: attest
     type: task
-    x: 940
+    x: 1160
     y: 100
     label: Atestace roku
     lane: compliance
     apis:
-      - POST /api/v1/ledger/close/{year}/attest
+      - POST /api/v1/ledger/close/{fiscalYear}/attest
     relatedServices:
       - ledger-service
     emits:
-      - openbank.ledger.journal.posted
-  - id: projection
-    type: event
-    x: 940
-    y: 220
-    label: Balance/Audit projekce
-    consumes:
-      - openbank.ledger.journal.posted
+      - YearCloseAttested
   - id: end
     type: end
-    x: 1060
+    x: 1280
     y: 100
     label: ATTESTED
 flows:
@@ -128,11 +141,15 @@ flows:
     to: unbal
     label: Ne
   - from: gwtb
+    to: draft
+    label: Ano
+  - from: draft
+    to: review
+  - from: review
+    to: conflict
+    label: Ne
+  - from: review
     to: attest
     label: Ano
-  - from: attest
-    to: projection
-    kind: async
-    topic: openbank.ledger.journal.posted
   - from: attest
     to: end

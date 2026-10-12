@@ -157,6 +157,32 @@ describe('bpmn manifests', () => {
     expect(unservedRoutes(stale, 'account-service', accountPaths)).toEqual(staleRoutes)
   })
 
+  it('shows year close as a draft followed by a distinct attestor', () => {
+    const diagram = loadBpmnProcess('closings')
+    const ledgerPaths = servicePaths('ledger-service')
+    expect(unservedRoutes(diagram, 'ledger-service', ledgerPaths)).toEqual([])
+    expect(diagram.steps.find((step) => step.id === 'draft')?.apis)
+      .toEqual(['POST /api/v1/ledger/close/{fiscalYear}'])
+    expect(diagram.steps.find((step) => step.id === 'attest')?.apis)
+      .toEqual(['POST /api/v1/ledger/close/{fiscalYear}/attest'])
+    expect(diagram.steps.find((step) => step.id === 'attest')?.emits)
+      .toEqual(['YearCloseAttested'])
+    expect(diagram.steps.find((step) => step.id === 'projection')).toBeUndefined()
+    expect(diagram.flows.find((flow) => flow.from === 'gwtb' && flow.to === 'draft')).toBeTruthy()
+    expect(diagram.flows.find((flow) => flow.from === 'draft' && flow.to === 'review')).toBeTruthy()
+    expect(diagram.flows.find((flow) => flow.from === 'review' && flow.to === 'conflict')?.label).toBe('Ne')
+    expect(diagram.flows.find((flow) => flow.from === 'review' && flow.to === 'attest')?.label).toBe('Ano')
+
+    const stale = {
+      ...diagram,
+      steps: diagram.steps.map((step) => step.id === 'attest'
+        ? { ...step, apis: ['POST /api/v1/ledger/close/{year}/attest'] }
+        : step),
+    }
+    expect(unservedRoutes(stale, 'ledger-service', ledgerPaths))
+      .toEqual(['POST /api/v1/ledger/close/{year}/attest'])
+  })
+
   it('keeps card issuance on its published route and card event, without invented PIN delivery', () => {
     const diagram = loadBpmnProcess('card-issuance')
     const cardPaths = servicePaths('card-issuance-service')
