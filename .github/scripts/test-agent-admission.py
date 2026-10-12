@@ -44,6 +44,38 @@ class AdmissionTest(unittest.TestCase):
         self.assertEqual(admission.admit_current_pr(pages, self.prefixes, 3, 12480, self.cutoff, [entry], expired), (False, 4))
         self.assertEqual(admission.admit_current_pr(pages, self.prefixes, 3, 12480, self.cutoff, [], now), (False, 4))
 
+    def test_proposed_exceptions_are_isolated_and_keep_queue_capacity(self):
+        from datetime import datetime, timezone
+        entries = admission.load_exceptions()
+        self.assertEqual({entry['pr'] for entry in entries}, {12480, 12587})
+        targets = [pr(entry['pr'], entry['branch'], head={
+            'ref': entry['branch'], 'repo': {'full_name': entry['repository']}
+        }) for entry in entries]
+        pages = [[pr(1), pr(2), pr(3), *targets, pr(12588, 'codex/other')]]
+        now = datetime(2026, 10, 12, tzinfo=timezone.utc)
+        expired = datetime(2026, 10, 17, tzinfo=timezone.utc)
+        self.assertEqual(admission.admit(pages, self.prefixes, self.limit), (False, 6))
+        for target in targets:
+            number = target['number']
+            rank = sum(item['number'] <= number for item in pages[0])
+            with self.subTest(number=number):
+                self.assertEqual(admission.admit_current_pr(
+                    pages, self.prefixes, self.limit, number, self.cutoff, entries, now), (True, rank))
+                for policy in ([], [entry for entry in entries if entry['pr'] != number]):
+                    self.assertEqual(admission.admit_current_pr(
+                        pages, self.prefixes, self.limit, number, self.cutoff, policy, now), (False, rank))
+                self.assertEqual(admission.admit_current_pr(
+                    pages, self.prefixes, self.limit, number, self.cutoff, entries, expired), (False, rank))
+                for field, value in [('branch', 'codex/other'), ('repository', 'fork/open-bank-oss')]:
+                    wrong = [dict(entry, **{field: value}) if entry['pr'] == number else entry for entry in entries]
+                    self.assertEqual(admission.admit_current_pr(
+                        pages, self.prefixes, self.limit, number, self.cutoff, wrong, now), (False, rank))
+        for number, rank in ((12509, 5), (12588, 6)):
+            # The support PR and unrelated later work cannot borrow either exception.
+            candidate_pages = [[pr(1), pr(2), pr(3), targets[0], pr(number, 'codex/other')]] if number == 12509 else pages
+            self.assertEqual(admission.admit_current_pr(
+                candidate_pages, self.prefixes, self.limit, number, self.cutoff, entries, now), (False, rank))
+
     def test_malformed_exception_policy_fails_closed(self):
         import tempfile
         entries = [None, {}, [{'pr': True}], [dict(pr=12480, repository='x', branch='x',
