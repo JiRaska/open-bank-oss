@@ -292,9 +292,13 @@ class TransferRequestRepositoryImpl(private val json: PayloadMapper, private val
             clauses += "status in :statuses"
             params["statuses"] = statuses.map { it.name }
         }
-        find(clauses.joinToString(" and ") + " order by createdAt desc", params).range(0, limit - 1).list()
+        // Bounded here as well as in the use case: the page end never derives from raw input.
+        val last = limit.coerceIn(1, MAX_PARTY_TRANSFERS) - 1
+        find(clauses.joinToString(" and ") + " order by createdAt desc", params).range(0, last).list()
     }.awaitSuspending().map { it.toDomain() }
 
     private fun TransferRequestEntity.toDomain(): TransferRequest =
         json.read(payload, TransferRequest::class.java).copy(version = version)
 }
+
+private const val MAX_PARTY_TRANSFERS = 100
