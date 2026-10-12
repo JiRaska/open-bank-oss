@@ -24,7 +24,7 @@ alone, with one log line per decision:
   * not armed                              -> skip, the author has not asked for a merge;
   * head committed < --debounce-minutes ago -> skip, so CI is not restarted repeatedly;
   * more than --max-updates in this run    -> skip, capped;
-  * branch-update budget exhausted         -> skip while that history remains; a human resolves it.
+  * branch-update budget exhausted         -> skip until the author pushes; listed in the summary.
 
 FULL-FLEET SERIALIZATION
 ------------------------
@@ -55,10 +55,12 @@ needs: see the PR that introduced this script for the measured evidence.
 
 HARD COST BUDGET
 ----------------
-`--max-updates` limits one workflow run only. `--max-updates-per-pr` also counts GitHub's
-server-side main-merge commits in the PR's own history, across workflow runs. At the cap the
-script cannot trigger another CI restart from that branch history. Unreadable or truncated commit
-history fails closed. A human can decide whether to rebase, close, or merge the PR after review.
+`--max-updates` limits one workflow run only. `--max-updates-per-pr` caps CONSECUTIVE
+server-side base merges at the tip of the head (walked along first parents, at most cap + 1
+commit reads), across workflow runs. Any non-updater commit — the author pushing, or merging or
+rebasing main themselves — resets it. At the cap the PR is skipped with the exact unblock action,
+and listed in the job summary. An unreadable budget skips THAT PR (fail closed) without failing
+the run; only a refused update-branch call fails the workflow.
 
 MODES
 -----
@@ -74,6 +76,7 @@ import json
 import os
 import pathlib
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -217,84 +220,198 @@ def self_test() -> int:
     import io
     from unittest.mock import patch
 
-    update = {"commit": {"message": "Merge branch 'main' into agent/example",
-                         "committer": {"name": "GitHub"}}, "parents": [{}, {}]}
-    renamed = {**update, "commit": {**update["commit"],
-                                    "message": "Merge branch 'main' into codex/renamed"}}
-    with patch.dict(globals(), {"get": lambda *_: [update, renamed]}):
-        used = branch_update_count("example/repo", 42, "main")
-    ok = used == 2
+    def graph(authored: int, updates: int, renamed_at: int | None = None) -> tuple[str, dict]:
+        """A first-parent chain: `authored` author commits, then `updates` updater merges."""
+        commits: dict[str, dict] = {}
+        prev = None
+        for i in range(authored + updates):
+            sha = f"{i:040x}"
+            parents = [{"sha": prev}] if prev else [{"sha": "f" * 40}]
+            if i >= authored:
+                into = "codex/renamed" if i == renamed_at else "agent/example"
+                commits[sha] = {"commit": {"message": f"Merge branch 'main' into {into}\n\nbody",
+                                           "committer": {"name": "GitHub"}},
+                                "parents": parents + [{"sha": "e" * 40}]}
+            else:
+                commits[sha] = {"commit": {"message": f"feat: work {i}",
+                                           "committer": {"name": "Author"}}, "parents": parents}
+            prev = sha
+        return prev, commits
+
+    def graph_api(commits: dict, update_code: int = 202, reads: list | None = None):
+        def fake(method: str, path: str, body: dict | None = None) -> tuple[int, object]:
+            if method == "GET" and "/commits/" in path:
+                sha = path.rsplit("/", 1)[1]
+                if reads is not None:
+                    reads.append(sha)
+                return (200, commits[sha]) if sha in commits else (404, "Not Found")
+            if method == "PUT" and path.endswith("/update-branch"):
+                return update_code, "denied" if update_code != 202 else {}
+            raise AssertionError(f"unexpected API call {method} {path}")
+        return fake
+
+    # 320 author commits + 2 updater merges: >250, the size GitHub's PR-commits list truncates.
+    head, commits = graph(320, 2, renamed_at=320)
+    reads: list = []
+    with patch.dict(globals(), {"api": graph_api(commits, reads=reads)}):
+        used = branch_update_count("example/repo", head, "main", 4)
+    ok = used == 2 and len(reads) == 3
     failures += not ok
-    print(f"{'PASS' if ok else 'FAIL'}  update budget persists in PR commits: {used}")
-    with patch.dict(globals(), {"get": lambda *_: [update] * 100}):
+    print(f"{'PASS' if ok else 'FAIL'}  322-commit PR readable: budget {used}, {len(reads)} reads")
+    # An author push on top of earlier updates resets the budget.
+    _, base_commits = graph(5, 3)
+    tip = "a" * 40
+    base_commits[tip] = {"commit": {"message": "fix: author push", "committer": {"name": "Author"}},
+                         "parents": [{"sha": f"{7:040x}"}]}
+    with patch.dict(globals(), {"api": graph_api(base_commits)}):
+        used = branch_update_count("example/repo", tip, "main", 4)
+    failures += used != 0
+    print(f"{'PASS' if used == 0 else 'FAIL'}  author push resets the budget: {used}")
+    with patch.dict(globals(), {"api": graph_api({})}):
         try:
-            branch_update_count("example/repo", 42, "main")
-        except ValueError:
-            print("PASS  truncated PR history fails closed")
+            branch_update_count("example/repo", "d" * 40, "main", 4)
+        except BudgetUnreadable:
+            print("PASS  unreadable head fails closed (BudgetUnreadable)")
         else:
             failures += 1
-            print("FAIL  truncated PR history passed")
+            print("FAIL  unreadable head passed")
 
     def fixture_get(path: str) -> object:
         if "/pulls?" in path:
             return [{"number": 42, "auto_merge": {"merge_method": "squash"}, "draft": False}]
         if path.endswith("/pulls/42"):
             return {"draft": False, "auto_merge": {"merge_method": "squash"}, "mergeable_state": "behind",
-                    "head": {"sha": "a" * 40, "ref": "agent/example",
+                    "head": {"sha": fixture_head, "ref": "agent/example",
                              "repo": {"full_name": "example/repo"}}}
-        if "/pulls/42/commits?" in path:
-            return []
         if "/commits/" in path:
             return {"commit": {"committer": {"date": old.isoformat()}}}
         raise AssertionError(f"unexpected API read {path}")
 
-    with patch.dict(globals(), {"required_policy": lambda *_: (["Gitleaks"], True),
-                                "get": fixture_get, "head_checks": lambda *_: {"Gitleaks": "success"}}):
-        for status, want in ((403, 1), (409, 0)):
-            with patch.dict(globals(), {"api": lambda *_args, code=status: (code, "denied")}):
-                output = io.StringIO()
-                with contextlib.redirect_stdout(output):
-                    result = run("example/repo", "main", 5, 0, False, 20)
-                ok = result == want and (("::error::FAILED" in output.getvalue()) == (status == 403))
-                failures += not ok
-                print(f"{'PASS' if ok else 'FAIL'}  update-branch HTTP {status} -> exit {result}")
+    def run_fixture(commits: dict, update_code: int, observed_head: str | None = "b" * 40,
+                    **kw) -> tuple[int, str]:
+        with patch.dict(globals(), {"required_policy": lambda *_: (["Gitleaks"], True),
+                                    "get": fixture_get, "head_checks": lambda *_: {"Gitleaks": "success"},
+                                    "api": graph_api(commits, update_code),
+                                    "observe_update": lambda *_: observed_head}):
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                result = run("example/repo", "main", 5, 0, False, 20, **kw)
+        return result, output.getvalue()
+
+    fixture_head, fresh = graph(320, 0)
+    for status, want in ((403, 1), (409, 0), (202, 0)):
+        result, out = run_fixture(fresh, status)
+        ok = result == want and (("::error::FAILED" in out) == (status == 403))
+        failures += not ok
+        print(f"{'PASS' if ok else 'FAIL'}  320-commit PR, update-branch HTTP {status} -> exit {result}")
+    fixture_head, spent = graph(3, 5)
+    result, out = run_fixture(spent, 500)  # 500 would fail the run if update-branch were called
+    ok = (result == 0 and "update budget exhausted (4/4" in out and "push to the branch" in out
+          and "::error::" not in out)
+    failures += not ok
+    print(f"{'PASS' if ok else 'FAIL'}  exhausted budget skips with unblock action, exit {result}")
+    fixture_head = "d" * 40
+    result, out = run_fixture({}, 500)
+    ok = result == 0 and "update budget unreadable" in out and "::error::" not in out
+    failures += not ok
+    print(f"{'PASS' if ok else 'FAIL'}  unreadable budget skips that PR, exit {result}")
+    fixture_head, fresh = graph(3, 0)
     with patch.dict(globals(), {"required_policy": lambda *_: (["Gitleaks"], True),
                                 "get": fixture_get, "head_checks": lambda *_: {}}):
         report = {"targets": []}
         with contextlib.redirect_stdout(io.StringIO()):
             result = run("example/repo", "main", 5, 0, False, 20, recovery_report=report)
         ok = result == 0 and report["targets"] == [{
-            "pr": 42, "head_sha": "a" * 40, "budget_validated": False,
-            "update_count": None, "history_error": False,
+            "pr": 42, "head_sha": fixture_head, "budget_validated": False,
+        "update_count": None, "history_error": False, "updated": False,
+        "updated_head_sha": None,
         }]
         failures += not ok
         print(f"{'PASS' if ok else 'FAIL'}  missing context has no target-history evidence")
-    with patch.dict(globals(), {"required_policy": lambda *_: (["Gitleaks"], True),
-                                "get": fixture_get, "head_checks": lambda *_: {"Gitleaks": "success"},
-                                "api": lambda *_args, **_kwargs: (202, {})}):
+    report = {"targets": []}
+    result, _ = run_fixture(fresh, 202, recovery_report=report)
+    ok = result == 0 and report["targets"] == [{
+        "pr": 42, "head_sha": fixture_head, "budget_validated": True,
+        "update_count": 0, "history_error": False, "updated": True,
+        "updated_head_sha": "b" * 40,
+    }]
+    failures += not ok
+    print(f"{'PASS' if ok else 'FAIL'}  exact target history produces recovery evidence")
+    report = {"targets": []}
+    result, _ = run_fixture({}, 500, recovery_report=report)
+    ok = result == 0 and report["targets"] == [{
+        "pr": 42, "head_sha": fixture_head, "budget_validated": False,
+        "update_count": None, "history_error": True, "updated": False,
+        "updated_head_sha": None,
+    }]
+    failures += not ok
+    print(f"{'PASS' if ok else 'FAIL'}  unreadable history cannot recover target")
+    report = {"targets": []}
+    result, _ = run_fixture(fresh, 202, observed_head=None, recovery_report=report)
+    ok = (result == 0 and report["targets"][0]["budget_validated"] is True
+          and report["targets"][0]["updated"] is False
+          and report["targets"][0]["updated_head_sha"] is None)
+    failures += not ok
+    print(f"{'PASS' if ok else 'FAIL'}  202 with unchanged head cannot recover target")
+    fixture_head, fresh = graph(3, 0)
+    for status, expected in ((409, 0), (403, 1)):
         report = {"targets": []}
-        with contextlib.redirect_stdout(io.StringIO()):
-            result = run("example/repo", "main", 5, 0, False, 20, recovery_report=report)
-        ok = result == 0 and report["targets"] == [{
-            "pr": 42, "head_sha": "a" * 40, "budget_validated": True,
-            "update_count": 0, "history_error": False,
-        }]
+        result, _ = run_fixture(fresh, status, recovery_report=report)
+        ok = (result == expected and len(report["targets"]) == 1
+              and report["targets"][0]["budget_validated"] is True
+              and report["targets"][0]["updated"] is False
+              and report["targets"][0]["updated_head_sha"] is None)
         failures += not ok
-        print(f"{'PASS' if ok else 'FAIL'}  exact target history produces recovery evidence")
-    def capped_get(path: str) -> object:
-        if "/pulls/42/commits?" in path:
-            return [update, update]
-        return fixture_get(path)
+        print(f"{'PASS' if ok else 'FAIL'}  rejected update {status} cannot recover target")
+    # Both histories can be read; the per-run cap selects only the first PR.
+    def two_pr_get(path: str) -> object:
+        if "/pulls?" in path:
+            return [{"number": n, "auto_merge": {"merge_method": "squash"}, "draft": False}
+                    for n in (41, 42)]
+        if path.endswith("/pulls/41") or path.endswith("/pulls/42"):
+            n = int(path.rsplit("/", 1)[1])
+            return {"draft": False, "auto_merge": {"merge_method": "squash"},
+                    "mergeable_state": "behind", "head": {
+                        "sha": fixture_head, "ref": f"agent/example-{n}",
+                        "repo": {"full_name": "example/repo"}}}
+        if "/commits/" in path:
+            return {"commit": {"committer": {"date": old.isoformat()}}}
+        raise AssertionError(f"unexpected API read {path}")
+    report = {"targets": []}
     with patch.dict(globals(), {"required_policy": lambda *_: (["Gitleaks"], True),
-                                "get": capped_get, "head_checks": lambda *_: {"Gitleaks": "success"},
-                                "api": lambda *_args, **_kwargs: (_ for _ in ()).throw(
-                                    AssertionError("exhausted budget called update-branch"))}):
-        output = io.StringIO()
-        with contextlib.redirect_stdout(output):
-            result = run("example/repo", "main", 5, 0, False, 20, max_updates_per_pr=2)
-        ok = result == 0 and "branch-history update budget exhausted (2/2)" in output.getvalue()
-        failures += not ok
-        print(f"{'PASS' if ok else 'FAIL'}  exhausted budget never calls update-branch")
+                                "get": two_pr_get, "head_checks": lambda *_: {"Gitleaks": "success"},
+                                "api": graph_api(fresh),
+                                "observe_update": lambda *_: "b" * 40}):
+        with contextlib.redirect_stdout(io.StringIO()):
+            result = run("example/repo", "main", 1, 0, False, 20, recovery_report=report)
+    ok = (result == 0 and [t["pr"] for t in report["targets"]] == [41, 42]
+          and all(t["budget_validated"] for t in report["targets"])
+          and [t["updated"] for t in report["targets"]] == [True, False])
+    failures += not ok
+    print(f"{'PASS' if ok else 'FAIL'}  validated but unselected PR cannot recover")
+    old_head, new_head = fixture_head, "b" * 40
+    def observed_api(_method: str, path: str, _body: dict | None = None):
+        if path.endswith("/pulls/42"):
+            return 200, {"head": {"sha": old_head}}
+        raise AssertionError(f"unexpected observation read {path}")
+    with patch.dict(globals(), {"api": observed_api}):
+        unchanged = observe_update("example/repo", 42, old_head, "main", 2, 0)
+    ok = unchanged is None
+    failures += not ok
+    print(f"{'PASS' if ok else 'FAIL'}  accepted update with unchanged head remains unproved")
+    def merged_api(_method: str, path: str, _body: dict | None = None):
+        if path.endswith("/pulls/42"):
+            return 200, {"head": {"sha": new_head}}
+        if path.endswith(f"/commits/{new_head}"):
+            return 200, {"commit": {"message": "Merge branch 'main' into agent/example",
+                                    "committer": {"name": "GitHub"}},
+                         "parents": [{"sha": old_head}, {"sha": "e" * 40}]}
+        raise AssertionError(f"unexpected observation read {path}")
+    with patch.dict(globals(), {"api": merged_api}):
+        observed = observe_update("example/repo", 42, old_head, "main", 2, 0)
+    ok = observed == new_head
+    failures += not ok
+    print(f"{'PASS' if ok else 'FAIL'}  child merge commit proves branch update")
     with patch.dict(globals(), {"required_policy": lambda *_: (["Gitleaks"], False),
                                 "get": lambda *_: (_ for _ in ()).throw(
                                     AssertionError("non-strict mode enumerated PRs"))}):
@@ -441,22 +558,69 @@ def parse_ts(s: str) -> dt.datetime:
     return dt.datetime.fromisoformat(s.replace("Z", "+00:00"))
 
 
-def branch_update_count(repo: str, number: int, branch: str) -> int:
-    """Count server-side base merges on this PR; fail closed on truncated history.
+class BudgetUnreadable(Exception):
+    """The update budget could not be established; that one PR is skipped, fail closed."""
 
-    The count lives in the PR commit graph, so a new workflow run cannot reset it.
-    Human branch updates count too: they consume the same CI budget.
+
+def is_updater_merge(commit: dict, branch: str) -> bool:
+    """A server-side `update-branch` merge: GitHub-committed, two parents, base merged in."""
+    body = commit.get("commit", {})
+    return (body.get("message", "").partition("\n")[0].startswith(f"Merge branch '{branch}' into ")
+            and body.get("committer", {}).get("name") == "GitHub"
+            and len(commit.get("parents", [])) == 2)
+
+
+def branch_update_count(repo: str, head_sha: str, branch: str, cap: int) -> int:
+    """Count the CONSECUTIVE base merges at the tip of the head, along first parents.
+
+    The budget is "CI restarts we caused since the author last pushed", read from the commit
+    graph itself (so a new workflow run cannot reset it) and bounded by construction: at most
+    cap + 1 commit reads, whatever the PR's size. The previous design listed
+    `pulls/{n}/commits`, which GitHub truncates (100 per page, 250 in total), so every long-lived
+    PR became permanently unreadable and failed the whole run. A commit that is not an updater
+    merge (the author pushed, or merged/rebased main themselves) ends the walk and so resets the
+    budget: that push is a deliberate human act, not an automated restart loop. Human presses of
+    "Update branch" produce the same server-side merge and count too.
     """
-    commits = get(f"/repos/{repo}/pulls/{number}/commits?per_page=100")
-    if not isinstance(commits, list) or len(commits) >= 100:
-        raise ValueError(f"#{number}: PR commit history is unreadable or truncated")
-    marker = f"Merge branch '{branch}' into "
-    return sum(
-        commit.get("commit", {}).get("message", "").partition("\n")[0].startswith(marker)
-        and commit.get("commit", {}).get("committer", {}).get("name") == "GitHub"
-        and len(commit.get("parents", [])) == 2
-        for commit in commits
-    )
+    used, sha = 0, head_sha
+    while used < cap:
+        code, commit = api("GET", f"/repos/{repo}/commits/{sha}")
+        if code != 200 or not isinstance(commit, dict) or not commit.get("parents"):
+            raise BudgetUnreadable(f"commit {sha[:9]} unreadable ({code})")
+        if not is_updater_merge(commit, branch):
+            break
+        used += 1
+        sha = commit["parents"][0]["sha"]
+    return used
+
+
+def observe_update(repo: str, number: int, old_sha: str, branch: str,
+                   attempts: int = 6, delay_seconds: float = 2) -> str | None:
+    """A 202 only queues the update; prove the PR head became its base-merge child."""
+    for attempt in range(attempts):
+        if attempt:
+            time.sleep(delay_seconds)
+        code, pr = api("GET", f"/repos/{repo}/pulls/{number}")
+        if code != 200 or not isinstance(pr, dict):
+            continue
+        new_sha = ((pr.get("head") or {}).get("sha") or "").lower()
+        if new_sha == old_sha or len(new_sha) != 40:
+            continue
+        code, commit = api("GET", f"/repos/{repo}/commits/{new_sha}")
+        if (code == 200 and isinstance(commit, dict) and is_updater_merge(commit, branch)
+                and commit["parents"][0].get("sha") == old_sha):
+            return new_sha
+        # Another actor moved the branch; it is not proof that our request completed.
+        return None
+    return None
+
+
+def write_summary(lines: list[str]) -> None:
+    path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not path or not lines:
+        return
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write("### Armed PRs the updater will not touch\n\n" + "\n".join(lines) + "\n")
 
 
 def run(repo: str, branch: str, max_updates: int, debounce: int, dry_run: bool,
@@ -475,6 +639,7 @@ def run(repo: str, branch: str, max_updates: int, debounce: int, dry_run: bool,
     armed = [p for p in pulls if p.get("auto_merge") and not p.get("draft")]
     print(f"{len(pulls)} open PR(s) against {branch}, {len(armed)} armed and non-draft")
     failed_updates = 0
+    stuck: list[str] = []
     entries, shas, budgets = [], {}, {}
     for p in armed:
         n = p["number"]
@@ -506,28 +671,35 @@ def run(repo: str, branch: str, max_updates: int, debounce: int, dry_run: bool,
                 ok, why = decide(pr, required, checks, now, committed, debounce)
         if ok:
             try:
-                used = branch_update_count(repo, n, branch)
-            except ValueError as error:
-                failed_updates += 1
+                used = branch_update_count(repo, sha, branch, max_updates_per_pr)
+            except BudgetUnreadable as error:
+                # Fail closed for THIS PR only; the others are still served and the run stays green.
                 budget_error = True
-                ok, why = False, f"unreadable update budget: {error}"
-                print(f"::error::{error}; refusing an unbudgeted branch update")
+                ok, why = False, f"update budget unreadable ({error}); skipped, retried next run"
+                print(f"::warning::#{n}: {why}")
+                stuck.append(f"- #{n}: {why}")
             else:
                 budgets[n] = used
                 if used >= max_updates_per_pr:
-                    ok, why = False, ("branch-history update budget exhausted "
-                                      f"({used}/{max_updates_per_pr}); manual resolution required")
+                    ok, why = False, (
+                        f"update budget exhausted ({used}/{max_updates_per_pr} consecutive base "
+                        "merges since the last author push); to unblock, push to the branch "
+                        "(merge or rebase main locally) or press 'Update branch' once by hand "
+                        "after checking why CI keeps losing the race")
+                    print(f"::warning::#{n}: {why}")
+                    stuck.append(f"- #{n}: {why}")
         since = (full["auto_merge"] or {}).get("enabled_at") or full.get("created_at") or ""
         print(f"CLASS  #{n} {sha[:9]}: {kind}{' (no build-matrix check runs: none selected or not started -> small)' if kind == 'unknown' else ''}"
               f"{', build in flight' if building else ''}, armed since {since or '?'}")
         entries.append({"number": n, "ok": ok, "why": why, "kind": kind, "building": building,
                         "waiting_since": since})
         if recovery_report is not None:
-            # This is evidence of reading the target's complete branch history, not evidence
-            # that a different PR was updated in the same successful workflow job.
+            # A successful generic updater job proves only the targets whose exact
+            # branch history was read; other PRs may have been skipped before that.
             recovery_report["targets"].append({
                 "pr": n, "head_sha": sha, "budget_validated": n in budgets,
                 "update_count": budgets.get(n), "history_error": budget_error,
+                "updated": False, "updated_head_sha": None,
             })
     updated = 0
     for n, ok, why in plan(entries, max_updates):
@@ -544,6 +716,14 @@ def run(repo: str, branch: str, max_updates: int, debounce: int, dry_run: bool,
         code, data = api("PUT", f"/repos/{repo}/pulls/{n}/update-branch", {"expected_head_sha": sha})
         if code == 202:
             updated += 1
+            if recovery_report is not None:
+                observed = observe_update(repo, n, sha, branch)
+                if observed:
+                    target = next(t for t in recovery_report["targets"] if t["pr"] == n)
+                    target["updated"] = True
+                    target["updated_head_sha"] = observed
+                else:
+                    print(f"::warning::#{n}: update accepted but target head transition unverified")
             print(f"UPDATE #{n} {sha[:9]}: {why} "
                   f"(budget {used + 1}/{max_updates_per_pr})")
         elif code == 409:
@@ -552,7 +732,9 @@ def run(repo: str, branch: str, max_updates: int, debounce: int, dry_run: bool,
         else:
             failed_updates += 1
             print(f"::error::FAILED #{n} {sha[:9]}: update-branch -> {code}: {data}")
-    print(f"done: {updated} update(s), {failed_updates} failed update(s)")
+    write_summary(stuck)
+    print(f"done: {updated} update(s), {failed_updates} failed update(s), "
+          f"{len(stuck)} PR(s) held by the budget")
     return 1 if failed_updates else 0
 
 
@@ -589,11 +771,15 @@ def main() -> int:
         "main_sha": os.environ.get("GITHUB_SHA", ""),
         "dry_run": a.dry_run,
         "complete": False,
+        "successful": False,
         "targets": [],
     }
     result = run(a.repo, a.branch, a.max_updates, a.debounce_minutes, a.dry_run,
                  a.full_fleet_threshold, a.max_updates_per_pr, recovery_report=report)
+    # Complete means the target inventory finished, even when an update was denied.
+    # Keep the exit verdict separate so a red run can still file its failure.
     report["complete"] = True
+    report["successful"] = result == 0
     if a.recovery_report:
         a.recovery_report.write_text(json.dumps(report, sort_keys=True) + "\n", encoding="utf-8")
     return result

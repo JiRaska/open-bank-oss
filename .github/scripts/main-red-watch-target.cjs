@@ -34,6 +34,8 @@ function withTargets(body, prs) {
 
 function validateEvidence(report, verdict) {
   if (!report || report.version !== 1 || report.complete !== true || report.dry_run !== false ||
+      typeof report.successful !== 'boolean' ||
+      (verdict.status === 'green' && report.successful !== true) ||
       report.run_id !== verdict.run_id || report.attempt !== verdict.attempt ||
       report.main_sha !== verdict.head_sha || !/^[a-f0-9]{40}$/.test(report.main_sha) ||
       !Array.isArray(report.targets)) throw new Error('Malformed or mismatched target evidence')
@@ -42,6 +44,11 @@ function validateEvidence(report, verdict) {
     if (!target || !Number.isSafeInteger(target.pr) || target.pr < 1 || seen.has(target.pr) ||
         !/^[a-f0-9]{40}$/.test(target.head_sha) ||
         typeof target.budget_validated !== 'boolean' || typeof target.history_error !== 'boolean' ||
+        typeof target.updated !== 'boolean' || (target.updated && !target.budget_validated) ||
+        (target.updated
+          ? (!/^[a-f0-9]{40}$/.test(target.updated_head_sha || '') ||
+             target.updated_head_sha === target.head_sha)
+          : target.updated_head_sha !== null) ||
         (target.budget_validated && (!Number.isSafeInteger(target.update_count) || target.update_count < 0)) ||
         (!target.budget_validated && target.update_count !== null) ||
         (target.budget_validated && target.history_error)) {
@@ -56,7 +63,7 @@ function targetsCovered(body, report) {
   const targets = targetPrs(body)
   if (!targets || !report) return false
   const byPr = new Map(report.targets.map(target => [target.pr, target]))
-  return targets.every(n => byPr.get(n)?.budget_validated === true)
+  return targets.every(n => byPr.get(n)?.budget_validated === true && byPr.get(n)?.updated === true)
 }
 
 async function loadTargetEvidence(github, repo, verdict) {

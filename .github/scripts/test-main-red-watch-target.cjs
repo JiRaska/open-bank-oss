@@ -24,12 +24,14 @@ const verdict = (run_id, status) => ({
   successful_jobs: status === 'green' ? [{ job, steps: [step] }] : [],
 })
 const report = (run_id, target) => ({
-  version: 1, run_id, attempt: 1, main_sha: sha, complete: true, dry_run: false,
+  version: 1, run_id, attempt: 1, main_sha: sha, complete: true, successful: true,
+  dry_run: false,
   targets: [target],
 })
-const target = (budget_validated, history_error = false) => ({
+const target = (budget_validated, history_error = false, updated = budget_validated) => ({
   pr: 12435, head_sha: 'f7220d2ac0000000000000000000000000000000',
-  budget_validated, update_count: budget_validated ? 3 : null, history_error,
+  budget_validated, update_count: budget_validated ? 3 : null, history_error, updated,
+  updated_head_sha: updated ? 'b'.repeat(40) : null,
 })
 
 async function main() {
@@ -44,8 +46,14 @@ async function main() {
     verdict(38260876231, 'green')), /mismatched/)
   assert.throws(() => validateEvidence({ ...report(38260876231, target(true)),
     targets: [target(true), target(true)] }, verdict(38260876231, 'green')), /Malformed target entry/)
+  assert.throws(() => validateEvidence(report(38260876231, target(false, false, true)),
+    verdict(38260876231, 'green')), /Malformed target entry/)
+  assert.throws(() => validateEvidence({ ...report(38260876231, target(true)), successful: false },
+    verdict(38260876231, 'green')), /mismatched/)
   assert.equal(targetsCovered(withTargets('issue body', [12435]), report(38260876231, target(false))), false)
   assert.equal(targetsCovered(withTargets('issue body', [12435]), report(38260876231, target(true))), true)
+  assert.equal(targetsCovered(withTargets('issue body', [12435]),
+    report(38260876231, target(true, false, false))), false)
   assert.equal(targetsCovered('legacy issue', report(38260876231, target(true))), false)
 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'main-red-target-test-'))
@@ -101,6 +109,10 @@ async function main() {
     async () => report(38260876231, target(false)))
   assert.equal(issues[0].state, 'open')
   assert.deepEqual(targetPrs(issues[0].body), [12435])
+  // The target history was read, but another PR consumed the update cap.
+  await applyVerdict(github, context, verdict(38260876232, 'green'),
+    async () => report(38260876232, target(true, false, false)))
+  assert.equal(issues[0].state, 'open')
   // A report from a later attempt that did validate the target's history may close it.
   await applyVerdict(github, context, verdict(38270000000, 'green'),
     async () => report(38270000000, target(true)))
