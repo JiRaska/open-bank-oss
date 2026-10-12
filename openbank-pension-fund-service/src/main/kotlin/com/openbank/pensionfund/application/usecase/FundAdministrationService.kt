@@ -6,8 +6,10 @@ package com.openbank.pensionfund.application.usecase
 
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.pensionfund.application.port.NotFoundException
+import com.openbank.pensionfund.application.port.PensionFundMetrics
 import com.openbank.pensionfund.application.port.PensionFundStore
 import com.openbank.pensionfund.application.port.StoreChanges
+import com.openbank.pensionfund.application.port.StrategyChangeEvent
 import com.openbank.pensionfund.domain.model.AllocationTarget
 import com.openbank.pensionfund.domain.model.Fund
 import com.openbank.pensionfund.domain.model.FundStatus
@@ -29,6 +31,7 @@ class FundAdministrationService(
     private val clock: Clock,
     @ConfigProperty(name = "openbank.pension-fund.strategy-change.minimum-notice-days", defaultValue = "30")
     private val minimumNoticeDays: Long,
+    private val metrics: PensionFundMetrics,
 ) {
     private fun today(): LocalDate = LocalDate.ofInstant(clock.instant(), ZoneOffset.UTC)
 
@@ -135,6 +138,7 @@ class FundAdministrationService(
         val proposed = strategy.apply(change, clock.instant())
         requireActiveFunds(proposed.fundIds)
         store.commit(StoreChanges(strategyChanges = listOf(change)))
+        metrics.strategyChange(StrategyChangeEvent.SUBMITTED)
         return change
     }
 
@@ -146,12 +150,14 @@ class FundAdministrationService(
     suspend fun approveChange(id: UUID, actor: String): StrategyChange {
         val approved = strategyChange(id).approve(actor, clock.instant(), today(), minimumNoticeDays)
         store.commit(StoreChanges(strategyChanges = listOf(approved)))
+        metrics.strategyChange(StrategyChangeEvent.APPROVED)
         return approved
     }
 
     suspend fun rejectChange(id: UUID, actor: String): StrategyChange {
         val rejected = strategyChange(id).reject(actor, clock.instant())
         store.commit(StoreChanges(strategyChanges = listOf(rejected)))
+        metrics.strategyChange(StrategyChangeEvent.REJECTED)
         return rejected
     }
 
@@ -163,6 +169,7 @@ class FundAdministrationService(
         val strategy = strategy(change.strategyId).apply(change, now)
         requireActiveFunds(strategy.fundIds)
         store.commit(StoreChanges(strategies = listOf(strategy), strategyChanges = listOf(applied)))
+        metrics.strategyChange(StrategyChangeEvent.APPLIED)
         return strategy
     }
 
