@@ -230,11 +230,15 @@ class SupplyChainTest(unittest.TestCase):
             elif mutation == 'unbounded-verifier':
                 doc['jobs']['verification-metadata']['if'] = 'always()'
             elif mutation == 'missing-shard-verdict-passes':
-                doc['jobs']['all-green']['steps'][0]['run'] = (
+                verdict = next(step for step in doc['jobs']['all-green']['steps']
+                               if step.get('name') == 'Verify no service failed')
+                verdict['run'] = (
                     'if [ "${{ needs.changes.result }}" != "success" ]; then '
                     'echo "scope is unknown"; exit 1; fi')
             else:
-                doc['jobs']['all-green']['steps'][0]['run'] = 'echo green'
+                verdict = next(step for step in doc['jobs']['all-green']['steps']
+                               if step.get('name') == 'Verify no service failed')
+                verdict['run'] = 'echo green'
             with self.subTest(mutation=mutation):
                 self.assertTrue(guard.findings('services-ci.yml', doc))
 
