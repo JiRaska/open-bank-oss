@@ -68,8 +68,9 @@ V produkčním profilu vyžaduje TLS listener na portu 8443 důvěryhodný klien
 obyčejný HTTP aplikační listener zůstává dostupný pro nakonfigurované volající uvnitř clusteru.
 Pro `/api/*` na obou listenerech musí volající navíc předložit OIDC bearer token. Klientský
 certifikát naváže TLS spojení, ale sám o sobě neautentizuje požadavek na API. Nastavení
-`bearer-only` vybírá autentizační mechanismus; role a scopes endpointu i samostatně
-nakonfigurované autorizační kontroly platí dál. Úspěšný mTLS handshake ani toto nastavení
+`bearer-only` vyžaduje bearer i na nově přidané trase API bez bezpečnostní anotace; role a
+scopes endpointu i samostatně nakonfigurované autorizační kontroly platí dál. Úspěšný mTLS
+handshake ani toto nastavení
 cesty nedokazují, že byla vynucena konkrétní autorizační politika.
 
 ## Health checky

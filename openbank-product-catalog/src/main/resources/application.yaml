@@ -175,12 +175,14 @@ openbank:
       # listeners, by the OIDC bearer OPA decides on, so /api/* accepts the bearer mechanism ONLY; the
       # certificate stays transport authentication. Measured before this: a fleet-CA certificate with no
       # bearer reached the API as an authenticated principal (403 from authz, not 401).
+      # `authenticated` also protects a future /api/* route with no JAX-RS security annotation;
+      # `permit` would select the bearer mechanism but allow that route anonymously.
       # ProductCatalogListenerAuthParityIT holds both listeners to it with the production listener shape.
       auth:
         permission:
           bearer-only:
             paths: /api/*
-            policy: permit
+            policy: authenticated
             auth-mechanism: bearer
 
 "%dev":

@@ -66,8 +66,9 @@ In the production profile, the TLS listener on port 8443 requires a trusted clie
 the plain HTTP application listener remains available for its configured in-cluster callers.
 For `/api/*` on either listener, the caller must also present an OIDC bearer token. A client
 certificate establishes the TLS connection but does not authenticate an API request by itself.
-The bearer-only route permission selects the authentication mechanism; endpoint roles, scopes
-and any separately configured authorization checks still apply. Do not treat successful mTLS
+The bearer-only route permission requires a bearer even for a newly added API route without
+security annotations; endpoint roles, scopes and any separately configured authorization checks
+still apply. Do not treat successful mTLS
 handshake or this route setting as evidence that a particular authorization policy was enforced.
 
 ## Health checks
