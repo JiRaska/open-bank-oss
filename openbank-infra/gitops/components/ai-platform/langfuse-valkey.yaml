@@ -115,9 +115,14 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data
+          # TCP alone reports Ready even if AUTH rejects every client.
+          # Keep the password in an environment variable, not probe arguments.
           readinessProbe:
-            tcpSocket:
-              port: redis
+            exec:
+              command:
+                - /bin/sh
+                - -ec
+                - 'test "$(VALKEYCLI_AUTH="$VALKEY_PASSWORD" valkey-cli PING)" = PONG'
             initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:

@@ -1226,6 +1226,22 @@ gates:
     run: |
       python3 .github/scripts/check-gitops-secret-refs.py
 
+  # A Valkey restart discards the single-replica emptyDir BullMQ queue. The
+  # litellm Application auto-syncs the entire directory, so a same-PR pause can
+  # race the new Deployment. Require a prior, separately synced manual mode.
+  - id: langfuse-valkey-auth-cutover
+    name: "Langfuse Valkey AUTH cutover requires a prior Argo auto-sync pause"
+    group: gitops
+    mode: enforced
+    when: pull_request
+    needs_base: required
+    budget_seconds: 5
+    selftest: python3 .github/scripts/check-langfuse-valkey-auth-cutover.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-langfuse-valkey-auth-cutover.py"]
+    run: |
+      python3 .github/scripts/check-langfuse-valkey-auth-cutover.py --base "${PR_DIFF_BASE}"
+
   # The in-cluster twin of external-feed-declaration-drift: a hostname naming another Service in
   # this cluster is stubbed by the unit test, overridden to localhost by the IT and never sent by
   # a consumer pact, so it is wrong only once a pod dials it. openbank-analytics-sink pointed at
