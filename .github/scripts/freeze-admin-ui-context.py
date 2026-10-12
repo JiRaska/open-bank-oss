@@ -40,6 +40,14 @@ def is_generated_sbom(relative: Path) -> bool:
             and relative.parts[1:] == ("build", "reports", "bom.json"))
 
 
+def context_path(relative: Path) -> Path:
+    # Root .dockerignore excludes every build/ directory. Stage only the
+    # allowlisted report under a flat path that BuildKit actually receives.
+    if is_generated_sbom(relative):
+        return Path("admin-ui-sbom-input") / relative.parts[0] / "bom.json"
+    return relative
+
+
 def paths(root: Path) -> set[Path]:
     proc = subprocess.run(["git", "ls-files", "-z"], cwd=root, check=True, capture_output=True)
     found = {Path(os.fsdecode(p)) for p in proc.stdout.split(b"\0") if p}
@@ -128,26 +136,30 @@ def freeze(root: Path, output: Path, manifest: Path) -> dict:
     entries = []
     for relative in sorted(paths(root), key=str):
         source = root / relative
+        staged = context_path(relative)
         if source.is_symlink():
             link = os.readlink(source)
             resolved = (source.parent / link).resolve()
             if not resolved.is_relative_to(root):
                 raise ValueError(f"external symlink in build context: {relative}")
             require_committed_content(relative, os.fsencode(link), blobs, object_format)
-            target = output / relative
+            target = output / staged
             target.parent.mkdir(parents=True, exist_ok=True)
             target.symlink_to(link)
-            entries.append({"path": relative.as_posix(), "symlink": link})
+            entries.append({"path": staged.as_posix(), "symlink": link})
             continue
         if not source.is_file():
             raise ValueError(f"missing tracked build input: {relative}")
-        target = output / relative
+        target = output / staged
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
         content = target.read_bytes()
         require_committed_content(relative, content, blobs, object_format)
-        entries.append({"path": relative.as_posix(), "sha256": hashlib.sha256(content).hexdigest(),
-                        "size": len(content), "executable": bool(target.stat().st_mode & 0o111)})
+        entry = {"path": staged.as_posix(), "sha256": hashlib.sha256(content).hexdigest(),
+                 "size": len(content), "executable": bool(target.stat().st_mode & 0o111)}
+        if staged != relative:
+            entry["sourcePath"] = relative.as_posix()
+        entries.append(entry)
     require_clean_source_inputs(root)
     source_sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, check=True,
                                 capture_output=True, text=True).stdout.strip()

@@ -76,9 +76,12 @@ class AdminUiImageInputsTest(unittest.TestCase):
                              '{"completed":true}\n')
             self.assertTrue(any(item["path"] == "openbank-admin-ui/client-test-evidence/run.json"
                                 for item in inventory))
-            sbom_path = "openbank-notification-service/build/reports/bom.json"
+            sbom_path = "admin-ui-sbom-input/openbank-notification-service/bom.json"
             self.assertEqual((context / sbom_path).read_bytes(), sbom.read_bytes())
-            self.assertTrue(any(item["path"] == sbom_path for item in inventory))
+            self.assertFalse((context / "openbank-notification-service/build/reports/bom.json").exists())
+            self.assertTrue(any(item["path"] == sbom_path and
+                                item["sourcePath"] == "openbank-notification-service/build/reports/bom.json"
+                                for item in inventory))
             self.assertEqual(next(item["sha256"] for item in inventory if item["path"] == sbom_path),
                              hashlib.sha256(sbom.read_bytes()).hexdigest())
             for name in ("governance.json", "cost-footprints.json", "cluster-topology.json"):
