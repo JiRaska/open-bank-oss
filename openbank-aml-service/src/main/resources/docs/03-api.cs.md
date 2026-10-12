@@ -23,10 +23,12 @@ Decision endpoint navíc nese `@Authorize(action = "amlCase.updateDecision", res
 
 ### Produkční mTLS listener
 
-`/api/*` přijímá OIDC bearer autentizaci na běžném HTTP listeneru i na mTLS
-listeneru. Důvěryhodný klientský certifikát ověřuje pouze TLS spojení; volající
-musí poslat i bearer token. Požadavek s certifikátem bez bearer tokenu vrací 401,
-zatímco bez důvěryhodného certifikátu selže TLS handshake ještě před HTTP.
+API AML případů a jeho podcesty vyžadují OIDC bearer autentizaci na běžném HTTP
+listeneru i na mTLS listeneru, i kdyby nová cesta postrádala anotaci role.
+Důvěryhodný klientský certifikát ověřuje pouze TLS spojení; volající musí poslat
+i bearer token. Požadavek s certifikátem bez bearer tokenu vrací 401, zatímco bez
+důvěryhodného certifikátu selže TLS handshake ještě před HTTP. Veřejné informační
+a konfigurační endpointy a zdravotní sondy zůstávají dostupné bez bearer tokenu.
 Požadavky na role endpointů a autorizační kontroly OPA platí i nadále.
 
 ## Idempotence

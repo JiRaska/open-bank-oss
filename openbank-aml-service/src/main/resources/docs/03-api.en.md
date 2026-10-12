@@ -23,11 +23,13 @@ The decision endpoint additionally carries `@Authorize(action = "amlCase.updateD
 
 ### Production mTLS listener
 
-`/api/*` accepts OIDC bearer authentication on both the plain HTTP listener and
-the mTLS listener. A trusted client certificate authenticates the TLS connection
-only; callers must also send their bearer token. A certificate without a bearer
-token receives 401, while a missing trusted certificate fails the TLS handshake
-before HTTP. The endpoint roles and OPA authorization checks still apply.
+The AML case API and its subpaths require OIDC bearer authentication on both the
+plain HTTP listener and the mTLS listener, even if a new route omits a role annotation.
+A trusted client certificate authenticates the TLS connection only; callers must
+also send their bearer token. A certificate without a bearer token receives 401,
+while a missing trusted certificate fails the TLS handshake before HTTP. Shared
+public build-info/config endpoints and management health remain reachable without a
+bearer. The endpoint roles and OPA authorization checks still apply.
 
 ## Idempotence
 
