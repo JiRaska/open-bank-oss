@@ -142,6 +142,9 @@ def check(clusters: list[dict], tf_text: str) -> tuple[list[str], int]:
     if not trust or not CLUSTER_TAG_CONDITION_RE.search(trust.group(1)):
         findings.append("db-backups.tf: backup role trust must require the exact EKS "
                         "cluster ARN request tag")
+    if trust and len(re.findall(r'(?m)^\s*statement\s*\{', trust.group(1))) != 1:
+        findings.append("db-backups.tf: backup role trust must have exactly one "
+                        "statement so an unrestricted alternative cannot assume it")
     if re.search(r'\bdisable_session_tags\s*=\s*true\b', tf_text):
         findings.append("db-backups.tf: disabled Pod Identity session tags break backup scope")
 
@@ -220,6 +223,9 @@ def self_test() -> int:
         good_tf + 'c = { namespace = "other", sa = "ledger-db" }\n', True)
     run("wrong cluster tag fails", [ok],
         good_tf.replace('aws:RequestTag/eks-cluster-arn', 'aws:RequestTag/eks-cluster-name'), True)
+    run("unrestricted alternate trust statement fails", [ok],
+        good_tf.replace('  }\n}\n',
+                        '  }\n  statement { actions = ["sts:AssumeRole"] }\n}\n', 1), True)
     run("disabled session tags fail", [ok],
         good_tf + 'disable_session_tags = true\n', True)
     drill = {"name": "ledger-db-drill", "namespace": "ledger", "file": "f", "dest": "",
