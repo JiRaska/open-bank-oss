@@ -21,6 +21,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatCode
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
+import java.lang.ref.Reference
 import java.util.UUID
 
 /** Stands in for a real, wired adapter: the name must not match the `NoOp`/`Logging` prefixes. */
@@ -57,6 +58,10 @@ private class TemporalStubOriginationWorkflowPort : OriginationWorkflowPort {
  * `LedgerAdapterBindingIT` proves the shipped configuration itself binds the real adapter.
  */
 class LendingAdapterBindingVerifierTest {
+
+    private companion object {
+        const val GC_ROUNDS = 5
+    }
 
     private fun verifier(
         ledger: LedgerPostingPort,
@@ -179,7 +184,10 @@ class LendingAdapterBindingVerifierTest {
     @Test
     fun `publishes a gauge naming which implementation is bound, per property`() {
         val meters = SimpleMeterRegistry()
-        verifier(
+        // Micrometer holds a gauge's state object WEAKLY; the verifier owns the AtomicIntegers. In
+        // production ArC keeps the @ApplicationScoped verifier alive; here only this local does, so
+        // it must stay reachable until the last read or a GC turns every value into NaN (#12213).
+        val bindingVerifier = verifier(
             ledger = RestStubLedgerPort(),
             credit = NoOpBorrowerCreditPort(),
             events = JpaStubLoanEventEmitter(),
@@ -187,6 +195,7 @@ class LendingAdapterBindingVerifierTest {
             creditBackend = "none",
             meters = meters,
         )
+        repeat(GC_ROUNDS) { System.gc() } // the CI failure, made deterministic
 
         val gauges = meters.find("openbank_lending_adapter_real_backend_bound").gauges()
         assertThat(gauges).hasSize(4) // ledger, borrower-credit, outbox, and the workflow port (#6085)
@@ -198,6 +207,7 @@ class LendingAdapterBindingVerifierTest {
         val creditGauge = gauges.single { it.id.getTag("property") == "lending.borrower-credit.backend" }
         assertThat(creditGauge.value()).isEqualTo(0.0)
         assertThat(creditGauge.id.getTag("implementation")).isEqualTo("NoOpBorrowerCreditPort")
+        Reference.reachabilityFence(bindingVerifier)
     }
 
     // --- #6085: the same mechanism on openbank.temporal.enabled ---------------------------------
