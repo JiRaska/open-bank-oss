@@ -1,32 +1,64 @@
 openapi: 3.0.3
 info:
   title: OpenBank Communication Service
-  # major == openbank.api.version == URL /api/v1 (ADR-0048).
-  # 1.0.0 -> 1.1.0 (#9602, MERGED): additive — the ADR-0285 phase 3 playbook layer.
-  # 1.1.0 -> 1.2.0 (#9633, this): additive — the ADR-0285 D4 golden-set documents.
-  # The sequencing both files recorded has played out: #9602 landed at 1.1.0 (live main), so 1.2.0
-  # is the next free minor rather than a collision. Neither branch could stay at 1.0.0 — main
-  # holds it, and `openapi-version-not-taken` reads the base tip, so an unchanged version on an
-  # additive change fails that gate and `api-contract-gate` both.
-  version: 1.3.0
+  # v2 style writes require a base published version and reject stale publication (#12283).
+  # v1 published-style reads remain available for existing consumers.
+  version: 2.0.0
 paths:
-  /api/v1/personas/{personaKey}/style-versions:
+  /api/v2/personas/{personaKey}/editor-state:
+    get:
+      summary: Atomically read the current style and durable publication generation for an editor
+      description: >-
+        The generation is the greatest ever published version, including a retired version;
+        zero means this persona has never published a style. Editors submit this value as
+        basePublishedVersion. The published field is null after explicit retirement.
+      parameters: [{name: personaKey, in: path, required: true, schema: {type: string}}]
+      responses:
+        "200":
+          description: Editor snapshot
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [basePublishedVersion, published]
+                properties:
+                  basePublishedVersion: {type: integer, minimum: 0}
+                  published: {type: object, nullable: true}
+        "404": {description: Unknown persona}
+  /api/v2/personas/{personaKey}/style-versions:
     post:
       summary: Draft a new style version for a persona (D3 lint runs before persistence)
       description: Optional uiMessages map contains approved mobile copy keys prefixed cs. or en., up to 332 plain-text values of 240 characters. Only customer-copilot supports UI copy. Omitted keys use bundled client defaults. The field is persisted and returned in the published style; the existing four-eyes publication applies.
       parameters: [{name: personaKey, in: path, required: true, schema: {type: string}}]
-      responses: {"201": {description: Created}, "400": {description: Rejected by lint or validation}}
-  /api/v1/personas/style-versions/{id}/submit:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tone, formality, formOfAddress, basePublishedVersion]
+              properties:
+                tone: {type: string}
+                formality: {type: string}
+                formOfAddress: {type: string}
+                maxLength: {type: integer, nullable: true}
+                preferredTerms: {type: object, additionalProperties: {type: string}}
+                forbiddenTerms: {type: array, items: {type: string}}
+                signature: {type: string, nullable: true}
+                basePublishedVersion: {type: integer, minimum: 0, description: "Latest published or retired styleVersion observed by the editor; 0 before the first publication. Must still match when the draft is created."}
+                uiMessages: {type: object, additionalProperties: {type: string}}
+      responses: {"201": {description: Created with basePublishedVersion}, "400": {description: Rejected by lint or validation}, "409": {description: Draft base does not match the current publication generation; no draft is persisted}}
+  /api/v2/personas/style-versions/{id}/submit:
     post:
       summary: DRAFT -> IN_REVIEW, the maker's declaration this is ready for a checker
       parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
       responses: {"200": {description: Submitted}, "409": {description: Conflict}}
-  /api/v1/personas/style-versions/{id}/publish:
+  /api/v2/personas/style-versions/{id}/publish:
     post:
       summary: Publish (four-eyes-gated, commstyle.publish; the draft's own maker is refused)
       parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
-      responses: {"200": {description: Published}, "202": {description: Paused pending a checker decision}, "409": {description: Conflict}}
-  /api/v1/personas/style-versions/{id}/retire:
+      responses: {"200": {description: Published}, "202": {description: Paused pending a checker decision}, "409": {description: Draft base no longer matches the published style; current version remains published}}
+  /api/v2/personas/style-versions/{id}/retire:
     post:
       summary: Retire a still-published version without a replacement
       parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
@@ -34,6 +66,11 @@ paths:
   /api/v1/personas/{personaKey}/published:
     get:
       summary: The composed, published style a consumer caches (D5)
+      parameters: [{name: personaKey, in: path, required: true, schema: {type: string}}]
+      responses: {"200": {description: The published style}, "404": {description: No published version}}
+  /api/v2/personas/{personaKey}/published:
+    get:
+      summary: The composed, published style for v2 editors
       parameters: [{name: personaKey, in: path, required: true, schema: {type: string}}]
       responses: {"200": {description: The published style}, "404": {description: No published version}}
   /api/v1/communications/approvals:
