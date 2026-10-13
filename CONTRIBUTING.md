@@ -128,6 +128,13 @@ resource to that test. For a resource owned by one test class, use
 inherited tests and profile resources first. Keep resources shared by several tests
 grouped, including their messaging and TLS setup.
 
+Resources also contribute configuration overrides, even when they start no
+container. Keep overrides within the tests that need them; inspect other tests
+for undeclared dependencies before narrowing their scope. If two resource
+implementations use equivalent images, lifecycle and configuration, reuse the
+existing shared implementation and preserve its evidence recording. Count every
+container type: a new boot group can save one service while restarting another.
+
 Verify the complete module test suite before and after changing resource scope.
 Compare every test outcome, preserving repeated parameterized cases, and count
 physical container starts from verbose logs. Fewer starts alone do not prove lower
