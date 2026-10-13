@@ -194,6 +194,13 @@ starts the required containers automatically:
 - **`fun foo() = runBlocking { }` drops tests silently.** JUnit 5 requires `void`-returning test
   methods. Always write `fun foo(): Unit = runBlocking { }` or use the Kotlin coroutine test runner.
 
+- **A matched diagnostic can fail under `pipefail`.** In `printf '%s' "$output" | grep -q ...`,
+  grep exits after the match; a producer still writing a large report can receive SIGPIPE,
+  making the pipeline return 141 and selecting the no-match branch. For literal text, use
+  `[[ "$output" == *"literal"* ]]`; for line-oriented regexes, use `grep -qE 'pattern' <<< "$output"`.
+  Preserve the matching vocabulary and verdict policy. Regression fixtures must include large
+  synthetic matching and nonmatching output; short fixtures cannot expose this defect.
+
 ## Workflow
 
 ```
