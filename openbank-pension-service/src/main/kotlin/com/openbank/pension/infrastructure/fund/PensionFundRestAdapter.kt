@@ -6,6 +6,7 @@ package com.openbank.pension.infrastructure.fund
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.openbank.libs.web.SyntheticTaintClientFilter
+import com.openbank.pension.application.port.out.ContributionOrigin
 import com.openbank.pension.application.port.out.FundAdministrationPort
 import com.openbank.pension.application.port.out.FundHolding
 import com.openbank.pension.application.port.out.FundHoldings
@@ -145,6 +146,7 @@ data class StrategyDto(
     val name: String,
     val status: String? = null,
     val allocations: List<AllocationTargetDto> = emptyList(),
+    val version: Int? = null,
 )
 
 /**
@@ -223,7 +225,21 @@ class PensionFundRestAdapter : FundAdministrationPort {
 
                 override suspend fun transactions(contractId: UUID) = client.transactions(contractId)
             },
-            { id -> contracts.findById(id)?.strategyOn(LocalDate.now(clock))?.strategyCode },
+            { id, selectedOn ->
+                contracts.findById(id)?.let { contract ->
+                    contract.strategyOn(selectedOn)?.let { election ->
+                        SubscriptionElection(
+                            contract.providerEntityId,
+                            contract.packVersion,
+                            contract.schedule.currency,
+                            election.strategyCode,
+                            election.effectiveFrom,
+                            election.electedAt,
+                            selectedOn,
+                        )
+                    }
+                }
+            },
             clock,
             plans,
         )
@@ -235,8 +251,13 @@ class PensionFundRestAdapter : FundAdministrationPort {
 
     override suspend fun transactions(contractId: UUID) = logic.transactions(contractId)
 
-    override suspend fun subscribe(contractId: UUID, amount: BigDecimal, currency: String, idempotencyKey: String) =
-        logic.subscribe(contractId, amount, currency, idempotencyKey)
+    override suspend fun subscribe(
+        contractId: UUID,
+        amount: BigDecimal,
+        currency: String,
+        idempotencyKey: String,
+        origin: ContributionOrigin?,
+    ) = logic.subscribe(contractId, amount, currency, idempotencyKey, origin)
 
     override suspend fun redeem(contractId: UUID, amount: BigDecimal, currency: String, idempotencyKey: String) =
         logic.redeem(contractId, amount, currency, idempotencyKey)
@@ -248,7 +269,7 @@ class PensionFundRestAdapter : FundAdministrationPort {
 /** The adapter's decisions, free of CDI so they are unit-tested against a fake register. */
 class PensionFundOrders(
     private val client: FundRegister,
-    private val strategyOf: suspend (UUID) -> String?,
+    private val electionOf: suspend (UUID, LocalDate) -> SubscriptionElection?,
     private val clock: Clock,
     private val plans: SubscriptionPlanRepository,
 ) : FundAdministrationPort {
@@ -293,34 +314,17 @@ class PensionFundOrders(
         amount: BigDecimal,
         currency: String,
         idempotencyKey: String,
+        origin: ContributionOrigin?,
     ): String {
         require(amount.signum() > 0) { "subscription amount must be positive" }
+        require(origin == null || idempotencyKey == "contribution:${origin.paymentId}") {
+            "contribution identity does not match the subscription key"
+        }
         // Resolve an existing plan before consulting today's strategy: a replay belongs to the
         // original decision date even when the election or fund allocation has since changed.
         val saved = plans.find(contractId, idempotencyKey)
-        val plan = if (saved != null) {
-            saved
-        } else {
-            // Previously persisted LEGACY plans can have four decimal places; only a new atomic
-            // batch requires an exactly representable two-decimal instruction.
-            val exactAmount = amount.setScale(MONEY_SCALE, RoundingMode.UNNECESSARY)
-            val code = strategyOf(contractId) ?: refuse("contract $contractId has no elected strategy")
-            val strategy = client.strategies().firstOrNull { it.name == code && it.status != "CLOSED" }
-                ?: refuse("strategy '$code' is not registered in pension-fund-service")
-            val legs = split(exactAmount, strategy.allocations).map { (fundId, legAmount) ->
-                SubscriptionLeg(fundId, legAmount)
-            }
-            plans.insertIfAbsent(
-                SubscriptionPlan(
-                    contractId,
-                    idempotencyKey,
-                    exactAmount,
-                    currency,
-                    legs,
-                    SubscriptionPlacementMode.BATCH,
-                ),
-            )
-        }.requireSameInstruction(amount, currency)
+        val plan = (saved ?: createPlan(contractId, amount, currency, idempotencyKey, origin))
+            .requireSameInstruction(amount, currency, origin)
         val ids = when (plan.placementMode) {
             SubscriptionPlacementMode.BATCH -> client.placeSubscriptionBatch(
                 contractId,
@@ -328,20 +332,78 @@ class PensionFundOrders(
                 SubscriptionBatchRequestDto(
                     plan.amount,
                     plan.currency,
-                    plan.legs.map { (fundId, legAmount) ->
-                        SubscriptionBatchLegDto(fundId, legAmount, legKey(idempotencyKey, fundId))
+                    plan.legs.map { leg ->
+                        SubscriptionBatchLegDto(
+                            leg.fundId,
+                            leg.amount,
+                            leg.orderKey ?: legKey(idempotencyKey, leg.fundId),
+                        )
                     },
                 ),
             ).map { it.id.toString() }
-            SubscriptionPlacementMode.LEGACY -> plan.legs.map { (fundId, legAmount) ->
+            SubscriptionPlacementMode.LEGACY -> plan.legs.map { leg ->
                 client.placeOrder(
                     contractId,
-                    legKey(idempotencyKey, fundId),
-                    OrderRequestDto(fundId, "SUBSCRIBE", amount = legAmount),
+                    leg.orderKey ?: legKey(idempotencyKey, leg.fundId),
+                    OrderRequestDto(leg.fundId, "SUBSCRIBE", amount = leg.amount),
                 ).id.toString()
             }
         }
         return ids.joinToString(",").takeIf { it.length <= MAX_REF } ?: "${ids.first()}+${ids.size - 1}"
+    }
+
+    private suspend fun createPlan(
+        contractId: UUID,
+        amount: BigDecimal,
+        currency: String,
+        idempotencyKey: String,
+        origin: ContributionOrigin?,
+    ): SubscriptionPlan {
+        // Previously persisted LEGACY plans can have four decimal places; only a new atomic
+        // batch requires an exactly representable two-decimal instruction.
+        val exactAmount = amount.setScale(MONEY_SCALE, RoundingMode.UNNECESSARY)
+        val selectedOn = LocalDate.now(clock)
+        val election = electionOf(contractId, selectedOn)
+            ?: refuse("contract $contractId has no elected strategy")
+        if (currency != election.contractCurrency) {
+            refuse("subscription currency $currency differs from contract currency ${election.contractCurrency}")
+        }
+        val strategy = client.strategies().firstOrNull {
+            it.name == election.strategyCode && it.status != "CLOSED"
+        } ?: refuse("strategy '${election.strategyCode}' is not registered in pension-fund-service")
+        val version = strategy.version ?: refuse("strategy '${election.strategyCode}' has no version")
+        val legs = split(exactAmount, strategy.allocations).map { (fundId, legAmount) ->
+            SubscriptionLeg(fundId, legAmount, legKey(idempotencyKey, fundId))
+        }
+        val independentlyRounded = strategy.allocations.filter { it.weight.signum() > 0 }
+            .fold(BigDecimal.ZERO) { sum, target ->
+                sum + exactAmount.multiply(target.weight).setScale(MONEY_SCALE, RoundingMode.HALF_EVEN)
+            }
+        return plans.insertIfAbsent(
+            SubscriptionPlan(
+                contractId,
+                idempotencyKey,
+                exactAmount,
+                currency,
+                legs,
+                SubscriptionPlacementMode.BATCH,
+                SubscriptionDecision(
+                    origin,
+                    election.providerEntityId,
+                    election.packVersion,
+                    election.selectedOn,
+                    election.effectiveFrom,
+                    election.electedAt,
+                    election.strategyCode,
+                    strategy.id,
+                    version,
+                    currency,
+                    election.contractCurrency,
+                    RoundingMode.HALF_EVEN.name,
+                    exactAmount - independentlyRounded,
+                ),
+            ),
+        )
     }
 
     override suspend fun redeem(
@@ -394,10 +456,15 @@ class PensionFundOrders(
                     money - allocated
                 } else {
                     money.multiply(t.weight).divide(weightSum, MONEY_SCALE, RoundingMode.HALF_EVEN)
+                        .min(money - allocated)
                 }
                 allocated += leg
                 t.fundId to leg
-            }.filter { it.second.signum() > 0 }
+            }.filter { it.second.signum() > 0 }.also { legs ->
+                check(legs.fold(BigDecimal.ZERO) { sum, leg -> sum + leg.second }.compareTo(money) == 0) {
+                    "subscription legs must sum to the instruction amount"
+                }
+            }
         }
 
         /** Per-fund key: SHA-256 of caller key + fund, hex — stable, and within the 128-char header limit. */

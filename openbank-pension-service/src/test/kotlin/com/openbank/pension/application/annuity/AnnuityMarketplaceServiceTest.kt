@@ -16,6 +16,7 @@ import com.openbank.pension.application.exit.PayoutRequestRepository
 import com.openbank.pension.application.exit.ScaOperation
 import com.openbank.pension.application.exit.ScaVerificationPort
 import com.openbank.pension.application.port.`in`.Caller
+import com.openbank.pension.application.port.out.ContributionOrigin
 import com.openbank.pension.application.port.out.FundAdministrationPort
 import com.openbank.pension.application.port.out.PensionContractRepository
 import com.openbank.pension.application.port.out.Redemption
@@ -583,6 +584,7 @@ class AnnuityMarketplaceServiceTest {
             amount: BigDecimal,
             currency: String,
             idempotencyKey: String,
+            origin: ContributionOrigin?,
         ): String {
             subscribed += amount
             return "SUB-1"

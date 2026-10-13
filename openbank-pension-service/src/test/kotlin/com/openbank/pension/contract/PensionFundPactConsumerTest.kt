@@ -175,6 +175,7 @@ class PensionFundPactConsumerTest {
                     s.uuid("id")
                     s.stringType("name", "BALANCED")
                     s.stringMatcher("status", "ACTIVE|CLOSED", "ACTIVE")
+                    s.numberType("version", 1)
                     s.minArrayLike("allocations", 1) { al ->
                         al.uuid("fundId", UUID.fromString(PRICED_FUND))
                         al.numberType("weight", BigDecimal("1"))
@@ -482,7 +483,7 @@ class PensionFundPactConsumerTest {
 
     private fun adapter(mock: MockServer) = PensionFundOrders(
         register(mock),
-        { null },
+        { _, _ -> null },
         Clock.systemUTC(),
         com.openbank.pension.infrastructure.fund.TestSubscriptionPlans(),
     )

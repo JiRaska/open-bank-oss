@@ -4,6 +4,7 @@
 
 package com.openbank.pension.application.port.out
 
+import com.openbank.pension.domain.contribution.ContributionSource
 import java.math.BigDecimal
 import java.time.Instant
 import java.time.LocalDate
@@ -14,6 +15,14 @@ data class Valuation(val amount: BigDecimal, val currency: String, val asOf: Loc
 
 /** A redemption order: [reference] identifies it for a reversal; [amount] is what it was placed for. */
 data class Redemption(val reference: String, val amount: BigDecimal)
+
+/** The credited source record, kept with a new subscription decision for audit and replay checks. */
+data class ContributionOrigin(
+    val contributionId: UUID,
+    val paymentId: String,
+    val source: ContributionSource,
+    val valueDate: LocalDate,
+)
 
 /**
  * One fund holding of a contract as the unit register reports it. [navPerUnit], [navDate] and
@@ -80,7 +89,13 @@ interface FundAdministrationPort {
     suspend fun transactions(contractId: UUID): List<FundUnitTransaction>
 
     /** Buys units for [amount] in the contract's elected strategy; returns the order reference. */
-    suspend fun subscribe(contractId: UUID, amount: BigDecimal, currency: String, idempotencyKey: String): String
+    suspend fun subscribe(
+        contractId: UUID,
+        amount: BigDecimal,
+        currency: String,
+        idempotencyKey: String,
+        origin: ContributionOrigin? = null,
+    ): String
 
     /** Sells units worth [amount] at the latest NAV, pro rata across the holdings. */
     suspend fun redeem(contractId: UUID, amount: BigDecimal, currency: String, idempotencyKey: String): Redemption

@@ -4,6 +4,8 @@
 
 package com.openbank.pension.infrastructure.fund
 
+import java.time.Instant
+import java.time.LocalDate
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
@@ -18,3 +20,13 @@ class TestSubscriptionPlans(private val newMode: SubscriptionPlacementMode = Sub
         plans.putIfAbsent(plan.contractId to plan.idempotencyKey, plan.copy(placementMode = newMode))
             ?: plan.copy(placementMode = newMode)
 }
+
+fun testElection(strategyCode: String, selectedOn: LocalDate): SubscriptionElection = SubscriptionElection(
+    UUID.fromString("00000000-0000-4000-8000-000000000001"),
+    1,
+    "CZK",
+    strategyCode,
+    selectedOn,
+    Instant.parse("2026-10-01T00:00:00Z"),
+    selectedOn,
+)

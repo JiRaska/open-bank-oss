@@ -9,6 +9,7 @@ import com.openbank.pension.application.port.out.ContractFundingDirectory
 import com.openbank.pension.application.port.out.ContractFundingView
 import com.openbank.pension.application.port.out.ContractNotFoundException
 import com.openbank.pension.application.port.out.ContractReferenceRepository
+import com.openbank.pension.application.port.out.ContributionOrigin
 import com.openbank.pension.application.port.out.ContributionRepository
 import com.openbank.pension.application.port.out.EmployerDirectoryPort
 import com.openbank.pension.application.port.out.EmployerEnrolmentRepository
@@ -273,7 +274,13 @@ class ContributionService(
     }
 
     private suspend fun subscribe(c: Contribution): Boolean = runCatching {
-        val order = fund.subscribe(c.contractId, c.amount, c.currency, "contribution:${c.paymentId}")
+        val order = fund.subscribe(
+            c.contractId,
+            c.amount,
+            c.currency,
+            "contribution:${c.paymentId}",
+            ContributionOrigin(c.id, c.paymentId, c.source, c.valueDate),
+        )
         contributions.setSubscriptionOrder(c.id, order)
     }.onFailure { log.warnf(it, "subscription for contribution %s not placed; the sweep will retry", c.id) }.isSuccess
 

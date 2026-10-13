@@ -5,6 +5,8 @@
 package com.openbank.pension.infrastructure.fund
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.pension.application.port.out.ContributionOrigin
+import com.openbank.pension.domain.contribution.ContributionSource
 import com.openbank.pension.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
@@ -18,6 +20,9 @@ import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.sql.DriverManager
 import java.time.Clock
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneOffset
 import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -104,12 +109,14 @@ class SubscriptionPlansPostgresIT {
                         AllocationTargetDto(first, BigDecimal("0.6")),
                         AllocationTargetDto(second, BigDecimal("0.4")),
                     ),
+                    1,
                 ),
                 StrategyDto(
                     UUID.randomUUID(),
                     "DYNAMIC",
                     "ACTIVE",
                     listOf(AllocationTargetDto(newFund, BigDecimal.ONE)),
+                    1,
                 ),
             )
 
@@ -143,12 +150,22 @@ class SubscriptionPlansPostgresIT {
             ),
         )
 
-        val initial = PensionFundOrders(register, { "BALANCED" }, Clock.systemUTC(), PgSubscriptionPlans(pool, mapper))
+        val initial = PensionFundOrders(
+            register,
+            { _, date -> testElection("BALANCED", date) },
+            Clock.systemUTC(),
+            PgSubscriptionPlans(pool, mapper),
+        )
         assertThatThrownBy { runBlocking { initial.subscribe(contract, BigDecimal("100.1234"), "CZK", key) } }
             .hasMessageContaining("transient second-leg failure")
         assertThat(sent.values.map { it.fundId }).containsExactly(first)
 
-        val restarted = PensionFundOrders(register, { "DYNAMIC" }, Clock.systemUTC(), PgSubscriptionPlans(pool, mapper))
+        val restarted = PensionFundOrders(
+            register,
+            { _, date -> testElection("DYNAMIC", date) },
+            Clock.systemUTC(),
+            PgSubscriptionPlans(pool, mapper),
+        )
         restarted.subscribe(contract, BigDecimal("100.1234"), "CZK", key)
         assertThat(sent.values.map { it.fundId }).containsExactlyInAnyOrder(first, second)
         assertThat(sent.values.fold(BigDecimal.ZERO) { total, order -> total + order.amount!! })
@@ -162,6 +179,16 @@ class SubscriptionPlansPostgresIT {
         val first = UUID.randomUUID()
         val second = UUID.randomUUID()
         val cash = UUID.randomUUID()
+        val balancedId = UUID.randomUUID()
+        val origin =
+            ContributionOrigin(
+                UUID.randomUUID(),
+                key.removePrefix("contribution:"),
+                ContributionSource.PARTICIPANT,
+                LocalDate.parse("2026-10-07"),
+            )
+        val firstClock = Clock.fixed(Instant.parse("2026-10-09T10:00:00Z"), ZoneOffset.UTC)
+        val laterClock = Clock.fixed(Instant.parse("2026-10-10T10:00:00Z"), ZoneOffset.UTC)
         val accepted = linkedMapOf<String, List<SubscriptionBatchOrderDto>>()
         val requests = mutableListOf<SubscriptionBatchRequestDto>()
         var loseFirstReply = true
@@ -173,19 +200,21 @@ class SubscriptionPlansPostgresIT {
 
             override suspend fun strategies() = listOf(
                 StrategyDto(
-                    UUID.randomUUID(),
+                    balancedId,
                     "BALANCED",
                     "ACTIVE",
                     listOf(
                         AllocationTargetDto(first, BigDecimal("0.6")),
                         AllocationTargetDto(second, BigDecimal("0.4")),
                     ),
+                    7,
                 ),
                 StrategyDto(
                     UUID.randomUUID(),
                     "DYNAMIC",
                     "ACTIVE",
                     listOf(AllocationTargetDto(cash, BigDecimal.ONE)),
+                    1,
                 ),
             )
 
@@ -219,14 +248,24 @@ class SubscriptionPlansPostgresIT {
             }
         }
 
-        val initial = PensionFundOrders(register, { "BALANCED" }, Clock.systemUTC(), PgSubscriptionPlans(pool, mapper))
-        assertThatThrownBy { runBlocking { initial.subscribe(contract, BigDecimal("100.01"), "CZK", key) } }
+        val initial = PensionFundOrders(
+            register,
+            { _, date -> testElection("BALANCED", date) },
+            firstClock,
+            PgSubscriptionPlans(pool, mapper),
+        )
+        assertThatThrownBy { runBlocking { initial.subscribe(contract, BigDecimal("100.01"), "CZK", key, origin) } }
             .hasMessageContaining("response lost after remote acceptance")
-        assertThat(PgSubscriptionPlans(pool, mapper).find(contract, key)?.placementMode)
-            .isEqualTo(SubscriptionPlacementMode.BATCH)
+        val frozen = checkNotNull(PgSubscriptionPlans(pool, mapper).find(contract, key))
+        assertFrozenDecision(frozen, origin, balancedId)
 
-        val restarted = PensionFundOrders(register, { "DYNAMIC" }, Clock.systemUTC(), PgSubscriptionPlans(pool, mapper))
-        val orderRef = restarted.subscribe(contract, BigDecimal("100.01"), "CZK", key)
+        val restarted = PensionFundOrders(
+            register,
+            { _, date -> testElection("DYNAMIC", date) },
+            laterClock,
+            PgSubscriptionPlans(pool, mapper),
+        )
+        val orderRef = restarted.subscribe(contract, BigDecimal("100.01"), "CZK", key, origin)
         assertThat(orderRef).isNotBlank()
         assertThat(batchCalls).isEqualTo(2)
         assertThat(accepted).hasSize(1)
@@ -236,9 +275,43 @@ class SubscriptionPlansPostgresIT {
         assertThat(accepted.getValue(key).map { it.fundId }).containsExactly(first, second)
         assertThat(accepted.getValue(key).fold(BigDecimal.ZERO) { total, order -> total + order.amount })
             .isEqualByComparingTo("100.01")
-        assertThatThrownBy { runBlocking { restarted.subscribe(contract, BigDecimal("100.02"), "CZK", key) } }
-            .hasMessageContaining("Idempotency-Key reused")
+        assertChangedInstructionRejected(restarted, contract, key, origin)
         assertThat(batchCalls).isEqualTo(2)
+    }
+
+    private fun assertChangedInstructionRejected(
+        restarted: PensionFundOrders,
+        contract: UUID,
+        key: String,
+        origin: ContributionOrigin,
+    ) {
+        assertThatThrownBy { runBlocking { restarted.subscribe(contract, BigDecimal("100.02"), "CZK", key, origin) } }
+            .hasMessageContaining("Idempotency-Key reused")
+        assertThatThrownBy {
+            runBlocking {
+                restarted.subscribe(
+                    contract,
+                    BigDecimal("100.01"),
+                    "CZK",
+                    key,
+                    origin.copy(contributionId = UUID.randomUUID()),
+                )
+            }
+        }.hasMessageContaining("different contribution")
+    }
+
+    private fun assertFrozenDecision(frozen: SubscriptionPlan, origin: ContributionOrigin, balancedId: UUID) {
+        assertThat(frozen.placementMode).isEqualTo(SubscriptionPlacementMode.BATCH)
+        assertThat(frozen.decision?.origin).isEqualTo(origin)
+        assertThat(frozen.decision?.providerEntityId)
+            .isEqualTo(testElection("BALANCED", LocalDate.parse("2026-10-09")).providerEntityId)
+        assertThat(frozen.decision?.selectedOn).isEqualTo(LocalDate.parse("2026-10-09"))
+        assertThat(frozen.decision?.strategyId).isEqualTo(balancedId)
+        assertThat(frozen.decision?.strategyVersion).isEqualTo(7)
+        assertThat(frozen.decision?.sourceCurrency).isEqualTo("CZK")
+        assertThat(frozen.decision?.targetCurrency).isEqualTo("CZK")
+        assertThat(frozen.decision?.roundingMode).isEqualTo("HALF_EVEN")
+        assertThat(frozen.legs.map { it.orderKey }).allSatisfy { assertThat(it).hasSize(64) }
     }
 
     @Test

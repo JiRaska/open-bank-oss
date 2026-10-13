@@ -9,6 +9,7 @@ import com.openbank.pension.application.port.out.ClaimBatchRepository
 import com.openbank.pension.application.port.out.ContractFundingDirectory
 import com.openbank.pension.application.port.out.ContractFundingView
 import com.openbank.pension.application.port.out.ContractReferenceRepository
+import com.openbank.pension.application.port.out.ContributionOrigin
 import com.openbank.pension.application.port.out.ContributionRepository
 import com.openbank.pension.application.port.out.EmployerDirectoryPort
 import com.openbank.pension.application.port.out.EmployerEnrolmentRepository
@@ -232,6 +233,7 @@ class InMemoryFunding(var now: Instant = Instant.parse("2026-04-10T10:00:00Z")) 
             amount: BigDecimal,
             currency: String,
             idempotencyKey: String,
+            origin: ContributionOrigin?,
         ): String {
             check(!fundDown) { "fund administrator unavailable" }
             subscriptions += idempotencyKey

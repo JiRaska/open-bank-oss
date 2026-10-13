@@ -4,6 +4,7 @@
 
 package com.openbank.pension.infrastructure.fund
 
+import com.openbank.pension.application.port.out.ContributionOrigin
 import com.openbank.pension.application.port.out.FundAdministrationPort
 import com.openbank.pension.application.port.out.FundHoldings
 import com.openbank.pension.application.port.out.FundUnitTransaction
@@ -78,6 +79,7 @@ class InMemoryFundAdministrationAdapter(
         amount: BigDecimal,
         currency: String,
         idempotencyKey: String,
+        origin: ContributionOrigin?,
     ): String {
         log.warnf("IN-MEMORY fund administration (dev/test): subscribe %s for %s", amount, contractId)
         orders.computeIfAbsent(idempotencyKey) {

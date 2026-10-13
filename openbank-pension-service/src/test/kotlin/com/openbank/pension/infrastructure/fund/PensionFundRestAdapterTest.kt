@@ -56,12 +56,14 @@ class PensionFundRestAdapterTest {
                 "CONSERVATIVE",
                 "ACTIVE",
                 listOf(AllocationTargetDto(currentFund, BigDecimal.ONE)),
+                1,
             ),
             StrategyDto(
                 UUID.randomUUID(),
                 "DYNAMIC",
                 "ACTIVE",
                 listOf(AllocationTargetDto(futureFund, BigDecimal.ONE)),
+                1,
             ),
         )
         coEvery { client.placeOrder(contract.id, any(), capture(placedOrders)) } returns

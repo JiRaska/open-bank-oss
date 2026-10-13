@@ -106,7 +106,8 @@
             ],
             "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
             "name": "BALANCED",
-            "status": "ACTIVE"
+            "status": "ACTIVE",
+            "version": 1
           }
         ],
         "generators": {
@@ -179,6 +180,14 @@
                 {
                   "match": "regex",
                   "regex": "ACTIVE|CLOSED"
+                }
+              ]
+            },
+            "$[*].version": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
                 }
               ]
             }

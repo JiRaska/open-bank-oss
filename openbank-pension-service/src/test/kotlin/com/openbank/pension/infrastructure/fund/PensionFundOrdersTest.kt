@@ -78,11 +78,14 @@ class PensionFundOrdersTest {
         "BALANCED",
         "ACTIVE",
         listOf(AllocationTargetDto(equity, BigDecimal("0.6")), AllocationTargetDto(bonds, BigDecimal("0.4"))),
+        1,
     )
     private val clock = Clock.fixed(Instant.parse("2026-10-09T10:00:00Z"), ZoneOffset.UTC)
 
     private fun orders(register: FakeRegister, strategy: String? = "BALANCED") =
-        PensionFundOrders(register, { strategy }, clock, TestSubscriptionPlans())
+        PensionFundOrders(register, { _, date ->
+            strategy?.let { testElection(it, date) }
+        }, clock, TestSubscriptionPlans())
 
     @Test
     fun `a subscription is split by the strategy weights and the legs sum to the amount exactly`(): Unit = runBlocking {
@@ -111,10 +114,12 @@ class PensionFundOrdersTest {
             "DYNAMIC",
             "ACTIVE",
             listOf(AllocationTargetDto(cash, BigDecimal.ONE)),
+            1,
         )
         val register = FakeRegister(emptyList(), listOf(balanced, dynamic))
         var strategy = "BALANCED"
-        val orders = PensionFundOrders(register, { strategy }, clock, TestSubscriptionPlans())
+        val orders =
+            PensionFundOrders(register, { _, date -> testElection(strategy, date) }, clock, TestSubscriptionPlans())
         register.failOnceOnFund = bonds
 
         assertThatThrownBy {
@@ -136,12 +141,13 @@ class PensionFundOrdersTest {
             "DYNAMIC",
             "ACTIVE",
             listOf(AllocationTargetDto(cash, BigDecimal.ONE)),
+            1,
         )
         val register = FakeRegister(emptyList(), listOf(balanced, dynamic))
         var strategy = "BALANCED"
         val orders = PensionFundOrders(
             register,
-            { strategy },
+            { _, date -> testElection(strategy, date) },
             clock,
             TestSubscriptionPlans(SubscriptionPlacementMode.BATCH),
         )
@@ -157,6 +163,79 @@ class PensionFundOrdersTest {
         assertThat(register.orders.values.map { it.fundId }).containsExactlyInAnyOrder(equity, bonds)
         assertThat(register.orders.values.fold(BigDecimal.ZERO) { sum, order -> sum + order.amount!! })
             .isEqualByComparingTo("100")
+    }
+
+    @Test
+    fun `new decision records the rounding residual and explicit order keys`(): Unit = runBlocking {
+        val equal = StrategyDto(
+            UUID.randomUUID(),
+            "EQUAL",
+            "ACTIVE",
+            listOf(
+                AllocationTargetDto(equity, BigDecimal("0.5")),
+                AllocationTargetDto(bonds, BigDecimal("0.5")),
+            ),
+            9,
+        )
+        val register = FakeRegister(emptyList(), listOf(equal))
+        val plans = TestSubscriptionPlans(SubscriptionPlacementMode.BATCH)
+        val orders = PensionFundOrders(register, { _, date -> testElection("EQUAL", date) }, clock, plans)
+        orders.subscribe(contract, BigDecimal("100.01"), "CZK", "contribution:rounding")
+
+        val saved = checkNotNull(plans.find(contract, "contribution:rounding"))
+        assertThat(saved.decision?.strategyId).isEqualTo(equal.id)
+        assertThat(saved.decision?.strategyVersion).isEqualTo(9)
+        assertThat(saved.decision?.roundingResidual).isEqualByComparingTo("0.01")
+        assertThat(saved.legs.map { it.amount }).containsExactly(BigDecimal("50.00"), BigDecimal("50.01"))
+        assertThat(saved.legs.map { it.orderKey }).containsExactly(
+            PensionFundOrders.legKey("contribution:rounding", equity),
+            PensionFundOrders.legKey("contribution:rounding", bonds),
+        )
+    }
+
+    @Test
+    fun `small batch caps rounded legs to the original three cents`(): Unit = runBlocking {
+        val funds = (1..5).map { UUID.nameUUIDFromBytes("small-fund-$it".toByteArray()) }
+        val equal = StrategyDto(
+            UUID.randomUUID(),
+            "FIVE_FUNDS",
+            "ACTIVE",
+            funds.map { AllocationTargetDto(it, BigDecimal("0.2")) },
+            2,
+        )
+        val register = FakeRegister(emptyList(), listOf(equal))
+        val plans = TestSubscriptionPlans(SubscriptionPlacementMode.BATCH)
+        val orders = PensionFundOrders(register, { _, date -> testElection("FIVE_FUNDS", date) }, clock, plans)
+
+        orders.subscribe(contract, BigDecimal("0.03"), "CZK", "contribution:three-cents")
+
+        val saved = checkNotNull(plans.find(contract, "contribution:three-cents"))
+        assertThat(saved.legs).hasSize(3)
+        assertThat(saved.legs.map { it.amount }).containsExactlyElementsOf(List(3) { BigDecimal("0.01") })
+        assertThat(saved.legs.fold(BigDecimal.ZERO) { sum, leg -> sum + leg.amount }).isEqualByComparingTo("0.03")
+        assertThat(register.batchCalls).isEqualTo(1)
+        assertThat(register.orders.values.fold(BigDecimal.ZERO) { sum, order -> sum + order.amount!! })
+            .isEqualByComparingTo("0.03")
+        assertThat(saved.legs.map { it.orderKey }).containsExactlyElementsOf(
+            funds.take(3).map { PensionFundOrders.legKey("contribution:three-cents", it) },
+        )
+    }
+
+    @Test
+    fun `new decision refuses a source currency different from contract currency`(): Unit = runBlocking {
+        val register = FakeRegister(emptyList(), listOf(balanced))
+        val plans = TestSubscriptionPlans(SubscriptionPlacementMode.BATCH)
+        val orders = PensionFundOrders(
+            register,
+            { _, date -> testElection("BALANCED", date).copy(contractCurrency = "EUR") },
+            clock,
+            plans,
+        )
+        assertThatThrownBy {
+            runBlocking { orders.subscribe(contract, BigDecimal("100"), "CZK", "contribution:currency") }
+        }.isInstanceOf(FundAdministrationRefusedException::class.java)
+        assertThat(plans.find(contract, "contribution:currency")).isNull()
+        assertThat(register.orders).isEmpty()
     }
 
     @Test
