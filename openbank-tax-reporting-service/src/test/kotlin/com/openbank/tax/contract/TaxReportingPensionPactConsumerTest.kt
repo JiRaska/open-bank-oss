@@ -59,7 +59,7 @@ class TaxReportingPensionPactConsumerTest {
         .given(STATE)
         .uponReceiving("GET participant aggregates for the third quarter of 2026")
         .path(EXPECTED_PATH)
-        .query("periodStart=2026-07-01&periodEnd=2026-09-30")
+        .query("companyId=$COMPANY&periodStart=2026-07-01&periodEnd=2026-09-30")
         .method("GET")
         .willRespondWith()
         .status(200)
@@ -89,10 +89,21 @@ class TaxReportingPensionPactConsumerTest {
         .given(NEGATIVE_AUTH_STATE)
         .uponReceiving("GET participant aggregates with no M2M identity is refused")
         .path(EXPECTED_PATH)
-        .query("periodStart=2026-07-01&periodEnd=2026-09-30")
+        .query("companyId=$COMPANY&periodStart=2026-07-01&periodEnd=2026-09-30")
         .method("GET")
         .willRespondWith()
         .status(401)
+        .toPact()
+
+    @Pact(consumer = CONSUMER, provider = PROVIDER)
+    fun otherCompanyPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(STATE)
+        .uponReceiving("GET participant aggregates for a different provider is refused")
+        .path(EXPECTED_PATH)
+        .query("companyId=$OTHER_COMPANY&periodStart=2026-07-01&periodEnd=2026-09-30")
+        .method("GET")
+        .willRespondWith()
+        .status(400)
         .toPact()
 
     @Test
@@ -100,7 +111,8 @@ class TaxReportingPensionPactConsumerTest {
     fun `the aggregates decode into the adapter DTO and assemble PSP 31-04`(mockServer: MockServer) {
         assertThat(clientPath()).isEqualTo(EXPECTED_PATH)
         val body = given().baseUri(mockServer.getUrl())
-            .queryParam("periodStart", "2026-07-01").queryParam("periodEnd", "2026-09-30")
+            .queryParam("companyId", COMPANY).queryParam("periodStart", "2026-07-01")
+            .queryParam("periodEnd", "2026-09-30")
             .get(clientPath()).then().statusCode(200).extract().asString()
         val aggregates = mapper.readValue<ParticipantAggregatesDto>(body)
         val catalogue = CatalogueParser.parse(mapper, "statutory-returns/cz/pension-cnb.v1.json")
@@ -110,7 +122,7 @@ class TaxReportingPensionPactConsumerTest {
                 .fetch(
                     catalogue,
                     definition,
-                    "company",
+                    COMPANY,
                     ReportingPeriod(Periodicity.QUARTER, LocalDate.parse("2026-09-30")),
                 )
         }
@@ -122,18 +134,30 @@ class TaxReportingPensionPactConsumerTest {
     @PactTestFor(pactMethod = "unauthenticatedPact")
     fun `a read with no identity is refused with 401`(mockServer: MockServer) {
         given().baseUri(mockServer.getUrl())
-            .queryParam("periodStart", "2026-07-01").queryParam("periodEnd", "2026-09-30")
+            .queryParam("companyId", COMPANY).queryParam("periodStart", "2026-07-01")
+            .queryParam("periodEnd", "2026-09-30")
             .get(clientPath()).then().statusCode(401)
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "otherCompanyPact")
+    fun `another company cannot receive this provider's figures`(mockServer: MockServer) {
+        given().baseUri(mockServer.getUrl())
+            .queryParam("companyId", OTHER_COMPANY).queryParam("periodStart", "2026-07-01")
+            .queryParam("periodEnd", "2026-09-30")
+            .get(clientPath()).then().statusCode(400)
     }
 
     private class FixedSources(private val aggregates: ParticipantAggregatesDto) : PensionReportingSources {
         override suspend fun fund(fundId: UUID, from: LocalDate, to: LocalDate): FundPeriodFiguresDto =
             error("not used by PSP 31-04")
 
-        override suspend fun participants(from: LocalDate, to: LocalDate) = aggregates
+        override suspend fun participants(companyId: UUID, from: LocalDate, to: LocalDate) = aggregates
     }
 
     companion object {
+        const val COMPANY = "00000000-0000-4000-8000-000000000001"
+        const val OTHER_COMPANY = "00000000-0000-4000-8000-000000000002"
         const val CONSUMER = "openbank-tax-reporting-service"
         const val PROVIDER = "openbank-pension-service"
         const val NEGATIVE_AUTH_STATE = "no valid M2M identity is presented"

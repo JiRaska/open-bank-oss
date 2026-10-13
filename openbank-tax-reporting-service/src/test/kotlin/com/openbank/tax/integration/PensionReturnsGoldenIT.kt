@@ -7,6 +7,7 @@ package com.openbank.tax.integration
 import com.openbank.libs.testing.containers.PostgresTestResource
 import com.sun.net.httpserver.HttpServer
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.WithTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
@@ -44,7 +45,7 @@ import java.util.concurrent.CopyOnWriteArrayList
     initArgs = [ResourceArg(name = "db", value = "openbank_tax_reporting_pension_golden_it")],
 )
 @QuarkusTestResource(StatutoryReturnMessagingTestResource::class)
-@QuarkusTestResource(PensionProvidersStub::class)
+@WithTestResource(PensionProvidersStub::class)
 class PensionReturnsGoldenIT {
 
     private fun assemble(code: String, entity: String, period: String) = given().contentType("application/json")
@@ -137,7 +138,7 @@ class PensionReturnsGoldenIT {
     @Test
     @TestSecurity(user = "filer", roles = ["ROLE_OPERATOR"])
     fun `PSP 31-04 assembles from the recorded participant month and its contributions add up`() {
-        val flows = assembled("PSP31-04", "company", "2009-Q1")
+        val flows = assembled("PSP31-04", COMPANY, "2009-Q1")
         assertThat(flows.v("contributions_participant_ytd")).isEqualByComparingTo("2300.00")
         assertThat(flows.v("contributions_employer_ytd")).isEqualByComparingTo("500.00")
         assertThat(flows.v("contributions_state_ytd")).isEqualByComparingTo("230.00")
@@ -162,6 +163,7 @@ class PensionReturnsGoldenIT {
     }
 
     companion object {
+        const val COMPANY = PensionProvidersStub.COMPANY
         const val FUND = PensionProvidersStub.FUND
         const val FUND2 = PensionProvidersStub.FUND2
     }
@@ -193,6 +195,7 @@ class PensionProvidersStub : QuarkusTestResourceLifecycleManager {
         return mapOf(
             "quarkus.rest-client.pension-fund-service.url" to url,
             "quarkus.rest-client.pension-service.url" to url,
+            "openbank.statutory-returns.company-id" to COMPANY,
             "openbank.statutory-returns.fund-ids" to "$FUND,$FUND2",
         )
     }
@@ -211,6 +214,8 @@ class PensionProvidersStub : QuarkusTestResourceLifecycleManager {
             .bufferedReader().readText()
 
     companion object {
+        const val COMPANY = "00000000-0000-4000-8000-000000000001"
+
         /** The fund id the provider golden test assigned; recorded with the fixtures. */
         const val FUND = "0f0f2425-0000-4000-8000-000000002025"
         const val FUND2 = "0f0f2425-0000-4000-8000-000000002026"
@@ -225,11 +230,17 @@ class PensionProvidersStub : QuarkusTestResourceLifecycleManager {
             "$FUNDS?periodStart=2025-01-01&periodEnd=2025-03-31" to "fund-loss-quarter-2025-q1.json",
             "/api/v1/reporting/funds/$FUND2/period-figures?periodStart=2025-01-01&periodEnd=2025-03-31" to
                 "fund-unclassified-quarter-2025-q1.json",
-            "/api/v2/pension/reporting/participant-aggregates?periodStart=2009-01-01&periodEnd=2009-03-31" to
+            (
+                "/api/v2/pension/reporting/participant-aggregates?companyId=$COMPANY" +
+                    "&periodStart=2009-01-01&periodEnd=2009-03-31"
+                ) to
                 "participants-2009-q1.json",
             // pension-service's ParticipantReportingApiIT books nothing after March 2009, so the
             // year answer is the same YTD figures re-dated to the year end (PSP 40-01).
-            "/api/v2/pension/reporting/participant-aggregates?periodStart=2009-01-01&periodEnd=2009-12-31" to
+            (
+                "/api/v2/pension/reporting/participant-aggregates?companyId=$COMPANY" +
+                    "&periodStart=2009-01-01&periodEnd=2009-12-31"
+                ) to
                 "participants-2009-year.json",
         )
     }

@@ -4,12 +4,14 @@
 
 package com.openbank.pension.application.usecase
 
+import com.openbank.pension.application.ProviderBoundary
 import com.openbank.pension.application.port.out.ParticipantReportingQueries
 import com.openbank.pension.domain.reporting.MixedCurrencyException
 import com.openbank.pension.domain.reporting.ParticipantBanding
 import com.openbank.pension.domain.reporting.ParticipantPeriodAggregates
 import com.openbank.pension.domain.reporting.UnknownSettlementTimeException
 import java.time.LocalDate
+import java.util.UUID
 
 /**
  * Participant aggregates per period for the statutory returns tax-reporting-service assembles
@@ -17,9 +19,26 @@ import java.time.LocalDate
  * state contributions; payouts by form; transfers in and out. Year-to-date figures run from
  * 1 January of [periodEnd]'s year, which is how the PSP 31-04 return states them.
  */
-class ParticipantReportingService(private val queries: ParticipantReportingQueries, private val baseCurrency: String) {
-    suspend fun aggregates(periodStart: LocalDate, periodEnd: LocalDate): ParticipantPeriodAggregates {
+class ParticipantReportingService(
+    private val queries: ParticipantReportingQueries,
+    private val baseCurrency: String,
+    private val providerBoundary: ProviderBoundary,
+) {
+    suspend fun aggregates(
+        providerEntityId: UUID,
+        periodStart: LocalDate,
+        periodEnd: LocalDate,
+    ): ParticipantPeriodAggregates {
+        providerBoundary.requireProvider(providerEntityId)
         require(!periodEnd.isBefore(periodStart)) { "periodEnd must not be before periodStart" }
+        return queries.consistentRead(providerEntityId) { source -> calculate(source, periodStart, periodEnd) }
+    }
+
+    private suspend fun calculate(
+        queries: ParticipantReportingQueries,
+        periodStart: LocalDate,
+        periodEnd: LocalDate,
+    ): ParticipantPeriodAggregates {
         val yearStart = LocalDate.of(periodEnd.year, 1, 1)
         val ytdFrom = if (periodStart.isBefore(yearStart)) periodStart else yearStart
         if (queries.hasUnknownSettlementTime(periodEnd)) {

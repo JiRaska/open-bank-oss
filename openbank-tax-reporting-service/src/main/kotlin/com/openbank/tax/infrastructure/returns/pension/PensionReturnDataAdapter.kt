@@ -25,7 +25,7 @@ import java.util.UUID
 interface PensionReportingSources {
     suspend fun fund(fundId: UUID, from: LocalDate, to: LocalDate): FundPeriodFiguresDto
 
-    suspend fun participants(from: LocalDate, to: LocalDate): ParticipantAggregatesDto
+    suspend fun participants(companyId: UUID, from: LocalDate, to: LocalDate): ParticipantAggregatesDto
 }
 
 @ApplicationScoped
@@ -36,8 +36,8 @@ class RestPensionReportingSources(
     override suspend fun fund(fundId: UUID, from: LocalDate, to: LocalDate) =
         sourced("pension-fund-service") { funds.periodFigures(fundId, from, to) }
 
-    override suspend fun participants(from: LocalDate, to: LocalDate) =
-        sourced("pension-service") { pension.participantAggregates(from, to) }
+    override suspend fun participants(companyId: UUID, from: LocalDate, to: LocalDate) =
+        sourced("pension-service") { pension.participantAggregates(companyId, from, to) }
 
     /**
      * Any failure to obtain the figures is "unavailable" (503), never a zero and never a 500: a
@@ -82,7 +82,7 @@ class PensionReturnDataAdapter(
         }
         val from = periodStart(period)
         val to = period.endDate
-        if (definition.code == "PSP31-04") return companyFlows(sources.participants(from, to))
+        if (definition.code == "PSP31-04") return companyFlows(sources.participants(companyId(entityId), from, to))
         CORPORATE_RETURNS[definition.code]?.let { needed ->
             return corporateReturn(definition.code, entityId, needed, from, to)
         }
@@ -100,6 +100,12 @@ class PensionReturnDataAdapter(
         "payout_cases_ytd" to BigDecimal(a.payoutsYtd.cases),
         "pensioners_count" to BigDecimal(a.participants.pensioners),
     )
+
+    private fun companyId(entityId: String): UUID = try {
+        UUID.fromString(entityId)
+    } catch (e: IllegalArgumentException) {
+        throw ReturnDataUnavailableException("company entity '$entityId' is not a pension provider UUID", e)
+    }
 
     /**
      * Returns built from the corporate register (#12425): only APPROVED, effective entries count,
@@ -136,7 +142,7 @@ class PensionReturnDataAdapter(
             )
             "PSP40-01" -> {
                 // The year's flows come from pension-service, the dividend from the register.
-                val year = sources.participants(from, to)
+                val year = sources.participants(companyId(entityId), from, to)
                 mapOf(
                     "dividend_paid_or_planned" to v(CorporateFact.DIVIDEND_PAID_OR_PLANNED),
                     "contributions_received_year" to year.contributionsYtd.total,

@@ -127,7 +127,7 @@ openbank:
   # configured, deadline checks fail closed and workflow liveness cannot report success.
   statutory-returns:
     catalogues: statutory-returns/cz/pension-cnb.v1.json
-    company-id: company
+    company-id: "${OPENBANK_STATUTORY_RETURNS_COMPANY_ID:company}"
     deadline-check-every: 1h
   build:
     time: "${BUILD_TIME:unknown}"

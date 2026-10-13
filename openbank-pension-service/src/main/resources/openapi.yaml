@@ -67,7 +67,10 @@ paths:
         Late status events
         can correct an earlier period. Served to staff and to
         tax-reporting-service's own client only (`pension.reporting.aggregate`).
+        The companyId must match this deployment's configured pension provider; every
+        aggregate is scoped to that company's contracts.
       parameters:
+        - { name: companyId, in: query, required: true, schema: { type: string, format: uuid } }
         - { name: periodStart, in: query, required: true, schema: { type: string, format: date } }
         - { name: periodEnd, in: query, required: true, schema: { type: string, format: date } }
       responses:

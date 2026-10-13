@@ -155,7 +155,7 @@ class TaxReportingPensionFundPactConsumerTest {
     private class FixedSources(private val figures: FundPeriodFiguresDto) : PensionReportingSources {
         override suspend fun fund(fundId: UUID, from: LocalDate, to: LocalDate) = figures
 
-        override suspend fun participants(from: LocalDate, to: LocalDate): ParticipantAggregatesDto =
+        override suspend fun participants(companyId: UUID, from: LocalDate, to: LocalDate): ParticipantAggregatesDto =
             error("not used by fund returns")
     }
 

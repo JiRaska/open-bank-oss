@@ -5,6 +5,7 @@
 package com.openbank.pension.integration
 
 import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
+import com.openbank.pension.application.port.out.ParticipantReportingQueries
 import com.openbank.pension.application.usecase.PayoutSettlementService
 import com.openbank.pension.application.usecase.RailSettlement
 import com.openbank.pension.infrastructure.payments.DomesticPaymentSettlementConsumer
@@ -14,7 +15,9 @@ import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
 import jakarta.inject.Inject
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.apache.kafka.common.header.internals.RecordHeader
 import org.apache.kafka.common.header.internals.RecordHeaders
@@ -30,6 +33,7 @@ import java.nio.charset.StandardCharsets
 import java.sql.Connection
 import java.sql.DriverManager
 import java.time.Instant
+import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.util.Optional
 import java.util.UUID
@@ -57,10 +61,14 @@ class ParticipantReportingApiIT {
     @Inject
     lateinit var settlementConsumer: DomesticPaymentSettlementConsumer
 
+    @Inject
+    lateinit var reportingQueries: ParticipantReportingQueries
+
     companion object {
         private val ids = mutableMapOf<String, UUID>()
         private var seeded = false
         private const val PATH = "/api/v2/pension/reporting/participant-aggregates"
+        private val REPORTING_PROVIDER = UUID.fromString("00000000-0000-4000-8000-000000000001")
     }
 
     private fun <T> jdbc(block: (Connection) -> T): T {
@@ -85,6 +93,7 @@ class ParticipantReportingApiIT {
         status: String,
         start: String,
         updated: String,
+        providerId: UUID = REPORTING_PROVIDER,
     ) {
         val id = UUID.randomUUID().also { ids[key] = it }
         exec(
@@ -95,7 +104,7 @@ class ParticipantReportingApiIT {
                 "(1000000000000 + (random() * 1000000000)::bigint, ?, ?, ?, 'CZ', 2, ?, 'PENSION_COMPANY', " +
                 "?::date, ?, " +
                 "1000, 'CZK', 'MONTHLY', ?::date, ?::timestamptz, ?::timestamptz)",
-            id, UUID.randomUUID(), line, UUID.randomUUID(), born, status, start, "${start}T08:00:00Z", updated,
+            id, UUID.randomUUID(), line, providerId, born, status, start, "${start}T08:00:00Z", updated,
         )
     }
 
@@ -199,9 +208,127 @@ class ParticipantReportingApiIT {
     }
 
     @Test
+    fun `one participant report sees one snapshot across an independent committed contribution`(): Unit = runBlocking {
+        val from = LocalDate.parse("2024-06-01")
+        val to = LocalDate.parse("2024-06-30")
+        val contributionId = UUID.randomUUID()
+        try {
+            val (before, withinSnapshot) = reportingQueries.consistentRead(REPORTING_PROVIDER) { scoped ->
+                val first = scoped.contributions(from, to).participant
+                withContext(Dispatchers.IO) {
+                    jdbc { c ->
+                        c.exec(
+                            "INSERT INTO pension_contributions (id, contract_id, payment_id, source, channel, " +
+                                "amount, currency, value_date, received_at) VALUES " +
+                                "(?, ?, ?, 'PARTICIPANT', 'BANK_TRANSFER', 123, 'CZK', ?::date, now())",
+                            contributionId,
+                            ids.getValue("A"),
+                            "snapshot-$contributionId",
+                            "2024-06-15",
+                        )
+                    }
+                }
+                first to scoped.contributions(from, to).participant
+            }
+            val after = reportingQueries.consistentRead(REPORTING_PROVIDER) { it.contributions(from, to).participant }
+            assertThat(withinSnapshot).isEqualByComparingTo(before)
+            assertThat(after).isEqualByComparingTo(before + java.math.BigDecimal("123"))
+        } finally {
+            jdbc { it.exec("DELETE FROM pension_contributions WHERE id = ?", contributionId) }
+        }
+    }
+
+    @Test
+    @TestSecurity(user = "service-account-openbank-tax-reporting", roles = ["ROLE_API"])
+    @Suppress("LongMethod") // One foreign-company fixture covers every reporting query and cleanup.
+    fun `company report excludes another provider including unknown settlement and currency`(): Unit = runBlocking {
+        val from = LocalDate.parse("2009-03-01")
+        val to = LocalDate.parse("2009-03-31")
+        suspend fun companyFacts(): List<Any> = reportingQueries.consistentRead(REPORTING_PROVIDER) { source ->
+            listOf(
+                source.hasUnknownSettlementTime(to), source.currencies(from, to), source.inForce(to),
+                source.startedBetween(from, to), source.exitedBetween(from, to),
+                source.contributingBetween(from, to), source.pensionersBetween(from, to),
+                source.contributions(from, to), source.contributions(LocalDate.parse("2009-01-01"), to),
+                source.stateContributions(from, to), source.payouts(from, to),
+                source.transfers(from, to),
+            )
+        }
+        val before = companyFacts()
+        val foreign = UUID.randomUUID()
+        val claimId = UUID.randomUUID()
+        val ledgerId = UUID.randomUUID()
+        val instructionKey = "rep-${UUID.randomUUID()}"
+        jdbc { c ->
+            c.contract("foreign", "DPS", "1975-01-10", "ACTIVE", "2009-03-01", "2009-03-01T08:00:00Z", foreign)
+            c.contribution("foreign", "PARTICIPANT", "999", "2009-03-15")
+            c.exec("UPDATE pension_contributions SET currency = 'EUR' WHERE contract_id = ?", ids.getValue("foreign"))
+            c.exec(
+                "INSERT INTO pension_incentive_claims (id, contract_id, incentive_id, period, basis, " +
+                    "claimed_amount, currency, status, created_at, updated_at) VALUES " +
+                    "(?, ?, 'cz-state-contribution', '2009-03', 999, 999, 'CZK', 'PENDING', now(), now())",
+                claimId,
+                ids.getValue("foreign"),
+            )
+            c.exec(
+                "INSERT INTO pension_incentive_ledger " +
+                    "(id, contract_id, incentive_id, kind, amount, tax_year, period, occurred_at) VALUES " +
+                    "(?, ?, 'cz-state-contribution', 'RECEIVED', 999, 2009, '2009-03', '2009-03-25T09:00:00Z')",
+                ledgerId,
+                ids.getValue("foreign"),
+            )
+            c.transfer("foreign", "IN", "999", "2009-03-15T09:00:00Z")
+            c.exec(
+                "INSERT INTO pension_payment_instructions " +
+                    "(idempotency_key, contract_id, purpose, amount, currency, creditor_iban, status, " +
+                    "payment_ref, created_at, updated_at) VALUES (?, ?, 'PHASED_WITHDRAWAL', 999, 'EUR', " +
+                    "'CZ6508000000192000145399', 'SETTLED', ?, '2009-03-28T09:00:00Z', '2009-03-28T09:00:00Z')",
+                instructionKey,
+                ids.getValue("foreign"),
+                UUID.randomUUID().toString(),
+            )
+        }
+        try {
+            assertThat(companyFacts()).isEqualTo(before)
+            reportingQueries.consistentRead(foreign) { source ->
+                assertThat(source.hasUnknownSettlementTime(to)).isTrue()
+                assertThat(source.currencies(from, to)).contains("EUR")
+                assertThat(source.inForce(to).sumOf { it.count }).isEqualTo(1)
+                assertThat(source.contributions(from, to).participant).isEqualByComparingTo("999")
+                assertThat(source.stateContributions(from, to).claimed).isEqualByComparingTo("999")
+                assertThat(source.stateContributions(from, to).received).isEqualByComparingTo("999")
+                assertThat(source.transfers(from, to).inAmount).isEqualByComparingTo("999")
+            }
+            given().queryParam("companyId", REPORTING_PROVIDER).queryParam("periodStart", "2009-03-01")
+                .queryParam("periodEnd", "2009-03-31")
+                .`when`().get(PATH).then().statusCode(200)
+                .body("participants.inForce", equalTo(3))
+                .body("contributions.participant", equalTo(1300.0f))
+                .body("stateContributions.claimed", equalTo(230.0f))
+                .body("transfers.inAmount", equalTo(50000.0f))
+            given().queryParam("companyId", foreign).queryParam("periodStart", "2009-03-01")
+                .queryParam("periodEnd", "2009-03-31")
+                .`when`().get(PATH).then().statusCode(400)
+        } finally {
+            jdbc { c ->
+                val contractId = ids.remove("foreign")!!
+                c.exec("DELETE FROM pension_payment_instructions WHERE contract_id = ?", contractId)
+                c.exec("DELETE FROM pension_transfer_requests WHERE contract_id = ?", contractId)
+                c.exec("DELETE FROM pension_incentive_ledger WHERE id = ?", ledgerId)
+                c.exec("DELETE FROM pension_incentive_claims WHERE id = ?", claimId)
+                c.exec("DELETE FROM pension_contributions WHERE contract_id = ?", contractId)
+                c.exec("DELETE FROM pension_contracts WHERE contract_id = ?", contractId)
+            }
+        }
+    }
+
+    @Test
     @TestSecurity(user = "service-account-openbank-tax-reporting", roles = ["ROLE_API"])
     fun `march 2009 aggregates are exact, reconcile, and carry no participant identifier`() {
-        val body = given().queryParam("periodStart", "2009-03-01").queryParam("periodEnd", "2009-03-31")
+        val body = given().queryParam(
+            "companyId",
+            REPORTING_PROVIDER,
+        ).queryParam("periodStart", "2009-03-01").queryParam("periodEnd", "2009-03-31")
             .`when`().get(PATH).then().log().ifValidationFails().statusCode(200)
             .body("currency", equalTo("CZK"))
             .body("participants.inForce", equalTo(3))
@@ -237,7 +364,10 @@ class ParticipantReportingApiIT {
             .extract().asString()
         ids.values.forEach { assertThat(body).doesNotContain(it.toString()) }
         // Reproducible: the same closed period answers byte for byte the same.
-        val again = given().queryParam("periodStart", "2009-03-01").queryParam("periodEnd", "2009-03-31")
+        val again = given().queryParam(
+            "companyId",
+            REPORTING_PROVIDER,
+        ).queryParam("periodStart", "2009-03-01").queryParam("periodEnd", "2009-03-31")
             .`when`().get(PATH).then().statusCode(200).extract().asString()
         assertThat(again).isEqualTo(body)
     }
@@ -293,13 +423,22 @@ class ParticipantReportingApiIT {
                     }
                 }
             }
-            given().queryParam("periodStart", "2009-07-01").queryParam("periodEnd", "2009-07-31")
+            given().queryParam(
+                "companyId",
+                REPORTING_PROVIDER,
+            ).queryParam("periodStart", "2009-07-01").queryParam("periodEnd", "2009-07-31")
                 .`when`().get(PATH).then().statusCode(409)
             runBlocking { settlementConsumer.consume(record(8, "2009-07-01T00:29:00Z")) }
-            given().queryParam("periodStart", "2009-07-01").queryParam("periodEnd", "2009-07-31")
+            given().queryParam(
+                "companyId",
+                REPORTING_PROVIDER,
+            ).queryParam("periodStart", "2009-07-01").queryParam("periodEnd", "2009-07-31")
                 .`when`().get(PATH).then().statusCode(409)
             runBlocking { settlementConsumer.consume(record(7, "2009-07-01T00:29:00Z")) }
-            given().queryParam("periodStart", "2009-07-01").queryParam("periodEnd", "2009-07-31")
+            given().queryParam(
+                "companyId",
+                REPORTING_PROVIDER,
+            ).queryParam("periodStart", "2009-07-01").queryParam("periodEnd", "2009-07-31")
                 .`when`().get(PATH).then().statusCode(200).body("payouts.total", equalTo(350.0f))
             runBlocking { settlementConsumer.consume(record(7, "2009-08-01T00:29:00Z")) }
             jdbc { c ->
@@ -334,7 +473,10 @@ class ParticipantReportingApiIT {
             )
         }
         try {
-            given().queryParam("periodStart", "2009-03-01").queryParam("periodEnd", "2009-03-31")
+            given().queryParam(
+                "companyId",
+                REPORTING_PROVIDER,
+            ).queryParam("periodStart", "2009-03-01").queryParam("periodEnd", "2009-03-31")
                 .`when`().get(PATH).then().statusCode(409)
         } finally {
             jdbc { c -> c.exec("DELETE FROM pension_payment_instructions WHERE idempotency_key = ?", key) }
@@ -373,13 +515,22 @@ class ParticipantReportingApiIT {
                         }
                     }
             }
-            given().queryParam("periodStart", "2009-04-01").queryParam("periodEnd", "2009-04-30")
+            given().queryParam(
+                "companyId",
+                REPORTING_PROVIDER,
+            ).queryParam("periodStart", "2009-04-01").queryParam("periodEnd", "2009-04-30")
                 .`when`().get(PATH).then().statusCode(200)
                 .body("payouts.byForm.PHASED_WITHDRAWAL", nullValue())
-            given().queryParam("periodStart", "2009-05-01").queryParam("periodEnd", "2009-05-31")
+            given().queryParam(
+                "companyId",
+                REPORTING_PROVIDER,
+            ).queryParam("periodStart", "2009-05-01").queryParam("periodEnd", "2009-05-31")
                 .`when`().get(PATH).then().statusCode(200)
                 .body("payouts.byForm.PHASED_WITHDRAWAL.amount", equalTo(250.0f))
-            given().queryParam("periodStart", "2009-06-01").queryParam("periodEnd", "2009-06-30")
+            given().queryParam(
+                "companyId",
+                REPORTING_PROVIDER,
+            ).queryParam("periodStart", "2009-06-01").queryParam("periodEnd", "2009-06-30")
                 .`when`().get(PATH).then().statusCode(200)
                 .body("payouts.byForm.PHASED_WITHDRAWAL", nullValue())
         } finally {
@@ -390,19 +541,33 @@ class ParticipantReportingApiIT {
     @Test
     @TestSecurity(user = "service-account-openbank-tax-reporting", roles = ["ROLE_API"])
     fun `the March instruction settled at 00h30 UTC in April belongs to April`() {
-        given().queryParam("periodStart", "2009-04-01").queryParam("periodEnd", "2009-04-30")
+        given().queryParam(
+            "companyId",
+            REPORTING_PROVIDER,
+        ).queryParam("periodStart", "2009-04-01").queryParam("periodEnd", "2009-04-30")
             .`when`().get(PATH).then().statusCode(200)
             .body("payouts.byForm.EARLY_WITHDRAWAL.amount", equalTo(777.0f))
             .body("participants.newInPeriod", equalTo(1))
-        given().queryParam("periodEnd", "2009-03-31").`when`().get(PATH).then().statusCode(400)
-        given().queryParam("periodStart", "2009-03-31").queryParam("periodEnd", "2009-03-01")
+        given().queryParam(
+            "companyId",
+            REPORTING_PROVIDER,
+        ).queryParam("periodEnd", "2009-03-31").`when`().get(PATH).then().statusCode(400)
+        given().queryParam("periodStart", "2009-03-01").queryParam("periodEnd", "2009-03-31")
+            .`when`().get(PATH).then().statusCode(400)
+        given().queryParam(
+            "companyId",
+            REPORTING_PROVIDER,
+        ).queryParam("periodStart", "2009-03-31").queryParam("periodEnd", "2009-03-01")
             .`when`().get(PATH).then().statusCode(400)
     }
 
     @Test
     @TestSecurity(user = "cust-1", roles = ["ROLE_CUSTOMER"])
     fun `a customer cannot reach the aggregates`() {
-        given().queryParam("periodStart", "2009-03-01").queryParam("periodEnd", "2009-03-31")
+        given().queryParam(
+            "companyId",
+            REPORTING_PROVIDER,
+        ).queryParam("periodStart", "2009-03-01").queryParam("periodEnd", "2009-03-31")
             .`when`().get(PATH).then().statusCode(403)
     }
 }

@@ -52,6 +52,7 @@ interface PensionReportingClient {
     @GET
     @Path("/participant-aggregates")
     suspend fun participantAggregates(
+        @QueryParam("companyId") companyId: UUID,
         @QueryParam("periodStart") periodStart: LocalDate,
         @QueryParam("periodEnd") periodEnd: LocalDate,
     ): ParticipantAggregatesDto

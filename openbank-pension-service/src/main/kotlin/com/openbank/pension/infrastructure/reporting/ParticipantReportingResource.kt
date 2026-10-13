@@ -6,6 +6,7 @@ package com.openbank.pension.infrastructure.reporting
 
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
+import com.openbank.pension.application.ProviderBoundary
 import com.openbank.pension.application.port.out.ParticipantReportingQueries
 import com.openbank.pension.application.usecase.ParticipantReportingService
 import com.openbank.pension.domain.reporting.ParticipantPeriodAggregates
@@ -24,6 +25,7 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.format.DateTimeParseException
+import java.util.UUID
 
 @ApplicationScoped
 class ParticipantReportingBeans {
@@ -32,7 +34,8 @@ class ParticipantReportingBeans {
     fun participantReportingService(
         queries: ParticipantReportingQueries,
         @ConfigProperty(name = "openbank.pension.reporting.currency", defaultValue = "CZK") currency: String,
-    ): ParticipantReportingService = ParticipantReportingService(queries, currency)
+        providerBoundary: ProviderBoundary,
+    ): ParticipantReportingService = ParticipantReportingService(queries, currency, providerBoundary)
 }
 
 /**
@@ -58,11 +61,18 @@ class ParticipantReportingResource {
     @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN, Roles.COMPLIANCE, Roles.AUDITOR)
     @Authorize(action = "pension.reporting.aggregate")
     suspend fun participantAggregates(
+        @QueryParam("companyId") companyId: String?,
         @QueryParam("periodStart") periodStart: String?,
         @QueryParam("periodEnd") periodEnd: String?,
     ): ParticipantAggregatesResponse = ParticipantAggregatesResponse.from(
-        reporting.aggregates(date("periodStart", periodStart), date("periodEnd", periodEnd)),
+        reporting.aggregates(parseCompanyId(companyId), date("periodStart", periodStart), date("periodEnd", periodEnd)),
     )
+
+    private fun parseCompanyId(value: String?): UUID = try {
+        UUID.fromString(requireNotNull(value) { "query parameter 'companyId' is required" })
+    } catch (e: IllegalArgumentException) {
+        throw IllegalArgumentException("query parameter 'companyId' must be a UUID", e)
+    }
 
     private fun date(name: String, value: String?): LocalDate {
         requireNotNull(value) { "query parameter '$name' is required" }

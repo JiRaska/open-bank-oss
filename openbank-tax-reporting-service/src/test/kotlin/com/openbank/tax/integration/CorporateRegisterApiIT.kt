@@ -6,6 +6,7 @@ package com.openbank.tax.integration
 
 import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.WithTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
@@ -37,23 +38,24 @@ import java.util.UUID
     initArgs = [ResourceArg(name = "db", value = "openbank_tax_reporting_corporate_register_it")],
 )
 @QuarkusTestResource(StatutoryReturnMessagingTestResource::class)
-@QuarkusTestResource(PensionProvidersStub::class)
+@WithTestResource(PensionProvidersStub::class)
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 class CorporateRegisterApiIT {
     companion object {
         const val PATH = "/api/v1/corporate-register"
+        const val COMPANY = PensionProvidersStub.COMPANY
         val proposed = mutableListOf<String>()
         lateinit var superseded: String
     }
 
     private fun propose(fact: String, value: String, effective: String) = given().contentType("application/json")
         .body(
-            """{"entityId":"company","fact":"$fact","value":$value,"effectiveFrom":"$effective",
+            """{"entityId":"$COMPANY","fact":"$fact","value":$value,"effectiveFrom":"$effective",
                 "reason":"annual update","evidence":"general meeting minutes 2025-04-30"}""",
         ).post(PATH)
 
     private fun assemble(code: String, period: String) = given().contentType("application/json")
-        .body("""{"catalogueId":"cz-pension-cnb","returnCode":"$code","entityId":"company","period":"$period"}""")
+        .body("""{"catalogueId":"cz-pension-cnb","returnCode":"$code","entityId":"$COMPANY","period":"$period"}""")
         .post("/api/v1/statutory-returns/assemble")
 
     private fun datapoints(code: String, period: String): Map<String, BigDecimal> {
@@ -91,7 +93,7 @@ class CorporateRegisterApiIT {
         // Validation: a negative figure and a fractional count are 422; a missing field 400; a foreign entity 422.
         propose("SHARE_CAPITAL", "-1", "2009-01-01").then().statusCode(422)
         propose("EMPLOYEES_COUNT", "1.5", "2009-01-01").then().statusCode(422)
-        given().contentType("application/json").body("""{"entityId":"company"}""").post(PATH).then().statusCode(400)
+        given().contentType("application/json").body("""{"entityId":"$COMPANY"}""").post(PATH).then().statusCode(400)
         given().contentType("application/json").body(
             """{"entityId":"other","fact":"SHARE_CAPITAL","value":1,"effectiveFrom":"2009-01-01","reason":"r","evidence":"e"}""",
         ).post(PATH).then().statusCode(422)
@@ -126,7 +128,7 @@ class CorporateRegisterApiIT {
         assertThat(risk.getValue("payouts_paid_year")).isEqualByComparingTo("125000.00")
 
         // A dividend effective in 2009 is not 2010's: that year has none approved.
-        given().get("$PATH/effective?entityId=company&periodStart=2010-01-01&periodEnd=2010-12-31").then()
+        given().get("$PATH/effective?entityId=$COMPANY&periodStart=2010-01-01&periodEnd=2010-12-31").then()
             .statusCode(200).body("DIVIDEND_PAID_OR_PLANNED", equalTo(null))
             .body("SHARE_CAPITAL", equalTo(50000000.0f))
     }
@@ -135,7 +137,7 @@ class CorporateRegisterApiIT {
     @Order(3)
     @TestSecurity(user = "auditor", roles = ["ROLE_AUDITOR"])
     fun `an auditor reads the trail, cannot write, and the database refuses to rewrite a decided row`() {
-        given().get("$PATH?entityId=company").then().statusCode(200)
+        given().get("$PATH?entityId=$COMPANY").then().statusCode(200)
             .body("size()", equalTo(9))
             .body("find { it.id == '$superseded' }.proposedBy", equalTo("maker"))
             .body("find { it.id == '$superseded' }.decidedBy", equalTo("checker"))
