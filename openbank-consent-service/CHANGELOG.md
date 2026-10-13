@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.26.2](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.26.1...consent-service-v0.26.2) (2026-10-13)
+
+
+### Security
+
+* **consent:** authenticate the API by bearer only on the mTLS listener ([#12527](https://github.com/JiRaska/open-bank-oss/issues/12527)) ([67e0dcd](https://github.com/JiRaska/open-bank-oss/commit/67e0dcd1f0f83508d497f0520ef42fb9d2307220))
+
 ## [0.26.1](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.26.0...consent-service-v0.26.1) (2026-10-11)
 
 
