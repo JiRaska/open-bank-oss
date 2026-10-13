@@ -53,7 +53,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: transaction-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-transaction-service:sandbox-4d47ca2b
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-transaction-service:sandbox-a9413403
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -464,7 +464,7 @@ spec:
         - name: sepa-payment
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-payment:sandbox-166fb99b
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-payment:sandbox-cca1c09e
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -1220,7 +1220,7 @@ spec:
         - name: sepa-instant
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-instant:sandbox-166fb99b
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-instant:sandbox-cca1c09e
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -1559,7 +1559,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: clearing-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-service:sandbox-43e7ec86
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-service:sandbox-8c54d176
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -1883,7 +1883,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: standing-order-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-standing-order-service:sandbox-43e7ec86
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-standing-order-service:sandbox-9e95c693
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -2469,11 +2469,8 @@ spec:
           type: RuntimeDefault
       containers:
         - name: card-processing-service
-          # Bootstrap pin: a real `sandbox-<sha>` naming a commit in this repository, because the deploy
-          # drift watch can only compare a tag it can resolve to a commit — an unpinned placeholder
-          # is UNVERIFIABLE forever rather than merely stale. No image carries this tag yet; the
-          # first auto-deploy run rewrites the line, and until then the Deployment does not admit,
-          # which is the honest state for a service whose image has never been built.
+          # Pin a built `sandbox-<sha>` image so the deploy drift watch can resolve its source
+          # commit and compare it with the desired revision.
           image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-processing-service:sandbox-43e7ec86
           imagePullPolicy: IfNotPresent
           ports:
@@ -2732,7 +2729,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: settlement-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-settlement-service:sandbox-166fb99b
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-settlement-service:sandbox-cca1c09e
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -3079,7 +3076,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: clearing-simulator
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-simulator:sandbox-f05874a7
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-simulator:sandbox-a9413403
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -3198,7 +3195,7 @@ spec:
         - name: swift-service
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-swift-service:sandbox-166fb99b
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-swift-service:sandbox-cca1c09e
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -3521,7 +3518,7 @@ spec:
       containers:
         - name: vop-service
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-vop-service:sandbox-4d47ca2b
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-vop-service:sandbox-a9413403
 
           imagePullPolicy: IfNotPresent
           ports:

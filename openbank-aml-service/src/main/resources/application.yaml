@@ -147,6 +147,19 @@ mp:
       # Keep the plain-HTTP port: with client-auth REQUIRED Quarkus otherwise drops the HTTP
       # listener, and the readiness probe plus admin-ui BFF discovery still use 8117.
       insecure-requests: enabled
+      # Listener parity (#12511, the #12506 pattern): with client-auth on, Quarkus ALSO registers its
+      # mTLS authentication mechanism, which turns any trusted client certificate into an authenticated
+      # SecurityIdentity of its own — on 8443 only. The API must be authenticated identically on both
+      # listeners, by the OIDC bearer OPA decides on. Demand authentication at the permission itself:
+      # `permit` would serve a newly unannotated business route without any bearer. Limit the rule to
+      # the AML API so the shared public /api/v1/info and /api/v1/config endpoints remain public.
+      # Listener parity tests cover the existing role-gated route and a test-only unannotated route.
+      auth:
+        permission:
+          bearer-only:
+            paths: /api/v1/aml/cases,/api/v1/aml/cases/*
+            policy: authenticated
+            auth-mechanism: bearer
     # The onboarding screening reconciler reads party-service's party list. Production uses a named
     # TLS bucket over party-service's private-CA mTLS listener (8443, client auth REQUIRED), the
     # same shape as sca-service and delegation-service. Local/test fixtures speak plain HTTP.
