@@ -262,8 +262,50 @@ EOF
     '{"result": true}|200{"result": true}|200') ;;
     *) echo "SELF-TEST FAIL 5: OPA stub did not answer two keep-alive POSTs with the allow body (got: ${ST_POST})"; ST_RC=1 ;;
   esac
+  # Control 6 exercises the evidence fixture at the handler boundary. Execute the actual
+  # heredoc class with a fake request/response so this control needs no second listener.
+  if ! python3 - "$0" <<'PY'
+import io
+import json
+import sys
+from types import SimpleNamespace
+
+source = open(sys.argv[1], encoding="utf-8").read()
+python = source.split("<<'STUBEOF' &\n", 1)[1].split("\nSTUBEOF\n", 1)[0]
+definitions = python.split("\nfor port in sys.argv[1:]:", 1)[0]
+namespace = {}
+exec(compile(definitions, sys.argv[1], "exec"), namespace)
+Handler = namespace["Absent"]
+
+def dispatch(path, method="GET", port=8113):
+    handler = object.__new__(Handler)
+    handler.server = SimpleNamespace(server_address=("127.0.0.1", port))
+    handler.command, handler.path = method, path
+    handler.headers, handler.rfile, handler.wfile = {}, io.BytesIO(), io.BytesIO()
+    handler._headers_buffer = []
+    handler.send_response = lambda code: setattr(handler, "status", code)
+    handler.send_header = lambda *_args: None
+    handler.end_headers = lambda: None
+    handler._absent()
+    return handler.status, handler.wfile.getvalue()
+
+status, body = dispatch("/api/v1/audit/evidence/synthetic-aggregate")
+assert status == 200
+response = json.loads(body)
+assert response["attestation"] == "audit-chain"
+assert response["truncated"] is False and response["tampered"] is False
+assert response["entryCount"] == 0 and response["entries"] == []
+assert dispatch("/api/v1/audit/evidence/synthetic-aggregate", port=8114)[0] == 404
+assert dispatch("/api/v1/audit/evidence/synthetic-aggregate/extra")[0] == 404
+assert dispatch("/api/v1/audit/evidence/synthetic-aggregate", "POST")[0] == 404
+assert dispatch("/unrelated")[0] == 404
+PY
+  then
+    echo "SELF-TEST FAIL 6: audit evidence stub contract or 404 boundaries regressed"
+    ST_RC=1
+  fi
   rm -rf "${ST_TMP}"
-  [ "${ST_RC}" = 0 ] && echo "self-test OK (5 controls)" || echo "self-test FAILED"
+  [ "${ST_RC}" = 0 ] && echo "self-test OK (6 controls)" || echo "self-test FAILED"
   exit "${ST_RC}"
 fi
 
@@ -326,7 +368,8 @@ for svc in $SERVICES; do
   # default names another openbank service that is NOT running in this job, and without a stub its
   # absence masquerades as a server-error finding — measured on run 34017868446, ledger's
   # POST /api/v1/ledger/fx-revaluation answered 500 solely because fx-service (8119) was down;
-  # same class as the Redis/OPA/Temporal traps in the header. The stub answers 404 to everything:
+  # same class as the Redis/OPA/Temporal traps in the header. Missing-service routes default to
+  # 404; the OIDC issuer, OPA decision, and audit-evidence cases have narrow explicit fixtures:
   # the "absent" answer these cross-service readers are written to expect (the fx adapter maps 404
   # to null and skips the leg), so schemathesis measures the HTTP surface, not the harness.
   # Never stub ports this job already provisions (postgres, redis) or shares with other infra
@@ -345,8 +388,8 @@ for svc in $SERVICES; do
   # this way, because the token fetch to the (excluded) keycloak port happens BEFORE the stubbed
   # fx-service call. Fix it the same derived way: a service declaring `oidc-client:` gets a stub
   # token issuer on 18099 (discovery + a static fake token), pointed there by a system property so
-  # it wins over any `${...:default}` spelling; the minted token is only ever presented to the
-  # 404 stubs, which validate nothing.
+  # it wins over any `${...:default}` spelling; the minted token is only ever presented to
+  # harness stubs, never to a real downstream service.
   OIDC_FLAGS=()
   if grep -qE '^  oidc-client:' "$APP_YAML"; then
     echo "==> [${svc}] config declares oidc-client — stubbing the token issuer on 18099 (outbound M2M mint)"
@@ -374,20 +417,23 @@ for svc in $SERVICES; do
   # the 404 set above excludes 8181 explicitly, and only the OPA set adds it back — so no
   # double-bind is possible. (The first version of the allow stub folded 8181 INTO the 404
   # list, which worked only because one process serves both, but printed the allow port in
-  # the "404-for-everything" line — a lie in the log while triaging run 34274283230.)
+  # the generic absent-service line — inaccurate while triaging run 34274283230.)
   STUB_PID=""
   if [ -n "${STUB_PORTS}" ] || [ -n "${OPA_STUB_PORTS}" ]; then
-    [ -n "${STUB_PORTS}" ] && echo "==> [${svc}] stubbing absent cross-service port(s) with 404-for-everything: $(echo ${STUB_PORTS})"
+    [ -n "${STUB_PORTS}" ] && echo "==> [${svc}] stubbing absent cross-service port(s); unspecified routes answer 404: $(echo ${STUB_PORTS})"
     python3 - ${STUB_PORTS} ${OPA_STUB_PORTS} >/dev/null 2>&1 <<'STUBEOF' &
 import http.server
+import json
 import os
 import sys
 import threading
 import time
+from urllib.parse import urlsplit
 
 # The port the OPA allow behaviour binds to; overridable so the self-test can exercise the
 # handler on a throwaway port without colliding with anything on 8181.
 OPA_PORT = int(os.environ.get("FUZZ_OPA_STUB_PORT", "8181"))
+AUDIT_EVIDENCE_STUB_PORT = int(os.environ.get("FUZZ_AUDIT_EVIDENCE_STUB_PORT", "8113"))
 
 
 class Absent(http.server.BaseHTTPRequestHandler):
@@ -437,6 +483,34 @@ class Absent(http.server.BaseHTTPRequestHandler):
         # keeps the 404 — the stub answers allow only where a PDP answer is asked for.
         if self.server.server_address[1] == OPA_PORT and self.path.startswith("/v1/data/"):
             self._answer(200, b'{"result": true}')
+            return
+        # audit-service's evidence route returns a valid empty bundle for an aggregate with
+        # no recorded rows. This narrow fixture models that response so lending's fuzz lane
+        # measures its HTTP surface instead of mapping an absent audit dependency's 404 to 503.
+        # This fixture does not model audit roles/OPA or caller-token forwarding; those
+        # downstream authorization and transport failures remain adapter-test responsibilities.
+        # All other paths and methods keep the fail-closed absent-service response below.
+        evidence_prefix = "/api/v1/audit/evidence/"
+        evidence_path = urlsplit(self.path).path
+        aggregate_id = evidence_path[len(evidence_prefix):] if evidence_path.startswith(evidence_prefix) else ""
+        if (self.server.server_address[1] == AUDIT_EVIDENCE_STUB_PORT
+                and self.command == "GET" and aggregate_id and "/" not in aggregate_id):
+            body = json.dumps({
+                "aggregateId": aggregate_id,
+                "attestation": "audit-chain",
+                "entryCount": 0,
+                "truncated": False,
+                "tampered": False,
+                "hashStatusCounts": {
+                    "VERIFIED": 0,
+                    "MISMATCH": 0,
+                    "LEGACY_UNVERIFIABLE": 0,
+                    "UNCHAINED": 0,
+                },
+                "fullChainVerification": "/api/v1/audit/integrity",
+                "entries": [],
+            }).encode()
+            self._answer(200, body)
             return
         self._answer(404, b'{"status":404,"title":"absent (fuzz cross-service stub)"}')
 
