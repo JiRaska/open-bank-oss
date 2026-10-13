@@ -109,5 +109,3 @@ Chyby při vyhledávání v account-service již do logů nezapisují identifik�
 - ✅ Resilience: circuit breaker / retry / timeout na odchozích voláních a publikaci outboxu
 - ✅ Tajemství: dev placeholdery nutno přepsat v produkci (Vault); non-root kontejner
 - ⚠️ SCA je vynucováno výše v řetězci, ne v této službě — ověř, že `sca_reference` je vyplněn pro zákaznicky iniciované kanály (threat-model follow-up)
-
-Chyby při vyhledávání v account-service již do logů nezapisují identifikátory účtů, texty výjimek z upstream služby ani stack trace. U HTTP chyb se zachovává pouze status; u ostatních pouze třída výjimky, aby operátoři rozlišili typ chyby bez zveřejnění dat požadavku či upstream služby.
