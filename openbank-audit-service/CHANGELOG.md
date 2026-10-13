@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.27.0](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.26.1...audit-service-v0.27.0) (2026-10-13)
+
+
+### Features
+
+* **lending:** read the loan evidence bundle from the audit chain and let lending_outbox purge ([#11962](https://github.com/JiRaska/open-bank-oss/issues/11962)) ([08bf6d9](https://github.com/JiRaska/open-bank-oss/commit/08bf6d910755fc16f9d3b8ce8e02eb39b6805d7f))
+
 ## [0.26.1](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.26.0...audit-service-v0.26.1) (2026-10-09)
 
 
