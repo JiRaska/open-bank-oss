@@ -137,14 +137,19 @@ class ListenerMaterial : QuarkusTestResourceLifecycleManager {
         }
 
         /** An RS256 access token the service's OIDC mechanism accepts: right issuer, right key, not expired. */
-        fun bearer(roles: List<String> = listOf("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")): String {
+        fun bearer(
+            roles: List<String> = listOf("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API"),
+            subject: String = "listener-parity-test",
+            audience: String? = null,
+        ): String {
             val now = Instant.now().epochSecond
             val header = """{"alg":"RS256","typ":"JWT","kid":"$KID"}"""
             val rolesJson = roles.joinToString(",") { "\"$it\"" }
+            val audienceJson = audience?.let { "\"aud\":\"$it\"," } ?: ""
             val claims =
                 """{"iss":"${System.getProperty(
                     ISSUER_PROPERTY,
-                )}","sub":"listener-parity-test","preferred_username":"listener-parity-test",""" +
+                )}","sub":"$subject","preferred_username":"$subject",$audienceJson""" +
                     """"iat":$now,"exp":${now + TOKEN_TTL_SECONDS},"realm_access":{"roles":[$rolesJson]},"groups":[$rolesJson]}"""
             val enc = Base64.getUrlEncoder().withoutPadding()
             val signingInput = enc.encodeToString(header.toByteArray()) + "." + enc.encodeToString(claims.toByteArray())

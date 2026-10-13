@@ -52,8 +52,7 @@ noise and the EU AI Act Art. 12 record-keeping claim cannot be checked.
 Today: **5 registered** (compliance-officer, ui-assistant, customer-copilot, devops-agent,
 control-liveness-sentinel), **6 pending** (the stub ops-agents, ADR-0164–0168 + ADR-0112 P4),
 **2 external** (rca-investigator → HolmesGPT's own image; ledger-domain-engineer → an operator's
-coding-agent session), **2 not-applicable** (mcp-anonymous, ap2-anonymous — identity-only
-principals).
+coding-agent session), **1 not-applicable** (mcp-anonymous — identity-only principal).
 
 | File | Source | Loaded from here? |
 |---|---|---|

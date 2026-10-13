@@ -5,9 +5,9 @@
 #
 # Every /ap2/verify call is authorized by the shared ADR-0034 PDP as an AI_AGENT principal —
 # the OPA sidecar below (localhost:8181) serves data.openbank.rest.allow, bridging the
-# verify.mandate capability to the ap2-anonymous charter (ADR-0193 phase 2). A PDP connectivity
-# error still fails /ap2/verify CLOSED (503). OIDC tenant-disabled; only in-cluster callers
-# (fenced by the generated NetworkPolicy). The image runs as numeric uid 100 (USER 100), so
+# verify.mandate capability to an onboarded agent charter. OIDC validates the bearer token
+# subject and audience before the PDP runs; absent charter or PDP connectivity fails closed.
+# The image runs as numeric uid 100 (USER 100), so
 # runAsNonRoot admits it; runAsUser is pinned for explicitness (matches agent-service).
 apiVersion: apps/v1
 kind: Deployment
@@ -39,7 +39,7 @@ spec:
       annotations:
         # Roll the pod when the OPA policy bundle changes (subPath mounts don't hot-reload).
         # Kept in sync by gen-ap2-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "81cf503ad32fd3f5"
+        openbank.tech/policy-checksum: "00a4de8772ecdab2"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -86,8 +86,8 @@ spec:
               value: http://keycloak.iam.svc:8080/realms/openbank
             # ADR-0034 PDP: the OPA sidecar in this pod (localhost:8181), serving
             # data.openbank.rest.allow (ap2-opa-bundle ConfigMap) — the shared PDP bridges the
-            # AI_AGENT verify.mandate capability to the ap2-anonymous charter (agents.rego). A PDP
-            # connectivity error still fails /ap2/verify CLOSED (503).
+            # AI_AGENT verify.mandate capability to an onboarded agent charter (agents.rego).
+            # A PDP connectivity error still fails /ap2/verify CLOSED (503).
             - name: OPA_URL
               value: http://localhost:8181
             # AP2 issuer trust list. Carries the demo issuer's public key so the sandbox demo
@@ -137,7 +137,7 @@ spec:
               memory: 512Mi
         # OPA policy-decision sidecar (ADR-0034 / ADR-0193 phase 2). Serves
         # data.openbank.rest.allow for the /ap2/verify gate — the shared PDP bridges the
-        # AI_AGENT verify.mandate capability to the ap2-anonymous charter (agents.rego). Bundle
+        # AI_AGENT verify.mandate capability to an onboarded agent charter (agents.rego). Bundle
         # mounted from ap2-opa-bundle ConfigMap (gen-ap2-opa-bundle.sh). Bind 0.0.0.0 so kubelet
         # httpGet probes reach /health (the image is scratch — no shell for an exec probe);
         # reachability is fenced by the pod network, and OPA serves only policy decisions.

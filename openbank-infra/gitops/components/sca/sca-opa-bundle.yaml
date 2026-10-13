@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: sca-service
     app.kubernetes.io/part-of: sca
   annotations:
-    openbank.tech/policy-checksum: "ca8ec6ea0ec0f2f9"
+    openbank.tech/policy-checksum: "0ab52067df1f6e1e"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1029,15 +1029,6 @@ data:
         - query.transaction.readonly
         - query.consent.readonly
         - propose.payment
-        deny:
-        - money.*
-        - gh.pr.*
-        - '*.write'
-        - secrets.read.raw
-    - id: ap2-anonymous
-      tools:
-        allow:
-        - verify.mandate
         deny:
         - money.*
         - gh.pr.*

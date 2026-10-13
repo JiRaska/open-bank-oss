@@ -1,16 +1,26 @@
 openapi: 3.0.3
 info:
   title: OpenBank AP2 Mandate Verifier
-  version: 1.0.0
+  version: 1.1.0
   description: >
     Bank-side verification of AP2 (Agent Payments Protocol) signed mandates as an
     authorization-evidence type (ADR-0193). Verifies the mandate's signature chain and its
     constraints (payee, amount cap, currency, expiry) against a presented payment. Moves no funds.
-    Every call is authorized by the ADR-0034 OPA PDP as an AI_AGENT principal.
+    Every call requires an AP2-audience OIDC bearer with agent:<id> subject, then the
+    ADR-0034 OPA PDP authorizes that agent's verify.mandate capability. No agent
+    identity is provisioned yet, so this endpoint remains closed until onboarding.
+components:
+  securitySchemes:
+    agentBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
 paths:
   /ap2/verify:
     post:
       summary: Verify a presented AP2 mandate against a payment
+      security:
+        - agentBearer: []
       requestBody:
         required: true
         content:
@@ -45,6 +55,7 @@ paths:
                     currency: { type: string }
                     at: { type: string, format: date-time }
       responses:
+        "401": { description: Missing or invalid bearer token }
         "200":
           description: Verdict (valid + evidence + failures)
           content:
