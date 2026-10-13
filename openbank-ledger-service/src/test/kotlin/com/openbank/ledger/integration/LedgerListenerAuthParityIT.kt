@@ -11,6 +11,9 @@ import com.openbank.libs.testing.mtls.ProductionListenerProfile
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.TestProfile
+import jakarta.ws.rs.GET
+import jakarta.ws.rs.Path
+import jakarta.ws.rs.core.Response
 import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.config.ConfigProvider
 import org.junit.jupiter.api.Test
@@ -47,5 +50,72 @@ class LedgerListenerAuthParityIT : ListenerAuthParityConformance() {
         assertThat(response.statusCode()).isEqualTo(401)
     }
 
-    class Profile : ProductionListenerProfile()
+    @Test
+    fun `an unannotated API route requires bearer on the mTLS listener`() = assertUnannotatedRoute("https")
+
+    @Test
+    fun `an unannotated API route requires bearer on the plain HTTP listener`() = assertUnannotatedRoute("http")
+
+    @Test
+    fun `public metadata remains available without bearer on both listeners`() {
+        val config = ConfigProvider.getConfig()
+        val plain = config.getValue("quarkus.http.test-port", Int::class.java)
+        val tls = config.getValue("quarkus.http.test-ssl-port", Int::class.java)
+        for (path in listOf("/api/v1/info", "/api/v1/config")) {
+            assertThat(get("http://localhost:$plain$path", false)).`as`("plain $path").isEqualTo(200)
+            assertThat(get("https://localhost:$tls$path", true)).`as`("TLS $path").isEqualTo(200)
+        }
+    }
+
+    @Test
+    fun `management readiness remains available without bearer`() {
+        val port = ConfigProvider.getConfig().getValue("quarkus.management.test-port", Int::class.java)
+        assertThat(get("http://localhost:$port/q/health/ready", false)).isEqualTo(200)
+    }
+
+    private fun get(url: String, tls: Boolean): Int {
+        val client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10))
+            .apply { if (tls) sslContext(ListenerMaterial.sslContext(true)) }
+            .build()
+        return client.send(
+            HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(10)).GET().build(),
+            HttpResponse.BodyHandlers.discarding(),
+        ).statusCode()
+    }
+
+    private fun assertUnannotatedRoute(scheme: String) {
+        fun response(scheme: String, bearer: String?): Int {
+            val portKey = if (scheme == "https") "quarkus.http.test-ssl-port" else "quarkus.http.test-port"
+            val port = ConfigProvider.getConfig().getValue(portKey, Int::class.java)
+            val request = HttpRequest.newBuilder(URI.create("$scheme://localhost:$port/api/v1/ledger/auth-probe"))
+                .timeout(Duration.ofSeconds(10))
+                .apply { bearer?.let { header("Authorization", "Bearer $it") } }
+                .GET()
+                .build()
+            val client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10))
+                .apply { if (scheme == "https") sslContext(ListenerMaterial.sslContext(true)) }
+                .build()
+            return client
+                .send(request, HttpResponse.BodyHandlers.discarding())
+                .statusCode()
+        }
+
+        assertThat(response(scheme, ListenerMaterial.bearer()))
+            .`as`("$scheme test-only unannotated route is served with a valid bearer")
+            .isEqualTo(200)
+        assertThat(response(scheme, null))
+            .`as`("$scheme test-only unannotated route must reject a request without bearer")
+            .isEqualTo(401)
+    }
+
+    class Profile : ProductionListenerProfile() {
+        override fun extraOverrides() = mapOf("quarkus.management.enabled" to "true")
+    }
+}
+
+/** Test-only route models a future endpoint accidentally missing a method security annotation. */
+@Path("/api/v1/ledger/auth-probe")
+class LedgerUnannotatedAuthProbe {
+    @GET
+    fun read(): Response = Response.ok().build()
 }
