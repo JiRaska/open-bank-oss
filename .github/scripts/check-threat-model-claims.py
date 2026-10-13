@@ -497,6 +497,7 @@ class Corpus:
         self.blobs: dict[str, str] = {}
         self.code: dict[str, str] = {}
         self._memo: dict[str, bool] = {}
+        self._stub_memo: dict[str, str | None] = {}
         for f in self.files:
             if f.endswith(DOCISH) or not f.endswith(CODEISH) or not is_backend(f):
                 continue
@@ -610,6 +611,11 @@ class Corpus:
         return hit
 
     def stub_site(self, sym: str) -> str | None:
+        if sym not in self._stub_memo:
+            self._stub_memo[sym] = self._stub_site_uncached(sym)
+        return self._stub_memo[sym]
+
+    def _stub_site_uncached(self, sym: str) -> str | None:
         """A cited symbol whose own DECLARATION opens with a stub marker.
 
         Anchored on the declaration, not on any mention: `paymentId` appears in hundreds of
@@ -966,6 +972,20 @@ def self_test() -> int:
     })
     case("naming a .rego file in prose, with no block-scalar key, does not resolve",
          prose_only.resolve("legacy_rest_ext.rego"), False)
+
+    # Stub lookup results belong to one immutable corpus, including negative results.
+    for label, symbol, blob, expected in [
+        ("stub declaration remains detected", "StubControl", "class StubControl {\n// TODO\n}", "fixture:1"),
+        ("real implementation is not a stub", "StubControl", "class StubControl {\nreturn 1\n}", None),
+        ("suffix declaration is not the cited symbol", "StubControl", "class OtherStubControl {\n// TODO\n}", None),
+        ("mention next to TODO is not a declaration", "StubControl", "class OtherControl {\nval message = StubControl // TODO\n}", None),
+        ("marker beyond declaration window is not a stub", "StubControl", "class StubControl {\n" + "\n" * 8 + "// TODO\n}", None),
+    ]:
+        stub_corpus = Corpus.__new__(Corpus)
+        stub_corpus.main = {"fixture": blob}
+        stub_corpus._stub_memo = {}
+        case(label, stub_corpus.stub_site(symbol), expected)
+        case(label + " on repeated lookup", stub_corpus.stub_site(symbol), expected)
 
     # (4) DISCRIMINATION. The widening must not simply fail everything: the CORRECTED form of each
     #     red case has to come back clean, or the gate is a blanket and not a check.
