@@ -71,10 +71,14 @@ look, not a gate.
 
 ## 3. Plan review
 
+At the approved change window, after prerequisites and pre-checks pass, generate a fresh plan
+against the current configuration and state. Keep backend state locking enabled, review this
+plan, and apply only this reviewed plan; do not reuse a plan from an earlier window or revision.
+
 ```
 cd openbank-infra/aws/envs/sandbox-substrate
 AWS_PROFILE=openbank tofu init -input=false
-AWS_PROFILE=openbank tofu plan -lock=false -out=eks.plan
+AWS_PROFILE=openbank tofu plan -out=eks.plan
 ```
 
 Expected change set for the version bump: `aws_eks_cluster` version, `aws_eks_node_group.bootstrap`
