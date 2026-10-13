@@ -229,3 +229,26 @@ test_tax_reporting_id_without_role_api_is_denied if {
 	}
 		with data.rules as reporting_excluded
 }
+
+test_reporting_close_seal_is_real_staff_only if {
+    rest.allow with input as {
+        "principal": {"type": "HUMAN", "id": "operator-1", "roles": ["ROLE_OPERATOR"]},
+        "action": "pension-fund.reporting.seal",
+    }
+    not rest.allow with input as {
+        "principal": {"type": "HUMAN", "id": "service-account-openbank-tax-reporting", "roles": ["ROLE_API", "ROLE_OPERATOR"]},
+        "action": "pension-fund.reporting.seal",
+    }
+    not rest.allow with input as {
+        "principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]},
+        "action": "pension-fund.reporting.seal",
+    }
+    not rest.allow with input as {
+        "principal": {"type": "AI_AGENT", "id": "agent:x", "roles": ["ROLE_OPERATOR"]},
+        "action": "pension-fund.reporting.seal",
+    }
+    not rest.allow with input as {
+        "principal": {"type": "HUMAN", "id": "cust-1", "roles": ["ROLE_CUSTOMER"]},
+        "action": "pension-fund.reporting.seal",
+    }
+}

@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: pension-fund-service
     app.kubernetes.io/part-of: pension-fund
   annotations:
-    openbank.tech/policy-checksum: "830929bd88aa7efa"
+    openbank.tech/policy-checksum: "cb4066d88847e598"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -623,7 +623,7 @@ data:
     #   pension-fund.strategy.read / .strategy.manage            — StrategyResource
     #   pension-fund.strategy.change.submit / .approve / .apply  — StrategyResource, StrategyChangeResource
     #   pension-fund.order.place / .holding.inspect              — ContractUnitResource
-    #   pension-fund.reporting.inspect                           — FundReportingResource (#12425)
+    #   pension-fund.reporting.inspect / .seal                   — FundReportingResource (#12425)
     #
     # WHY NOT `rules.yaml: authz.role_action_matrix`: a matrix line is a grant to every MACHINE that
     # holds the role, and no policy can veto it (#3765/#3734). The Keycloak service-accounts are
@@ -661,6 +661,7 @@ data:
     	"pension-fund.strategy.change.approve",
     	"pension-fund.strategy.change.apply",
     	"pension-fund.order.place",
+            "pension-fund.reporting.seal",
     }
 
     pension_fund_read_actions := {

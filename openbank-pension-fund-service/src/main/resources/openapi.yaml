@@ -6,7 +6,8 @@ info:
   # 1.2.0: separately accumulated P&L lines, the instrument class of positions and its four-eyes
   #        correction route — additive; income/expenses stay as deprecated fields.
   # 1.2.1: refuse a reporting period without a published NAV on the exact close date.
-  version: 1.2.1
+  # 1.3.0: explicit immutable fund source close and scoped historical aggregate read.
+  version: 1.3.0
   description: |
     Provider side of the pension platform (ADR-0334 §1): segregated funds, fund strategies with
     lifecycle glide paths, the unit register and NAV.
@@ -120,8 +121,9 @@ paths:
         Balance sheet at the closing NAV, year-to-date P&L, unit roll-forward, portfolio at the
         closing NAV, flows and participant COUNTS for one period. Aggregate only — no contract id
         or participant attribute is returned. Derived from PUBLISHED NAVs and the transactions
-        priced at them, bucketed by valuation date, so a closed period answers the same way every
-        time; `fingerprint` changes only when the inputs do (e.g. a NAV correction).
+        priced at them, bucketed by valuation date. This is a live, unsealed projection: a later
+        correction may change the answer and its `fingerprint`. Seal a source close explicitly
+        before assembling an attested statutory return.
         Served to staff and to tax-reporting-service's own client only.
       parameters:
         - { name: periodStart, in: query, required: true, schema: { type: string, format: date } }
@@ -131,6 +133,51 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { description: No published NAV at the period close — not reportable (never zeroes), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /api/v1/reporting/funds/{fundId}/period-closes:
+    parameters: [ { $ref: '#/components/parameters/FundId' } ]
+    post:
+      tags: [Reporting]
+      operationId: sealFundPeriodClose
+      summary: Seal an immutable aggregate source revision after the period ends
+      description: |
+        Operator-only command. Computes the existing fund period figures once, stores their
+        exact JSON bytes, NAV ids, source fingerprint and digest. Repeating the same scoped
+        actor/key/body command returns its original close even after a source correction;
+        a new key after correction creates a new close.
+        It does not submit a ČNB return.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 128 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FundPeriodCloseRequest' }
+      responses:
+        '201': { description: Sealed close receipt, content: { application/json: { schema: { $ref: '#/components/schemas/FundPeriodCloseReceipt' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/reporting/funds/{fundId}/period-closes/{closeId}:
+    parameters:
+      - { $ref: '#/components/parameters/FundId' }
+      - { name: closeId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [Reporting]
+      operationId: getSealedFundPeriodClose
+      summary: Read exactly the aggregate JSON sealed under this fund-scoped close id
+      responses:
+        '200':
+          description: Sealed aggregate; close and SHA-256 headers identify its source revision
+          headers:
+            X-Reporting-Payload-SHA256: { schema: { type: string, pattern: '^[0-9a-f]{64}$' } }
+            X-Reporting-Close-Id: { schema: { type: string, format: uuid } }
+            X-Reporting-Close-Revision: { schema: { type: string } }
+            X-Reporting-Payload-Schema-Version: { schema: { type: string } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/FundPeriodFigures' } } }
+        '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/navs/{navId}:
     parameters: [ { $ref: '#/components/parameters/NavId' } ]
     get:
@@ -602,6 +649,27 @@ components:
         contractId: { type: string, format: uuid }
         holdings: { type: array, items: { $ref: '#/components/schemas/HoldingValuation' } }
         pendingOrders: { type: array, items: { $ref: '#/components/schemas/UnitOrder' } }
+    FundPeriodCloseRequest:
+      type: object
+      required: [periodStart, periodEnd]
+      properties:
+        periodStart: { type: string, format: date }
+        periodEnd: { type: string, format: date }
+    FundPeriodCloseReceipt:
+      type: object
+      required: [id, revision, fundId, periodStart, periodEnd, closingNavId, sourceFingerprint, payloadSchemaVersion, payloadSha256, createdBy, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        revision: { type: integer, format: int64 }
+        fundId: { type: string, format: uuid }
+        periodStart: { type: string, format: date }
+        periodEnd: { type: string, format: date }
+        closingNavId: { type: string, format: uuid }
+        sourceFingerprint: { type: string, pattern: '^[0-9a-f]{64}$' }
+        payloadSchemaVersion: { type: string, example: '1.3.0' }
+        payloadSha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
     FundPeriodFigures:
       type: object
       required: [fundId, currency, periodStart, periodEnd, closingNavId, closingValuationDate, balanceSheet, profitAndLossYtd, units, portfolio, flows, entitlements, participants, basisNavIds, fingerprint]

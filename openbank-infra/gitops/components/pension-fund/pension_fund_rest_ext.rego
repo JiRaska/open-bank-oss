@@ -9,7 +9,7 @@
 #   pension-fund.strategy.read / .strategy.manage            — StrategyResource
 #   pension-fund.strategy.change.submit / .approve / .apply  — StrategyResource, StrategyChangeResource
 #   pension-fund.order.place / .holding.inspect              — ContractUnitResource
-#   pension-fund.reporting.inspect                           — FundReportingResource (#12425)
+#   pension-fund.reporting.inspect / .seal                   — FundReportingResource (#12425)
 #
 # WHY NOT `rules.yaml: authz.role_action_matrix`: a matrix line is a grant to every MACHINE that
 # holds the role, and no policy can veto it (#3765/#3734). The Keycloak service-accounts are
@@ -47,6 +47,7 @@ pension_fund_staff_write_actions := {
 	"pension-fund.strategy.change.approve",
 	"pension-fund.strategy.change.apply",
 	"pension-fund.order.place",
+        "pension-fund.reporting.seal",
 }
 
 pension_fund_read_actions := {

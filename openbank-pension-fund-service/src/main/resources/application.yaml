@@ -82,6 +82,10 @@ quarkus:
     host: 0.0.0.0
     root-path: /q
 
+  smallrye-openapi:
+    # API-contract axis (ADR-0048), independent of release-please's version.txt.
+    info-version: 1.3.0
+
   dev-ui:
     enabled: false
 
