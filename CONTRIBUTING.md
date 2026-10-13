@@ -120,6 +120,25 @@ This mirrors the exact checks the CI gates enforce (ADR-0029). Run this before o
 Docker) is the earliest point where CDI failures surface. Add it to your pre-push routine when
 modifying producers, interceptors, or `@ApplicationScoped` beans.
 
+### Scope integration-test infrastructure
+
+`ResourceArg(name = "db", value = ...)` names a database; it does not limit the
+resource to that test. For a resource owned by one test class, use
+`restrictToAnnotatedClass = true` on its `@QuarkusTestResource` annotation. Check
+inherited tests and profile resources first. Keep resources shared by several tests
+grouped, including their messaging and TLS setup.
+
+Verify the complete module test suite before and after changing resource scope.
+Compare every test outcome, preserving repeated parameterized cases, and count
+physical container starts from verbose logs. Fewer starts alone do not prove lower
+CI wall time. Then run the module build for lint, coverage and CDI validation.
+
+Resource isolation can change Quarkus restart boundaries. If a test passes alone
+but fails in the complete suite, investigate the application lifecycle before
+changing assertions. A dedicated empty test profile can separate boot contexts;
+verify the complete suite and its memory use before adopting it. Set any measured
+test heap requirement on that module's test task, keeping runtime settings separate.
+
 ### Run admin-ui locally
 
 ```bash
