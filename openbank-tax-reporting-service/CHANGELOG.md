@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.44.0](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.43.1...tax-reporting-service-v0.44.0) (2026-10-13)
+
+
+### Features
+
+* **tax-reporting:** corporate register feeding ČNB PSP 32-04, 50-04 and 40-01 ([#12495](https://github.com/JiRaska/open-bank-oss/issues/12495)) ([b44c19b](https://github.com/JiRaska/open-bank-oss/commit/b44c19b652a953b642eb236b151855fdc39ef9b8))
+
 ## [0.43.1](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.43.0...tax-reporting-service-v0.43.1) (2026-10-13)
 
 
