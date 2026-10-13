@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.4](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.13.3...aml-service-v0.13.4) (2026-10-13)
+
+
+### Security
+
+* **aml:** authenticate the API by bearer only on the mTLS listener ([#12529](https://github.com/JiRaska/open-bank-oss/issues/12529)) ([abb9c0c](https://github.com/JiRaska/open-bank-oss/commit/abb9c0c178a49f800f6c6e2127b6d5736828b88e))
+
 ## [0.13.3](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.13.2...aml-service-v0.13.3) (2026-10-04)
 
 
