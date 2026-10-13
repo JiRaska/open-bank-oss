@@ -42,11 +42,13 @@
       "code": "PSP20-12-FUND", "name": "PSP (ČNB) 20-12 Měsíční výkaz zisku a ztráty fondu (year to date)",
       "scope": "FUND", "periodicity": "MONTH", "deadlineDaysAfterPeriodEnd": 20,
       "legalBasis": "vyhl. 425/2012 Sb. §3(2)(b)",
-      "datapoints": ["income_ytd", "expenses_ytd", "profit_loss_ytd"],
+      "_comment": "Separate result lines (#12425): revaluation gains and losses are each non-negative and a loss year is a losses line, never a negative income. other_investment_result_ytd (interest, result on disposals, cash) and profit_loss_ytd are signed by nature. Line ids are platform identifiers, not SDAT cells.",
+      "datapoints": ["revaluation_gains_ytd", "revaluation_losses_ytd", "other_investment_result_ytd", "management_fees_ytd", "profit_loss_ytd"],
       "rules": [
-        {"type": "NON_NEGATIVE", "id": "pl-components-non-negative", "datapoints": ["income_ytd", "expenses_ytd"]},
-        {"type": "SUM_EQUALS", "id": "profit-is-income-less-expenses", "target": "profit_loss_ytd",
-         "terms": [{"datapoint": "income_ytd", "sign": 1}, {"datapoint": "expenses_ytd", "sign": -1}]}
+        {"type": "NON_NEGATIVE", "id": "pl-gross-lines-non-negative", "datapoints": ["revaluation_gains_ytd", "revaluation_losses_ytd", "management_fees_ytd"]},
+        {"type": "SUM_EQUALS", "id": "profit-is-sum-of-lines", "target": "profit_loss_ytd",
+         "terms": [{"datapoint": "revaluation_gains_ytd", "sign": 1}, {"datapoint": "revaluation_losses_ytd", "sign": -1},
+                   {"datapoint": "other_investment_result_ytd", "sign": 1}, {"datapoint": "management_fees_ytd", "sign": -1}]}
       ]
     },
     {
@@ -102,8 +104,9 @@
       "code": "PSP50-04", "name": "PSP (ČNB) 50-04 Hlášení o organizační struktuře",
       "scope": "COMPANY", "periodicity": "QUARTER", "deadlineDaysAfterPeriodEnd": 30,
       "legalBasis": "vyhl. 425/2012 Sb. §3(1)(b)(1)",
-      "datapoints": ["share_capital", "employees_count", "qualifying_shareholders_count"],
-      "rules": [{"type": "NON_NEGATIVE", "id": "structure-non-negative", "datapoints": ["share_capital", "employees_count", "qualifying_shareholders_count"]}]
+      "_comment": "Sourced from the operator-maintained corporate register (#12425): no system produces these figures.",
+      "datapoints": ["share_capital", "employees_count", "qualifying_shareholders_count", "board_of_directors_members", "supervisory_board_members"],
+      "rules": [{"type": "NON_NEGATIVE", "id": "structure-non-negative", "datapoints": ["share_capital", "employees_count", "qualifying_shareholders_count", "board_of_directors_members", "supervisory_board_members"]}]
     },
     {
       "code": "PSP40-01", "name": "PSP (ČNB) 40-01 Doplňující informace pro vyhodnocování rizikovosti",
