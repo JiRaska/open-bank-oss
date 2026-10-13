@@ -40,6 +40,8 @@ claim to have transmitted a regulator file; verified cell-level rendering is tra
 The configured reporting entity IDs and reporting start must be supplied before never-assembled
 pension returns can be monitored.
 
+The corporate register is available at `/api/v1/corporate-register` for the reporting company. Entries name their source document and are versioned and effective-dated. Only approved entries feed a return; the proposer cannot decide their own entry, and decided entries are append-only. Missing approved values produce an unavailable return response rather than zero.
+
 For fund PSP 20-12, the return uses the provider's year-to-date revaluation gains, revaluation losses, management fees, other investment result, and profit/loss figures. Revaluation gains, revaluation losses, and management fees are non-negative amounts; other investment result and profit/loss are signed. The catalogue checks the reported profit/loss against its component lines. If the provider cannot supply the required lines, assembly returns unavailable with the provider's reason.
 
 Fund PEF 13-04 uses the closing portfolio's `loansOutstanding`. The provider reports it as unknown while any closing position is `UNCLASSIFIED`, because that position may be a loan; tax-reporting then refuses assembly with HTTP 503 and identifies the number of unclassified positions and the four-eyes classification path. A period from before position recording is also unavailable. Missing loan data is never converted to zero; zero is reported only when the provider has a known closing portfolio and no classified loans.
