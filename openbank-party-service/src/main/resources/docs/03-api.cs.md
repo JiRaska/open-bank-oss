@@ -12,6 +12,8 @@ REST kontrakt je popsán v [`openapi.yaml`](../openapi.yaml) (`info.version` 1.3
 
 Všechny endpointy vyžadují **Keycloak Bearer token** (realm `openbank`). Role per endpoint (`@RolesAllowed`):
 
+V produkčním prostředí `/api/*` na HTTP i mTLS listeneru používá autentizační mechanismus bearer. Důvěryhodný klientský certifikát je nutný pro navázání TLS na portu 8443, ale sám o sobě neurčuje identitu volajícího API: certifikát bez tokenu vrací 401. Na tomto listeneru klient potřebuje certifikát i platný bearer; stávající HTTP listener nadále vyžaduje bearer. Tím se brání tomu, aby služba s důvěryhodným transportním certifikátem získala identitu v API bez tokenu (#12511). `PartyListenerAuthParityIT` ověřuje oba listenery skutečnými HTTP požadavky. Volba mechanismu nemění poradní režim OPA ani kontroly rolí jednotlivých endpointů níže.
+
 | Endpoint | Role |
 |---|---|
 | `GET /parties`, `GET /parties/search`, `GET /parties/{id}`, `GET /parties/{id}/documents` | `ROLE_VIEWER`, `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_KYC`, `ROLE_API` |

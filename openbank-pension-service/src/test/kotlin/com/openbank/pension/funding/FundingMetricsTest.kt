@@ -7,6 +7,7 @@ package com.openbank.pension.funding
 import com.openbank.pension.application.usecase.ReceiptOutcome
 import com.openbank.pension.domain.contribution.ContributionChannel
 import com.openbank.pension.domain.contribution.IncomingPayment
+import com.openbank.pension.domain.contribution.UnmatchedStatus
 import com.openbank.pension.e2e.support.StateAgencySimulator
 import com.openbank.pension.infrastructure.observability.MicrometerPensionMetrics
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
@@ -68,6 +69,52 @@ class FundingMetricsTest {
         ).isEqualTo(1.0)
         assertThat(received("unmatched")).isEqualTo(1.0)
         assertThat(received("credited")).isEqualTo(1.0)
+    }
+
+    @Test
+    fun `assignment of an existing credit counts a resolution but no second amount`(): Unit = runBlocking {
+        val c = f.contract()
+        val reference = f.contributionService.paymentReference(c.contractId)
+        f.contributionService.receive(payment("existing", "800", reference))
+        val parked = (
+            f.contributionService.receive(
+                payment("existing", "800", "nope"),
+            ) as ReceiptOutcome.Unmatched
+            ).unmatched
+
+        f.contributionService.assignUnmatched(parked.id, c.contractId, "alice")
+
+        assertThat(received("credited")).isEqualTo(1.0)
+        assertThat(received("duplicate")).isEqualTo(1.0)
+        assertThat(amount("PARTICIPANT", "credited")).isEqualTo(800.0)
+        assertThat(
+            registry.find("openbank.pension.unmatched.resolved").tag("resolution", "assigned").counter()?.count(),
+        )
+            .isEqualTo(1.0)
+        assertThat(f.contributionRows).hasSize(1)
+    }
+
+    @Test
+    fun `a conflicting assignment records neither resolution nor another credit`(): Unit = runBlocking {
+        val original = f.contract()
+        val other = f.contract()
+        val reference = f.contributionService.paymentReference(original.contractId)
+        f.contributionService.receive(payment("conflict", "800", reference))
+        val parked = (
+            f.contributionService.receive(
+                payment("conflict", "800", "nope"),
+            ) as ReceiptOutcome.Unmatched
+            ).unmatched
+
+        val rejected = runCatching { f.contributionService.assignUnmatched(parked.id, other.contractId, "alice") }
+
+        assertThat(rejected.exceptionOrNull()).isInstanceOf(IllegalStateException::class.java)
+        assertThat(received("credited")).isEqualTo(1.0)
+        assertThat(received("duplicate")).isZero()
+        assertThat(registry.find("openbank.pension.unmatched.resolved").tag("resolution", "assigned").counter())
+            .isNull()
+        assertThat(f.unmatchedRows.getValue(parked.id).status).isEqualTo(UnmatchedStatus.OPEN)
+        assertThat(f.contributionRows).hasSize(1)
     }
 
     @Test

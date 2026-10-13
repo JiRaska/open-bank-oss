@@ -177,6 +177,9 @@ class PensionFundRestAdapter : FundAdministrationPort {
     @Inject
     lateinit var clock: Clock
 
+    @Inject
+    lateinit var plans: FundOrderPlans
+
     private val logic by lazy {
         PensionFundOrders(
             object : FundRegister {
@@ -191,6 +194,7 @@ class PensionFundRestAdapter : FundAdministrationPort {
             },
             { id -> contracts.findById(id)?.strategyOn(LocalDate.now(clock))?.strategyCode },
             clock,
+            plans,
         )
     }
 
@@ -215,6 +219,7 @@ class PensionFundOrders(
     private val client: FundRegister,
     private val strategyOf: suspend (UUID) -> String?,
     private val clock: Clock,
+    private val plans: FundOrderPlans,
 ) : FundAdministrationPort {
 
     override suspend fun valuation(contractId: UUID, currency: String): Valuation {
@@ -259,16 +264,16 @@ class PensionFundOrders(
         idempotencyKey: String,
     ): String {
         require(amount.signum() > 0) { "subscription amount must be positive" }
-        val code = strategyOf(contractId) ?: refuse("contract $contractId has no elected strategy")
-        val strategy = client.strategies().firstOrNull { it.name == code && it.status != "CLOSED" }
-            ?: refuse("strategy '$code' is not registered in pension-fund-service")
-        val legs = split(amount, strategy.allocations)
-        val ids = legs.map { (fundId, legAmount) ->
-            client.placeOrder(
-                contractId,
-                legKey(idempotencyKey, fundId),
-                OrderRequestDto(fundId, "SUBSCRIBE", amount = legAmount),
-            ).id.toString()
+        val plan = plan(contractId, "SUBSCRIBE", amount, currency, idempotencyKey) {
+            val code = strategyOf(contractId) ?: refuse("contract $contractId has no elected strategy")
+            val strategy = client.strategies().firstOrNull { it.name == code && it.status != "CLOSED" }
+                ?: refuse("strategy '$code' is not registered in pension-fund-service")
+            split(amount, strategy.allocations).map { (fundId, legAmount) ->
+                OrderRequestDto(fundId, "SUBSCRIBE", amount = legAmount)
+            }
+        }
+        val ids = plan.legs.map { leg ->
+            client.placeOrder(contractId, legKey(idempotencyKey, leg.fundId), leg).id.toString()
         }
         return ids.joinToString(",").takeIf { it.length <= MAX_REF } ?: "${ids.first()}+${ids.size - 1}"
     }
@@ -280,25 +285,48 @@ class PensionFundOrders(
         idempotencyKey: String,
     ): Redemption {
         require(amount.signum() > 0) { "redemption amount must be positive" }
-        val holdings = client.holdings(contractId).holdings.filter { it.units.signum() > 0 }
-        val total = valuation(contractId, currency).amount
-        if (amount > total) refuse("redemption $amount exceeds the holdings' value $total")
-        val ratio = amount.divide(total, RATIO_SCALE, RoundingMode.HALF_EVEN)
-        holdings.forEach { h ->
-            val units = if (amount.compareTo(total) == 0) {
-                h.units
-            } else {
-                h.units.multiply(ratio).setScale(UNIT_SCALE, RoundingMode.HALF_UP).min(h.units)
+        val plan = plan(contractId, "REDEEM", amount, currency, idempotencyKey) {
+            val holdings = client.holdings(contractId).holdings.filter { it.units.signum() > 0 }
+            holdings.forEach { h ->
+                if (h.currency != currency) refuse("holding in fund ${h.fundId} is in ${h.currency}, not $currency")
+                if (h.value == null) refuse("fund ${h.fundId} has no published NAV yet")
             }
-            if (units.signum() > 0) {
-                client.placeOrder(
-                    contractId,
-                    legKey(idempotencyKey, h.fundId),
-                    OrderRequestDto(h.fundId, "REDEEM", units = units),
-                )
+            val total = holdings.fold(BigDecimal.ZERO) { sum, holding -> sum + holding.value!! }
+                .setScale(MONEY_SCALE, RoundingMode.HALF_EVEN)
+            if (amount > total) refuse("redemption $amount exceeds the holdings' value $total")
+            val ratio = amount.divide(total, RATIO_SCALE, RoundingMode.HALF_EVEN)
+            holdings.mapNotNull { h ->
+                val units = if (amount.compareTo(total) == 0) {
+                    h.units
+                } else {
+                    h.units.multiply(ratio).setScale(UNIT_SCALE, RoundingMode.HALF_UP).min(h.units)
+                }
+                if (units.signum() > 0) OrderRequestDto(h.fundId, "REDEEM", units = units) else null
             }
         }
+        plan.legs.forEach { leg ->
+            client.placeOrder(contractId, legKey(idempotencyKey, leg.fundId), leg)
+        }
         return Redemption(idempotencyKey, amount.setScale(MONEY_SCALE, RoundingMode.HALF_EVEN))
+    }
+
+    private suspend fun plan(
+        contractId: UUID,
+        kind: String,
+        amount: BigDecimal,
+        currency: String,
+        idempotencyKey: String,
+        createLegs: suspend () -> List<OrderRequestDto>,
+    ): FundOrderPlan {
+        val key = MessageDigest.getInstance("SHA-256")
+            .digest(idempotencyKey.toByteArray(StandardCharsets.UTF_8)).joinToString("") { "%02x".format(it) }
+        val stored = plans.find(key) ?: run {
+            val legs = createLegs()
+            check(legs.isNotEmpty()) { "fund operation has no positive instruction" }
+            plans.saveIfAbsent(FundOrderPlan(key, contractId, kind, amount, currency, legs))
+        }
+        stored.requireRequest(contractId, kind, amount, currency)
+        return stored
     }
 
     override suspend fun reverseRedemption(contractId: UUID, redemption: Redemption, currency: String) {

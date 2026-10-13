@@ -12,10 +12,12 @@ compliance read grants. This policy is **advisory by default** in
 product-catalog (`AUTHZ_ENFORCE=false`): the approval-evidence GET endpoint's
 mandatory gates are `CATALOG_SCOPE_READ` and a verified JWT reader check. The
 reader must be the named pension service account or an Admin UI human with a
-matching pension approval role and scope. Another service's token with
-`catalog:read` cannot read approval evidence even when it omits service-account
-name and role claims. With `AUTHZ_ENFORCE=true`, OPA also checks its policy's
-caller and claim conditions.
+matching pension approval role and scope, or a human publisher with the
+`catalog:publish` scope. The publisher needs the evidence to decide whether a
+revision can be published; this read grant cannot create an approval. Another
+service's token with `catalog:read` and `catalog:publish` still cannot read the
+evidence, even when it omits service-account name and role claims. With
+`AUTHZ_ENFORCE=true`, OPA also checks its policy's caller and claim conditions.
 
 Catalog approval decisions are separately human-only and require the legal or
 product-owner role together with its matching scope. The endpoint checks the

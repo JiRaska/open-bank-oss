@@ -70,7 +70,7 @@ class LendingResource(
     private val collateral: CollateralUseCase,
     private val provisioning: ProvisioningUseCase,
     private val terminate: com.openbank.lending.application.port.`in`.TerminateLoanUseCase,
-    private val outbox: com.openbank.lending.application.port.out.LendingOutboxRepository,
+    private val evidence: com.openbank.lending.application.port.out.LoanEvidencePort,
     private val identity: SecurityIdentity,
     private val clock: Clock,
     private val idempotencyStore: IdempotencyStore,
@@ -233,18 +233,35 @@ class LendingResource(
     @Authorize(action = "lending.evidence.read", resource = "#id")
     @Operation(summary = "Ordered evidence bundle for one loan application (ADR-0214)")
     suspend fun evidence(@PathParam("id") id: UUID): Response {
-        val events = outbox.findByAggregateId(id).map { entry ->
+        // ADR-0214 D3 / #11900: the bundle comes from the tamper-evident audit chain, read with the
+        // caller's own token. No fallback to lending_outbox — that table is a delivery buffer and
+        // is purged once delivered; a bundle silently assembled from whatever it still holds would
+        // read as complete when it is not.
+        val bundle = try {
+            evidence.bundleFor(id.toString())
+        } catch (e: com.openbank.lending.application.port.out.LoanEvidenceUnavailable) {
+            val status = when (e.status) {
+                HTTP_UNAUTHORIZED, HTTP_FORBIDDEN -> e.status
+                else -> HTTP_SERVICE_UNAVAILABLE
+            }
+            return Response.status(status).entity(mapOf("error" to "evidence trail unavailable: ${e.message}")).build()
+        }
+        val events = bundle.events.map { event ->
             mapOf(
-                "eventId" to entry.eventId.toString(),
-                "eventType" to entry.eventType,
-                "occurredAt" to entry.createdAt.toString(),
-                "payload" to entry.payload,
+                "eventId" to event.eventId,
+                "eventType" to event.eventType,
+                "sourceService" to event.sourceService,
+                "occurredAt" to event.occurredAt.toString(),
+                "payload" to event.payload,
+                "hashStatus" to event.hashStatus,
             )
         }
         return Response.ok(
             mapOf(
                 "applicationId" to id.toString(),
-                "attestation" to "local-outbox",
+                "attestation" to bundle.attestation,
+                "tampered" to bundle.tampered,
+                "truncated" to bundle.truncated,
                 "eventCount" to events.size,
                 "events" to events,
                 "requestedBy" to actor(),
@@ -501,6 +518,9 @@ class LendingResource(
         const val HTTP_NOT_FOUND = 404
         const val HTTP_UNPROCESSABLE = 422
         const val HTTP_CONFLICT = 409
+        const val HTTP_UNAUTHORIZED = 401
+        const val HTTP_FORBIDDEN = 403
+        const val HTTP_SERVICE_UNAVAILABLE = 503
         const val MAX_APPLICATION_LIST_LIMIT = 200
     }
 }

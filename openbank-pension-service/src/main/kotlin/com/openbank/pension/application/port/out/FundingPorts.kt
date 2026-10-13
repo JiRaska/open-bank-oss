@@ -66,6 +66,9 @@ interface UnmatchedPaymentRepository {
 
     suspend fun list(status: UnmatchedStatus?): List<UnmatchedPayment>
 
+    /** Commit an OPEN decision and its contribution together; concurrent decisions fail. */
+    suspend fun assignAtomically(payment: UnmatchedPayment, contribution: Contribution): Pair<Contribution, Boolean>
+
     suspend fun update(payment: UnmatchedPayment)
 }
 
