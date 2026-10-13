@@ -790,6 +790,18 @@ loan's remaining schedule, so the engine pulls it at snapshot time.
   namespace's NetworkPolicy admission) is a separate reviewed change. **STRIDE-S/I:** additive — a
   second, strictly stronger path to the same surface. Rollback: revert the commit (remove the
   listener env, port, volume and Certificate); 8126 is untouched throughout.
+- **2026-10-11** — **The 8443 listener no longer accepts a client certificate as a login (#12511).**
+  `client-auth: required` (2026-09-20 entries above) also registers Quarkus's mTLS authentication
+  mechanism, which turned any certificate the private CA had signed into an authenticated
+  `SecurityIdentity`: a workload holding a fleet-CA certificate and NO bearer reached `/api/*` as a
+  logged-in principal (measured: 403 from authz instead of 401). `%prod` now restricts `/api/*` to
+  `auth-mechanism: bearer` (the #12506 pattern), so the certificate is transport authentication only and
+  the OIDC bearer is the only identity a route or OPA sees, identically on 8443 and the plain port.
+  **STRIDE-S/E:** closes a spoofing / elevation path; callers are unaffected because every 8443 caller
+  already sends its own bearer. Proven by `LendingListenerAuthParityIT` (production listener shape, real
+  HTTP; 1 of 4 failing without the change, 4 of 4 with it) and gated fleet-wide by `mtls-bearer-only`.
+  Rollback: revert the commit (re-opens the path).
+
 
 ## 10. Credit-risk read surface (ADR-0230 D1, ADR-0213 D4) — STRIDE supplement
 
