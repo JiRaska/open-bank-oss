@@ -238,6 +238,16 @@ retiring the corresponding KEK version in Transit, not after.
   revoke propagation per ADR-0232; customer-edge adoption of the check endpoint is its own slice.
   Rollback: revert; the projection tables are droppable without touching `cards`.
 - **2026-09-21** — **Two card reads admit named machine identities (#10486 batch 6).** `GET /api/v1/cards/{id}` (`card.read`) and `GET /api/v1/cards/party/{partyId}` (`card.list`) add `ROLE_API` to `@RolesAllowed`, so delegation-service (ownership check) and party-service (GDPR Art. 15) keep reading once the shared `openbank-services` client loses `ROLE_OPERATOR`. **STRIDE-E/I:** `ROLE_API` is held by every service account and this is cardholder data, so it is narrowed twice: identity rules in `card_issuance_rest_ext.rego` (`service-delegation-card-read`, `service-party-card-list`) and, because card-issuance runs `AUTHZ_ENFORCE=false`, a Kotlin named-caller check (`requireNamedCardReader`) with one list per endpoint. `CardReadCallerGuardTest` pins the Kotlin lists to the rego and asserts only these two endpoints admit `ROLE_API`; `card_issuance_rest_ext_test.rego` denies another service account and the shared client (negative case run: widening a rule to a `service-account-` prefix turned two tests red). The secure-details endpoint (PAN/CVV) is unchanged. Rollback: revert the commit.
+- **2026-10-13** — **OPA client identity is a separate trust input (#12328).** The shared
+  authorization interceptor now forwards `principal.attributes.verified_client_id` only from
+  an authenticated JWT with a nonempty `sub` and `azp`. A preferred/display username alone
+  is not evidence of the OAuth client. Missing or subjectless JWTs carry no such attribute;
+  policy rules for a named machine client must deny those inputs and bind both the exact
+  client and the expected service-account principal. This additive query field does not
+  grant card access, provision a card-processing credential, reconcile the live realm,
+  or change `AUTHZ_ENFORCE=false`. The issuer flip still requires a reviewed staged caller
+  rollout and observed zero legitimate advisory denials.
+
 ## Delegation lifecycle ordering
 
 The card enforcement projection uses a durable monotonic cursor before changing access or blocking
