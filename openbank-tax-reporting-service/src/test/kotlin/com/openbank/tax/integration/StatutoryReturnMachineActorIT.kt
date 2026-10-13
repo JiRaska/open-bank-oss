@@ -28,6 +28,7 @@ import org.junit.jupiter.api.Test
 @QuarkusTestResource(
     value = PostgresTestResource::class,
     initArgs = [ResourceArg(name = "db", value = "openbank_tax_reporting_machine_it")],
+    restrictToAnnotatedClass = true,
 )
 @QuarkusTestResource(StatutoryReturnMessagingTestResource::class)
 class StatutoryReturnMachineActorIT {

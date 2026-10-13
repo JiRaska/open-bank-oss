@@ -40,3 +40,9 @@ dependencies {
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
     testImplementation(project(":openbank-libs-testing"))
 }
+
+// Independent Quarkus boot profiles retain more than the default 512 MiB test heap.
+// The complete real-DB/Kafka suite measured 680 MiB after GC with a 1 GiB cap (#12250).
+tasks.named<Test>("test") {
+    maxHeapSize = "1g"
+}
