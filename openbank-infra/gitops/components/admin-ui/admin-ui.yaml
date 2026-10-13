@@ -49,7 +49,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: admin-ui
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-admin-ui:sandbox-b77a6d24a-run38165787191
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-admin-ui:sandbox-8c54d176e-run38356731710
           ports:
             - name: http
               containerPort: 3000
@@ -107,6 +107,8 @@ spec:
             # Adding a service *inside* an existing namespace is fully automatic.
             - name: OPENBANK_NAMESPACES
               value: accounts,payments,compliance,identity,open-banking,platform,ledger,balances,audit,sanctions,security-scanner,onboarding,party,sca,statements,customer-edge,kyc,notifications,aml,consent,dispute,fraud,fx,interest,pid,psd2,documents,campaign,anacredit,billing,finrep,lending,sdd,tpp-registry,delegation,engagement,referral,kyb,communication,wealth,context,risk,loyalty,incentive,treasury,pricing,pension,pension-fund,tax-reporting,treasury-pension-co
+            - name: PENSION_COMPANY_TREASURY_URL
+              value: https://treasury-service.treasury-pension-co.svc:8443
             - name: REFERRAL_SERVICE_URL
               value: https://referral-service.referral.svc:8443
             - name: NODE_EXTRA_CA_CERTS
@@ -219,6 +221,9 @@ spec:
             - name: sbom-drift
               mountPath: /config/sbom-drift
               readOnly: true
+            - name: treasury-tls
+              mountPath: /mnt/treasury-tls
+              readOnly: true
             - name: referral-ca
               mountPath: /mnt/referral-ca
               readOnly: true
@@ -244,6 +249,9 @@ spec:
           emptyDir: {}
         - name: next-cache
           emptyDir: {}
+        - name: treasury-tls
+          secret:
+            secretName: admin-ui-treasury-client
         - name: referral-ca
           secret:
             secretName: admin-ui-referral-ca

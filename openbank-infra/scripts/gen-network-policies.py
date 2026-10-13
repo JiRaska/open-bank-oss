@@ -429,6 +429,16 @@ spec:
 ---
 apiVersion: apps/v1
 kind: Deployment
+metadata: {name: admin-ui, namespace: admin-ui}
+spec:
+  template:
+    spec:
+      containers:
+        - name: admin-ui
+          env: [{name: TARGET_URL, value: 'https://fixture-service.fixture.svc:8443'}]
+---
+apiVersion: apps/v1
+kind: Deployment
 metadata: {name: scanner, namespace: security-scanner}
 spec:
   template:
@@ -464,10 +474,33 @@ spec:
                            if peer.get("namespaceSelector", {}).get("matchLabels", {}).get(
                                "kubernetes.io/metadata.name") == namespace
                            for port in rule.get("ports", [])})
+        case("no empty peer rule can admit every source", any(rule.get("from") == [] for rule in policy["spec"]["ingress"]), False)
+        case("explicit BFF mTLS edge excludes HTTP and renderer does not re-add it", allowed("admin-ui"), [8443])
         case("mTLS caller does not inherit HTTP", allowed("payments"), [8443])
         case("HTTP scanner does not inherit mTLS", allowed("security-scanner"), [8117])
         case("portless declaration stays conservative", allowed("legacy"), [8117, 8443])
         source = component / "workloads.yaml"
+        original_source = source.read_text(encoding="utf-8")
+        # Exercise the genuinely empty HTTP peer set, not merely a mixed caller group.
+        documents = list(yaml.safe_load_all(original_source))
+        source.write_text(yaml.safe_dump_all([
+            doc for doc in documents if doc["metadata"]["name"] in ("fixture-service", "admin-ui")
+        ]), encoding="utf-8")
+        try:
+            globals()["COMPONENTS"] = temp_dir
+            sys.argv = [sys.argv[0]]
+            main()
+        finally:
+            globals()["COMPONENTS"] = previous_components
+            sys.argv = previous_argv
+        documents = yaml.safe_load_all((component / "network-policies.yaml").read_text(encoding="utf-8"))
+        isolated_policy = next(doc for doc in documents if doc["metadata"]["name"] == "fixture-service-ingress-allow-list")
+        case("empty dynamic BFF peer group creates no all-source rule",
+             any(rule.get("from") == [] for rule in isolated_policy["spec"]["ingress"]), False)
+        case("undeclared plaintext listener has no cross-namespace rule",
+             any(port["port"] == 8117 for rule in isolated_policy["spec"]["ingress"]
+                 for port in rule.get("ports", [])), False)
+        source.write_text(original_source, encoding="utf-8")
         source.write_text(source.read_text(encoding="utf-8").replace(
             "  annotations: {openbank.io/port-scoped-ingress: 'true'}\n", ""), encoding="utf-8")
         try:
@@ -480,13 +513,14 @@ spec:
         documents = yaml.safe_load_all((component / "network-policies.yaml").read_text(encoding="utf-8"))
         policy = next(doc for doc in documents if doc["metadata"]["name"] == "fixture-service-ingress-allow-list")
         case("non-opted workload retains both ports", allowed("payments"), [8117, 8443])
+        case("non-opted BFF retains dynamic HTTP fallback", allowed("admin-ui"), [8117, 8443])
 
     if fails:
         for f in fails:
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
-    print("self-test ok: dependency extraction, atomic publication and port scoping (24 cases)")
+    print("self-test ok: dependency extraction, atomic publication and port scoping (29 cases)")
     return 0
 
 def main():
@@ -784,7 +818,13 @@ def main():
 
         rules = [{"from": [{"podSelector": {}}]}]  # same-namespace
         if http_ports:
-            port_callers = {port: {ADMIN_UI_NS} for port in http_ports}  # BFF dynamic discovery
+            # An explicit BFF URL replaces discovery's all-listener fallback on
+            # opt-in port-scoped workloads (e.g. a separate mTLS business instance).
+            admin_edge = (ns, wl_name, ADMIN_UI_NS)
+            admin_declared = {resolve_pod_port(ns, wl_name, port) for port in edge_ports[admin_edge]}
+            admin_ports = (admin_declared if wl["port_scoped"] and admin_edge not in unscoped_edges and
+                           admin_declared and admin_declared.issubset(http_ports) else set(http_ports))
+            port_callers = {port: ({ADMIN_UI_NS} if port in admin_ports else set()) for port in http_ports}
             for caller in callers:
                 edge = (ns, wl_name, caller)
                 declared = {resolve_pod_port(ns, wl_name, port) for port in edge_ports[edge]}
@@ -802,8 +842,10 @@ def main():
             # per-port difference splits it, avoiding gratuitous fleet-wide drift.
             groups = defaultdict(list)
             for port, peers in port_callers.items():
+                if not peers:
+                    continue  # Empty `from` would admit EVERY source, not deny all.
                 ordered = tuple(sorted(peers - {ADMIN_UI_NS, KEDA_NS}) +
-                                [ADMIN_UI_NS] + ([KEDA_NS] if KEDA_NS in peers else []))
+                                ([ADMIN_UI_NS] if ADMIN_UI_NS in peers else []) + ([KEDA_NS] if KEDA_NS in peers else []))
                 groups[ordered].append(port)
             for peer_names, ports in sorted(groups.items(), key=lambda item: min(item[1])):
                 rules.append({

@@ -14,6 +14,7 @@
 // Off-cluster (local dev / docker-compose) there is no ServiceAccount token, so
 // discoverServices() returns null and callers fall back to the static probe.
 
+import { discoveryServiceKey, discoveredBaseUrl } from '@/lib/treasury-company'
 import { readFileSync, existsSync } from 'node:fs'
 import https from 'node:https'
 
@@ -49,6 +50,7 @@ export interface DiscoveredService {
 // Adding a service *inside* an existing namespace is fully automatic.
 // Unknown namespaces fall back to 'platform' so they are never silently hidden.
 const NS_GROUP: Record<string, ServiceGroup> = {
+  'treasury-pension-co': 'core',
   accounts:           'core',
   payments:           'payments',
   compliance:         'compliance',
@@ -237,7 +239,7 @@ export async function discoverServices(): Promise<DiscoveredService[] | null> {
         const readyReplicas = d.status?.readyReplicas ?? 0
         const desired = d.spec?.replicas ?? d.status?.replicas ?? 0
         return {
-          name: d.metadata.name,
+          name: discoveryServiceKey(d.metadata.name, d.metadata.namespace),
           namespace: d.metadata.namespace,
           port: businessPort(d),
           group: NS_GROUP[d.metadata.namespace] ?? 'platform',
@@ -276,12 +278,12 @@ export async function resolveInClusterBaseUrl(k8sName: string): Promise<string |
     const discovered = await discoverServices()
     if (discovered) {
       const map: Record<string, { namespace: string; port: number }> = {}
-      for (const d of discovered) map[d.name] = { namespace: d.namespace, port: d.port }
+      for (const d of discovered) map[discoveryServiceKey(d.name, d.namespace)] = { namespace: d.namespace, port: d.port }
       _baseUrlCache = { at: now, map }
     }
   }
   const hit = _baseUrlCache?.map[k8sName]
-  return hit ? `http://${k8sName}.${hit.namespace}.svc:${hit.port}` : null
+  return hit ? discoveredBaseUrl(k8sName, hit.namespace, hit.port) : null
 }
 
 /** "account-service" → "Account Service" for display. */
