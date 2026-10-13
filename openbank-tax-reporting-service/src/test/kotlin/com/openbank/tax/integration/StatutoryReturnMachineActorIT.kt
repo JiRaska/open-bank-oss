@@ -8,6 +8,8 @@ import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.junit.QuarkusTestProfile
+import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.test.security.oidc.Claim
 import io.quarkus.test.security.oidc.OidcSecurity
@@ -31,7 +33,11 @@ import org.junit.jupiter.api.Test
     restrictToAnnotatedClass = true,
 )
 @QuarkusTestResource(StatutoryReturnMessagingTestResource::class)
+@TestProfile(StatutoryReturnMachineActorIT.MachineActorProfile::class)
 class StatutoryReturnMachineActorIT {
+    // Force a separate Quarkus boot for this class-scoped database resource.
+    class MachineActorProfile : QuarkusTestProfile
+
     private val path = "/api/v1/statutory-returns"
     private val absentId = "00000000-0000-0000-0000-000000000099"
     private val assembleBody = """{
