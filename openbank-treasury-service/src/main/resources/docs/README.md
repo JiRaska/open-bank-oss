@@ -72,3 +72,18 @@ A byte-identical replay returns its original version and does not repair missing
 Do not backfill dimensions from instrument class or CFI. Before rollback, stop writes and retain
 the dimension evidence; an older binary cannot safely aggregate unlike dimensions, so keep
 period-end reporting unavailable until forward recovery is complete.
+
+### Company reporting identity
+
+The company-instance deployment uses the synthetic portfolio entity `company`, matching the
+existing `openbank.statutory-returns.company-id` used by tax-reporting for statutory returns and
+the corporate register. The namespace `treasury-pension-co` is a transport/isolation identity,
+not that reporting identifier. The company ledger is isolated by its deployment and database;
+it has no entity column or entity-ID configuration (ADR-0337). Keep its company URL separate
+from the bank ledger.
+
+Before real ingestion, the owner must verify the reporting identity and custodian accounts
+consistently across both services. Changing an identifier after ingestion does not migrate
+immutable statements, register entries or stored returns: retain their evidence and reconcile
+the history before a coordinated change. This configuration change neither renames existing
+tax-reporting data nor provisions or deploys the company instance.

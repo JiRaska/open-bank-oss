@@ -95,8 +95,10 @@ spec:
             # ── The one thing this instance is for: the custodian's semt.002 (PSP 34-12 PS) ────
             # The legal entity whose portfolio this deployment keeps; every statement and snapshot
             # is stored under it. Without it every upload is refused and every read answers 409.
+            # Match tax-reporting's existing statutory-returns.company-id. This is a synthetic
+            # reporting identifier, not the namespace or a verified legal-party identifier.
             - name: OPENBANK_TREASURY_PORTFOLIO_ENTITY
-              value: pension-co
+              value: company
             # SYNTHETIC sandbox custodian safekeeping account (the semt.002 test fixtures' own).
             # A statement for any other account is refused at upload. Replace with the real
             # custodian account(s), comma-separated, before the first real statement.
