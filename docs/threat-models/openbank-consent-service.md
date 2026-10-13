@@ -235,14 +235,15 @@ escalating a consent is a direct path to unauthorized data access or payment ini
   this migration as "non-money-path" and is corrected here — no endpoint, authorization or
   consent-lifecycle logic changes. **Risk class:** none — response-plumbing de-duplication only.
   Rollback: restore the deleted mapper classes and revert the exception base classes.
-- **2026-10-11** — **The 8443 listener no longer accepts a client certificate as a login (#12511).**
-  `client-auth: required` (2026-09-20 entries above) also registers Quarkus's mTLS authentication
-  mechanism, which turned any certificate the private CA had signed into an authenticated
-  `SecurityIdentity`: a workload holding a fleet-CA certificate and NO bearer reached `/api/*` as a
-  logged-in principal (measured: 403 from authz instead of 401). `%prod` now restricts `/api/*` to
-  `auth-mechanism: bearer` (the #12506 pattern), so the certificate is transport authentication only and
-  the OIDC bearer is the only identity a route or OPA sees, identically on 8443 and the plain port.
-  **STRIDE-S/E:** closes a spoofing / elevation path; callers are unaffected because every 8443 caller
-  already sends its own bearer. Proven by `ConsentListenerAuthParityIT` (production listener shape, real
-  HTTP; 1 of 4 failing without the change, 4 of 4 with it) and gated fleet-wide by `mtls-bearer-only`.
-  Rollback: revert the commit (re-opens the path).
+
+- **2026-10-13** — **Bearer identity is required for consent and suppression APIs on both HTTP
+  listeners (#12511).** Client-auth TLS validates the workload certificate on the HTTPS listener,
+  but that certificate must not become the caller identity for consent decisions. The scoped
+  `authenticated` permission selects the OIDC bearer mechanism before JAX-RS or OPA runs. A real
+  listener test found that a new, unannotated business route returned 200 without a bearer on both
+  listeners before this permission; it returns 401 after the change, while a valid signed bearer
+  remains accepted. The shared public build-info/config endpoints and management health remain
+  reachable without a bearer. Existing consent and suppression methods already carry role gates;
+  this permission protects future unannotated methods too. **Risk class:** unauthorized read/write
+  if an annotation is omitted or an mTLS certificate is treated as application identity. Rollback
+  requires an equivalent bearer-only gate; removing this permission restores the demonstrated gap.
