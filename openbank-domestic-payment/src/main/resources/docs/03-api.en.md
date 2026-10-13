@@ -158,7 +158,7 @@ Topic: `openbank.domestic.payment.events` (Kafka, JSON, channel `events-out`).
 | Event type | Trigger | Payload (key fields) |
 |---|---|---|
 | `domestic.payment.created` | `POST /domestic-payments` | paymentId, idempotencyKey, status, debtorAccountId, debtor/creditor account+bank, amount, currency, priority, endToEndId, occurredAt |
-| `domestic.payment.status-changed` | any persisted transition | paymentId, previousStatus, newStatus, rejectReason, rejectDetail, occurredAt |
+| `domestic.payment.status-changed` | any persisted transition | paymentId, previousStatus, newStatus, rejectReason, rejectDetail, occurredAt, settledAt (the persisted SETTLED transition time, null until settled; not the event creation time) |
 
 Events are **append-only**; corrections are made by a new status-changed event, not by rewriting.
 

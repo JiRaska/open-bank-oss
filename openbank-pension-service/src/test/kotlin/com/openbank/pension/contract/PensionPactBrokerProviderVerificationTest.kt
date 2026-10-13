@@ -14,6 +14,7 @@ import au.com.dius.pact.provider.junitsupport.loader.PactBroker
 import com.openbank.pension.application.onboarding.TransferRequestRepository
 import com.openbank.pension.infrastructure.fund.InMemoryFundAdministrationAdapter
 import com.openbank.pension.it.PostgresTestResource
+import io.quarkus.security.runtime.QuarkusSecurityIdentity
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestIdentityAssociation
@@ -26,6 +27,7 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty
 import org.junit.jupiter.api.extension.ExtendWith
+import java.security.Principal
 
 /**
  * Broker-sourced twin of [PensionPactProviderVerificationTest] (ADR-0334 S6): `@PactFolder` never
@@ -70,8 +72,17 @@ class PensionPactBrokerProviderVerificationTest {
     @TestTemplate
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verifyPacts(context: PactVerificationContext?) {
-        if (context != null && context.interaction.providerStates.any { it.name == NEGATIVE_AUTH_STATE }) {
-            testIdentityAssociation.setTestIdentity(null)
+        if (context != null) {
+            val states = context.interaction.providerStates.map { it.name }
+            when {
+                NEGATIVE_AUTH_STATE in states -> testIdentityAssociation.setTestIdentity(null)
+                PARTICIPANT_REPORTING_STATE in states -> testIdentityAssociation.setTestIdentity(
+                    QuarkusSecurityIdentity.builder()
+                        .setPrincipal(Principal { "service-account-openbank-tax-reporting" })
+                        .addRole("ROLE_API")
+                        .build(),
+                )
+            }
         }
         context?.verifyInteraction()
     }
@@ -100,6 +111,9 @@ class PensionPactBrokerProviderVerificationTest {
 
     @State(PactContractSeed.AWAITING_CONSENT_STATE)
     fun transferAwaitingConsent() = PactContractSeed.insertAwaitingConsent(transfers)
+
+    @State(PARTICIPANT_REPORTING_STATE)
+    fun participantReporting() = PactContractSeed.reset()
 
     @State(NEGATIVE_AUTH_STATE)
     fun stateNoValidM2mIdentity() {

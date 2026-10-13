@@ -51,6 +51,9 @@ import java.util.UUID
  * instance and a real Postgres — always, with no broker, so a wrong request path in the edge's
  * client is red at PR time (a consumer pact alone cannot catch that).
  *
+ * Tax-reporting interactions run as their own caller in
+ * [PensionReportingPactFolderProviderVerificationTest].
+ *
  * The pact is produced by customer-edge's `CustomerEdgePensionPactConsumerTest` and lands in the
  * same PR as this class (ADR-0334 S6, #12359): `check-pact-provider-replay.py` refuses a provider
  * class no committed pact names, and a committed pact no always-running class replays.
@@ -72,7 +75,7 @@ import java.util.UUID
 )
 @Provider("openbank-pension-service")
 @PactFolder("../pacts")
-@PactFilter("^(?!" + NEGATIVE_AUTH_STATE + "\$).*\$")
+@PactFilter("^(?!" + NEGATIVE_AUTH_STATE + "\$|" + PARTICIPANT_REPORTING_STATE + "\$).*\$")
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
 class PensionPactProviderVerificationTest {
     @Inject
