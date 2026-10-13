@@ -44,7 +44,7 @@ import java.util.UUID
  * and the shared `service-account-openbank-services` holds ROLE_OPERATOR in some realms. As on
  * [StatutoryReturnResource], `@Authorize` actions use verbs that are NOT `read`/`list` (so the
  * fleet's generic read-any rules never match; `tax_reporting_rest_ext.rego` grants them to real
- * staff only), and [TaxReportingActor] refuses a service-account as maker or checker even where
+ * staff only), and [TaxReportingActor] refuses a service-account on reads and as maker or checker even where
  * OPA enforcement is off. Maker != checker stays in the domain (CorporateRegisterEntry).
  */
 @Path("/api/v1/corporate-register")
@@ -59,6 +59,7 @@ class CorporateRegisterResource(private val service: CorporateRegisterService) {
     @Authorize(action = "tax.corporate-register.inspect")
     @Operation(summary = "Every register entry of an entity, any status — the audit trail")
     suspend fun list(@QueryParam("entityId") entityId: String?): Response {
+        TaxReportingActor.staffSubject(identity, "inspect corporate-register figures")
         val entity = requireNotNull(entityId) { "query parameter 'entityId' is required" }
         return Response.ok(service.entries(entity).map { it.toResponse() }).build()
     }
@@ -73,6 +74,7 @@ class CorporateRegisterResource(private val service: CorporateRegisterService) {
         @QueryParam("periodStart") periodStart: String?,
         @QueryParam("periodEnd") periodEnd: String?,
     ): Response {
+        TaxReportingActor.staffSubject(identity, "inspect corporate-register figures")
         val entity = requireNotNull(entityId) { "query parameter 'entityId' is required" }
         val values = service.effective(
             entity,

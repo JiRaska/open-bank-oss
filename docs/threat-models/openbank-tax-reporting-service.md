@@ -55,8 +55,9 @@ NetworkPolicy admits admin-ui and the platform scrapers only, no ingress); servi
 - `CorporateRegisterResource` (the operator-maintained figures feeding PSP 32-04, 50-04 and 40-01)
   follows the same pattern: `tax.corporate-register.inspect` for the reads (real staff only) and
   `.propose` / `.approve` / `.reject` for changes (a real operator only), all excluding
-  `service-account-*` and requiring a HUMAN principal. The resource refuses a service-account
-  token as maker or checker through the same `TaxReportingActor`, and `CorporateRegisterEntry`
+  `service-account-*` and requiring a HUMAN principal. The resource independently refuses a
+  service-account token on both inspection routes and as maker or checker through the same
+  claim-aware `TaxReportingActor`, including UUID principals and advisory OPA, and `CorporateRegisterEntry`
   refuses a checker who is the proposer.
 - `AUTHZ_ENFORCE=true` from the first rollout. Every allow test has a matching must-deny.
 
