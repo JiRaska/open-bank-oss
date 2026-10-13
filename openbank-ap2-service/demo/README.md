@@ -8,6 +8,9 @@ presented payment; a **human-in-the-loop (HITL)** threshold decides auto-eligibl
 step-up. **No funds move** — the verifier returns *authorization evidence* only (ADR-0193):
 a valid verdict is an input to the SCA/payment decision, never a payment.
 
+The bank-owned endpoint is `POST /api/v2/ap2/verify`. The earlier unversioned
+`/ap2/verify` route is retired before any real agent onboarding.
+
 > Complements the MCP server (ADR-0181): **MCP = the agent talks to the bank; AP2 = the
 > agent pays *through* the bank.**
 

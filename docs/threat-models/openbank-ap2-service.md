@@ -2,7 +2,7 @@
 # Threat model — AP2 mandate verifier authentication
 
 **Status:** Draft for #12511. This describes the candidate source change, not a deployed control.
-**Scope:** `POST /ap2/verify` and its authentication and authorization path. ADR-0193 keeps the
+**Scope:** `POST /api/v2/ap2/verify` and its authentication and authorization path. ADR-0193 keeps the
 verifier evidence-only: it does not execute a payment, choose an SCA exemption, or move funds.
 
 ## Assets and trust boundaries
@@ -37,3 +37,5 @@ restoring the old anonymous grant by itself would reopen the spoofable caller pa
 
 The AP2 sandbox demo stays closed until a genuine agent is onboarded with a validated token and
 an independently reviewed charter. No demonstration client or credential is provisioned here.
+The former unversioned `/ap2/verify` route is removed in this pre-onboarding cutover; there is no
+caller to migrate and no compatibility alias that could preserve the spoofable phase-1 behavior.

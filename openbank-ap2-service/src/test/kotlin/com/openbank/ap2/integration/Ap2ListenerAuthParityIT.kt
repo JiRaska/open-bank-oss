@@ -21,8 +21,8 @@ import java.time.Duration
 
 /**
  * #12511 for ap2: the production listener shape (`client-auth: required` plus the bearer-only
- * permission on the `/ap2/` prefix) boots, refuses a client without a certificate, and serves
- * `POST /ap2/verify` identically with and without a client certificate. The OIDC bearer is the
+ * permission on the `/api/v2/ap2/` prefix) boots, refuses a client without a certificate, and serves
+ * `POST /api/v2/ap2/verify` identically with and without a client certificate. The OIDC bearer is the
  * only source of agent identity; a certificate or X-Agent-Id header alone cannot authenticate.
  */
 @QuarkusTest
@@ -33,7 +33,7 @@ class Ap2ListenerAuthParityIT {
     private fun port(name: String) = ConfigProvider.getConfig().getValue(name, Int::class.java)
 
     private fun verify(scheme: String, port: Int, bearer: String? = null, assertedAgent: String? = null) =
-        HttpRequest.newBuilder(URI.create("$scheme://localhost:$port/ap2/verify"))
+        HttpRequest.newBuilder(URI.create("$scheme://localhost:$port/api/v2/ap2/verify"))
             .timeout(TIMEOUT)
             .header("Content-Type", "application/json")
             .apply { bearer?.let { header("Authorization", "Bearer $it") } }

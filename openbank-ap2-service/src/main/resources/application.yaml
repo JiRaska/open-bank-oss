@@ -16,7 +16,7 @@ quarkus:
     tenant-enabled: true
   smallrye-openapi:
     info-title: OpenBank AP2 Mandate Verifier
-    info-version: "1.1.0"
+    info-version: "2.0.0"
 
 # OPA PDP (ADR-0034). An unreachable sidecar fails verification closed.
 opa:
@@ -30,6 +30,8 @@ ap2:
   trust-list: ${AP2_TRUST_LIST:}
 
 openbank:
+  api:
+    version: 2
   # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (replaces the
   # per-service AuthzProducer; same opa.url / opa.path / opa.timeout-ms keys and defaults).
   authz:
@@ -53,14 +55,14 @@ openbank:
       # Listener parity (#12511, the #12506 pattern): with client-auth on, Quarkus ALSO registers its
       # mTLS authentication mechanism, which turns any trusted client certificate into an authenticated
       # SecurityIdentity of its own — on 8443 only. The API must be authenticated identically on both
-      # listeners, by the OIDC bearer OPA decides on, so /ap2/* accepts the bearer mechanism ONLY; the
+      # listeners, by the OIDC bearer OPA decides on, so /api/v2/ap2/* accepts bearer ONLY; the
       # certificate stays transport authentication. Measured before this: a fleet-CA certificate with no
       # bearer reached the API as an authenticated principal (403 from authz, not 401).
       # Ap2ListenerAuthParityIT holds both listeners to it with the production listener shape.
       auth:
         permission:
           bearer-only:
-            paths: /ap2/*
+            paths: /api/v2/ap2/*
             policy: authenticated
             auth-mechanism: bearer
 

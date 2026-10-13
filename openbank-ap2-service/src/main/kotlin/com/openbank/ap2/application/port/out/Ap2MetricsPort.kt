@@ -62,7 +62,7 @@ enum class MandateSignatureOutcome {
     VERIFICATION_ERROR,
 }
 
-/** Outcome of the PDP gate on `POST /ap2/verify`. A bounded set — safe as a tag. */
+/** Outcome of the PDP gate on `POST /api/v2/ap2/verify`. A bounded set — safe as a tag. */
 enum class Ap2AuthorizationOutcome {
     /** OPA allowed the agent to verify. */
     ALLOWED,

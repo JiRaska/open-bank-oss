@@ -73,7 +73,7 @@ def verify(si: str, sig: str, amount_minor: int) -> dict | None:
                     "signingInput": si, "signatureB64": sig, "algorithm": "ED25519"},
         "payment": {"payee": PAYEE, "amountMinor": amount_minor, "currency": CURRENCY, "at": "2026-06-01T00:00:00Z"},
     }
-    req = urllib.request.Request(f"{AP2_URL}/ap2/verify", data=json.dumps(body).encode(),
+    req = urllib.request.Request(f"{AP2_URL}/api/v2/ap2/verify", data=json.dumps(body).encode(),
                                  headers={"Content-Type": "application/json", "Authorization": f"Bearer {AP2_BEARER_TOKEN}"})
     try:
         with urllib.request.urlopen(req, timeout=10) as r:

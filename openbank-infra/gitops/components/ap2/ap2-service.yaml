@@ -1,9 +1,9 @@
 # openbank-ap2-service: the bank-side AP2 (Agent Payments Protocol) mandate verifier
-# (ADR-0193). A stateless JSON-RPC surface: POST /ap2/verify takes a presented signed
+# (ADR-0193). A stateless JSON-RPC surface: POST /api/v2/ap2/verify takes a presented signed
 # mandate + the payment it authorizes and returns a verdict (valid + evidence + failures).
 # It MOVES NO FUNDS — authorization evidence only. No DB, no Kafka.
 #
-# Every /ap2/verify call is authorized by the shared ADR-0034 PDP as an AI_AGENT principal —
+# Every /api/v2/ap2/verify call is authorized by the shared ADR-0034 PDP as an AI_AGENT principal —
 # the OPA sidecar below (localhost:8181) serves data.openbank.rest.allow, bridging the
 # verify.mandate capability to an onboarded agent charter. OIDC validates the bearer token
 # subject and audience before the PDP runs; absent charter or PDP connectivity fails closed.
@@ -87,7 +87,7 @@ spec:
             # ADR-0034 PDP: the OPA sidecar in this pod (localhost:8181), serving
             # data.openbank.rest.allow (ap2-opa-bundle ConfigMap) — the shared PDP bridges the
             # AI_AGENT verify.mandate capability to an onboarded agent charter (agents.rego).
-            # A PDP connectivity error still fails /ap2/verify CLOSED (503).
+            # A PDP connectivity error still fails /api/v2/ap2/verify CLOSED (503).
             - name: OPA_URL
               value: http://localhost:8181
             # AP2 issuer trust list. Carries the demo issuer's public key so the sandbox demo
@@ -136,7 +136,7 @@ spec:
               cpu: "1"
               memory: 512Mi
         # OPA policy-decision sidecar (ADR-0034 / ADR-0193 phase 2). Serves
-        # data.openbank.rest.allow for the /ap2/verify gate — the shared PDP bridges the
+        # data.openbank.rest.allow for the /api/v2/ap2/verify gate — the shared PDP bridges the
         # AI_AGENT verify.mandate capability to an onboarded agent charter (agents.rego). Bundle
         # mounted from ap2-opa-bundle ConfigMap (gen-ap2-opa-bundle.sh). Bind 0.0.0.0 so kubelet
         # httpGet probes reach /health (the image is scratch — no shell for an exec probe);

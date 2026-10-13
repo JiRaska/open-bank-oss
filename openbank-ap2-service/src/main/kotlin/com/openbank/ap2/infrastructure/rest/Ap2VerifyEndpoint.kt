@@ -25,7 +25,7 @@ import org.eclipse.microprofile.jwt.JsonWebToken
 import org.jboss.logging.Logger
 
 /**
- * The AP2 mandate verification surface (ADR-0193): POST /ap2/verify takes a presented mandate + the
+ * The AP2 mandate verification surface (ADR-0193): POST /api/v2/ap2/verify takes a presented mandate + the
  * payment it is offered to authorize, and returns a [MandateVerdict] (valid + evidence + failures).
  * It moves NO funds — it is authorization evidence only.
  *
@@ -38,7 +38,7 @@ import org.jboss.logging.Logger
  * surface emits no `openbank_authz_decisions_total` — so its own decisions are counted on
  * [Ap2MetricsPort]. `pdp_unavailable` matters most: it denies every agent, correctly and silently.
  */
-@Path("/ap2/verify")
+@Path("/api/v2/ap2/verify")
 @Consumes(MediaType.APPLICATION_JSON)
 @Produces(MediaType.APPLICATION_JSON)
 class Ap2VerifyEndpoint(
