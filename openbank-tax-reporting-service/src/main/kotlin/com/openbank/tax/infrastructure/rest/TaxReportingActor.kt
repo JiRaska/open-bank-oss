@@ -11,8 +11,9 @@ import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.jwt.JsonWebToken
 
 /**
- * Resolves the person who assembles, approves or submits a statutory return — and refuses a
- * machine. A return's maker/checker/submitter is a regulatory attestation by a member of staff;
+ * Resolves the person who performs a regulatory maker/checker act in tax-reporting — assembling,
+ * approving or submitting a statutory return, proposing or deciding a corporate-register figure —
+ * and refuses a machine. Each of those is an attestation by a member of staff;
  * a Keycloak service-account carries staff roles in some realms and is classified HUMAN by the
  * authz layer, so roles cannot tell the two apart.
  *
@@ -26,7 +27,7 @@ import org.eclipse.microprofile.jwt.JsonWebToken
  * Kept local until `ServiceAccountIdentity` (#12463) lands in libs-runtime; then this delegates
  * to it.
  */
-internal object StatutoryReturnActor {
+internal object TaxReportingActor {
     private const val PREFIX = "service-account-"
 
     fun isServiceAccount(identity: SecurityIdentity?): Boolean {
@@ -40,14 +41,17 @@ internal object StatutoryReturnActor {
             jwt.claimString("client_id") != null
     }
 
-    /** The acting staff member's subject, or 401 (no subject) / 403 (a machine). */
-    fun staffSubject(identity: SecurityIdentity): String {
+    /**
+     * The acting staff member's subject, or 401 (no subject) / 403 (a machine). [act] completes
+     * "A service account may not …" in the 403 body.
+     */
+    fun staffSubject(identity: SecurityIdentity, act: String): String {
         if (isServiceAccount(identity)) {
             throw WebApplicationException(
                 Response.status(Response.Status.FORBIDDEN)
                     .entity(
                         mapOf(
-                            "error" to "A service account may not assemble, approve or submit a statutory return",
+                            "error" to "A service account may not $act",
                         ),
                     )
                     .type(MediaType.APPLICATION_JSON)
