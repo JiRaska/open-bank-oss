@@ -56,7 +56,12 @@ ensure_admin_ui_deps() {
     waited=$((waited + 2))
     if [ -f "$marker" ]; then return 0; fi
   done
-  trap 'rm -rf "$lock"' EXIT
+  # Freeze the path in the trap command. `lock` is function-local and is out of scope by
+  # the time an EXIT trap runs after an errexit from npm ci; expanding it then fails under
+  # nounset and strands the lock, making the other gate wait until its timeout.
+  local cleanup_lock
+  printf -v cleanup_lock 'rm -rf -- %q' "$lock"
+  trap "$cleanup_lock" EXIT
 
   # Re-check under the lock: the holder we queued behind has usually just finished.
   if [ -f "$marker" ]; then
