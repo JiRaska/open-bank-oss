@@ -49,5 +49,36 @@ class LendingListenerAuthParityIT : ListenerAuthParityConformance() {
         assertThat(response.statusCode()).isEqualTo(401)
     }
 
-    class Profile : ProductionListenerProfile()
+    @Test
+    fun `public metadata remains available without bearer on both listeners`() {
+        val config = ConfigProvider.getConfig()
+        val plain = config.getValue("quarkus.http.test-port", Int::class.java)
+        val tls = config.getValue("quarkus.http.test-ssl-port", Int::class.java)
+        for (path in listOf("/api/v1/info", "/api/v1/config")) {
+            assertThat(get("http://localhost:$plain$path", false)).`as`("plain $path").isEqualTo(200)
+            assertThat(get("https://localhost:$tls$path", true)).`as`("TLS $path").isEqualTo(200)
+        }
+    }
+
+    @Test
+    fun `management health remains available without bearer`() {
+        val port = ConfigProvider.getConfig().getValue("quarkus.management.test-port", Int::class.java)
+        for (path in listOf("/q/health/live", "/q/health/ready")) {
+            assertThat(get("http://localhost:$port$path", false)).`as`("management $path").isEqualTo(200)
+        }
+    }
+
+    private fun get(url: String, tls: Boolean): Int {
+        val client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10))
+            .apply { if (tls) sslContext(ListenerMaterial.sslContext(true)) }
+            .build()
+        return client.send(
+            HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(10)).GET().build(),
+            HttpResponse.BodyHandlers.discarding(),
+        ).statusCode()
+    }
+
+    class Profile : ProductionListenerProfile() {
+        override fun extraOverrides() = mapOf("quarkus.management.enabled" to "true")
+    }
 }

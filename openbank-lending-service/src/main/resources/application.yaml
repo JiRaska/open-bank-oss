@@ -325,6 +325,10 @@ lending:
             paths: /api/*
             policy: authenticated
             auth-mechanism: bearer
+          public-metadata:
+            paths: /api/v1/info,/api/v1/config
+            methods: GET
+            policy: permit
     # RestCatalogLoanProfilePort calls product-catalog. Production uses a named TLS bucket over
     # product-catalog's private-CA mTLS listener (8443, client auth REQUIRED). Local/test fixtures
     # speak plain HTTP, so this stays under %prod: the client cert only exists in the cluster.
