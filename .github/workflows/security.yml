@@ -68,17 +68,14 @@ jobs:
           # Dockerfile-only PR could only ever start a leg with nothing to trace. That is
           # no longer RED — #3103's fallback forces a real recompile rather than
           # finalising an empty database — but it is now the expensive shape instead: a
-          # ~30-module `--rerun-tasks` rebuild, 25-30 min, to analyse a diff containing no
+          # forced fleet compiler-policy rebuild to analyse a diff containing no
           # Java. Dockerfile stays in the SBOM regex below, which is a separate question
           # (a base-image bump genuinely does change the dependency graph).
           python3 .github/scripts/tests/test_codeql_scope_classifier.py
-          JAVA_RE='(\.(java|kt|kts)$|(^|/)(build|settings)\.gradle|gradle/)'
+          JAVA_RE='(\.(java|kt|kts)$|(^|/)(build|settings)\.gradle|gradle/|^\.github/scripts/codeql-force-compilers\.init\.gradle$|^\.github/workflows/security\.yml$)'
           JS_RE='(\.(js|jsx|ts|tsx|mjs|cjs)$|(^|/)package(-lock)?\.json$)'
-          # NOTE: .github/workflows/ is deliberately NOT in either pattern. A workflow-only
-          # PR changes no analysable source, so every compile resolves from cache, CodeQL
-          # traces nothing, and `analyze` dies with "could not process any code written in
-          # Java/Kotlin" (issue seen on PR #3079). Including workflows bought no coverage —
-          # it bought a guaranteed red on exactly the PRs that change no code.
+          # General workflow-only changes do not require semantic analysis. This workflow
+          # and its compiler policy do: their changes must exercise actual extraction.
 
           # Emits codeql_matrix as a JSON array of matrix entries; '[]' means skip the job.
           emit_matrix() {
@@ -185,8 +182,8 @@ jobs:
     # any GRADLE_OPTS we'd set in a step — it needs the env var at the job level. Without
     # this, Gradle's auto-detected 3 GiB default heap OOMs on that resolution (first seen
     # moving this job off the 16 GB Hetzner host to ubuntu-latest). Same fix pattern as
-    # fleet-lint.yml's GRADLE_OPTS. Timeout raised 30->40min: --no-build-cache (below)
-    # means every run now genuinely compiles instead of sometimes restoring from cache.
+    # fleet-lint.yml's GRADLE_OPTS. Timeout remains 40min for full traced compilation.
+    # Compiler outputs are forced and non-cacheable by the tracing policy below.
     env:
       GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8"
     strategy:
@@ -225,8 +222,8 @@ jobs:
           build-mode: ${{ matrix.build-mode }}
           queries: security-extended,security-and-quality
 
-      # Restore Gradle home for dependency downloads, but force production compilation
-      # below: a cached class is invisible to CodeQL's manual-build extractor.
+      # Restore dependency and auxiliary-task caches. The init policy forces every
+      # Kotlin/Java compiler, including included builds, out of date and non-cacheable.
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         if: matrix.language == 'java-kotlin'
 
@@ -243,7 +240,7 @@ jobs:
           # production compilation for every module while keeping the trace bounded.
           python3 .github/scripts/tests/test_codeql_compile_coverage.py
           .github/scripts/gradle-heap-headroom.sh codeql-java-kotlin -- \
-            ./gradlew classes --no-build-cache --rerun-tasks --no-daemon \
+            ./gradlew classes --init-script .github/scripts/codeql-force-compilers.init.gradle --no-daemon \
             2>&1 | tee "${RUNNER_TEMP:-/tmp}/codeql-build.log"
           python3 .github/scripts/check-codeql-compile-coverage.py \
             --root . --log "${RUNNER_TEMP:-/tmp}/codeql-build.log"

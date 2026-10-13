@@ -35,6 +35,9 @@ class CodeqlScopeClassifierTest(unittest.TestCase):
             ("openbank-ledger-service/src/main/kotlin/Service.kt\n", "true false"),
             ("openbank-admin-ui/src/App.tsx\n", "false true"),
             ("docs/generated-long-path.md\n" * 30000, "false false"),
+            (".github/scripts/codeql-force-compilers.init.gradle\n", "true false"),
+            (".github/workflows/security.yml\n", "true false"),
+            (".github/workflows/issue-hygiene.yml\n", "false false"),
         ):
             with self.subTest(expected=expected):
                 self.assertEqual(self.classify(paths), expected)
