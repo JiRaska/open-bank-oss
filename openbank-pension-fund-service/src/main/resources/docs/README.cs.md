@@ -68,6 +68,7 @@ vypočtenou NAV se ukládají její pozice. U starších NAV bez zaznamenaných 
 jsou údaje portfolia neznámé, nikoli prázdné. Identifikátory podkladových NAV
 a fingerprint určují vstupy výkazu. Tento model poskytuje údaje; nepodává
 regulátorovi statutární výkaz.
+Konec období bez zveřejněné NAV přesně k danému dni vrací 409 do schválení pravidla as-of.
 
 ### Výsledovka a klasifikace pozic pro reporting
 

@@ -70,6 +70,7 @@ calculated NAVs. For older NAVs without recorded positions, portfolio figures
 are unknown rather than an empty portfolio. Basis NAV identifiers and a
 fingerprint identify the report inputs. This read model supplies figures;
 it does not submit a statutory return to the regulator.
+An end date without an exactly dated published NAV returns 409 until a reviewed as-of rule exists.
 
 ### Reporting P&L and position classification
 

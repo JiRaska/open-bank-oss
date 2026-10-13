@@ -27,7 +27,7 @@ class FundReportingService(private val store: PensionFundStore) {
         // The YTD P&L revalues every NAV interval of the year, from the last NAV before it.
         val yearStart = LocalDate.of(periodEnd.year, 1, 1)
         val firstNeeded = navs.lastOrNull { it.valuationDate.isBefore(yearStart) }?.valuationDate ?: yearStart
-        val closing = navs.lastOrNull { !it.valuationDate.isBefore(periodStart) }
+        val closing = navs.lastOrNull { it.valuationDate == periodEnd }
         val withPositions = navs
             .filter { it.positionsRecorded && (!it.valuationDate.isBefore(firstNeeded) || it.id == closing?.id) }
             .map { it.id }
