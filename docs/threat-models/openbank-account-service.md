@@ -1023,3 +1023,12 @@ The account ownership projection still returns an account identifier only for an
 active account owned by the supplied party. A compromised pension credential can
 invoke its scoped projection; it does not acquire shared operator or compliance
 roles. Realm import and credential delivery must be verified before deployment.
+
+## Listener authentication follow-up (#12511)
+
+The production API permission requires an OIDC bearer on HTTP and client-certificate TLS, including
+a future route without a security annotation. Exact GET-only service info/config remain public and
+management health remains on its separate interface. Production-profile real HTTP/TLS tests cover
+these exceptions as well as annotated and unannotated API bearer parity. This candidate is not a
+deployed enforcement claim; money-path review and staged runtime verification remain required.
+Rollback restores the previous API permission and its certificate-only identity risk.

@@ -368,15 +368,19 @@ authz:
       # mTLS authentication mechanism, which turns any trusted client certificate into an authenticated
       # SecurityIdentity of its own — on 8443 only. The API must be authenticated identically on both
       # listeners, by the OIDC bearer OPA decides on, so /api/* accepts the bearer mechanism ONLY; the
-      # certificate stays transport authentication. Measured before this: a fleet-CA certificate with no
-      # bearer reached the API as an authenticated principal (403 from authz, not 401).
-      # AccountListenerAuthParityIT holds both listeners to it with the production listener shape.
+      # certificate stays transport authentication. The permission must demand authentication itself:
+      # `permit` would allow an unannotated API route to be served without any bearer.
+      # Listener parity tests cover both existing annotated routes and a test-only unannotated route.
       auth:
         permission:
           bearer-only:
             paths: /api/*
-            policy: permit
+            policy: authenticated
             auth-mechanism: bearer
+          public-metadata:
+            paths: /api/v1/info,/api/v1/config
+            methods: GET
+            policy: permit
     # SavingsProposalService's SCA approval calls sca-service. Production uses a named TLS bucket
     # over sca-service's private-CA mTLS listener (8443, client auth REQUIRED). Local/test fixtures
     # speak plain HTTP, so this stays under %prod: the client certificate only exists in the cluster.
