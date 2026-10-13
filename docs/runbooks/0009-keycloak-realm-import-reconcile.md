@@ -345,6 +345,21 @@ confirmation) moves to the agent's identity with **no** upstream grant, so it st
 If a charter later gains that capability, add the upstream read rule in the same change;
 `AgentMachineGrantCharterAlignmentTest` and `McpMachineGrantCharterAlignmentTest` fail until you do.
 
+### Tax reporting — pension read models (#12425)
+
+Same recipe, same script, one client. tax-reporting-service is not yet deployed by gitops, so no
+ExternalSecret exists for it; when its component is added, the consuming env var is
+`OIDC_TAX_REPORTING_CLIENT_SECRET` (`quarkus.oidc-client` in its `application.yaml`), referenced
+`optional: false` like every other per-service client.
+
+| Keycloak client | Vault KV (`openbank/`) | ExternalSecret (namespace) | Render-script variable |
+|---|---|---|---|
+| `openbank-tax-reporting` | `keycloak/tax-reporting-service` | — (service not deployed yet) | `TAX_REPORTING_CLIENT_SECRET` |
+
+pension-fund-service admits `pension-fund.reporting.read` and pension-service admits
+`pension.reporting.aggregate` for this identity alone among machines; it reaches nothing else on
+either service.
+
 ### Treasury deal postings (ADR-0315)
 
 Same recipe, same script, one client — created with the service it serves, not in a later sweep.

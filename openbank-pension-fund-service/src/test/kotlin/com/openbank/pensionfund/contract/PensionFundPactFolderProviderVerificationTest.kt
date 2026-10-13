@@ -39,7 +39,9 @@ import org.junit.jupiter.api.extension.ExtendWith
 @TestSecurity(user = "service-account-openbank-pension", roles = ["ROLE_API"])
 @Provider("openbank-pension-fund-service")
 @PactFolder("../pacts")
-@PactFilter("^(?!" + NEGATIVE_AUTH_STATE + "\$).*\$")
+@PactFilter(
+    "^(?!" + NEGATIVE_AUTH_STATE + "\$|" + TaxReportingPensionFundPactStates.FUND_STATE + "\$).*\$",
+)
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
 class PensionFundPactFolderProviderVerificationTest {
 
