@@ -136,7 +136,19 @@ class InMemoryFunding(var now: Instant = Instant.parse("2026-04-10T10:00:00Z")) 
             status == null ||
                 it.status == status
         }
+        override suspend fun assignAtomically(
+            payment: UnmatchedPayment,
+            contribution: Contribution,
+        ): Pair<Contribution, Boolean> {
+            check(unmatchedRows.getValue(payment.id).status == UnmatchedStatus.OPEN)
+            val stored = contributionRows.firstOrNull { it.paymentId == contribution.paymentId }
+            check(stored == null || stored.contractId == contribution.contractId)
+            if (stored == null) contributionRows += contribution
+            unmatchedRows[payment.id] = payment
+            return (stored ?: contribution) to (stored == null)
+        }
         override suspend fun update(payment: UnmatchedPayment) {
+            check(unmatchedRows.getValue(payment.id).status == UnmatchedStatus.OPEN)
             unmatchedRows[payment.id] = payment
         }
     }
