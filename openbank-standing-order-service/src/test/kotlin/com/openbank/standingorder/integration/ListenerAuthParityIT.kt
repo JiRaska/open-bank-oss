@@ -119,11 +119,17 @@ class ListenerAuthParityIT {
     @Test
     fun `public metadata and management health remain available without bearer`() {
         val http = HttpClient.newHttpClient()
+        val tls = HttpClient.newBuilder().sslContext(sslContext(withClientCertificate = true)).build()
         for (path in listOf("/api/v1/info", "/api/v1/config")) {
-            val request = HttpRequest.newBuilder(URI.create("http://localhost:$httpPort$path"))
-                .timeout(Duration.ofSeconds(10)).GET().build()
-            assertThat(http.send(request, HttpResponse.BodyHandlers.ofString()).statusCode())
-                .describedAs(path).isEqualTo(OK)
+            for ((client, base) in listOf(
+                http to "http://localhost:$httpPort",
+                tls to "https://localhost:$httpsPort",
+            )) {
+                val request = HttpRequest.newBuilder(URI.create("$base$path"))
+                    .timeout(Duration.ofSeconds(10)).GET().build()
+                assertThat(client.send(request, HttpResponse.BodyHandlers.ofString()).statusCode())
+                    .describedAs("$base$path").isEqualTo(OK)
+            }
         }
         val health = HttpRequest.newBuilder(URI.create("http://localhost:$managementPort/q/health/live"))
             .timeout(Duration.ofSeconds(10)).GET().build()
