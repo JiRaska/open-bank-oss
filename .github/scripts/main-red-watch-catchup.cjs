@@ -265,7 +265,7 @@ async function runCatchup({ github, context, core, classify = classifyAttempt,
         if (lastProcessed) {
           const next = { version: 1, workflow_id: workflowId,
             run_id: lastProcessed.id, attempt: lastProcessed.attempt }
-          sha = await writeCheckpoint(github, context.repo, workflowId, next, sha)
+          await writeCheckpoint(github, context.repo, workflowId, next, sha)
           checkpoint = next
         }
         core.warning(`${error.message}; failing attempt remains unprocessed, retry on the next source event`)
