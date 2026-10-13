@@ -1,0 +1,60 @@
+{
+  "fundId" : "0f0f2425-0000-4000-8000-000000002026",
+  "currency" : "CZK",
+  "periodStart" : "2025-01-01",
+  "periodEnd" : "2025-03-31",
+  "closingNavId" : "01a12599-105b-7c56-a42b-cb8f2c22f475",
+  "closingValuationDate" : "2025-03-31",
+  "balanceSheet" : {
+    "totalAssets" : 14038.45,
+    "totalLiabilities" : 11.92,
+    "totalEquity" : 14026.53
+  },
+  "profitAndLossYtd" : {
+    "revaluationGains" : 0.00,
+    "revaluationLosses" : 1000.00,
+    "otherInvestmentResult" : 50.00,
+    "managementFees" : 23.47,
+    "profitLoss" : -973.47,
+    "linesUnavailableReason" : null
+  },
+  "units" : {
+    "opening" : 0.000000,
+    "issued" : 15000.000000,
+    "cancelled" : 0.000000,
+    "closing" : 15000.000000,
+    "unitValue" : 0.935102,
+    "unitValuePeriodMax" : 1.002563
+  },
+  "portfolio" : {
+    "carryingValue" : 14000.00,
+    "holdingsCount" : 2,
+    "cash" : 38.45,
+    "carryingValueByClass" : {
+      "DEBT_SECURITY" : 13500.00,
+      "UNCLASSIFIED" : 500.00
+    },
+    "unclassifiedCount" : 1,
+    "loansOutstanding" : null
+  },
+  "flows" : {
+    "subscriptions" : 15000.00,
+    "redemptions" : 0.00,
+    "switchesIn" : 0.00,
+    "switchesOut" : 0.00,
+    "unitFees" : 0.00,
+    "managementFeesAccrued" : 23.47
+  },
+  "entitlements" : {
+    "opening" : 0.00,
+    "increase" : 15000.00,
+    "decrease" : 973.47,
+    "closing" : 14026.53
+  },
+  "participants" : {
+    "holders" : 1,
+    "subscribing" : 1
+  },
+  "basisNavIds" : [ "01a12599-1019-7e02-a805-a4e1f22d74e8", "01a12599-1059-7201-87c5-d02f52fa020b", "01a12599-105b-7c56-a42b-cb8f2c22f475" ],
+  "fingerprint" : "c7cfbd5a4b38c6fad42c85a4bfb8981a595a6a2239d8fb20bec622b842ac5928"
+}
