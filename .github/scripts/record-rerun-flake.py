@@ -84,18 +84,20 @@ def flatten_job_pages(pages: list[dict]) -> list[dict]:
     if not pages or not isinstance(pages[0], dict):
         raise ValueError("no Jobs API pages")
     expected = pages[0].get("total_count")
-    if not isinstance(expected, int) or isinstance(expected, bool) or expected < 0:
+    if type(expected) is not int or expected < 0:
         raise ValueError("invalid Jobs API total_count")
     jobs: list[dict] = []
     for page in pages:
-        if not isinstance(page, dict) or page.get("total_count") != expected:
+        if (not isinstance(page, dict) or type(page.get("total_count")) is not int
+                or page["total_count"] != expected):
             raise ValueError("inconsistent Jobs API page total_count")
         batch = page.get("jobs")
         if not isinstance(batch, list) or not all(isinstance(job, dict) for job in batch):
             raise ValueError("malformed Jobs API page")
         jobs.extend(batch)
     ids = [job.get("id") for job in jobs]
-    if len(jobs) != expected or any(not isinstance(id_, int) for id_ in ids) or len(set(ids)) != len(ids):
+    if (len(jobs) != expected or any(type(id_) is not int or id_ <= 0 for id_ in ids)
+            or len(set(ids)) != len(ids)):
         raise ValueError("incomplete or duplicate Jobs API inventory")
     return jobs
 
@@ -472,14 +474,19 @@ def self_test() -> int:
 
     print("has_spot_kill_signature / find_flake_candidates")
     pages = [
-        {"total_count": 158, "jobs": [{"id": i} for i in range(100)]},
-        {"total_count": 158, "jobs": [{"id": i} for i in range(100, 158)]},
+        {"total_count": 158, "jobs": [{"id": i} for i in range(1, 101)]},
+        {"total_count": 158, "jobs": [{"id": i} for i in range(101, 159)]},
     ]
     check("all 158 jobs survive both API pages", len(flatten_job_pages(pages)) == 158)
     for label, invalid in [
         ("missing page", pages[:1]),
-        ("duplicate job", [pages[0], {"total_count": 158, "jobs": [{"id": 0} for _ in range(58)]}]),
+        ("duplicate job", [pages[0], {"total_count": 158, "jobs": [{"id": 1} for _ in range(58)]}]),
         ("inconsistent total", [pages[0], {"total_count": 159, "jobs": pages[1]["jobs"]}]),
+        ("boolean first-page total", [{"total_count": True, "jobs": []}]),
+        ("boolean later-page total", [{"total_count": 1, "jobs": []}, {"total_count": True, "jobs": [{"id": 1}]}]),
+        ("boolean job ID", [{"total_count": 1, "jobs": [{"id": True}]}]),
+        ("zero job ID", [{"total_count": 1, "jobs": [{"id": 0}]}]),
+        ("negative job ID", [{"total_count": 1, "jobs": [{"id": -1}]}]),
     ]:
         try:
             flatten_job_pages(invalid)
@@ -487,6 +494,7 @@ def self_test() -> int:
             check(f"{label} fails closed", True)
         else:
             check(f"{label} fails closed", False)
+    check("zero-job inventory remains valid", flatten_job_pages([{"total_count": 0, "jobs": []}]) == [])
     spot_killed = _job(
         "build (openbank-billing-service)",
         "failure",
