@@ -10,7 +10,7 @@ authenticated SecurityIdentity. A workload holding a fleet-CA certificate and no
 
 Rule: in every profile where client-auth resolves to required/request, some
 `quarkus.http.auth.permission.<name>` resolving in that profile must set
-`auth-mechanism: bearer`, and its `paths` must cover the class-level `@Path` root of every
+`auth-mechanism: bearer` with `policy: authenticated`, and its `paths` must cover the class-level `@Path` root of every
 JAX-RS resource class in the module's src/main (REST-client interfaces are not served and do
 not count). The certificate then stays transport authentication; the OIDC bearer is the only
 identity a route sees. Behaviour is proven per service by a ListenerAuthParityConformance IT.
@@ -113,7 +113,12 @@ def bearer_paths(flat: dict) -> list[str]:
         # Class-level @Path inspection cannot prove which methods each resource serves, so
         # only a permission applying to every method can establish root-wide coverage.
         methods = str(flat.get(f"{PERMISSION}.{n}.methods", "")).strip()
-        if mech == "bearer" and not methods and str(flat.get(f"{PERMISSION}.{n}.enabled", "true")).lower() != "false":
+        # Selecting a mechanism alone does not make credentials mandatory: the
+        # `permit` policy allows anonymous requests even with auth-mechanism=bearer.
+        # Treat unknown/custom policies as unproven rather than guessing their semantics.
+        policy = str(flat.get(f"{PERMISSION}.{n}.policy", "")).strip().lower()
+        if (mech == "bearer" and policy == "authenticated" and not methods and
+                str(flat.get(f"{PERMISSION}.{n}.enabled", "true")).lower() != "false"):
             out += [p for p in str(flat.get(f"{PERMISSION}.{n}.paths", "")).split(",") if p.strip()]
     return out
 
@@ -173,7 +178,8 @@ def overriding_permissions(flat: dict, roots: list[str], bearer: list[str]) -> l
             continue
         if str(flat.get(key + "shared", "false")).lower() == "true":
             continue
-        if str(flat.get(key + "auth-mechanism", "")).strip().lower() == "bearer":
+        if (str(flat.get(key + "auth-mechanism", "")).strip().lower() == "bearer" and
+                str(flat.get(key + "policy", "")).strip().lower() == "authenticated"):
             continue
         # An unconditional deny does not authenticate a certificate or reach the API.
         if str(flat.get(key + "policy", "")).strip().lower() == "deny":
@@ -234,7 +240,7 @@ def findings_for(doc, roots: list[str]) -> list[str]:
         patterns = bearer_paths(flat)
         label = f"profile {name or '(default)'}"
         if not patterns:
-            out.append(f"{label}: client-auth={ca} but no unrestricted permission sets auth-mechanism: bearer — "
+            out.append(f"{label}: client-auth={ca} but no unrestricted permission sets policy: authenticated and auth-mechanism: bearer — "
                        "a trusted client certificate alone authenticates (#12511)")
             continue
         uncovered = [r for r in roots if not any(_covers(p, r) for p in patterns)]
@@ -264,11 +270,16 @@ def self_test() -> int:
     fixed = yaml.safe_load(
         '"%prod":\n  quarkus:\n    http:\n      ssl:\n        client-auth: required\n'
         "      auth:\n        permission:\n          bearer-only:\n            paths: /api/*\n"
+        "            policy: authenticated\n            auth-mechanism: bearer\n"
+    )
+    permit_bearer = yaml.safe_load(
+        '"%prod":\n  quarkus:\n    http:\n      ssl:\n        client-auth: required\n'
+        "      auth:\n        permission:\n          bearer-only:\n            paths: /api/*\n"
         "            policy: permit\n            auth-mechanism: bearer\n"
     )
     inherited = yaml.safe_load(
         "quarkus:\n  http:\n    auth:\n      permission:\n        b:\n          paths: /api/*,/ap2/*\n"
-        "          auth-mechanism: bearer\n"
+        "          policy: authenticated\n          auth-mechanism: bearer\n"
         '"%prod":\n  quarkus:\n    http:\n      ssl:\n        client-auth: required\n'
     )
     wrong_mech = yaml.safe_load(
@@ -278,81 +289,81 @@ def self_test() -> int:
     get_only = yaml.safe_load(
         '"%prod":\n  quarkus:\n    http:\n      ssl:\n        client-auth: required\n'
         "      auth:\n        permission:\n          x:\n            paths: /api/*\n"
-        "            methods: GET\n            auth-mechanism: bearer\n"
+        "            methods: GET\n            policy: authenticated\n            auth-mechanism: bearer\n"
     )
     exact_root_only = yaml.safe_load(
         '"%prod":\n  quarkus:\n    http:\n      ssl:\n        client-auth: required\n'
         '      auth:\n        permission:\n          x:\n'
-        '            paths: /api/v1/sca\n            auth-mechanism: bearer\n'
+        '            paths: /api/v1/sca\n            policy: authenticated\n            auth-mechanism: bearer\n'
     )
     overridden = yaml.safe_load(
         '"%prod":\n  quarkus:\n    http:\n      ssl:\n        client-auth: required\n'
         "      auth:\n        permission:\n"
-        "          bearer-only:\n            paths: /api/*\n            auth-mechanism: bearer\n"
+        "          bearer-only:\n            paths: /api/*\n            policy: authenticated\n            auth-mechanism: bearer\n"
         "          narrower:\n            paths: /api/v1/accounts/*\n            policy: authenticated\n"
     )
     unrelated = yaml.safe_load(
         '"%prod":\n  quarkus:\n    http:\n      ssl:\n        client-auth: required\n'
         "      auth:\n        permission:\n"
-        "          bearer-only:\n            paths: /api/*\n            auth-mechanism: bearer\n"
+        "          bearer-only:\n            paths: /api/*\n            policy: authenticated\n            auth-mechanism: bearer\n"
         "          other:\n            paths: /status/*\n            policy: authenticated\n"
     )
     method_override = yaml.safe_load(
         '"%prod":\n  quarkus:\n    http:\n      ssl:\n        client-auth: required\n'
         "      auth:\n        permission:\n"
-        "          bearer-only:\n            paths: /api/*\n            auth-mechanism: bearer\n"
+        "          bearer-only:\n            paths: /api/*\n            policy: authenticated\n            auth-mechanism: bearer\n"
         "          get-only:\n            paths: /api/*\n            methods: GET\n            policy: authenticated\n"
     )
     middle_wildcard = yaml.safe_load(
         '"%prod":\n  quarkus:\n    http:\n      ssl:\n        client-auth: required\n'
         "      auth:\n        permission:\n"
-        "          bearer-only:\n            paths: /api/*\n            auth-mechanism: bearer\n"
+        "          bearer-only:\n            paths: /api/*\n            policy: authenticated\n            auth-mechanism: bearer\n"
         "          admin:\n            paths: /api/*/admin\n            policy: authenticated\n"
     )
     exact_override = yaml.safe_load(
         '"%prod":\n  quarkus:\n    http:\n      ssl:\n        client-auth: required\n'
         "      auth:\n        permission:\n"
-        "          bearer-only:\n            paths: /api/v1/*\n            auth-mechanism: bearer\n"
+        "          bearer-only:\n            paths: /api/v1/*\n            policy: authenticated\n            auth-mechanism: bearer\n"
         "          exact:\n            paths: /api/v1\n            policy: authenticated\n"
     )
     nested_bearer = yaml.safe_load(
         '"%prod":\n  quarkus:\n    http:\n      ssl:\n        client-auth: required\n'
         "      auth:\n        permission:\n"
-        "          broad:\n            paths: /api/*\n            auth-mechanism: bearer\n"
-        "          narrow:\n            paths: /api/v1/secure/*\n            auth-mechanism: bearer\n"
+        "          broad:\n            paths: /api/*\n            policy: authenticated\n            auth-mechanism: bearer\n"
+        "          narrow:\n            paths: /api/v1/secure/*\n            policy: authenticated\n            auth-mechanism: bearer\n"
         "          middle:\n            paths: /api/v1/*\n            policy: authenticated\n"
     )
     exact_bearer = yaml.safe_load(
         '"%prod":\n  quarkus:\n    http:\n      ssl:\n        client-auth: required\n'
         "      auth:\n        permission:\n"
-        "          broad:\n            paths: /api/*\n            auth-mechanism: bearer\n"
-        "          exact:\n            paths: /api/v1/secure\n            auth-mechanism: bearer\n"
+        "          broad:\n            paths: /api/*\n            policy: authenticated\n            auth-mechanism: bearer\n"
+        "          exact:\n            paths: /api/v1/secure\n            policy: authenticated\n            auth-mechanism: bearer\n"
         "          middle:\n            paths: /api/v1/*\n            policy: authenticated\n"
     )
     trailing_slash_bearer = yaml.safe_load(
         '"%prod":\n  quarkus:\n    http:\n      ssl:\n        client-auth: required\n'
         "      auth:\n        permission:\n"
-        "          broad:\n            paths: /api/*\n            auth-mechanism: bearer\n"
-        "          slash-only:\n            paths: /api/v1/\n            auth-mechanism: bearer\n"
+        "          broad:\n            paths: /api/*\n            policy: authenticated\n            auth-mechanism: bearer\n"
+        "          slash-only:\n            paths: /api/v1/\n            policy: authenticated\n            auth-mechanism: bearer\n"
         "          exact:\n            paths: /api/v1\n            policy: authenticated\n"
     )
     trailing_slash_override = yaml.safe_load(
         '"%prod":\n  quarkus:\n    http:\n      ssl:\n        client-auth: required\n'
         "      auth:\n        permission:\n"
-        "          broad:\n            paths: /api/*\n            auth-mechanism: bearer\n"
-        "          slashless:\n            paths: /api/v1\n            auth-mechanism: bearer\n"
+        "          broad:\n            paths: /api/*\n            policy: authenticated\n            auth-mechanism: bearer\n"
+        "          slashless:\n            paths: /api/v1\n            policy: authenticated\n            auth-mechanism: bearer\n"
         "          slash:\n            paths: /api/v1/\n            policy: authenticated\n"
     )
     slashless_override = yaml.safe_load(
         '"%prod":\n  quarkus:\n    http:\n      ssl:\n        client-auth: required\n'
         "      auth:\n        permission:\n"
-        "          broad:\n            paths: /api/*\n            auth-mechanism: bearer\n"
+        "          broad:\n            paths: /api/*\n            policy: authenticated\n            auth-mechanism: bearer\n"
         "          exact:\n            paths: /api/v1\n            policy: authenticated\n"
     )
     attached_wildcard = yaml.safe_load(
         '"%prod":\n  quarkus:\n    http:\n      ssl:\n        client-auth: required\n'
         "      auth:\n        permission:\n"
-        "          bearer-only:\n            paths: /api/*\n            auth-mechanism: bearer\n"
+        "          bearer-only:\n            paths: /api/*\n            policy: authenticated\n            auth-mechanism: bearer\n"
         "          attached:\n            paths: /api/v1*\n            policy: authenticated\n"
     )
     none = yaml.safe_load("quarkus:\n  http:\n    port: 8080\n")
@@ -360,7 +371,8 @@ def self_test() -> int:
     checks = [
         ("client-auth required without bearer-only flagged", len(findings_for(vuln, api)) == 1),
         ("client-auth request without bearer-only flagged", len(findings_for(request, api)) == 1),
-        ("#12506 pattern passes", findings_for(fixed, api) == []),
+        ("authenticated bearer permission passes", findings_for(fixed, api) == []),
+        ("permit bearer permission does not require bearer identity", len(findings_for(permit_bearer, api)) == 1),
         ("bearer-only not covering /ap2 root flagged", len(findings_for(fixed, ["/ap2/verify"])) == 1),
         ("inherited multi-path bearer-only passes", findings_for(inherited, ["/ap2/verify", "/api/v1/x"]) == []),
         ("auth-mechanism other than bearer flagged", len(findings_for(wrong_mech, api)) == 1),
