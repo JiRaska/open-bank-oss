@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/pension-fund-service-v0.4.0...pension-fund-service-v0.5.0) (2026-10-12)
+
+
+### Features
+
+* **pension-fund:** fund-service observability — NAV pipeline, AUM, orders, approvals, alerts, dashboards ([#12442](https://github.com/JiRaska/open-bank-oss/issues/12442)) ([f05874a](https://github.com/JiRaska/open-bank-oss/commit/f05874a76a9d289450f31cbe79d0bbd5fc140d33))
+
 ## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/pension-fund-service-v0.3.0...pension-fund-service-v0.4.0) (2026-10-11)
 
 

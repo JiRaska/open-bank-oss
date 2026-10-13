@@ -440,7 +440,7 @@ authz:
             certs: /mnt/fund-tls/ca.crt
         protocols: TLSv1.3
     http:
-      # East-west mTLS on the 8443 listener: tax-reporting is its only caller and presents
+      # East-west mTLS on the 8443 listener: tax-reporting presents
       # tax-reporting-internal-tls (ADR-0337 pattern, as treasury). `quarkus.http.ssl.client-auth`
       # is BUILD-TIME, so it lives in the file the image is built from; %prod only, because with
       # quarkus.http.ssl.* set and no certificate Quarkus refuses to start in dev and @QuarkusTest.
@@ -459,7 +459,7 @@ authz:
         permission:
           bearer-only:
             paths: /api/*
-            policy: permit
+            policy: authenticated
             auth-mechanism: bearer
     rest-client:
       product-catalog:

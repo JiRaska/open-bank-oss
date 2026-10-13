@@ -128,7 +128,7 @@ class ListenerAuthParityIT {
             "quarkus.oidc.discovery-enabled" to "false",
             "quarkus.oidc.jwks-path" to "protocol/openid-connect/certs",
             "quarkus.http.auth.permission.bearer-only.paths" to "/api/*",
-            "quarkus.http.auth.permission.bearer-only.policy" to "permit",
+            "quarkus.http.auth.permission.bearer-only.policy" to "authenticated",
             "quarkus.http.auth.permission.bearer-only.auth-mechanism" to "bearer",
         )
 
