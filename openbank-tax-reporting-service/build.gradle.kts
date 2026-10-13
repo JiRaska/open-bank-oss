@@ -6,6 +6,11 @@ plugins {
     id("openbank.quarkus-service")
 }
 
+// Compile the corporate-facts test double used by this module's consumer Pact tests.
+kotlin.sourceSets.named("consumerPactTest") {
+    kotlin.include("com/openbank/tax/contract/NoCorporateFacts.kt")
+}
+
 dependencies {
     implementation(enforcedPlatform(libs.quarkus.bom))
     implementation(libs.quarkus.kotlin)
