@@ -71,6 +71,7 @@ jobs:
           # ~30-module `--rerun-tasks` rebuild, 25-30 min, to analyse a diff containing no
           # Java. Dockerfile stays in the SBOM regex below, which is a separate question
           # (a base-image bump genuinely does change the dependency graph).
+          python3 .github/scripts/tests/test_codeql_scope_classifier.py
           JAVA_RE='(\.(java|kt|kts)$|(^|/)(build|settings)\.gradle|gradle/)'
           JS_RE='(\.(js|jsx|ts|tsx|mjs|cjs)$|(^|/)package(-lock)?\.json$)'
           # NOTE: .github/workflows/ is deliberately NOT in either pattern. A workflow-only
@@ -97,8 +98,8 @@ jobs:
           # does not match, which is the common case. classify() never fails.
           classify() {
             J=false; S=false
-            if printf '%s\n' "$1" | grep -qE "$JAVA_RE"; then J=true; fi
-            if printf '%s\n' "$1" | grep -qE "$JS_RE"; then S=true; fi
+            if grep -qE "$JAVA_RE" <<< "$1"; then J=true; fi
+            if grep -qE "$JS_RE" <<< "$1"; then S=true; fi
           }
           # schedule / manual: always run the full audit.
           if [ "$EVENT" = "schedule" ] || [ "$EVENT" = "workflow_dispatch" ]; then
