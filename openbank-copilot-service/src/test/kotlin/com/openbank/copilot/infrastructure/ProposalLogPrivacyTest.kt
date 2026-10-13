@@ -118,6 +118,11 @@ class ProposalLogPrivacyTest {
                 assertThat(gate.authorize(token.toolName, token.customerId).allow).isFalse()
                 status = 503
                 assertThat(gate.authorize(token.toolName, token.customerId).allow).isFalse()
+                server.stop(0)
+                val unreachable = gate.authorize(token.toolName, token.customerId, "private-json-marker")
+                assertThat(unreachable.allow).isFalse()
+                assertThat(records.last().message).isEqualTo("OpaToolGate: sidecar unreachable")
+                assertThat(records.last().thrown).isNull()
                 assertPrivate(records)
             }
         } finally {
