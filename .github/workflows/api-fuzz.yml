@@ -193,7 +193,7 @@ jobs:
       # its installed locked package, rather than repeat it for every service.
       - name: Verify Schemathesis response isolation
         if: matrix.service == fromJSON(needs.prepare.outputs.services)[0]
-        run: python3 .github/scripts/tests/test_fuzz_response_isolation.py
+        run: python3 .github/scripts/fuzz_tests/test_fuzz_response_isolation.py
 
       - name: Fuzz services
         run: .github/scripts/fuzz-services.sh

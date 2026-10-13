@@ -363,6 +363,13 @@ dump_out() { # dump_out <captured output>
   printf '%s' "$1" | od -c | sed 's/^/        /'
 }
 
+# Match the captured text in-process. `grep -q` exits as soon as it finds a match, which can close
+# the pipe while printf is still writing; with pipefail that turns a successful assertion into a
+# failure when captured output is larger than the pipe buffer.
+contains_text() { # contains_text <captured output> <literal>
+  case "$1" in *"$2"*) return 0 ;; *) return 1 ;; esac
+}
+
 self_test() {
   local tmp rc out ok=0
   tmp="$(mktemp -d)"
@@ -420,11 +427,14 @@ HOOK
 
   # case 1 — the #6231 interleaving: KEEP is the OLDER commit, the open PR is the NEWER one.
   out="$(run "$P" 6225 "$OLD" "$(printf '6222\t%s%s' "$P" "$NEW")" 2>&1)" && rc=0 || rc=$?
+  # Keep a realistic large-output regression case: the expected error is near the start, followed
+  # by more than a typical pipe buffer. The assertion must still see it without a grep pipeline.
+  out+="$(printf '%131072s' '' | tr ' ' x)"
   if [ "$rc" -eq 0 ]; then
     echo "SELF-TEST FAIL case 1: stale KEEP exited 0 (must be non-zero)"; ok=1
-  elif ! printf '%s' "$out" | grep -q '::error::supersede: #6225 pins aaaaaaaa, which is an ANCESTOR'; then
+  elif ! contains_text "$out" '::error::supersede: #6225 pins aaaaaaaa, which is an ANCESTOR'; then
     echo "SELF-TEST FAIL case 1: no ::error naming the ancestry; got: $out"; ok=1; dump_out "$out"
-  elif printf '%s' "$out" | grep -q 'would close'; then
+  elif contains_text "$out" 'would close'; then
     echo "SELF-TEST FAIL case 1: it still closed the newer PR"; ok=1
   else
     echo "self-test case 1 OK (stale keep -> rc=$rc, ::error, nothing closed)"
@@ -434,13 +444,7 @@ HOOK
   out="$(run "$P" 6222 "$NEW" "$(printf '6225\t%s%s' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
   if [ "$rc" -ne 0 ]; then
     echo "SELF-TEST FAIL case 2: ordinary supersede exited $rc; got: $out"; ok=1; dump_out "$out"
-  elif ! printf '%s' "$out" | grep -q 'would close #6225'; then
-    # Capture PIPESTATUS before echo/dump_out overwrites it: the 139-byte recurrence in #6618
-    # contained the sought text, but did not show whether printf or grep failed under pipefail.
-    local -a match_status=("${PIPESTATUS[@]}")
-    printf '        matcher: printf=%s grep=%s bash=%s\n' \
-      "${match_status[0]}" "${match_status[1]}" "$BASH_VERSION"
-    grep --version 2>&1 | head -n 1 || true
+  elif ! contains_text "$out" 'would close #6225'; then
     echo "SELF-TEST FAIL case 2: the older PR was not closed; got: $out"; ok=1; dump_out "$out"
   else
     echo "self-test case 2 OK (ordinary supersede -> rc=$rc, older PR closed)"
@@ -448,7 +452,7 @@ HOOK
 
   # case 3 — unrelated shas must never be closed on a guess.
   out="$(run "$P" 1 cccccccccccccccccccccccccccccccccccccccc "$(printf '2\t%s%s' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
-  if [ "$rc" -ne 0 ] || printf '%s' "$out" | grep -q 'would close'; then
+  if [ "$rc" -ne 0 ] || contains_text "$out" 'would close'; then
     echo "SELF-TEST FAIL case 3: diverged pair was closed or failed; got: $out"; ok=1; dump_out "$out"
   else
     echo "self-test case 3 OK (diverged -> warning, left open)"
@@ -456,7 +460,7 @@ HOOK
 
   # case 4 — an unparsable branch name is unknown, not permission.
   out="$(run "$P" 1 "$NEW" "$(printf '2\t%snot-a-sha' "$P")" 2>&1)" && rc=0 || rc=$?
-  if [ "$rc" -ne 0 ] || printf '%s' "$out" | grep -q 'would close'; then
+  if [ "$rc" -ne 0 ] || contains_text "$out" 'would close'; then
     echo "SELF-TEST FAIL case 4: unparsable branch was closed or failed; got: $out"; ok=1; dump_out "$out"
   else
     echo "self-test case 4 OK (unparsable sha -> warning, left open)"
@@ -468,9 +472,9 @@ HOOK
   out="$(run "$P" 7314 "$NEW" "$(printf '7313\t%s%s' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
   if [ "$rc" -ne 0 ]; then
     echo "SELF-TEST FAIL case 5: coverage-insufficient run exited $rc (must be 0, tidiness only); got: $out"; ok=1; dump_out "$out"
-  elif printf '%s' "$out" | grep -q 'would close #7313'; then
+  elif contains_text "$out" 'would close #7313'; then
     echo "SELF-TEST FAIL case 5: #7313 was closed despite #7314 never touching balance-service.yaml; got: $out"; ok=1; dump_out "$out"
-  elif ! printf '%s' "$out" | grep -q 'coverage check, issue #7621.*leaving #7313 OPEN'; then
+  elif ! contains_text "$out" 'coverage check, issue #7621) — leaving #7313 OPEN.'; then
     echo "SELF-TEST FAIL case 5: no coverage warning naming #7313; got: $out"; ok=1; dump_out "$out"
   else
     echo "self-test case 5 OK (ancestor but disjoint files -> #7313 left OPEN, #7313/#7314/#7319 shape)"
@@ -481,7 +485,7 @@ HOOK
   out="$(run "$P" 7327 "$NEW" "$(printf '7320\t%s%s' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
   if [ "$rc" -ne 0 ]; then
     echo "SELF-TEST FAIL case 6: ordinary coverage-covered run exited $rc; got: $out"; ok=1; dump_out "$out"
-  elif ! printf '%s' "$out" | grep -q 'would close #7320'; then
+  elif ! contains_text "$out" 'would close #7320'; then
     echo "SELF-TEST FAIL case 6: #7320 was not closed despite #7327's superset diff; got: $out"; ok=1; dump_out "$out"
   else
     echo "self-test case 6 OK (ancestor and superset files -> #7320 closed)"
@@ -493,7 +497,7 @@ HOOK
   out="$(run "$P" 11499 "$NEW" "$(printf '11491\t%s%s\t1' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
   if [ "$rc" -eq 0 ]; then
     echo "SELF-TEST FAIL case 7: held predecessor superseded with rc=0 — survivor would be armed; got: $out"; ok=1; dump_out "$out"
-  elif ! printf '%s' "$out" | grep -qF "would inherit hold: #11499 -> rules.yaml deploy_holds [openbank-sanctions-service]"; then
+  elif ! contains_text "$out" "would inherit hold: #11499 -> rules.yaml deploy_holds [openbank-sanctions-service]"; then
     echo "SELF-TEST FAIL case 7: #11499 did not inherit #11491's hold; got: $out"; ok=1; dump_out "$out"
   else
     echo "self-test case 7 OK (held #11491 superseded -> #11499 inherits hold, rc=$rc)"
@@ -501,8 +505,8 @@ HOOK
 
   # case 8 — the same pair WITHOUT a hold is ordinary: closed, rc 0, nothing inherited.
   out="$(run "$P" 11499 "$NEW" "$(printf '11491\t%s%s\t0' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
-  if [ "$rc" -ne 0 ] || printf '%s' "$out" | grep -q 'inherit hold' \
-     || ! printf '%s' "$out" | grep -q 'would close #11491'; then
+  if [ "$rc" -ne 0 ] || contains_text "$out" 'inherit hold' \
+     || ! contains_text "$out" 'would close #11491'; then
     echo "SELF-TEST FAIL case 8: unheld supersede was not ordinary; got: $out"; ok=1; dump_out "$out"
   else
     echo "self-test case 8 OK (unheld -> closed, rc=0, no hold)"
@@ -511,7 +515,7 @@ HOOK
   # case 9 — a held predecessor whose hold cannot be recorded (no readable image pin) must stay
   # OPEN and the run must fail: unknown is never permission to drop a hold.
   out="$(run "$P" 11499 "$NEW" "$(printf '11498\t%s%s\t1' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
-  if [ "$rc" -eq 0 ] || printf '%s' "$out" | grep -q 'would close #11498'; then
+  if [ "$rc" -eq 0 ] || contains_text "$out" 'would close #11498'; then
     echo "SELF-TEST FAIL case 9: unrecordable hold was dropped; got: $out"; ok=1; dump_out "$out"
   else
     echo "self-test case 9 OK (unrecordable hold -> #11498 left OPEN, rc=$rc)"
