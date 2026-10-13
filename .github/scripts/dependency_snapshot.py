@@ -5,6 +5,8 @@ import re
 from copy import deepcopy
 
 IDENTITY = ('version', 'sha', 'ref', 'job', 'detector')
+# Bound each process while amortizing Gradle startup across more projects.
+PROJECTS_PER_SHARD = 16
 
 def load_snapshot(path):
     def unique(pairs):
@@ -199,19 +201,19 @@ def generate(repo, output, env, extra_arguments=()):
     # for setup, validation and submission; never publish a partial graph.
     deadline = time.monotonic() + 20 * 60
     (output / 'inventory.json').write_text(json.dumps(modules, indent=2))
-    expected = [f'shard-{i // 8:02}' for i in range(0, len(modules), 8)]
+    expected = [f'shard-{i // PROJECTS_PER_SHARD:02}' for i in range(0, len(modules), PROJECTS_PER_SHARD)]
     identity = {'version': 0, 'sha': sha, 'ref': env['GITHUB_DEPENDENCY_GRAPH_REF'],
                     'job': {'id': env['GITHUB_DEPENDENCY_GRAPH_JOB_ID'], 'correlator': correlator},
                     'detector': {'name': 'GitHub Dependency Graph Gradle Plugin', 'version': '1.5.0',
                                   'url': 'https://github.com/gradle/github-dependency-graph-gradle-plugin'}}
     parts, receipts = {}, []
-    for i in range(0, len(modules), 8):
-        shard = output / expected[i // 8]
+    for i in range(0, len(modules), PROJECTS_PER_SHARD):
+        shard = output / expected[i // PROJECTS_PER_SHARD]
         shard.mkdir()
         reports, coverage = shard / 'reports', shard / 'coverage'
         reports.mkdir()
         coverage.mkdir()
-        projects = [':' + module for module in modules[i:i + 8]]
+        projects = [':' + module for module in modules[i:i + PROJECTS_PER_SHARD]]
         if i == 0:
             projects.insert(0, ':')
         tasks = [p.rstrip(':') + ':OpenBankResolveDependencyGraph'
