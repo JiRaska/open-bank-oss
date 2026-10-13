@@ -7,13 +7,16 @@ package com.openbank.tax.application.usecase
 import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessRecorder
+import com.openbank.tax.application.port.out.ParticipantCloseDataPort
 import com.openbank.tax.application.port.out.ReturnCatalogueSource
 import com.openbank.tax.application.port.out.ReturnDataPort
 import com.openbank.tax.application.port.out.ReturnDataUnavailableException
+import com.openbank.tax.application.port.out.ReturnExtraction
 import com.openbank.tax.application.port.out.StatutoryReturnMetricsPort
 import com.openbank.tax.application.port.out.StatutoryReturnRepository
 import com.openbank.tax.domain.model.TaxConflictException
 import com.openbank.tax.domain.model.TaxValidationException
+import com.openbank.tax.domain.returns.ParticipantCloseLineage
 import com.openbank.tax.domain.returns.Periodicity
 import com.openbank.tax.domain.returns.ReportingPeriod
 import com.openbank.tax.domain.returns.ReturnCatalogue
@@ -65,8 +68,16 @@ class StatutoryReturnServiceTest {
 
     private class InMemoryRepo : StatutoryReturnRepository {
         val rows = linkedMapOf<UUID, StatutoryReturn>()
+        var hideNextSourceLookup = false
         override suspend fun insert(statutoryReturn: StatutoryReturn) = statutoryReturn.also { rows[it.id] = it }
         override suspend fun findReturn(id: UUID) = rows[id]
+        override suspend fun findSourceAssembly(keyHash: String): StatutoryReturn? {
+            if (hideNextSourceLookup) {
+                hideNextSourceLookup = false
+                return null
+            }
+            return rows.values.firstOrNull { it.sourceAssemblyKeyHash == keyHash }
+        }
         override suspend fun latestRevision(
             catalogueId: String,
             returnCode: String,
@@ -87,18 +98,190 @@ class StatutoryReturnServiceTest {
         }
     }
 
-    private class FixedData(var values: Map<String, BigDecimal>?) : ReturnDataPort {
+    private class FixedData(var values: Map<String, BigDecimal>?) :
+        ReturnDataPort,
+        ParticipantCloseDataPort {
         override val available = values != null
+        var closedFetches = 0
+        var closedExtraction: ReturnExtraction? = null
         override suspend fun fetch(
             catalogue: ReturnCatalogue,
             definition: ReturnDefinition,
             entityId: String,
             period: ReportingPeriod,
         ) = values ?: throw ReturnDataUnavailableException("unbound")
+
+        override suspend fun fetchClosed(
+            catalogue: ReturnCatalogue,
+            definition: ReturnDefinition,
+            companyId: UUID,
+            period: ReportingPeriod,
+            sourceIdempotencyKey: String,
+        ): ReturnExtraction {
+            closedFetches++
+            return closedExtraction ?: throw ReturnDataUnavailableException("no closed participant source in this test")
+        }
     }
 
     private val repo = InMemoryRepo()
     private val data = FixedData(mapOf("units" to BigDecimal("100")))
+
+    private val companyId = UUID.fromString("cae643b1-09b9-4ad7-ae55-310959d62156")
+    private val closedDefinition = ReturnDefinition(
+        code = "PSP40-01",
+        name = "company pension return",
+        scope = ReturnScope.COMPANY,
+        periodicity = Periodicity.YEAR,
+        deadlineDaysAfterPeriodEnd = 30,
+        datapoints = listOf("contributions_received_year", "payouts_paid_year"),
+        rules = emptyList(),
+        legalBasis = "test",
+    )
+
+    private fun closedService(closed: FixedData) = StatutoryReturnService(
+        catalogues = object : ReturnCatalogueSource {
+            override fun catalogues() =
+                listOf(ReturnCatalogue("cz-pension-cnb", 1, "CZ", false, listOf(closedDefinition)))
+        },
+        data = closed,
+        closedData = closed,
+        repository = repo,
+        entities = ReportingEntities(companyId.toString(), emptyList(), LocalDate.of(2025, 1, 1)),
+        accountingClock = AccountingClock.bank(Clock.fixed(Instant.parse("2027-01-25T09:00:00Z"), ZoneOffset.UTC)),
+        clock = clock,
+    )
+
+    private fun closedData() = FixedData(emptyMap()).also {
+        it.closedExtraction = ReturnExtraction(
+            values = mapOf("contributions_received_year" to BigDecimal("100"), "payouts_paid_year" to BigDecimal("10")),
+            participantCloseLineage = ParticipantCloseLineage(
+                snapshotId = UUID.fromString("d45ca8df-f9dc-4573-bb7b-513219f33a96"),
+                companyId = companyId,
+                periodStart = LocalDate.of(2026, 1, 1),
+                periodEnd = LocalDate.of(2026, 12, 31),
+                revision = 1,
+                payloadSchemaVersion = "participant-period-aggregates/2.0",
+                sha256 = "a".repeat(64),
+                cellPaths = mapOf(
+                    "contributions_received_year" to "/contributionsYtd/total",
+                    "payouts_paid_year" to "/payoutsYtd/total",
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun `source command replays exact receipt before provider lookup and rejects changed intent`(): Unit = runBlocking {
+        val closed = closedData()
+        val svc = closedService(closed)
+        val key = "stable-source-key-123456"
+        val first = svc.assembleFromParticipantClose(
+            "cz-pension-cnb",
+            "PSP40-01",
+            companyId.toString(),
+            "2026",
+            "maker",
+            "realm-1",
+            key,
+        )
+        val retry = svc.assembleFromParticipantClose(
+            "cz-pension-cnb",
+            "PSP40-01",
+            companyId.toString(),
+            "2026",
+            "maker",
+            "realm-1",
+            key,
+        )
+        assertThat(retry.id).isEqualTo(first.id)
+        assertThat(closed.closedFetches).isEqualTo(1)
+        assertThatThrownBy {
+            runBlocking {
+                svc.assembleFromParticipantClose(
+                    "cz-pension-cnb",
+                    "PSP40-01",
+                    companyId.toString(),
+                    "2025",
+                    "maker",
+                    "realm-1",
+                    key,
+                )
+            }
+        }.isInstanceOf(TaxConflictException::class.java)
+        assertThat(closed.closedFetches).isEqualTo(1)
+    }
+
+    @Test
+    fun `same raw key from a different verified issuer or subject cannot replay another actor receipt`(): Unit =
+        runBlocking {
+            val closed = closedData()
+            val svc = closedService(closed)
+            val key = "stable-source-key-123456"
+            svc.assembleFromParticipantClose(
+                "cz-pension-cnb",
+                "PSP40-01",
+                companyId.toString(),
+                "2026",
+                "maker",
+                "realm-1",
+                key,
+            )
+            assertThatThrownBy {
+                runBlocking {
+                    svc.assembleFromParticipantClose(
+                        "cz-pension-cnb",
+                        "PSP40-01",
+                        companyId.toString(),
+                        "2026",
+                        "other",
+                        "realm-1",
+                        key,
+                    )
+                }
+            }.isInstanceOf(TaxConflictException::class.java).hasMessageContaining("revision 1")
+            assertThatThrownBy {
+                runBlocking {
+                    svc.assembleFromParticipantClose(
+                        "cz-pension-cnb",
+                        "PSP40-01",
+                        companyId.toString(),
+                        "2026",
+                        "maker",
+                        "realm-2",
+                        key,
+                    )
+                }
+            }.isInstanceOf(TaxConflictException::class.java).hasMessageContaining("revision 1")
+            assertThat(closed.closedFetches).isEqualTo(1)
+        }
+
+    @Test
+    fun `a same-key winner between receipt and revision lookups replays before provider access`(): Unit = runBlocking {
+        val closed = closedData()
+        val svc = closedService(closed)
+        val key = "stable-source-key-123456"
+        val first = svc.assembleFromParticipantClose(
+            "cz-pension-cnb",
+            "PSP40-01",
+            companyId.toString(),
+            "2026",
+            "maker",
+            "realm-1",
+            key,
+        )
+        repo.hideNextSourceLookup = true
+        val replay = svc.assembleFromParticipantClose(
+            "cz-pension-cnb",
+            "PSP40-01",
+            companyId.toString(),
+            "2026",
+            "maker",
+            "realm-1",
+            key,
+        )
+        assertThat(replay.id).isEqualTo(first.id)
+        assertThat(closed.closedFetches).isEqualTo(1)
+    }
 
     private fun service(
         start: LocalDate? = LocalDate.of(2026, 8, 1),
@@ -109,6 +292,7 @@ class StatutoryReturnServiceTest {
             override fun catalogues() = listOf(catalogue)
         },
         data = d,
+        closedData = data,
         repository = repo,
         entities = ReportingEntities("company", fundIds, start),
         accountingClock = AccountingClock.bank(clock),

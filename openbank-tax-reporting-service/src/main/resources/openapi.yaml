@@ -3,8 +3,8 @@
 openapi: 3.1.0
 info:
   title: Tax Reporting Service API
-  # 1.2.0: additive (#12495) — corporate register routes feeding ČNB PSP 32-04, 50-04 and 40-01.
-  version: 1.2.0
+  # 1.3.0: additive (#12425) — immutable participant-close assembly and read-only source lineage.
+  version: 1.3.0
   description: >
     §38d Vyúčtování daně vybírané srážkou podle zvláštní sazby daně — the platform's system of
     record for the monthly withholding-tax return (ADR-0180). Consumes
@@ -254,7 +254,7 @@ paths:
   /api/v1/statutory-returns/assemble:
     post:
       tags: [StatutoryReturn]
-      summary: Assemble and validate a return from sourced figures (→ ASSEMBLED); 503 while no data source is bound
+      summary: Legacy v1 assembly from sourced figures without immutable participant-close lineage
       operationId: assembleStatutoryReturn
       requestBody:
         required: true
@@ -278,6 +278,40 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ApiError' }
         '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /api/v1/statutory-returns/source-assemblies:
+    post:
+      tags: [StatutoryReturn]
+      summary: Assemble PSP40-01 from a verified immutable participant close; PSP31-04 is unavailable pending a beneficiary stock source
+      operationId: assembleStatutoryReturnFromParticipantClose
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema: { type: string, minLength: 16, maxLength: 128, pattern: '^[A-Za-z0-9._:-]{16,128}$' }
+          description: Stable command key; a successful retry returns the original return revision.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AssembleReturnRequest' }
+      responses:
+        '200':
+          description: The sourced revision, or the original revision on an exact-key retry
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatutoryReturnResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '503':
+          description: No verified participant close is available, including PSP31-04's missing as-of beneficiary stock
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
 
   /api/v1/statutory-returns/{id}/approve:
     post:
@@ -546,7 +580,7 @@ components:
         returns: { type: array, items: { $ref: '#/components/schemas/ReturnDefinitionResponse' } }
     StatutoryReturnResponse:
       type: object
-      required: [id, catalogueId, catalogueVersion, returnCode, entityId, periodicity, period, revision, status, datapoints, contentHash, dueDate, assembledBy, assembledAt]
+      required: [id, catalogueId, catalogueVersion, returnCode, entityId, periodicity, period, revision, status, datapoints, contentHash, contentHashVersion, dueDate, assembledBy, assembledAt]
       properties:
         id: { type: string, format: uuid }
         catalogueId: { type: string }
@@ -559,6 +593,11 @@ components:
         status: { type: string, enum: [ASSEMBLED, APPROVED, SUBMITTED] }
         datapoints: { type: object, additionalProperties: { type: number } }
         contentHash: { type: string, description: SHA-256 of the canonical content }
+        contentHashVersion: { type: integer, enum: [1, 2], description: '1 preserves legacy hash bytes; 2 also binds the immutable participant close and cell paths' }
+        participantCloseLineage:
+          oneOf:
+            - $ref: '#/components/schemas/ParticipantCloseLineage'
+            - type: 'null'
         dueDate: { type: string, format: date }
         assembledBy: { type: string }
         assembledAt: { type: string, format: date-time }
@@ -568,6 +607,18 @@ components:
         submittedBy: { type: [string, 'null'] }
         submittedAt: { type: [string, 'null'], format: date-time }
         submissionReference: { type: [string, 'null'] }
+    ParticipantCloseLineage:
+      type: object
+      required: [snapshotId, companyId, periodStart, periodEnd, revision, payloadSchemaVersion, sha256, cellPaths]
+      properties:
+        snapshotId: { type: string, format: uuid }
+        companyId: { type: string, format: uuid }
+        periodStart: { type: string, format: date }
+        periodEnd: { type: string, format: date }
+        revision: { type: integer }
+        payloadSchemaVersion: { type: string }
+        sha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+        cellPaths: { type: object, additionalProperties: { type: string }, description: 'Return datapoint to immutable participant-close JSON Pointer' }
     ApiError:
       type: object
       properties:

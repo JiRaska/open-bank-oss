@@ -12,6 +12,7 @@ import com.openbank.tax.application.port.out.ReturnWireRendererPort
 import com.openbank.tax.application.usecase.ReturnBreach
 import com.openbank.tax.application.usecase.StatutoryReturnNotFoundException
 import com.openbank.tax.application.usecase.StatutoryReturnService
+import com.openbank.tax.domain.returns.ParticipantCloseLineage
 import com.openbank.tax.domain.returns.ReturnCatalogue
 import com.openbank.tax.domain.returns.ReturnValidationException
 import com.openbank.tax.domain.returns.StatutoryReturn
@@ -20,6 +21,7 @@ import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.GET
+import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
@@ -126,6 +128,30 @@ class StatutoryReturnResource(
     }
 
     @POST
+    @Path("/source-assemblies")
+    @RolesAllowed(Roles.OPERATOR)
+    @Authorize(action = "tax.statutory-return.assemble")
+    @Operation(summary = "Assemble a participant-sourced return from a pinned immutable provider close")
+    suspend fun assembleFromParticipantClose(
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        request: AssembleReturnRequest?,
+    ): Response {
+        val actor = TaxReportingActor.verifiedStaffActor(identity, "assemble a statutory return")
+        val command = requireNotNull(request) { "source assembly body is required" }
+        return Response.ok(
+            service.assembleFromParticipantClose(
+                command.catalogueId,
+                command.returnCode,
+                command.entityId,
+                command.period,
+                actor.subject,
+                actor.issuer,
+                requireNotNull(idempotencyKey) { "Idempotency-Key header is required" },
+            ).toResponse(),
+        ).build()
+    }
+
+    @POST
     @Path("/{id}/approve")
     @RolesAllowed(Roles.OPERATOR)
     @Authorize(action = "tax.statutory-return.approve", resource = "#id")
@@ -143,12 +169,12 @@ class StatutoryReturnResource(
     suspend fun submitted(@PathParam("id") id: String, request: RecordSubmissionRequest): Response =
         Response.ok(service.submit(parseId(id), request.reference, actingPrincipal()).toResponse()).build()
 
-    private fun parseId(value: String): UUID = runCatching { UUID.fromString(value) }.getOrNull()
-        ?: throw WebApplicationException("id must be a UUID (got '$value')", Response.Status.BAD_REQUEST)
-
     private fun actingPrincipal(): String =
         TaxReportingActor.staffSubject(identity, "assemble, approve or submit a statutory return")
 }
+
+private fun parseId(value: String): UUID = runCatching { UUID.fromString(value) }.getOrNull()
+    ?: throw WebApplicationException("id must be a UUID (got '$value')", Response.Status.BAD_REQUEST)
 
 data class AssembleReturnRequest(
     val catalogueId: String,
@@ -177,6 +203,8 @@ data class StatutoryReturnResponse(
     val status: String,
     val datapoints: Map<String, BigDecimal>,
     val contentHash: String,
+    val contentHashVersion: Int,
+    val participantCloseLineage: ParticipantCloseLineage?,
     val dueDate: String,
     val assembledBy: String,
     val assembledAt: String,
@@ -227,6 +255,8 @@ private fun StatutoryReturn.toResponse() = StatutoryReturnResponse(
     status = status.name,
     datapoints = datapoints,
     contentHash = contentHash,
+    contentHashVersion = contentHashVersion,
+    participantCloseLineage = participantCloseLineage,
     dueDate = dueDate.toString(),
     assembledBy = assembledBy,
     assembledAt = assembledAt.toString(),

@@ -30,6 +30,8 @@ import org.eclipse.microprofile.jwt.JsonWebToken
 internal object TaxReportingActor {
     private const val PREFIX = "service-account-"
 
+    data class VerifiedStaffActor(val issuer: String, val subject: String)
+
     fun isServiceAccount(identity: SecurityIdentity?): Boolean {
         val principal = identity?.principal ?: return false
         if (principal.name.orEmpty().startsWith(PREFIX)) return true
@@ -65,6 +67,17 @@ internal object TaxReportingActor {
         }
         return subject
     }
+
+    /** Source-assembly keys are scoped to the validated token issuer and staff subject. */
+    fun verifiedStaffActor(identity: SecurityIdentity, act: String): VerifiedStaffActor {
+        staffSubject(identity, act) // Keep the existing machine-token refusal, never its display-name fallback.
+        val jwt = identity.principal as? JsonWebToken
+            ?: throw WebApplicationException("A validated staff token is required", Response.Status.UNAUTHORIZED)
+        return VerifiedStaffActor(requiredVerifiedClaim(jwt.issuer), requiredVerifiedClaim(jwt.subject))
+    }
+
+    private fun requiredVerifiedClaim(value: String?): String = value?.takeIf { it.isNotBlank() }
+        ?: throw WebApplicationException("Verified staff identity is incomplete", Response.Status.UNAUTHORIZED)
 
     private fun JsonWebToken.claimString(name: String): String? =
         (getClaim<Any?>(name))?.toString()?.trim('"')?.takeIf { it.isNotBlank() }

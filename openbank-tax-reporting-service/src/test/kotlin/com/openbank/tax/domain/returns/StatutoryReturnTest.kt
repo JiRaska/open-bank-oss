@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.time.Instant
 import java.time.LocalDate
+import java.util.UUID
 
 class StatutoryReturnTest {
     private val balanceSheet = ReturnDefinition(
@@ -63,8 +64,45 @@ class StatutoryReturnTest {
                 "total_assets=1500000.5\ntotal_equity=1400000\ntotal_liabilities=100000.5\n",
         )
         assertThat(ret.contentHash).isEqualTo("904936295b99bd9f0b8ec881948c226f2c0e1c782b429f1a51987f90eef08eee")
+        assertThat(ret.contentHashVersion).isEqualTo(1)
+        assertThat(ret.participantCloseLineage).isNull()
         assertThat(ret.dueDate).isEqualTo(LocalDate.of(2026, 8, 20))
         assertThat(ret.status).isEqualTo(ReturnStatus.ASSEMBLED)
+    }
+
+    @Test
+    fun `participant close changes the attested hash without changing the legacy hash`() {
+        val original = assembled()
+        val lineage = ParticipantCloseLineage(
+            snapshotId = UUID.fromString("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+            companyId = UUID.fromString("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"),
+            periodStart = LocalDate.parse("2026-07-01"),
+            periodEnd = july.endDate,
+            revision = 1,
+            payloadSchemaVersion = "participant-period-aggregates/2.0",
+            sha256 = "a".repeat(64),
+            cellPaths = mapOf("total_assets" to "/contributionsYtd/total"),
+        )
+        val sourced = StatutoryReturn.assemble(
+            catalogue, balanceSheet, "fund-conservative", july, 1, goodValues, "maker", at, lineage,
+            "c".repeat(64), "d".repeat(64),
+        )
+        assertThat(original.contentHash).isEqualTo("904936295b99bd9f0b8ec881948c226f2c0e1c782b429f1a51987f90eef08eee")
+        assertThat(sourced.contentHashVersion).isEqualTo(2)
+        assertThat(sourced.contentHash).isNotEqualTo(original.contentHash)
+        val approved = sourced.approve("checker", at)
+        assertThat(approved.submit("REFERENCE", "checker", at).status).isEqualTo(ReturnStatus.SUBMITTED)
+        assertThatThrownBy {
+            approved.copy(participantCloseLineage = lineage.copy(sha256 = "b".repeat(64)))
+                .submit("REFERENCE", "checker", at)
+        }.isInstanceOf(TaxConflictException::class.java)
+    }
+
+    @Test
+    fun `an unknown restored content hash version is refused before attestation`() {
+        assertThatThrownBy { assembled().copy(contentHashVersion = 3) }
+            .isInstanceOf(TaxValidationException::class.java)
+            .hasMessageContaining("hash version")
     }
 
     @Test

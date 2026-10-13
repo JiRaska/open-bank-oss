@@ -91,8 +91,16 @@ by the follow-up #12500 and require rollout verification before company-books re
 | **Elevation of privilege** | A service-account holding `ROLE_OPERATOR` assembles, approves (as the four-eyes checker) or submits a ČNB statutory return | Non-read `tax.statutory-return.*` verbs, granted only to real staff by the extension; the resource also refuses a service-account token. `StatutoryReturnMachineActorIT` drives it over HTTP, `opa eval` against the generated bundle |
 | **Elevation of privilege** | A backend service-account holding `ROLE_OPERATOR` assembles or files | Both lifecycle rules require a principal id outside `service-account-*`. Tested with that exact principal |
 | **Tampering / wrong legal entity** | A company return uses bank or pension-fund books, live mutable totals, incomplete periods or another currency | Separate company-ledger URL and authorization are rollout prerequisites. `CompanyBooksCalculator` sums frozen YEAR evidence for prior years and MONTH evidence for the current year, requires a balanced flag, known account types and the reporting currency, and refuses any unavailable period. `CompanyBooksCalculatorTest` and `CompanyBooksGoldenIT` cover arithmetic, missing evidence and refusal paths |
+| **Tampering / replay** | A pension participant total changes between capture and statutory assembly, or a repeated command reads a newer revision | The additive `source-assemblies` command scopes its durable successful idempotency receipt to the verified staff JWT issuer and subject. It verifies the provider's exact UTF-8 payload hash before decoding, and rejects a different company, period, currency or required cell set. The v2 return hash binds the source receipt and cell paths to the assembled values; an exact retry returns the original revision without a new provider capture. Rejected commands leave no successful-key receipt. The legacy assemble route and v1 hash remain supported but do not establish this source-close lineage |
 
 ## 5. Residual risks and follow-ups
+
+- The additive participant source receipt is a technical snapshot, not a legal final close or an
+  independent reconciliation. Existing legacy assemblies remain outside the new lineage guarantee;
+  their migration or sunset and the authenticated provider deployment require separate proof.
+- PSP31-04 source-aware assembly refuses before provider capture until a verified as-of beneficiary
+  stock exists. The current pension instruction count cannot establish that reporting-date stock.
+  PSP40-01 uses the verified participant flow cells and an independently approved dividend input.
 
 - Company-books reporting remains unavailable unless the books-opened date is configured. Before
   enabling it, verify the separate legal entity's complete frozen history, reporting currency,

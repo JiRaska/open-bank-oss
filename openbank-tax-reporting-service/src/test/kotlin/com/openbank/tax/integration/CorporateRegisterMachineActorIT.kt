@@ -37,7 +37,7 @@ import org.junit.jupiter.api.Test
 class CorporateRegisterMachineActorIT {
     private val path = "/api/v1/corporate-register"
     private val absentId = "00000000-0000-0000-0000-000000000098"
-    private val proposeBody = """{"entityId":"company","fact":"SHARE_CAPITAL","value":1000,
+    private val proposeBody = """{"entityId":"${PensionProvidersStub.COMPANY}","fact":"SHARE_CAPITAL","value":1000,
         "effectiveFrom":"2009-01-01","reason":"annual update","evidence":"minutes"}"""
 
     private fun assertEveryRegisterRouteRefused() {
@@ -53,14 +53,14 @@ class CorporateRegisterMachineActorIT {
         assertAll(
             "both corporate-register inspection routes refuse machines independently",
             {
-                Given { queryParam("entityId", "company") } When { get(path) } Then {
+                Given { queryParam("entityId", PensionProvidersStub.COMPANY) } When { get(path) } Then {
                     statusCode(403)
                     body("error", containsString("service account"))
                 }
             },
             {
                 Given {
-                    queryParam("entityId", "company")
+                    queryParam("entityId", PensionProvidersStub.COMPANY)
                     queryParam("periodStart", "2009-01-01")
                     queryParam("periodEnd", "2009-12-31")
                 } When { get("$path/effective") } Then {
@@ -123,9 +123,10 @@ class CorporateRegisterMachineActorIT {
         } When { post(path) } Then { statusCode(201) }
         Given { contentType("application/json") } When { post("$path/$absentId/approve") } Then { statusCode(404) }
         Given { contentType("application/json") } When { post("$path/$absentId/reject") } Then { statusCode(404) }
-        Given { queryParam("entityId", "company") } When { get(path) } Then { statusCode(200) }
+        Given { queryParam("entityId", PensionProvidersStub.COMPANY) } When { get(path) } Then
+            { statusCode(200) }
         Given {
-            queryParam("entityId", "company")
+            queryParam("entityId", PensionProvidersStub.COMPANY)
             queryParam("periodStart", "2009-01-01")
             queryParam("periodEnd", "2009-12-31")
         } When { get("$path/effective") } Then { statusCode(200) }

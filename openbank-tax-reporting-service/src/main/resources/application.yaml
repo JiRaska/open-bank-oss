@@ -144,6 +144,9 @@ openbank:
     commit: "${GIT_COMMIT:unknown}"
 
 "%test":
+  openbank:
+    statutory-returns:
+      company-id: 00000000-0000-4000-8000-000000000001
   quarkus:
     datasource:
       reactive:

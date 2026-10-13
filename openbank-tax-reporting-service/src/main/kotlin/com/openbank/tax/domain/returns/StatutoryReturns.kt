@@ -223,6 +223,27 @@ class ReturnValidationException(val findings: List<ValidationFinding>) :
 
 enum class ReturnStatus { ASSEMBLED, APPROVED, SUBMITTED }
 
+/** Exact participant close and cell paths used by one return revision. No participant data is copied here. */
+data class ParticipantCloseLineage(
+    val snapshotId: UUID,
+    val companyId: UUID,
+    val periodStart: LocalDate,
+    val periodEnd: LocalDate,
+    val revision: Int,
+    val payloadSchemaVersion: String,
+    val sha256: String,
+    val cellPaths: Map<String, String>,
+) {
+    init {
+        requireValid(revision > 0) { "participant close revision must be positive" }
+        requireValid(payloadSchemaVersion.isNotBlank()) { "participant close schema version is required" }
+        requireValid(sha256.matches(Regex("[0-9a-f]{64}"))) { "participant close SHA-256 must be lowercase hex" }
+        requireValid(cellPaths.isNotEmpty() && cellPaths.values.all { it.startsWith('/') }) {
+            "participant close must identify its source cells"
+        }
+    }
+}
+
 /**
  * One revision of one return for one entity and period (ADR-0336).
  *
@@ -251,7 +272,24 @@ data class StatutoryReturn(
     val submittedAt: Instant? = null,
     val submissionReference: String? = null,
     val version: Long = 0L,
+    val contentHashVersion: Int = 1,
+    val participantCloseLineage: ParticipantCloseLineage? = null,
+    val sourceAssemblyKeyHash: String? = null,
+    val sourceAssemblyRequestHash: String? = null,
 ) {
+    init {
+        requireValid(contentHashVersion in 1..2) { "unsupported statutory return content hash version" }
+        requireValid((contentHashVersion == 1) == (participantCloseLineage == null)) {
+            "content hash version and participant close lineage disagree"
+        }
+        requireValid((sourceAssemblyKeyHash == null) == (sourceAssemblyRequestHash == null)) {
+            "source assembly command hashes must be present together"
+        }
+        requireValid((sourceAssemblyKeyHash == null) == (participantCloseLineage == null)) {
+            "a source assembly command and verified close must be present together"
+        }
+    }
+
     /** The approver must not be the assembler; approval pins the content hash as the attestation. */
     fun approve(by: String, at: Instant): StatutoryReturn {
         checkConflict(status == ReturnStatus.ASSEMBLED) {
@@ -281,7 +319,16 @@ data class StatutoryReturn(
         }
         requireValid(reference.isNotBlank()) { "A submission reference is required" }
         requireValid(by.isNotBlank()) { "Submission requires an actor" }
-        val recomputed = contentHash(catalogueId, catalogueVersion, returnCode, entityId, period, revision, datapoints)
+        val recomputed = contentHash(
+            catalogueId,
+            catalogueVersion,
+            returnCode,
+            entityId,
+            period,
+            revision,
+            datapoints,
+            participantCloseLineage,
+        )
         if (attestedHash == null || recomputed != attestedHash) {
             throw TaxConflictException(
                 "$returnCode ${period.label}: content does not match the attested hash — refusing to submit unattested figures",
@@ -311,6 +358,9 @@ data class StatutoryReturn(
             values: Map<String, BigDecimal>,
             by: String,
             at: Instant,
+            participantCloseLineage: ParticipantCloseLineage? = null,
+            sourceAssemblyKeyHash: String? = null,
+            sourceAssemblyRequestHash: String? = null,
         ): StatutoryReturn {
             requireValid(period.periodicity == definition.periodicity) {
                 "${definition.code} is ${definition.periodicity}, not ${period.periodicity}"
@@ -336,10 +386,15 @@ data class StatutoryReturn(
                     period,
                     revision,
                     values,
+                    participantCloseLineage,
                 ),
                 dueDate = definition.dueDate(period),
                 assembledBy = by,
                 assembledAt = at,
+                contentHashVersion = if (participantCloseLineage == null) 1 else 2,
+                participantCloseLineage = participantCloseLineage,
+                sourceAssemblyKeyHash = sourceAssemblyKeyHash,
+                sourceAssemblyRequestHash = sourceAssemblyRequestHash,
             )
         }
 
@@ -373,18 +428,46 @@ data class StatutoryReturn(
             period: ReportingPeriod,
             revision: Int,
             values: Map<String, BigDecimal>,
+            participantCloseLineage: ParticipantCloseLineage? = null,
         ): String = MessageDigest.getInstance("SHA-256")
             .digest(
-                canonicalContent(
-                    catalogueId,
-                    catalogueVersion,
-                    returnCode,
-                    entityId,
-                    period,
-                    revision,
-                    values,
-                ).toByteArray(),
+                (
+                    if (participantCloseLineage == null) {
+                        canonicalContent(
+                            catalogueId,
+                            catalogueVersion,
+                            returnCode,
+                            entityId,
+                            period,
+                            revision,
+                            values,
+                        )
+                    } else {
+                        canonicalContent(
+                            catalogueId,
+                            catalogueVersion,
+                            returnCode,
+                            entityId,
+                            period,
+                            revision,
+                            values,
+                        ) + participantCloseLineage.canonicalContent()
+                    }
+                    ).toByteArray(),
             )
             .joinToString("") { "%02x".format(it) }
+    }
+}
+
+private fun ParticipantCloseLineage.canonicalContent(): String = buildString {
+    append("source-lineage-version=2\n")
+    append("participant-snapshot=").append(snapshotId).append('\n')
+    append("participant-company=").append(companyId).append('\n')
+    append("participant-period=").append(periodStart).append(':').append(periodEnd).append('\n')
+    append("participant-revision=").append(revision).append('\n')
+    append("participant-schema=").append(payloadSchemaVersion).append('\n')
+    append("participant-sha256=").append(sha256).append('\n')
+    cellPaths.toSortedMap().forEach { (cell, path) ->
+        append("participant-cell=").append(cell).append(':').append(path).append('\n')
     }
 }
