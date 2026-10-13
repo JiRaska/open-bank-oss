@@ -6,6 +6,7 @@ package com.openbank.treasury.application.usecase
 
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.treasury.application.port.`in`.PortfolioStatementUseCase
+import com.openbank.treasury.application.port.out.CompletePortfolio
 import com.openbank.treasury.application.port.out.DuplicatePortfolioStatementException
 import com.openbank.treasury.application.port.out.PortfolioSnapshotMissingException
 import com.openbank.treasury.application.port.out.PortfolioStatementRepository
@@ -49,10 +50,10 @@ class PortfolioStatementService(
         require(statement.safekeepingAccount in accounts) {
             "safekeeping account ${statement.safekeepingAccount} is not configured for $owner"
         }
-        replay(owner, statement.statementDate, sha256, idempotencyKey)?.let { return it }
+        replay(owner, statement.safekeepingAccount, statement.statementDate, sha256, idempotencyKey)?.let { return it }
         val currency = currencyOf(statement)
         val snapshot = classes.classify(owner, statement, currency)
-        val prior = statements.current(owner, statement.statementDate)
+        val prior = statements.current(owner, statement.safekeepingAccount, statement.statementDate)
         val candidate = StoredPortfolioStatement(
             id = Ids.newId(),
             idempotencyKey = idempotencyKey,
@@ -70,7 +71,7 @@ class PortfolioStatementService(
         } catch (e: DuplicatePortfolioStatementException) {
             // A concurrent upload or correction committed first. Same bytes: that IS this upload.
             // Otherwise the caller corrected against a version that is no longer current: 409.
-            replay(owner, statement.statementDate, sha256, idempotencyKey)
+            replay(owner, statement.safekeepingAccount, statement.statementDate, sha256, idempotencyKey)
                 ?: throw IllegalStateException(
                     "the statement for ${statement.statementDate} changed while this one was stored; re-read and retry",
                     e,
@@ -82,12 +83,18 @@ class PortfolioStatementService(
      * The stored version this upload already is: the same key with the same bytes, or the same
      * bytes as the date's current version under any key. The key on other bytes is a 409.
      */
-    private suspend fun replay(owner: String, date: LocalDate, sha256: String, key: String): StoredPortfolioStatement? {
+    private suspend fun replay(
+        owner: String,
+        account: String,
+        date: LocalDate,
+        sha256: String,
+        key: String,
+    ): StoredPortfolioStatement? {
         statements.findByIdempotencyKey(key)?.let { prior ->
             check(prior.sha256 == sha256) { "Idempotency-Key was used for a different statement" }
             return prior
         }
-        val current = statements.current(owner, date)?.takeIf { it.sha256 == sha256 } ?: return null
+        val current = statements.current(owner, account, date)?.takeIf { it.sha256 == sha256 } ?: return null
         val bound = statements.bindIdempotencyKey(key, current.id)
         check(bound.sha256 == sha256) { "Idempotency-Key was used for a different statement" }
         return bound
@@ -105,9 +112,37 @@ class PortfolioStatementService(
         return currencies.singleOrNull() ?: EMPTY_PORTFOLIO_CURRENCY
     }
 
-    override suspend fun periodEnd(date: LocalDate): StoredPortfolioStatement {
+    override suspend fun periodEnd(date: LocalDate): CompletePortfolio {
         val owner = entity ?: throw PortfolioSnapshotMissingException("(no portfolio entity)", date)
-        return statements.current(owner, date) ?: throw PortfolioSnapshotMissingException(owner, date)
+        val current = statements.currentForDate(owner, date).filter { it.snapshot.safekeepingAccount in accounts }
+        val byAccount = current.associateBy { it.snapshot.safekeepingAccount }
+        val missing = accounts - byAccount.keys
+        if (accounts.isEmpty() || missing.isNotEmpty()) {
+            throw PortfolioSnapshotMissingException("$owner (missing accounts: ${missing.sorted()})", date)
+        }
+        val sources = accounts.sorted().map { byAccount.getValue(it) }
+        val currencies = sources.filter { it.snapshot.positions.isNotEmpty() }.map { it.snapshot.currency }.toSet()
+        check(currencies.size <= 1) { "portfolio accounts at $date have incompatible currencies $currencies" }
+        val positions = sources.flatMap {
+            it.snapshot.positions
+        }.groupBy { it.isin }.toSortedMap().map { (isin, legs) ->
+            val first = legs.first()
+            check(first.quantityBasis != null && legs.all { it.quantityBasis == first.quantityBasis }) {
+                "ISIN $isin has unknown or incompatible quantity basis across accounts; a source correction is required"
+            }
+            check(
+                legs.all {
+                    it.cfi == first.cfi &&
+                        it.instrumentClass == first.instrumentClass &&
+                        it.valuationCurrency == first.valuationCurrency
+                },
+            ) { "ISIN $isin has incompatible CFI, class or currency across accounts" }
+            first.copy(
+                quantity = legs.fold(java.math.BigDecimal.ZERO) { sum, leg -> sum + leg.quantity },
+                valuation = legs.fold(java.math.BigDecimal.ZERO) { sum, leg -> sum + leg.valuation },
+            )
+        }
+        return CompletePortfolio(owner, date, currencies.singleOrNull() ?: EMPTY_PORTFOLIO_CURRENCY, positions, sources)
     }
 
     override suspend fun versions(date: LocalDate): List<StoredPortfolioStatement> =

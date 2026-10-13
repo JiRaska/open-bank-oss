@@ -640,7 +640,7 @@ paths:
         missing CFI refuses the WHOLE statement, naming every unclassifiable ISIN. DOCTYPE is
         refused. Nothing is posted.
         Idempotent: the same Idempotency-Key with the same bytes, or the same bytes as the date's
-        current version under any key, returns the stored version. Different bytes for a date that
+        current version under any key, returns the stored version. Different bytes for an account and date that
         already has a statement are a CORRECTION: stored as the next version, which supersedes the
         current one; the superseded version is kept. The key reused on other bytes is 409.
       parameters:
@@ -674,7 +674,7 @@ paths:
     get:
       tags: [Portfolio]
       operationId: listPortfolioStatementVersions
-      summary: Every version stored for a statement date, oldest first (the correction trail)
+      summary: Every account version stored for a statement date, oldest first (the correction trail)
       parameters:
         - $ref: '#/components/parameters/PortfolioDate'
       responses:
@@ -700,8 +700,8 @@ paths:
       operationId: getPeriodEndPortfolio
       summary: The portfolio at exactly that date (tax-reporting's PSP 34-12 PS source)
       description: |
-        The CURRENT version of the statement of holdings stated at exactly `date`. With no statement
-        for that date the answer is 409 `PORTFOLIO_SNAPSHOT_MISSING` — never an empty list: an
+        The complete entity portfolio from CURRENT statements for every configured account at exactly `date`.
+        If any configured account lacks that date's statement, the answer is 409 `PORTFOLIO_SNAPSHOT_MISSING` — never an empty list: an
         empty portfolio (a statement with no holdings, 200 with `positions: []`) and a missing
         statement must not look the same. Decimals are strings.
       parameters:
@@ -722,7 +722,7 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
         '409':
-          description: No statement of holdings is stored for that date
+          description: One or more configured accounts lacks a statement for that date
           content:
             application/json:
               schema:
@@ -1181,29 +1181,43 @@ components:
           items: {$ref: '#/components/schemas/NostroStatementEntry'}
     PortfolioPosition:
       type: object
-      required: [instrumentClass, isin, cfi, quantity, valuation, valuationCurrency]
+      required: [instrumentClass, isin, cfi, quantity, quantityBasis, valuation, valuationCurrency]
       properties:
         instrumentClass:
           type: string
           description: Mapped from the CFI by the configured prefix mapping (openbank.treasury.portfolio.cfi-classes)
         isin: {type: string, pattern: '^[A-Z]{2}[A-Z0-9]{9}[0-9]$'}
         cfi: {type: string, pattern: '^[A-Z]{6}$'}
-        quantity: {type: string, description: 'Units, or nominal for debt instruments, as stated (decimal string)'}
+        quantity: {type: string, description: 'Quantity in quantityBasis, as stated (decimal string)'}
+        quantityBasis:
+          type: string
+          enum: [UNIT, FACE_AMOUNT, AMORTISED_VALUE]
+          description: Custodian-stated quantity dimension; never inferred from CFI. Unknown legacy dimensions refuse the report.
         valuation: {type: string, description: 'Holding value in valuationCurrency (decimal string)'}
         valuationCurrency: {type: string}
     PeriodEndPortfolio:
       type: object
-      required: [asOf, entity, currency, statementUuid, version, positions]
+      required: [asOf, entity, currency, sourceStatements, positions]
       properties:
         asOf: {type: string, format: date}
         entity: {type: string}
         currency: {type: string}
-        statementUuid: {type: string, format: uuid}
-        statementId: {type: [string, 'null']}
-        version: {type: integer, minimum: 1}
+        sourceStatements:
+          type: array
+          minItems: 1
+          description: Current statement for every configured safekeeping account; sorted by account.
+          items: {$ref: '#/components/schemas/PortfolioSourceStatement'}
         positions:
           type: array
           items: {$ref: '#/components/schemas/PortfolioPosition'}
+    PortfolioSourceStatement:
+      type: object
+      required: [safekeepingAccount, statementUuid, version]
+      properties:
+        safekeepingAccount: {type: string}
+        statementUuid: {type: string, format: uuid}
+        statementId: {type: [string, 'null']}
+        version: {type: integer, minimum: 1}
     PortfolioStatement:
       type: object
       required: [id, entity, safekeepingAccount, statementDate, currency, version, positionCount, sha256, uploadedBy, uploadedAt]

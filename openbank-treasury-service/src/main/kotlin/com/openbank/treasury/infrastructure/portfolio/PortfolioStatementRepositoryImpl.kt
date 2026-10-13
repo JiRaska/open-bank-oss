@@ -8,6 +8,7 @@ import com.openbank.treasury.application.port.out.DuplicatePortfolioStatementExc
 import com.openbank.treasury.application.port.out.PortfolioStatementRepository
 import com.openbank.treasury.application.port.out.StoredPortfolioStatement
 import com.openbank.treasury.domain.model.PortfolioPosition
+import com.openbank.treasury.domain.model.PortfolioQuantityBasis
 import com.openbank.treasury.domain.model.PortfolioSnapshot
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
@@ -51,13 +52,28 @@ open class PortfolioStatementRepositoryImpl(private val holdingRepo: PortfolioHo
             ).setParameter("key", key).setParameter("statement", statementId).executeUpdate()
         }
 
-    override suspend fun current(entity: String, date: LocalDate): StoredPortfolioStatement? = Panache.withSession {
-        find("entity = ?1 and statementDate = ?2 and supersededBy is null", entity, date).firstResult()
-    }.awaitSuspending()?.let { withHoldings(it) }
+    override suspend fun current(entity: String, account: String, date: LocalDate): StoredPortfolioStatement? =
+        Panache.withSession {
+            find(
+                "entity = ?1 and safekeepingAccount = ?2 and statementDate = ?3 and supersededBy is null",
+                entity,
+                account,
+                date,
+            ).firstResult()
+        }.awaitSuspending()?.let { withHoldings(it) }
+
+    override suspend fun currentForDate(entity: String, date: LocalDate): List<StoredPortfolioStatement> =
+        Panache.withSession {
+            list(
+                "entity = ?1 and statementDate = ?2 and supersededBy is null order by safekeepingAccount",
+                entity,
+                date,
+            )
+        }.awaitSuspending().map { withHoldings(it) }
 
     override suspend fun versions(entity: String, date: LocalDate): List<StoredPortfolioStatement> =
         Panache.withSession {
-            list("entity = ?1 and statementDate = ?2 order by version", entity, date)
+            list("entity = ?1 and statementDate = ?2 order by uploadedAt, statementUuid", entity, date)
         }.awaitSuspending().map { withHoldings(it) }
 
     override suspend fun save(stored: StoredPortfolioStatement): StoredPortfolioStatement {
@@ -84,6 +100,7 @@ open class PortfolioStatementRepositoryImpl(private val holdingRepo: PortfolioHo
                 isin = p.isin
                 cfi = p.cfi
                 instrumentClass = p.instrumentClass
+                quantityBasis = p.quantityBasis?.name
                 quantity = p.quantity
                 valuation = p.valuation
                 valuationCurrency = p.valuationCurrency
@@ -92,7 +109,7 @@ open class PortfolioStatementRepositoryImpl(private val holdingRepo: PortfolioHo
         try {
             Panache.withTransaction {
                 // Retire the prior CURRENT version first: the partial unique index admits one
-                // current row per (entity, date), and the superseded_by FK is deferred to commit.
+                // current row per (entity, account, date), and the superseded_by FK is deferred to commit.
                 supersede(stored).flatMap { persist(row) }.flatMap {
                     if (holdings.isEmpty()) Uni.createFrom().voidItem() else holdingRepo.persist(holdings)
                 }.flatMap { Panache.getSession().flatMap { it.flush() } }
@@ -111,10 +128,14 @@ open class PortfolioStatementRepositoryImpl(private val holdingRepo: PortfolioHo
     private fun supersede(stored: StoredPortfolioStatement): Uni<Unit> {
         val prior = stored.supersedes ?: return Uni.createFrom().item(Unit)
         return update(
-            "supersededBy = ?1, supersededAt = ?2 where statementUuid = ?3 and supersededBy is null",
+            "supersededBy = ?1, supersededAt = ?2 where statementUuid = ?3 and supersededBy is null " +
+                "and entity = ?4 and safekeepingAccount = ?5 and statementDate = ?6",
             stored.id,
             stored.uploadedAt,
             prior,
+            stored.snapshot.entity,
+            stored.snapshot.safekeepingAccount,
+            stored.snapshot.statementDate,
         ).map { changed -> if (changed != 1) throw StalePriorVersionException() }
     }
 
@@ -158,6 +179,7 @@ open class PortfolioStatementRepositoryImpl(private val holdingRepo: PortfolioHo
                         cfi = it.cfi,
                         instrumentClass = it.instrumentClass,
                         quantity = it.quantity,
+                        quantityBasis = it.quantityBasis?.let(PortfolioQuantityBasis::valueOf),
                         valuation = it.valuation,
                         valuationCurrency = it.valuationCurrency,
                     )

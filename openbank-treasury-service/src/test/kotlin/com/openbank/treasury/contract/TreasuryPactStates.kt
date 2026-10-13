@@ -8,6 +8,7 @@ import com.openbank.treasury.application.port.`in`.PortfolioStatementUseCase
 import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.ActorType
 import com.openbank.treasury.infrastructure.iso20022.Semt002Statements
+import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.vertx.core.runtime.context.VertxContextSafetyToggle
 import io.vertx.core.Vertx
 import io.vertx.core.impl.ContextInternal
@@ -22,13 +23,20 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executor
 import java.util.concurrent.TimeUnit
 
+class TreasuryPortfolioPactProfile : QuarkusTestProfile {
+    override fun getConfigOverrides(): Map<String, String> = mapOf(
+        "openbank.treasury.portfolio.entity" to "company",
+        "openbank.treasury.portfolio.safekeeping-accounts" to "PSCO-OWN-0001,PSCO-OWN-0002",
+    )
+}
+
 /** Provider states for tax-reporting's portfolio pact (ADR-0337 amendment, #12504). */
 object TreasuryPactStates {
     /** Must match TaxReportingTreasuryPortfolioPactConsumerTest (openbank-tax-reporting-service). */
     const val SNAPSHOT_STATE = "the pension company holds investment positions at 2026-12-31"
 
     /** The 409 ("no statement, never an empty list") state; recorded by the consumer since #12504. */
-    const val NO_SNAPSHOT_STATE = "no portfolio snapshot exists for 2026-12-31"
+    const val NO_SNAPSHOT_STATE = "one or more safekeeping accounts has no portfolio snapshot for 2026-12-31"
 
     /** The state name every consumer of this provider uses for its missing-identity interaction. */
     const val NEGATIVE_AUTH_STATE = "no valid M2M identity is presented"
@@ -50,6 +58,15 @@ object TreasuryPactStates {
                 "pact-portfolio-$DATE",
                 Actor("pact-state", ActorType.HUMAN),
             )
+            val emptySecondAccount = Regex("<BalForAcct>.*?</BalForAcct>", RegexOption.DOT_MATCHES_ALL)
+                .replace(xml.toString(Charsets.UTF_8).replace("PSCO-OWN-0001", "PSCO-OWN-0002"), "")
+                .toByteArray(Charsets.UTF_8)
+            portfolio.upload(
+                Semt002Statements.parse(emptySecondAccount),
+                HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(emptySecondAccount)),
+                "pact-portfolio-$DATE-account-b",
+                Actor("pact-state", ActorType.HUMAN),
+            )
         }
     }
 
@@ -63,11 +80,20 @@ object TreasuryPactStates {
         ).use { c ->
             c.autoCommit = false
             c.createStatement().use { st ->
-                st.executeUpdate("delete from portfolio_holdings where statement_date = date '$DATE'")
                 st.executeUpdate(
-                    "update portfolio_statements set supersedes = null where statement_date = date '$DATE'",
+                    "delete from portfolio_statement_keys where statement_uuid in " +
+                        "(select statement_uuid from portfolio_statements where entity = 'company' " +
+                        "and statement_date = date '$DATE')",
                 )
-                st.executeUpdate("delete from portfolio_statements where statement_date = date '$DATE'")
+                st.executeUpdate(
+                    "delete from portfolio_holdings where entity = 'company' and statement_date = date '$DATE'",
+                )
+                st.executeUpdate(
+                    "update portfolio_statements set supersedes = null where entity = 'company' and statement_date = date '$DATE'",
+                )
+                st.executeUpdate(
+                    "delete from portfolio_statements where entity = 'company' and statement_date = date '$DATE'",
+                )
             }
             c.commit()
         }

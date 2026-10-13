@@ -15,6 +15,7 @@ import com.openbank.treasury.domain.model.CfiClassMapping
 import com.openbank.treasury.domain.model.CustodyHolding
 import com.openbank.treasury.domain.model.CustodyStatement
 import com.openbank.treasury.domain.model.Isin
+import com.openbank.treasury.domain.model.PortfolioQuantityBasis
 import com.openbank.treasury.infrastructure.iso20022.Semt002Statements
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
@@ -42,6 +43,82 @@ class PortfolioStatementServiceTest {
     private fun statement(name: String = "pension-co-2026-12-31.xml") = Semt002Statements.parse(fixture(name))
 
     @Test
+    fun `two configured accounts contribute their holdings to the same period-end portfolio`(): Unit = runBlocking {
+        val multiAccount = PortfolioStatementService(
+            repo,
+            "pension-co",
+            listOf("PSCO-OWN-0001", "PSCO-OWN-0002"),
+            classes,
+            clock,
+        )
+        val original = statement()
+        val first = original.copy(holdings = listOf(original.holdings[0]))
+        val second = original.copy(
+            safekeepingAccount = "PSCO-OWN-0002",
+            holdings = listOf(original.holdings[1]),
+        )
+        multiAccount.upload(first, "sha-account-a", "account-a", actor)
+        multiAccount.upload(second, "sha-account-b", "account-b", actor)
+
+        assertThat(multiAccount.periodEnd(date).positions.map { it.isin })
+            .containsExactlyInAnyOrder(first.holdings.single().isin, second.holdings.single().isin)
+    }
+
+    @Test
+    fun `a missing configured account refuses the entity snapshot`(): Unit = runBlocking {
+        val multiAccount =
+            PortfolioStatementService(repo, "pension-co", listOf("PSCO-OWN-0001", "PSCO-OWN-0002"), classes, clock)
+        multiAccount.upload(statement(), "sha-a", "a", actor)
+        assertThatThrownBy { runBlocking { multiAccount.periodEnd(date) } }
+            .isInstanceOf(PortfolioSnapshotMissingException::class.java)
+            .hasMessageContaining("PSCO-OWN-0002")
+    }
+
+    @Test
+    fun `account currency disagreement refuses aggregation`(): Unit = runBlocking {
+        val multiAccount =
+            PortfolioStatementService(repo, "pension-co", listOf("PSCO-OWN-0001", "PSCO-OWN-0002"), classes, clock)
+        multiAccount.upload(statement(), "sha-a", "a", actor)
+        val foreign = statement().copy(
+            safekeepingAccount = "PSCO-OWN-0002",
+            holdings = statement().holdings.map { it.copy(valuationCurrency = "EUR") },
+        )
+        multiAccount.upload(foreign, "sha-b", "b", actor)
+        assertThatThrownBy { runBlocking { multiAccount.periodEnd(date) } }
+            .isInstanceOf(IllegalStateException::class.java).hasMessageContaining("incompatible currencies")
+    }
+
+    @Test
+    fun `Unit and FaceAmt for the same ISIN cannot be summed as one quantity`(): Unit = runBlocking {
+        val multiAccount = PortfolioStatementService(
+            repo,
+            "pension-co",
+            listOf("PSCO-OWN-0001", "PSCO-OWN-0002"),
+            classes,
+            clock,
+        )
+        val unitXml = String(fixture()).replace("<FaceAmt>", "<Unit>").replace("</FaceAmt>", "</Unit>")
+            .replace("PSCO-OWN-0001", "PSCO-OWN-0002")
+        multiAccount.upload(statement(), "sha-face", "face", actor)
+        multiAccount.upload(Semt002Statements.parse(unitXml.toByteArray()), "sha-unit", "unit", actor)
+        assertThatThrownBy { runBlocking { multiAccount.periodEnd(date) } }
+            .isInstanceOf(IllegalStateException::class.java).hasMessageContaining("quantity basis")
+    }
+
+    @Test
+    fun `all explicit ISO quantity dimensions survive parsing and classification`() {
+        val parsed = statement()
+        assertThat(parsed.holdings[0].quantityBasis).isEqualTo(PortfolioQuantityBasis.FACE_AMOUNT)
+        assertThat(parsed.holdings[2].quantityBasis).isEqualTo(PortfolioQuantityBasis.UNIT)
+        val amortised = Semt002Statements.parse(
+            String(fixture()).replace("<FaceAmt>", "<AmtsdVal>").replace("</FaceAmt>", "</AmtsdVal>").toByteArray(),
+        )
+        val classified = classes.classify("pension-co", amortised, "CZK")
+        assertThat(classified.positions[0].quantityBasis).isEqualTo(PortfolioQuantityBasis.AMORTISED_VALUE)
+        assertThat(classified.positions[2].quantityBasis).isEqualTo(PortfolioQuantityBasis.UNIT)
+    }
+
+    @Test
     fun `stores every holding classified by the longest CFI prefix`(): Unit = runBlocking {
         val stored = service.upload(statement(), "sha-a", "k1", actor)
 
@@ -60,7 +137,7 @@ class PortfolioStatementServiceTest {
                 "CZ0008008018" to "EQUITY",
             ),
         )
-        assertThat(service.periodEnd(date).id).isEqualTo(stored.id)
+        assertThat(service.periodEnd(date).sourceStatements.single().id).isEqualTo(stored.id)
         assertThat(stored.uploadedAt).isEqualTo(Instant.parse("2027-01-05T09:00:00Z"))
     }
 
@@ -100,7 +177,7 @@ class PortfolioStatementServiceTest {
     fun `a statement with no holdings is an EMPTY portfolio, served as such`(): Unit = runBlocking {
         val empty = statement().copy(holdings = emptyList())
         service.upload(empty, "sha-e", "ke", actor)
-        assertThat(service.periodEnd(date).snapshot.positions).isEmpty()
+        assertThat(service.periodEnd(date).positions).isEmpty()
     }
 
     @Test
@@ -136,7 +213,7 @@ class PortfolioStatementServiceTest {
 
         assertThat(corrected.version).isEqualTo(2)
         assertThat(corrected.supersedes).isEqualTo(first.id)
-        assertThat(service.periodEnd(date).id).isEqualTo(corrected.id)
+        assertThat(service.periodEnd(date).sourceStatements.single().id).isEqualTo(corrected.id)
         val trail = service.versions(date)
         assertThat(trail.map { it.version }).containsExactly(1, 2)
         assertThat(trail.first().supersededBy).isEqualTo(corrected.id)
@@ -247,14 +324,20 @@ class PortfolioStatementServiceTest {
             return checkNotNull(findByIdempotencyKey(key))
         }
 
-        override suspend fun current(entity: String, date: LocalDate) = rows.firstOrNull {
+        override suspend fun current(entity: String, account: String, date: LocalDate) = rows.firstOrNull {
             it.snapshot.entity == entity &&
+                it.snapshot.safekeepingAccount == account &&
                 it.snapshot.statementDate == date &&
                 it.supersededBy == null
         }
 
-        override suspend fun versions(entity: String, date: LocalDate) =
-            rows.filter { it.snapshot.entity == entity && it.snapshot.statementDate == date }.sortedBy { it.version }
+        override suspend fun currentForDate(entity: String, date: LocalDate) = rows.filter {
+            it.snapshot.entity == entity && it.snapshot.statementDate == date && it.supersededBy == null
+        }
+
+        override suspend fun versions(entity: String, date: LocalDate) = rows.filter {
+            it.snapshot.entity == entity && it.snapshot.statementDate == date
+        }.sortedWith(compareBy<StoredPortfolioStatement> { it.uploadedAt }.thenBy { it.id.toString() })
 
         override suspend fun save(stored: StoredPortfolioStatement): StoredPortfolioStatement {
             failNextSaveWith?.let {
