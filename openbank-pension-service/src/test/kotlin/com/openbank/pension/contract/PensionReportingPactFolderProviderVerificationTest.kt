@@ -20,7 +20,12 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.extension.ExtendWith
 
-/** Replays tax-reporting's generated consumer contract over real HTTP and the migrated database. */
+/**
+ * Replays authenticated reporting interactions over real HTTP and the migrated database.
+ * The same consumer pact's 401 interaction runs without an identity in
+ * [PensionReportingNegativeAuthProviderVerificationTest]; this class filters it out because
+ * its @TestSecurity identity would otherwise authenticate the anonymous request.
+ */
 @QuarkusTest
 @QuarkusTestResource(PostgresTestResource::class)
 @TestSecurity(user = "service-account-openbank-tax-reporting", roles = ["ROLE_API"])

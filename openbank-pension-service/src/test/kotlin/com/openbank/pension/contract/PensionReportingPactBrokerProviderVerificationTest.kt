@@ -22,7 +22,11 @@ import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty
 import org.junit.jupiter.api.extension.ExtendWith
 
-/** Main-push twin publishes provider verification; both authenticated and missing-identity states run. */
+/**
+ * Main-push twin publishes both authenticated and anonymous provider verification.
+ * The consumer's 401 interaction clears the test identity before replay; its local PR twin is
+ * [PensionReportingNegativeAuthProviderVerificationTest].
+ */
 @QuarkusTest
 @QuarkusTestResource(PostgresTestResource::class)
 @TestSecurity(user = "service-account-openbank-tax-reporting", roles = ["ROLE_API"])

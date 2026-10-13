@@ -19,7 +19,11 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.extension.ExtendWith
 
-/** Replays tax-reporting's generated consumer contract over real HTTP and the migrated database. */
+/**
+ * Replays the consumer's anonymous request against real HTTP: the generated pact expects 401.
+ * No @TestSecurity identity is installed. Authenticated interactions run in
+ * [PensionReportingPactFolderProviderVerificationTest].
+ */
 @QuarkusTest
 @QuarkusTestResource(PostgresTestResource::class)
 @Provider("openbank-pension-service")
