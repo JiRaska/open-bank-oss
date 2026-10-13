@@ -4047,6 +4047,8 @@ security_sensitive_paths:
       - "src/main/kotlin/**/*Kyc*.kt"
       - "src/main/kotlin/**/*Address*.kt"
       - "src/main/kotlin/**/*Contact*.kt"
+      - "src/main/kotlin/**/BusinessPaymentBatchDraftResource.kt"
+      - "src/main/kotlin/**/BusinessPaymentBatchDraftEntity.kt"
     cardholder: []
   openbank-account-service:
     auth_crypto_payment:
