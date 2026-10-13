@@ -10,6 +10,10 @@ posts nothing to the ledger; the money was withheld and remitted by interest-ser
 produces is a figure a bank reports to the tax authority, so the asset at stake is the
 **correctness and completeness of a filed tax return**.
 
+ČNB pension-company returns additionally read the reporting legal entity's own ledger. The ledger
+instance is separate from the bank's and from pension-fund assets. This service reads frozen
+period evidence; it neither posts journal entries nor substitutes bank or fund balances.
+
 Deployed for the first time by #5760. Not in `money_path_services`.
 
 ## 2. Data flow (DFD)
@@ -19,12 +23,17 @@ interest-service ──outbox──▶ openbank.interest.accrual.event ──(Ka
                                                                                                 │      │
                                          openbank.dlq.tax-reporting.withholding-remitted-in ◀──┘      └── OPA sidecar (localhost:8181)
 operator / auditor ──(OIDC)──▶ admin-ui ──(bearer)──▶ tax-reporting-service
+tax-reporting-service ──(OIDC machine bearer; production mTLS prerequisite)──▶ pension-company ledger
 ```
 
 Trust boundaries: Kafka (mTLS, the `tax-reporting-service` KafkaUser holds Read on the source topic
 and its own consumer group, Write only on its own dead-letter topic); staff → service (in-cluster,
 NetworkPolicy admits admin-ui and the platform scrapers only, no ingress); service → database
-(single-owner CNPG cluster, backed up to S3 via Pod Identity).
+(single-owner CNPG cluster, backed up to S3 via Pod Identity); service → pension-company ledger
+(a separate legal entity's financial evidence, with independently configured instance URL and
+ledger authorization). This code PR does not prove deployment, credential projection or transport
+reachability. Production named TLS configuration and the separate ledger deployment are supplied
+by the follow-up #12500 and require rollout verification before company-books reporting is enabled.
 
 Outbound reads for the ČNB pension returns (#12468): tax-reporting-service ──(own client
 `service-account-openbank-tax-reporting`, ROLE_API)──▶ pension-service (`pension`, participant
@@ -37,8 +46,15 @@ grant and STRIDE rows live in the provider's own model (pension §4b, pension-fu
 ## 3. Authn/Authz
 
 - Every route is behind Keycloak OIDC (`@RolesAllowed`); there is no anonymous surface. The service
-  validates bearer tokens against the realm JWKS and holds **no client secret**: it calls nobody,
-  so no credential is projected into its namespace.
+  validates inbound bearer tokens against the realm JWKS. Outbound `CompanyLedgerClient` carries
+  `@OidcClientFilter`: it uses the configured tax-reporting machine client, not the staff caller's
+  bearer identity. Its credential must be supplied through deployment secret configuration;
+  this PR neither adds a credential nor proves that it is projected in a running deployment.
+- The company ledger must authorize that machine for `ledger.read` on frozen evidence only.
+  `PENSION_COMPANY_LEDGER_URL` must name the reporting company's instance, never the bank's.
+  The #12500 follow-up binds this client to a named TLS bucket with CA trust, client certificate
+  and hostname verification. That production transport is a prerequisite, not a verified rollout
+  claim of this code PR.
 - `@Authorize` on every route of `TaxFilingResource` asks the OPA sidecar.
   `tax_reporting_rest_ext.rego` grants `tax.filing.inspect` to real staff (operator, admin, auditor,
   viewer, compliance) and `tax.filing.assemble` / `tax.filing.file` to a real operator. Both rules
@@ -82,8 +98,14 @@ grant and STRIDE rows live in the provider's own model (pension §4b, pension-fu
 | **Denial of service / loss** | A database outage while remittances arrive | A failed write is retried, then rethrown. The channel's dead-letter strategy parks the record on its own DLQ topic. Acking it would silently understate the return. A dead-lettered record is still missing from that period's return until it is replayed, so it needs an operator |
 | **Elevation of privilege** | A service-account holding `ROLE_OPERATOR` assembles, approves (as the four-eyes checker) or submits a ČNB statutory return | Non-read `tax.statutory-return.*` verbs, granted only to real staff by the extension; the resource also refuses a service-account token. `StatutoryReturnMachineActorIT` drives it over HTTP, `opa eval` against the generated bundle |
 | **Elevation of privilege** | A backend service-account holding `ROLE_OPERATOR` assembles or files | Both lifecycle rules require a principal id outside `service-account-*`. Tested with that exact principal |
+| **Tampering / wrong legal entity** | A company return uses bank or pension-fund books, live mutable totals, incomplete periods or another currency | Separate company-ledger URL and authorization are rollout prerequisites. `CompanyBooksCalculator` sums frozen YEAR evidence for prior years and MONTH evidence for the current year, requires a balanced flag, known account types and the reporting currency, and refuses any unavailable period. `CompanyBooksCalculatorTest` and `CompanyBooksGoldenIT` cover arithmetic, missing evidence and refusal paths |
 
 ## 5. Residual risks and follow-ups
+
+- Company-books reporting remains unavailable unless the books-opened date is configured. Before
+  enabling it, verify the separate legal entity's complete frozen history, reporting currency,
+  machine authorization and #12500's production mTLS settings. A wrong URL or opening date is an
+  operator configuration risk; passing local stub tests does not establish live source identity.
 
 - EPO XML rendering is not built (`UnavailableEpoRenderer`). An operator submits through the EPO
   portal or a data box and records the reference. The service reports this through

@@ -59,6 +59,10 @@ private class TemporalStubOriginationWorkflowPort : OriginationWorkflowPort {
  */
 class LendingAdapterBindingVerifierTest {
 
+    private companion object {
+        const val GC_ROUNDS = 5
+    }
+
     private fun verifier(
         ledger: LedgerPostingPort,
         credit: BorrowerCreditPort,
@@ -180,6 +184,9 @@ class LendingAdapterBindingVerifierTest {
     @Test
     fun `publishes a gauge naming which implementation is bound, per property`() {
         val meters = SimpleMeterRegistry()
+        // Micrometer holds a gauge's state object WEAKLY; the verifier owns the AtomicIntegers. In
+        // production ArC keeps the @ApplicationScoped verifier alive; here only this local does, so
+        // it must stay reachable until the last read or a GC turns every value into NaN (#12213).
         val bindingVerifier = verifier(
             ledger = RestStubLedgerPort(),
             credit = NoOpBorrowerCreditPort(),
@@ -188,6 +195,7 @@ class LendingAdapterBindingVerifierTest {
             creditBackend = "none",
             meters = meters,
         )
+        repeat(GC_ROUNDS) { System.gc() } // the CI failure, made deterministic
 
         // Micrometer holds gauge values weakly; the CDI owner remains alive in production.
         // Retain that same ownership until every assertion completes.
