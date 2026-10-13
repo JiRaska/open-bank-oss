@@ -35,9 +35,10 @@ import org.junit.jupiter.api.extension.ExtendWith
  *
  * Pinned: the **refusal** — an unregistered TPP answers HTTP **403** carrying the result body.
  * `TppRegistryRestClient` declares a plain return type, so a non-2xx becomes a
- * `WebApplicationException`, and that is what makes [TppAuthorizationGuard] fail closed. A
- * 200-carrying-`authorized:false` would silently defeat it, so pinning the 403 pins the security
- * property, not merely a status code. It also *proves the route exists*, which a 404 interaction
+ * `WebApplicationException`; [TppAuthorizationGuard] must translate only this contract-valid,
+ * matching `authorized:false` 403 into a denial DTO. Other statuses and malformed bodies remain
+ * exceptions and fail closed as registry failures. Pinning the provider's 403 preserves the
+ * security contract and *proves the route exists*, which a 404 interaction
  * could not: Quarkus answers 404 for an absent route too, so a pact pinned to a 404 is satisfied by
  * a client pointed at nothing. This is the sharpest available form of the #2269 check — finrep
  * shipped a call to a ledger path that had never existed while its unit tests passed against a
@@ -75,8 +76,7 @@ class TppRegistryCheckPactConsumerTest {
         .method("GET")
         .headers(mapOf("Accept" to "application/json"))
         .willRespondWith()
-        // 403, not 200-with-authorized:false. The client's plain return type turns this into a
-        // WebApplicationException, which is what makes TppAuthorizationGuard fail closed.
+        // 403, not 200-with-authorized:false: this is the provider's pinned denial contract.
         .status(403)
         .headers(mapOf("Content-Type" to "application/json"))
         .body(
