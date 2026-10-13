@@ -91,7 +91,7 @@ class UpstreamClient {
     lateinit var tlsTrustCertificateFile: Optional<String>
 
     @ConfigProperty(name = "openbank.upstream.tls-configuration-name")
-    var tlsConfigurationName: Optional<String> = Optional.empty()
+    lateinit var tlsConfigurationName: Optional<String>
 
     @Inject
     lateinit var tlsRegistry: TlsConfigurationRegistry

@@ -559,6 +559,7 @@ class CustomerEdgePensionPactConsumerTest {
 
     private fun resource(mockServer: MockServer): CustomerPensionResource {
         val upstream = UpstreamClient().apply {
+            tlsConfigurationName = java.util.Optional.empty()
             tokenEndpointBase = "http://127.0.0.1:${tokenStub.address.port}"
             clientId = "openbank-customer-edge"
             clientSecret = "pact"
@@ -575,6 +576,7 @@ class CustomerEdgePensionPactConsumerTest {
 
     private fun changes(mockServer: MockServer): CustomerPensionChangeResource {
         val upstream = UpstreamClient().apply {
+            tlsConfigurationName = java.util.Optional.empty()
             tokenEndpointBase = "http://127.0.0.1:${tokenStub.address.port}"
             clientId = "openbank-customer-edge"
             clientSecret = "pact"
@@ -586,6 +588,7 @@ class CustomerEdgePensionPactConsumerTest {
 
     private fun transfers(mockServer: MockServer): CustomerPensionTransferResource {
         val upstream = UpstreamClient().apply {
+            tlsConfigurationName = java.util.Optional.empty()
             tokenEndpointBase = "http://127.0.0.1:${tokenStub.address.port}"
             clientId = "openbank-customer-edge"
             clientSecret = "pact"

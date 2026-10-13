@@ -92,6 +92,7 @@ class UpstreamClientMtlsTest {
         }
 
         fun client(named: Boolean) = UpstreamClient().apply {
+            tlsConfigurationName = java.util.Optional.empty()
             clientSecret = "test-only-secret"
             tokenEndpointBase = "http://localhost:${tokens.address.port}/realms/openbank"
             tlsTrustCertificateFile = Optional.of(directory.resolve("tls.crt").toString())
