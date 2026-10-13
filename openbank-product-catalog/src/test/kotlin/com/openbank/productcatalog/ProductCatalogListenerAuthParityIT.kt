@@ -52,5 +52,12 @@ class ProductCatalogListenerAuthParityIT : ListenerAuthParityConformance() {
             .isEqualTo(401)
     }
 
-    class Profile : ProductionListenerProfile()
+    class Profile : ProductionListenerProfile() {
+        override fun extraOverrides(): Map<String, String> = mapOf(
+            "quarkus.http.test-port" to "41021",
+            "quarkus.http.test-ssl-port" to "41022",
+            "quarkus.management.enabled" to "true",
+            "quarkus.management.test-port" to "41023",
+        )
+    }
 }

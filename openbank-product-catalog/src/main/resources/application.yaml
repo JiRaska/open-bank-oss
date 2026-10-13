@@ -184,6 +184,11 @@ openbank:
             paths: /api/*
             policy: authenticated
             auth-mechanism: bearer
+          # Shared service metadata is deliberately public; limit the exception to exact GET routes.
+          public-metadata:
+            paths: /api/v1/info,/api/v1/config
+            methods: GET
+            policy: permit
 
 "%dev":
   quarkus:
