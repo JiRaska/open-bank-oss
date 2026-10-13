@@ -1083,6 +1083,23 @@
       "attributes": {}
     },
     {
+      "clientId": "openbank-tax-reporting",
+      "name": "OpenBank Tax Reporting Service",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "CHANGE_ME_LOCAL_DEV_ONLY",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "protocol": "openid-connect",
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "attributes": {}
+    },
+    {
       "clientId": "openbank-analytics-sink",
       "name": "OpenBank Analytics Sink",
       "enabled": true,
@@ -1504,6 +1521,14 @@
       "username": "service-account-openbank-pension",
       "enabled": true,
       "serviceAccountClientId": "openbank-pension",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-tax-reporting",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-tax-reporting",
       "realmRoles": [
         "ROLE_API"
       ]
