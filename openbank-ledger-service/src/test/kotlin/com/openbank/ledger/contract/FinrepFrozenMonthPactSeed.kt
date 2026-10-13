@@ -33,6 +33,24 @@ import javax.sql.DataSource
 object FinrepFrozenMonthPactSeed {
     val REPORTING_MONTH: LocalDate = LocalDate.of(2000, 6, 30)
 
+    /**
+     * Published legacy pacts omit state parameters. New pacts declare a month-end reporting date
+     * and whether the whole pact's fixture includes January-to-date frozen evidence; every state
+     * must agree with the pact request plan, even when its own endpoint reads only one month.
+     */
+    fun validateStateParameters(plan: Pair<LocalDate, Boolean>, parameters: Map<String, Any>) {
+        if (parameters.isEmpty()) return
+        require(parameters.keys == setOf("reportingMonth", "yearToDate")) {
+            "FINREP frozen-month state parameters must name reportingMonth and yearToDate"
+        }
+        require(parameters["reportingMonth"] == plan.first.toString()) {
+            "FINREP frozen-month state disagrees with the request month"
+        }
+        require(parameters["yearToDate"] == plan.second) {
+            "FINREP frozen-month state disagrees with the request evidence window"
+        }
+    }
+
     // Shared by the separately compiled provider Pact source set.
     fun requestPlan(paths: List<String>): Pair<LocalDate, Boolean> {
         val months = paths.mapNotNull {
