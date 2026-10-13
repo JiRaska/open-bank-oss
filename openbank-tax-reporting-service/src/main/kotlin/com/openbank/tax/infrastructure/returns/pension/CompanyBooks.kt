@@ -116,8 +116,8 @@ object CompanyBooksCalculator {
         }
         val months = generateSequence(firstMonth) { it.plusMonths(1) }.takeWhile { !it.isAfter(endMonth) }
             .map { "MONTH" to it.atDay(1) }.toList()
-        val prior = years.map { (t, d) -> checked(source.frozen(t, d), currency) }
-        val current = months.map { (t, d) -> checked(source.frozen(t, d), currency) }
+        val prior = years.map { (t, d) -> checked(source.frozen(t, d), t, d, currency) }
+        val current = months.map { (t, d) -> checked(source.frozen(t, d), t, d, currency) }
         val all = (prior + current).flatMap { it.lines }
         fun net(lines: List<FrozenTrialBalanceLineDto>, type: String) =
             lines.filter { it.type == type }.fold(BigDecimal.ZERO) { a, l -> a + l.net }
@@ -132,10 +132,21 @@ object CompanyBooksCalculator {
         )
     }
 
-    private fun checked(tb: FrozenTrialBalanceDto, currency: String): FrozenTrialBalanceDto {
+    private fun checked(
+        tb: FrozenTrialBalanceDto,
+        type: String,
+        date: LocalDate,
+        currency: String,
+    ): FrozenTrialBalanceDto {
+        val expectedPeriod = when (type) {
+            "YEAR" -> "YEAR:${date.year}"
+            "MONTH" -> "MONTH:${YearMonth.from(date)}"
+            else -> error("Unsupported frozen trial-balance period type: $type")
+        }
         val foreign = tb.lines.firstOrNull { it.currency != currency }
         val unknown = tb.lines.firstOrNull { it.type !in ACCOUNT_TYPES }
         val defect = when {
+            tb.period != expectedPeriod -> "does not match requested period $expectedPeriod"
             tb.balanced != true -> "is not reported balanced (${tb.balanced})"
             foreign != null -> "books ${foreign.currency} on ${foreign.code}; returns are filed in $currency"
             unknown != null -> "has unknown account type ${unknown.type} on ${unknown.code}"
