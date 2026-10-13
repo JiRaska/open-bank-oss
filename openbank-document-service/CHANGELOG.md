@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.17.1](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.17.0...document-service-v0.17.1) (2026-10-12)
+
+
+### Security
+
+* **document:** authenticate the API by bearer only on the mTLS listener ([#12530](https://github.com/JiRaska/open-bank-oss/issues/12530)) ([8a1108c](https://github.com/JiRaska/open-bank-oss/commit/8a1108c3c3a74d38a7616fa8e97db11cd656a454))
+
+## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.16.1...document-service-v0.17.0) (2026-10-11)
+
+
+### Features
+
+* **document:** pension document templates and notification support ([#12409](https://github.com/JiRaska/open-bank-oss/issues/12409)) ([8f93df5](https://github.com/JiRaska/open-bank-oss/commit/8f93df589241c531e2bf8d4a91f54bed51b4994e))
+
 ## [0.16.1](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.16.0...document-service-v0.16.1) (2026-10-03)
 
 

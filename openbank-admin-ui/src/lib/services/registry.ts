@@ -2,7 +2,11 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
-// Single source of truth for "which service is at which port / container".
+// Single source of truth for "which service is at which port / container" - and it is DERIVED:
+// `buildRegistry` maps the code-generated catalog (catalog.json: every runnable module, with the
+// port read from its own application.yaml) onto this shape. Nothing here lists the fleet; the only
+// authored data is SERVICE_OVERRIDES (label / group / naming exceptions). Server code loads the
+// catalog through fleet.ts; the browser calls buildRegistry over GET /api/catalog/services.
 // Consumed by:
 //   - /api/services/health (per-service probe)
 //   - /api/services/[name]/docs (Docs-as-Service proxy → live /q/openbank/docs)
@@ -32,6 +36,8 @@ export interface ServiceEntry {
   container: string
   /** HTTP port for both business and `/q/...` endpoints. */
   port: number
+  /** Management port (`/q/health`), when the module declares one. */
+  mgmtPort?: number
   /**
    * Kubernetes workload name, ONLY when it differs from the module directory.
    * Defaults to `container` minus the `openbank-` prefix, which holds for every
@@ -50,54 +56,150 @@ export function k8sNameOf(svc: ServiceEntry): string {
   return svc.k8sName ?? svc.container.replace(/^openbank-/, '')
 }
 
-export const SERVICE_REGISTRY: ServiceEntry[] = [
-  { id: 'account',            label: 'Accounts',         group: 'core',         container: 'openbank-account-service',        port: 8100 },
-  { id: 'ledger',             label: 'Ledger',           group: 'core',         container: 'openbank-ledger-service',         port: 8101 },
-  { id: 'transaction',        label: 'Transactions',     group: 'core',         container: 'openbank-transaction-service',    port: 8102 },
-  { id: 'balance',            label: 'Balance',          group: 'core',         container: 'openbank-balance-service',        port: 8103 },
-  { id: 'product-catalog',    label: 'Product Catalog',  group: 'core',         container: 'openbank-product-catalog',        port: 8104 },
-  { id: 'pid',                label: 'PID',              group: 'identity',     container: 'openbank-pid-service',            port: 8105 },
-  { id: 'kyb',                label: 'KYB',              group: 'identity',     container: 'openbank-kyb-service',            port: 8157 },
-  { id: 'consent',            label: 'Consent',          group: 'open-banking', container: 'openbank-consent-service',        port: 8106 },
-  { id: 'psd2',               label: 'PSD2',             group: 'open-banking', container: 'openbank-psd2-service',           port: 8107 },
-  { id: 'tpp-registry',       label: 'TPP Registry',     group: 'open-banking', container: 'openbank-tpp-registry-service',   port: 8108 },
-  { id: 'agent',              label: 'Agent (MCP)',      group: 'platform',     container: 'openbank-agent-service',          port: 8109 },
-  { id: 'sca',                label: 'SCA',              group: 'identity',     container: 'openbank-sca-service',            port: 8110 },
-  { id: 'party',              label: 'Parties',          group: 'identity',     container: 'openbank-party-service',          port: 8111 },
-  { id: 'notification',       label: 'Notifications',    group: 'platform',     container: 'openbank-notification-service',   port: 8112 },
-  { id: 'audit',              label: 'Audit',            group: 'compliance',   container: 'openbank-audit-service',          port: 8113 },
-  { id: 'kyc',                label: 'KYC',              group: 'compliance',   container: 'openbank-kyc-service',            port: 8114 },
-  { id: 'sepa-payment',       label: 'SEPA',             group: 'payments',     container: 'openbank-sepa-payment',           port: 8115 },
-  { id: 'domestic-payment',   label: 'Domestic',         group: 'payments',     container: 'openbank-domestic-payment',       port: 8116 },
-  { id: 'aml',                label: 'AML',              group: 'compliance',   container: 'openbank-aml-service',            port: 8117 },
-  { id: 'card-issuance',      label: 'Cards',            group: 'payments',     container: 'openbank-card-issuance-service', port: 8118 },
-  { id: 'fx',                 label: 'FX',               group: 'payments',     container: 'openbank-fx-service',             port: 8119 },
-  { id: 'security-scanner',   label: 'Security',         group: 'platform',     container: 'openbank-security-scanner',       port: 8120, k8sName: 'security-scanner-service' },
-  { id: 'standing-order',     label: 'Standing Orders',  group: 'payments',     container: 'openbank-standing-order-service', port: 8121 },
-  { id: 'swift',              label: 'SWIFT',            group: 'payments',     container: 'openbank-swift-service',          port: 8122 },
-  { id: 'sanctions',          label: 'Sanctions',        group: 'compliance',   container: 'openbank-sanctions-service',     port: 8123 },
-  { id: 'clearing',           label: 'Clearing',         group: 'payments',     container: 'openbank-clearing-service',       port: 8124 },
-  { id: 'interest',           label: 'Interest',         group: 'payments',     container: 'openbank-interest-service',       port: 8125 },
-  { id: 'dispute',            label: 'Disputes',         group: 'compliance',   container: 'openbank-dispute-service',        port: 8135 },
-  { id: 'sepa-instant',       label: 'SEPA Instant',     group: 'payments',     container: 'openbank-sepa-instant',           port: 8127 },
-  { id: 'vop',                label: 'VoP',              group: 'payments',     container: 'openbank-vop-service',           port: 8149 },
-  { id: 'customer-edge',     label: 'Customer Edge',    group: 'platform',     container: 'openbank-customer-edge',          port: 8128 },
-  { id: 'statement',         label: 'Statements',       group: 'compliance',   container: 'openbank-statement-service',      port: 8136 },
-  { id: 'onboarding',        label: 'Onboarding',       group: 'compliance',   container: 'openbank-onboarding-service',     port: 8130 },
-  { id: 'document',          label: 'Documents',        group: 'platform',     container: 'openbank-document-service',       port: 8143 },
-  { id: 'lending',           label: 'Lending',          group: 'payments',     container: 'openbank-lending-service',        port: 8126 },
-  { id: 'risk-engine',       label: 'Risk Engine',      group: 'core',         container: 'openbank-risk-engine',            port: 8159 },
-  { id: 'sdd',               label: 'SDD',              group: 'payments',     container: 'openbank-sdd-service',            port: 8129 },
-  { id: 'copilot',           label: 'Copilot',          group: 'platform',     container: 'openbank-copilot-service',        port: 8131 },
-  { id: 'fraud',             label: 'Fraud',            group: 'compliance',   container: 'openbank-fraud-service',          port: 8133 },
-  { id: 'analytics-sink',    label: 'Analytics Sink',   group: 'platform',     container: 'openbank-analytics-sink',         port: 8134 },
-  { id: 'anacredit',         label: 'AnaCredit',        group: 'compliance',   container: 'openbank-anacredit-service',      port: 8137 },
-  { id: 'case-coordinator',  label: 'Case Coordinator', group: 'platform',     container: 'openbank-case-coordinator-agent', port: 8146 },
-  { id: 'communication',     label: 'Communication',    group: 'platform',     container: 'openbank-communication-service',  port: 8158 },
-]
+/**
+ * Presentation metadata that cannot be derived from the code: a display label, a UI group, and the
+ * two naming exceptions. Keyed by MODULE DIRECTORY name. This is NOT the list of services — the SET
+ * of services comes from the code-derived catalog (`catalog.json`, generate-catalog.mjs: every
+ * module applying the `openbank.quarkus-service` convention plugin) and so cannot drift; an entry
+ * here for a module the catalog does not know is inert, and a module missing here still appears,
+ * with a label derived from its name and group `platform`. The guard test asserts every key is a
+ * real catalog module.
+ */
+export const SERVICE_OVERRIDES: Record<string, { label?: string; group?: ServiceEntry['group']; id?: string; k8sName?: string; exposeViaBff?: boolean }> = {
+  'openbank-account-service'            : { label: 'Accounts', group: 'core' },
+  'openbank-ledger-service'             : { label: 'Ledger', group: 'core' },
+  'openbank-transaction-service'        : { label: 'Transactions', group: 'core' },
+  'openbank-balance-service'            : { label: 'Balance', group: 'core' },
+  'openbank-product-catalog'            : { label: 'Product Catalog', group: 'core' },
+  'openbank-pid-service'                : { label: 'PID', group: 'identity' },
+  'openbank-kyb-service'                : { label: 'KYB', group: 'identity' },
+  'openbank-consent-service'            : { label: 'Consent', group: 'open-banking' },
+  'openbank-psd2-service'               : { label: 'PSD2', group: 'open-banking' },
+  'openbank-tpp-registry-service'       : { label: 'TPP Registry', group: 'open-banking' },
+  'openbank-agent-service'              : { label: 'Agent (MCP)', group: 'platform' },
+  'openbank-sca-service'                : { label: 'SCA', group: 'identity' },
+  'openbank-party-service'              : { label: 'Parties', group: 'identity' },
+  'openbank-notification-service'       : { label: 'Notifications', group: 'platform' },
+  'openbank-audit-service'              : { label: 'Audit', group: 'compliance' },
+  'openbank-kyc-service'                : { label: 'KYC', group: 'compliance' },
+  'openbank-sepa-payment'               : { label: 'SEPA', group: 'payments' },
+  'openbank-domestic-payment'           : { label: 'Domestic', group: 'payments' },
+  'openbank-aml-service'                : { label: 'AML', group: 'compliance' },
+  'openbank-card-issuance-service'      : { label: 'Cards', group: 'payments' },
+  'openbank-fx-service'                 : { label: 'FX', group: 'payments' },
+  'openbank-security-scanner'           : { label: 'Security', group: 'platform', k8sName: 'security-scanner-service' },
+  'openbank-standing-order-service'     : { label: 'Standing Orders', group: 'payments' },
+  'openbank-swift-service'              : { label: 'SWIFT', group: 'payments' },
+  'openbank-sanctions-service'          : { label: 'Sanctions', group: 'compliance' },
+  'openbank-clearing-service'           : { label: 'Clearing', group: 'payments' },
+  'openbank-interest-service'           : { label: 'Interest', group: 'payments' },
+  'openbank-dispute-service'            : { label: 'Disputes', group: 'compliance' },
+  'openbank-sepa-instant'               : { label: 'SEPA Instant', group: 'payments' },
+  'openbank-vop-service'                : { label: 'VoP', group: 'payments' },
+  'openbank-customer-edge'              : { label: 'Customer Edge', group: 'platform' },
+  'openbank-statement-service'          : { label: 'Statements', group: 'compliance' },
+  'openbank-onboarding-service'         : { label: 'Onboarding', group: 'compliance' },
+  'openbank-document-service'           : { label: 'Documents', group: 'platform' },
+  'openbank-lending-service'            : { label: 'Lending', group: 'payments' },
+  'openbank-risk-engine'                : { label: 'Risk Engine', group: 'core' },
+  'openbank-sdd-service'                : { label: 'SDD', group: 'payments' },
+  'openbank-copilot-service'            : { label: 'Copilot', group: 'platform' },
+  'openbank-fraud-service'              : { label: 'Fraud', group: 'compliance' },
+  'openbank-analytics-sink'             : { label: 'Analytics Sink', group: 'platform' },
+  'openbank-anacredit-service'          : { label: 'AnaCredit', group: 'compliance' },
+  'openbank-case-coordinator-agent'     : { label: 'Case Coordinator', group: 'platform', id: 'case-coordinator' },
+  'openbank-communication-service'      : { label: 'Communication', group: 'platform' },
+  // Not business services (agents / auditors / sentinels whose names carry no -agent suffix): never BFF-exposed.
+  'openbank-authz-policy-auditor':       { exposeViaBff: false },
+  'openbank-control-liveness-sentinel':  { exposeViaBff: false },
+  'openbank-flaky-test-hunter':          { exposeViaBff: false },
+  'openbank-governance-auditor':         { exposeViaBff: false },
+  'openbank-release-steward':            { exposeViaBff: false },
+  // Owner decision: mcp-service is reached through admin-ui's own /api/agent/mcp route, not the generic proxy.
+  'openbank-mcp-service':                { exposeViaBff: false },
+}
 
-export function findService(id: string): ServiceEntry | undefined {
-  return SERVICE_REGISTRY.find(s => s.id === id)
+/** The subset of a `catalog.json` module this registry needs. */
+export interface CatalogFleetModule {
+  name: string
+  short: string
+  kind: string
+  runnable?: boolean
+  apiTitle?: string | null
+  port?: number | null
+  mgmtPort?: number | null
+}
+
+function titleCase(short: string): string {
+  return short.replace(/-service$/, '').split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+}
+
+/**
+ * Derive the service registry from the catalog: one entry per runnable module that declares a port.
+ * Pure (no I/O) so server routes, the browser and the guard test all share one definition.
+ */
+export function buildRegistry(modules: readonly CatalogFleetModule[]): ServiceEntry[] {
+  const entries = modules
+    .filter(m => m.runnable === true && typeof m.port === 'number')
+    .map((m): ServiceEntry => {
+      const o = SERVICE_OVERRIDES[m.name] ?? {}
+      return {
+        id: o.id ?? m.short.replace(/-service$/, ''),
+        label: o.label ?? titleCase(m.short),
+        group: o.group ?? 'platform',
+        container: m.name,
+        port: m.port as number,
+        ...(typeof m.mgmtPort === 'number' ? { mgmtPort: m.mgmtPort } : {}),
+        ...(o.k8sName ? { k8sName: o.k8sName } : {}),
+      }
+    })
+    .sort((a, b) => a.container.localeCompare(b.container))
+  assertUnique(entries.map(e => e.id), 'registry id')
+  return entries
+}
+
+function assertUnique(values: readonly string[], what: string): void {
+  const seen = new Set<string>()
+  for (const v of values) {
+    if (seen.has(v)) throw new Error(`duplicate ${what} '${v}' in the derived service registry - fix SERVICE_OVERRIDES or the module name`)
+    seen.add(v)
+  }
+}
+
+export function findInRegistry(registry: readonly ServiceEntry[], id: string): ServiceEntry | undefined {
+  return registry.find(s => s.id === id)
+}
+
+/**
+ * Modules that are NOT business services and must not be reachable through the operator BFF unless
+ * explicitly overridden (`exposeViaBff: true`): AI/ops agents, data sinks, simulators, libraries.
+ * Names, not metadata, because the catalog carries no exposure class; the guard test pins the
+ * resulting set.
+ */
+const NON_BFF_PATTERN = /(-agent|-sink|-simulator)$|^openbank-libs/
+
+/** The registry entries `/api/svc` may reach. */
+export function isBffExposed(s: ServiceEntry): boolean {
+  const o = SERVICE_OVERRIDES[s.container]
+  if (o?.exposeViaBff !== undefined) return o.exposeViaBff
+  return !NON_BFF_PATTERN.test(s.container)
+}
+
+/**
+ * The BFF allowlist: `/api/svc/<key>` -> upstream target. Derived from the same registry, so the
+ * key set is exactly the catalog's runnable BUSINESS modules - never free-form, and never a
+ * caller-supplied host (the host is `container`/`SERVICES_HOST`, the port comes from the module's
+ * own config). The key is the Kubernetes workload name, which in-cluster is looked up verbatim in
+ * discovery. The returned map has no prototype: `constructor`/`__proto__` are plain missing keys.
+ * A duplicate key throws instead of silently overwriting (which would re-route one service to
+ * another's upstream).
+ */
+export function buildProxyAllowlist(registry: readonly ServiceEntry[]): Record<string, { container: string; port: number }> {
+  const exposed = registry.filter(isBffExposed)
+  assertUnique(exposed.map(s => k8sNameOf(s)), 'BFF allowlist key')
+  const out: Record<string, { container: string; port: number }> = Object.create(null)
+  for (const s of exposed) out[k8sNameOf(s)] = { container: s.container, port: s.port }
+  return out
 }
 
 /**

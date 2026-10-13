@@ -35,6 +35,10 @@ escalating a consent is a direct path to unauthorized data access or payment ini
 
 - Mutations must be bound to an authenticated party + SCA (sca-service) per PSD2 RTS.
 - OPA enforce; consent issuance/activation should not be `@PermitAll`.
+- The suppression resource requires an authenticated `ROLE_API`, `ROLE_OPERATOR`, or `ROLE_ADMIN`
+  caller at the JAX-RS boundary. Create and revoke additionally require `ROLE_OPERATOR` or
+  `ROLE_ADMIN`; the read path retains `ROLE_API` for the contact-policy service. OPA checks remain
+  separate and narrower, including the human-operator restriction on writes.
 
 ## 4. STRIDE
 
@@ -56,6 +60,17 @@ escalating a consent is a direct path to unauthorized data access or payment ini
   `ConsentOutboxDispatcher`), closing the prior dual-write that could drop it entirely.
 
 ## 6. Change log
+
+- **2026-10-11** — Suppression REST authentication is enforced independently of the OPA advisory
+  setting (#12544). The existing `@Authorize` checks alone allowed an anonymous principal to
+  reach the PDP; in advisory mode that could expose the active suppression list or allow writes.
+  Class-level `@RolesAllowed` now rejects anonymous calls, while method-level roles restrict
+  create/revoke to operators and admins. The M2M read role remains admitted; OPA still decides
+  the fine-grained action. This closes a spoofing and information-disclosure gap at the inbound
+  REST boundary without adding an endpoint or caller. Reverting the JAX-RS role gate would restore
+  the advisory-mode exposure; retain the gate during rollback of unrelated changes.
+
+- **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `consent_outbox` kept every SENT row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; its v1 repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`. PENDING, FAILED, DISPATCHING and DEAD rows are never touched. Information disclosure: shrinks the window in which a database read (replica, backup, operator query) exposes past event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now comes from the broker or audit-service, not this table.
 
 - **2026-09-26** — Consent creation binds its idempotency key to a request fingerprint
   (#10916, #10946). The key is reserved atomically before the consent is created. Same key + same
@@ -220,3 +235,14 @@ escalating a consent is a direct path to unauthorized data access or payment ini
   this migration as "non-money-path" and is corrected here — no endpoint, authorization or
   consent-lifecycle logic changes. **Risk class:** none — response-plumbing de-duplication only.
   Rollback: restore the deleted mapper classes and revert the exception base classes.
+- **2026-10-11** — **The 8443 listener no longer accepts a client certificate as a login (#12511).**
+  `client-auth: required` (2026-09-20 entries above) also registers Quarkus's mTLS authentication
+  mechanism, which turned any certificate the private CA had signed into an authenticated
+  `SecurityIdentity`: a workload holding a fleet-CA certificate and NO bearer reached `/api/*` as a
+  logged-in principal (measured: 403 from authz instead of 401). `%prod` now restricts `/api/*` to
+  `auth-mechanism: bearer` (the #12506 pattern), so the certificate is transport authentication only and
+  the OIDC bearer is the only identity a route or OPA sees, identically on 8443 and the plain port.
+  **STRIDE-S/E:** closes a spoofing / elevation path; callers are unaffected because every 8443 caller
+  already sends its own bearer. Proven by `ConsentListenerAuthParityIT` (production listener shape, real
+  HTTP; 1 of 4 failing without the change, 4 of 4 with it) and gated fleet-wide by `mtls-bearer-only`.
+  Rollback: revert the commit (re-opens the path).

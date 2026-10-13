@@ -100,6 +100,8 @@ Content-Type: application/json
 
 The edge enriches `debtorAccountNumber`/`debtorBankCode` (from the account's Czech IBAN), `debtorName` (party-service), splits the creditor `number/bankcode`, maps `reference`→`messageForPayee`, defaults `priority=STANDARD`, then forwards to `domestic-payment-service`. Money does not move — initiation creates and screens only; settlement is SCA-gated.
 
+The domestic rail accepts CZK only. Another currency returns `400 CURRENCY_NOT_ALLOWED` before account lookup, delegated spend reservation, or SCA; the `Idempotency-Key` remains available for a valid retry. A caller without debit authority receives the same `403` whether the account or a delegation exists, so this response does not reveal either.
+
 ### Start onboarding (anonymous)
 
 ```http
@@ -157,3 +159,7 @@ The edge returns small JSON error envelopes of the shape `{"error":"…"}` it ge
 `GET /customer/v1/app-copy` is anonymous and returns only `{version, messages}` projected from the published customer communication style. It exposes no customer information or internal persona instructions. Successful published responses are cacheable for 60 seconds. An absent or retired publication returns version zero and an empty map, explicitly clearing client overrides.
 
 The communication upstream is supplied through `COMMUNICATION_SERVICE_URL` at runtime. A missing configuration or unavailable upstream returns 503; an invalid upstream document returns 502. Clients retain validated cached or bundled copy on either error and must not delay startup waiting for this optional request. The upstream read uses the edge service identity without a customer party header.
+
+## Upstream URL path validation
+
+Currency codes must contain three uppercase ASCII letters; country codes contain two ASCII letters with case preserved. Saved-payee identifiers accept 1–34 ASCII letters or digits without a checksum requirement, so existing saved values remain removable. The edge reconstructs accepted values from its own alphabet before building upstream URLs. Invalid values return HTTP 400 and are never included in an upstream URL.

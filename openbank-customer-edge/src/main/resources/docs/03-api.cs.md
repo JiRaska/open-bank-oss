@@ -96,6 +96,8 @@ Content-Type: application/json
 
 Edge obohatí `debtorAccountNumber`/`debtorBankCode` (z českého IBANu účtu), `debtorName` (party-service), rozdělí kredit `number/bankcode`, namapuje `reference`→`messageForPayee`, nastaví `priority=STANDARD` a přepošle na `domestic-payment-service`. Peníze se nehýbou — iniciace jen vytvoří a proscreenuje; settlement je pod SCA.
 
+Domácí platební rail přijímá pouze CZK. Jiná měna vrátí `400 CURRENCY_NOT_ALLOWED` ještě před dohledáním účtu, rezervací delegovaného limitu nebo SCA; `Idempotency-Key` zůstane použitelný pro platný pokus. Volající bez práva odepsat peníze dostane stejnou odpověď `403` bez ohledu na existenci účtu či delegace, takže odpověď jejich existenci neprozrazuje.
+
 ### Začátek onboardingu (anonymně)
 
 ```http
@@ -153,3 +155,7 @@ Edge vrací malé JSON chybové obálky tvaru `{"error":"…"}`, které sám gen
 Anonymní `GET /customer/v1/app-copy` vrací pouze `{version, messages}` ze zveřejněného komunikačního stylu pro klienty. Neobsahuje osobní údaje ani interní instrukce persony. Zveřejněné odpovědi lze ukládat do cache na 60 sekund. Chybějící nebo vyřazená publikace vrací verzi nula a prázdnou mapu, což výslovně ruší klientské přepisy.
 
 Adresa komunikační služby se dodává při běhu přes `COMMUNICATION_SERVICE_URL`. Chybějící konfigurace nebo nedostupná služba vrací 503; neplatný dokument vrací 502. Klient v obou případech zachová ověřené uložené nebo vestavěné texty a tímto volitelným požadavkem neblokuje spuštění. Volání používá identitu služby bez hlavičky klientské party.
+
+## Validace hodnot v URL upstream služeb
+
+Kód měny tvoří tři velká ASCII písmena; kód země dvě ASCII písmena se zachováním velikosti. Identifikátor uloženého příjemce přijímá 1–34 ASCII písmen nebo číslic bez kontroly kontrolního součtu, aby bylo možné odstranit i dříve uložené hodnoty. Edge sestaví přijaté hodnoty z vlastní abecedy před vytvořením URL upstream služby. Neplatné hodnoty vrací HTTP 400 a do URL upstream služby se nedostanou.
