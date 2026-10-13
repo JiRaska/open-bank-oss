@@ -175,12 +175,12 @@ def c_comments(text: str) -> list[tuple[int, str]]:
             i += 1
             continue
         if depth:
-            if text.startswith("/*", i):
+            if ch == "/" and text.startswith("/*", i):
                 depth += 1
                 buf.append("/*")
                 i += 2
                 continue
-            if text.startswith("*/", i):
+            if ch == "*" and text.startswith("*/", i):
                 depth -= 1
                 i += 2
                 if depth == 0:
@@ -201,13 +201,13 @@ def c_comments(text: str) -> list[tuple[int, str]]:
             in_str = ch
             i += 1
             continue
-        if text.startswith("//", i):
+        if ch == "/" and text.startswith("//", i):
             j = text.find("\n", i)
             j = n if j < 0 else j
             out.append((line_no, text[i + 2:j]))
             i = j
             continue
-        if text.startswith("/*", i):
+        if ch == "/" and text.startswith("/*", i):
             depth = 1
             start = line_no
             buf = []
