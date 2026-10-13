@@ -48,6 +48,34 @@ class CompileCoverageTest(unittest.TestCase):
         )
         self.assertFalse(coverage.check(self.root, log)[0])
 
+    def test_mixed_module_requires_java_compilation(self):
+        java = self.root / "openbank-alpha-service/src/main/java/Parser.java"
+        java.parent.mkdir(parents=True)
+        java.write_text("class Parser {}\n")
+        kotlin = "> Task :openbank-alpha-service:compileKotlin\n> Task :openbank-beta-service:compileKotlin\n"
+        self.assertFalse(coverage.check(self.root, kotlin)[0])
+        self.assertTrue(coverage.check(self.root, kotlin + "> Task :openbank-alpha-service:compileJava\n")[0])
+
+    def test_java_cached_skipped_and_missing_source_outcomes_fail(self):
+        java = self.root / "openbank-alpha-service/src/main/java/Parser.java"
+        java.parent.mkdir(parents=True)
+        java.write_text("class Parser {}\n")
+        kotlin = "> Task :openbank-alpha-service:compileKotlin\n> Task :openbank-beta-service:compileKotlin\n"
+        for outcome in ("FROM-CACHE", "UP-TO-DATE", "SKIPPED", "NO-SOURCE"):
+            with self.subTest(outcome=outcome):
+                log = kotlin + f"> Task :openbank-alpha-service:compileJava {outcome}\n"
+                self.assertFalse(coverage.check(self.root, log)[0])
+                self.assertFalse(coverage.check(self.root, log + "> Task :openbank-alpha-service:compileJava\n")[0])
+
+    def test_java_only_module_is_not_empty_coverage(self):
+        root = self.root / "java-only"
+        module = root / "openbank-java-service"
+        (module / "src/main/java").mkdir(parents=True)
+        (module / "build.gradle.kts").touch()
+        (module / "src/main/java/Parser.java").write_text("class Parser {}\n")
+        self.assertTrue(coverage.check(root, "> Task :openbank-java-service:compileJava\n")[0])
+        self.assertFalse(coverage.check(root, "")[0])
+
     def test_reprinted_header_of_an_executed_compile_still_passes(self):
         # Shape seen on run 35360885303: parallel output reprinted executed task headers.
         log = (
