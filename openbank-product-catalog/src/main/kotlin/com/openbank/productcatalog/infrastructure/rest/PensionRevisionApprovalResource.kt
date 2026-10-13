@@ -64,23 +64,26 @@ class PensionRevisionApprovalResource(
     private fun requirePensionServiceWhenMachine() {
         val token = identity.principal as? JsonWebToken
             ?: throw CatalogForbiddenException("a verified JWT is required for approval evidence")
-        val client = token.getClaim<String>("azp")
-        val username = token.getClaim<String>("preferred_username").orEmpty()
         val subject = token.subject ?: token.getClaim<String>("sub")
-        val pensionService = client == "openbank-pension" &&
-            username == "service-account-openbank-pension" &&
-            "ROLE_API" in identity.roles
-        val humanApprover = client == "openbank-admin-ui" &&
+        if (subject.isNullOrBlank() || !(isPensionService(token) || isHumanApprovalReader(token, subject))) {
+            throw CatalogForbiddenException("pension approval evidence reader identity is required")
+        }
+    }
+
+    private fun isPensionService(token: JsonWebToken): Boolean = token.getClaim<String>("azp") == "openbank-pension" &&
+        token.getClaim<String>("preferred_username") == "service-account-openbank-pension" &&
+        "ROLE_API" in identity.roles
+
+    private fun isHumanApprovalReader(token: JsonWebToken, subject: String): Boolean {
+        val username = token.getClaim<String>("preferred_username").orEmpty()
+        val humanToken = token.getClaim<String>("azp") == "openbank-admin-ui" &&
             username.isNotBlank() &&
             !username.startsWith("service-account-") &&
             !username.startsWith("agent:") &&
-            subject?.startsWith("agent:") != true &&
-            scopeMapper.roles(token.getClaim<Any?>(scopeClaim), identity.roles).any {
-                it == CatalogRoles.PENSION_LEGAL_APPROVER || it == CatalogRoles.PENSION_PRODUCT_OWNER
-            }
-        if (subject.isNullOrBlank() || (!pensionService && !humanApprover)) {
-            throw CatalogForbiddenException("pension approval evidence reader identity is required")
-        }
+            !subject.startsWith("agent:") &&
+            "ROLE_API" !in identity.roles
+        return humanToken &&
+            scopeMapper.roles(token.getClaim<Any?>(scopeClaim), identity.roles).any { it in APPROVAL_READER_ROLES }
     }
 
     @POST
@@ -165,6 +168,9 @@ class PensionRevisionApprovalResource(
         PensionApprovalResponse(approval.role, approval.digest, approval.approvedAt)
 
     private companion object {
+        private val APPROVAL_READER_ROLES =
+            setOf(CatalogRoles.PENSION_LEGAL_APPROVER, CatalogRoles.PENSION_PRODUCT_OWNER, CatalogRoles.PUBLISH)
+
         val STRONG_ETAG = Regex("\\\"([0-9]+)\\\"")
     }
 }

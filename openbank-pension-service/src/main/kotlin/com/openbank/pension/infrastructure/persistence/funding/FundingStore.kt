@@ -31,9 +31,11 @@ import com.openbank.pension.domain.incentive.IncentiveClaim
 import com.openbank.pension.domain.incentive.IncentiveLedgerEntry
 import com.openbank.pension.domain.incentive.LedgerEntryKind
 import com.openbank.pension.domain.incentive.TaxYearSummary
+import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.vertx.mutiny.sqlclient.Pool
 import io.vertx.mutiny.sqlclient.Row
+import io.vertx.mutiny.sqlclient.SqlClient
 import io.vertx.mutiny.sqlclient.Tuple
 import jakarta.inject.Singleton
 import java.math.BigDecimal
@@ -111,29 +113,8 @@ class PgContributions(client: Pool) :
     PgFundingSupport(client),
     ContributionRepository {
 
-    override suspend fun insertIfAbsent(contribution: Contribution): Pair<Contribution, Boolean> {
-        val inserted = client.preparedQuery(
-            """
-            INSERT INTO pension_contributions (id, contract_id, payment_id, source, channel, amount, currency,
-                value_date, employer_party_id, subscription_order_id, received_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-            ON CONFLICT (payment_id) DO NOTHING
-            """.trimIndent(),
-        ).execute(
-            Tuple.tuple(
-                listOf(
-                    contribution.id, contribution.contractId, contribution.paymentId, contribution.source.name,
-                    contribution.channel.name, contribution.amount, contribution.currency, contribution.valueDate,
-                    contribution.employerPartyId, contribution.subscriptionOrderId, utc(contribution.receivedAt),
-                ),
-            ),
-        ).awaitSuspending().rowCount() == 1
-        val stored = rows(
-            "${Sql.CONTRIBUTION_SELECT} WHERE payment_id = $1",
-            Tuple.of(contribution.paymentId),
-        ).first().toContribution()
-        return stored to inserted
-    }
+    override suspend fun insertIfAbsent(contribution: Contribution): Pair<Contribution, Boolean> =
+        insertContribution(client, contribution).awaitSuspending()
 
     override suspend fun setSubscriptionOrder(contributionId: UUID, orderId: String) {
         client.preparedQuery("UPDATE pension_contributions SET subscription_order_id = $2 WHERE id = $1")
@@ -158,6 +139,29 @@ class PgContributions(client: Pool) :
         Tuple.of(contractId, from, toExclusive),
     ).map { it.toContribution() }
 }
+
+private fun insertContribution(client: SqlClient, contribution: Contribution): Uni<Pair<Contribution, Boolean>> =
+    client.preparedQuery(
+        """
+            INSERT INTO pension_contributions (id, contract_id, payment_id, source, channel, amount, currency,
+                value_date, employer_party_id, subscription_order_id, received_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            ON CONFLICT (payment_id) DO NOTHING
+        """.trimIndent(),
+    ).execute(
+        Tuple.tuple(
+            listOf(
+                contribution.id, contribution.contractId, contribution.paymentId, contribution.source.name,
+                contribution.channel.name, contribution.amount, contribution.currency, contribution.valueDate,
+                contribution.employerPartyId, contribution.subscriptionOrderId, utc(contribution.receivedAt),
+            ),
+        ),
+    ).flatMap { result ->
+        val inserted = result.rowCount() == 1
+        client.preparedQuery(
+            "${Sql.CONTRIBUTION_SELECT} WHERE payment_id = $1",
+        ).execute(Tuple.of(contribution.paymentId)).map { rows -> rows.first().toContribution() to inserted }
+    }
 
 /** Construct the exclusive year bound without wrapping a caller-supplied year. */
 internal fun taxYearWindow(taxYear: Int): Pair<LocalDate, LocalDate> {
@@ -199,20 +203,49 @@ class PgUnmatchedPayments(client: Pool) :
     )
         .map { it.toUnmatched() }
 
+    override suspend fun assignAtomically(
+        payment: UnmatchedPayment,
+        contribution: Contribution,
+    ): Pair<Contribution, Boolean> {
+        require(payment.status == UnmatchedStatus.ASSIGNED)
+        require(
+            payment.resolvedContractId == contribution.contractId &&
+                payment.payment.paymentId == contribution.paymentId,
+        )
+        return client.withTransaction { conn ->
+            resolve(conn, payment).flatMap {
+                insertContribution(conn, contribution).map { stored ->
+                    check(stored.first.contractId == contribution.contractId) {
+                        "payment already credited to another contract"
+                    }
+                    stored
+                }
+            }
+        }.awaitSuspending()
+    }
+
     override suspend fun update(payment: UnmatchedPayment) {
-        client.preparedQuery(
-            "UPDATE pension_unmatched_payments SET status = $2, resolved_contract_id = $3, resolved_by = $4, resolved_at = $5 WHERE id = $1",
-        ).execute(
-            Tuple.tuple(
-                listOf(
-                    payment.id,
-                    payment.status.name,
-                    payment.resolvedContractId,
-                    payment.resolvedBy,
-                    payment.resolvedAt?.let(::utc),
-                ),
+        require(payment.status == UnmatchedStatus.RETURNED)
+        resolve(client, payment).awaitSuspending()
+    }
+
+    private fun resolve(connection: SqlClient, payment: UnmatchedPayment): Uni<Int> = connection.preparedQuery(
+        "UPDATE pension_unmatched_payments SET status = $2, resolved_contract_id = $3, " +
+            "resolved_by = $4, resolved_at = $5 " +
+            "WHERE id = $1 AND status = 'OPEN'",
+    ).execute(
+        Tuple.tuple(
+            listOf(
+                payment.id,
+                payment.status.name,
+                payment.resolvedContractId,
+                payment.resolvedBy,
+                payment.resolvedAt?.let(::utc),
             ),
-        ).awaitSuspending()
+        ),
+    ).map { result ->
+        check(result.rowCount() == 1) { "unmatched payment ${payment.id} is already resolved" }
+        result.rowCount()
     }
 }
 

@@ -27,6 +27,8 @@ class PensionFundOrdersTest {
 
     private class FakeRegister(var holdings: List<HoldingDto>, val strategies: List<StrategyDto>) : FundRegister {
         val orders = linkedMapOf<String, OrderRequestDto>()
+        var loseNextResponse = false
+        val plans = InMemoryFundOrderPlans()
 
         override suspend fun holdings(contractId: UUID) = ContractValuationDto(contractId, holdings)
 
@@ -35,7 +37,12 @@ class PensionFundOrdersTest {
             idempotencyKey: String,
             order: OrderRequestDto,
         ): UnitOrderDto {
-            orders.putIfAbsent(idempotencyKey, order) // the register deduplicates on the key
+            val existing = orders.putIfAbsent(idempotencyKey, order)
+            check(existing == null || existing == order) { "Idempotency-Key reused for a different order" }
+            if (loseNextResponse) {
+                loseNextResponse = false
+                error("accepted order response lost")
+            }
             return UnitOrderDto(UUID.nameUUIDFromBytes(idempotencyKey.toByteArray()), "PENDING")
         }
 
@@ -55,7 +62,7 @@ class PensionFundOrdersTest {
     private val clock = Clock.fixed(Instant.parse("2026-10-09T10:00:00Z"), ZoneOffset.UTC)
 
     private fun orders(register: FakeRegister, strategy: String? = "BALANCED") =
-        PensionFundOrders(register, { strategy }, clock)
+        PensionFundOrders(register, { strategy }, clock, register.plans)
 
     @Test
     fun `a subscription is split by the strategy weights and the legs sum to the amount exactly`(): Unit = runBlocking {
@@ -136,6 +143,57 @@ class PensionFundOrdersTest {
                 orders(FakeRegister(holdings, listOf(balanced))).redeem(contract, BigDecimal("2000.01"), "CZK", "k")
             }
         }.isInstanceOf(FundAdministrationRefusedException::class.java)
+    }
+
+    @Test
+    fun `redemption retry preserves the accepted instruction after NAV changes`(): Unit = runBlocking {
+        val register = FakeRegister(
+            listOf(HoldingDto(equity, BigDecimal("10"), BigDecimal("100"), BigDecimal("1000"), "CZK")),
+            listOf(balanced),
+        )
+        register.loseNextResponse = true
+        assertThatThrownBy {
+            runBlocking { orders(register).redeem(contract, BigDecimal("500"), "CZK", "retry-redemption") }
+        }.hasMessage("accepted order response lost")
+        register.holdings = listOf(
+            HoldingDto(equity, BigDecimal("10"), BigDecimal("200"), BigDecimal("2000"), "CZK"),
+        )
+        val result = orders(register).redeem(contract, BigDecimal("500"), "CZK", "retry-redemption")
+        assertThat(result.reference).isEqualTo("retry-redemption")
+        assertThat(register.orders.values.single().units).isEqualByComparingTo("5")
+    }
+
+    @Test
+    fun `partial subscription retry keeps the original strategy legs`(): Unit = runBlocking {
+        val register = FakeRegister(emptyList(), listOf(balanced))
+        register.loseNextResponse = true
+        assertThatThrownBy {
+            runBlocking { orders(register).subscribe(contract, BigDecimal("1000"), "CZK", "retry-subscription") }
+        }.hasMessage("accepted order response lost")
+        orders(register, "A_NEW_STRATEGY").subscribe(contract, BigDecimal("1000"), "CZK", "retry-subscription")
+        assertThat(register.orders).hasSize(2)
+        val legs = register.orders.values.associate { it.fundId to it.amount!! }
+        assertThat(legs.getValue(equity)).isEqualByComparingTo("600")
+        assertThat(legs.getValue(bonds)).isEqualByComparingTo("400")
+    }
+
+    @Test
+    fun `a saved key rejects another request before sending any further order`(): Unit = runBlocking {
+        val register = FakeRegister(emptyList(), listOf(balanced))
+        orders(register).subscribe(contract, BigDecimal("100"), "CZK", "same-request")
+        assertThatThrownBy {
+            runBlocking { orders(register).subscribe(contract, BigDecimal("200"), "CZK", "same-request") }
+        }.hasMessage("fund operation key reused for a different request")
+        assertThatThrownBy {
+            runBlocking { orders(register).subscribe(UUID.randomUUID(), BigDecimal("100"), "CZK", "same-request") }
+        }.hasMessage("fund operation key reused for a different request")
+        assertThatThrownBy {
+            runBlocking { orders(register).redeem(contract, BigDecimal("100"), "CZK", "same-request") }
+        }.hasMessage("fund operation key reused for a different request")
+        assertThatThrownBy {
+            runBlocking { orders(register).subscribe(contract, BigDecimal("100"), "EUR", "same-request") }
+        }.hasMessage("fund operation key reused for a different request")
+        assertThat(register.orders).hasSize(2)
     }
 
     @Test
