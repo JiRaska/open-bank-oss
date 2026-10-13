@@ -73,11 +73,14 @@ allowed_reasons contains "staff-compliance-card-cancel" if {
 }
 
 # Customer-edge already checks card ownership/mandate and step-up where required before
-# forwarding these three self-service writes. Its dedicated machine identity alone can
-# reach them; the shared openbank-services principal does not gain these actions.
+# forwarding these three self-service writes. Bind its service-account subject to the
+# authenticated OAuth client claim forwarded by the interceptor (69cd2761, #12328).
+# A display username alone is not a verified machine-client identity; absent or
+# non-string azp leaves verified_client_id absent and this rule fails closed.
 allowed_reasons contains "edge-card-self-service-write" if {
     input.principal.type == "HUMAN"
     input.principal.id == "service-account-openbank-edge"
+    input.principal.attributes.verified_client_id == "openbank-edge"
     "ROLE_OPERATOR" in input.principal.roles
     input.action in {"card.cancel", "card.limits.update", "card.controls.update"}
 }
@@ -130,9 +133,11 @@ allowed_reasons contains "service-delegation-card-read" if {
 # #12328: card-processing alone may ask the issuer for a spending decision and the card it
 # needs to evaluate. Never grant card.authorization.decide to the shared services principal:
 # it is held by unrelated backends and was the over-grant fixed by GHSA-58jq-9hq3-66jr.
+# The subject and validated client must both identify this dedicated caller.
 allowed_reasons contains "service-card-processing-authorization" if {
     input.principal.type == "HUMAN"
     input.principal.id == "service-account-openbank-card-processing"
+    input.principal.attributes.verified_client_id == "openbank-card-processing"
     input.action in {"card.authorization.decide", "card.read"}
 }
 

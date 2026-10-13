@@ -139,15 +139,39 @@ test_card_compliance_can_cancel_but_not_change_limits if {
 
 test_card_edge_only_receives_its_observed_self_service_writes if {
     every action in {"card.cancel", "card.limits.update", "card.controls.update"} {
+        d := rest.allow with input as {
+            "principal": {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"], "attributes": {"verified_client_id": "openbank-edge"}},
+            "action": action,
+        } with data.rules as b6_rules
+        d.allow == true
         "edge-card-self-service-write" in rest.allowed_reasons with input as {
-            "principal": {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]},
+            "principal": {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"], "attributes": {"verified_client_id": "openbank-edge"}},
             "action": action,
         }
     }
     count(rest.allowed_reasons) == 0 with input as {
-        "principal": {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]},
+        "principal": {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"], "attributes": {"verified_client_id": "openbank-edge"}},
         "action": "card.category-limits.update",
     }
+}
+
+test_card_edge_write_requires_matching_verified_client if {
+    every client in ["openbank-services", "openbank-card-processing", 42, null] {
+        every action in {"card.cancel", "card.limits.update", "card.controls.update"} {
+            rest.allow == false with input as {
+                "principal": {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"], "attributes": {"verified_client_id": client}},
+                "action": action,
+            } with data.rules as b6_rules
+        }
+    }
+    rest.allow == false with input as {
+        "principal": {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]},
+        "action": "card.cancel",
+    } with data.rules as b6_rules
+    rest.allow == false with input as {
+        "principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"], "attributes": {"verified_client_id": "openbank-edge"}},
+        "action": "card.cancel",
+    } with data.rules as b6_rules
 }
 
 test_card_other_service_accounts_do_not_inherit_new_writes if {
@@ -212,7 +236,7 @@ test_card_outbox_requeue_denied_for_ai_agent if {
 
 # --- #10486/#12328: per-service issuer identities (ROLE_API only) ---
 
-b6_sa(name) := {"type": "HUMAN", "id": sprintf("service-account-openbank-%v", [name]), "roles": ["ROLE_API"]}
+b6_sa(name) := {"type": "HUMAN", "id": sprintf("service-account-openbank-%v", [name]), "roles": ["ROLE_API"], "attributes": {"verified_client_id": sprintf("openbank-%v", [name])}}
 
 b6_rules := {
 	"authz": {"role_action_matrix": {"ROLE_OPERATOR": {"grant": ["card.create", "card.block"]}}},
@@ -265,4 +289,23 @@ test_b6_other_role_api_sa_denied_card_reads_and_decision if {
 				with data.rules as b6_rules
 		}
 	}
+}
+
+test_b6_card_processing_requires_matching_verified_client if {
+    every client in ["openbank-services", "openbank-edge", 42, null] {
+        every action in {"card.read", "card.authorization.decide"} {
+            rest.allow == false with input as {
+                "principal": {"type": "HUMAN", "id": "service-account-openbank-card-processing", "roles": ["ROLE_API"], "attributes": {"verified_client_id": client}},
+                "action": action,
+            } with data.rules as b6_rules
+        }
+    }
+    rest.allow == false with input as {
+        "principal": {"type": "HUMAN", "id": "service-account-openbank-card-processing", "roles": ["ROLE_API"]},
+        "action": "card.authorization.decide",
+    } with data.rules as b6_rules
+    rest.allow == false with input as {
+        "principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_API"], "attributes": {"verified_client_id": "openbank-card-processing"}},
+        "action": "card.authorization.decide",
+    } with data.rules as b6_rules
 }
