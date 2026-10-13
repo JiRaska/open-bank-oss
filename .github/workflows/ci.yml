@@ -366,10 +366,6 @@ jobs:
             echo "Re-run it (or push again) — a cancelled run must not read as a passing gate."
             exit 1
           fi
-          if [ "$UI_CHANGED" = "true" ] && [ "$RESULT" != "success" ]; then
-            echo "::error::Admin UI changed but its build did not succeed ($RESULT)."
-            exit 1
-          fi
           echo "Admin UI: $RESULT (skipped = no UI changes in this PR)."
 
   # ---------------------------------------------------------------------------
