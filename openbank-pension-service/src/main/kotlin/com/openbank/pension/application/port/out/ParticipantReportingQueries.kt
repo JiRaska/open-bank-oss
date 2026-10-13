@@ -21,6 +21,9 @@ import java.time.LocalDate
 // One aggregate query per statutory figure, plus the completeness guard.
 @Suppress("TooManyFunctions")
 interface ParticipantReportingQueries {
+    /** All aggregate SELECTs in [block] observe one database snapshot, including completeness guards. */
+    suspend fun <T> consistentRead(block: suspend (ParticipantReportingQueries) -> T): T
+
     /** True if a settled payout created by [to] lacks its persisted domestic transition time. */
     suspend fun hasUnknownSettlementTime(to: LocalDate): Boolean
 

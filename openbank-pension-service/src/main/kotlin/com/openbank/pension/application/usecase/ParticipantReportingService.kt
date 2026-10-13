@@ -20,6 +20,14 @@ import java.time.LocalDate
 class ParticipantReportingService(private val queries: ParticipantReportingQueries, private val baseCurrency: String) {
     suspend fun aggregates(periodStart: LocalDate, periodEnd: LocalDate): ParticipantPeriodAggregates {
         require(!periodEnd.isBefore(periodStart)) { "periodEnd must not be before periodStart" }
+        return queries.consistentRead { source -> calculate(source, periodStart, periodEnd) }
+    }
+
+    private suspend fun calculate(
+        queries: ParticipantReportingQueries,
+        periodStart: LocalDate,
+        periodEnd: LocalDate,
+    ): ParticipantPeriodAggregates {
         val yearStart = LocalDate.of(periodEnd.year, 1, 1)
         val ytdFrom = if (periodStart.isBefore(yearStart)) periodStart else yearStart
         if (queries.hasUnknownSettlementTime(periodEnd)) {

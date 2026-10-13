@@ -5,6 +5,7 @@
 package com.openbank.pension.integration
 
 import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
+import com.openbank.pension.application.port.out.ParticipantReportingQueries
 import com.openbank.pension.application.usecase.PayoutSettlementService
 import com.openbank.pension.application.usecase.RailSettlement
 import com.openbank.pension.infrastructure.payments.DomesticPaymentSettlementConsumer
@@ -14,7 +15,9 @@ import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
 import jakarta.inject.Inject
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.apache.kafka.common.header.internals.RecordHeader
 import org.apache.kafka.common.header.internals.RecordHeaders
@@ -30,6 +33,7 @@ import java.nio.charset.StandardCharsets
 import java.sql.Connection
 import java.sql.DriverManager
 import java.time.Instant
+import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.util.Optional
 import java.util.UUID
@@ -56,6 +60,9 @@ class ParticipantReportingApiIT {
 
     @Inject
     lateinit var settlementConsumer: DomesticPaymentSettlementConsumer
+
+    @Inject
+    lateinit var reportingQueries: ParticipantReportingQueries
 
     companion object {
         private val ids = mutableMapOf<String, UUID>()
@@ -196,6 +203,37 @@ class ParticipantReportingApiIT {
             c.transfer("F", "OUT", "80000", "2009-03-12T10:00:00Z")
         }
         seeded = true
+    }
+
+    @Test
+    fun `one participant report sees one snapshot across an independent committed contribution`(): Unit = runBlocking {
+        val from = LocalDate.parse("2024-06-01")
+        val to = LocalDate.parse("2024-06-30")
+        val contributionId = UUID.randomUUID()
+        try {
+            val (before, withinSnapshot) = reportingQueries.consistentRead { scoped ->
+                val first = scoped.contributions(from, to).participant
+                withContext(Dispatchers.IO) {
+                    jdbc { c ->
+                        c.exec(
+                            "INSERT INTO pension_contributions (id, contract_id, payment_id, source, channel, " +
+                                "amount, currency, value_date, received_at) VALUES " +
+                                "(?, ?, ?, 'PARTICIPANT', 'BANK_TRANSFER', 123, 'CZK', ?::date, now())",
+                            contributionId,
+                            ids.getValue("A"),
+                            "snapshot-$contributionId",
+                            "2024-06-15",
+                        )
+                    }
+                }
+                first to scoped.contributions(from, to).participant
+            }
+            val after = reportingQueries.consistentRead { it.contributions(from, to).participant }
+            assertThat(withinSnapshot).isEqualByComparingTo(before)
+            assertThat(after).isEqualByComparingTo(before + java.math.BigDecimal("123"))
+        } finally {
+            jdbc { it.exec("DELETE FROM pension_contributions WHERE id = ?", contributionId) }
+        }
     }
 
     @Test

@@ -26,6 +26,7 @@ class ParticipantReportingServiceTest {
 
     private class Fake(val currencies: Set<String> = setOf("CZK"), val unknownSettlementTime: Boolean = false) :
         ParticipantReportingQueries {
+        override suspend fun <T> consistentRead(block: suspend (ParticipantReportingQueries) -> T): T = block(this)
         val contributionWindows = mutableListOf<Pair<LocalDate, LocalDate>>()
         override suspend fun hasUnknownSettlementTime(to: LocalDate) = unknownSettlementTime
         override suspend fun currencies(from: LocalDate, to: LocalDate) = currencies

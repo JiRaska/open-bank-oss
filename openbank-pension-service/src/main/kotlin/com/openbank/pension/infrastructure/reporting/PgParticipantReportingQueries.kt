@@ -13,11 +13,15 @@ import com.openbank.pension.domain.reporting.PayoutTotals
 import com.openbank.pension.domain.reporting.StateContributionFigures
 import com.openbank.pension.domain.reporting.StatusBuckets
 import com.openbank.pension.domain.reporting.TransferTotals
-import com.openbank.pension.infrastructure.persistence.funding.PgFundingSupport
+import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.vertx.mutiny.sqlclient.Pool
 import io.vertx.mutiny.sqlclient.Row
+import io.vertx.mutiny.sqlclient.SqlClient
 import io.vertx.mutiny.sqlclient.Tuple
+import jakarta.inject.Inject
 import jakarta.inject.Singleton
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.OffsetDateTime
@@ -35,9 +39,52 @@ import java.time.ZoneOffset
 // One query per reported figure, and column indexes into each aggregate row.
 @Suppress("TooManyFunctions", "MagicNumber")
 @Singleton
-class PgParticipantReportingQueries(client: Pool) :
-    PgFundingSupport(client),
+class PgParticipantReportingQueries private constructor(client: SqlClient, private val pool: Pool?) :
     ParticipantReportingQueries {
+
+    private val queryClient: SqlClient = client
+
+    @Inject
+    constructor(pool: Pool) : this(pool, pool)
+
+    /**
+     * A fresh read-only REPEATABLE READ transaction and connection for each report request.
+     * Catching Throwable includes cancellation; cleanup must still release the pooled connection.
+     * A close failure escapes finally only when no earlier failure exists.
+     */
+    @Suppress("TooGenericExceptionCaught", "ThrowingExceptionFromFinally")
+    override suspend fun <T> consistentRead(block: suspend (ParticipantReportingQueries) -> T): T {
+        val connection = checkNotNull(pool) { "nested participant reporting snapshot is unsupported" }
+            .connection.awaitSuspending()
+        var failure: Throwable? = null
+        try {
+            val transaction = connection.begin().awaitSuspending()
+            try {
+                connection.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
+                    .execute().awaitSuspending()
+                val result = block(PgParticipantReportingQueries(connection, null))
+                transaction.commit().awaitSuspending()
+                return result
+            } catch (failure: Throwable) {
+                withContext(NonCancellable) {
+                    runCatching { transaction.rollback().awaitSuspending() }
+                        .exceptionOrNull()?.let(failure::addSuppressed)
+                }
+                throw failure
+            }
+        } catch (cause: Throwable) {
+            failure = cause
+            throw cause
+        } finally {
+            withContext(NonCancellable) {
+                try {
+                    connection.close().awaitSuspending()
+                } catch (closeFailure: Throwable) {
+                    if (failure != null) failure.addSuppressed(closeFailure) else throw closeFailure
+                }
+            }
+        }
+    }
 
     override suspend fun hasUnknownSettlementTime(to: LocalDate): Boolean = count(
         """
@@ -178,6 +225,9 @@ class PgParticipantReportingQueries(client: Pool) :
     }
 
     private suspend fun count(sql: String, args: Tuple): Long = rows(sql, args).single().getLong(0)
+
+    private suspend fun rows(sql: String, args: Tuple): List<Row> =
+        queryClient.preparedQuery(sql).execute(args).awaitSuspending().toList()
 
     private fun Row.money(i: Int): BigDecimal = getBigDecimal(i).setScale(MONEY_SCALE, java.math.RoundingMode.HALF_EVEN)
 
