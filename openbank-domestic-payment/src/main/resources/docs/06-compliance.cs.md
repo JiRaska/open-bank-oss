@@ -95,6 +95,8 @@ Otevření AML případu je best-effort: výpadek úložiště případů se zal
 
 Každá mutace emituje doménovou událost (`domestic.payment.created`, `domestic.payment.status-changed`), drénovanou přes transakční outbox do Kafky, kde ji `audit-service` perzistuje s tamper-evident řetězcem. To poskytuje obranu proti nepopiratelnosti iniciace platby (volající popírá iniciaci) spolu se sloupci `actor_id`, `channel`, `ip_address` a `sca_reference`.
 
+Chyby při vyhledávání v account-service již do logů nezapisují identifikátory účtů, texty výjimek z upstream služby ani stack trace. U HTTP chyb se zachovává pouze status; u ostatních pouze třída výjimky, aby operátoři rozlišili typ chyby bez zveřejnění dat požadavku či upstream služby.
+
 ## Bezpečnostní kontroly
 
 - ✅ Validace vstupu (Bean Validation; CHECK na konstantní symbol v DB)
@@ -107,3 +109,5 @@ Každá mutace emituje doménovou událost (`domestic.payment.created`, `domesti
 - ✅ Resilience: circuit breaker / retry / timeout na odchozích voláních a publikaci outboxu
 - ✅ Tajemství: dev placeholdery nutno přepsat v produkci (Vault); non-root kontejner
 - ⚠️ SCA je vynucováno výše v řetězci, ne v této službě — ověř, že `sca_reference` je vyplněn pro zákaznicky iniciované kanály (threat-model follow-up)
+
+Chyby při vyhledávání v account-service již do logů nezapisují identifikátory účtů, texty výjimek z upstream služby ani stack trace. U HTTP chyb se zachovává pouze status; u ostatních pouze třída výjimky, aby operátoři rozlišili typ chyby bez zveřejnění dat požadavku či upstream služby.
