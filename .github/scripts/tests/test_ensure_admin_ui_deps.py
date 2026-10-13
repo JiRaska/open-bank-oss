@@ -12,11 +12,7 @@ SCRIPT = Path(__file__).resolve().parents[1] / "ensure-admin-ui-deps.sh"
 
 class EnsureAdminUiDepsTests(unittest.TestCase):
     def setUp(self):
-        prefix = (
-            "gate-fixture-"
-            if self._testMethodName == "test_npm_failure_preserves_error_and_releases_lock"
-            else "gate deps 'quoted "
-        )
+        prefix = "gate deps 'quoted "
         self.temp = tempfile.TemporaryDirectory(prefix=prefix)
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
