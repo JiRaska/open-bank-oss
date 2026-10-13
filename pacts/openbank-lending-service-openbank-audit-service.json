@@ -1,0 +1,161 @@
+{
+  "consumer": {
+    "name": "openbank-lending-service"
+  },
+  "interactions": [
+    {
+      "description": "GET the evidence bundle with no caller identity is refused",
+      "providerStates": [
+        {
+          "name": "no valid caller identity is presented"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/audit/evidence/d7d7d7d7-d7d7-4d7d-8d7d-d7d7d7d7d7d7"
+      },
+      "response": {
+        "status": 401
+      }
+    },
+    {
+      "description": "GET the evidence bundle for one loan application with the caller's own bearer",
+      "providerStates": [
+        {
+          "name": "the audit chain holds evidence for the pact loan application"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Authorization": "Bearer pact-credit-risk-person"
+        },
+        "matchingRules": {
+          "header": {
+            "Authorization": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "Bearer .+"
+                }
+              ]
+            }
+          }
+        },
+        "method": "GET",
+        "path": "/api/v1/audit/evidence/d7d7d7d7-d7d7-4d7d-8d7d-d7d7d7d7d7d7"
+      },
+      "response": {
+        "body": {
+          "attestation": "audit-chain",
+          "entries": [
+            {
+              "entryId": "0b7a1c7e-0000-4000-8000-000000000001",
+              "eventType": "lending.application.submitted",
+              "hashStatus": "VERIFIED",
+              "occurredAt": "2026-09-01T10:00:00Z",
+              "payload": "{}",
+              "sourceService": "lending-service"
+            }
+          ],
+          "tampered": false,
+          "truncated": false
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.entries": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 1
+                }
+              ]
+            },
+            "$.entries[*].entryId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.entries[*].eventType": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.entries[*].hashStatus": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "VERIFIED|MISMATCH|LEGACY_UNVERIFIABLE|UNCHAINED"
+                }
+              ]
+            },
+            "$.entries[*].occurredAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "format": "yyyy-MM-dd'T'HH:mm:ss'Z'",
+                  "match": "timestamp"
+                }
+              ]
+            },
+            "$.entries[*].payload": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.entries[*].sourceService": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.tampered": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.truncated": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-audit-service"
+  }
+}

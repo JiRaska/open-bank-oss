@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.0.0](https://github.com/JiRaska/open-bank-oss/compare/communication-service-v0.3.0...communication-service-v1.0.0) (2026-10-12)
+
+
+### ⚠ BREAKING CHANGES
+
+* **communication:** Style writes now use /api/v2/personas and require basePublishedVersion. The v1 published-style read remains available.
+
+### Bug Fixes
+
+* **communication:** reject stale style publication ([#12294](https://github.com/JiRaska/open-bank-oss/issues/12294)) ([aea8ae9](https://github.com/JiRaska/open-bank-oss/commit/aea8ae95b291dcf7548f82b5482839b5747430da))
+
 ## [0.3.0](https://github.com/JiRaska/open-bank-oss/compare/communication-service-v0.2.3...communication-service-v0.3.0) (2026-10-08)
 
 

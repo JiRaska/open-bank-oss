@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.34.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.34.0...ledger-service-v1.34.1) (2026-10-12)
+
+
+### Security
+
+* **ledger:** authenticate the API by bearer only on the mTLS listener ([#12531](https://github.com/JiRaska/open-bank-oss/issues/12531)) ([1fad45c](https://github.com/JiRaska/open-bank-oss/commit/1fad45c5692b2cc342189ddc611d36c4edb7b223))
+
 ## [1.34.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.33.1...ledger-service-v1.34.0) (2026-10-11)
 
 
