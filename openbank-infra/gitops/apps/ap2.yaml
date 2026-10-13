@@ -1,6 +1,6 @@
 # ArgoCD app for openbank-ap2-service (bank-side AP2 mandate verifier, ADR-0193).
 # Deploys the platform-ns Deployment+Service from components/ap2. Tracks main.
-# Phase 1: no OPA sidecar (/ap2/verify fails closed 503), no DB, no Kafka.
+# The v2 verification route stays closed until a genuine agent is onboarded. No DB or Kafka.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:

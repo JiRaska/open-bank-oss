@@ -21,7 +21,7 @@ WHY THIS EXISTS
 
 WHY IT IS NOT LIVE TODAY, AND WHY THAT IS ABOUT TO CHANGE
 
-  `mcp-anonymous` and `ap2-anonymous` declare `model: unknown` in agents.yaml itself (ADR-0181
+  `mcp-anonymous` declares `model: unknown` in agents.yaml itself (ADR-0181
   phase 1: a single fixed principal stands in for every caller), so the two sides already agree —
   UNKNOWN_MODEL both ways is correct, not a gap. Every other id with a real model is a service this
   agent-service does not yet serve chat/MCP traffic for. So there is no live mismatch today; there

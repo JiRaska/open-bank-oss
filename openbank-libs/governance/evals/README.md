@@ -92,7 +92,7 @@ scope, and the exclusion is about what the harness can physically do — not abo
 
 | status | why it can never have a suite |
 |---|---|
-| `not-applicable` | the charter causes no model call at all (`mcp-anonymous`, `ap2-anonymous` are identity-only principals) — there is no output for a scenario to assert on |
+| `not-applicable` | the charter causes no model call at all (`mcp-anonymous` is an identity-only principal) — there is no output for a scenario to assert on |
 | `external` | a real model runs, but this repo neither authors the prompt nor makes the call (`rca-investigator` → HolmesGPT's own image; `ledger-domain-engineer` → an operator's coding-agent session). `--record` records *our* prompt against *our* call; here there is nothing to record, and asserting on someone else's output would measure their prompt while reading as coverage of ours |
 
 Before this the warning listed all 10 uncovered charters, 4 of which could never be closed — and a

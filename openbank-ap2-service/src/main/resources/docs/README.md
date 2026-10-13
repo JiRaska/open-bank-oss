@@ -8,7 +8,7 @@ The committed `src/main/resources/openapi.yaml` defines the API contract. Read `
 
 ## Production authentication
 
-`/ap2/*` requires an OIDC bearer token on both the plain HTTP listener and the
+`/api/v2/ap2/*` requires an OIDC bearer token on both the plain HTTP listener and the
 mTLS listener. A trusted client certificate authenticates only the TLS
 connection and cannot replace the bearer token. Callers using mTLS must supply
 both credentials: a trusted certificate without a bearer token receives 401,
