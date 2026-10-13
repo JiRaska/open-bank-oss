@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.43.0](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.42.2...tax-reporting-service-v0.43.0) (2026-10-13)
+
+
+### Features
+
+* **tax-reporting:** assemble the ČNB pension returns from the reporting read models ([#12468](https://github.com/JiRaska/open-bank-oss/issues/12468)) ([d7807fb](https://github.com/JiRaska/open-bank-oss/commit/d7807fbbecdf5bbc4dd1b230229ae12f8a0b1597))
+
+## [0.42.2](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.42.1...tax-reporting-service-v0.42.2) (2026-10-11)
+
+
+### Security
+
+* **tax-reporting:** keep service accounts out of statutory returns ([#12536](https://github.com/JiRaska/open-bank-oss/issues/12536)) ([b433e3e](https://github.com/JiRaska/open-bank-oss/commit/b433e3e18b96575f4800be595b5c7bdecee4517c))
+
 ## [0.42.1](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.42.0...tax-reporting-service-v0.42.1) (2026-10-11)
 
 

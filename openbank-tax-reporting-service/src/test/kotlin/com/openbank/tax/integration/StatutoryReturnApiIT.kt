@@ -49,7 +49,7 @@ class StatutoryReturnApiIT {
         }
         Given { this } When { get("$path/capability") } Then {
             statusCode(200)
-            body("dataSourceAvailable", equalTo(false))
+            body("dataSourceAvailable", equalTo(true))
             body("wireFormatAvailable", equalTo(false))
         }
         Given { this } When { get("$path/breaches") } Then {
@@ -82,13 +82,22 @@ class StatutoryReturnApiIT {
 
     @Test
     @TestSecurity(user = "operator", roles = ["ROLE_OPERATOR"])
-    fun `operator reaches assembly but unbound pension figures fail closed`() {
+    fun `operator reaches assembly but unsourced or unreachable pension figures fail closed`() {
+        // The company's own balance sheet has no source system: refused by name, never zero-filled.
         Given {
             contentType("application/json")
             body(assembleBody)
         } When { post("$path/assemble") } Then {
             statusCode(503)
-            body("error", containsString("No data source is bound"))
+            body("error", containsString("no source system"))
+        }
+        // PSP 31-04 is sourced from pension-service, which is not running in this test: 503, not 500.
+        Given {
+            contentType("application/json")
+            body("""{"catalogueId":"cz-pension-cnb","returnCode":"PSP31-04","entityId":"company","period":"2025-Q1"}""")
+        } When { post("$path/assemble") } Then {
+            statusCode(503)
+            body("error", containsString("pension-service"))
         }
     }
 }
