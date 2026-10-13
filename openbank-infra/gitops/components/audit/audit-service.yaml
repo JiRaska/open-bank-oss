@@ -31,7 +31,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes (subPath mounts do not hot-reload).
         # Kept in sync by gen-audit-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "e10801606caee586"
+        openbank.tech/policy-checksum: "ddd8bd370908fea3"
     spec:
       serviceAccountName: audit-service
       securityContext:
@@ -43,7 +43,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: audit-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-audit-service:sandbox-7599960e
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-audit-service:sandbox-c2e63ca5
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -53,19 +53,24 @@ spec:
             - name: management
               containerPort: 8085
           env:
+            # Private-CA mTLS listener for east-west callers (first: lending-service's evidence-bundle
+            # read, #11900, which carries a person's bearer token and so must not cross the cluster in
+            # plaintext — ASVS V9.1). HTTP/8113 stays for existing callers (admin-ui, security-scanner)
+            # until their own reviewed migrations; same shape as consent-service's 8443 listener.
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
               value: /mnt/internal-tls/tls.crt
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
               value: /mnt/internal-tls/tls.key
             - name: QUARKUS_HTTP_SSL_PORT
               value: "8443"
-            # Keep old callers working until the separately verified HTTPS cutover.
-            - name: QUARKUS_HTTP_INSECURE_REQUESTS
-              value: enabled
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_TRUST_STORE_FILES
+              value: /mnt/internal-tls/ca.crt
+            # MIRRORS the build-time quarkus.http.ssl.client-auth in application.yaml (%prod); this
+            # env cannot set it, it states the listener's posture so the manifest cannot disagree.
+            - name: QUARKUS_HTTP_SSL_CLIENT_AUTH
+              value: required
             - name: QUARKUS_HTTP_SSL_PROTOCOLS
               value: TLSv1.3
-            - name: QUARKUS_HTTP_SSL_CERTIFICATE_RELOAD_PERIOD
-              value: 1h
             - name: QUARKUS_DATASOURCE_JDBC_URL
               value: jdbc:postgresql://audit-db-rw.audit.svc:5432/openbank_audit
             - name: QUARKUS_DATASOURCE_REACTIVE_URL
@@ -263,6 +268,7 @@ spec:
         - name: internal-tls
           secret:
             secretName: audit-service-internal-tls
+            optional: false
         - name: tmp
           emptyDir: {}
         - name: opa-tmp

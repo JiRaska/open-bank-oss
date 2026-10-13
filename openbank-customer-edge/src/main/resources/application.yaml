@@ -258,3 +258,22 @@ opa:
   timeout-ms: "${OPA_TIMEOUT_MS:500}"
 authz:
   enforce: "${AUTHZ_ENFORCE:true}"
+
+# Named TLS material for the production JDK upstream client. Test/dev fixtures retain their
+# optional trust-only configuration. Missing production key material fails startup.
+"%prod":
+  quarkus:
+    tls:
+      upstream:
+        reload-period: 1h
+        trust-store:
+          pem:
+            certs: ${OPENBANK_UPSTREAM_TLS_TRUST_CERTIFICATE_FILE}
+        key-store:
+          pem:
+            edge:
+              cert: ${OPENBANK_UPSTREAM_TLS_CLIENT_CERTIFICATE_FILE}
+              key: ${OPENBANK_UPSTREAM_TLS_CLIENT_KEY_FILE}
+  openbank:
+    upstream:
+      tls-configuration-name: upstream
