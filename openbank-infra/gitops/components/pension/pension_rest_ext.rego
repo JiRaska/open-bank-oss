@@ -270,6 +270,15 @@ allowed_reasons contains "service-tax-reporting-participant-aggregates" if {
 	input.action == "pension.reporting.aggregate"
 }
 
+# Technical source capture/read is only for the verified tax-reporting OAuth client.
+# The local REST guard independently checks the validated JWT before any database access.
+allowed_reasons contains "service-tax-reporting-participant-snapshot" if {
+    input.principal.id == "service-account-openbank-tax-reporting"
+    input.principal.attributes.verified_client_id == "openbank-tax-reporting"
+    "ROLE_API" in input.principal.roles
+    input.action in {"pension.reporting.snapshot.capture", "pension.reporting.snapshot.read"}
+}
+
 # Participant valuation + operator mandates list (#12350, ADR-0334 final integration).
 #   pension.contract.inspect          — GET /contracts/{id}/valuation, /contracts/{id}/transactions
 #                                    (edge for the participant, staff as readers; rules above)

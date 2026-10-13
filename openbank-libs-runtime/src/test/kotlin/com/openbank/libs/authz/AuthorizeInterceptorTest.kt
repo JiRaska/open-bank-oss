@@ -98,6 +98,7 @@ class AuthorizeInterceptorTest {
         }
         every { sc.userPrincipal } returns JavaPrincipal { "user-42" }
         every { identity.principal } returns JavaPrincipal { "user-42" }
+        every { identity.isAnonymous } returns false
     }
 
     private fun makeCtx(method: Method, vararg params: Any?): InvocationContext {
@@ -213,6 +214,58 @@ class AuthorizeInterceptorTest {
         assertThat(capturedQuery).hasSize(1)
         assertThat(capturedQuery[0].principal.roles)
             .containsExactlyInAnyOrder("ROLE_OPERATOR", "ROLE_ADMIN")
+    }
+
+    @Test
+    fun `OPA query binds OAuth client to authenticated JWT rather than displayed principal name`() {
+        every { sc.userPrincipal } returns JavaPrincipal { "service-account-openbank-card-processing" }
+        every { identity.roles } returns setOf("ROLE_API")
+        val captured = mutableListOf<AuthzQuery>()
+        interceptor.pdp = mockk {
+            every { isResolvable } returns true
+            every { get() } returns object : PolicyDecisionPoint {
+                override suspend fun allow(query: AuthzQuery): AuthzDecision {
+                    captured += query
+                    return AuthzDecision(allow = true)
+                }
+            }
+        }
+
+        fun token(subjectValue: String, clientId: Any?): JsonWebToken = mockk {
+            every { subject } returns subjectValue
+            every { getClaim<Any>("azp") } returns clientId
+        }
+
+        every { identity.principal } returns token("account-42", "openbank-card-processing")
+        interceptor.authorize(makeCtx(annotatedMethod))
+        every { identity.principal } returns token("account-42", "openbank-services")
+        interceptor.authorize(makeCtx(annotatedMethod))
+        every { identity.principal } returns token("account-42", null)
+        interceptor.authorize(makeCtx(annotatedMethod))
+        every { identity.principal } returns token("account-42", "")
+        interceptor.authorize(makeCtx(annotatedMethod))
+        every { identity.principal } returns token("account-42", listOf("openbank-card-processing"))
+        interceptor.authorize(makeCtx(annotatedMethod))
+        every { identity.principal } returns token("", "openbank-card-processing")
+        interceptor.authorize(makeCtx(annotatedMethod))
+        every { identity.principal } returns JavaPrincipal { "service-account-openbank-card-processing" }
+        interceptor.authorize(makeCtx(annotatedMethod))
+        every { identity.isAnonymous } returns true
+        every { identity.principal } returns token("account-42", "openbank-card-processing")
+        interceptor.authorize(makeCtx(annotatedMethod))
+
+        assertThat(captured.map { it.principal.id }).containsOnly("service-account-openbank-card-processing")
+        assertThat(captured.map { it.principal.attributes })
+            .containsExactly(
+                mapOf("verified_client_id" to "openbank-card-processing"),
+                mapOf("verified_client_id" to "openbank-services"),
+                emptyMap<String, Any?>(),
+                emptyMap<String, Any?>(),
+                emptyMap<String, Any?>(),
+                emptyMap<String, Any?>(),
+                emptyMap<String, Any?>(),
+                emptyMap<String, Any?>(),
+            )
     }
 
     @Test
@@ -578,6 +631,7 @@ class AuthorizeInterceptorTest {
         every { sc.userPrincipal } returns JavaPrincipal { "agent:onboarding" }
         every { identity.principal } returns mockk<JsonWebToken> {
             every { subject } returns "agent:onboarding"
+            every { getClaim<String>("azp") } returns null
         }
         every { identity.roles } returns setOf("ROLE_AGENT")
         val capturedQuery = mutableListOf<AuthzQuery>()

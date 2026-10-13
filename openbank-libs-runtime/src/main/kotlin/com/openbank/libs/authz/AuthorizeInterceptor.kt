@@ -458,10 +458,15 @@ class AuthorizeInterceptor {
 
     private fun buildQuery(ctx: InvocationContext, annotation: Authorize): AuthzQuery {
         val sc = securityContext.get()
+        val authenticatedIdentity = identity.get()
+        val jwt = authenticatedIdentity.takeUnless { it.isAnonymous }?.principal as? JsonWebToken
+        val claimedClient = jwt?.takeIf { !it.subject.isNullOrBlank() }?.getClaim<Any>("azp")
+        val clientId = (claimedClient as? String)?.takeIf { it.isNotBlank() && it.length <= MAX_OAUTH_CLIENT_ID_LENGTH }
         val principal = Principal(
             id = sc.userPrincipal?.name ?: "anonymous",
-            type = principalType(sc, identity.get()),
-            roles = identity.get().roles.toList(),
+            type = principalType(sc, authenticatedIdentity),
+            roles = authenticatedIdentity.roles.toList(),
+            attributes = clientId?.let { mapOf("verified_client_id" to it) }.orEmpty(),
         )
         val resource = annotation.resource.takeIf { it.isNotEmpty() }?.let { expr ->
             extractResource(ctx, annotation, expr)
@@ -535,6 +540,7 @@ class AuthorizeInterceptor {
     }
 
     private companion object {
+        const val MAX_OAUTH_CLIENT_ID_LENGTH = 128
         const val APPROVAL_ID_HEADER = "X-Approval-Id"
         const val PENDING_APPROVAL_STATUS = 202
     }

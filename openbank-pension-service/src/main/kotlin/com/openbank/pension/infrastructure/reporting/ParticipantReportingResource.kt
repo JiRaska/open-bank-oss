@@ -8,7 +8,10 @@ import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import com.openbank.pension.application.ProviderBoundary
 import com.openbank.pension.application.port.out.ParticipantReportingQueries
+import com.openbank.pension.application.port.out.ParticipantSnapshotRepository
+import com.openbank.pension.application.port.out.ParticipantSnapshotSerializer
 import com.openbank.pension.application.usecase.ParticipantReportingService
+import com.openbank.pension.application.usecase.ParticipantSnapshotService
 import com.openbank.pension.domain.reporting.ParticipantPeriodAggregates
 import com.openbank.pension.domain.reporting.PayoutTotals
 import jakarta.annotation.security.RolesAllowed
@@ -23,6 +26,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import java.math.BigDecimal
+import java.time.Clock
 import java.time.LocalDate
 import java.time.format.DateTimeParseException
 import java.util.UUID
@@ -36,6 +40,17 @@ class ParticipantReportingBeans {
         @ConfigProperty(name = "openbank.pension.reporting.currency", defaultValue = "CZK") currency: String,
         providerBoundary: ProviderBoundary,
     ): ParticipantReportingService = ParticipantReportingService(queries, currency, providerBoundary)
+
+    @Produces
+    @ApplicationScoped
+    fun participantSnapshotService(
+        reporting: ParticipantReportingService,
+        snapshots: ParticipantSnapshotRepository,
+        serializer: ParticipantSnapshotSerializer,
+        providerBoundary: ProviderBoundary,
+        clock: Clock,
+    ): ParticipantSnapshotService =
+        ParticipantSnapshotService(reporting, snapshots, serializer, providerBoundary, clock)
 }
 
 /**

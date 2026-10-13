@@ -21,3 +21,13 @@ The production adapter is introduced with this integration, so the initial rollo
 Adds nullable `settled_at` and `settlement_event_revision` to payout instructions. Deploy the additive domestic-payment event field before upgrading the pension consumer. Historical rows are not backfilled from processing or order time; reporting refuses an unknown settlement time. The SQL file documents reconciliation and rollback, including taking a backup before removing the recorded timestamps.
 
 This draft migration follows the integration branch's V14 fund-order journal. Its number is reserved as V15 before deployment; no applied migration is renumbered.
+
+### V16 — immutable participant aggregate source snapshots
+
+Adds aggregate-only technical source snapshots and successful capture command receipts. The
+captured JSON bytes and SHA-256 are immutable; correction is a new revision, while a retry with
+the same actor-scoped key returns the original receipt. This does not establish a legal or
+business close or a source-specific retention period. Deploy schema before the capture API.
+Before any write, the objects can be dropped for rollback. After capture, keep the append-only
+evidence and roll back application readers/writers only; deletion needs a separately reviewed
+retention and reconciliation procedure. No historical source revision is fabricated.
