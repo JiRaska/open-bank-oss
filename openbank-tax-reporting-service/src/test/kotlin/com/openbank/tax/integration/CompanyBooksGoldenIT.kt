@@ -144,13 +144,18 @@ class CompanyLedgerStub : QuarkusTestResourceLifecycleManager {
         val requests = CopyOnWriteArrayList<String>()
 
         private val PORTFOLIO = """
-            {"asOf":"2025-03-31","currency":"CZK","positions":[
+            {"entity":"company","asOf":"2025-03-31","currency":"CZK","positions":[
               {"instrumentClass":"GOVERNMENT_BOND","isin":"CZ0001005037","quantity":"1000",
-               "valuation":"1012345.67","valuationCurrency":"CZK"},
+               "valuation":"1012345.67","valuationCurrency":"CZK","quantityBasis":"FACE_AMOUNT"},
               {"instrumentClass":"GOVERNMENT_BOND","isin":"CZ0001004600","quantity":"500",
-               "valuation":"498765.43","valuationCurrency":"CZK"},
+               "valuation":"498765.43","valuationCurrency":"CZK","quantityBasis":"FACE_AMOUNT"},
               {"instrumentClass":"EQUITY","isin":"CZ0008019106","quantity":"2500",
-               "valuation":"2412500.00","valuationCurrency":"CZK"}
+               "valuation":"2412500.00","valuationCurrency":"CZK","quantityBasis":"UNIT"}
+            ],"sourceStatements":[
+              {"safekeepingAccount":"PSCO-OWN-0001","statementUuid":"00000000-0000-4000-8000-000000000001",
+               "statementId":"CUST-PS-20250331","version":1},
+              {"safekeepingAccount":"PSCO-OWN-0002","statementUuid":"00000000-0000-4000-8000-000000000002",
+               "statementId":"CUST-PS-20250331","version":1}
             ]}
         """.trimIndent()
     }

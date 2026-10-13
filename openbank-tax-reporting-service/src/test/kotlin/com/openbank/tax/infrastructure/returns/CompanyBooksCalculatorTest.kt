@@ -89,6 +89,18 @@ class CompanyBooksCalculatorTest {
     }
 
     @Test
+    fun `a balanced trial balance for a different period is refused`() {
+        val wrongPeriod = FrozenTrialBalanceSource { type, date ->
+            val tb = ledger.frozen(type, date)
+            if (type == "MONTH" && date.monthValue == 2) tb.copy(period = "MONTH:2025-01") else tb
+        }
+
+        assertThatThrownBy { figures("2025-03-31", wrongPeriod) }
+            .isInstanceOf(ReturnDataUnavailableException::class.java)
+            .hasMessageContaining("does not match requested period MONTH:2025-02")
+    }
+
+    @Test
     fun `books opened inside the reported year sum only the months since opening`() {
         val f = figures("2025-03-31", opened = "2025-02-01")
         assertThat(requested).containsExactly("MONTH 2025-02-01", "MONTH 2025-03-01")
