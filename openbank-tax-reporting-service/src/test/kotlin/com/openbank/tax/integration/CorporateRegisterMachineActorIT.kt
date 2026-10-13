@@ -15,6 +15,7 @@ import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
 import org.hamcrest.Matchers.containsString
+import org.junit.jupiter.api.Assertions.assertAll
 import org.junit.jupiter.api.Test
 
 /**
@@ -23,7 +24,9 @@ import org.junit.jupiter.api.Test
  * `service-account-openbank-services` holds ROLE_OPERATOR in some realms, so `@RolesAllowed` alone
  * let a machine propose a figure, or approve/reject one as the four-eyes checker.
  * The status codes discriminate: past authorisation, propose answers 201 and approve/reject of an
- * absent entry answer 404 — only 403 means the caller was refused.
+ * absent entry answer 404 — only 403 means the caller was refused. Both inspection routes also
+ * refuse those machine claims before returning any figures or their audit trail, including when
+ * the principal is a UUID and OPA is advisory.
  */
 @QuarkusTest
 @QuarkusTestResource(
@@ -37,7 +40,7 @@ class CorporateRegisterMachineActorIT {
     private val proposeBody = """{"entityId":"company","fact":"SHARE_CAPITAL","value":1000,
         "effectiveFrom":"2009-01-01","reason":"annual update","evidence":"minutes"}"""
 
-    private fun assertEveryChangeRouteRefused() {
+    private fun assertEveryRegisterRouteRefused() {
         Given {
             contentType("application/json")
             body(proposeBody)
@@ -47,6 +50,25 @@ class CorporateRegisterMachineActorIT {
         }
         Given { contentType("application/json") } When { post("$path/$absentId/approve") } Then { statusCode(403) }
         Given { contentType("application/json") } When { post("$path/$absentId/reject") } Then { statusCode(403) }
+        assertAll(
+            "both corporate-register inspection routes refuse machines independently",
+            {
+                Given { queryParam("entityId", "company") } When { get(path) } Then {
+                    statusCode(403)
+                    body("error", containsString("service account"))
+                }
+            },
+            {
+                Given {
+                    queryParam("entityId", "company")
+                    queryParam("periodStart", "2009-01-01")
+                    queryParam("periodEnd", "2009-12-31")
+                } When { get("$path/effective") } Then {
+                    statusCode(403)
+                    body("error", containsString("service account"))
+                }
+            },
+        )
     }
 
     @Test
@@ -57,8 +79,8 @@ class CorporateRegisterMachineActorIT {
             Claim(key = "preferred_username", value = "service-account-openbank-services"),
         ],
     )
-    fun `shared service account with ROLE_OPERATOR cannot propose, approve or reject`() {
-        assertEveryChangeRouteRefused()
+    fun `shared service account with ROLE_OPERATOR cannot read, propose, approve or reject`() {
+        assertEveryRegisterRouteRefused()
     }
 
     @Test
@@ -71,7 +93,7 @@ class CorporateRegisterMachineActorIT {
         ],
     )
     fun `a service-account token is refused even when its principal name is not the username`() {
-        assertEveryChangeRouteRefused()
+        assertEveryRegisterRouteRefused()
     }
 
     @Test
@@ -83,7 +105,7 @@ class CorporateRegisterMachineActorIT {
         ],
     )
     fun `a client_credentials token is refused by its client_id claim alone`() {
-        assertEveryChangeRouteRefused()
+        assertEveryRegisterRouteRefused()
     }
 
     @Test
@@ -94,12 +116,18 @@ class CorporateRegisterMachineActorIT {
             Claim(key = "preferred_username", value = "operator"),
         ],
     )
-    fun `a human operator still reaches the change routes`() {
+    fun `a human operator still reaches the read and change routes`() {
         Given {
             contentType("application/json")
             body(proposeBody)
         } When { post(path) } Then { statusCode(201) }
         Given { contentType("application/json") } When { post("$path/$absentId/approve") } Then { statusCode(404) }
         Given { contentType("application/json") } When { post("$path/$absentId/reject") } Then { statusCode(404) }
+        Given { queryParam("entityId", "company") } When { get(path) } Then { statusCode(200) }
+        Given {
+            queryParam("entityId", "company")
+            queryParam("periodStart", "2009-01-01")
+            queryParam("periodEnd", "2009-12-31")
+        } When { get("$path/effective") } Then { statusCode(200) }
     }
 }
