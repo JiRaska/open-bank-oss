@@ -35,6 +35,13 @@ let server: https.Server
 const target = 'https://treasury-service.treasury-pension-co.svc:8443/api/example?x=1'
 const call = () => fetchCompanyTreasury(target, { method: 'POST', headers: new Headers({ authorization: 'Bearer test-token', 'idempotency-key': 'retry-1' }), body: new TextEncoder().encode('payload').buffer, signal: new AbortController().signal })
 function openssl(...args: string[]) { execFileSync('openssl', args, { cwd: fixture.directory, stdio: 'ignore' }) }
+function encodeResponse(encoding: string, payload: Buffer): Buffer {
+  if (encoding === 'gzip') return gzipSync(payload)
+  if (encoding === 'br') return brotliCompressSync(payload)
+  if (encoding === 'deflate') return deflateSync(payload)
+  if (encoding === 'identity') return payload
+  throw new Error(`Unsupported test response encoding: ${encoding}`)
+}
 beforeAll(async () => {
   fixture.directory = fs.mkdtempSync(join(tmpdir(), 'ob-treasury-mtls-'))
   openssl('req','-x509','-newkey','rsa:2048','-nodes','-keyout','ca.key','-out','ca.crt','-days','1','-subj','/CN=ephemeral-test-ca')
@@ -49,9 +56,9 @@ beforeAll(async () => {
     let body = ''; req.on('data', data => { body += data }); req.on('end', () => {
       const encoding = req.url?.split('/compressed/')[1]
       if (encoding) {
-        const encode = { gzip: gzipSync, br: brotliCompressSync, deflate: deflateSync }[encoding]
+        const payload = Buffer.from('{"ok":true}')
         res.writeHead(200, {'content-type':'application/json', 'content-encoding':encoding})
-        res.end(encode!(Buffer.from('{"ok":true}'))); return
+        res.end(encodeResponse(encoding, payload)); return
       }
       if (req.url === '/no-content') { res.writeHead(204); res.end(); return }
       if (req.url === '/abort') { res.writeHead(200); res.flushHeaders(); return }
@@ -94,8 +101,8 @@ it('does not accept caller-selected hosts, plaintext or configured alternate tar
   try { expect(() => discoveredBaseUrl('treasury-pension-co', 'treasury-pension-co',8160)).toThrow('Invalid company treasury target') } finally { delete process.env.PENSION_COMPANY_TREASURY_URL }
 })
 
-it('decodes compressed responses without forwarding stale encoding or length', async () => {
-  for (const encoding of ['gzip','br','deflate']) {
+it('decodes compressed and identity responses without forwarding stale encoding or length', async () => {
+  for (const encoding of ['gzip','br','deflate','identity']) {
     const response = await fetchCompanyTreasury(`https://treasury-service.treasury-pension-co.svc:8443/compressed/${encoding}`, {method:'GET',headers:new Headers(),signal:new AbortController().signal})
     expect(await response.json()).toEqual({ok:true})
     expect(response.headers.has('content-encoding')).toBe(false)
