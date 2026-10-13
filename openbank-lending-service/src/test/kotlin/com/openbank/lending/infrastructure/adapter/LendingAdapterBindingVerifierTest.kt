@@ -21,6 +21,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatCode
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
+import java.lang.ref.Reference
 import java.util.UUID
 
 /** Stands in for a real, wired adapter: the name must not match the `NoOp`/`Logging` prefixes. */
@@ -179,7 +180,7 @@ class LendingAdapterBindingVerifierTest {
     @Test
     fun `publishes a gauge naming which implementation is bound, per property`() {
         val meters = SimpleMeterRegistry()
-        verifier(
+        val bindingVerifier = verifier(
             ledger = RestStubLedgerPort(),
             credit = NoOpBorrowerCreditPort(),
             events = JpaStubLoanEventEmitter(),
@@ -188,16 +189,22 @@ class LendingAdapterBindingVerifierTest {
             meters = meters,
         )
 
-        val gauges = meters.find("openbank_lending_adapter_real_backend_bound").gauges()
-        assertThat(gauges).hasSize(4) // ledger, borrower-credit, outbox, and the workflow port (#6085)
+        // Micrometer holds gauge values weakly; the CDI owner remains alive in production.
+        // Retain that same ownership until every assertion completes.
+        try {
+            val gauges = meters.find("openbank_lending_adapter_real_backend_bound").gauges()
+            assertThat(gauges).hasSize(4) // ledger, borrower-credit, outbox, and the workflow port (#6085)
 
-        val ledgerGauge = gauges.single { it.id.getTag("property") == "lending.ledger.backend" }
-        assertThat(ledgerGauge.value()).isEqualTo(1.0)
-        assertThat(ledgerGauge.id.getTag("implementation")).isEqualTo("RestStubLedgerPort")
+            val ledgerGauge = gauges.single { it.id.getTag("property") == "lending.ledger.backend" }
+            assertThat(ledgerGauge.value()).isEqualTo(1.0)
+            assertThat(ledgerGauge.id.getTag("implementation")).isEqualTo("RestStubLedgerPort")
 
-        val creditGauge = gauges.single { it.id.getTag("property") == "lending.borrower-credit.backend" }
-        assertThat(creditGauge.value()).isEqualTo(0.0)
-        assertThat(creditGauge.id.getTag("implementation")).isEqualTo("NoOpBorrowerCreditPort")
+            val creditGauge = gauges.single { it.id.getTag("property") == "lending.borrower-credit.backend" }
+            assertThat(creditGauge.value()).isEqualTo(0.0)
+            assertThat(creditGauge.id.getTag("implementation")).isEqualTo("NoOpBorrowerCreditPort")
+        } finally {
+            Reference.reachabilityFence(bindingVerifier)
+        }
     }
 
     // --- #6085: the same mechanism on openbank.temporal.enabled ---------------------------------
