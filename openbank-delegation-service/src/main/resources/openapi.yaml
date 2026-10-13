@@ -10,7 +10,8 @@ info:
   # 1.24 -> 1.25 (#9430): additive — approval-group management routes, preview scaReference and
   # approval-group snapshot fields; N_OF_M is admitted behind openbank.delegation.n-of-m-enabled
   # (default false) for SAVINGS_GOAL + SAVINGS_PROPOSE_WITHDRAW only.
-  version: 1.25.0
+  # 1.25 -> 1.26 (#12693): correct the owner portfolio path parameter name in the document.
+  version: 1.26.0
 servers:
   - url: http://localhost:8126
 tags:
@@ -94,7 +95,7 @@ paths:
       tags: [Delegation portfolios]
       summary: List portfolios of the active profile
       parameters:
-        - $ref: '#/components/parameters/PartyId'
+        - $ref: '#/components/parameters/OwnerPartyId'
         - $ref: '#/components/parameters/CustomerPartyId'
       responses:
         '200':
@@ -1089,6 +1090,11 @@ components:
       schema: { type: string, format: uuid }
     PartyId:
       name: partyId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    OwnerPartyId:
+      name: ownerPartyId
       in: path
       required: true
       schema: { type: string, format: uuid }
