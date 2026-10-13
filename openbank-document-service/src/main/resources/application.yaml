@@ -308,10 +308,16 @@ authz:
       # listeners, by the OIDC bearer OPA decides on, so /api/* accepts the bearer mechanism ONLY; the
       # certificate stays transport authentication. Measured before this: a fleet-CA certificate with no
       # bearer reached the API as an authenticated principal (403 from authz, not 401).
-      # DocumentListenerAuthParityIT holds both listeners to it with the production listener shape.
+      # Require authentication at the path boundary as well: `permit` bypasses the mechanism for
+      # an unannotated route even though annotated methods pass the listener parity checks.
+      # DocumentListenerAuthParityIT probes both annotated and unannotated routes over real TLS.
       auth:
         permission:
           bearer-only:
             paths: /api/*
-            policy: permit
+            policy: authenticated
             auth-mechanism: bearer
+          public-metadata:
+            paths: /api/v1/info,/api/v1/config
+            methods: GET
+            policy: permit
