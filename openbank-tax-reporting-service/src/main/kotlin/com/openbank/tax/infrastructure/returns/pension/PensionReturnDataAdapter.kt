@@ -125,6 +125,37 @@ class PensionReturnDataAdapter(private val sources: PensionReportingSources) : R
             return mapOf("holdings_carrying_value" to value, "holdings_count" to BigDecimal(count))
         }
 
+        private fun profitAndLoss(code: String, entityId: String, f: FundPeriodFiguresDto): Map<String, BigDecimal> {
+            val pl = f.profitAndLossYtd
+            val gains = pl.revaluationGains
+            val losses = pl.revaluationLosses
+            val other = pl.otherInvestmentResult
+            if (gains == null || losses == null || other == null) {
+                throw ReturnDataUnavailableException(
+                    "$code: fund $entityId P&L lines are unknown — ${pl.linesUnavailableReason ?: "not reported"}",
+                )
+            }
+            return mapOf(
+                "revaluation_gains_ytd" to gains,
+                "revaluation_losses_ytd" to losses,
+                "other_investment_result_ytd" to other,
+                "management_fees_ytd" to pl.managementFees,
+                "profit_loss_ytd" to pl.profitLoss,
+            )
+        }
+
+        private fun loans(code: String, entityId: String, f: FundPeriodFiguresDto): Map<String, BigDecimal> {
+            val loans = f.portfolio.loansOutstanding ?: throw ReturnDataUnavailableException(
+                when (val n = f.portfolio.unclassifiedCount) {
+                    null -> "$code: the closing NAV for fund $entityId predates position recording — loans unknown"
+                    else ->
+                        "$code: $n closing position(s) of fund $entityId are UNCLASSIFIED and may be loans — " +
+                            "classify them (four-eyes) in pension-fund-service"
+                },
+            )
+            return mapOf("loans_outstanding" to loans)
+        }
+
         /** Fund-scoped returns: return code -> datapoints taken from pension-fund-service's period figures. */
         private val FUND_RETURNS: Map<
             String,
@@ -136,13 +167,8 @@ class PensionReturnDataAdapter(private val sources: PensionReportingSources) : R
             > = mapOf(
             "PSP10-12-FUND" to { _, _, f -> balanceSheet(f) },
             "PEF12-04-FUND" to { _, _, f -> balanceSheet(f) },
-            "PSP20-12-FUND" to { _, _, f ->
-                mapOf(
-                    "income_ytd" to f.profitAndLossYtd.income,
-                    "expenses_ytd" to f.profitAndLossYtd.expenses,
-                    "profit_loss_ytd" to f.profitAndLossYtd.profitLoss,
-                )
-            },
+            "PSP20-12-FUND" to ::profitAndLoss,
+            "PEF13-04" to ::loans,
             "PSP30-12" to { _, _, f ->
                 mapOf(
                     "units_opening" to f.units.opening,
@@ -175,7 +201,7 @@ class PensionReturnDataAdapter(private val sources: PensionReportingSources) : R
          * Returns no service in this platform owns the figures for. The company's OWN balance
          * sheet, P&L, own portfolio, capital, organisation and dividends live in its accounting
          * system, not in either pension service (fund assets are segregated from the company's by
-         * law, ADR-0334 §1); a fund's loans are not modelled at all.
+         * law, ADR-0334 §1).
          */
         val UNSOURCED: Map<String, String> = mapOf(
             "PSP10-12-PS" to "the pension company's own balance sheet has no source system in this platform",
@@ -185,7 +211,6 @@ class PensionReturnDataAdapter(private val sources: PensionReportingSources) : R
             "PSP32-04" to "regulatory capital and its requirement have no source system in this platform",
             "PSP50-04" to "share capital, headcount and qualifying holders have no source system in this platform",
             "PSP40-01" to "dividend_paid_or_planned has no source system in this platform",
-            "PEF13-04" to "fund loans are not modelled by pension-fund-service",
         )
 
         /** First day of the period [period] closes; YTD figures are computed by the providers. */
