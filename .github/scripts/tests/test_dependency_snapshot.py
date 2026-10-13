@@ -172,6 +172,7 @@ class RunnerTests(unittest.TestCase):
                     self.assertEqual(timeouts, [240, 10] if case == 'budget-truncated' else [240, 180])
                     self.assertTrue((output / 'merged.json').is_file())
                     self.assertTrue(all('--continue' not in cmd for cmd in calls))
+                    self.assertTrue(all('--stacktrace' in cmd for cmd in calls))
                     self.assertTrue(all('--configure-on-demand' in cmd for cmd in calls))
                     self.assertTrue(all('--no-configure-on-demand' not in cmd for cmd in calls))
                 else:

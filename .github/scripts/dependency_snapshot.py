@@ -222,7 +222,7 @@ def generate(repo, output, env, extra_arguments=()):
         # configuration can select it. The graph plugin still captures the
         # resolved configurations and writes the snapshot after a successful build.
         command = ['./gradlew', '--init-script', str(repo / '.github/scripts/dependency-resolution-strict.init.gradle'),
-                   '--no-daemon', '--no-configuration-cache', '--configure-on-demand',
+                   '--no-daemon', '--no-configuration-cache', '--configure-on-demand', '--stacktrace',
                    '--max-workers=2', '-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g',
                    *extra_arguments, *tasks]
         started = time.monotonic()
