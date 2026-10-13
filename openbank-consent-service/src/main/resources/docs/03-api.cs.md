@@ -4,6 +4,14 @@ Endpointy souhlasů a potlačení komunikace jsou pod `/api/v1/consents` a `/api
 
 > **Stav kontraktu:** se službou se dodává `openapi.yaml`, který je ovšem aktuálně **částečně zastaralý** oproti implementovanému resourcu (předchází SCA-gated životnímu cyklu — např. ukazuje `expiresAt`/`accountIds` a status `PENDING`, zatímco kód používá `validTo`/`accountIbans` a `PENDING_SCA` a vystavuje `/activate` a `/reject`). Popisy níže jsou **odvozeny z reálného `ConsentResource.kt`** a jsou autoritativní; sladění `openapi.yaml` s tímto stavem je evidovaný follow-up.
 
+## Autentizace na produkčních listenerech
+
+`/api/*` vyžaduje OIDC bearer token na běžném HTTP listeneru i na mTLS listeneru.
+Důvěryhodný klientský certifikát ověřuje pouze TLS spojení; volající přes mTLS
+musí poslat i bearer token. Požadavek s důvěryhodným certifikátem bez bearer tokenu
+vrací 401. Bez důvěryhodného certifikátu selže TLS handshake ještě před HTTP.
+Role endpointů, rozhodnutí OPA a požadavky SCA pro aktivaci souhlasu platí i nadále.
+
 ## Endpointy
 
 | Metoda | Cesta | Účel | Úspěch |

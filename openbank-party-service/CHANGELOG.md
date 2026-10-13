@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.3](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.25.2...party-service-v0.25.3) (2026-10-12)
+
+
+### Security
+
+* **party:** authenticate the API by bearer only on the mTLS listener ([#12533](https://github.com/JiRaska/open-bank-oss/issues/12533)) ([572f579](https://github.com/JiRaska/open-bank-oss/commit/572f579bfbea13e1354bb3395c487d62d23961e6))
+
 ## [0.25.2](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.25.1...party-service-v0.25.2) (2026-10-07)
 
 
