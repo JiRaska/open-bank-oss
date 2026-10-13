@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Generates ap2-opa-bundle.yaml (the ConfigMap ArgoCD applies) for openbank-ap2-service
-# (ADR-0193 phase 2). The AP2 verifier authorizes /ap2/verify through the SHARED ADR-0034 PDP —
+# (ADR-0193 phase 2). The AP2 verifier authorizes /api/v2/ap2/verify through the SHARED ADR-0034 PDP —
 # it queries data.openbank.rest.allow, which bridges an AI_AGENT capability to the
-# mcp-anonymous charter in agents.rego. So this bundle embeds the full shared policy set
+# onboarded agent charter in agents.rego. So this bundle embeds the full shared policy set
 # (rest.rego + agents.rego + agents.yaml + rules.yaml + manifest), same as a standard service;
 # unlike agent-service it needs no service-local REST extension (the MCP capabilities are
 # charter-matched directly, not mapped through rest_domains).

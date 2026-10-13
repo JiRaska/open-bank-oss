@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: statement-service
     app.kubernetes.io/part-of: statements
   annotations:
-    openbank.tech/policy-checksum: "59f5a8c5cfc75983"
+    openbank.tech/policy-checksum: "f5e2d5d45c6741ca"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1002,15 +1002,6 @@ data:
         - query.transaction.readonly
         - query.consent.readonly
         - propose.payment
-        deny:
-        - money.*
-        - gh.pr.*
-        - '*.write'
-        - secrets.read.raw
-    - id: ap2-anonymous
-      tools:
-        allow:
-        - verify.mandate
         deny:
         - money.*
         - gh.pr.*

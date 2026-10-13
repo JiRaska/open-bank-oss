@@ -17,13 +17,24 @@
 #
 # Usage (point at the live sandbox service; port-forward in another shell):
 #   kubectl port-forward -n platform svc/ap2-service 8151:8151
-#   AP2_URL=http://localhost:8151 python3 ap2-mandate-demo.py
+#   AP2_BEARER_TOKEN=<onboarded-agent-token> AP2_URL=http://localhost:8151 python3 ap2-mandate-demo.py
 #   python3 ap2-mandate-demo.py --print-trust     # emit the AP2_TRUST_LIST value to configure
 #
 #   HITL threshold (minor units) is configurable:  HITL_THRESHOLD_MINOR=50000 python3 ap2-mandate-demo.py
 #
 # Requires: cryptography (pip install cryptography).
-import base64, json, os, sys, urllib.request, urllib.error
+import base64
+import json
+import os
+import sys
+import urllib.error
+import urllib.request
+
+if "--print-trust" not in sys.argv and not os.environ.get("AP2_BEARER_TOKEN"):
+    print("AP2 is closed until a real agent is onboarded with a signed charter and OAuth token.", file=sys.stderr)
+    print("Set AP2_BEARER_TOKEN after onboarding; the old anonymous demo identity is retired.", file=sys.stderr)
+    sys.exit(2)
+
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
@@ -32,6 +43,7 @@ KEY = Ed25519PrivateKey.from_private_bytes(DEMO_SEED)
 DEMO_SPKI_B64 = base64.b64encode(KEY.public_key().public_bytes(Encoding.DER, PublicFormat.SubjectPublicKeyInfo)).decode()
 AP2_URL = os.environ.get("AP2_URL", "http://localhost:8151").rstrip("/")
 HITL_THRESHOLD_MINOR = int(os.environ.get("HITL_THRESHOLD_MINOR", "50000"))  # >500.00 CZK needs a human
+AP2_BEARER_TOKEN = os.environ.get("AP2_BEARER_TOKEN", "")
 
 ISSUER, PAYEE, CURRENCY = "demo-issuer", "CZ6508000000192000145399", "CZK"
 CAP_MINOR = 100_000            # mandate authorises up to 1000.00 CZK
@@ -61,8 +73,8 @@ def verify(si: str, sig: str, amount_minor: int) -> dict | None:
                     "signingInput": si, "signatureB64": sig, "algorithm": "ED25519"},
         "payment": {"payee": PAYEE, "amountMinor": amount_minor, "currency": CURRENCY, "at": "2026-06-01T00:00:00Z"},
     }
-    req = urllib.request.Request(f"{AP2_URL}/ap2/verify", data=json.dumps(body).encode(),
-                                 headers={"Content-Type": "application/json", "X-Agent-Id": "agent:ap2-anonymous"})
+    req = urllib.request.Request(f"{AP2_URL}/api/v2/ap2/verify", data=json.dumps(body).encode(),
+                                 headers={"Content-Type": "application/json", "Authorization": f"Bearer {AP2_BEARER_TOKEN}"})
     try:
         with urllib.request.urlopen(req, timeout=10) as r:
             v = json.load(r)

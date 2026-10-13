@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: card-issuance-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "6601d0c9f07e67b4"
+    openbank.tech/policy-checksum: "077275e1030f3351"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -988,15 +988,6 @@ data:
         - query.transaction.readonly
         - query.consent.readonly
         - propose.payment
-        deny:
-        - money.*
-        - gh.pr.*
-        - '*.write'
-        - secrets.read.raw
-    - id: ap2-anonymous
-      tools:
-        allow:
-        - verify.mandate
         deny:
         - money.*
         - gh.pr.*

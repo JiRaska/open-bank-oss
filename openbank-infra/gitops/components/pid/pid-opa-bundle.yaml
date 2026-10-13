@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: pid-service
     app.kubernetes.io/part-of: pid
   annotations:
-    openbank.tech/policy-checksum: "925f1a55c8822f00"
+    openbank.tech/policy-checksum: "289f364488fafb9d"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -998,15 +998,6 @@ data:
         - query.transaction.readonly
         - query.consent.readonly
         - propose.payment
-        deny:
-        - money.*
-        - gh.pr.*
-        - '*.write'
-        - secrets.read.raw
-    - id: ap2-anonymous
-      tools:
-        allow:
-        - verify.mandate
         deny:
         - money.*
         - gh.pr.*

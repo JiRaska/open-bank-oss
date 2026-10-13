@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: case-coordinator-agent
     app.kubernetes.io/part-of: platform
   annotations:
-    openbank.tech/policy-checksum: "63d5776454f98f0a"
+    openbank.tech/policy-checksum: "619697e491cd5bea"
 data:
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -298,15 +298,6 @@ data:
         - query.transaction.readonly
         - query.consent.readonly
         - propose.payment
-        deny:
-        - money.*
-        - gh.pr.*
-        - '*.write'
-        - secrets.read.raw
-    - id: ap2-anonymous
-      tools:
-        allow:
-        - verify.mandate
         deny:
         - money.*
         - gh.pr.*

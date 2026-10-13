@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: mcp-service
     app.kubernetes.io/part-of: platform
   annotations:
-    openbank.tech/policy-checksum: "81cf503ad32fd3f5"
+    openbank.tech/policy-checksum: "00a4de8772ecdab2"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -898,15 +898,6 @@ data:
         - query.transaction.readonly
         - query.consent.readonly
         - propose.payment
-        deny:
-        - money.*
-        - gh.pr.*
-        - '*.write'
-        - secrets.read.raw
-    - id: ap2-anonymous
-      tools:
-        allow:
-        - verify.mandate
         deny:
         - money.*
         - gh.pr.*

@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: vop-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "d46b8ac4481b1a62"
+    openbank.tech/policy-checksum: "3eed7074e5ac2f2d"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -970,15 +970,6 @@ data:
         - query.transaction.readonly
         - query.consent.readonly
         - propose.payment
-        deny:
-        - money.*
-        - gh.pr.*
-        - '*.write'
-        - secrets.read.raw
-    - id: ap2-anonymous
-      tools:
-        allow:
-        - verify.mandate
         deny:
         - money.*
         - gh.pr.*

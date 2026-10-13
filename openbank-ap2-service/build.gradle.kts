@@ -28,9 +28,11 @@ dependencies {
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
     testImplementation(libs.quarkus.junit5)
+    testImplementation(libs.quarkus.test.security.oidc)
     // ListenerAuthParity kit (#12511): production listener shape over real TLS.
     testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.assertj)
+    testImplementation(libs.mockk)
     // Ap2ApiContractTest drives the real endpoint and compares the wire JSON against the committed
     // openapi.yaml, which it PARSES rather than greps. jackson-dataformat-yaml carries no version:
     // it is managed by the enforcedPlatform(quarkus.bom) above (testImplementation extends

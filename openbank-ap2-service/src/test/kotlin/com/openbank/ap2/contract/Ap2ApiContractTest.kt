@@ -8,6 +8,9 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.dataformat.yaml.YAMLMapper
 import io.quarkus.arc.Arc
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
 import jakarta.ws.rs.DELETE
@@ -19,6 +22,7 @@ import jakarta.ws.rs.POST
 import jakarta.ws.rs.PUT
 import jakarta.ws.rs.Path
 import org.assertj.core.api.Assertions.assertThat
+import org.eclipse.microprofile.config.ConfigProvider
 import org.junit.jupiter.api.Test
 import java.io.File
 import java.lang.reflect.Method
@@ -60,7 +64,7 @@ import jakarta.enterprise.inject.Any as CdiAny
  *   with what the endpoint really emits, and each declared property's JSON type is checked against
  *   the live value.
  *
- * `servers:` is resolved before comparing. ap2 declares none, so `/ap2/verify` is the literal served
+ * `servers:` is resolved before comparing. ap2 declares none, so `/api/v2/ap2/verify` is the literal served
  * path — but the resolution is done explicitly rather than assumed, because reading `paths:` alone is
  * exactly how copilot's spec was misread as broken when its `servers: [- url: /api/v1]` made it
  * correct.
@@ -82,16 +86,41 @@ import jakarta.enterprise.inject.Any as CdiAny
  * in-process; this test covers the wire format.
  */
 @QuarkusTest
+@TestSecurity(user = "agent:contract-test")
+@OidcSecurity(claims = [Claim(key = "sub", value = "agent:contract-test")])
 class Ap2ApiContractTest {
 
     private val spec: JsonNode = YAMLMapper().readTree(File(SPEC_PATH))
 
     private val verifyPost: JsonNode
-        get() = spec.at("/paths/~1ap2~1verify/post").also {
+        get() = spec.at("/paths/~1api~1v2~1ap2~1verify/post").also {
             assertThat(it.isMissingNode)
-                .describedAs("%s must declare POST /ap2/verify", SPEC_PATH)
+                .describedAs("%s must declare POST /api/v2/ap2/verify", SPEC_PATH)
                 .isFalse()
         }
+
+    @Test
+    fun `running OpenAPI advertises the committed v2 contract`() {
+        val managementPort = ConfigProvider.getConfig().getValue(
+            "quarkus.management.test-port",
+            Int::class.javaObjectType,
+        )
+        val served = YAMLMapper().readTree(
+            given().port(managementPort).accept(ContentType.JSON)
+                .get("/q/openapi?format=json").then().statusCode(200).extract().asString(),
+        )
+        assertThat(served.at("/info/version").asText()).isEqualTo(spec.at("/info/version").asText())
+        assertThat(served.at("/paths/~1api~1v2~1ap2~1verify/post").isMissingNode).isFalse()
+        assertThat(served.at("/paths/~1ap2~1verify").isMissingNode).isTrue()
+    }
+
+    @Test
+    fun `the published verify contract requires an agent bearer`() {
+        assertThat(spec.at("/components/securitySchemes/agentBearer/type").asText()).isEqualTo("http")
+        assertThat(spec.at("/components/securitySchemes/agentBearer/scheme").asText()).isEqualTo("bearer")
+        assertThat(verifyPost.at("/security/0/agentBearer").isMissingNode).isFalse()
+        assertThat(verifyPost.at("/responses/401").isMissingNode).isFalse()
+    }
 
     // ---------------------------------------------------------------- operations, both directions
 
@@ -194,7 +223,6 @@ class Ap2ApiContractTest {
         // verdict rendered over an absent mandate.
         val status = given()
             .contentType(ContentType.JSON)
-            .header(AGENT_HEADER, AGENT_ID)
             .body(mapOf("payment" to payment))
             .post(VERIFY_PATH)
             .then().extract().statusCode()
@@ -274,7 +302,6 @@ class Ap2ApiContractTest {
 
     private fun postVerify(path: String, kind: String, algorithm: String = "ED25519") = given()
         .contentType(ContentType.JSON)
-        .header(AGENT_HEADER, AGENT_ID)
         .body(mapOf("mandate" to mandate(kind, algorithm), "payment" to payment))
         .post(path)
 
@@ -305,9 +332,7 @@ class Ap2ApiContractTest {
     private companion object {
         const val SPEC_PATH = "src/main/resources/openapi.yaml"
         const val SERVICE_PACKAGE = "com.openbank.ap2."
-        const val VERIFY_PATH = "/ap2/verify"
-        const val AGENT_HEADER = "X-Agent-Id"
-        const val AGENT_ID = "agent:contract-test"
+        const val VERIFY_PATH = "/api/v2/ap2/verify"
         const val PAYEE = "CZ6508000000192000145399"
         val HTTP_METHODS = setOf("GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS")
     }
