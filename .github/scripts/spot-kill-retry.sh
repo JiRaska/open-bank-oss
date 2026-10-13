@@ -180,7 +180,7 @@ jobs_query() { # jobs_query <jq>
 # Return 10 for a stale/previously rerun PR (a completed decision), 1 for unreadable evidence.
 guarded_rerun() { # guarded_rerun [--failed]
   local detail event run_sha current_sha pr_count pr_number pr_detail pr_state attempt
-  local head_owner head_branch branch_prs branch_pr_count
+  local head_owner head_branch branch_prs branch_pr_count head_repo
   case "${RUN_EVENT:-}" in
     pull_request|pull_request_target)
       detail="$(with_retry "run metadata API" gh_ api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}")" || return 1
@@ -191,8 +191,8 @@ guarded_rerun() { # guarded_rerun [--failed]
       attempt="$(jq -r '.run_attempt // 0' <<< "${detail}")" || return 1
       # GitHub drops pull_requests from old run metadata after a PR is merged and its
       # branch is deleted. Check the original head identity before escalating: a
-      # closed-only match has no current PR run to reanimate. Ambiguous/open matches
-      # remain red, and none of these fallback paths authorizes a rerun.
+      # closed-only match has no current PR run to reanimate. A uniquely identified
+      # open PR may prove the run stale. No fallback path authorizes a rerun.
       if [ "${pr_count}" -eq 0 ] && [ "${event}" = "${RUN_EVENT}" ]; then
         head_owner="$(jq -r '.head_repository.owner.login // ""' <<< "${detail}")" || return 1
         head_branch="$(jq -r '.head_branch // ""' <<< "${detail}")" || return 1
@@ -204,6 +204,35 @@ guarded_rerun() { # guarded_rerun [--failed]
             echo "::notice title=spot-kill auto-retry::NOT re-running ${RUN_URL:-${RUN_ID}} — its original PR branch now belongs only to closed PRs."
             decide skipped-closed-pr-no-association "GitHub omitted the old run's PR association; the branch lookup found no open PR"
             return 10
+          fi
+          head_repo="$(jq -r '.head_repository.full_name // ""' <<< "${detail}")" || return 1
+          # Branch names can be reused. Only a unique, fully bound branch match,
+          # confirmed again by the PR endpoint, proves this old run is stale.
+          # Equal heads and incomplete/ambiguous responses still fail closed.
+          if [ "${branch_pr_count}" -eq 1 ] && [[ "${run_sha}" =~ ^[0-9a-f]{40}$ ]] &&
+             [[ "${attempt}" =~ ^[0-9]+$ ]] && [ -n "${head_repo}" ] &&
+             jq -e --arg repo "${GITHUB_REPOSITORY}" --arg head_repo "${head_repo}" \
+               --arg owner "${head_owner}" --arg branch "${head_branch}" --arg sha "${run_sha}" '
+               .[0] | .state == "open" and
+               (.number | type == "number" and . > 0 and . == floor) and
+               .base.repo.full_name == $repo and .head.repo.full_name == $head_repo and
+               .head.repo.owner.login == $owner and .head.ref == $branch and
+               (.head.sha | type == "string" and test("^[0-9a-f]{40}$")) and .head.sha != $sha
+               ' <<< "${branch_prs}" >/dev/null; then
+            pr_number="$(jq -r '.[0].number' <<< "${branch_prs}")"
+            pr_detail="$(with_retry "PR head API" gh_ api "repos/${GITHUB_REPOSITORY}/pulls/${pr_number}")" || return 1
+            current_sha="$(jq -r '.[0].head.sha' <<< "${branch_prs}")"
+            if jq -e --arg repo "${GITHUB_REPOSITORY}" --arg head_repo "${head_repo}" \
+                 --arg owner "${head_owner}" --arg branch "${head_branch}" \
+                 --arg sha "${current_sha}" --argjson number "${pr_number}" '
+                 .number == $number and .state == "open" and .base.repo.full_name == $repo and
+                 .head.repo.full_name == $head_repo and .head.repo.owner.login == $owner and
+                 .head.ref == $branch and .head.sha == $sha
+                 ' <<< "${pr_detail}" >/dev/null; then
+              echo "::notice title=spot-kill auto-retry::NOT re-running ${RUN_URL:-${RUN_ID}} — the uniquely identified PR branch has advanced."
+              decide skipped-stale-pr-no-association "GitHub omitted the run association; the exact live PR identity confirms a newer head"
+              return 10
+            fi
           fi
         fi
       fi
@@ -484,6 +513,25 @@ FIX
   cat > "${tmp}/open-branch-prs.json" <<'FIX'
 [{"number":11870,"state":"open","head":{"sha":"16d65d792afda6caad8e6315b8bef17ba7822e79"}}]
 FIX
+  cat > "${tmp}/bound-unassociated.json" <<'FIX'
+{"event":"pull_request","head_sha":"834a4374500868edc5388502d943365c52dfbd20","run_attempt":1,
+ "head_branch":"feature","head_repository":{"full_name":"owner/repo","owner":{"login":"owner"}},"pull_requests":[]}
+FIX
+  cat > "${tmp}/bound-open-head.json" <<'FIX'
+{"number":11870,"state":"open","base":{"repo":{"full_name":"owner/repo"}},
+ "head":{"sha":"16d65d792afda6caad8e6315b8bef17ba7822e79","ref":"feature",
+ "repo":{"full_name":"owner/repo","owner":{"login":"owner"}}}}
+FIX
+  jq -s '.' "${tmp}/bound-open-head.json" > "${tmp}/bound-open-branch.json"
+  jq '.head.sha="834a4374500868edc5388502d943365c52dfbd20"' "${tmp}/bound-open-head.json" > "${tmp}/bound-equal-head.json"
+  jq -s '.' "${tmp}/bound-equal-head.json" > "${tmp}/bound-equal-branch.json"
+  jq -s '.[0] as $pr | [$pr,$pr]' "${tmp}/bound-open-head.json" > "${tmp}/bound-duplicate-branch.json"
+  jq '.head.ref="other"' "${tmp}/bound-open-head.json" > "${tmp}/bound-wrong-ref.json"
+  jq -s '.' "${tmp}/bound-wrong-ref.json" > "${tmp}/bound-wrong-branch.json"
+  jq '.base.repo.full_name="owner/other"' "${tmp}/bound-open-head.json" > "${tmp}/bound-wrong-repo.json"
+  jq -s '.' "${tmp}/bound-wrong-repo.json" > "${tmp}/bound-wrong-repo-branch.json"
+  jq '.head.sha="invalid"' "${tmp}/bound-open-head.json" > "${tmp}/bound-invalid-sha.json"
+  jq -s '.' "${tmp}/bound-invalid-sha.json" > "${tmp}/bound-invalid-sha-branch.json"
   cat > "${tmp}/stale-pr-head.json" <<'FIX'
 {"state":"open","head":{"sha":"a01b680e0be85051435023b0adc2cce8830d23e8"}}
 FIX
@@ -576,6 +624,15 @@ FIX
   case_ "missing PR association never authorizes a rerun" cancelled 1 0 "0|@reclaim" "0|@raw:unknown-pr"
   case_ "merged PR with omitted run association is skipped" cancelled 0 0 "0|@reclaim" "0|@raw:merged-pr-unassociated" "0|@raw:closed-branch-prs"
   case_ "open PR with omitted run association remains red" cancelled 1 0 "0|@reclaim" "0|@raw:merged-pr-unassociated" "0|@raw:open-branch-prs"
+  case_ "bound stale unassociated PR is skipped" cancelled 0 0 "0|@reclaim" "0|@raw:bound-unassociated" "0|@raw:bound-open-branch" "0|@raw:bound-open-head"
+  case_ "equal unassociated PR never authorizes rerun" cancelled 1 0 "0|@reclaim" "0|@raw:bound-unassociated" "0|@raw:bound-equal-branch"
+  case_ "duplicate branch matches remain red" cancelled 1 0 "0|@reclaim" "0|@raw:bound-unassociated" "0|@raw:bound-duplicate-branch"
+  case_ "wrong branch identity remains red" cancelled 1 0 "0|@reclaim" "0|@raw:bound-unassociated" "0|@raw:bound-wrong-branch"
+  case_ "live head race remains red" cancelled 1 0 "0|@reclaim" "0|@raw:bound-unassociated" "0|@raw:bound-open-branch" "0|@raw:bound-equal-head"
+  case_ "live PR identity mismatch remains red" cancelled 1 0 "0|@reclaim" "0|@raw:bound-unassociated" "0|@raw:bound-open-branch" "0|@raw:bound-wrong-ref"
+  case_ "wrong base repository remains red" cancelled 1 0 "0|@reclaim" "0|@raw:bound-unassociated" "0|@raw:bound-wrong-repo-branch"
+  case_ "malformed branch head remains red" cancelled 1 0 "0|@reclaim" "0|@raw:bound-unassociated" "0|@raw:bound-invalid-sha-branch"
+  case_ "live head API failure remains red" cancelled 1 0 "0|@reclaim" "0|@raw:bound-unassociated" "0|@raw:bound-open-branch" "1|${PERM}"
   case_ "closed PR cannot be reanimated by a spot retry" cancelled 0 0 "0|@reclaim" "0|@raw:current-pr" "0|@raw:closed-pr-head"
   RUN_EVENT=push
 
