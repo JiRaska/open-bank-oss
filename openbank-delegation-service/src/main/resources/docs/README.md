@@ -9,3 +9,7 @@ The committed `src/main/resources/openapi.yaml` defines the API contract. Read `
 ## Build identity
 
 The generated `00-build` page in this same documentation index reports the release version, full source commit, and API contract version packaged in the running image. The index is available at `/q/openbank/docs`.
+
+## Consumer contract verification
+
+Consumer Pact tests exercise delegation-service's outbound REST interactions, including calls to SCA, PID, account, and card-issuance services. Their expected paths are literal values kept separate from the client annotations used to form requests, so an incorrect client route can fail the contract test. Run them with `./gradlew :openbank-delegation-service:consumerPactTest`.
