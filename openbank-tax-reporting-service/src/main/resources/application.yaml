@@ -58,6 +58,28 @@ kafka:
   bootstrap:
     servers: localhost:9092
 
+  # #12425: tax-reporting-service's OWN machine identity — Keycloak client `openbank-tax-reporting`,
+  # ROLE_API only — for the pension reporting read models. pension-service and pension-fund-service
+  # admit their aggregate routes for service-account-openbank-tax-reporting and staff alone; never
+  # the shared openbank-services client.
+  oidc-client:
+    auth-server-url: ${OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+    client-id: openbank-tax-reporting
+    credentials:
+      secret: ${OIDC_TAX_REPORTING_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    grant:
+      type: client
+
+  rest-client:
+    pension-service:
+      url: ${PENSION_SERVICE_URL:http://localhost:8171}
+      connect-timeout: 2000
+      read-timeout: 10000
+    pension-fund-service:
+      url: ${PENSION_FUND_SERVICE_URL:http://localhost:8162}
+      connect-timeout: 2000
+      read-timeout: 10000
+
 mp:
   messaging:
     incoming:
@@ -122,6 +144,8 @@ openbank:
     management:
       enabled: false
     oidc:
+      enabled: false
+    oidc-client:
       enabled: false
     devservices:
       enabled: false

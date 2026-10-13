@@ -11,17 +11,21 @@ import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactBroker
+import com.openbank.pensionfund.application.port.PensionFundStore
 import com.openbank.pensionfund.it.PostgresTestResource
+import io.quarkus.security.runtime.QuarkusSecurityIdentity
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
+import io.vertx.core.Vertx
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty
 import org.junit.jupiter.api.extension.ExtendWith
+import java.security.Principal
 
 /**
  * Broker twin of [PensionFundPactFolderProviderVerificationTest]: runs on main-push only (gated on
@@ -38,6 +42,12 @@ import org.junit.jupiter.api.extension.ExtendWith
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
 @EnabledIfSystemProperty(named = "pactbroker.url", matches = ".+")
 class PensionFundPactBrokerProviderVerificationTest {
+
+    @Inject
+    lateinit var vertx: Vertx
+
+    @Inject
+    lateinit var store: PensionFundStore
 
     @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
     lateinit var testPort: String
@@ -65,6 +75,17 @@ class PensionFundPactBrokerProviderVerificationTest {
     @State(NEGATIVE_AUTH_STATE)
     fun stateNoValidM2mIdentity() {
         // verifyPacts clears the authenticated test identity for this interaction.
+    }
+
+    @State(TaxReportingPensionFundPactStates.FUND_STATE)
+    fun fundWithSeptemberNav() {
+        testIdentityAssociation.setTestIdentity(
+            QuarkusSecurityIdentity.builder()
+                .setPrincipal(Principal { "service-account-openbank-tax-reporting" })
+                .addRole("ROLE_API")
+                .build(),
+        )
+        TaxReportingPensionFundPactStates.fundWithSeptemberNav(vertx, store)
     }
 
     @State(PRICED_STATE)
