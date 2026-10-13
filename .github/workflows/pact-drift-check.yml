@@ -142,7 +142,7 @@ jobs:
           set -euo pipefail
           mapfile -t GRADLE_ARGS < "${RUNNER_TEMP}/shard-args.txt"
           touch "${RUNNER_TEMP}/pact-regen-marker"
-          ./gradlew --continue "${GRADLE_ARGS[@]}"
+          ./gradlew --configure-on-demand --continue "${GRADLE_ARGS[@]}"
           find pacts -maxdepth 1 -name '*.json' -newer "${RUNNER_TEMP}/pact-regen-marker" \
             -print | sort > "${RUNNER_TEMP}/regenerated.txt"
           tar -cf "${RUNNER_TEMP}/shard-${SHARD}.tar" -T "${RUNNER_TEMP}/regenerated.txt"
