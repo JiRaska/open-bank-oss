@@ -55,7 +55,10 @@ import javax.sql.DataSource
  * off under `%test`.
  */
 @QuarkusTest
-@QuarkusTestResource(SanctionsOutboxAtomicityIT.NoOutboxDispatchResource::class)
+@QuarkusTestResource(
+    value = SanctionsOutboxAtomicityIT.NoOutboxDispatchResource::class,
+    restrictToAnnotatedClass = true,
+)
 @QuarkusTestResource(PostgresTestResource::class)
 class SanctionsOutboxAtomicityIT {
 
