@@ -113,6 +113,10 @@ CI_VALIDATE_REFUSAL_LINE = re.compile(
     r"\(success, proceed=false\)\.\r?$",
     re.MULTILINE,
 )
+CI_ADMIN_UI_REFUSAL_LINE = re.compile(
+    LOG_PREFIX + re.escape("Admin UI change detection did not succeed (skipped).") + r"\r?$",
+    re.MULTILINE,
+)
 
 
 def is_policy_admission_refusal(prev_jobs: list[dict], changes_log: str, all_green_log: str) -> bool:
@@ -166,9 +170,39 @@ def is_ci_policy_admission_refusal(
     return int(count) > int(limit)
 
 
+def is_ci_admin_ui_admission_refusal(
+    prev_jobs: list[dict], admission_log: str, validate_manifests_log: str, admin_ui_log: str,
+) -> bool:
+    """Exclude Admin UI's propagated failure only for a fully evidenced CI WIP refusal."""
+    if not is_ci_policy_admission_refusal(prev_jobs, admission_log, validate_manifests_log):
+        return False
+
+    expected = {
+        "Detect UI or governance changes": "skipped",
+        "Admin UI build": "skipped",
+        "Admin UI cross-package guards": "skipped",
+        "Admin UI": "failure",
+    }
+    matched: dict[str, dict] = {}
+    for name, conclusion in expected.items():
+        jobs = [job for job in prev_jobs if job.get("name") == name]
+        if len(jobs) != 1 or jobs[0].get("conclusion") != conclusion:
+            return False
+        matched[name] = jobs[0]
+
+    result_steps = [step for step in matched["Admin UI"].get("steps") or []
+                    if step.get("name") == "Check build result"]
+    failed_steps = [step for step in matched["Admin UI"].get("steps") or []
+                    if step.get("conclusion") == "failure"]
+    if (len(result_steps) != 1 or result_steps[0].get("conclusion") != "failure"
+            or len(failed_steps) != 1 or failed_steps[0] != result_steps[0]):
+        return False
+    return len(CI_ADMIN_UI_REFUSAL_LINE.findall(admin_ui_log)) == 1
+
+
 def find_flake_candidates(
     prev_jobs: list[dict], changes_log: str = "", all_green_log: str = "",
-    admission_log: str = "", validate_manifests_log: str = "",
+    admission_log: str = "", validate_manifests_log: str = "", admin_ui_log: str = "",
 ) -> list[dict]:
     """Jobs from the PRIOR attempt that failed for a real reason (not a spot kill).
 
@@ -180,6 +214,9 @@ def find_flake_candidates(
     ci_admission_refusal = is_ci_policy_admission_refusal(
         prev_jobs, admission_log, validate_manifests_log,
     )
+    ci_admin_ui_refusal = is_ci_admin_ui_admission_refusal(
+        prev_jobs, admission_log, validate_manifests_log, admin_ui_log,
+    )
     return [
         j
         for j in prev_jobs
@@ -187,6 +224,7 @@ def find_flake_candidates(
         and not has_spot_kill_signature(j)
         and not (admission_refusal and j.get("name") == "all-green")
         and not (ci_admission_refusal and j.get("name") == "Validate manifests")
+        and not (ci_admin_ui_refusal and j.get("name") == "Admin UI")
     ]
 
 
@@ -345,6 +383,7 @@ def main(argv: list[str]) -> int:
     p_classify.add_argument("--all-green-log", type=Path)
     p_classify.add_argument("--admission-log", type=Path)
     p_classify.add_argument("--validate-manifests-log", type=Path)
+    p_classify.add_argument("--admin-ui-log", type=Path)
 
     p_flatten = sub.add_parser("flatten-jobs")
     p_flatten.add_argument("--pages-file", required=True, type=Path)
@@ -378,8 +417,9 @@ def main(argv: list[str]) -> int:
             args.validate_manifests_log.read_text(errors="replace")
             if args.validate_manifests_log and args.validate_manifests_log.exists() else ""
         )
+        admin_ui_log = args.admin_ui_log.read_text(errors="replace") if args.admin_ui_log and args.admin_ui_log.exists() else ""
         print(json.dumps(find_flake_candidates(
-            jobs, changes_log, all_green_log, admission_log, validate_manifests_log,
+            jobs, changes_log, all_green_log, admission_log, validate_manifests_log, admin_ui_log,
         ), indent=2))
         return 0
 
@@ -590,6 +630,81 @@ def self_test() -> int:
               ])], admission_log=ci_queue_refusal,
               validate_manifests_log=ci_aggregate_refusal,
           )[0]["name"] == "Validate manifests")
+
+    ci_ui_jobs = ci_jobs + [
+        _job("Detect UI or governance changes", "skipped", []),
+        _job("Admin UI build", "skipped", []),
+        _job("Admin UI cross-package guards", "skipped", []),
+        _job("Admin UI", "failure", [("Check build result", "failure")]),
+    ]
+    ci_admin_ui_refusal = (
+        "2026-10-07T11:31:22.009Z Admin UI change detection did not succeed (skipped)."
+    )
+    ui_admission_args = {
+        "admission_log": ci_queue_refusal,
+        "validate_manifests_log": ci_aggregate_refusal,
+        "admin_ui_log": ci_admin_ui_refusal,
+    }
+    check("CI proven WIP refusal excludes only the propagated Admin UI aggregate",
+          find_flake_candidates(ci_ui_jobs, **ui_admission_args) == [])
+    check("CI propagated refusal preserves genuine sibling failures",
+          find_flake_candidates(ci_ui_jobs + [genuine], **ui_admission_args) == [genuine])
+    check("CI missing, duplicate, or echo-only Admin UI evidence retains aggregate",
+          find_flake_candidates(
+              ci_ui_jobs, **{**ui_admission_args, "admin_ui_log": ""},
+          ) == [ci_ui_jobs[-1]] and find_flake_candidates(
+              ci_ui_jobs, **{**ui_admission_args, "admin_ui_log": ci_admin_ui_refusal * 2},
+          ) == [ci_ui_jobs[-1]] and find_flake_candidates(
+              ci_ui_jobs,
+              **{**ui_admission_args, "admin_ui_log": (
+                  '2026-10-07T11:31:22.009Z echo "'
+                  "Admin UI change detection did not succeed (skipped).\""
+              )},
+          ) == [ci_ui_jobs[-1]])
+    ui_build_failure_jobs = [
+        *ci_jobs,
+        _job("Detect UI or governance changes", "success", [("Detect", "success")]),
+        _job("Admin UI build", "failure", [("Build", "failure")]),
+        _job("Admin UI cross-package guards", "skipped", []),
+        _job("Admin UI", "failure", [("Check build result", "failure")]),
+    ]
+    ui_guard_failure_jobs = [
+        *ci_jobs,
+        _job("Detect UI or governance changes", "success", [("Detect", "success")]),
+        _job("Admin UI build", "skipped", []),
+        _job("Admin UI cross-package guards", "failure", [("Verify affected cross-package guards", "failure")]),
+        _job("Admin UI", "failure", [("Check build result", "failure")]),
+    ]
+    check("CI Admin UI negative fixtures have unique job names",
+          all(len([job for job in fixture if job["name"] == name]) == 1
+              for fixture in (ui_build_failure_jobs, ui_guard_failure_jobs)
+              for name in (
+                  "Agent PR admission", "Validate manifests", "Detect UI or governance changes",
+                  "Admin UI build", "Admin UI cross-package guards", "Admin UI",
+              )))
+    check("CI Admin UI build and guard failures remain candidates",
+          {job["name"] for job in find_flake_candidates(
+              ui_build_failure_jobs, **ui_admission_args,
+          )} == {"Admin UI build", "Admin UI"} and {job["name"] for job in find_flake_candidates(
+              ui_guard_failure_jobs, **ui_admission_args,
+          )} == {"Admin UI cross-package guards", "Admin UI"})
+    ui_multiple_aggregate_failures = [
+        *ci_jobs,
+        _job("Detect UI or governance changes", "skipped", []),
+        _job("Admin UI build", "skipped", []),
+        _job("Admin UI cross-package guards", "skipped", []),
+        _job("Admin UI", "failure", [
+            ("Check build result", "failure"),
+            ("Unexpected second failure", "failure"),
+        ]),
+    ]
+    check("CI second failed Admin UI aggregate step retains aggregate",
+          {job["name"] for job in find_flake_candidates(
+              ui_multiple_aggregate_failures, **ui_admission_args,
+          )} == {"Admin UI"})
+    check("CI duplicate UI aggregate identity fails closed",
+          find_flake_candidates(ci_ui_jobs + [ci_ui_jobs[-1]], **ui_admission_args)[-2:]
+          == [ci_ui_jobs[-1], ci_ui_jobs[-1]])
 
     print("extract_service")
     check(

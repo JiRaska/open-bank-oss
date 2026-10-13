@@ -536,7 +536,8 @@ jobs:
             "Detect changed services:changes" \
             "all-green:all-green" \
             "Agent PR admission:admission" \
-            "Validate manifests:validate-manifests"; do
+            "Validate manifests:validate-manifests" \
+            "Admin UI:admin-ui"; do
             job_name=${pair%:*}
             log_name=${pair#*:}
             job_id=$(jq -r --arg name "$job_name" \
@@ -554,6 +555,7 @@ jobs:
             --all-green-log "${RUNNER_TEMP}/all-green.log" \
             --admission-log "${RUNNER_TEMP}/admission.log" \
             --validate-manifests-log "${RUNNER_TEMP}/validate-manifests.log" \
+            --admin-ui-log "${RUNNER_TEMP}/admin-ui.log" \
             > "${RUNNER_TEMP}/candidates.json"
 
           count=$(python3 -c "import json,sys; print(len(json.load(open(sys.argv[1]))))" \
