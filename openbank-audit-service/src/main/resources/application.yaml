@@ -331,10 +331,11 @@ opa:
       # otherwise defaults insecure-requests to `disabled` and drops that listener (#10441).
       insecure-requests: enabled
       # A trusted workload certificate is transport identity, not an API login (#12511).
-      # Keep route-level role and OPA checks; select bearer as their caller identity.
+      # Require an OIDC bearer on every API route, including a future route without annotations.
+      # Route-level role and OPA checks still make the finer authorization decision.
       auth:
         permission:
           bearer-only:
             paths: /api/*
-            policy: permit
+            policy: authenticated
             auth-mechanism: bearer
