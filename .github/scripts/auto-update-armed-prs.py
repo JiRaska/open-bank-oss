@@ -76,6 +76,7 @@ import json
 import os
 import pathlib
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -286,10 +287,12 @@ def self_test() -> int:
             return {"commit": {"committer": {"date": old.isoformat()}}}
         raise AssertionError(f"unexpected API read {path}")
 
-    def run_fixture(commits: dict, update_code: int, **kw) -> tuple[int, str]:
+    def run_fixture(commits: dict, update_code: int, observed_head: str | None = "b" * 40,
+                    **kw) -> tuple[int, str]:
         with patch.dict(globals(), {"required_policy": lambda *_: (["Gitleaks"], True),
                                     "get": fixture_get, "head_checks": lambda *_: {"Gitleaks": "success"},
-                                    "api": graph_api(commits, update_code)}):
+                                    "api": graph_api(commits, update_code),
+                                    "observe_update": lambda *_: observed_head}):
             output = io.StringIO()
             with contextlib.redirect_stdout(output):
                 result = run("example/repo", "main", 5, 0, False, 20, **kw)
@@ -312,6 +315,103 @@ def self_test() -> int:
     ok = result == 0 and "update budget unreadable" in out and "::error::" not in out
     failures += not ok
     print(f"{'PASS' if ok else 'FAIL'}  unreadable budget skips that PR, exit {result}")
+    fixture_head, fresh = graph(3, 0)
+    with patch.dict(globals(), {"required_policy": lambda *_: (["Gitleaks"], True),
+                                "get": fixture_get, "head_checks": lambda *_: {}}):
+        report = {"targets": []}
+        with contextlib.redirect_stdout(io.StringIO()):
+            result = run("example/repo", "main", 5, 0, False, 20, recovery_report=report)
+        ok = result == 0 and report["targets"] == [{
+            "pr": 42, "head_sha": fixture_head, "budget_validated": False,
+        "update_count": None, "history_error": False, "updated": False,
+        "updated_head_sha": None,
+        }]
+        failures += not ok
+        print(f"{'PASS' if ok else 'FAIL'}  missing context has no target-history evidence")
+    report = {"targets": []}
+    result, _ = run_fixture(fresh, 202, recovery_report=report)
+    ok = result == 0 and report["targets"] == [{
+        "pr": 42, "head_sha": fixture_head, "budget_validated": True,
+        "update_count": 0, "history_error": False, "updated": True,
+        "updated_head_sha": "b" * 40,
+    }]
+    failures += not ok
+    print(f"{'PASS' if ok else 'FAIL'}  exact target history produces recovery evidence")
+    report = {"targets": []}
+    result, _ = run_fixture({}, 500, recovery_report=report)
+    ok = result == 0 and report["targets"] == [{
+        "pr": 42, "head_sha": fixture_head, "budget_validated": False,
+        "update_count": None, "history_error": True, "updated": False,
+        "updated_head_sha": None,
+    }]
+    failures += not ok
+    print(f"{'PASS' if ok else 'FAIL'}  unreadable history cannot recover target")
+    report = {"targets": []}
+    result, _ = run_fixture(fresh, 202, observed_head=None, recovery_report=report)
+    ok = (result == 0 and report["targets"][0]["budget_validated"] is True
+          and report["targets"][0]["updated"] is False
+          and report["targets"][0]["updated_head_sha"] is None)
+    failures += not ok
+    print(f"{'PASS' if ok else 'FAIL'}  202 with unchanged head cannot recover target")
+    fixture_head, fresh = graph(3, 0)
+    for status, expected in ((409, 0), (403, 1)):
+        report = {"targets": []}
+        result, _ = run_fixture(fresh, status, recovery_report=report)
+        ok = (result == expected and len(report["targets"]) == 1
+              and report["targets"][0]["budget_validated"] is True
+              and report["targets"][0]["updated"] is False
+              and report["targets"][0]["updated_head_sha"] is None)
+        failures += not ok
+        print(f"{'PASS' if ok else 'FAIL'}  rejected update {status} cannot recover target")
+    # Both histories can be read; the per-run cap selects only the first PR.
+    def two_pr_get(path: str) -> object:
+        if "/pulls?" in path:
+            return [{"number": n, "auto_merge": {"merge_method": "squash"}, "draft": False}
+                    for n in (41, 42)]
+        if path.endswith("/pulls/41") or path.endswith("/pulls/42"):
+            n = int(path.rsplit("/", 1)[1])
+            return {"draft": False, "auto_merge": {"merge_method": "squash"},
+                    "mergeable_state": "behind", "head": {
+                        "sha": fixture_head, "ref": f"agent/example-{n}",
+                        "repo": {"full_name": "example/repo"}}}
+        if "/commits/" in path:
+            return {"commit": {"committer": {"date": old.isoformat()}}}
+        raise AssertionError(f"unexpected API read {path}")
+    report = {"targets": []}
+    with patch.dict(globals(), {"required_policy": lambda *_: (["Gitleaks"], True),
+                                "get": two_pr_get, "head_checks": lambda *_: {"Gitleaks": "success"},
+                                "api": graph_api(fresh),
+                                "observe_update": lambda *_: "b" * 40}):
+        with contextlib.redirect_stdout(io.StringIO()):
+            result = run("example/repo", "main", 1, 0, False, 20, recovery_report=report)
+    ok = (result == 0 and [t["pr"] for t in report["targets"]] == [41, 42]
+          and all(t["budget_validated"] for t in report["targets"])
+          and [t["updated"] for t in report["targets"]] == [True, False])
+    failures += not ok
+    print(f"{'PASS' if ok else 'FAIL'}  validated but unselected PR cannot recover")
+    old_head, new_head = fixture_head, "b" * 40
+    def observed_api(_method: str, path: str, _body: dict | None = None):
+        if path.endswith("/pulls/42"):
+            return 200, {"head": {"sha": old_head}}
+        raise AssertionError(f"unexpected observation read {path}")
+    with patch.dict(globals(), {"api": observed_api}):
+        unchanged = observe_update("example/repo", 42, old_head, "main", 2, 0)
+    ok = unchanged is None
+    failures += not ok
+    print(f"{'PASS' if ok else 'FAIL'}  accepted update with unchanged head remains unproved")
+    def merged_api(_method: str, path: str, _body: dict | None = None):
+        if path.endswith("/pulls/42"):
+            return 200, {"head": {"sha": new_head}}
+        if path.endswith(f"/commits/{new_head}"):
+            return 200, {"commit": {"message": "Merge branch 'main' into agent/example",
+                                    "committer": {"name": "GitHub"}},
+                         "parents": [{"sha": old_head}, {"sha": "e" * 40}]}
+        raise AssertionError(f"unexpected observation read {path}")
+    with patch.dict(globals(), {"api": merged_api}):
+        observed = observe_update("example/repo", 42, old_head, "main", 2, 0)
+    ok = observed == new_head
+    failures += not ok
+    print(f"{'PASS' if ok else 'FAIL'}  child merge commit proves branch update")
     with patch.dict(globals(), {"required_policy": lambda *_: (["Gitleaks"], False),
                                 "get": lambda *_: (_ for _ in ()).throw(
                                     AssertionError("non-strict mode enumerated PRs"))}):
@@ -494,6 +594,27 @@ def branch_update_count(repo: str, head_sha: str, branch: str, cap: int) -> int:
     return used
 
 
+def observe_update(repo: str, number: int, old_sha: str, branch: str,
+                   attempts: int = 6, delay_seconds: float = 2) -> str | None:
+    """A 202 only queues the update; prove the PR head became its base-merge child."""
+    for attempt in range(attempts):
+        if attempt:
+            time.sleep(delay_seconds)
+        code, pr = api("GET", f"/repos/{repo}/pulls/{number}")
+        if code != 200 or not isinstance(pr, dict):
+            continue
+        new_sha = ((pr.get("head") or {}).get("sha") or "").lower()
+        if new_sha == old_sha or len(new_sha) != 40:
+            continue
+        code, commit = api("GET", f"/repos/{repo}/commits/{new_sha}")
+        if (code == 200 and isinstance(commit, dict) and is_updater_merge(commit, branch)
+                and commit["parents"][0].get("sha") == old_sha):
+            return new_sha
+        # Another actor moved the branch; it is not proof that our request completed.
+        return None
+    return None
+
+
 def write_summary(lines: list[str]) -> None:
     path = os.environ.get("GITHUB_STEP_SUMMARY")
     if not path or not lines:
@@ -503,7 +624,8 @@ def write_summary(lines: list[str]) -> None:
 
 
 def run(repo: str, branch: str, max_updates: int, debounce: int, dry_run: bool,
-        fleet_threshold: int, max_updates_per_pr: int = 4) -> int:
+        fleet_threshold: int, max_updates_per_pr: int = 4,
+        recovery_report: dict | None = None) -> int:
     required, strict = required_policy(repo, branch)
     print(f"required contexts on {branch} (live): {required}; strict={strict}")
     if not required:
@@ -521,6 +643,7 @@ def run(repo: str, branch: str, max_updates: int, debounce: int, dry_run: bool,
     entries, shas, budgets = [], {}, {}
     for p in armed:
         n = p["number"]
+        budget_error = False
         full = get(f"/repos/{repo}/pulls/{n}")
         sha = shas[n] = full["head"]["sha"]
         pr = {"draft": full["draft"], "auto_merge": full["auto_merge"],
@@ -551,6 +674,7 @@ def run(repo: str, branch: str, max_updates: int, debounce: int, dry_run: bool,
                 used = branch_update_count(repo, sha, branch, max_updates_per_pr)
             except BudgetUnreadable as error:
                 # Fail closed for THIS PR only; the others are still served and the run stays green.
+                budget_error = True
                 ok, why = False, f"update budget unreadable ({error}); skipped, retried next run"
                 print(f"::warning::#{n}: {why}")
                 stuck.append(f"- #{n}: {why}")
@@ -569,6 +693,14 @@ def run(repo: str, branch: str, max_updates: int, debounce: int, dry_run: bool,
               f"{', build in flight' if building else ''}, armed since {since or '?'}")
         entries.append({"number": n, "ok": ok, "why": why, "kind": kind, "building": building,
                         "waiting_since": since})
+        if recovery_report is not None:
+            # A successful generic updater job proves only the targets whose exact
+            # branch history was read; other PRs may have been skipped before that.
+            recovery_report["targets"].append({
+                "pr": n, "head_sha": sha, "budget_validated": n in budgets,
+                "update_count": budgets.get(n), "history_error": budget_error,
+                "updated": False, "updated_head_sha": None,
+            })
     updated = 0
     for n, ok, why in plan(entries, max_updates):
         sha = shas[n]
@@ -584,6 +716,14 @@ def run(repo: str, branch: str, max_updates: int, debounce: int, dry_run: bool,
         code, data = api("PUT", f"/repos/{repo}/pulls/{n}/update-branch", {"expected_head_sha": sha})
         if code == 202:
             updated += 1
+            if recovery_report is not None:
+                observed = observe_update(repo, n, sha, branch)
+                if observed:
+                    target = next(t for t in recovery_report["targets"] if t["pr"] == n)
+                    target["updated"] = True
+                    target["updated_head_sha"] = observed
+                else:
+                    print(f"::warning::#{n}: update accepted but target head transition unverified")
             print(f"UPDATE #{n} {sha[:9]}: {why} "
                   f"(budget {used + 1}/{max_updates_per_pr})")
         elif code == 409:
@@ -609,6 +749,8 @@ def main() -> int:
                     help="hard lifetime cap from server-side merge commits on the PR")
     ap.add_argument("--debounce-minutes", type=int, default=20)
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--recovery-report", type=pathlib.Path,
+                    help="run-bound per-PR history evidence for main-red recovery")
     ap.add_argument("--full-fleet-threshold", type=int, default=20,
                     help="distinct build-matrix modules at which a PR counts as full-fleet")
     a = ap.parse_args()
@@ -622,8 +764,25 @@ def main() -> int:
     if a.max_updates < 0 or a.max_updates_per_pr < 0:
         print("::error::update caps must be nonnegative")
         return 1
-    return run(a.repo, a.branch, a.max_updates, a.debounce_minutes, a.dry_run,
-               a.full_fleet_threshold, a.max_updates_per_pr)
+    report = {
+        "version": 1,
+        "run_id": int(os.environ.get("GITHUB_RUN_ID", "0")),
+        "attempt": int(os.environ.get("GITHUB_RUN_ATTEMPT", "0")),
+        "main_sha": os.environ.get("GITHUB_SHA", ""),
+        "dry_run": a.dry_run,
+        "complete": False,
+        "successful": False,
+        "targets": [],
+    }
+    result = run(a.repo, a.branch, a.max_updates, a.debounce_minutes, a.dry_run,
+                 a.full_fleet_threshold, a.max_updates_per_pr, recovery_report=report)
+    # Complete means the target inventory finished, even when an update was denied.
+    # Keep the exit verdict separate so a red run can still file its failure.
+    report["complete"] = True
+    report["successful"] = result == 0
+    if a.recovery_report:
+        a.recovery_report.write_text(json.dumps(report, sort_keys=True) + "\n", encoding="utf-8")
+    return result
 
 
 if __name__ == "__main__":

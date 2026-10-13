@@ -75,14 +75,10 @@ on:
       # pure projection of its sources — and in both cases the fleet-wide merge freeze this
       # workflow exists to end is back, with nothing else reporting it.
       - "Derived artefact autoheal"
-      - "ADR registry"
       # Builds, signs and pushes the IdP and LLM-gateway images (#11265). A red run on main
       # means a merged Dockerfile fix (a CVE bump) is not in the registry and not deployed.
       - "Platform images"
-      - "Agent charter registry"
-      - "AI governance snapshot"
       - "API contract post-merge guard"
-      - "EU AI Act registry"
       - "Evals - copilot proposal quality"
       - "Evals - fraud review"
       - "Fleet lint"
@@ -99,6 +95,12 @@ on:
       - ".github/scripts/check-main-red-watch.py"
       - ".github/scripts/main-red-watch-order.cjs"
       - ".github/scripts/test-main-red-watch-order.cjs"
+      - ".github/scripts/main-red-watch-checkpoint.cjs"
+      - ".github/scripts/main-red-watch-catchup.cjs"
+      - ".github/scripts/main-red-watch-target.cjs"
+      - ".github/scripts/test-main-red-watch-catchup.cjs"
+      - ".github/scripts/test-main-red-watch-target.cjs"
+      - ".github/scripts/main-red-watch-reconcile.py"
   workflow_dispatch:
     inputs:
       run_id:
@@ -107,28 +109,67 @@ on:
       attempt:
         description: "Attempt number to inspect (defaults to the run's latest)"
         required: false
+  repository_dispatch:
+    types: [main-red-reconcile]
+  schedule:
+    # Backstop when the final workflow_run event is lost or its API read was transient.
+    - cron: "17 */3 * * *"
 
 permissions:
   contents: read
 
 concurrency:
-  # Serialise real verdicts per watched workflow so two completions cannot race
-  # the same issue. GitHub replaces an older PENDING run in a group even with
-  # cancel-in-progress=false; a cancelled/skipped/neutral source event must not
-  # evict a pending red or green verdict. Those events get a separate group and
-  # skip the watch job without allocating a runner.
-  group: >-
-    main-red-watch-${{ github.event.workflow_run.name || github.ref }}-${{
-    contains(fromJSON('["cancelled","skipped","neutral"]'), github.event.workflow_run.conclusion)
-    && 'ignored' || 'verdict' }}
+  # GitHub may replace an older PENDING run even with cancel-in-progress=false.
+  # Every later event, including a cancelled one, replays from a durable cursor.
+  group: main-red-watch-${{ github.event.workflow_run.workflow_id || github.event.client_payload.workflow_id || github.ref }}
   cancel-in-progress: false
 
 jobs:
+  reconcile:
+    name: Dispatch one catch-up per watched workflow
+    if: ${{ github.event_name == 'schedule' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: bash .github/scripts/install-pyyaml-hash-pinned.sh
+      - name: Extract the watched workflow names
+        run: python3 .github/scripts/main-red-watch-reconcile.py > /tmp/main-red-watch-names.json
+      - name: Dispatch bounded per-workflow reconciliation
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const fs = require('fs')
+            const names = JSON.parse(fs.readFileSync('/tmp/main-red-watch-names.json', 'utf8'))
+            const workflows = await github.paginate(github.rest.actions.listRepoWorkflows, {
+              ...context.repo, per_page: 100,
+            })
+            const failures = []
+            for (const name of names) {
+              const matches = workflows.filter(workflow => workflow.name === name)
+              if (matches.length !== 1) {
+                failures.push(`Cannot resolve watched workflow ${name}`)
+                continue
+              }
+              try {
+                await github.rest.repos.createDispatchEvent({
+                  ...context.repo, event_type: 'main-red-reconcile',
+                  client_payload: { workflow_id: matches[0].id },
+                })
+              } catch (error) {
+                failures.push(`Cannot dispatch ${name}: ${error.message}`)
+              }
+            }
+            if (failures.length) throw new Error(failures.join('; '))
+
   # PR / dispatch lane: prove the watch's coverage set and its classifier are
   # honest. Cheap, offline, and it is the only lane that runs on a PR.
   declaration:
     name: main-red-watch declaration
-    if: ${{ github.event_name != 'workflow_run' }}
+    if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -138,6 +179,9 @@ jobs:
         run: |
           python3 .github/scripts/check-main-red-watch.py --self-test
           node .github/scripts/test-main-red-watch-order.cjs
+          node .github/scripts/test-main-red-watch-catchup.cjs
+          node .github/scripts/test-main-red-watch-target.cjs
+          python3 .github/scripts/main-red-watch-reconcile.py > /dev/null
       - name: Every push-on-main workflow is watched or declared
         run: python3 .github/scripts/check-main-red-watch.py --check-declaration
 
@@ -149,13 +193,13 @@ jobs:
     # falsification against a known-red and a known-green run.
     if: >-
       github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'repository_dispatch' ||
       (github.event.workflow_run.head_branch == 'main' &&
-       github.event.workflow_run.event == 'push' &&
-       !contains(fromJSON('["cancelled","skipped","neutral"]'), github.event.workflow_run.conclusion))
+       github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: read
+      contents: write
       actions: read
       issues: write
     steps:
@@ -169,6 +213,7 @@ jobs:
 
       - name: Classify the run this event fired for
         id: verdict
+        if: ${{ github.event_name == 'workflow_dispatch' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RUN_ID: ${{ inputs.run_id || github.event.workflow_run.id }}
@@ -198,138 +243,14 @@ jobs:
             *) echo "::error::Unexpected exit $code."; exit "$code" ;;
           esac
 
-      - name: Escalate or stand down
-        # A manual dispatch inspects without touching an issue: falsifying the
-        # watch must not manufacture the thing it reports.
-        #
-        # Exit 3 (the API refused to answer) is excluded for TWO independent reasons, either of
-        # which alone would be a defect: `--json` is never written on that path, so this step
-        # would die reading /tmp/main-red.json; and the branch below treats "not red" as a reason
-        # to CLOSE this workflow's open main-red issue — so a rate limit would silently declare a
-        # genuinely red main fixed. Not answering must change nothing (#9697).
-        if: ${{ github.event_name == 'workflow_run' && steps.verdict.outputs.code != '3' }}
+      - name: Replay missed main runs and persist the checkpoint
+        # Manual dispatch remains read-only. A failed classifier or API request
+        # never advances the cursor and is retried by a later source event.
+        if: ${{ github.event_name == 'workflow_run' || github.event_name == 'repository_dispatch' }}
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
-          CODE: ${{ steps.verdict.outputs.code }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           script: |
-            const fs = require('fs')
-            const { eventIsSuperseded } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/main-red-watch-order.cjs`)
-            const v = JSON.parse(fs.readFileSync('/tmp/main-red.json', 'utf8'))
-            const LABEL = 'main-red'
-            const slug = (v.workflow || 'unknown').toLowerCase().replace(/[^a-z0-9]+/g, '-')
-            const marker = `<!-- main-red:${slug} -->`
-            const REOPEN_WINDOW_DAYS = 14
-
-            // Find this workflow's issue by MARKER, not by title: a title carries the
-            // sha and moves every time the issue is refreshed.
-            const findByMarker = async (state) => {
-              const issues = await github.paginate(github.rest.issues.listForRepo, {
-                ...context.repo, state, labels: LABEL, per_page: 100,
-                sort: 'updated', direction: 'desc',
-              })
-              return issues.find(i => (i.body || '').includes(marker))
-            }
-
-            // Completion order differs from commit order. A slow old CI run may finish
-            // after a newer green one and reopen an already-healed main-red issue.
-            // Query only when an issue would change, to spare the installation API quota.
-            if (v.status !== 'red' && v.status !== 'green') {
-              core.info(`${v.workflow} concluded ${v.status}; leaving issue state unchanged.`)
-              return
-            }
-            const openIssue = v.status === 'green' ? await findByMarker('open') : null
-            if (v.status === 'green' && !openIssue) {
-              core.info(`${v.workflow} green on main; nothing open.`)
-              return
-            }
-            const workflowId = context.payload.workflow_run?.workflow_id
-            if (!Number.isSafeInteger(workflowId) || workflowId < 1) {
-              throw new Error('workflow_run has no valid workflow_id; refusing issue mutation')
-            }
-            const completed = await github.rest.actions.listWorkflowRuns({
-              ...context.repo, workflow_id: workflowId, branch: 'main', event: 'push',
-              status: 'completed', per_page: 10,
-            })
-            const latest = (completed.data.workflow_runs || []).reduce(
-              (newest, run) => !newest || run.id > newest.id ? run : newest, null,
-            )
-            if (eventIsSuperseded(v, latest)) {
-              core.info(`Ignoring superseded ${v.workflow} run ${v.run_id} attempt ${v.attempt}; latest completed is ${latest.id} attempt ${latest.run_attempt}.`)
-              return
-            }
-
-            if (v.status === 'green') {
-              // Green closes this workflow's issue. Only THIS
-              // workflow's — Services CI going green says nothing about Trivy.
-              await github.rest.issues.createComment({
-                ...context.repo, issue_number: openIssue.number,
-                body: `\`${v.workflow}\` is green again on main at \`${(v.head_sha||'').slice(0,9)}\` — closing. _(\`${context.workflow}\` run ${context.runId})_`,
-              })
-              await github.rest.issues.update({
-                ...context.repo, issue_number: openIssue.number, state: 'closed',
-              })
-              core.info(`closed #${openIssue.number}`)
-              return
-            }
-
-            const first = v.failing[0]
-            const gate = first.steps.length ? `${first.job} / ${first.steps[0]}` : first.job
-            const sha = (v.head_sha || '').slice(0, 9)
-            const title = `main is red: ${v.workflow} — ${gate} @ ${sha}`
-            const body = [
-              marker,
-              `## \`main\` is red — nothing else would have told you`,
-              '',
-              '| | |',
-              '|---|---|',
-              `| workflow | \`${v.workflow}\` |`,
-              `| first failing gate | \`${gate}\` |`,
-              `| head sha | \`${v.head_sha}\` |`,
-              `| run | [${v.run_id} attempt ${v.attempt}](${v.html_url}) |`,
-              '',
-              '### Every failing job in this attempt',
-              '',
-              ...v.failing.map(f =>
-                `- \`${f.job}\` [${f.conclusion}] — ${f.steps.length ? f.steps.map(s => `\`${s}\``).join(', ') : '_no step-level failure reported_'} ([log](${f.job_url}))`),
-              '',
-              'Read this as: **every PR that runs this workflow from now on inherits a red it',
-              'did not cause**, and a PR merged onto this commit merges onto a broken tree.',
-              'Step conclusions above come from the attempt-scoped jobs API, not a log grep —',
-              'a job log contains the step\'s own `run:` script, so a grep matches strings that',
-              'never executed.',
-              '',
-              'This issue is refreshed in place while main stays red and is closed by the watch',
-              'itself the next time `' + v.workflow + '` goes green on main. Closing it by hand',
-              'does not fix main — the watch reopens it. To accept the red knowingly, say so in',
-              'a comment; a silent red main is the only unacceptable state.',
-              '',
-              `_Automated: \`${context.workflow}\` run ${context.runId} (issue #4019)._`,
-            ].join('\n')
-
-            const open = await findByMarker('open')
-            if (open) {
-              await github.rest.issues.update({
-                ...context.repo, issue_number: open.number, title, body,
-              })
-              core.info(`refreshed #${open.number}`)
-              return
-            }
-            const closed = await findByMarker('closed')
-            const fresh = closed && closed.closed_at &&
-              (Date.now() - Date.parse(closed.closed_at)) < REOPEN_WINDOW_DAYS * 864e5
-            if (fresh) {
-              await github.rest.issues.update({
-                ...context.repo, issue_number: closed.number, title, body, state: 'open',
-              })
-              await github.rest.issues.createComment({
-                ...context.repo, issue_number: closed.number,
-                body: `main is red again on \`${v.workflow}\` — reopening rather than stacking a new issue. _(\`${context.workflow}\` run ${context.runId})_`,
-              })
-              core.info(`reopened #${closed.number}`)
-              return
-            }
-            const created = await github.rest.issues.create({
-              ...context.repo, title, body, labels: [LABEL, 'fleet-health'],
-            })
-            core.info(`opened #${created.data.number}`)
+            const { runCatchup } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/main-red-watch-catchup.cjs`)
+            await runCatchup({ github, context, core })
