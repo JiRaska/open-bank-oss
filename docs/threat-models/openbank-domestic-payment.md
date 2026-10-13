@@ -697,3 +697,14 @@ during rollout. First publish a compatible signed provider image, then configure
 private-CA listener and certificate rotation, and finally switch pension callers to HTTPS.
 OIDC and policy checks continue to authorize business operations independently of TLS trust.
 Roll back caller URLs before removing the provider listener or reverting its image.
+
+## Listener authentication follow-up (#12511)
+
+The production API permission requires an OIDC bearer on both HTTP and the client-certificate
+TLS listener. A trusted workload certificate supplies transport authentication and cannot replace
+the API bearer, including for a future route without a security annotation. Exact GET-only public
+service metadata remains public; management health stays on its separate interface. Real listener
+tests read the production permission and verify anonymous rejection, signed bearer acceptance and
+metadata/health preservation. This source change does not establish deployed enforcement; normal
+money-path review and a staged runtime check are required. Rollback restores the prior permission
+and reopens the listener-authentication risk.
