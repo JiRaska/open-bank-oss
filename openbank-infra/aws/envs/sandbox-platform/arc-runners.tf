@@ -587,6 +587,42 @@ resource "kubectl_manifest" "nodepool_runners_warm" {
   })
 }
 
+# Pact provider verification is deliberately separate from Spot and from the shared
+# build/batch label pools. A zero-minimum ARC scale set creates pods only for targeted
+# main-branch verification; an empty node is consolidated after five minutes.
+# Karpenter limits bound desired capacity but may briefly overshoot during concurrent
+# provisioning, so this is not a hard instance-count or spend guarantee.
+resource "kubectl_manifest" "nodepool_runners_pact" {
+  count      = var.arc_runner_enabled ? 1 : 0
+  depends_on = [helm_release.karpenter, kubectl_manifest.ec2nodeclass_runners]
+
+  yaml_body = yamlencode({
+    apiVersion = "karpenter.sh/v1"
+    kind       = "NodePool"
+    metadata   = { name = "runners-pact" }
+    spec = {
+      template = {
+        metadata = { labels = { "openbank.io/pool" = "runners-pact" } }
+        spec = {
+          taints = [{ key = "openbank.io/runner", value = "true", effect = "NoSchedule" }]
+          requirements = [
+            { key = "kubernetes.io/arch", operator = "In", values = ["arm64"] },
+            { key = "kubernetes.io/os", operator = "In", values = ["linux"] },
+            { key = "karpenter.sh/capacity-type", operator = "In", values = ["on-demand"] },
+            # 4 vCPU / 16 GiB plus local NVMe accommodates the build runner,
+            # dind and node DaemonSets without the 8 GiB variants' memory pressure.
+            { key = "node.kubernetes.io/instance-type", operator = "In", values = ["m6gd.xlarge"] },
+          ]
+          nodeClassRef = { group = "karpenter.k8s.aws", kind = "EC2NodeClass", name = "runners" }
+          expireAfter  = "Never"
+        }
+      }
+      disruption = { consolidationPolicy = "WhenEmpty", consolidateAfter = "5m" }
+      limits     = { cpu = "4" }
+    }
+  })
+}
+
 # Spot burst pool: wider instance selection, longer expiry to amortise cold starts.
 resource "kubectl_manifest" "nodepool_runners" {
   count      = var.arc_runner_enabled ? 1 : 0
@@ -1169,6 +1205,53 @@ resource "helm_release" "arc_batch" {
             resources = {
               requests = { cpu = local.runner_cpu_request.batch, memory = "4Gi", "ephemeral-storage" = "16Gi" }
               limits   = { memory = "8Gi" }
+            }
+          },
+          local.dind_container,
+        ]
+        volumes = local.dind_volumes
+      }
+    }
+  })]
+}
+
+# Targeted, main-only Pact provider verification. This scale set has a unique label:
+# the shared build/batch labels can also select non-ARC self-hosted runners, which
+# would not prove stable on-demand execution or private Broker reachability.
+resource "helm_release" "arc_pact" {
+  count            = var.arc_runner_enabled ? 1 : 0
+  name             = "openbank-pact"
+  namespace        = kubernetes_namespace.arc_runners[0].metadata[0].name
+  create_namespace = false
+  repository       = "oci://ghcr.io/actions/actions-runner-controller-charts"
+  chart            = "gha-runner-scale-set"
+  version          = var.arc_controller_version
+  depends_on       = [helm_release.arc_controller, kubectl_manifest.nodepool_runners_pact, kubernetes_config_map.dind_mirror_certs]
+
+  values = [yamlencode({
+    githubConfigUrl    = var.github_config_url
+    githubConfigSecret = "arc-github-app"
+    runnerScaleSetName = "openbank-pact"
+    minRunners         = 0
+    maxRunners         = 1
+    template = {
+      metadata = { annotations = local.runner_pod_annotations }
+      spec = {
+        serviceAccountName = kubernetes_service_account.arc_build_runner[0].metadata[0].name
+        priorityClassName  = "openbank-ci"
+        nodeSelector       = { "openbank.io/pool" = "runners-pact" }
+        tolerations        = local.runner_tolerations
+        initContainers     = [local.dind_init_container, local.aio_sysctl_init_container, local.gradle_home_init_container, local.jdk_toolcache_preload_init_container]
+        containers = [
+          {
+            name         = "runner"
+            image        = local.runner_image
+            command      = local.runner_command
+            env          = local.runner_docker_env
+            volumeMounts = local.runner_docker_volume_mounts
+            resources = {
+              requests = { cpu = local.runner_cpu_request.build, memory = "6Gi", "ephemeral-storage" = "16Gi" }
+              limits   = { memory = "9Gi" }
             }
           },
           local.dind_container,

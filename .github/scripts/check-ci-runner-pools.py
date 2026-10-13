@@ -73,11 +73,12 @@ import gatelib  # noqa: E402  (path must be set first)
 
 # Declared in rules.yaml: ci_runners.pools, provisioned by no OpenTofu scale set.
 # Removing an entry requires either provisioning the pool or deleting its declaration.
-# Both entries here are also in KNOWN_UNAPPLIED: their OpenTofu exists but has never
+# Entries here are also in KNOWN_UNAPPLIED: their OpenTofu exists but has never
 # been applied, so they are declared capacity that does not exist (#6458).
 KNOWN_UNPROVISIONED: dict[str, str] = {
     "openbank-batch": "#6458 — OpenTofu added by #8388, never applied",
     "openbank-dr": "#6458 — OpenTofu added by #8388, never applied",
+    "openbank-pact": "#12689 — capacity must be applied and verified before workflow routing",
 }
 
 # Scale sets whose OpenTofu resource EXISTS but which no `tofu apply` has ever created.
@@ -105,6 +106,7 @@ KNOWN_UNPROVISIONED: dict[str, str] = {
 KNOWN_UNAPPLIED: dict[str, str] = {
     "openbank-batch": "#6458 — helm_release.arc_batch (arc-runners.tf) added by #8388, never applied",
     "openbank-dr": "#6458 — helm_release.arc_dr (arc-runners.tf) added by #8388, never applied",
+    "openbank-pact": "#12689 — apply dedicated capacity and verify live scale set before workflow routing",
 }
 
 SCALE_SET_RE = re.compile(r'runnerScaleSetName\s*=\s*"([^"]+)"')

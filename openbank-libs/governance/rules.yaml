@@ -2504,7 +2504,7 @@ ci_runners:
   spot:
     provider: karpenter                 # diversified Graviton spot, price-capacity-optimized
     interruption: karpenter-managed     # no persistent spot request; node replaced on reclaim
-  pools:                                # three ARC scale sets: build/deploy TRUST split + build/batch CAPACITY split
+  pools:                                # ARC scale sets split by trust and workload capacity
     build:                              # executes PR code, merge-required (compile, unit/IT tests, admin-ui, manifests)
       scale_set: openbank-build
       cloud_write_credentials: false    # no ECR push, no ArgoCD, no prod secrets
@@ -2518,6 +2518,14 @@ ci_runners:
       image_builds: dind
       ephemeral_per_job: true
       isolation_rationale: "separate low-capped pool so a scan/cron burst cannot starve the merge-required build lane (ARC has no job preemption — dedicated capacity is the only priority lever)"
+    pact:                              # targeted main-only provider verification; stable on-demand node
+      scale_set: openbank-pact
+      cloud_write_credentials: false    # reuses build runner SA; no deploy privilege
+      secrets: pact_broker_only
+      image_builds: dind
+      ephemeral_per_job: true
+      triggers: [workflow_dispatch, workflow_call]
+      isolation_rationale: "single on-demand Pact lane with scale-to-zero; avoids Spot interruption during provider proof without moving fleet builds"
     dr:                                # quarterly resilience lanes: dr-restore-verify, chaos drill, attestation evidence (ADR-0277)
       scale_set: openbank-dr
       cloud_write_credentials: false    # no IRSA/cloud role on the pod SA at all
