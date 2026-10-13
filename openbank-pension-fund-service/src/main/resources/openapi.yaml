@@ -130,7 +130,7 @@ paths:
         '200': { description: The period figures, content: { application/json: { schema: { $ref: '#/components/schemas/FundPeriodFigures' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
-        '409': { description: No published NAV backs the period — not reportable (never zeroes), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: No published NAV at the period close — not reportable (never zeroes), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /api/v1/navs/{navId}:
     parameters: [ { $ref: '#/components/parameters/NavId' } ]
     get:
