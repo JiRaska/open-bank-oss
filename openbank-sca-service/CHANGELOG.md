@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.2](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.21.1...sca-service-v0.21.2) (2026-10-12)
+
+
+### Security
+
+* **sca:** authenticate the API by bearer only on the mTLS listener ([#12525](https://github.com/JiRaska/open-bank-oss/issues/12525)) ([a435846](https://github.com/JiRaska/open-bank-oss/commit/a43584659b7584ab1b0ee758f5d294581db92d2a))
+
 ## [0.21.1](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.21.0...sca-service-v0.21.1) (2026-10-11)
 
 

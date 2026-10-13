@@ -17,6 +17,7 @@ Build je fast-jar (nikdy uber-jar — viz GitOps pravidla v root CLAUDE.md). Gen
 | Oblast | Hodnota | Zdroj |
 |---|---|---|
 | App HTTP port | `8113` | `quarkus.http.port` |
+| East-west mTLS port | `8443` (certifikát z privátní CA `audit-service-internal-tls`, klientský certifikát povinný; jen `%prod`) | env `QUARKUS_HTTP_SSL_*`, `quarkus.http.ssl.client-auth` (build time) |
 | Management port | `8085`, root-path `/q` | `quarkus.management.*` |
 | Datasource | `postgresql://localhost:5432/openbank_audit` | `quarkus.datasource` |
 | Flyway | `migrate-at-start: true`, 10 connect retries | `quarkus.flyway` |
@@ -25,6 +26,8 @@ Build je fast-jar (nikdy uber-jar — viz GitOps pravidla v root CLAUDE.md). Gen
 | OIDC | `…/realms/openbank`, client `openbank-services` | `quarkus.oidc` |
 | OTel | OTLP `http://localhost:4317` | `quarkus.otel` |
 | Rate limit | zapnuto, max 200 concurrent | `openbank.rate-limit` |
+
+Listener 8443 slouží čtení důkazního balíku z lending-service (#11900), které nese token konkrétní osoby; HTTP/8113 zůstává pro stávající volající a sondy (`quarkus.http.insecure-requests: enabled`).
 
 Secrets (`POSTGRES_PASSWORD`, `OIDC_CLIENT_SECRET`) nesou placeholdery `CHANGE_ME_LOCAL_DEV_ONLY`; produkce injektuje reálné hodnoty (Vault, ADR-0017). Placeholdery nikdy nešipuj.
 
@@ -76,3 +79,7 @@ GitOps přes ArgoCD (manifesty v `gitops/`). Při merge-konfliktu image tagů be
 ## Auditní stopa sazeb ČNB
 
 Auditní konzument odebírá `openbank.fx.cnb-policy-rate.published` spolu s ostatními FX topicy. Při úpravách odběru ponechte tento topic v konfiguraci `audit-events-in`: nově publikovaná i opravená sazba pak prochází stejnou archivovanou auditní cestou jako ostatní obchodní události. Pokud záznamy chybí, před opakováním odběru zkontrolujte lag skupiny auditního konzumenta a retenci topicu.
+
+## Identita volajícího na mTLS listeneru
+
+Auditní API v produkci používá bearer autentizaci na HTTP i mTLS listeneru. Důvěryhodný klientský certifikát je podmínkou TLS spojení, ale nenahrazuje bearer token volajícího. Bez bearer přihlašovacích údajů API vrací HTTP 401; role endpointu a OPA nadále rozhodují, co smí přihlášený volající číst. Test parity listenerů načítá produkční konfiguraci a přes skutečné HTTP ověřuje přístup bez certifikátu, pouze s certifikátem i s platným bearer tokenem.
