@@ -51,7 +51,7 @@ echo "gate_ran=true" >> "$GITHUB_OUTPUT"
 SERVICES="${SERVICES:?}"
 arch="$(uname -m)"; case "$arch" in aarch64|arm64) a=arm64 ;; *) a=x86_64 ;; esac
 os="$(uname -s | tr '[:upper:]' '[:lower:]')"; case "$os" in darwin) o=osx ;; *) o=linux ;; esac
-CLI="/tmp/pact/pact/bin/pact-broker"
+CLI="${PACT_CLI_BIN:-/tmp/pact/pact/bin/pact-broker}"
 # Download only on a cache miss (the "Cache pact standalone CLI" step restores /tmp/pact
 # on a hit). This removes the flaky github.com release download — the single point of
 # failure that fail-closes the whole gate (issue #1348/#1009) — from every run after the
@@ -269,13 +269,9 @@ for svc in $(echo "$SERVICES" | jq -r '.[]'); do
     echo "  ✓ ${svc} deployable"
     deployable_list+=("$svc")
   else
-    # "No version with tag main exists": new service that has been registered as a
-    # Pacticipant (via record-deployment) but has never published a pact or been
-    # verified against one. Has the same semantics as a 404 Pacticipant — it cannot
-    # break any consumer/provider expectation. Treat as deployable.
-    if echo "$cid_out" | grep -q "No version with tag"; then
-      echo "::warning::can-i-deploy: ${svc} has no 'main'-tagged version yet (new service, no pacts) — treating as deployable (ADR-0092)"
-      deployable_list+=("$svc")
+    # A known Pacticipant whose exact-version query fails with "No version with tag main"
+    # is NOT deployable. The broker's 404 Pacticipant exception was already handled above;
+    # a missing main tag cannot turn a failed --version query into a green verdict.
     # If every failure line is "no version is currently recorded as deployed/released
     # in this environment", the counterpart service has simply not been deployed to
     # sandbox yet and therefore cannot break any contract expectation. Treat it the
@@ -285,8 +281,18 @@ for svc in $(echo "$SERVICES" | jq -r '.[]'); do
     # pairs failed — folding the banner into the count made a single real failure
     # look like two, so the >= comparison below could never hold for exactly one
     # failing pair (issue surfaced by fraud-service/transaction-service, 2026-07-09).
-    elif [ "$(echo "$cid_out" | grep -c "There is no verified pact" || true)" -gt 0 ] && \
-         [ "$(echo "$cid_out" | grep -c "no version is currently recorded" || true)" -ge "$(echo "$cid_out" | grep -c "There is no verified pact" || true)" ]; then
+    # Every such pair must have a matching missing-deployment reason. A second pair with
+    # an actual failed verification must never inherit this exception from the first.
+    missing_pacts="$(grep -cF 'There is no verified pact' <<< "$cid_out" || true)"
+    unrecorded_versions="$(grep -cF 'no version is currently recorded' <<< "$cid_out" || true)"
+    failed_rows="$(grep -Ec '\|[[:space:]]*false[[:space:]]*$' <<< "$cid_out" || true)"
+    if [[ "$vpresent" = yes || "$vpresent" = equivalent:* ]] && \
+         [ "$missing_pacts" -gt 0 ] && \
+         [ "$unrecorded_versions" -eq "$missing_pacts" ] && \
+         [ "$failed_rows" -le "$missing_pacts" ] && \
+         ! grep -q "The verification for the pact" <<< "$cid_out" && \
+         ! grep -Eiq '(^|[[:space:]])(failed|failure|error)([[:space:]:.]|$)' <<< "$cid_out" && \
+         ! grep -q "No version with tag" <<< "$cid_out"; then
       echo "::warning::can-i-deploy: ${svc} has counterpart(s) not yet recorded in sandbox — treating as deployable (ADR-0092)"
       deployable_list+=("$svc")
     else

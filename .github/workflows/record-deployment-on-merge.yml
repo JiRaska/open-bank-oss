@@ -80,14 +80,13 @@ jobs:
       # goes stale with no error. Pass the repo explicitly so it works API-only.
       GH_REPO: ${{ github.repository }}
     steps:
-      # SHALLOW on purpose. The only things needed from the repo are two files —
-      # .github/scripts/resolve-record-deployment-version.sh and release-please-config.json —
-      # and the equivalence proof is made through the compare API, not through git history
-      # (#3223). A full-history checkout on every gitops merge would buy nothing here.
-      - name: Check out the resolver and the exclude-paths it reads
+      # Equivalence must cover shared Pact/build inputs as well as the service subtree.
+      # The contract-input comparator verifies ancestry and Git tree objects; a shallow
+      # checkout cannot establish either for the deployed and published revisions.
+      - name: Check out the Pact source identity proof
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5.0.1
         with:
-          fetch-depth: 1
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Record deployed services in the broker
@@ -174,13 +173,15 @@ jobs:
           mkdir -p /tmp/pact && tar -xzf /tmp/pact.tgz -C /tmp/pact
           CLI="/tmp/pact/pact/bin/pact-broker"
 
-          rec_failed="$resolve_failed"
+          # Resolve the entire PR before any broker write. A single unresolved Pact
+          # participant must never leave a partly advanced deployment matrix.
+          [ "$resolve_failed" -eq 0 ] || { echo 'one or more image tags were unresolved; recording nothing' >&2; exit 1; }
+          RECORD_PLAN="$(mktemp)"
           for pair in "${PAIRS[@]}"; do
             svc="${pair%%:sandbox-*}"
             short="${pair##*:sandbox-}"
             SHA="${FULL[$short]:-}"
-            [ -n "$SHA" ] || continue  # unresolvable tag already counted via resolve_failed
-            echo "==> record-deployment ${svc} @ ${short} → sandbox"
+            echo "==> resolve-deployment ${svc} @ ${short} → sandbox"
             # WHICH version to record is decided by resolve-record-deployment-version.sh (#3223).
             # It never fabricates: `exact` when the broker has this sha, `equivalent:<sha>` when a
             # published version is byte-identical in every RECORDED SOURCE of this service, `none`
@@ -199,24 +200,27 @@ jobs:
             case "$sel" in
               exact:*)      REC_VER="${sel#exact:}" ;;
               equivalent:*) REC_VER="${sel#equivalent:}"
-                            echo "  no version for ${SHA:0:8}; ${REC_VER:0:8} is byte-identical in every recorded source — recording that (#3223, #3432)" ;;
-              *)            echo "::warning::${svc}: no published version for ${SHA:0:8} and none provably equivalent — recording NOTHING rather than a version nothing can verify (#3223). can-i-deploy for its consumers will report no deployed version, which is the honest state. If that service's own src/test changed since its latest published version, that is the #9898 case: the deployed tree needs publishing, and it is NOT a provider defect. NOTE the broker's PREVIOUS record for ${svc} stays current until something replaces it: publish the deployed tree (verify-provider.yml ref=${SHA}), then re-run this workflow by workflow_dispatch with services=${svc}."
-                            continue ;;
+                            echo "  no version for ${SHA:0:8}; ${REC_VER:0:8} is byte-identical in recorded sources; matrix approval still required" ;;
+              *)            participant_code="$(curl -s --connect-timeout 5 --max-time 20 -o /dev/null -w '%{http_code}' \
+                              -u "${PACT_BROKER_USERNAME}:${PACT_BROKER_PASSWORD}" \
+                              "${PACT_BROKER_URL}/pacticipants/${svc}")"
+                            if [ "$participant_code" = 404 ]; then
+                              echo "  ${svc} is not a Pact participant; no record required"
+                              continue
+                            fi
+                            echo "::error::${svc}: published version unresolved (participant HTTP ${participant_code}); recording NOTHING for this PR"
+                            rm -f "$RECORD_PLAN"
+                            exit 1 ;;
             esac
-            ok=0
-            for attempt in 1 2 3; do
-              if "$CLI" record-deployment \
-                   --pacticipant "$svc" --version "$REC_VER" --environment sandbox \
-                   --broker-base-url "$PACT_BROKER_URL" \
-                   --broker-username "$PACT_BROKER_USERNAME" \
-                   --broker-password "$PACT_BROKER_PASSWORD"; then
-                ok=1; echo "  ✓ recorded"; break
-              fi
-              echo "::warning::record-deployment ${svc} attempt ${attempt}/3 failed; retrying in 5s"; sleep 5
-            done
-            [ "$ok" -eq 1 ] || { echo "::error::record-deployment failed for ${svc} after 3 attempts"; rec_failed=1; }
+            printf '%s\t%s\n' "$svc" "$REC_VER" >>"$RECORD_PLAN"
           done
-          if [ "$rec_failed" -ne 0 ]; then
-            echo "::error::one or more record-deployments failed — broker matrix diverges from reality (ADR-0092)"
-            exit 1
+          if [ -s "$RECORD_PLAN" ]; then
+            if ! bash .github/scripts/record-deployment-approved-set.sh "$RECORD_PLAN" "$CLI"; then
+              rm -f "$RECORD_PLAN"
+              echo 'Pact deployment record gate failed; see exact-version matrix verdict above' >&2
+              exit 1
+            fi
+          else
+            echo 'No Pact participants in this PR; no record required.'
           fi
+          rm -f "$RECORD_PLAN"
