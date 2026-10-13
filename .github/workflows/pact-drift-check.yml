@@ -15,6 +15,9 @@ on:
     paths:
       - "pacts/**"
       - "**/src/test/kotlin/**/contract/*PactConsumerTest.kt"
+      - "openbank-delegation-service/src/test/kotlin/com/openbank/delegation/contract/ClientRoute.kt"
+      - "openbank-customer-edge/src/test/kotlin/com/openbank/customeredge/infrastructure/rest/InMemoryPaymentSessionBackend.kt"
+      - "**/build.gradle.kts"
       - "openbank-admin-ui/**"
       - "openbank-case-coordinator-agent/**"
       - "openbank-flaky-test-hunter/**"
@@ -44,6 +47,9 @@ on:
     paths:
       - "pacts/**"
       - "**/src/test/kotlin/**/contract/*PactConsumerTest.kt"
+      - "openbank-delegation-service/src/test/kotlin/com/openbank/delegation/contract/ClientRoute.kt"
+      - "openbank-customer-edge/src/test/kotlin/com/openbank/customeredge/infrastructure/rest/InMemoryPaymentSessionBackend.kt"
+      - "**/build.gradle.kts"
       - "openbank-admin-ui/**"
       - "openbank-case-coordinator-agent/**"
       - "openbank-flaky-test-hunter/**"

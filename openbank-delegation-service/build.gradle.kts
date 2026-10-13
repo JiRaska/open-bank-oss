@@ -17,6 +17,11 @@ tasks.test {
     maxHeapSize = "2g"
 }
 
+// Consumer contracts share this test helper without compiling the full test suite.
+kotlin.sourceSets.named("consumerPactTest") {
+    kotlin.include("com/openbank/delegation/contract/ClientRoute.kt")
+}
+
 dependencies {
     implementation(enforcedPlatform(libs.quarkus.bom))
 

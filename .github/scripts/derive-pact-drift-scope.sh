@@ -178,11 +178,11 @@ EOF
   if ! contains "$module" "$gated_modules"; then
     gated_modules="$gated_modules$module
 "
-    # One `--tests` filter per module; Gradle applies it to the `:test` task it follows.
-    # `--rerun` is load-bearing (#2291, #2309): the pact JSON is not a declared task output, so a
-    # warm build cache reports `test` UP-TO-DATE, nothing is rewritten, and the diff below passes
-    # having read nothing.
-    gated_args="$gated_args:$module:test
+    # One `--tests` filter per module; Gradle applies it to the `:consumerPactTest` task it follows.
+    # Pact JSON is a side effect outside declared task outputs (#2291, #2309).
+    # Keep explicit regeneration in the derived command; consumerPactTest also disables
+    # up-to-date and cache reuse so direct invocations regenerate contracts.
+    gated_args="$gated_args:$module:consumerPactTest
 --rerun
 --tests
 *.contract.*PactConsumerTest
