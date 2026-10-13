@@ -4893,6 +4893,25 @@ gates:
     run: |
       python3 openbank-infra/scripts/check-threat-models.py
 
+  # #9908: validate a service at the PR that activates its Argo Application OR
+  # first places its workload under an already automated Application. The app's
+  # literal source.path is the ownership link; staged desired state is not live.
+  # Existing model/backup rules and the actual OPA generators remain authorities.
+  - id: service-application-readiness
+    name: "automated Application prerequisites at source introduction (#9908)"
+    group: gitops
+    mode: enforced
+    when: pull_request
+    needs_base: required
+    rationale: "A new auto-synced service previously arrived before its threat model, generated OPA bundle and initial backup declaration; each gap became visible only on a later PR."
+    review_after: "2027-04-14"
+    selftest_inputs: [".github/scripts/check-service-application-readiness.py", ".github/scripts/test_service_application_readiness.py"]
+    selftest: python3 .github/scripts/test_service_application_readiness.py
+    selftest_expect: pass
+    budget_seconds: 120
+    run: |
+      python3 .github/scripts/check-service-application-readiness.py --base "${PR_DIFF_BASE}"
+
   # ADR-0030 D2, diff-aware half (issue #265): when a PR moves a money-path
   # service's TRUST BOUNDARIES — inbound REST surface, a new outbound
   # HTTP/gRPC edge, authn/listener/transport keys in application.yaml, or
