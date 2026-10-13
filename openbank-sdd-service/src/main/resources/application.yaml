@@ -209,6 +209,18 @@ mp:
       ssl:
         client-auth: required
       insecure-requests: enabled
+      # A trusted workload certificate authenticates the TLS transport, not the API caller
+      # (#12511). Require the same OIDC bearer identity on the plain and mTLS listeners.
+      auth:
+        permission:
+          bearer-only:
+            paths: /api/*
+            policy: authenticated
+            auth-mechanism: bearer
+          public-metadata:
+            paths: /api/v1/info,/api/v1/config
+            methods: GET
+            policy: permit
     # ADR-0335 D6: account-service's private-CA mTLS listener (8443, client auth REQUIRED), same
     # shape as aml-service's account-authority. Local/test fixtures speak plain HTTP.
     tls:
