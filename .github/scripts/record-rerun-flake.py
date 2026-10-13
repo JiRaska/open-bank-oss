@@ -107,6 +107,12 @@ ADMISSION_REFUSAL = re.compile(
 )
 ALL_GREEN_REFUSAL = "Agent PR admission refused or failed; service builds did not run."
 ALL_GREEN_REFUSAL_LINE = re.compile(LOG_PREFIX + re.escape(ALL_GREEN_REFUSAL) + r"\r?$", re.MULTILINE)
+CI_ADMISSION_REFUSAL_LINE = ADMISSION_REFUSAL
+CI_VALIDATE_REFUSAL_LINE = re.compile(
+    LOG_PREFIX + r"(?:##\[error\]|::error::)?Agent PR admission refused or failed "
+    r"\(success, proceed=false\)\.\r?$",
+    re.MULTILINE,
+)
 
 
 def is_policy_admission_refusal(prev_jobs: list[dict], changes_log: str, all_green_log: str) -> bool:
@@ -127,7 +133,43 @@ def is_policy_admission_refusal(prev_jobs: list[dict], changes_log: str, all_gre
     return any(int(count) > int(limit) for count, limit in ADMISSION_REFUSAL.findall(changes_log))
 
 
-def find_flake_candidates(prev_jobs: list[dict], changes_log: str = "", all_green_log: str = "") -> list[dict]:
+def is_ci_policy_admission_refusal(
+    prev_jobs: list[dict], admission_log: str, validate_manifests_log: str,
+) -> bool:
+    """Exclude the CI aggregate only when prior-attempt logs prove a WIP refusal.
+
+    CI has a different job shape from Services CI: admission succeeds with `proceed=false`,
+    then Validate manifests fails its `Verify agent PR admission` check. Require unique job and
+    step identities plus both executed output lines so an API failure, a missing log, or an
+    unexecuted shell echo remains visible as a real failed job.
+    """
+    admission = [job for job in prev_jobs if job.get("name") == "Agent PR admission"]
+    aggregate = [job for job in prev_jobs if job.get("name") == "Validate manifests"]
+    if len(admission) != 1 or len(aggregate) != 1:
+        return False
+    if admission[0].get("conclusion") != "success" or aggregate[0].get("conclusion") != "failure":
+        return False
+    verify_steps = [step for step in aggregate[0].get("steps") or []
+                    if step.get("name") == "Verify agent PR admission"]
+    failed_steps = [step for step in aggregate[0].get("steps") or []
+                    if step.get("conclusion") == "failure"]
+    if (len(verify_steps) != 1 or verify_steps[0].get("conclusion") != "failure"
+            or len(failed_steps) != 1 or failed_steps[0] != verify_steps[0]):
+        return False
+
+    # Match the timestamped output lines, not the shell source Actions prints before execution.
+    counts = CI_ADMISSION_REFUSAL_LINE.findall(admission_log)
+    validation_lines = CI_VALIDATE_REFUSAL_LINE.findall(validate_manifests_log)
+    if len(counts) != 1 or len(validation_lines) != 1:
+        return False
+    count, limit = counts[0]
+    return int(count) > int(limit)
+
+
+def find_flake_candidates(
+    prev_jobs: list[dict], changes_log: str = "", all_green_log: str = "",
+    admission_log: str = "", validate_manifests_log: str = "",
+) -> list[dict]:
     """Jobs from the PRIOR attempt that failed for a real reason (not a spot kill).
 
     Called once the run's FINAL attempt has concluded `success` -- by construction, every job
@@ -135,12 +177,16 @@ def find_flake_candidates(prev_jobs: list[dict], changes_log: str = "", all_gree
     signal; this function only identifies which prior-attempt jobs qualify.
     """
     admission_refusal = is_policy_admission_refusal(prev_jobs, changes_log, all_green_log)
+    ci_admission_refusal = is_ci_policy_admission_refusal(
+        prev_jobs, admission_log, validate_manifests_log,
+    )
     return [
         j
         for j in prev_jobs
         if (j.get("conclusion") or "").lower() == "failure"
         and not has_spot_kill_signature(j)
         and not (admission_refusal and j.get("name") == "all-green")
+        and not (ci_admission_refusal and j.get("name") == "Validate manifests")
     ]
 
 
@@ -297,6 +343,8 @@ def main(argv: list[str]) -> int:
     p_classify.add_argument("--jobs-file", required=True, type=Path)
     p_classify.add_argument("--changes-log", type=Path)
     p_classify.add_argument("--all-green-log", type=Path)
+    p_classify.add_argument("--admission-log", type=Path)
+    p_classify.add_argument("--validate-manifests-log", type=Path)
 
     p_flatten = sub.add_parser("flatten-jobs")
     p_flatten.add_argument("--pages-file", required=True, type=Path)
@@ -325,7 +373,14 @@ def main(argv: list[str]) -> int:
         jobs = json.loads(args.jobs_file.read_text(encoding="utf-8"))
         changes_log = args.changes_log.read_text(errors="replace") if args.changes_log and args.changes_log.exists() else ""
         all_green_log = args.all_green_log.read_text(errors="replace") if args.all_green_log and args.all_green_log.exists() else ""
-        print(json.dumps(find_flake_candidates(jobs, changes_log, all_green_log), indent=2))
+        admission_log = args.admission_log.read_text(errors="replace") if args.admission_log and args.admission_log.exists() else ""
+        validate_manifests_log = (
+            args.validate_manifests_log.read_text(errors="replace")
+            if args.validate_manifests_log and args.validate_manifests_log.exists() else ""
+        )
+        print(json.dumps(find_flake_candidates(
+            jobs, changes_log, all_green_log, admission_log, validate_manifests_log,
+        ), indent=2))
         return 0
 
     if args.cmd == "flatten-jobs":
@@ -444,6 +499,97 @@ def self_test() -> int:
           find_flake_candidates([changes, aggregate, genuine], refusal,
                                 "2026-10-07T11:31:21.009Z One or more service builds failed.")
           == [aggregate, genuine])
+
+    ci_admission = _job("Agent PR admission", "success", [("Run admission", "success")])
+    ci_validate = _job("Validate manifests", "failure", [
+        ("Verify agent PR admission", "failure"),
+        ("Verify no gate shard failed", "skipped"),
+    ])
+    ci_queue_refusal = (
+        "2026-10-07T11:31:14.599Z Agent PRs: 4/3; finish existing work before opening another PR"
+    )
+    ci_aggregate_refusal = (
+        "2026-10-07T11:31:21.009Z ##[error]"
+        "Agent PR admission refused or failed (success, proceed=false)."
+    )
+    ci_jobs = [ci_admission, ci_validate]
+    check("CI proven WIP refusal excludes Validate manifests",
+          find_flake_candidates(
+              ci_jobs, admission_log=ci_queue_refusal,
+              validate_manifests_log=ci_aggregate_refusal,
+          ) == [])
+    check("CI admission evidence excludes only aggregate, preserving genuine sibling failures",
+          find_flake_candidates(
+              [ci_admission, ci_validate, genuine], admission_log=ci_queue_refusal,
+              validate_manifests_log=ci_aggregate_refusal,
+          ) == [genuine])
+    check("CI missing either log retains Validate manifests",
+          find_flake_candidates(
+              ci_jobs, admission_log="", validate_manifests_log=ci_aggregate_refusal,
+          ) == [ci_validate] and find_flake_candidates(
+              ci_jobs, admission_log=ci_queue_refusal, validate_manifests_log="",
+          ) == [ci_validate])
+    check("CI echo-only, capacity-available, and non-refusal output retain aggregate",
+          find_flake_candidates(
+              ci_jobs, admission_log='2026-10-07T11:31:14.599Z echo "' + ci_queue_refusal.split("Z ", 1)[1] + '"',
+              validate_manifests_log=ci_aggregate_refusal,
+          ) == [ci_validate] and find_flake_candidates(
+              ci_jobs,
+              admission_log="2026-10-07T11:31:14.599Z Agent PRs: 3/3; capacity available",
+              validate_manifests_log=ci_aggregate_refusal,
+          ) == [ci_validate])
+    check("CI malformed or duplicate WIP refusal lines retain aggregate",
+          find_flake_candidates(
+              ci_jobs, admission_log="2026-10-07T11:31:14.599Z Agent PRs: many/3; finish existing work before opening another PR",
+              validate_manifests_log=ci_aggregate_refusal,
+          ) == [ci_validate] and find_flake_candidates(
+              ci_jobs, admission_log=ci_queue_refusal + "\n" + ci_queue_refusal,
+              validate_manifests_log=ci_aggregate_refusal,
+          ) == [ci_validate])
+    check("CI aggregate error echo without executed marker retains aggregate",
+          find_flake_candidates(
+              ci_jobs, admission_log=ci_queue_refusal,
+              validate_manifests_log=(
+                  '2026-10-07T11:31:21.009Z echo "::error::'
+                  "Agent PR admission refused or failed (success, proceed=false).\""
+              ),
+          ) == [ci_validate])
+    check("CI duplicate aggregate refusal lines retain aggregate",
+          find_flake_candidates(
+              ci_jobs, admission_log=ci_queue_refusal,
+              validate_manifests_log=ci_aggregate_refusal + "\n" + ci_aggregate_refusal,
+          ) == [ci_validate])
+    check("CI API failure or mismatched step evidence retains aggregate",
+          {job["name"] for job in find_flake_candidates(
+              [_job("Agent PR admission", "failure", [("Run admission", "failure")]), ci_validate],
+              admission_log=ci_queue_refusal, validate_manifests_log=ci_aggregate_refusal,
+          )} == {"Agent PR admission", "Validate manifests"} and find_flake_candidates(
+              [ci_admission, _job("Validate manifests", "failure", [
+                  ("Verify agent PR admission", "skipped"),
+              ])], admission_log=ci_queue_refusal,
+              validate_manifests_log=ci_aggregate_refusal,
+          ) == [_job("Validate manifests", "failure", [
+              ("Verify agent PR admission", "skipped"),
+          ])])
+    check("CI second failed aggregate step retains Validate manifests",
+          find_flake_candidates(
+              [ci_admission, _job("Validate manifests", "failure", [
+                  ("Verify agent PR admission", "failure"),
+                  ("Verify no gate shard failed", "failure"),
+              ])], admission_log=ci_queue_refusal,
+              validate_manifests_log=ci_aggregate_refusal,
+          )[0]["name"] == "Validate manifests")
+    check("duplicate CI job or admission-step identities fail closed",
+          find_flake_candidates(
+              [ci_admission, ci_admission, ci_validate], admission_log=ci_queue_refusal,
+              validate_manifests_log=ci_aggregate_refusal,
+          ) == [ci_validate] and find_flake_candidates(
+              [ci_admission, _job("Validate manifests", "failure", [
+                  ("Verify agent PR admission", "failure"),
+                  ("Verify agent PR admission", "failure"),
+              ])], admission_log=ci_queue_refusal,
+              validate_manifests_log=ci_aggregate_refusal,
+          )[0]["name"] == "Validate manifests")
 
     print("extract_service")
     check(

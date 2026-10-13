@@ -532,7 +532,11 @@ jobs:
 
           # An admission refusal is a policy decision, not a flaky test. Both logs must
           # prove that narrow case; unreadable logs leave the aggregate failure visible.
-          for pair in "Detect changed services:changes" "all-green:all-green"; do
+          for pair in \
+            "Detect changed services:changes" \
+            "all-green:all-green" \
+            "Agent PR admission:admission" \
+            "Validate manifests:validate-manifests"; do
             job_name=${pair%:*}
             log_name=${pair#*:}
             job_id=$(jq -r --arg name "$job_name" \
@@ -547,7 +551,10 @@ jobs:
           python3 .github/scripts/record-rerun-flake.py classify \
             --jobs-file "${RUNNER_TEMP}/prev-jobs.json" \
             --changes-log "${RUNNER_TEMP}/changes.log" \
-            --all-green-log "${RUNNER_TEMP}/all-green.log" > "${RUNNER_TEMP}/candidates.json"
+            --all-green-log "${RUNNER_TEMP}/all-green.log" \
+            --admission-log "${RUNNER_TEMP}/admission.log" \
+            --validate-manifests-log "${RUNNER_TEMP}/validate-manifests.log" \
+            > "${RUNNER_TEMP}/candidates.json"
 
           count=$(python3 -c "import json,sys; print(len(json.load(open(sys.argv[1]))))" \
             "${RUNNER_TEMP}/candidates.json")
