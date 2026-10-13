@@ -94,21 +94,25 @@ class ContributionService(
             "contract $contractId cannot receive this payment (status ${contract.status}, currency ${contract.currency})"
         }
         val assigned = parked.assign(contractId, actor, now())
-        val outcome =
-            credit(
-                contract,
-                parked.payment.paymentId,
-                ContributionSource.PARTICIPANT,
-                parked.payment.channel,
-                parked.payment,
-                null,
-            )
-        unmatched.update(assigned)
-        return when (outcome) {
-            is ReceiptOutcome.Credited -> outcome.contribution
-            is ReceiptOutcome.Duplicate -> outcome.contribution
-            is ReceiptOutcome.Unmatched -> error("credit cannot park")
+        val (stored, created) = unmatched.assignAtomically(
+            assigned,
+            Contribution(
+                id = Ids.newId(),
+                contractId = contract.contractId,
+                paymentId = parked.payment.paymentId,
+                source = ContributionSource.PARTICIPANT,
+                channel = parked.payment.channel,
+                amount = parked.payment.amount,
+                currency = parked.payment.currency,
+                valueDate = parked.payment.valueDate,
+                receivedAt = now(),
+            ),
+        )
+        if (created) {
+            if (contract.status == PENDING) activation.firstContributionReceived(contract.contractId)
+            subscribe(stored)
         }
+        return stored
     }
 
     /** Operator decision: the parked payment goes back to the payer (the refund itself is the payment hub's). */

@@ -19,6 +19,9 @@ import org.hamcrest.Matchers.hasSize
 import org.junit.jupiter.api.Test
 import java.sql.DriverManager
 import java.util.UUID
+import java.util.concurrent.Callable
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /**
  * The S3 funding routes over real HTTP against a real Postgres (ADR-0334 S3): proves the routes
@@ -208,6 +211,115 @@ class FundingApiIT {
             .body("""{"scaChallengeId":"sca-${UUID.randomUUID()}"}""")
             .`when`().put("$funding/$id/employers/$employer").then().statusCode(204)
         assertThat(rows("SELECT count(*) FROM pension_employer_enrolments WHERE contract_id = '$id'")).isEqualTo(1)
+    }
+
+    @Test
+    @TestSecurity(user = "alice", roles = ["ROLE_OPERATOR"])
+    fun `concurrent assignments cannot disagree with the credited contract`() {
+        val first = seededContract(UUID.randomUUID())
+        val second = seededContract(UUID.randomUUID())
+        val (paymentId, unmatchedId) = parkedPayment()
+        val results = raceDecisions(
+            unmatchedId,
+            { spec(null).body("""{"contractId":"$first"}""").post("$ops/unmatched/$unmatchedId/assign").statusCode },
+            { spec(null).body("""{"contractId":"$second"}""").post("$ops/unmatched/$unmatchedId/assign").statusCode },
+        )
+        assertThat(results).containsExactlyInAnyOrder(200, 409)
+        assertThat(rows("SELECT count(*) FROM pension_contributions WHERE payment_id = '$paymentId'")).isEqualTo(1)
+        assertThat(
+            rows(
+                "SELECT count(*) FROM pension_unmatched_payments u JOIN pension_contributions c USING (payment_id) " +
+                    "WHERE u.id = '$unmatchedId' AND u.status = 'ASSIGNED' AND u.resolved_contract_id = c.contract_id",
+            ),
+        ).isEqualTo(1)
+    }
+
+    @Test
+    @TestSecurity(user = "alice", roles = ["ROLE_OPERATOR"])
+    fun `concurrent assignment and return have exactly one winner`() {
+        val contract = seededContract(UUID.randomUUID())
+        val (paymentId, unmatchedId) = parkedPayment()
+        val results = raceDecisions(
+            unmatchedId,
+            { spec(null).body("""{"contractId":"$contract"}""").post("$ops/unmatched/$unmatchedId/assign").statusCode },
+            { spec(null).body("{}").post("$ops/unmatched/$unmatchedId/return").statusCode },
+        )
+        assertThat(results).containsExactlyInAnyOrder(200, 409)
+        val assigned =
+            rows("SELECT count(*) FROM pension_unmatched_payments WHERE id = '$unmatchedId' AND status = 'ASSIGNED'")
+        assertThat(
+            rows("SELECT count(*) FROM pension_contributions WHERE payment_id = '$paymentId'"),
+        ).isEqualTo(assigned)
+    }
+
+    @Test
+    @TestSecurity(user = "alice", roles = ["ROLE_OPERATOR"])
+    fun `conflicting existing credit rolls back the unmatched decision`() {
+        val creditedContract = seededContract(UUID.randomUUID())
+        val requestedContract = seededContract(UUID.randomUUID())
+        val paymentId = "rollback-${UUID.randomUUID()}"
+        val ref = reference(creditedContract, null)
+        spec(null).body(
+            """{"paymentId":"$paymentId","amount":300,"currency":"CZK","valueDate":"2026-01-20","reference":"$ref"}""",
+        ).post("$ops/payments").then().statusCode(200).body("outcome", equalTo("CREDITED"))
+        val (_, unmatchedId) = parkedPayment(paymentId)
+        spec(null).body("""{"contractId":"$requestedContract"}""")
+            .post("$ops/unmatched/$unmatchedId/assign").then().statusCode(409)
+        assertThat(
+            rows(
+                "SELECT count(*) FROM pension_unmatched_payments WHERE id = '$unmatchedId' " +
+                    "AND status = 'OPEN' AND resolved_contract_id IS NULL AND resolved_by IS NULL AND resolved_at IS NULL",
+            ),
+        ).isEqualTo(1)
+        assertThat(
+            rows(
+                "SELECT count(*) FROM pension_contributions WHERE payment_id = '$paymentId' AND contract_id = '$creditedContract'",
+            ),
+        ).isEqualTo(1)
+    }
+
+    private fun parkedPayment(paymentId: String = "race-${UUID.randomUUID()}"): Pair<String, String> {
+        val id: String = spec(null).body(
+            """{"paymentId":"$paymentId","amount":300,"currency":"CZK","valueDate":"2026-01-20","reference":"0000"}""",
+        ).post("$ops/payments").then().statusCode(200).extract().path("unmatched.id")
+        return paymentId to id
+    }
+
+    /** Hold the row until both real HTTP decisions reach the database; neither can win early. */
+    private fun raceDecisions(id: String, first: () -> Int, second: () -> Int): List<Int> {
+        val executor = Executors.newFixedThreadPool(2)
+        try {
+            return jdbc { connection ->
+                connection.autoCommit = false
+                connection.prepareStatement("SELECT id FROM pension_unmatched_payments WHERE id = ? FOR UPDATE").use {
+                    it.setObject(1, UUID.fromString(id))
+                    it.executeQuery().use { row -> assertThat(row.next()).isTrue() }
+                }
+                val futures = listOf(first, second).map { decision -> executor.submit(Callable { decision() }) }
+                try {
+                    val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15)
+                    while (rows(
+                            "SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' " +
+                                "AND query LIKE '%UPDATE pension_unmatched_payments%'",
+                        ) < 2 &&
+                        System.nanoTime() < deadline
+                    ) {
+                        Thread.sleep(25)
+                    }
+                    assertThat(
+                        rows(
+                            "SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' " +
+                                "AND query LIKE '%UPDATE pension_unmatched_payments%'",
+                        ),
+                    ).isEqualTo(2)
+                } finally {
+                    connection.rollback()
+                }
+                futures.map { it.get(30, TimeUnit.SECONDS) }
+            }
+        } finally {
+            executor.shutdownNow()
+        }
     }
 
     private fun <T> jdbc(block: (java.sql.Connection) -> T): T {

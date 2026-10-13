@@ -19,6 +19,7 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import com.openbank.pension.infrastructure.fund.ContractValuationDto
 import com.openbank.pension.infrastructure.fund.FundRegister
+import com.openbank.pension.infrastructure.fund.InMemoryFundOrderPlans
 import com.openbank.pension.infrastructure.fund.OrderRequestDto
 import com.openbank.pension.infrastructure.fund.PensionFundOrders
 import com.openbank.pension.infrastructure.fund.PensionFundRestClient
@@ -370,7 +371,9 @@ class PensionFundPactConsumerTest {
             mapper.readValue(get(mock, clientPath("transactions", contractId.toString())))
     }
 
-    private fun adapter(mock: MockServer) = PensionFundOrders(register(mock), { null }, Clock.systemUTC())
+    private fun adapter(mock: MockServer) = PensionFundOrders(register(mock), {
+        null
+    }, Clock.systemUTC(), InMemoryFundOrderPlans())
 
     private fun get(mock: MockServer, path: String): String =
         given().baseUri(mock.getUrl()).get(path).then().statusCode(200).extract().asString()
