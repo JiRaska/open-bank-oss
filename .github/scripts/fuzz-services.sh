@@ -309,6 +309,15 @@ PY
   exit "${ST_RC}"
 fi
 
+# Schemathesis exposes one extension-module slot through SCHEMATHESIS_HOOKS. Do not
+# silently replace a caller-provided hook; this harness needs the slot for response
+# isolation and does not yet support composing multiple modules.
+FUZZ_SERVICES_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+if [ -n "${SCHEMATHESIS_HOOKS:-}" ]; then
+  echo "::error::SCHEMATHESIS_HOOKS is already set; fuzz-services cannot safely compose hooks"
+  exit 2
+fi
+
 mkdir -p fuzz-reports
 OVERALL=0
 
@@ -643,7 +652,7 @@ STUBEOF
       #   --hypothesis-deadline removed (no equivalent); --request-timeout unit ms -> seconds;
       #   --experimental=openapi-3.1 removed (default now); --junit-xml -> --report junit
       #   --report-junit-path
-      schemathesis run "$SPEC" \
+      SCHEMATHESIS_HOOKS="${FUZZ_SERVICES_DIR}/fuzz_response_isolation.py" schemathesis run "$SPEC" \
         --url "http://localhost:${PORT}" \
         --checks not_a_server_error \
         --max-examples "${MAX_EXAMPLES}" \
