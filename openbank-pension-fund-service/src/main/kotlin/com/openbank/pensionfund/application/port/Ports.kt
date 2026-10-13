@@ -25,6 +25,16 @@ data class ClassificationReceipt(
     val result: PositionClassificationCorrection,
 )
 
+/** One database view of the inputs to a statutory fund close, including correction decisions. */
+data class FundReportingSnapshot(
+    val fund: Fund?,
+    val navs: List<NavRecord>,
+    val transactions: List<UnitTransaction>,
+    val positionNavIds: List<UUID>,
+    val positions: List<NavPosition>,
+    val corrections: List<PositionClassificationCorrection>,
+)
+
 /**
  * Everything one use case changes, committed in ONE transaction. A NAV publication settles orders,
  * moves holdings, writes transactions and may spawn switch-in legs — a partial commit would leave
@@ -79,6 +89,9 @@ interface PensionFundStore {
     suspend fun transactions(contractId: UUID): List<UnitTransaction>
 
     // ---- reporting reads (#12425): aggregate inputs, by fund and valuation date ----
+
+    /** A consistent as-of read; production keeps every source query in one repeatable-read transaction. */
+    suspend fun reportingSnapshot(fundId: UUID, periodStart: LocalDate, periodEnd: LocalDate): FundReportingSnapshot
 
     /** PUBLISHED NAVs of [fundId] valued on or before [upTo], oldest first. */
     suspend fun publishedNavsUpTo(fundId: UUID, upTo: LocalDate): List<NavRecord>
