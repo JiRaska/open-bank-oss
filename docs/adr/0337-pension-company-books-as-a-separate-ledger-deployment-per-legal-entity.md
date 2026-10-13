@@ -105,7 +105,7 @@ delivered (`CompanyBooksCalculator`, golden IT), the instance is not — hence `
 The Consequences above leave PSP 34-12 PS (the company's own portfolio: instrument class, ISIN,
 quantity, valuation at period end) unsourced. We evaluated the obvious candidate, a second
 deployment of `openbank-treasury-service` (ADR-0315) for the pension company, the same pattern
-this ADR applies to the ledger. It cannot answer the return today:
+this ADR applies to the ledger. At the 2026-10-10 evaluation, its deal model could not derive the return:
 
 - **No securities product.** `ProductType` is `MM_PLACEMENT`, `MM_BORROWING`,
   `CNB_DEPOSIT_FACILITY`, `CNB_LOMBARD`, `FX_SPOT`. ADR-0315 D2 plans `BOND_PURCHASE` /
@@ -131,15 +131,22 @@ of ADR-0315, not a read model.
    holdings** (ISO 20022 `semt.002`). The pension company's own investments sit with a custodian,
    and the custodian's statement already carries ISIN, quantity and a valuation at the statement
    date. A `treasury-pension-co` deployment ingests it the way treasury already ingests nostro
-   `camt.053` statements (ADR-0315 D7): an idempotent upload keyed by account and statement date,
-   one immutable snapshot per date.
+   `camt.053` statements (ADR-0315 D7): idempotent uploads and immutable correction versions
+   scoped by entity, safekeeping account and statement date. Every configured account contributes
+   its current statement; uploading or correcting one account must not retire another.
 2. **The read contract stays as agreed with tax-reporting:**
    `GET /api/v1/treasury/portfolio/period-end?date=YYYY-MM-DD` answers the snapshot for exactly
-   that date (`asOf`, `currency`, positions of `instrumentClass`, `isin`, `quantity`,
-   `valuation`, `valuationCurrency`, decimals as strings), OPA action `treasury.portfolio.read`
-   granted to tax-reporting's service account by `principal.id` only. With no snapshot for the
-   date it answers **409**, never an empty list: an empty portfolio and a missing statement must
-   not look the same, the same fail-closed rule as the frozen trial balance in Decision 2.
+   that date (`asOf`, `entity`, `currency`, `sourceStatements` identifying each account's statement
+   UUID, optional custodian statement ID and version, and positions of `instrumentClass`, `isin`,
+   `cfi`, `quantity`, `quantityBasis`, `valuation`, `valuationCurrency`, decimals as strings).
+   OPA action `treasury.portfolio.inspect` is granted to the exact tax-reporting service-account
+   identity and excluded from broad operator/compliance read grants. The consumer requires the
+   configured company identity. If any configured account lacks that date's statement, the read
+   answers **409**; a complete recorded-empty account remains valid evidence. Matching ISINs can
+   aggregate only with consistent classification, currency and explicit quantity dimension
+   (`UNIT`, `FACE_AMOUNT`, `AMORTISED_VALUE`). Unknown legacy or unlike dimensions refuse the
+   complete report rather than guessing a sum. A verified source correction supplies missing
+   dimensions; identical-byte replay preserves the original version.
 3. **Instrument class is mapped, not guessed.** `semt.002` carries a CFI code per ISIN (ISO
    10962); the ČNB class is a declared CFI-prefix mapping in configuration, and an unmapped CFI
    refuses the snapshot at ingestion.
@@ -149,8 +156,8 @@ of ADR-0315, not a read model.
    source of record for the return.
 5. **The `treasury-pension-co` instance runs no bank automation**, as Decision 4 requires of the
    ledger: simulated market, interest accrual, nostro break sweep and outbox dispatch to the
-   bank's topics are off, and any GL posting points at `ledger-pension-co`, never the bank's
-   ledger.
+   bank's topics are off. Statement ingestion posts nothing; a later posting feature must use
+   the company's isolated ledger and its own controls, never the bank's ledger.
 
 ### Alternatives considered (amendment)
 
@@ -165,6 +172,14 @@ of ADR-0315, not a read model.
 
 ### Delivery check (amendment)
 
-`grep -rn "portfolio/period-end" openbank-treasury-service/src/main/resources/openapi.yaml` and
-`ls openbank-infra/gitops/components | grep treasury-pension-co` both print nothing today.
-PSP 34-12 PS stays unsourced, and tax-reporting must keep refusing it, until both print a line.
+The ADR is implemented separately: #12504 carries the consumer, #12506 now contains the draft
+statement-ingestion provider and committed populated/missing-account/anonymous Pact interactions,
+and #12508 declares the draft company-instance TLS and network configuration. Their existence is
+not evidence of deployment, populated custody accounts or regulator acceptance. Required CI and
+reviews remain mandatory before merging those implementations; live rollout still requires owner
+identity/account configuration, trusted certificates, backup prerequisites and explicit approval.
+
+Until the configured company source supplies complete snapshots for the requested date,
+PSP 34-12 PS must remain unavailable. Files or routes matching a grep are discovery evidence only;
+readiness requires real authenticated provider/consumer verification and source completeness. No
+regulator transmission or acceptance is claimed by this ADR.
