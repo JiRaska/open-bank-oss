@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.40.3](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.40.2...lending-service-v0.40.3) (2026-10-13)
+
+
+### Security
+
+* **lending:** authenticate the API by bearer only on the mTLS listener ([#12532](https://github.com/JiRaska/open-bank-oss/issues/12532)) ([a489ca6](https://github.com/JiRaska/open-bank-oss/commit/a489ca6571c59ea468baf6048c8c1097a38f662d))
+
 ## [0.40.2](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.40.1...lending-service-v0.40.2) (2026-10-07)
 
 
