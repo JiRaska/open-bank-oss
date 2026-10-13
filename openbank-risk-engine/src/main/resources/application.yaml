@@ -816,6 +816,10 @@ authz:
       # RiskListenerAuthParityIT holds both listeners to it with the production listener shape.
       auth:
         permission:
+          public-metadata:
+            paths: /api/v1/info,/api/v1/config
+            methods: GET
+            policy: permit
           bearer-only:
             paths: /api/*
             policy: authenticated
