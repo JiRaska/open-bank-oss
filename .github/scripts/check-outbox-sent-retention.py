@@ -45,10 +45,6 @@ EXEMPT: dict[str, str] = {
         "Annual fee-summary reruns still use SENT billing_outbox rows as the issuance guard; "
         "keep retention off until the durable account/year key in #12311 is merged and deployed (#12187)"
     ),
-    "openbank-lending-service": (
-        "SENT rows ARE the ADR-0214 evidence bundle (LendingResource GET /applications/{id}/evidence "
-        "reads them via findByAggregateId); purge only after that evidence moves to a durable store (#11900)"
-    ),
     "openbank-case-coordinator-agent": (
         "GET /cases/{caseId} projects proposal evidence directly from SENT case_outbox rows; "
         "purge only after that evidence has an independent durable source (#11896)"
