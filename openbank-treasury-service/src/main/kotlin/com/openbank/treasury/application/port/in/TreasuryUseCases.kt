@@ -5,6 +5,7 @@
 package com.openbank.treasury.application.port.`in`
 
 import com.openbank.libs.domain.money.RoundingPolicy
+import com.openbank.treasury.application.port.out.CompletePortfolio
 import com.openbank.treasury.application.port.out.DealRepository
 import com.openbank.treasury.application.port.out.LedgerJournalRef
 import com.openbank.treasury.application.port.out.StoredPortfolioStatement
@@ -224,7 +225,7 @@ interface PortfolioStatementUseCase {
     ): StoredPortfolioStatement
 
     /** The current snapshot at [date]. @throws com.openbank.treasury.application.port.out.PortfolioSnapshotMissingException when none (409). */
-    suspend fun periodEnd(date: LocalDate): StoredPortfolioStatement
+    suspend fun periodEnd(date: LocalDate): CompletePortfolio
 
     /** Every version stored for [date], oldest first: the correction trail. */
     suspend fun versions(date: LocalDate): List<StoredPortfolioStatement>

@@ -7,6 +7,9 @@ package com.openbank.treasury.domain.model
 import java.math.BigDecimal
 import java.time.LocalDate
 
+/** The custodian's quantity dimension; never inferred from instrument classification. */
+enum class PortfolioQuantityBasis { UNIT, FACE_AMOUNT, AMORTISED_VALUE }
+
 /**
  * One instrument of a custodian's period-end statement of holdings (semt.002 `BalForAcct`), as the
  * custodian stated it, before classification.
@@ -19,6 +22,7 @@ data class CustodyHolding(
     /** The holding value in the account's base currency, as stated. */
     val valuation: BigDecimal,
     val valuationCurrency: String,
+    val quantityBasis: PortfolioQuantityBasis? = null,
 )
 
 /** A complete semt.002 statement of holdings for one safekeeping account at [statementDate]. */
@@ -37,6 +41,8 @@ data class PortfolioPosition(
     val quantity: BigDecimal,
     val valuation: BigDecimal,
     val valuationCurrency: String,
+    /** Null only for legacy holdings whose source dimension was not retained. */
+    val quantityBasis: PortfolioQuantityBasis? = null,
 ) {
     init {
         require(Isin.isValid(isin)) { "ISIN $isin is not a valid ISO 6166 identifier" }
@@ -109,6 +115,7 @@ class CfiClassMapping(prefixes: Map<String, String>) {
                     h.quantity,
                     h.valuation,
                     h.valuationCurrency,
+                    h.quantityBasis,
                 )
             },
         )

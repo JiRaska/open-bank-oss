@@ -61,6 +61,7 @@ class TaxReportingTreasuryPortfolioPactConsumerTest {
         .headers(mapOf("Content-Type" to "application/json"))
         .body(
             newJsonBody { o ->
+                o.stringValue("entity", "company")
                 o.stringValue("asOf", "2026-12-31")
                 o.stringType("currency", "CZK")
                 o.minArrayLike("positions", 1) { p ->
@@ -69,6 +70,21 @@ class TaxReportingTreasuryPortfolioPactConsumerTest {
                     p.stringMatcher("quantity", DECIMAL, "1000")
                     p.stringMatcher("valuation", DECIMAL, "1012345.67")
                     p.stringType("valuationCurrency", "CZK")
+                    p.stringType("quantityBasis", "FACE_AMOUNT")
+                }
+                o.array("sourceStatements") { s ->
+                    s.`object` { statement ->
+                        statement.stringValue("safekeepingAccount", SOURCE_ACCOUNT_A)
+                        statement.uuid("statementUuid")
+                        statement.stringValue("statementId", SOURCE_STATEMENT_ID)
+                        statement.integerType("version", 1)
+                    }
+                    s.`object` { statement ->
+                        statement.stringValue("safekeepingAccount", SOURCE_ACCOUNT_B)
+                        statement.uuid("statementUuid")
+                        statement.stringValue("statementId", SOURCE_STATEMENT_ID)
+                        statement.integerType("version", 1)
+                    }
                 }
             }.build(),
         )
@@ -77,7 +93,7 @@ class TaxReportingTreasuryPortfolioPactConsumerTest {
     @Pact(consumer = CONSUMER, provider = PROVIDER)
     fun noSnapshotPact(builder: PactDslWithProvider): RequestResponsePact = builder
         .given(NO_SNAPSHOT_STATE)
-        .uponReceiving("GET the pension company's portfolio for a year end with no custodian statement")
+        .uponReceiving("GET the pension company's portfolio when a safekeeping account has no year-end statement")
         .path(EXPECTED_PATH)
         .query("date=2026-12-31")
         .method("GET")
@@ -103,7 +119,7 @@ class TaxReportingTreasuryPortfolioPactConsumerTest {
         assertThat(clientPath()).isEqualTo(EXPECTED_PATH)
         val body = given().baseUri(mockServer.getUrl()).queryParam("date", "2026-12-31")
             .get(clientPath()).then().statusCode(200).extract().asString()
-        val portfolio = TreasuryCompanyPortfolio.decode(mapper.readValue<TreasuryPortfolioDto>(body))
+        val portfolio = TreasuryCompanyPortfolio.decode(mapper.readValue<TreasuryPortfolioDto>(body), "company")
         val catalogue = CatalogueParser.parse(mapper, "statutory-returns/cz/pension-cnb.v1.json")
         val definition = catalogue.definition("PSP34-12-PS")!!
         val values = runBlocking {
@@ -118,6 +134,8 @@ class TaxReportingTreasuryPortfolioPactConsumerTest {
         assertThat(values.keys).containsExactlyInAnyOrderElementsOf(definition.datapoints)
         assertThat(values.getValue("government_bond_valuation")).isEqualByComparingTo("1012345.67")
         assertThat(definition.validate(values)).isEmpty()
+        assertThat(portfolio.sourceStatements.map { it.safekeepingAccount })
+            .containsExactly(SOURCE_ACCOUNT_A, SOURCE_ACCOUNT_B)
     }
 
     @Test
@@ -131,7 +149,7 @@ class TaxReportingTreasuryPortfolioPactConsumerTest {
         assertThat(response.path<String>("error")).isEqualTo("PORTFOLIO_SNAPSHOT_MISSING")
         val refusal = TreasuryCompanyPortfolio.unavailable(response.statusCode(), LocalDate.parse("2026-12-31"))
         assertThat(refusal).isInstanceOf(ReturnDataUnavailableException::class.java)
-        assertThat(refusal.message).startsWith("no custodian statement for 2026-12-31")
+        assertThat(refusal.message).startsWith("no complete custodian statement set for 2026-12-31")
     }
 
     @Test
@@ -155,10 +173,13 @@ class TaxReportingTreasuryPortfolioPactConsumerTest {
         const val NEGATIVE_AUTH_STATE = "no valid M2M identity is presented"
 
         /** Must match TreasuryPactStates.NO_SNAPSHOT_STATE (treasury-service, #12506). */
-        const val NO_SNAPSHOT_STATE = "no portfolio snapshot exists for 2026-12-31"
+        const val NO_SNAPSHOT_STATE = "one or more safekeeping accounts has no portfolio snapshot for 2026-12-31"
 
         /** Must match the treasury-service @PactFolder provider state (feat/treasury-pension-co-portfolio). */
         const val STATE = "the pension company holds investment positions at 2026-12-31"
+        const val SOURCE_ACCOUNT_A = "PSCO-OWN-0001"
+        const val SOURCE_ACCOUNT_B = "PSCO-OWN-0002"
+        const val SOURCE_STATEMENT_ID = "CUST-PS-20261231"
 
         /** LITERAL, retyped from the shared portfolio contract — never derived from the client. */
         const val EXPECTED_PATH = "/api/v1/treasury/portfolio/period-end"

@@ -8,6 +8,7 @@ import com.openbank.libs.iso20022.SecuritiesHolding
 import com.openbank.libs.iso20022.Semt002Reader
 import com.openbank.treasury.domain.model.CustodyHolding
 import com.openbank.treasury.domain.model.CustodyStatement
+import com.openbank.treasury.domain.model.PortfolioQuantityBasis
 import java.math.BigDecimal
 
 /**
@@ -37,6 +38,7 @@ object Semt002Statements {
             quantity = exact(h.quantity, QUANTITY_SCALE, QUANTITY_INTEGER_DIGITS, "ISIN ${h.isin} quantity"),
             valuation = exact(value, VALUE_SCALE, VALUE_INTEGER_DIGITS, "ISIN ${h.isin} valuation"),
             valuationCurrency = currency,
+            quantityBasis = PortfolioQuantityBasis.valueOf(h.quantityType.name),
         )
     }
 

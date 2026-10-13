@@ -7,6 +7,7 @@ package com.openbank.treasury.infrastructure.rest
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import com.openbank.treasury.application.port.`in`.PortfolioStatementUseCase
+import com.openbank.treasury.application.port.out.CompletePortfolio
 import com.openbank.treasury.application.port.out.StoredPortfolioStatement
 import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.infrastructure.iso20022.Semt002Statements
@@ -77,7 +78,7 @@ class PortfolioResource {
 
     @GET
     @Path("/period-end")
-    @Operation(summary = "The portfolio at exactly that date; 409 when no statement of holdings is stored for it")
+    @Operation(summary = "The portfolio at exactly that date; 409 when any configured account lacks its statement")
     @Authorize(action = "treasury.portfolio.inspect")
     suspend fun periodEnd(@QueryParam("date") date: String?): PeriodEndPortfolioResponse =
         PeriodEndPortfolioResponse.from(portfolio.periodEnd(date(date)))
@@ -109,34 +110,46 @@ data class PortfolioPositionResponse(
     val isin: String,
     val cfi: String,
     val quantity: String,
+    val quantityBasis: String,
     val valuation: String,
     val valuationCurrency: String,
 )
 
 /** The agreed tax-reporting contract: `asOf`, `currency`, `positions`. */
+data class PortfolioSourceStatementResponse(
+    val safekeepingAccount: String,
+    val statementUuid: UUID,
+    val statementId: String?,
+    val version: Int,
+)
+
 data class PeriodEndPortfolioResponse(
     val asOf: LocalDate,
     val entity: String,
     val currency: String,
-    val statementUuid: UUID,
-    val statementId: String?,
-    val version: Int,
+    val sourceStatements: List<PortfolioSourceStatementResponse>,
     val positions: List<PortfolioPositionResponse>,
 ) {
     companion object {
-        fun from(s: StoredPortfolioStatement) = PeriodEndPortfolioResponse(
-            asOf = s.snapshot.statementDate,
-            entity = s.snapshot.entity,
-            currency = s.snapshot.currency,
-            statementUuid = s.id,
-            statementId = s.snapshot.statementId,
-            version = s.version,
-            positions = s.snapshot.positions.sortedBy { it.isin }.map {
+        fun from(s: CompletePortfolio) = PeriodEndPortfolioResponse(
+            asOf = s.statementDate,
+            entity = s.entity,
+            currency = s.currency,
+            sourceStatements = s.sourceStatements.map {
+                PortfolioSourceStatementResponse(
+                    it.snapshot.safekeepingAccount,
+                    it.id,
+                    it.snapshot.statementId,
+                    it.version,
+                )
+            },
+            positions = s.positions.sortedBy { it.isin }.map {
                 PortfolioPositionResponse(
                     instrumentClass = it.instrumentClass,
                     isin = it.isin,
                     cfi = it.cfi,
                     quantity = it.quantity.stripTrailingZeros().toPlainString(),
+                    quantityBasis = checkNotNull(it.quantityBasis).name,
                     valuation = it.valuation.toPlainString(),
                     valuationCurrency = it.valuationCurrency,
                 )

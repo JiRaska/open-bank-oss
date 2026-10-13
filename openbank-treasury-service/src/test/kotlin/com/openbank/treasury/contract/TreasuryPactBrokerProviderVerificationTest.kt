@@ -16,6 +16,7 @@ import com.openbank.treasury.integration.TreasuryDealApiIT
 import com.openbank.treasury.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
 import io.vertx.core.Vertx
@@ -33,6 +34,7 @@ import org.junit.jupiter.api.extension.ExtendWith
  * test identity cleared.
  */
 @QuarkusTest
+@TestProfile(TreasuryPortfolioPactProfile::class)
 @QuarkusTestResource(TreasuryDealApiIT.InMemoryKafkaResource::class)
 @QuarkusTestResource(PostgresTestResource::class)
 @TestSecurity(user = "service-account-openbank-tax-reporting", roles = ["ROLE_API"])

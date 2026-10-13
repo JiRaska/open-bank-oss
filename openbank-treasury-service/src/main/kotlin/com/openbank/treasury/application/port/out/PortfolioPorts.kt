@@ -4,6 +4,7 @@
 
 package com.openbank.treasury.application.port.out
 
+import com.openbank.treasury.domain.model.PortfolioPosition
 import com.openbank.treasury.domain.model.PortfolioSnapshot
 import java.time.Instant
 import java.time.LocalDate
@@ -42,6 +43,14 @@ class PortfolioSnapshotMissingException(entity: String, date: LocalDate) :
 class DuplicatePortfolioStatementException(cause: Throwable) :
     RuntimeException("portfolio statement already stored", cause)
 
+data class CompletePortfolio(
+    val entity: String,
+    val statementDate: LocalDate,
+    val currency: String,
+    val positions: List<PortfolioPosition>,
+    val sourceStatements: List<StoredPortfolioStatement>,
+)
+
 interface PortfolioStatementRepository {
     suspend fun findByIdempotencyKey(key: String): StoredPortfolioStatement?
 
@@ -49,7 +58,10 @@ interface PortfolioStatementRepository {
     suspend fun bindIdempotencyKey(key: String, statementId: UUID): StoredPortfolioStatement
 
     /** The current (not superseded) version for [entity] at [date], or null. */
-    suspend fun current(entity: String, date: LocalDate): StoredPortfolioStatement?
+    suspend fun current(entity: String, account: String, date: LocalDate): StoredPortfolioStatement?
+
+    /** All current account statements selected together for the date. */
+    suspend fun currentForDate(entity: String, date: LocalDate): List<StoredPortfolioStatement>
 
     /** Every version for [entity] at [date], oldest first (the correction trail). */
     suspend fun versions(entity: String, date: LocalDate): List<StoredPortfolioStatement>

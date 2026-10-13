@@ -82,6 +82,9 @@ class PortfolioHoldingEntity : PanacheEntity() {
     @Column(name = "instrument_class", nullable = false)
     lateinit var instrumentClass: String
 
+    @Column(name = "quantity_basis")
+    var quantityBasis: String? = null
+
     @Column(name = "quantity", nullable = false)
     lateinit var quantity: BigDecimal
 
