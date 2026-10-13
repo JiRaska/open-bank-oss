@@ -351,14 +351,12 @@ is the **authentication assurance gate** for payments and consent — defeating 
   PENDING approval can never be decided or claimed, so it ages out on the same clock. A still-live
   approval never matches, because the cutoff lies in the past. The outbox events are not touched. A legal hold is `openbank.sca.approval-purge.enabled=false`. **Rollback:** revert
   the binary with four-eyes enforcement off; keep `sca_operator_approvals` and its outbox rows.
-- **2026-10-11** — **The 8443 listener no longer accepts a client certificate as a login (#12511).**
-  `client-auth: required` (2026-09-20 entries above) also registers Quarkus's mTLS authentication
-  mechanism, which turned any certificate the private CA had signed into an authenticated
-  `SecurityIdentity`: a workload holding a fleet-CA certificate and NO bearer reached `/api/*` as a
-  logged-in principal (measured: 403 from authz instead of 401). `%prod` now restricts `/api/*` to
-  `auth-mechanism: bearer` (the #12506 pattern), so the certificate is transport authentication only and
-  the OIDC bearer is the only identity a route or OPA sees, identically on 8443 and the plain port.
-  **STRIDE-S/E:** closes a spoofing / elevation path; callers are unaffected because every 8443 caller
-  already sends its own bearer. Proven by `ScaListenerAuthParityIT` (production listener shape, real
-  HTTP; 1 of 4 failing without the change, 4 of 4 with it) and gated fleet-wide by `mtls-bearer-only`.
-  Rollback: revert the commit (re-opens the path).
+- **2026-10-13** — **Bearer enforcement on SCA business routes (#12511).** A trusted client
+  certificate validates the TLS transport but is not the application caller identity. The earlier
+  `auth-mechanism: bearer` rule with `policy: permit` returned 401 for annotated operations yet
+  allowed a test-only unannotated `/api/v1/sca/*` route without a bearer on both listeners (200 in
+  two of five red real-HTTP/TLS checks). The `%prod` permission now requires an authenticated OIDC
+  bearer on the exact `/api/v1/sca` root and its descendants; shared public metadata and management
+  routes stay outside it. Existing role and OPA checks still apply after authentication. **STRIDE-S/E:**
+  prevents an omitted route annotation from accepting an unauthenticated caller. Rollback must keep
+  an equivalent bearer-required permission; restoring `policy: permit` reopens the measured gap.
