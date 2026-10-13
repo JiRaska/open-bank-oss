@@ -9,6 +9,8 @@ import com.openbank.libs.web.SyntheticTaintClientFilter
 import com.openbank.tax.application.port.out.CompanyPortfolio
 import com.openbank.tax.application.port.out.CompanyPortfolioPort
 import com.openbank.tax.application.port.out.CompanyPortfolioPosition
+import com.openbank.tax.application.port.out.CompanyPortfolioSourceStatement
+import com.openbank.tax.application.port.out.PortfolioQuantityBasis
 import com.openbank.tax.application.port.out.ReturnDataUnavailableException
 import io.quarkus.oidc.client.filter.OidcClientFilter
 import jakarta.enterprise.context.ApplicationScoped
@@ -26,8 +28,8 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import java.math.BigDecimal
 import java.time.LocalDate
-import java.time.format.DateTimeParseException
 import java.util.Optional
+import java.util.UUID
 
 /**
  * The pension company's OWN treasury instance (`treasury-pension-co`, ADR-0337): its portfolio at a
@@ -53,13 +55,25 @@ data class TreasuryPositionDto(
     val quantity: String? = null,
     val valuation: String? = null,
     val valuationCurrency: String? = null,
+    val quantityBasis: String? = null,
 )
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class TreasuryPortfolioDto(
+    val entity: String? = null,
     val asOf: String? = null,
     val currency: String? = null,
     val positions: List<TreasuryPositionDto>? = null,
+    val sourceStatements: List<TreasurySourceStatementDto>? = null,
+)
+
+/** Period-end statement provenance for one safekeeping account. */
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class TreasurySourceStatementDto(
+    val safekeepingAccount: String? = null,
+    val statementUuid: String? = null,
+    val statementId: String? = null,
+    val version: Int? = null,
 )
 
 /**
@@ -71,6 +85,8 @@ data class TreasuryPortfolioDto(
 class TreasuryCompanyPortfolio(
     @RestClient private val client: Instance<TreasuryPortfolioClient>,
     @ConfigProperty(name = "quarkus.rest-client.treasury-service.url") private val url: Optional<String>,
+    @ConfigProperty(name = "openbank.statutory-returns.company-id", defaultValue = "company")
+    private val companyId: String,
 ) : CompanyPortfolioPort {
     override suspend fun portfolio(periodEnd: LocalDate): CompanyPortfolio {
         if (url.isEmpty || url.get().isBlank()) {
@@ -86,21 +102,22 @@ class TreasuryCompanyPortfolio(
         } catch (e: ProcessingException) {
             throw ReturnDataUnavailableException("pension company treasury unreachable: ${e.message}", e)
         }
-        return decode(dto)
+        return decode(dto, companyId)
     }
 
     companion object {
         /**
          * A refusal by the treasury, as the reason the return is unavailable (503). 409 is the
-         * provider's "no custodian statement stored for that date" (PORTFOLIO_SNAPSHOT_MISSING —
-         * never an empty list, ADR-0337 amendment): a missing semt.002 upload, which an operator
-         * fixes by uploading it, so the reason names exactly that rather than a status code.
+         * provider's "one or more safekeeping accounts has no statement for that date"
+         * (PORTFOLIO_SNAPSHOT_MISSING — never an empty list, ADR-0337 amendment): a missing
+         * semt.002 upload, which an operator fixes by uploading it, rather than a status code.
          */
         fun unavailable(status: Int, periodEnd: LocalDate, cause: Throwable? = null): ReturnDataUnavailableException =
             if (status == HTTP_CONFLICT) {
                 ReturnDataUnavailableException(
-                    "no custodian statement for $periodEnd: the pension company's treasury holds no " +
-                        "semt.002 portfolio snapshot for that date (upload it, then assemble again)",
+                    "no complete custodian statement set for $periodEnd: the pension company's treasury " +
+                        "lacks a semt.002 snapshot for one or more safekeeping accounts " +
+                        "(upload the missing statement, then assemble again)",
                     cause,
                 )
             } else {
@@ -113,26 +130,80 @@ class TreasuryCompanyPortfolio(
         private const val HTTP_CONFLICT = 409
 
         /** Wire -> port; any absent or unparsable field refuses the whole answer, never a default. */
-        fun decode(dto: TreasuryPortfolioDto): CompanyPortfolio {
-            fun bad(what: String): Nothing =
-                throw ReturnDataUnavailableException("pension company treasury portfolio is malformed: $what")
-            val asOf = try {
-                LocalDate.parse(dto.asOf ?: bad("asOf absent"))
-            } catch (e: DateTimeParseException) {
-                bad("asOf '${dto.asOf}' is not a date (${e.message})")
+        fun decode(dto: TreasuryPortfolioDto, expectedEntity: String): CompanyPortfolio {
+            val entity = dto.entity ?: bad("entity absent")
+            if (entity != expectedEntity) {
+                bad("entity '$entity' does not match configured pension company '$expectedEntity'")
             }
-            val positions = (dto.positions ?: bad("positions absent")).mapIndexed { i, p ->
-                fun dec(name: String, v: String?) = v?.toBigDecimalOrNull() ?: bad("positions[$i].$name '$v'")
-                CompanyPortfolioPosition(
-                    instrumentClass = p.instrumentClass ?: bad("positions[$i].instrumentClass absent"),
-                    isin = p.isin ?: bad("positions[$i].isin absent"),
-                    quantity = dec("quantity", p.quantity),
-                    valuation = dec("valuation", p.valuation),
-                    valuationCurrency = p.valuationCurrency ?: bad("positions[$i].valuationCurrency absent"),
-                )
-            }
-            return CompanyPortfolio(asOf, dto.currency ?: bad("currency absent"), positions)
+            val sourceStatements = decodeSourceStatements(dto.sourceStatements)
+            return CompanyPortfolio(
+                parseAsOf(dto.asOf),
+                dto.currency ?: bad("currency absent"),
+                decodePositions(dto.positions),
+                sourceStatements,
+            )
         }
+
+        private fun parseAsOf(raw: String?): LocalDate = try {
+            LocalDate.parse(raw ?: bad("asOf absent"))
+        } catch (e: java.time.format.DateTimeParseException) {
+            bad("asOf '$raw' is not a date (${e.message})")
+        }
+
+        private fun decodePositions(raw: List<TreasuryPositionDto>?): List<CompanyPortfolioPosition> =
+            (raw ?: bad("positions absent")).mapIndexed(::decodePosition)
+
+        private fun decodePosition(index: Int, position: TreasuryPositionDto): CompanyPortfolioPosition {
+            val rawBasis = position.quantityBasis ?: bad("positions[$index].quantityBasis absent")
+            val basis = PortfolioQuantityBasis.entries.firstOrNull { it.name == rawBasis }
+                ?: bad("positions[$index].quantityBasis '$rawBasis' is unsupported")
+            return CompanyPortfolioPosition(
+                instrumentClass = position.instrumentClass ?: bad("positions[$index].instrumentClass absent"),
+                isin = position.isin ?: bad("positions[$index].isin absent"),
+                quantity = parseDecimal(index, "quantity", position.quantity),
+                valuation = parseDecimal(index, "valuation", position.valuation),
+                valuationCurrency = position.valuationCurrency ?: bad("positions[$index].valuationCurrency absent"),
+                quantityBasis = basis,
+            )
+        }
+
+        private fun parseDecimal(index: Int, field: String, raw: String?): BigDecimal =
+            raw?.toBigDecimalOrNull() ?: bad("positions[$index].$field '$raw'")
+
+        private fun decodeSourceStatements(
+            raw: List<TreasurySourceStatementDto>?,
+        ): List<CompanyPortfolioSourceStatement> {
+            val statements = (raw ?: bad("sourceStatements absent")).mapIndexed(::decodeSourceStatement)
+            if (statements.isEmpty()) bad("sourceStatements is empty")
+            val duplicateAccounts = statements.groupBy { it.safekeepingAccount }.filterValues { it.size > 1 }.keys
+            if (duplicateAccounts.isNotEmpty()) {
+                bad("sourceStatements repeats safekeeping account(s) $duplicateAccounts")
+            }
+            val duplicateUuids = statements.groupBy { it.statementUuid }.filterValues { it.size > 1 }.keys
+            if (duplicateUuids.isNotEmpty()) {
+                bad("sourceStatements repeats statement UUID(s) $duplicateUuids")
+            }
+            return statements
+        }
+
+        private fun decodeSourceStatement(
+            index: Int,
+            statement: TreasurySourceStatementDto,
+        ): CompanyPortfolioSourceStatement {
+            val account = statement.safekeepingAccount?.takeIf { it.isNotBlank() }
+                ?: bad("sourceStatements[$index].safekeepingAccount absent")
+            val rawUuid = statement.statementUuid ?: bad("sourceStatements[$index].statementUuid absent")
+            val canonicalUuid = Regex("[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}")
+            if (!canonicalUuid.matches(rawUuid)) {
+                bad("sourceStatements[$index].statementUuid is not a canonical UUID")
+            }
+            val version = statement.version?.takeIf { it >= 1 }
+                ?: bad("sourceStatements[$index].version must be positive")
+            return CompanyPortfolioSourceStatement(account, UUID.fromString(rawUuid), statement.statementId, version)
+        }
+
+        private fun bad(what: String): Nothing =
+            throw ReturnDataUnavailableException("pension company treasury portfolio is malformed: $what")
     }
 }
 
@@ -142,10 +213,16 @@ data class Psp3412PsRow(
     val isin: String,
     val quantity: BigDecimal,
     val valuation: BigDecimal,
+    val quantityBasis: PortfolioQuantityBasis,
 )
 
 /** The assembled return: instrument-level [rows] and the catalogue [datapoints] derived from them. */
-data class Psp3412PsReport(val asOf: LocalDate, val rows: List<Psp3412PsRow>, val datapoints: Map<String, BigDecimal>)
+data class Psp3412PsReport(
+    val asOf: LocalDate,
+    val rows: List<Psp3412PsRow>,
+    val datapoints: Map<String, BigDecimal>,
+    val sourceStatements: List<CompanyPortfolioSourceStatement>,
+)
 
 /**
  * ČNB PSP (ČNB) 34-12 PS — composition of the pension company's own portfolio (vyhl. 425/2012 Sb.
@@ -193,11 +270,17 @@ object Psp3412PsAssembler {
                 refuse("${p.isin} is valued in ${p.valuationCurrency}; no FX conversion is applied here")
             }
         }
+        val mixedQuantityBasis = portfolio.positions.groupBy { it.instrumentClass }
+            .filterValues { positions -> positions.map { it.quantityBasis }.distinct().size > 1 }
+            .keys
+        if (mixedQuantityBasis.isNotEmpty()) {
+            refuse("instrument class(es) $mixedQuantityBasis mix quantity bases; class quantities cannot be added")
+        }
         val duplicate = portfolio.positions.groupBy { it.isin }.filterValues { it.size > 1 }.keys
         if (duplicate.isNotEmpty()) refuse("ISIN(s) $duplicate reported more than once")
 
         val rows = portfolio.positions
-            .map { Psp3412PsRow(it.instrumentClass, it.isin, it.quantity, it.valuation) }
+            .map { Psp3412PsRow(it.instrumentClass, it.isin, it.quantity, it.valuation, it.quantityBasis) }
             .sortedWith(compareBy({ INSTRUMENT_CLASSES.indexOf(it.instrumentClass) }, { it.isin }))
         val byClass = rows.groupBy { it.instrumentClass }
         val datapoints = linkedMapOf(
@@ -209,6 +292,6 @@ object Psp3412PsAssembler {
             datapoints[quantityId(c)] = inClass.fold(BigDecimal.ZERO) { a, r -> a + r.quantity }
             datapoints[valuationId(c)] = inClass.fold(BigDecimal.ZERO) { a, r -> a + r.valuation }
         }
-        return Psp3412PsReport(periodEnd, rows, datapoints)
+        return Psp3412PsReport(periodEnd, rows, datapoints, portfolio.sourceStatements)
     }
 }

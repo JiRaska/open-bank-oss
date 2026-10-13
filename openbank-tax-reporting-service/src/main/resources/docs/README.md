@@ -20,7 +20,25 @@ Withholding-remitted events feed the monthly totals. Events with an unexpected t
 
 Statutory-return access requires a staff identity as well as the route's role and OPA decision. Inspection uses `tax.statutory-return.inspect`; the policy grants it to permitted staff and refuses service-account principals. Assembly, approval, and submission require `ROLE_OPERATOR` and their respective lifecycle decisions. The application also rejects a service-account actor on all three lifecycle routes, including when OPA enforcement is disabled: an operator role alone does not make a machine a maker, checker, or submitter. This guard checks the principal name and token claims, so a service-account token with a UUID principal name is still refused with HTTP 403. A human operator remains subject to the data-availability checks and the separate maker/checker requirement.
 
-`/capability` is authoritative for the current deployment. Pension figures are read from pension-fund-service's period figures (fund balance sheet, year-to-date P&L, unit roll-forward, portfolio including fund loans, entitlements, participant counts) and pension-service's participant aggregates (contributions by source, payouts, pensioners), using this service's own machine client. The pension company's own balance sheet and P&L are sourced from its separate ledger's frozen closes. Capital, organisation and dividend facts require approved, effective corporate-register entries. PSP 34-12 PS uses the company's own treasury portfolio at the period end, with the configured reporting currency; it does not substitute a fund portfolio or the bank's treasury. These source mappings do not prove that a source instance is deployed or populated: missing source data still refuses assembly. The regulator wire renderer is unavailable, and this service does not claim to have transmitted a regulator file; verified cell-level rendering is tracked separately. The configured reporting entity IDs and reporting start must be supplied before never-assembled pension returns can be monitored.
+`/capability` is authoritative for the current deployment. Pension figures are read from
+pension-fund-service's period figures (fund balance sheet, year-to-date P&L, unit roll-forward,
+portfolio including fund loans, entitlements, participant counts) and pension-service's participant
+aggregates (contributions by source, payouts, pensioners), using this service's own machine client.
+The pension company's own balance sheet and P&L are sourced from its separate ledger's frozen
+closes. Capital, organisation and dividend facts require approved, effective corporate-register
+entries. PSP 34-12 PS uses the company's own treasury portfolio at the period end, with the
+configured reporting currency; it does not substitute a fund portfolio or the bank's treasury. The
+response must identify the configured company and provide a source statement for every safekeeping
+account; treasury aggregates holdings of the same ISIN across those accounts. Tax-reporting validates
+and carries the source-statement metadata while assembling the report. It also requires a declared
+quantity basis (unit, face amount, or amortised value) and refuses to total one instrument class when
+its positions use mixed bases. The statutory-return record persists datapoints and their content
+hash, not the statement identifiers or quantity basis. These source
+mappings do not prove that a source instance is deployed or populated: missing or incomplete source
+data still refuses assembly. The regulator wire renderer is unavailable, and this service does not
+claim to have transmitted a regulator file; verified cell-level rendering is tracked separately.
+The configured reporting entity IDs and reporting start must be supplied before never-assembled
+pension returns can be monitored.
 
 For fund PSP 20-12, the return uses the provider's year-to-date revaluation gains, revaluation losses, management fees, other investment result, and profit/loss figures. Revaluation gains, revaluation losses, and management fees are non-negative amounts; other investment result and profit/loss are signed. The catalogue checks the reported profit/loss against its component lines. If the provider cannot supply the required lines, assembly returns unavailable with the provider's reason.
 
