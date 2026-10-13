@@ -3,4 +3,3 @@
 # on a line that has become compliant), and nothing may be added.
 openbank-domestic-payment
 openbank-sdd-service
-openbank-standing-order-service
