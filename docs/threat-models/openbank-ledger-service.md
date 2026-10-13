@@ -622,3 +622,14 @@ set) apply equally to the new `ledger.approval.decide` action.
   turns `opa test` red. RBAC unchanged. Rollback: revert the annotation and the two rego reasons together.
   Same change: a cron job switched `off` no longer registers a workflow-liveness gauge (no security
   surface; removes a stale-alert source on instances that run without it).
+- **2026-10-11** — **The 8443 listener no longer accepts a client certificate as a login (#12511).**
+  `client-auth: required` (2026-09-20 entries above) also registers Quarkus's mTLS authentication
+  mechanism, which turned any certificate the private CA had signed into an authenticated
+  `SecurityIdentity`: a workload holding a fleet-CA certificate and NO bearer reached `/api/*` as a
+  logged-in principal (measured: 403 from authz instead of 401). `%prod` now restricts `/api/*` to
+  `auth-mechanism: bearer` (the #12506 pattern), so the certificate is transport authentication only and
+  the OIDC bearer is the only identity a route or OPA sees, identically on 8443 and the plain port.
+  **STRIDE-S/E:** closes a spoofing / elevation path; callers are unaffected because every 8443 caller
+  already sends its own bearer. Proven by `LedgerListenerAuthParityIT` (production listener shape, real
+  HTTP; 1 of 4 failing without the change, 4 of 4 with it) and gated fleet-wide by `mtls-bearer-only`.
+  Rollback: revert the commit (re-opens the path).
