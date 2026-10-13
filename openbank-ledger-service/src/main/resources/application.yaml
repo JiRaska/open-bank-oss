@@ -254,3 +254,7 @@ openbank:
             paths: /api/*
             policy: authenticated
             auth-mechanism: bearer
+          public-metadata:
+            paths: /api/v1/info,/api/v1/config
+            methods: GET
+            policy: permit
