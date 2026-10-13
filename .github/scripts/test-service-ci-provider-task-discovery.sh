@@ -32,6 +32,9 @@ export GITHUB_OUTPUT="$tmp/output"
 export HARNESS_CALLS="$tmp/calls"
 export HARNESS_SERVICE="$service"
 export RUNNER_TEMP="$staged"
+# Isolate proof identity from the enclosing Actions job.
+export GITHUB_RUN_ID=local
+export GITHUB_RUN_ATTEMPT=1
 
 # A successful warm-up proof avoids a second Gradle invocation.
 printf '%s' "$service" > "$proof"

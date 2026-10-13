@@ -484,6 +484,12 @@ jobs:
             || python3 -c "import yaml" 2>/dev/null \
             || { echo "::error::pyyaml unavailable — add it to the runner base image"; exit 1; }
 
+      - name: Install locked Schemathesis for governance regressions
+        if: contains(matrix.groups, 'supplychain')
+        run: |
+          python3 -m pip install --quiet --require-hashes \
+            -r .github/workflows/requirements/schemathesis.txt --break-system-packages
+
       # yamllint is not on the hosted image (shellcheck is), and only the bucket CONTAINING
       # the `lint` group needs it — installing it in every bucket would pay an apt-get three
       # times over. `contains(...)` on the space-separated set, since the bucket is no longer

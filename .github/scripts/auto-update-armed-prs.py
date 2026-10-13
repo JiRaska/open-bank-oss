@@ -403,7 +403,7 @@ def self_test() -> int:
         ("unreadable", (503, {}), 1),
     ):
         calls = []
-        def racing_api(method, path, body=None):
+        def racing_api(method, path, body=None, calls=calls, response=response):
             calls.append(method)
             return (422, {"message": "expected head sha didn’t match current head ref."}) if method == "PUT" else response
         report = {"targets": []}
