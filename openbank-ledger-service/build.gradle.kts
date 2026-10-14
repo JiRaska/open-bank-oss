@@ -130,3 +130,79 @@ pitest {
     threads = 4
     excludedClasses = setOf("com.openbank.ledger.domain.*Kt")
 }
+
+// Explicit offline replay of one historical FINREP Pact; never changes broker selectors or publishes.
+val historicalPactSources = sourceSets.named("providerPactTest")
+val historicalFinrepPactTest = tasks.register<Test>("historicalFinrepPactTest") {
+    description = "Replay a validated historical FINREP artifact locally; this is not broker verification"
+    group = "verification"
+    testClassesDirs = historicalPactSources.get().output.classesDirs
+    classpath = historicalPactSources.get().runtimeClasspath
+    filter.includeTestsMatching("com.openbank.ledger.contract.LedgerHistoricalFinrepProviderVerificationTest")
+    outputs.upToDateWhen { false }
+    outputs.cacheIf { false }
+    doFirst {
+        check(System.getProperty("pact.verifier.publishResults", "false") == "false") {
+            "Offline historical replay cannot publish broker results"
+        }
+        val providerSha = requireNotNull(System.getProperty("finrep.historical.providerSha"))
+        require(Regex("[0-9a-f]{40}").matches(providerSha)) { "Provider commit must be a 40-hex SHA" }
+        val ancestry = providers.exec {
+            workingDir(rootProject.projectDir)
+            commandLine("git", "merge-base", "--is-ancestor", providerSha, "origin/main")
+            isIgnoreExitValue = true
+        }.result.get().exitValue
+        check(ancestry == 0) { "Provider commit must be an ancestor of fetched origin/main" }
+        val productionDiff = providers.exec {
+            workingDir(rootProject.projectDir)
+            commandLine("git", "diff", providerSha, "--", "openbank-ledger-service/src/main")
+        }.standardOutput.asText.get()
+        check(productionDiff.isBlank()) { "Provider production source differs from the attested main commit" }
+        for (key in listOf(
+            "pactFile",
+            "manifestFile",
+            "trustedBrokerOriginFile",
+            "providerSha",
+            "consumerSha",
+            "contentSha256",
+            "interactionCount",
+        )) {
+            systemProperty("finrep.historical.$key", requireNotNull(System.getProperty("finrep.historical.$key")))
+        }
+        systemProperty("finrep.historical.enabled", "true")
+        systemProperty("pact.verifier.publishResults", "false")
+        // Do not allow filters to turn a full-artifact replay into an accidental partial success.
+        systemProperties.keys.removeAll { it.toString().startsWith("pact.filter.") }
+    }
+    doLast {
+        val manifest = groovy.json.JsonSlurper().parse(
+            file(System.getProperty("finrep.historical.manifestFile")),
+        ) as Map<*, *>
+        val expected = requireNotNull(System.getProperty("finrep.historical.interactionCount")).toInt()
+        check((manifest["interactionCount"] as Number).toInt() == expected)
+        val reports = reports.junitXml.outputLocation.get().asFile.listFiles { f ->
+            f.name.startsWith("TEST-") &&
+                f.name.endsWith(".xml")
+        }
+            .orEmpty()
+        val parser = javax.xml.parsers.DocumentBuilderFactory.newInstance().apply {
+            setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
+        }.newDocumentBuilder()
+        var verified = 0
+        for (report in reports) {
+            val suite = parser.parse(report).documentElement
+            for (attribute in listOf("failures", "errors", "skipped")) {
+                check(suite.getAttribute(attribute).toInt() == 0) {
+                    "Historical replay has failures or skipped interactions"
+                }
+            }
+            verified += suite.getAttribute("tests").toInt()
+        }
+        check(expected > 0 && verified == expected) {
+            "Historical replay did not verify the exact artifact interaction count"
+        }
+        logger.lifecycle(
+            "Offline historical FINREP replay verified $verified interactions; no broker verification was published",
+        )
+    }
+}
