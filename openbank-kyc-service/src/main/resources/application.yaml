@@ -77,6 +77,8 @@ quarkus:
     # calling a meaningless URL. The rest-client default exists only so the client bean builds.
     case-coordinator:
       url: ${CASE_COORDINATOR_URL:http://localhost:8146}
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
   smallrye-reactive-messaging:
     kafka:
