@@ -54,8 +54,10 @@ describe('MergeRecordsSection', () => {
     render(<MergeRecordsSection knownAgentIds={['finops-agent']} />)
 
     expect(await screen.findByText('Recorded human merges')).toBeVisible()
-    // Summary chip: 2 total, 1 within the last 30 days.
-    expect(screen.getByText('2 recorded · 1 in the last 30 days')).toBeVisible()
+    // Summary chip renders only after the fetch resolves (records !== null), and
+    // the title above renders immediately — so the chip must be AWAITED, not
+    // grabbed synchronously, or the assertion races the fetch (CI flake).
+    expect(await screen.findByText('2 recorded · 1 in the last 30 days')).toBeVisible()
 
     // PR number links to prUrl.
     const prLink = screen.getByRole('link', { name: '#123' })
