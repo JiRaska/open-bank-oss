@@ -153,12 +153,6 @@ charters:
       stamps on MCP tool calls (ADR-0181). openbank-mcp-service makes no model call of any kind;
       the calling agent is external and brings its own prompt.
 
-  - id: ap2-anonymous
-    status: not-applicable
-    reason: >-
-      Identity-only principal for the AP2 mandate-signature verifier (ADR-0193). Pure
-      cryptographic verification with `read: []`; no model, no prompt.
-
   - id: finops-agent
     status: registered
     prompts: [system.v1]

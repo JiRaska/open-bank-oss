@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: domestic-payment
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "a52fbfbadaedfea3"
+    openbank.tech/policy-checksum: "ad6706d1d69b2ef6"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -988,15 +988,6 @@ data:
         - query.transaction.readonly
         - query.consent.readonly
         - propose.payment
-        deny:
-        - money.*
-        - gh.pr.*
-        - '*.write'
-        - secrets.read.raw
-    - id: ap2-anonymous
-      tools:
-        allow:
-        - verify.mandate
         deny:
         - money.*
         - gh.pr.*

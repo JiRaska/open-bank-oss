@@ -18,7 +18,10 @@ import com.openbank.libs.authz.AuthzDecision
 import com.openbank.libs.authz.AuthzQuery
 import com.openbank.libs.authz.PolicyDecisionPoint
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
+import io.mockk.every
+import io.mockk.mockk
 import org.assertj.core.api.Assertions.assertThat
+import org.eclipse.microprofile.jwt.JsonWebToken
 import org.junit.jupiter.api.Test
 import java.time.Instant
 
@@ -50,24 +53,29 @@ class Ap2VerifyEndpointTest {
         payment = PresentedPayment("CZ65", 50_00, "CZK", Instant.parse("2026-06-01T00:00:00Z")),
     )
 
-    private fun endpoint(pdp: PolicyDecisionPoint) = Ap2VerifyEndpoint(verifier, pdp, Ap2MetricsAdapter(registry))
+    private fun endpoint(pdp: PolicyDecisionPoint, subject: Any? = "agent:test"): Ap2VerifyEndpoint = Ap2VerifyEndpoint(
+        verifier,
+        pdp,
+        Ap2MetricsAdapter(registry),
+        mockk<JsonWebToken>().apply { every { getClaim<Any>("sub") } returns subject },
+    )
 
     @Test
     fun `allow returns 200 with a verdict`() {
-        val resp = endpoint(allow()).verify(request, "agent:test")
+        val resp = endpoint(allow()).verify(request)
         assertThat(resp.status).isEqualTo(200)
         assertThat(resp.entity).isInstanceOf(MandateVerdict::class.java)
     }
 
     @Test
     fun `deny returns 403`() {
-        val resp = endpoint(deny()).verify(request, "agent:test")
+        val resp = endpoint(deny()).verify(request)
         assertThat(resp.status).isEqualTo(403)
     }
 
     @Test
     fun `pdp outage fails closed with 503`() {
-        val resp = endpoint(exploding()).verify(request, "agent:test")
+        val resp = endpoint(exploding()).verify(request)
         assertThat(resp.status).isEqualTo(503)
     }
 
@@ -88,9 +96,9 @@ class Ap2VerifyEndpointTest {
         // The endpoint calls the PDP directly rather than through the @Authorize interceptor, so it
         // emits no openbank_authz_decisions_total. A PDP outage denies EVERY agent and previously
         // left nothing behind but a WARN line.
-        endpoint(allow()).verify(request, "agent:test")
-        endpoint(deny()).verify(request, "agent:test")
-        endpoint(exploding()).verify(request, "agent:test")
+        endpoint(allow()).verify(request)
+        endpoint(deny()).verify(request)
+        endpoint(exploding()).verify(request)
 
         assertThat(decisions("allowed")).isEqualTo(1.0)
         assertThat(decisions("denied")).isEqualTo(1.0)
@@ -99,7 +107,7 @@ class Ap2VerifyEndpointTest {
 
     @Test
     fun `a denied call verifies no mandate, so it publishes no verification counter`() {
-        endpoint(deny()).verify(request, "agent:test")
+        endpoint(deny()).verify(request)
 
         assertThat(decisions("denied")).isEqualTo(1.0)
         assertThat(registry.find("openbank.ap2.mandate.verifications").counters()).isEmpty()
@@ -109,4 +117,51 @@ class Ap2VerifyEndpointTest {
         .tag("service", "ap2")
         .tag("outcome", outcome)
         .counter().count()
+
+    @Test
+    fun `missing or non-agent token subject never reaches the PDP`() {
+        val neverCalled = object : PolicyDecisionPoint {
+            override suspend fun allow(query: AuthzQuery): AuthzDecision = error("PDP must not be called")
+        }
+        assertThat(endpoint(neverCalled, null).verify(request).status).isEqualTo(403)
+        assertThat(endpoint(neverCalled, "service-account-shared").verify(request).status).isEqualTo(403)
+        assertThat(endpoint(neverCalled, "agent:").verify(request).status).isEqualTo(403)
+        assertThat(endpoint(neverCalled, "agent:ap2-anonymous").verify(request).status).isEqualTo(403)
+    }
+
+    @Test
+    fun `non-string token subjects are refused before policy and mandate verification`() {
+        val neverCalled = object : PolicyDecisionPoint {
+            override suspend fun allow(query: AuthzQuery): AuthzDecision = error("PDP must not be called")
+        }
+        listOf<Any>(42, true, listOf("agent:test"), mapOf("name" to "agent:test")).forEach { malformed ->
+            assertThat(endpoint(neverCalled, malformed).verify(request).status).isEqualTo(403)
+        }
+        assertThat(registry.find("openbank.ap2.mandate.verifications").counters()).isEmpty()
+    }
+
+    @Test
+    fun `an unreadable token subject is refused before policy and mandate verification`() {
+        val neverCalled = object : PolicyDecisionPoint {
+            override suspend fun allow(query: AuthzQuery): AuthzDecision = error("PDP must not be called")
+        }
+        val unreadable = mockk<JsonWebToken> {
+            every { getClaim<Any>("sub") } throws ClassCastException("invalid subject claim")
+        }
+        val endpoint = Ap2VerifyEndpoint(verifier, neverCalled, Ap2MetricsAdapter(registry), unreadable)
+        assertThat(endpoint.verify(request).status).isEqualTo(403)
+        assertThat(registry.find("openbank.ap2.mandate.verifications").counters()).isEmpty()
+    }
+
+    @Test
+    fun `PDP receives only the validated token subject`() {
+        val pdp = object : PolicyDecisionPoint {
+            override suspend fun allow(query: AuthzQuery): AuthzDecision {
+                assertThat(query.principal.id).isEqualTo("agent:caller")
+                assertThat(query.principal.type).isEqualTo("AI_AGENT")
+                return AuthzDecision(allow = true)
+            }
+        }
+        assertThat(endpoint(pdp, "agent:caller").verify(request).status).isEqualTo(200)
+    }
 }

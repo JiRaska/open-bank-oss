@@ -258,7 +258,7 @@ def main():
 
     # Coverage is scored against the prompt-registry status vocabulary, not against the raw charter
     # list (issue #2381). Before this, a charter that CANNOT have an eval suite counted as backlog:
-    # mcp-anonymous and ap2-anonymous are identity-only principals that make no model call at all,
+    # identity-only principals such as mcp-anonymous make no model call at all,
     # so they would have sat in the warning line forever, and a permanently-unclosable item trains
     # readers to skim the whole warning. That is the exact absent-vs-not-applicable conflation
     # prompts/registry.yaml was introduced to end (#1918) — check-prompt-registry.py honours the
