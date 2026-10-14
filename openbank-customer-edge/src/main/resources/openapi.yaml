@@ -47,7 +47,10 @@ info:
   # 1.79.1 -> 1.80.0 (#12350): additive — /pension/*, the customer pension lifecycle (ADR-0334 S6),
   # following pension-service API 1.2.0 and docs/ux/pension-client-flows.md (questionnaire, schedule,
   # beneficiaries, mandates, statements, annuity).
-  version: 1.80.0
+  # 1.80.0 -> 1.81.0: additive — providerEntityId is no longer required on PensionApplicationRequest;
+  # the edge supplies the deployment's configured provider (no customer route discloses it), and a
+  # value sent by the app is ignored. 503 PENSION_PROVIDER_NOT_CONFIGURED when none is configured.
+  version: 1.81.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -6774,12 +6777,15 @@ components:
         employerAmount: {type: [string, 'null'], description: Decimal string}
     PensionApplicationRequest:
       type: object
-      description: Birth date and residency are not accepted here; the edge reads them from the party record.
-      required: [productLine, jurisdiction, providerEntityId, providerType, schedule]
+      description: >-
+        Birth date and residency are not accepted here; the edge reads them from the party record.
+        The provider legal entity is the deployment's configured one, supplied by the edge;
+        providerEntityId is accepted for compatibility and ignored.
+      required: [productLine, jurisdiction, providerType, schedule]
       properties:
         productLine: {type: string, enum: [DPS, DIP]}
         jurisdiction: {type: string, pattern: '^[A-Z]{2}$'}
-        providerEntityId: {type: string, format: uuid}
+        providerEntityId: {type: string, format: uuid, deprecated: true, description: Ignored; the edge supplies the configured provider.}
         providerType: {type: string, enum: [PENSION_COMPANY, BANK, INVESTMENT_FIRM, MANAGEMENT_COMPANY, INSURANCE_COMPANY]}
         schedule: {$ref: '#/components/schemas/PensionSchedule'}
     PensionTransferInRequest:

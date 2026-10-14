@@ -32,6 +32,7 @@ class CustomerPensionResourceTest {
     private val sca = "http://sca.test"
     private val partySvc = "http://party.test"
     private val challenge: UUID = UUID.randomUUID()
+    private val configuredProvider: UUID = UUID.randomUUID()
     private val mapper = ObjectMapper()
 
     private fun resource(upstream: UpstreamClient) =
@@ -41,6 +42,7 @@ class CustomerPensionResourceTest {
                 catalogUrl = catalog
                 scaServiceUrl = sca
                 partyServiceUrl = partySvc
+                providerEntityId = { configuredProvider.toString() }
             }
 
     private fun json(response: Response): JsonNode = mapper.readTree(response.entity as String)
@@ -92,6 +94,38 @@ class CustomerPensionResourceTest {
         assertThat(upstreamBody["birthDate"].asText()).isEqualTo("1985-05-05")
         assertThat(upstreamBody["residencyCountry"].asText()).isEqualTo("CZ")
         assertThat(sent.captured).doesNotContain(stranger.toString())
+        // The provider is the deployment's, whatever the app sent (validApplication carries another).
+        assertThat(upstreamBody["providerEntityId"].asText()).isEqualTo(configuredProvider.toString())
+    }
+
+    @Test
+    fun `an application without a provider id is completed with the configured provider`() {
+        val upstream = mockk<UpstreamClient>()
+        partyRecord(upstream, """{"id":"$caller","dateOfBirth":"1985-05-05","address":{"countryCode":"CZ"}}""")
+        val sent = slot<String>()
+        every { upstream.post("$pension/api/v2/pension/onboarding/applications", any(), capture(sent), any()) } returns
+            ok("""{"applicationId":"${UUID.randomUUID()}","status":"STARTED"}""", 201)
+        val withoutProvider = """
+            {"productLine":"DPS","jurisdiction":"CZ","providerType":"PENSION_COMPANY",
+             "schedule":{"amount":"1000","currency":"CZK","frequency":"MONTHLY"}}
+        """.trimIndent()
+
+        val response = resource(upstream).startApplication(withoutProvider, "key-2")
+
+        assertThat(response.status).isEqualTo(201)
+        assertThat(mapper.readTree(sent.captured)["providerEntityId"].asText()).isEqualTo(configuredProvider.toString())
+    }
+
+    @Test
+    fun `without a configured provider an application is refused before anything goes upstream`() {
+        val upstream = mockk<UpstreamClient>()
+        val response = resource(upstream).apply {
+            providerEntityId = { null }
+        }.startApplication(validApplication, "key-3")
+
+        assertThat(response.status).isEqualTo(503)
+        assertThat(json(response)["code"].asText()).isEqualTo("PENSION_PROVIDER_NOT_CONFIGURED")
+        verify(exactly = 0) { upstream.post(any(), any(), any(), any()) }
     }
 
     @Test
