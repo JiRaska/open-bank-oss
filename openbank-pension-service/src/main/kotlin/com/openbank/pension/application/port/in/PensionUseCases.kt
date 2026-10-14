@@ -5,14 +5,13 @@
 package com.openbank.pension.application.port.`in`
 
 import com.openbank.pension.domain.model.Beneficiary
+import com.openbank.pension.domain.model.ContractStatus
 import com.openbank.pension.domain.model.ContributionSchedule
 import com.openbank.pension.domain.model.PensionContract
 import com.openbank.pension.domain.model.ProductLine
 import com.openbank.pension.domain.pack.IncentivePeriod
 import com.openbank.pension.domain.pack.IncentiveResult
 import com.openbank.pension.domain.pack.ProviderType
-import com.openbank.pension.domain.pack.SurrenderInputs
-import com.openbank.pension.domain.pack.SurrenderPreview
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.util.UUID
@@ -49,6 +48,41 @@ data class Caller(val customerPartyId: UUID?) {
     }
 }
 
+/**
+ * A strategy change of an existing contract. SCA-bound to [ScaOperation.STRATEGY_CHANGE] over
+ * [StrategyChangeDocument.hash]; repeating an already-applied change is an idempotent no-op.
+ */
+data class ElectStrategyCommand(
+    val caller: Caller,
+    val contractId: UUID,
+    val strategyCode: String,
+    val effectiveFrom: LocalDate?,
+    val scaChallengeId: String?,
+    val acknowledgedWarnings: Set<com.openbank.pension.domain.questionnaire.WarningCode> = emptySet(),
+    val language: String? = null,
+)
+
+/** The document a strategy-change challenge signs: contract, strategy, effective date, warnings acknowledged. */
+object StrategyChangeDocument {
+    fun hash(
+        contractId: UUID,
+        strategyCode: String,
+        effectiveFrom: LocalDate,
+        acknowledged: Set<com.openbank.pension.domain.questionnaire.WarningCode>,
+    ): String {
+        val doc = listOf(
+            "pension-strategy-change",
+            contractId,
+            strategyCode,
+            effectiveFrom,
+            acknowledged.map { it.name }.sorted().joinToString(","),
+        ).joinToString("|")
+        return java.security.MessageDigest.getInstance("SHA-256")
+            .digest(doc.toByteArray(java.nio.charset.StandardCharsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+    }
+}
+
 data class IncentiveEvaluationCommand(
     val caller: Caller,
     val contractId: UUID,
@@ -58,28 +92,15 @@ data class IncentiveEvaluationCommand(
     val sharedCapUsed: Map<String, BigDecimal>,
 )
 
-data class EarlyTerminationCommand(
-    val caller: Caller,
-    val contractId: UUID,
-    val inputs: SurrenderInputs,
-    val confirm: Boolean,
-)
-
-data class EarlyTerminationResult(val contract: PensionContract, val preview: SurrenderPreview)
-
 interface PensionContractUseCase {
     suspend fun createDraft(command: CreateDraftCommand): PensionContract
     suspend fun submit(caller: Caller, id: UUID): PensionContract
-    suspend fun activate(caller: Caller, id: UUID): PensionContract
-    suspend fun electStrategy(
-        caller: Caller,
-        id: UUID,
-        strategyCode: String,
-        effectiveFrom: LocalDate?,
-    ): PensionContract
+    suspend fun electStrategy(command: ElectStrategyCommand): PensionContract
     suspend fun suspendContributions(caller: Caller, id: UUID): PensionContract
     suspend fun resumeContributions(caller: Caller, id: UUID): PensionContract
     suspend fun get(caller: Caller, id: UUID): PensionContract
+
+    /** A participant sees exactly their own contracts; staff list by status. */
+    suspend fun list(caller: Caller, status: ContractStatus?, limit: Int): List<PensionContract>
     suspend fun evaluateIncentives(command: IncentiveEvaluationCommand): List<IncentiveResult>
-    suspend fun requestEarlyTermination(command: EarlyTerminationCommand): EarlyTerminationResult
 }
