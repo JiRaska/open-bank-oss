@@ -130,3 +130,192 @@ pitest {
     threads = 4
     excludedClasses = setOf("com.openbank.ledger.domain.*Kt")
 }
+
+// Explicit offline replay of one historical FINREP Pact; never changes broker selectors or publishes.
+val historicalPactSources = sourceSets.named("providerPactTest")
+val historicalFinrepPactTest = tasks.register<Test>("historicalFinrepPactTest") {
+    description = "Replay a validated historical FINREP artifact locally; this is not broker verification"
+    group = "verification"
+    testClassesDirs = historicalPactSources.get().output.classesDirs
+    classpath = historicalPactSources.get().runtimeClasspath
+    filter.includeTestsMatching("com.openbank.ledger.contract.LedgerHistoricalFinrepProviderVerificationTest")
+    outputs.upToDateWhen { false }
+    outputs.cacheIf { false }
+    doFirst {
+        check(System.getProperty("pact.verifier.publishResults", "false") == "false") {
+            "Offline historical replay cannot publish broker results"
+        }
+        val providerSha = requireNotNull(System.getProperty("finrep.historical.providerSha"))
+        require(Regex("[0-9a-f]{40}").matches(providerSha)) { "Provider commit must be a 40-hex SHA" }
+        val ancestry = providers.exec {
+            workingDir(rootProject.projectDir)
+            commandLine("git", "merge-base", "--is-ancestor", providerSha, "origin/main")
+            isIgnoreExitValue = true
+        }.result.get().exitValue
+        check(ancestry == 0) { "Provider commit must be an ancestor of fetched origin/main" }
+        val productionDiff = providers.exec {
+            workingDir(rootProject.projectDir)
+            commandLine("git", "diff", providerSha, "--", "openbank-ledger-service/src/main")
+        }.standardOutput.asText.get()
+        check(productionDiff.isBlank()) { "Provider production source differs from the attested main commit" }
+        for (key in listOf(
+            "pactFile",
+            "manifestFile",
+            "trustedBrokerOriginFile",
+            "providerSha",
+            "consumerSha",
+            "contentSha256",
+            "interactionCount",
+        )) {
+            systemProperty("finrep.historical.$key", requireNotNull(System.getProperty("finrep.historical.$key")))
+        }
+        systemProperty("finrep.historical.enabled", "true")
+        systemProperty("pact.verifier.publishResults", "false")
+        // Do not allow filters to turn a full-artifact replay into an accidental partial success.
+        systemProperties.keys.removeAll { it.toString().startsWith("pact.filter.") }
+    }
+    doLast {
+        val manifest = groovy.json.JsonSlurper().parse(
+            file(System.getProperty("finrep.historical.manifestFile")),
+        ) as Map<*, *>
+        val expected = requireNotNull(System.getProperty("finrep.historical.interactionCount")).toInt()
+        check((manifest["interactionCount"] as Number).toInt() == expected)
+        val reports = reports.junitXml.outputLocation.get().asFile.listFiles { f ->
+            f.name.startsWith("TEST-") &&
+                f.name.endsWith(".xml")
+        }
+            .orEmpty()
+        val parser = javax.xml.parsers.DocumentBuilderFactory.newInstance().apply {
+            setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
+        }.newDocumentBuilder()
+        var verified = 0
+        for (report in reports) {
+            val suite = parser.parse(report).documentElement
+            for (attribute in listOf("failures", "errors", "skipped")) {
+                check(suite.getAttribute(attribute).toInt() == 0) {
+                    "Historical replay has failures or skipped interactions"
+                }
+            }
+            verified += suite.getAttribute("tests").toInt()
+        }
+        check(expected > 0 && verified == expected) {
+            "Historical replay did not verify the exact artifact interaction count"
+        }
+        logger.lifecycle(
+            "Offline historical FINREP replay verified $verified interactions; no broker verification was published",
+        )
+    }
+}
+
+// Controlled loopback lineage plus real provider HTTP/Postgres; run once for each direction.
+tasks.register<Test>("controlledFinrepOrderPactTest") {
+    group = "verification"
+    testClassesDirs = historicalPactSources.get().output.classesDirs
+    classpath = historicalPactSources.get().runtimeClasspath
+    filter.includeTestsMatching("com.openbank.ledger.contract.LedgerControlledFinrepOrderProviderVerificationTest")
+    outputs.upToDateWhen { false }
+    outputs.cacheIf { false }
+    doFirst {
+        check(System.getProperty("pact.verifier.publishResults", "false") == "false")
+        systemProperty("pact.verifier.publishResults", "false")
+        systemProperty("finrep.order.enabled", "true")
+        for (key in listOf(
+            "direction",
+            "historicalFile",
+            "historicalDigest",
+            "historicalConsumer",
+            "currentConsumer",
+            "currentFile",
+            "currentDigest",
+            "providerSha",
+        )) {
+            systemProperty("finrep.order.$key", requireNotNull(System.getProperty("finrep.order.$key")))
+        }
+        systemProperties.keys.removeAll { it.toString().startsWith("pact.filter.") }
+    }
+    doLast {
+        val reports = reports.junitXml.outputLocation.get().asFile.listFiles {
+            it.name.startsWith("TEST-") &&
+                it.name.endsWith(".xml")
+        }.orEmpty()
+        val parser = javax.xml.parsers.DocumentBuilderFactory.newInstance().apply {
+            setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
+        }.newDocumentBuilder()
+        var count = 0
+        for (report in reports) {
+            val suite = parser.parse(report).documentElement
+            for (attribute in listOf("failures", "errors", "skipped")) check(suite.getAttribute(attribute).toInt() == 0)
+            count += suite.getAttribute("tests").toInt()
+        }
+        check(count == 14) { "Controlled replay must verify all 3 historical and 11 current interactions" }
+        val outcomes = groovy.json.JsonSlurper().parse(file("build/controlled-finrep-order-outcomes.json")) as List<*>
+        val versions =
+            listOf(
+                System.getProperty("finrep.order.historicalConsumer"),
+                System.getProperty("finrep.order.currentConsumer"),
+            )
+        val expectedKeys = listOf(versions[0] to 3, versions[1] to 11).let {
+            if (System.getProperty("finrep.order.direction") == "historical-first") it else it.reversed()
+        }.flatMap { (version, size) -> (0 until size).map { index -> version to index } }
+        check(
+            outcomes.map {
+                val row = it as Map<*, *>
+                row["consumerSha"] to (row["index"] as Number).toInt()
+            } ==
+                expectedKeys,
+        )
+        val cases = reports.flatMap { report ->
+            val nodes = parser.parse(report).documentElement.getElementsByTagName("testcase")
+            (0 until nodes.length).map { (nodes.item(it) as org.w3c.dom.Element).getAttribute("name") }
+        }
+        check(outcomes.map { "${(it as Map<*, *>)["consumerSha"]}:${it["index"]}:${it["description"]}" } == cases)
+        check(outcomes.all { (it as Map<*, *>)["passed"] == true })
+    }
+}
+
+// Hosted historical verification and post-run publication remain distinct opt-in tasks.
+for ((taskName, testClass) in listOf(
+    "hostedHistoricalFinrepPactTest" to
+        "com.openbank.ledger.contract.LedgerHostedHistoricalFinrepProviderVerificationTest",
+    "hostedHistoricalFinrepPublish" to "com.openbank.ledger.fixtures.HostedHistoricalFinrepPublishTest",
+)) {
+    tasks.register<Test>(taskName) {
+        group = "verification"
+        testClassesDirs = historicalPactSources.get().output.classesDirs
+        classpath = historicalPactSources.get().runtimeClasspath
+        filter.includeTestsMatching(testClass)
+        outputs.upToDateWhen { false }
+        outputs.cacheIf { false }
+        systemProperty("pact.verifier.publishResults", "false")
+        systemProperty("finrep.hosted.enabled", "true")
+        doFirst {
+            check(System.getProperty("pact.verifier.publishResults", "false") == "false")
+            if (taskName == "hostedHistoricalFinrepPublish") {
+                check(System.getenv("FINREP_PUBLICATION_ENABLED") == "true")
+                check(System.getenv("GITHUB_RUN_ATTEMPT") == "1")
+            }
+            systemProperties.keys.removeAll { it.toString().startsWith("pact.filter.") }
+        }
+        doLast {
+            val xmlFiles = reports.junitXml.outputLocation.get().asFile.listFiles {
+                it.name.startsWith("TEST-") &&
+                    it.name.endsWith(".xml")
+            }.orEmpty()
+            check(xmlFiles.size == 1)
+            val parser = javax.xml.parsers.DocumentBuilderFactory.newInstance().apply {
+                setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
+            }.newDocumentBuilder()
+            val suite = parser.parse(xmlFiles.single()).documentElement
+            check(suite.getAttribute("name") == testClass)
+            for (attribute in listOf("failures", "errors", "skipped")) check(suite.getAttribute(attribute).toInt() == 0)
+            val expectedCount = if (taskName ==
+                "hostedHistoricalFinrepPublish"
+            ) {
+                1
+            } else {
+                requireNotNull(System.getenv("FINREP_INTERACTION_COUNT")).toInt()
+            }
+            check(suite.getAttribute("tests").toInt() == expectedCount)
+        }
+    }
+}
