@@ -14,15 +14,15 @@ import rego.v1
 
 import data.openbank.rest
 
-tax := {"type": "HUMAN", "id": "service-account-openbank-tax-reporting", "roles": ["ROLE_API"]}
+tax := {"type": "HUMAN", "service_account": true, "id": "service-account-openbank-tax-reporting", "roles": ["ROLE_API"]}
 
-shared := {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR", "ROLE_API", "ROLE_COMPLIANCE"]}
+shared := {"type": "HUMAN", "service_account": true, "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR", "ROLE_API", "ROLE_COMPLIANCE"]}
 
-approver := {"type": "HUMAN", "id": "alice", "roles": ["ROLE_TREASURY_APPROVER"]}
+approver := {"type": "HUMAN", "service_account": false, "id": "alice", "roles": ["ROLE_TREASURY_APPROVER"]}
 
-dealer := {"type": "HUMAN", "id": "bob", "roles": ["ROLE_TREASURY_DEALER"]}
+dealer := {"type": "HUMAN", "service_account": false, "id": "bob", "roles": ["ROLE_TREASURY_DEALER"]}
 
-admin := {"type": "HUMAN", "id": "carol", "roles": ["ROLE_ADMIN", "ROLE_OPERATOR"]}
+admin := {"type": "HUMAN", "service_account": false, "id": "carol", "roles": ["ROLE_ADMIN", "ROLE_OPERATOR"]}
 
 allow(p, a) if {
 	rest.allow.allow with input as {"principal": p, "action": a, "resource": "2026-12-31"}
@@ -45,7 +45,7 @@ test_shared_client_cannot_read_portfolio if not allow(shared, "treasury.portfoli
 test_shared_client_cannot_read_deals if not allow(shared, "treasury.deal.read")
 
 test_other_service_account_with_api_role_denied if {
-	not allow({"type": "HUMAN", "id": "service-account-openbank-treasury", "roles": ["ROLE_API"]}, "treasury.portfolio.inspect")
+	not allow({"type": "HUMAN", "service_account": true, "id": "service-account-openbank-treasury", "roles": ["ROLE_API"]}, "treasury.portfolio.inspect")
 }
 
 test_dealer_cannot_upload if not allow(dealer, "treasury.portfolio.upload")
@@ -63,3 +63,12 @@ test_admin_cannot_read_deals_here if not allow(admin, "treasury.deal.read")
 test_agent_gets_nothing if not allow({"type": "AI_AGENT", "id": "treasury-dealing-assistant", "roles": []}, "treasury.deal.draft")
 
 test_anonymous_denied if not allow({"type": "ANONYMOUS", "id": "", "roles": []}, "treasury.portfolio.inspect")
+
+# The verified producer flag added on main must not grant staff authority to renamed machines.
+test_renamed_machine_cannot_upload if {
+	not allow({"type": "HUMAN", "id": "renamed-client", "service_account": true, "roles": ["ROLE_TREASURY_APPROVER"]}, "treasury.portfolio.upload")
+}
+
+test_missing_flag_cannot_upload if {
+	not allow({"type": "HUMAN", "id": "alice", "roles": ["ROLE_TREASURY_APPROVER"]}, "treasury.portfolio.upload")
+}

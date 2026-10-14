@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: treasury-service
     app.kubernetes.io/part-of: treasury-pension-co
   annotations:
-    openbank.tech/policy-checksum: "3bd0ef4515a3b4e1"
+    openbank.tech/policy-checksum: "a511e75d6c75efa0"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -671,8 +671,9 @@ data:
     import rego.v1
 
     treasury_staff if {
-    	input.principal.type == "HUMAN"
-    	not startswith(input.principal.id, "service-account-")
+        input.principal.type == "HUMAN"
+        input.principal.service_account == false
+        not startswith(input.principal.id, "service-account-")
     }
 
     allowed_reasons contains "treasury-staff-read" if {
