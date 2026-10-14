@@ -243,6 +243,7 @@ open class CampaignJourneyActivitiesImpl(
             metrics.sendAttempted(delivery.channel, SendHandoffOutcome.DRY_RUN)
             return StepOutcome.SENT
         }
+        reserveNotificationHandoff(sendId, context, delivery.channel)
         try {
             if (delivery.channel == Channel.BANNER) {
                 bannerPlacement.place(
@@ -269,6 +270,12 @@ open class CampaignJourneyActivitiesImpl(
                 SendOutcome.FAILED,
                 delivery.channel,
             )
+            if (sendLog.wasHandedOff(sendId)) {
+                // A correlated delivery outcome can arrive before the request call returns. That
+                // provider evidence proves acceptance despite this later transport exception.
+                metrics.sendAttempted(delivery.channel, SendHandoffOutcome.HANDED_OFF)
+                return StepOutcome.SENT
+            }
             metrics.sendAttempted(delivery.channel, SendHandoffOutcome.FAILED)
             throw e
         }
@@ -285,6 +292,14 @@ open class CampaignJourneyActivitiesImpl(
         // (ADR-0200 D3), so delivery is not a fact it is in any position to assert.
         metrics.sendAttempted(delivery.channel, SendHandoffOutcome.HANDED_OFF)
         return StepOutcome.SENT
+    }
+
+    private suspend fun reserveNotificationHandoff(sendId: UUID, context: StepDeliveryContext, channel: Channel) {
+        if (channel != Channel.BANNER) {
+            // Persist ownership before publish: notification-service may emit a policy outcome
+            // before this activity has written its final send-log row.
+            sendLog.reserveHandoff(sendId, context.campaignId, context.partyId, context.stepOrder, channel)
+        }
     }
 
     private fun logicalSendId(campaignId: UUID, partyId: UUID, stepOrder: Int): UUID = UUID.nameUUIDFromBytes(

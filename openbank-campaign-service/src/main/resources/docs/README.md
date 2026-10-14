@@ -38,6 +38,13 @@ one-minute slots within the deadline. The estimated click burst from one admissi
 checks against configured evidence; they do not monitor live provider or destination health,
 account for multiple messages per journey, or establish that a 100000-person send is safe.
 
+Before publishing a campaign notification, the service stores its correlation ID and campaign
+identity in a durable handoff-intent row. A provider outcome can arrive before the journey records
+its send row; that outcome reconciles the row using the provider event time. An ambiguous transport
+failure keeps the intent available for later reconciliation, with no age-based expiry. Before
+rolling back this migration, stop campaign sends, reconcile every remaining intent, and retain the
+resulting send history under the campaign retention policy.
+
 ## Interface
 
 The committed `src/main/resources/openapi.yaml` defines the API contract. Read `/q/openapi` on the running service for the exact paths, request bodies, responses, and contract version of its image.

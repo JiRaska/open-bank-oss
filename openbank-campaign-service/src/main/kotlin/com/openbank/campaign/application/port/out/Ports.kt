@@ -168,6 +168,9 @@ data class CampaignInteractionAttribution(
 
 @Suppress("TooManyFunctions") // One aggregate port; see PanacheSendLogRepository's matching rationale.
 interface SendLogRepository {
+    /** Reserve a campaign-owned send id before publishing so an early shared-topic outcome is identifiable. */
+    suspend fun reserveHandoff(sendId: UUID, campaignId: UUID, partyId: UUID, stepOrder: Int, channel: Channel)
+
     suspend fun record(send: SendRecord)
 
     /** A completed logical delivery step must not hand off again when Temporal retries its activity. */

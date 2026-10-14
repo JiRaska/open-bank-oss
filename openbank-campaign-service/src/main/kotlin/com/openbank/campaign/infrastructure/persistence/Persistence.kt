@@ -59,11 +59,13 @@ import io.quarkus.hibernate.reactive.panache.PanacheRepository
 import io.quarkus.panache.common.Page
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.inject.Inject
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.EnumType
 import jakarta.persistence.Enumerated
 import jakarta.persistence.Id
+import jakarta.persistence.LockModeType
 import jakarta.persistence.Table
 import java.time.Instant
 import java.util.UUID
@@ -235,6 +237,41 @@ class SendLogEntity : PanacheEntityBase() {
     /** Actual request medium; nullable so migration leaves historical decision rows intact. */
     @Column(length = 8)
     var channel: String? = null
+}
+
+/**
+ * Durable ownership marker for a campaign notification while its Kafka handoff is in flight.
+ * The shared outcomes topic carries every producer's UUIDs, so only IDs reserved here are eligible
+ * for early-outcome reconciliation. No free-form provider reason is retained in this marker.
+ */
+@Entity
+@Table(name = "campaign_send_handoff_intents")
+class CampaignSendHandoffIntentEntity : PanacheEntityBase() {
+    @Id
+    @Column(nullable = false, updatable = false)
+    lateinit var sendId: UUID
+
+    @Column(nullable = false)
+    lateinit var campaignId: UUID
+
+    @Column(nullable = false)
+    lateinit var partyId: UUID
+
+    @Column(nullable = false)
+    var stepOrder: Int = 0
+
+    @Column(nullable = false, length = 8)
+    lateinit var channel: String
+
+    /** Immutable reservation timestamp for evidence ordering; it is never used as an expiry clock. */
+    @Column(nullable = false, updatable = false)
+    lateinit var createdAt: Instant
+
+    @Column(nullable = false, length = 16)
+    var deliveryStatus: String = DeliveryStatus.PENDING.name
+
+    @Column
+    var deliveryUpdatedAt: Instant? = null
 }
 
 /**
@@ -632,39 +669,124 @@ class PanacheSendLogRepository :
     SendLogRepository,
     PanacheRepository<SendLogEntity> {
 
+    @Inject
+    lateinit var handoffIntents: PanacheCampaignSendHandoffIntentRepository
+
     override suspend fun wasHandedOff(sendId: UUID): Boolean = Panache.withSession {
         find("id = ?1 and outcome = ?2", sendId, SendOutcome.SENT.name).count()
     }.awaitSuspending() > 0
 
-    override suspend fun record(send: SendRecord) {
+    override suspend fun reserveHandoff(
+        sendId: UUID,
+        campaignId: UUID,
+        partyId: UUID,
+        stepOrder: Int,
+        channel: Channel,
+    ) {
+        require(channel == Channel.EMAIL || channel == Channel.PUSH) {
+            "only notification channels use campaign handoff intents"
+        }
         Panache.withTransaction {
-            find("id", send.id).firstResult<SendLogEntity>().flatMap { existing ->
-                if (existing != null) {
-                    // A retried Temporal activity uses the same id. Never turn an observed handoff
-                    // back into FAILED; a later successful retry may resolve an earlier failure.
-                    if (existing.outcome == SendOutcome.FAILED.name && send.outcome == SendOutcome.SENT) {
-                        existing.outcome = SendOutcome.SENT.name
-                        existing.occurredAt = send.occurredAt
+            Panache.getSession().flatMap { session ->
+                session.find(
+                    CampaignSendHandoffIntentEntity::class.java,
+                    sendId,
+                    LockModeType.PESSIMISTIC_WRITE,
+                ).flatMap { existing ->
+                    if (existing == null) {
+                        val createdAt = Instant.now()
+                        handoffIntents.persist(
+                            CampaignSendHandoffIntentEntity().apply {
+                                this.sendId = sendId
+                                this.campaignId = campaignId
+                                this.partyId = partyId
+                                this.stepOrder = stepOrder
+                                this.channel = channel.name
+                                this.createdAt = createdAt
+                            },
+                        )
+                    } else {
+                        check(
+                            existing.campaignId == campaignId &&
+                                existing.partyId == partyId &&
+                                existing.stepOrder == stepOrder &&
+                                existing.channel == channel.name,
+                        ) { "campaign send identity collision" }
+                        io.smallrye.mutiny.Uni.createFrom().voidItem()
                     }
-                    io.smallrye.mutiny.Uni.createFrom().voidItem()
-                } else {
-                    persist(
-                        SendLogEntity().apply {
-                            id = send.id
-                            campaignId = send.campaignId
-                            partyId = send.partyId
-                            stepOrder = send.stepOrder
-                            outcome = send.outcome.name
-                            occurredAt = send.occurredAt
-                            deliveryStatus = send.deliveryStatus.name
-                            deliveryReason = send.deliveryReason
-                            deliveryUpdatedAt = send.deliveryUpdatedAt
-                            channel = send.channel?.name
-                        },
-                    )
                 }
             }
         }.awaitSuspending()
+    }
+
+    override suspend fun record(send: SendRecord) {
+        Panache.withTransaction {
+            // Lock in the same order as applyDeliveryOutcome. A callback racing this transaction
+            // lands either on the owned marker before projection or on the resulting send row.
+            Panache.getSession().flatMap { session ->
+                session.find(
+                    CampaignSendHandoffIntentEntity::class.java,
+                    send.id,
+                    LockModeType.PESSIMISTIC_WRITE,
+                ).flatMap { intent ->
+                    if (intent != null) {
+                        check(
+                            intent.campaignId == send.campaignId &&
+                                intent.partyId == send.partyId &&
+                                intent.stepOrder == send.stepOrder &&
+                                intent.channel == send.channel?.name,
+                        ) { "campaign send identity collision" }
+                    }
+                    session.find(SendLogEntity::class.java, send.id, LockModeType.PESSIMISTIC_WRITE)
+                        .flatMap { existing ->
+                            val recorded = if (existing != null) {
+                                if (existing.outcome == SendOutcome.FAILED.name && send.outcome == SendOutcome.SENT) {
+                                    existing.outcome = SendOutcome.SENT.name
+                                    existing.occurredAt = send.occurredAt
+                                }
+                                io.smallrye.mutiny.Uni.createFrom().item(existing)
+                            } else {
+                                val entity = send.toEntity()
+                                persist(entity).replaceWith(entity)
+                            }
+                            recorded.call { entity ->
+                                when {
+                                    intent == null -> io.smallrye.mutiny.Uni.createFrom().voidItem()
+                                    send.outcome == SendOutcome.FAILED &&
+                                        intent.deliveryStatus == DeliveryStatus.PENDING.name -> {
+                                        // An exception is ambiguous: retain the marker for an
+                                        // asynchronous outcome, while preserving the failed attempt.
+                                        io.smallrye.mutiny.Uni.createFrom().voidItem()
+                                    }
+                                    else -> {
+                                        if (intent.deliveryStatus != DeliveryStatus.PENDING.name) {
+                                            projectIntent(
+                                                intent,
+                                                entity,
+                                                preserveExistingSentTime = entity.outcome == SendOutcome.SENT.name,
+                                            )
+                                        }
+                                        handoffIntents.delete(intent)
+                                    }
+                                }
+                            }
+                        }
+                }
+            }
+        }.awaitSuspending()
+    }
+
+    private fun SendRecord.toEntity() = SendLogEntity().apply {
+        id = this@toEntity.id
+        campaignId = this@toEntity.campaignId
+        partyId = this@toEntity.partyId
+        stepOrder = this@toEntity.stepOrder
+        outcome = this@toEntity.outcome.name
+        occurredAt = this@toEntity.occurredAt
+        deliveryStatus = this@toEntity.deliveryStatus.name
+        deliveryReason = this@toEntity.deliveryReason
+        deliveryUpdatedAt = this@toEntity.deliveryUpdatedAt
+        channel = this@toEntity.channel?.name
     }
 
     override suspend fun listByCampaign(
@@ -694,25 +816,92 @@ class PanacheSendLogRepository :
         reason: String?,
         occurredAt: Instant,
     ): Boolean = Panache.withTransaction {
-        // Explicit type argument: this is the Java Panache variant, whose query methods are generic
-        // in the entity type, so Kotlin cannot infer it from the receiver (the same reason
-        // `listByCampaign` above writes `.page<SendLogEntity>(…).list<SendLogEntity>()`).
-        find("id", sendId).firstResult<SendLogEntity>().map { entity ->
-            if (entity == null) {
-                false
-            } else {
-                val next = DeliveryTransition.next(DeliveryStatus.valueOf(entity.deliveryStatus), outcome)
-                if (next == null) {
-                    false
-                } else {
-                    entity.deliveryStatus = next.name
-                    entity.deliveryReason = reason
-                    entity.deliveryUpdatedAt = occurredAt
-                    true
-                }
+        // Use the same lock order as record(): intent, then send row. Unknown UUIDs from the
+        // shared topic remain a normal no-op because they have no campaign-owned marker.
+        Panache.getSession().flatMap { session ->
+            session.find(
+                CampaignSendHandoffIntentEntity::class.java,
+                sendId,
+                LockModeType.PESSIMISTIC_WRITE,
+            ).flatMap { intent ->
+                session.find(SendLogEntity::class.java, sendId, LockModeType.PESSIMISTIC_WRITE)
+                    .flatMap { entity ->
+                        when {
+                            entity != null && intent != null -> {
+                                val moved = applyOutcome(intent, outcome, occurredAt)
+                                if (moved && intent.deliveryStatus != DeliveryStatus.PENDING.name) {
+                                    // Provider evidence proves handoff. Reconcile any failed local
+                                    // attempt and consume the marker in this same transaction.
+                                    projectIntent(
+                                        intent,
+                                        entity,
+                                        preserveExistingSentTime = entity.outcome == SendOutcome.SENT.name,
+                                    )
+                                    handoffIntents.delete(intent).replaceWith(true)
+                                } else {
+                                    io.smallrye.mutiny.Uni.createFrom().item(moved)
+                                }
+                            }
+                            entity != null -> io.smallrye.mutiny.Uni.createFrom()
+                                .item(applyOutcome(entity, outcome, reason, occurredAt))
+                            intent != null -> {
+                                val moved = applyOutcome(intent, outcome, occurredAt)
+                                if (!moved || intent.deliveryStatus == DeliveryStatus.PENDING.name) {
+                                    io.smallrye.mutiny.Uni.createFrom().item(false)
+                                } else {
+                                    // A valid provider outcome proves handoff even if the activity
+                                    // crashed before writing its send row. Materialize the row and
+                                    // consume the marker atomically so frequency caps see the send.
+                                    val materialized = SendLogEntity().also { projectIntent(intent, it) }
+                                    persist(materialized).flatMap {
+                                        handoffIntents.delete(intent).replaceWith(true)
+                                    }
+                                }
+                            }
+                            else -> io.smallrye.mutiny.Uni.createFrom().item(false)
+                        }
+                    }
             }
         }
     }.awaitSuspending()
+
+    private fun applyOutcome(entity: SendLogEntity, outcome: String, reason: String?, occurredAt: Instant): Boolean {
+        val next = DeliveryTransition.next(DeliveryStatus.valueOf(entity.deliveryStatus), outcome) ?: return false
+        entity.deliveryStatus = next.name
+        entity.deliveryReason = reason
+        entity.deliveryUpdatedAt = occurredAt
+        return true
+    }
+
+    private fun applyOutcome(intent: CampaignSendHandoffIntentEntity, outcome: String, occurredAt: Instant): Boolean {
+        val next = DeliveryTransition.next(DeliveryStatus.valueOf(intent.deliveryStatus), outcome) ?: return false
+        intent.deliveryStatus = next.name
+        intent.deliveryUpdatedAt = occurredAt
+        return true
+    }
+
+    /** Provider evidence proves acceptance and can materialize a row lost after broker publish. */
+    private fun projectIntent(
+        intent: CampaignSendHandoffIntentEntity,
+        entity: SendLogEntity,
+        preserveExistingSentTime: Boolean = false,
+    ) {
+        val firstHandoffAt = if (preserveExistingSentTime) {
+            entity.occurredAt
+        } else {
+            requireNotNull(intent.deliveryUpdatedAt) { "terminal delivery intent lacks provider timestamp" }
+        }
+        entity.id = intent.sendId
+        entity.campaignId = intent.campaignId
+        entity.partyId = intent.partyId
+        entity.stepOrder = intent.stepOrder
+        entity.outcome = SendOutcome.SENT.name
+        entity.occurredAt = firstHandoffAt
+        entity.deliveryStatus = intent.deliveryStatus
+        entity.deliveryUpdatedAt = intent.deliveryUpdatedAt
+        entity.deliveryReason = null
+        entity.channel = intent.channel
+    }
 
     /** `GROUP BY campaignId, outcome` — the whole estate in one round trip (issue #3296). */
     override suspend fun countAllByCampaignAndOutcome(): List<CampaignOutcomeCount> = Panache
@@ -920,6 +1109,9 @@ class PanacheSegmentRegistry(private val mapper: ObjectMapper) :
         return SegmentCatalog.ALL + legacy.filterNot { (it.name to it.version) in catalogKeys }
     }
 }
+
+@ApplicationScoped
+class PanacheCampaignSendHandoffIntentRepository : PanacheRepository<CampaignSendHandoffIntentEntity>
 
 /** Database-backed audiences are mutable only through their governed lifecycle. */
 @ApplicationScoped

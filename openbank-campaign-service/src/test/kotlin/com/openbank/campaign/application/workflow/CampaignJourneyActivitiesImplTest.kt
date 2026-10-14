@@ -152,6 +152,7 @@ class CampaignJourneyActivitiesImplTest {
             completedAt = null,
         )
         coEvery { sendLog.wasHandedOff(any()) } returns false
+        coEvery { sendLog.reserveHandoff(any(), any(), any(), any(), any()) } just Runs
         coEvery { sendLog.conversionContextFor(campaignId, partyId) } returns ConversionContext(null, false)
         coEvery { consentCheck.hasActiveConsent(partyId, any()) } returns true
         coEvery { sendLog.record(any()) } just Runs
@@ -174,6 +175,21 @@ class CampaignJourneyActivitiesImplTest {
         // that says campaign-service is still handing work to notification-service.
         assertThat(sends("email", "handed_off")).isEqualTo(0.0)
         assertThat(sends("email", "dry_run")).isEqualTo(0.0)
+    }
+
+    @Test
+    fun `an early provider outcome makes a later transport exception a completed handoff`() {
+        givenDeliverableStep()
+        var handedOff = false
+        coEvery { notificationSend.requestSend(any()) } throws IllegalStateException("response was lost")
+        coEvery { sendLog.record(any()) } answers { handedOff = true }
+        coEvery { sendLog.wasHandedOff(any()) } answers { handedOff }
+
+        assertThat(activities.deliverStep(campaignId, partyId, 1)).isEqualTo(StepOutcome.SENT)
+
+        assertThat(sends("email", "handed_off")).isEqualTo(1.0)
+        assertThat(sends("email", "failed")).isEqualTo(0.0)
+        coVerify(exactly = 1) { notificationSend.requestSend(any()) }
     }
 
     @Test

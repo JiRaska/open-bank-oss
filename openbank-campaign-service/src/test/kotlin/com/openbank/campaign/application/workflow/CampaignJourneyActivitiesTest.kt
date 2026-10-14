@@ -138,6 +138,14 @@ class CampaignJourneyActivitiesTest {
             override suspend fun conversionContextFor(campaignId: java.util.UUID, partyId: java.util.UUID) =
                 com.openbank.campaign.application.port.out.ConversionContext(null, false)
 
+            override suspend fun reserveHandoff(
+                sendId: UUID,
+                campaignId: UUID,
+                partyId: UUID,
+                stepOrder: Int,
+                channel: Channel,
+            ) = Unit
+
             override suspend fun record(send: SendRecord) {
                 recorded += send
             }
