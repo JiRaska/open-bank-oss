@@ -4,6 +4,7 @@
 
 package com.openbank.libs.web
 
+import com.openbank.libs.authz.ServiceAccountIdentity
 import com.openbank.libs.synthetic.SyntheticTaint
 import io.opentelemetry.api.baggage.Baggage
 import io.opentelemetry.context.Context
@@ -41,22 +42,23 @@ private const val SYNTHETIC_TAINT_BAGGAGE_SCOPE_PROPERTY: String = "openbank.syn
  * self-service evasion primitive, and it would be introduced by the very mechanism built to
  * make the platform more honest.
  *
- * Hence: the header is honoured **only** from a principal named in
- * `openbank.synthetic.trusted-principals`, and that list is **empty by default**. Shipping this
+ * Hence: the header is honoured **only** from a verified service-account JWT named in
+ * `openbank.synthetic.trusted-principals`, with matching `azp`, `preferred_username` and subject
+ * claims, and that list is **empty by default**. Shipping this
  * filter therefore changes nothing anywhere until an operator names the canary principals in one
  * environment. An anonymous request can never taint, no matter what it sends.
  *
  * ## Fail-to-real, everywhere
  *
- * Absent header, unparseable value, unauthenticated caller, untrusted principal, empty
+ * Absent header, unparseable value, unauthenticated caller, unverified service account, empty
  * configuration — all mean REAL. The asymmetry is argued in [SyntheticTaint]: real-read-as-
  * synthetic silently removes real customer money from a regulatory return, which is unbounded
  * and invisible; synthetic-read-as-real is visible and bounded.
  *
  * ## An untrusted attempt is a security signal, not noise
  *
- * A caller that sends the header without being trusted gets ignored *and* logged at WARN with
- * the principal name. Nobody sends that header by accident, so a single occurrence in production
+ * A caller that sends the header without being trusted gets ignored *and* logged at WARN. Nobody
+ * sends that header by accident, so a single occurrence in production
  * is either a misconfigured canary or someone probing for exactly the hole described above.
  *
  * ## Blast radius
@@ -70,7 +72,7 @@ private const val SYNTHETIC_TAINT_BAGGAGE_SCOPE_PROPERTY: String = "openbank.syn
 class SyntheticTaintRequestFilter : ContainerRequestFilter {
 
     /**
-     * Comma-separated principal names allowed to assert the taint — the canary service accounts,
+     * Comma-separated service-account names allowed to assert the taint — the canary service accounts,
      * nothing else. `Optional<String>` rather than a bare `String`: an unset property throws
      * `SRCFG00040` at boot for the latter, and this filter is on every service's request path.
      *
@@ -88,16 +90,18 @@ class SyntheticTaintRequestFilter : ContainerRequestFilter {
             markReal(ctx)
             return
         }
-        val principal = ctx.securityContext?.userPrincipal?.name
-        val trusted = principal != null && principal in trustedNames()
+        val principal = ctx.securityContext?.userPrincipal
+        val trusted = ServiceAccountIdentity.verifiedClientId(principal)?.let { clientId ->
+            "${ServiceAccountIdentity.PRINCIPAL_PREFIX}$clientId" in trustedNames()
+        } ?: false
         if (!trusted) {
             // Never raise a 4xx: the request itself is legitimate, only its claim is not. Rejecting
             // it would turn a monitoring nicety into an availability risk on every service's
             // request path, which is a bad trade for a claim we can simply decline to believe.
-            log.warnf(
-                "synthetic taint REFUSED: principal=%s is not in openbank.synthetic.trusted-principals; " +
+            log.warn(
+                "synthetic taint REFUSED: caller is not a verified service account in " +
+                    "openbank.synthetic.trusted-principals; " +
                     "treating the request as real. Nobody sends this header by accident.",
-                principal ?: "<anonymous>",
             )
             markReal(ctx)
             return
