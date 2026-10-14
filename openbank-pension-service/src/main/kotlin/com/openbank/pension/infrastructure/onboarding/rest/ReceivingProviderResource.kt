@@ -5,6 +5,7 @@
 package com.openbank.pension.infrastructure.onboarding.rest
 
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.authz.ServiceAccountIdentity
 import com.openbank.libs.security.Roles
 import com.openbank.pension.application.onboarding.TransferOutCommand
 import com.openbank.pension.application.onboarding.TransferService
@@ -26,7 +27,7 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag
 /**
  * A receiving provider asking for a participant's contract to be transferred to it.
  *
- * Authenticated AS that provider: the caller's principal must be exactly
+ * Authenticated AS that provider: verified JWT client and service-account username must bind to
  * `service-account-pension-provider-<receivingProviderId>`, so one provider can neither speak for
  * another nor be impersonated by the customer edge (and the rego extension grants this action to
  * that principal prefix only). The request carries no consent of its own: it is created
@@ -56,7 +57,7 @@ class ReceivingProviderResource {
         requireIdempotencyKey(idempotencyKey)
         val body = requireNotNull(request) { "request body is required" }
         val receiving = body.toCounterparty()
-        if (identity.principal?.name != PROVIDER_PRINCIPAL_PREFIX + receiving.providerId) {
+        if (!ServiceAccountIdentity.isPrincipal(identity, PROVIDER_PRINCIPAL_PREFIX + receiving.providerId)) {
             throw ForbiddenException("the caller is not provider ${receiving.providerId}")
         }
         val transfer = transfers.requestTransferOut(

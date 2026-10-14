@@ -3802,6 +3802,30 @@ autonomous_agent_prs:
       branch: codex/docs-fleet-ci
       expires_at: '2026-10-17T00:00:00Z'
       reason: 'Owner-requested admission for service documentation verification; admission only, all review, CI, merge and deployment approvals remain required.'
+    # Proposal only: requires explicit owner approval and separate maintainer adoption.
+    - pr: 12636
+      repository: JiRaska/open-bank-oss
+      branch: codex/copilot-log-privacy-20261012
+      expires_at: '2026-10-17T00:00:00Z'
+      reason: 'Owner-authorized time-limited admission; admission only, all owner/review/CI/merge/deployment controls remain required.'
+    # Proposal only: requires explicit owner approval and separate maintainer adoption.
+    - pr: 12717
+      repository: JiRaska/open-bank-oss
+      branch: codex/log-privacy-505-506-358-combined
+      expires_at: '2026-10-17T00:00:00Z'
+      reason: 'Owner-authorized time-limited admission; admission only, all owner/review/CI/merge/deployment controls remain required.'
+    # Proposal only: requires explicit owner approval and separate maintainer adoption.
+    - pr: 12551
+      repository: JiRaska/open-bank-oss
+      branch: codex/katex-trust-security-split
+      expires_at: '2026-10-17T00:00:00Z'
+      reason: 'Owner-authorized time-limited admission; admission only, all owner/review/CI/merge/deployment controls remain required.'
+    # Proposal only: requires explicit owner approval and separate maintainer adoption.
+    - pr: 12647
+      repository: JiRaska/open-bank-oss
+      branch: codex/temurin-rescan-main-6717
+      expires_at: '2026-10-17T00:00:00Z'
+      reason: 'Owner-authorized time-limited admission; admission only, all owner/review/CI/merge/deployment controls remain required.'
   detect:
     - 'any pull_request whose author is a declared agent account, or whose head branch carries a declared agent prefix'
   require:
