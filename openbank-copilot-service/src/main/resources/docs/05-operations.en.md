@@ -27,4 +27,4 @@ production log format reintroduces a raw `token=` / `tokenId=` field.
 Note: nothing in `src/main` issues a proposal token today (#5900), so these lines appear only in
 tests until the confirm path is wired.
 
-Proposal and policy logs contain outcomes and the hashed token reference, never customer subjects, tool names, policy reasons or deserialisation payloads. Exception messages and stack traces are omitted on these paths because they can contain request data. HTTP status, token TTL and generated action ids remain available for diagnosis.
+Operational proposal and policy diagnostic logs contain outcomes and the hashed token reference, never customer subjects, tool names, policy reasons or deserialisation payloads. Attributed audit events remain a separate record: they retain actor/resource attribution and the audit payload fields required to explain the decision. Exception messages and stack traces are omitted from these diagnostic paths because they can contain request data. HTTP status, token TTL and generated action ids remain available for diagnosis.
