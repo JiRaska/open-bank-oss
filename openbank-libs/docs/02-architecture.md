@@ -32,3 +32,7 @@ Kořenový build používá Gradle subprojekty. Služby zpravidla deklarují `im
 - **Selhání:** výjimka z rendereru volání odmítne (503, `PolicyDecisionException`) — schválení se nevydá s chybějícím shrnutím ani s obecným výpisem argumentů, který renderer nahrazuje.
 - **Shrnutí je informativní:** o shodě opakovaného požadavku rozhoduje pouze otisk, nikdy text shrnutí.
 - **Osobní údaje:** shrnutí vidí operátoři, takže v něm smí být jen to, co schvalovatel potřebuje k rozpoznání cíle. Účty a IBAN maskujte (např. poslední 4 znaky), klíče nikdy nevypisujte (stačí krátký otisk SHA-256), žádná tajemství, hodnoty od volajícího ověřte podle očekávaného tvaru, jinak je nevypisujte. Příklad: `ScaApprovalSummaryRenderer` v sca-service.
+
+## Service-account and interactive caller identity
+
+`ServiceAccountIdentity` in libs-runtime checks a machine token's verified JWT subject, `azp` client id and matching Keycloak `preferred_username`. Service guards compare only the resulting client-bound service-account identity with their endpoint-specific allowlist. Staff-role shortcuts use `isHumanStaff`, which requires a verified user JWT from one of the realm's interactive-only clients and excludes service-account usernames. Neither role nor principal name alone establishes the caller.
