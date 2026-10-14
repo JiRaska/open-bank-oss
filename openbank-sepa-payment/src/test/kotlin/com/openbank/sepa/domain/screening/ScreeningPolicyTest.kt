@@ -67,4 +67,23 @@ class ScreeningPolicyTest {
         )
         assertThat(ScreeningPolicy.decide(results)).isEqualTo(ScreeningDecision.BLOCK)
     }
+
+    @Test
+    fun `screening result exposes the verdict fields it was built from`() {
+        val matched = ScreeningResult(
+            subject = "ACME Corp",
+            role = ScreeningRole.DEBTOR,
+            status = ScreeningMatchStatus.POTENTIAL_HIT,
+            score = 0.91,
+            matchedEntity = "OFAC-SDN-123",
+        )
+
+        assertThat(matched.subject).isEqualTo("ACME Corp")
+        assertThat(matched.role).isEqualTo(ScreeningRole.DEBTOR)
+        assertThat(matched.status).isEqualTo(ScreeningMatchStatus.POTENTIAL_HIT)
+        assertThat(matched.score).isEqualTo(0.91)
+        assertThat(matched.matchedEntity).isEqualTo("OFAC-SDN-123")
+        assertThat(ScreeningResult("X", ScreeningRole.CREDITOR, ScreeningMatchStatus.CLEAR, 0.0, null).matchedEntity)
+            .isNull()
+    }
 }
