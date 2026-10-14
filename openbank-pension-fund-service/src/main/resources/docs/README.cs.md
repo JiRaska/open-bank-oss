@@ -68,6 +68,9 @@ vypočtenou NAV se ukládají její pozice. U starších NAV bez zaznamenaných 
 jsou údaje portfolia neznámé, nikoli prázdné. Identifikátory podkladových NAV
 a fingerprint určují vstupy výkazu. Tento model poskytuje údaje; nepodává
 regulátorovi statutární výkaz.
+Dosavadní živý čtecí model používá poslední zveřejněnou NAV v požadovaném období. Nová
+výslovná technická uzávěrka vyžaduje zveřejněnou NAV přesně k datu konce období; jinak vrací 409.
+Z toho neplyne žádné statutární pravidlo náhrady za nepracovní den.
 
 ### Výsledovka a klasifikace pozic pro reporting
 
