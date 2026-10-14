@@ -4,7 +4,7 @@
 - **Status:** bootstrap (ADR-0334 slice S4), sandbox only — no participant-facing caller yet
 - **Last reviewed:** 2026-10-11 (#12442 conflict metric on the REST mappers)
 - **Owner:** pension-fund-service CODEOWNERS
-- **Related ADRs:** ADR-0030, ADR-0034, ADR-0315, ADR-0334
+- **Related ADRs:** ADR-0030, ADR-0034, ADR-0315, ADR-0334, proposed ADR-0339
 
 ## Scope and assets
 
@@ -15,6 +15,8 @@ changes (`strategy_changes`), NAV records (`fund_navs`) and the unit register �
 (`unit_holdings`). **Money-path** (`rules.yaml: money_path_services`): every settled order converts
 a participant's money into or out of units at a NAV, so a wrong NAV or a double settlement is a
 money movement for every participant who traded at it.
+An explicit technical reporting close adds immutable aggregate bytes in `fund_reporting_closes`
+and successful command receipts in `fund_reporting_close_receipts`; it does not approve a filing.
 
 Fund assets belong to the participants and are **segregated from the bank**: nothing in this
 service posts to the bank ledger or to treasury, and no table references a bank GL account. A fund
@@ -54,6 +56,19 @@ contact data.
    unit holding (`optimisticLockConflict("unit_holding")`) before answering 409. The boundary
    itself is unchanged: same status, same body, no new route or caller; the metric carries a
    fixed aggregate label only, never a contract id or a request value.
+6. `POST /api/v1/reporting/funds/{fundId}/period-closes` explicitly captures a technical source
+   revision. Its hard REST guard requires ROLE_OPERATOR or ROLE_ADMIN and a validated JWT with
+   issuer, subject and staff username; it rejects client-credentials and agent markers before
+   looking up a command receipt. The idempotency identity binds issuer and subject rather than a
+   mutable display name. The command requires an idempotency key, an ended period and a PUBLISHED
+   NAV on the exact period-end date. The
+   `pension-fund.reporting.seal` PDP action is restricted by the candidate pension-fund REST
+   extension to human staff with ROLE_OPERATOR or ROLE_ADMIN; policy tests reject service-account
+   ids, AI_AGENT principals and unprivileged callers. The existing advisory PDP configuration is
+   **not** evidence of an authorized production seal. Reviewed policy deployment and enforced
+   runtime proof are separate gates. Historical
+   `GET /api/v1/reporting/funds/{fundId}/period-closes/{closeId}` uses the existing reporting
+   inspect action and resolves the id within the requested fund before serving stored bytes.
 
 ## STRIDE analysis
 
@@ -71,7 +86,9 @@ contact data.
 | Repudiation | Maker and checker principal names and times are stored on every NAV and strategy change; transactions keep the NAV they were priced at and, after a correction, the NAV they were corrected from | No events are published yet, so nothing reaches the tamper-evident audit trail; the database rows are the only record |
 | Information disclosure — another service reads participants' holdings | ClusterIP only, generated NetworkPolicy allow-list, no participant PII; holdings readable only by staff and `service-account-openbank-pension` (declared exclusion from `operator-read-any`, must-deny tests for the shared and an unrelated service-account) | Every operator can read every contract's holdings; the pension-service Keycloak client is not registered yet, so until it is no machine can read holdings at all |
 | Information disclosure — the reporting read model leaks participants | The response carries counts and sums only; `PensionFundApiIT` asserts the seeded contract id is absent from the payload and the golden test asserts no contract id appears in the report | Small counts (one holder) are inferable; acceptable for a filing the regulator receives anyway |
-| Tampering — a filed figure silently restated | Period figures are derived only from PUBLISHED NAVs and the transactions priced at them, bucketed by valuation date; the response carries `basisNavIds` and a `fingerprint` that changes when, and only when, those inputs change (a NAV correction), so tax-reporting can file a revision rather than overwrite; every roll-forward's closing figure is computed independently of its movements (`FundReportingGoldenTest`, with a sabotage run that drops fee cancellations and fails 3 of 4 tests) | The read model is computed on request, not snapshotted; the fingerprint detects a restatement, it does not prevent one |
+| Tampering — a live figure silently restated | Live period figures are derived only from PUBLISHED NAVs and the transactions priced at them, bucketed by valuation date; the response carries `basisNavIds` and a `fingerprint` that changes with those inputs. Every roll-forward's closing figure is computed independently of its movements (`FundReportingGoldenTest`, including fee-cancellation sabotage) | The legacy GET remains live and can change after a NAV correction; its fingerprint alone does not retain historical row versions |
+| Tampering or replay — a technical close changes after a correction or a lost reply | The explicit seal stores canonical response bytes, SHA-256, schema version, source fingerprint and closing NAV id. `PanachePensionFundStore` reads one REPEATABLE READ database snapshot; command receipt and close commit atomically. A retry with the same actor/key returns the first close before rereading mutable source; a changed request conflicts. V5 rejects UPDATE/DELETE on both tables. Historical GET verifies the stored bytes' SHA-256 and scopes close id to fund (`FundReportingCloseIT`, `FundReportingSnapshotIT`) | The aggregate proves captured bytes, not independent reconciliation of every original transaction row. Tested NAV correction chains permit bounded numerical reconstruction, but full raw-source replay and statutory calendar methodology remain unproven. No reviewed expiry process for immutable evidence is implemented |
+| Elevation or disclosure — an unauthorized caller seals or reads a close | The seal has hard ROLE_OPERATOR/ROLE_ADMIN and validated-JWT staff guards before receipt lookup, plus an explicit `pension-fund.reporting.seal` staff-only PDP rule. OPA tests deny machines and agents; real HTTP/Postgres tests deny their operator-role JWTs and unchanged-row replay. Historical read retains `pension-fund.reporting.inspect` and fund-id-scoped lookup. The close contains aggregates, not contract identifiers (`FundReportingCloseIT`) | A misissued human JWT with a staff role and no machine markers cannot be distinguished locally; enforced runtime policy and identity-projection proof remain pending. Small aggregate counts may permit inference |
 | Tampering — a position's instrument class changed by one person, or a loan reported as zero | A recorded position's class (ECB/2018/2 category) changes only through `position_classification_corrections`: maker proposes (`nav.calculate`), a different checker decides (`nav.approve`); domain `FourEyesViolationException` (403) plus DB CHECK `ck_classification_four_eyes`; one pending correction per position (partial unique index); approval re-checks the class the maker saw and refuses a stale proposal (409); the position row is never rewritten. Positions recorded before the attribute are `UNCLASSIFIED`, and `loansOutstanding` (PEF 13-04) is null while any closing position is — unknown, never zero (`FundLossAndClassificationTest`, `PensionFundApiIT`; sabotage of the four-eyes check and of the unknown-loans rule each fails the suite) | Classification of a NEW position is what the maker submits with the NAV; the NAV's own four-eyes covers it, nothing checks it against an external instrument master |
 | Tampering — a loss year hidden in a netted income | The YTD P&L reports revaluation gains and losses as separate non-negative lines, fees on their own, and the signed profit measured from net assets and flows; lines are null (with the reason) when a NAV of the year predates position recording (sabotage: netting losses into gains fails the golden loss quarter) | Interest, the result on disposals and cash movements are one signed "other" line — there is no cash or trade ledger to separate them |
 | Denial of service | 1 MB body limit, rate limit, a NAV publication settles in one transaction | A fund with very many queued orders settles them all in one request |
@@ -87,6 +104,9 @@ contact data.
 6. A reporting period with no published NAV is not reportable (409), never a report of zeroes.
 7. A position's instrument class changes only by an approved four-eyes correction; an
    UNCLASSIFIED closing position makes the fund's loans unknown, never zero.
+8. A technical close requires a published NAV on the exact period-end date, retains its original
+   bytes across later corrections and serves them only under the matching fund id. This is not a
+   legal or business approval of the close; the legacy live projection remains compatible.
 
 ## Out of scope / follow-ups
 
@@ -94,3 +114,5 @@ Domain events and the audit subscription, the pension-service FundAdministration
 its machine grant, a real market-data adapter, investment orders and depositary reconciliation,
 limit/concentration checks, scheduled NAV and strategy application, participant notification
 delivery, compensation payments for NAV corrections, fund close/merge with unit migration.
+Enforced production authorization for the new seal action, statutory date methodology, independent
+source reconciliation and reviewed evidence expiry remain open.

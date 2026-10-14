@@ -5,6 +5,7 @@
 package com.openbank.pensionfund.application
 
 import com.openbank.pensionfund.application.port.ClassificationReceipt
+import com.openbank.pensionfund.application.port.FundReportingSnapshot
 import com.openbank.pensionfund.application.port.PensionFundStore
 import com.openbank.pensionfund.application.port.StoreChanges
 import com.openbank.pensionfund.domain.model.Fund
@@ -86,6 +87,28 @@ class InMemoryStore : PensionFundStore {
     override suspend fun publishedNavsUpTo(fundId: UUID, upTo: LocalDate) = navs.values
         .filter { it.fundId == fundId && it.status == NavStatus.PUBLISHED && !it.valuationDate.isAfter(upTo) }
         .sortedBy { it.valuationDate }
+    override suspend fun reportingSnapshot(
+        fundId: UUID,
+        periodStart: LocalDate,
+        periodEnd: LocalDate,
+    ): FundReportingSnapshot {
+        val navs = publishedNavsUpTo(fundId, periodEnd)
+        val yearStart = LocalDate.of(periodEnd.year, 1, 1)
+        val firstNeeded = navs.lastOrNull { it.valuationDate.isBefore(yearStart) }?.valuationDate ?: yearStart
+        val closing = navs.lastOrNull { it.valuationDate == periodEnd }
+        val positionNavIds = navs.filter {
+            it.positionsRecorded && (!it.valuationDate.isBefore(firstNeeded) || it.id == closing?.id)
+        }.map { it.id }
+        val positions = navPositionsOf(positionNavIds)
+        return FundReportingSnapshot(
+            fund(fundId),
+            navs,
+            transactionsPricedAtAny(navs.map { it.id }),
+            positionNavIds,
+            positions,
+            classificationCorrections(positions.map { it.id }),
+        )
+    }
     override suspend fun transactionsPricedAtAny(navIds: Collection<UUID>) =
         transactions.values.filter { it.navId in navIds }
     override suspend fun navPositions(navId: UUID) = positions.filter { it.navId == navId }

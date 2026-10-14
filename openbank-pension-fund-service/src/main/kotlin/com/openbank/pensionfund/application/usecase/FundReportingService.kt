@@ -20,20 +20,11 @@ import java.util.UUID
 @ApplicationScoped
 class FundReportingService(private val store: PensionFundStore) {
     suspend fun periodReport(fundId: UUID, periodStart: LocalDate, periodEnd: LocalDate): FundPeriodReport {
-        val fund = store.fund(fundId) ?: throw NotFoundException("fund $fundId not found")
         require(!periodEnd.isBefore(periodStart)) { "periodEnd must not be before periodStart" }
-        val navs = store.publishedNavsUpTo(fundId, periodEnd)
-        val transactions = store.transactionsPricedAtAny(navs.map { it.id })
-        // The YTD P&L revalues every NAV interval of the year, from the last NAV before it.
-        val yearStart = LocalDate.of(periodEnd.year, 1, 1)
-        val firstNeeded = navs.lastOrNull { it.valuationDate.isBefore(yearStart) }?.valuationDate ?: yearStart
-        val closing = navs.lastOrNull { !it.valuationDate.isBefore(periodStart) }
-        val withPositions = navs
-            .filter { it.positionsRecorded && (!it.valuationDate.isBefore(firstNeeded) || it.id == closing?.id) }
-            .map { it.id }
-        val recorded = store.navPositionsOf(withPositions)
-        val positions = effectiveClasses(recorded, store.classificationCorrections(recorded.map { it.id }))
-        val byNav = withPositions.associateWith { id -> positions.filter { it.navId == id } }
-        return FundPeriodCalculator.calculate(fund, periodStart, periodEnd, navs, transactions, byNav)
+        val source = store.reportingSnapshot(fundId, periodStart, periodEnd)
+        val fund = source.fund ?: throw NotFoundException("fund $fundId not found")
+        val positions = effectiveClasses(source.positions, source.corrections)
+        val byNav = source.positionNavIds.associateWith { navId -> positions.filter { it.navId == navId } }
+        return FundPeriodCalculator.calculate(fund, periodStart, periodEnd, source.navs, source.transactions, byNav)
     }
 }

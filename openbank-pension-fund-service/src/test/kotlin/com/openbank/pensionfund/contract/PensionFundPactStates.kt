@@ -4,8 +4,10 @@
 
 package com.openbank.pensionfund.contract
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.pensionfund.application.port.PensionFundStore
 import com.openbank.pensionfund.application.port.StoreChanges
+import com.openbank.pensionfund.application.usecase.FundReportingService
 import com.openbank.pensionfund.domain.model.Fund
 import com.openbank.pensionfund.domain.model.FundStatus
 import com.openbank.pensionfund.domain.model.InstrumentClass
@@ -15,13 +17,20 @@ import com.openbank.pensionfund.domain.model.NavRecord
 import com.openbank.pensionfund.domain.model.NavStatus
 import com.openbank.pensionfund.domain.model.UnitTransaction
 import com.openbank.pensionfund.domain.model.UnitTransactionType
+import com.openbank.pensionfund.infrastructure.persistence.FUND_REPORTING_PAYLOAD_SCHEMA_VERSION
+import com.openbank.pensionfund.infrastructure.persistence.FundReportingCloseRepository
+import com.openbank.pensionfund.infrastructure.rest.FundPeriodFiguresResponse
+import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.vertx.core.runtime.context.VertxContextSafetyToggle
+import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.vertx.core.Vertx
 import io.vertx.core.impl.ContextInternal
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.launch
 import java.math.BigDecimal
+import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
@@ -34,6 +43,9 @@ object PensionFundPactStates {
     /** Must match TaxReportingPensionFundPactConsumerTest (openbank-tax-reporting-service). */
     val FUND_ID: UUID = UUID.fromString("f0a7c1e2-0000-4000-8000-000000012425")
     const val FUND_STATE = "a pension fund with a published September 2026 NAV exists"
+    val SEALED_FUND_ID: UUID = UUID.fromString("f0a7c1e2-0000-4000-8000-000000012426")
+    val SEALED_CLOSE_ID: UUID = UUID.fromString("f0a7c1e2-0000-4000-8000-0000000c2014")
+    const val SEALED_FUND_STATE = "a sealed pension fund reporting close exists for March 2014"
 
     /** The state name every consumer of this provider uses for its missing-identity interaction. */
     const val NEGATIVE_AUTH_STATE = "no valid M2M identity is presented"
@@ -80,6 +92,83 @@ object PensionFundPactStates {
                         BigDecimal("10"),
                         BigDecimal("100"),
                         InstrumentClass.DEBT_SECURITY,
+                    ),
+                ),
+            ),
+        )
+    }
+
+    /** Fixed test-only close ID for a Pact V3 GET path; bytes come from the production read model. */
+    fun fundWithMarch2014Seal(
+        vertx: Vertx,
+        store: PensionFundStore,
+        reporting: FundReportingService,
+        closes: FundReportingCloseRepository,
+        mapper: ObjectMapper,
+    ) = runOnVertxContext(vertx) {
+        if (closes.byId(SEALED_FUND_ID, SEALED_CLOSE_ID) != null) return@runOnVertxContext
+        val at = Instant.parse("2014-04-01T12:00:00Z")
+        val periodStart = LocalDate.parse("2014-01-01")
+        val periodEnd = LocalDate.parse("2014-03-31")
+        val navId = UUID.fromString("f0a7c1e2-0000-4000-8000-0000000a2014")
+        seedMarch2014Fund(store, at, periodEnd, navId)
+        val report = reporting.periodReport(SEALED_FUND_ID, periodStart, periodEnd)
+        val payload = mapper.writeValueAsString(FundPeriodFiguresResponse.from(report))
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest(payload.toByteArray(StandardCharsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+        Panache.withTransaction {
+            Panache.getSession().flatMap { session ->
+                session.createNativeQuery<Int>(
+                    "INSERT INTO fund_reporting_closes " +
+                        "(id, fund_id, period_start, period_end, closing_nav_id, source_fingerprint, " +
+                        "payload_schema_version, payload_json, payload_sha256, created_by, created_at) " +
+                        "VALUES (:id, :fund, :start, :end, :nav, :fingerprint, :schema, :payload, " +
+                        ":digest, :actor, :at) ON CONFLICT (id) DO NOTHING",
+                )
+                    .setParameter("id", SEALED_CLOSE_ID)
+                    .setParameter("fund", SEALED_FUND_ID)
+                    .setParameter("start", periodStart)
+                    .setParameter("end", periodEnd)
+                    .setParameter("nav", report.closingNavId)
+                    .setParameter("fingerprint", report.fingerprint)
+                    .setParameter("schema", FUND_REPORTING_PAYLOAD_SCHEMA_VERSION)
+                    .setParameter("payload", payload)
+                    .setParameter("digest", digest)
+                    .setParameter("actor", "pact-fixture")
+                    .setParameter("at", at)
+                    .executeUpdate()
+            }
+        }.awaitSuspending()
+        check(closes.byId(SEALED_FUND_ID, SEALED_CLOSE_ID)?.payloadSha256 == digest)
+    }
+
+    private suspend fun seedMarch2014Fund(store: PensionFundStore, at: Instant, periodEnd: LocalDate, navId: UUID) {
+        store.commit(
+            StoreChanges(
+                funds = listOf(
+                    Fund(
+                        id = SEALED_FUND_ID, name = "Pact sealed fund", isin = "CZ0001242600",
+                        lei = "315700ABCDEF12345678", depositaryReference = "DEP",
+                        custodyAccountReference = "CUST-PACT-SEAL", currency = "CZK", riskClass = 3,
+                        mandatoryConservative = false, managementFeeRate = BigDecimal.ZERO,
+                        launchNavPerUnit = BigDecimal.ONE, status = FundStatus.ACTIVE,
+                        createdAt = at, updatedAt = at,
+                    ),
+                ),
+                navs = listOf(
+                    NavRecord(
+                        id = navId, fundId = SEALED_FUND_ID, valuationDate = periodEnd,
+                        figures = NavFigures(
+                            grossAssets = BigDecimal("100.00"),
+                            accruedManagementFee = BigDecimal.ZERO,
+                            otherLiabilities = BigDecimal.ZERO,
+                            netAssets = BigDecimal("100.00"),
+                            unitsOutstanding = BigDecimal.ZERO,
+                            navPerUnit = BigDecimal.ONE,
+                        ),
+                        status = NavStatus.PUBLISHED, calculatedBy = "pact-maker", calculatedAt = at,
+                        approvedBy = "pact-checker", publishedAt = at, positionsRecorded = false,
                     ),
                 ),
             ),
