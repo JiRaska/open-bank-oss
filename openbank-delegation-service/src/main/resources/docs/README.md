@@ -13,3 +13,7 @@ The generated `00-build` page in this same documentation index reports the relea
 ## Consumer contract verification
 
 Consumer Pact tests exercise delegation-service's outbound REST interactions, including calls to SCA, PID, account, and card-issuance services. Their expected paths are literal values kept separate from the client annotations used to form requests, so an incorrect client route can fail the contract test. Run them with `./gradlew :openbank-delegation-service:consumerPactTest`.
+
+## Customer recertification caller
+
+Recertification confirmation accepts only the customer-edge workload acting for the matching grantor party. The workload must present its own verified service-account JWT (`azp`, subject and matching Keycloak username); a matching principal name or `ROLE_API` alone is insufficient. The grantor equality check also applies to an already recorded idempotent confirmation.

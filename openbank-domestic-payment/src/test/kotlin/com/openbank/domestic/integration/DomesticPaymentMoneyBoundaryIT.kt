@@ -9,6 +9,8 @@ import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.RestAssured
 import io.restassured.response.Response
 import jakarta.inject.Inject
@@ -65,6 +67,13 @@ class DomesticPaymentMoneyBoundaryIT {
         "0.00, CZK, VALIDATION_ERROR, amount",
     )
     @TestSecurity(user = ACTOR_ID, roles = ["ROLE_PAYMENTS"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = ACTOR_ID),
+            Claim(key = "preferred_username", value = ACTOR_ID),
+        ],
+    )
     fun `an invalid amount or a currency outside the domestic scheme is refused and consumes nothing`(
         amount: String,
         currency: String,
@@ -89,6 +98,13 @@ class DomesticPaymentMoneyBoundaryIT {
 
     @Test
     @TestSecurity(user = ACTOR_ID, roles = ["ROLE_PAYMENTS"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = ACTOR_ID),
+            Claim(key = "preferred_username", value = ACTOR_ID),
+        ],
+    )
     fun `an absent amount is a 400 naming the field`() {
         val key = "money-boundary-it-absent-${UUID.randomUUID()}"
         val response = post(key, body(null, "CZK"))
@@ -99,6 +115,13 @@ class DomesticPaymentMoneyBoundaryIT {
 
     @Test
     @TestSecurity(user = ACTOR_ID, roles = ["ROLE_PAYMENTS"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = ACTOR_ID),
+            Claim(key = "preferred_username", value = ACTOR_ID),
+        ],
+    )
     fun `a valid amount is stored unchanged and read back at the currency scale`() {
         val key = "money-boundary-it-ok-${UUID.randomUUID()}"
 

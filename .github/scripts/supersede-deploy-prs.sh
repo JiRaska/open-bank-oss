@@ -211,10 +211,17 @@ inherit_hold() {
   # shellcheck disable=SC2086
   new="$(add_hold_entries "$n" "$keep" $services <<<"$rules")" || return 1
   if [ "$new" != "$rules" ]; then
-    gh api -X PUT "repos/$REPO/contents/$RULES_PATH" \
-      -f message="chore(gitops): inherit deploy hold from #$n (issue #11503)" \
-      -f content="$(printf '%s\n' "$new" | base64 | tr -d '\n')" \
-      -f sha="$sha" -f branch="$branch" >/dev/null || return 1
+    if ! (
+      request_file="$(mktemp "${TMPDIR:-/tmp}/supersede-hold-request.XXXXXX")" || exit 1
+      trap 'rm -f "$request_file"' EXIT
+      printf '%s\n' "$new" | base64 | tr -d '\n' | \
+        jq -Rs --arg message "chore(gitops): inherit deploy hold from #$n (issue #11503)" \
+          --arg sha "$sha" --arg branch "$branch" \
+          '{message: $message, content: ., sha: $sha, branch: $branch}' >"$request_file" || exit 1
+      gh api -X PUT "repos/$REPO/contents/$RULES_PATH" --input "$request_file" >/dev/null
+    ); then
+      return 1
+    fi
   fi
   gh pr ready "$keep" --repo "$REPO" --undo || return 1
   gh pr edit "$keep" --repo "$REPO" --add-label blocked || return 1
@@ -537,11 +544,141 @@ HOOK
     echo "self-test case 10 OK (durable deploy_holds entry inserted; no block -> refused)"
   fi
 
+  # case 11 — a large durable hold is transported as a JSON request file, not one argv. The fixture is
+  # synthetic and deliberately exceeds Linux MAX_ARG_STRLEN after base64 expansion; it must survive
+  # the GitHub Contents API round-trip byte-for-byte, and the hold actions keep their order.
+  local rules_file blob_file expected_file body_file events_file fake_bin payload_len
+  local new_keep_branch expected_events base64_bin request_tmp
+  rules_file="$tmp/rules.yaml"
+  blob_file="$tmp/rules-response.json"
+  expected_file="$tmp/expected-rules.yaml"
+  body_file="$tmp/put-body.json"
+  events_file="$tmp/gh-events"
+  fake_bin="$tmp/bin"
+  request_tmp="$tmp/request-tmp"
+  mkdir -p "$request_tmp"
+  new_keep_branch="$P$NEW"
+  base64_bin="$(command -v base64)"
+  mkdir -p "$fake_bin"
+  awk 'BEGIN {
+    print "deploy_holds:"
+    print "  services:"
+    for (i = 1; i <= 5000; i++) printf "# synthetic fixture line %05d %070d\n", i, i
+    print "commits:"
+    print "  marker: test"
+  }' >"$rules_file"
+  jq -n --rawfile rules "$rules_file" \
+    '{sha: "synthetic-rules-sha", content: ($rules | @base64)}' >"$blob_file"
+  cat >"$fake_bin/gh" <<'HOOK'
+#!/usr/bin/env bash
+set -euo pipefail
+case "${1:-}" in
+  pr)
+    case "${2:-}" in
+      view) printf '%s\n' "$FAKE_GH_KEEP_BRANCH"; printf 'pr:view\n' >>"$FAKE_GH_EVENTS" ;;
+      ready) printf 'pr:ready\n' >>"$FAKE_GH_EVENTS" ;;
+      edit) printf 'pr:edit\n' >>"$FAKE_GH_EVENTS" ;;
+      comment) printf 'pr:comment\n' >>"$FAKE_GH_EVENTS" ;;
+      close) printf 'pr:close\n' >>"$FAKE_GH_EVENTS" ;;
+      *) echo "unexpected fake gh pr command" >&2; exit 90 ;;
+    esac
+    ;;
+  api)
+    if [ "${2:-}" = "-X" ] && [ "${3:-}" = "PUT" ]; then
+      printf 'api:put\n' >>"$FAKE_GH_EVENTS"
+      if [ "$#" -ne 6 ] || [ "${5:-}" != "--input" ] || [ ! -f "${6:-}" ]; then
+        echo "PUT must use a complete --input file and no form-field payload arguments" >&2
+        exit 91
+      fi
+      cat "${6}" >"$FAKE_GH_PUT_BODY"
+      [ "${FAKE_GH_FAIL_PUT:-false}" != "true" ] || exit 42
+    else
+      printf 'api:get\n' >>"$FAKE_GH_EVENTS"
+      cat "$FAKE_GH_RULES_BLOB"
+    fi
+    ;;
+  *) echo "unexpected fake gh command" >&2; exit 92 ;;
+esac
+HOOK
+  cat >"$fake_bin/base64" <<'HOOK'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "${1:-}" = "--decode" ]; then
+  shift
+  exec "$FAKE_BASE64_REAL" -d "$@"
+fi
+if [ "${FAKE_BASE64_FAIL_PARTIAL:-false}" != "true" ]; then
+  exec "$FAKE_BASE64_REAL" "$@"
+fi
+head -c 12 | "$FAKE_BASE64_REAL"
+exit 43
+HOOK
+  chmod +x "$fake_bin/gh" "$fake_bin/base64"
+  add_hold_entries 11491 11499 openbank-sanctions-service <"$rules_file" >"$expected_file"
+  payload_len="$(jq -r '.content | length' "$blob_file")"
+  if [ "$payload_len" -le 131072 ]; then
+    echo "SELF-TEST FAIL case 11: synthetic base64 rules payload is not oversized ($payload_len bytes)"; ok=1
+  fi
+  export PATH="$fake_bin:$PATH"
+  export TMPDIR="$request_tmp"
+  export REPO=JiRaska/open-bank-oss
+  export FAKE_GH_KEEP_BRANCH="$new_keep_branch"
+  export FAKE_BASE64_REAL="$base64_bin"
+  export FAKE_BASE64_FAIL_PARTIAL=false
+  export FAKE_GH_RULES_BLOB="$blob_file"
+  export FAKE_GH_PUT_BODY="$body_file"
+  export FAKE_GH_EVENTS="$events_file"
+  export DRY_RUN=false
+  export FAKE_GH_FAIL_PUT=false
+  : >"$events_file"
+  out="$(run "$P" 11499 "$NEW" "$(printf '11491\t%s%s\t1' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -ne 1 ]; then
+    echo "SELF-TEST FAIL case 11: successful hold transfer did not stop auto-merge (rc=$rc); got: $out"; ok=1
+  elif [ -n "$(find "$request_tmp" -type f -print -quit)" ]; then
+    echo "SELF-TEST FAIL case 11: request temp file was not cleaned up"; ok=1
+  elif ! jq -e --arg message 'chore(gitops): inherit deploy hold from #11491 (issue #11503)' \
+      --arg branch "$new_keep_branch" --rawfile expected "$expected_file" \
+      '.message == $message and .sha == "synthetic-rules-sha" and .branch == $branch
+       and (.content | @base64d) == $expected and (.content | length) > 131072' \
+      "$body_file" >/dev/null; then
+    echo "SELF-TEST FAIL case 11: large JSON PUT body did not preserve full rules payload and metadata; got: $out"; ok=1
+  else
+    expected_events=$'pr:view\napi:get\napi:put\npr:ready\npr:edit\npr:comment\npr:comment\npr:close'
+    if [ "$(cat "$events_file")" != "$expected_events" ]; then
+      echo "SELF-TEST FAIL case 11: hold transfer/action ordering changed; got events: $(tr '\n' ' ' <"$events_file")"; ok=1
+    else
+      echo "self-test case 11 OK (oversized JSON request preserved; hold transfer precedes close)"
+    fi
+  fi
+
+  # case 12 — a failed contents PUT must not draft/label/comment the survivor or close the held PR.
+  : >"$events_file"
+  export FAKE_BASE64_FAIL_PARTIAL=false
+  export FAKE_GH_FAIL_PUT=true
+  out="$(run "$P" 11499 "$NEW" "$(printf '11491\t%s%s\t1' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -eq 0 ] || [ "$(cat "$events_file")" != $'pr:view\napi:get\napi:put' ] || [ -n "$(find "$request_tmp" -type f -print -quit)" ]; then
+    echo "SELF-TEST FAIL case 12: failed hold PUT mutated/closed a PR, leaked its request file, or returned success; rc=$rc events=$(tr '\n' ' ' <"$events_file")"; ok=1
+  else
+    echo "self-test case 12 OK (failed hold PUT leaves both PRs untouched)"
+  fi
+
+  # case 13 — a producer that emits a prefix then fails must never let that partial JSON reach gh.
+  : >"$events_file"
+  rm -f "$body_file"
+  export FAKE_GH_FAIL_PUT=false
+  export FAKE_BASE64_FAIL_PARTIAL=true
+  out="$(run "$P" 11499 "$NEW" "$(printf '11491\t%s%s\t1' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -eq 0 ] || [ "$(cat "$events_file")" != $'pr:view\napi:get' ] || [ -e "$body_file" ] || [ -n "$(find "$request_tmp" -type f -print -quit)" ]; then
+    echo "SELF-TEST FAIL case 13: producer failure reached PUT/PR actions or leaked its request file; rc=$rc events=$(tr '\n' ' ' <"$events_file")"; ok=1
+  else
+    echo "self-test case 13 OK (partial producer failure stops before PUT and PR actions)"
+  fi
+
   if [ "$ok" -ne 0 ]; then
     echo "self-test: FAILED"
     return 1
   fi
-  echo "self-test: all 10 cases OK"
+  echo "self-test: all 13 cases OK"
   return 0
 }
 
