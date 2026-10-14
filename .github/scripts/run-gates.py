@@ -1036,6 +1036,24 @@ EXPECTED = {
 
 
 def self_test():
+    import contextlib
+    import io
+
+    def capture_fixture_output(call, *, expect_exit=False):
+        """Keep expected fixture commands out of the enclosing GitHub Actions log."""
+        sink = io.StringIO()
+        with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
+            try:
+                result = call()
+            except SystemExit as exc:
+                if not expect_exit:
+                    raise
+                result = exc
+        return result, sink.getvalue()
+
+    def annotation_ids(output, command):
+        return set(re.findall(rf"^::{command} title=([^:]+)::", output, re.M))
+
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="run-gates-selftest-"))
     try:
         (tmp / ".github" / "gates").mkdir(parents=True)
@@ -1118,21 +1136,36 @@ def self_test():
         # The report() contract too: a failed gate must make the runner exit non-zero, and
         # an advisory-only failure must NOT. Checking the statuses alone would miss a
         # report() that classified correctly and then returned 0 regardless.
-        rc_all = report(results, 1)
-        if rc_all == 0:
-            bad.append("report() returned 0 despite an enforced failure")
-        rc_advisory = report([r for r in results if r.id in ("passing", "advisory-failing")], 1)
+        rc_all, report_output = capture_fixture_output(lambda: report(results, 1))
+        if type(rc_all) is not int or rc_all != 1:
+            bad.append(f"report() returned {rc_all!r}, want 1 for an enforced failure")
+        expected_errors = {
+            r.id for r in results if r.status in ("failed", "unfalsified")
+        }
+        expected_warnings = {r.id for r in results if r.status == "warned"}
+        if annotation_ids(report_output, "error") != expected_errors:
+            bad.append("report() did not emit the expected fixture error annotations")
+        if annotation_ids(report_output, "warning") != expected_warnings:
+            bad.append("report() did not emit the expected fixture warning annotations")
+        rc_advisory, advisory_output = capture_fixture_output(
+            lambda: report([r for r in results if r.id in ("passing", "advisory-failing")], 1)
+        )
         if rc_advisory != 0:
             bad.append("report() returned non-zero for an advisory-only failure")
+        if annotation_ids(advisory_output, "error") or annotation_ids(advisory_output, "warning") != {
+            "advisory-failing"
+        }:
+            bad.append("report() advisory-only fixture emitted unexpected annotations")
 
         # An empty manifest must abort, not pass.
         (tmp / ".github" / "gates" / "gates.yaml").write_text("gates: []\n")
-        try:
-            load(tmp)
+        result, fixture_output = capture_fixture_output(lambda: load(tmp), expect_exit=True)
+        if not isinstance(result, SystemExit):
             bad.append("load() accepted an empty manifest instead of exiting")
-        except SystemExit as exc:
-            if exc.code != 2:
-                bad.append(f"empty manifest exited {exc.code}, want 2")
+        elif result.code != 2:
+            bad.append(f"empty manifest exited {result.code}, want 2")
+        if "::error::" not in fixture_output or "declares no gates" not in fixture_output:
+            bad.append("empty manifest did not emit the expected refusal diagnostic")
 
         # An empty (or comment-only) run: must abort. `bash -c ""` exits 0, so without this the
         # gate reports PASS having run nothing — and the negative case matters just as much:
@@ -1146,13 +1179,17 @@ def self_test():
             (tmp / ".github" / "gates" / "gates.yaml").write_text(
                 f"gates:\n  - id: x\n    name: x\n    group: t\n    {body}\n"
             )
-            try:
-                load(tmp)
+            result, fixture_output = capture_fixture_output(lambda: load(tmp), expect_exit=True)
+            exited = isinstance(result, SystemExit)
+            if exited != want_abort:
                 if want_abort:
                     bad.append(f"load() accepted a no-op run: ({body})")
-            except SystemExit:
-                if not want_abort:
+                else:
                     bad.append(f"load() rejected a run: that does have a command ({body})")
+            if want_abort and "::error::" not in fixture_output:
+                bad.append(f"load() did not emit the expected no-op refusal: ({body})")
+            if not want_abort and fixture_output:
+                bad.append(f"load() emitted unexpected output for valid run: ({body})")
 
         # Off the runner, the same over-budget gate must PASS — the whole point of gating the
         # rule on CI is that a laptop's timings are not a measurement.
@@ -1181,13 +1218,17 @@ def self_test():
                 f"gates:\n  - id: x\n    name: x\n    group: t\n    {body}\n"
                 f'    run: "true"\n'
             )
-            try:
-                load(tmp)
+            result, fixture_output = capture_fixture_output(lambda: load(tmp), expect_exit=True)
+            exited = isinstance(result, SystemExit)
+            if exited != want_abort:
                 if want_abort:
                     bad.append(f"load() accepted an unusable budget_seconds ({body})")
-            except SystemExit:
-                if not want_abort:
+                else:
                     bad.append(f"load() rejected a valid budget_seconds ({body})")
+            if want_abort and "::error::" not in fixture_output:
+                bad.append(f"load() did not emit a budget refusal diagnostic ({body})")
+            if not want_abort and fixture_output:
+                bad.append(f"load() emitted output for valid budget_seconds ({body})")
 
         # A floor must be a positive integer. `0` is the shape that matters: it reads like a
         # declaration and asserts nothing at all.
@@ -1202,13 +1243,17 @@ def self_test():
                 f"gates:\n  - id: x\n    name: x\n    group: t\n    {body}\n"
                 f"    run: \"echo SUBJECTS=1\"\n"
             )
-            try:
-                load(tmp)
+            result, fixture_output = capture_fixture_output(lambda: load(tmp), expect_exit=True)
+            exited = isinstance(result, SystemExit)
+            if exited != want_abort:
                 if want_abort:
                     bad.append(f"load() accepted an unusable min_subjects ({body})")
-            except SystemExit:
-                if not want_abort:
+                else:
                     bad.append(f"load() rejected a valid min_subjects ({body})")
+            if want_abort and "::error::" not in fixture_output:
+                bad.append(f"load() did not emit a subject-floor refusal diagnostic ({body})")
+            if not want_abort and fixture_output:
+                bad.append(f"load() emitted output for valid min_subjects ({body})")
 
         # The parse-cache contract is a STRING shared with gatelib.py, in two files that do not
         # import each other. A rename on one side would silently turn the cross-gate cache off
@@ -1235,13 +1280,17 @@ def self_test():
             (tmp / ".github" / "gates" / "gates.yaml").write_text(
                 f"gates:\n  - id: x\n    name: x\n    group: t\n    {body}\n"
             )
-            try:
-                load(tmp)
+            result, fixture_output = capture_fixture_output(lambda: load(tmp), expect_exit=True)
+            exited = isinstance(result, SystemExit)
+            if exited != want_abort:
                 if want_abort:
                     bad.append("load() accepted a ${{ }} expression in a command")
-            except SystemExit:
-                if not want_abort:
+                else:
                     bad.append("load() rejected a ${{ }} mentioned only in a comment")
+            if want_abort and "workflow expression" not in fixture_output:
+                bad.append("load() did not emit the expected workflow-expression diagnostic")
+            if not want_abort and fixture_output:
+                bad.append("load() emitted output for a comment-only workflow expression")
 
         # needs_base. Every combination that must abort, and the three that must not —
         # a load() that rejected everything would satisfy the negative cases on its own.
@@ -1265,13 +1314,17 @@ def self_test():
                 f"gates:\n  - id: x\n    name: x\n    group: t\n    {decl}\n    {when}\n    {body}\n"
             )
             label = f"{decl or 'undeclared'} / {when or 'when:always'} / {body}"
-            try:
-                load(tmp)
+            result, fixture_output = capture_fixture_output(lambda: load(tmp), expect_exit=True)
+            exited = isinstance(result, SystemExit)
+            if exited != want_abort:
                 if want_abort:
                     bad.append(f"load() accepted an invalid needs_base shape: {label}")
-            except SystemExit:
-                if not want_abort:
+                else:
                     bad.append(f"load() rejected a VALID needs_base shape: {label}")
+            if want_abort and "::error::" not in fixture_output:
+                bad.append(f"load() did not emit the expected needs_base diagnostic: {label}")
+            if not want_abort and fixture_output:
+                bad.append(f"load() emitted output for valid needs_base shape: {label}")
 
         # And at run time: `required` with an empty base is refused, `optional` runs anyway.
         #
@@ -1344,9 +1397,13 @@ def self_test():
         # every future run of THIS self-test would silently cost 30 extra seconds.
         out_path = tmp / "gate-results.json"
         argv_json = ["--root", str(tmp), "--group", "t", "--json", str(out_path), "--timeout", "3"]
-        rc = main(argv_json)
-        if rc == 0:
-            bad.append("--json run: expected a non-zero exit (the manifest has failing gates)")
+        rc, main_output = capture_fixture_output(lambda: main(argv_json))
+        if type(rc) is not int or rc != 1:
+            bad.append(f"--json run returned {rc!r}, want 1 for the failing fixture manifest")
+        if annotation_ids(main_output, "error") != expected_errors:
+            bad.append("--json fixture run did not emit the expected fixture error annotations")
+        if annotation_ids(main_output, "warning") != expected_warnings:
+            bad.append("--json fixture run did not emit the expected fixture warning annotations")
         if not out_path.is_file():
             bad.append("--json: no file was written")
         else:
@@ -1357,17 +1414,18 @@ def self_test():
             except json.JSONDecodeError as exc:
                 bad.append(f"--json: written file is not valid JSON: {exc}")
 
-        import io
-        import contextlib
-
-        sink = io.StringIO()
-        with contextlib.redirect_stderr(sink):
-            rc2 = main(["--root", str(tmp), "--group", "t", "--timeout", "3",
-                        "--json", str(tmp / "no" / "such" / "dir" / "x.json")])
-        if "could not write --json" not in sink.getvalue():
+        rc2, unwritable_output = capture_fixture_output(
+            lambda: main(["--root", str(tmp), "--group", "t", "--timeout", "3",
+                          "--json", str(tmp / "no" / "such" / "dir" / "x.json")])
+        )
+        if "could not write --json" not in unwritable_output:
             bad.append("--json to an unwritable path did not warn")
-        if rc2 == 0:
-            bad.append("--json to an unwritable path unexpectedly reported success overall")
+        if type(rc2) is not int or rc2 != 1:
+            bad.append(f"--json to an unwritable path returned {rc2!r}, want 1 for fixture failures")
+        if annotation_ids(unwritable_output, "error") != expected_errors:
+            bad.append("unwritable --json fixture did not emit the expected fixture errors")
+        if annotation_ids(unwritable_output, "warning") != expected_warnings:
+            bad.append("unwritable --json fixture did not emit the expected fixture warnings")
 
         # ------------------------------------------------------------------
         # #6068: the runner must not be able to report success having run nothing,
