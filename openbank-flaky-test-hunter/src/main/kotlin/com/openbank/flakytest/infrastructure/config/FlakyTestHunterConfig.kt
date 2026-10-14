@@ -8,6 +8,7 @@ package com.openbank.flakytest.infrastructure.config
 import io.smallrye.config.ConfigMapping
 import io.smallrye.config.WithDefault
 import jakarta.enterprise.context.ApplicationScoped
+import java.time.Duration
 import java.util.Optional
 
 @ConfigMapping(prefix = "openbank.flaky-test-hunter")
@@ -45,4 +46,21 @@ interface FlakyTestHunterConfig {
     // checkout mount in the real deployment.
     @WithDefault(".")
     fun repoRoot(): String
+
+    /** ADR-0031 D9 phase 3: policy pre-flight gate on the gh.pr.open write path (PrPathPolicyGate). */
+    fun policyGate(): PolicyGate
+
+    interface PolicyGate {
+        /** Kill switch for the gate. Default true — the PR path is policy-gated in every profile. */
+        @WithDefault("true")
+        fun enabled(): Boolean
+
+        /** Base URL of the OPA sidecar serving the governance bundle. */
+        @WithDefault("http://localhost:8181")
+        fun opaUrl(): String
+
+        /** Per-call connect + request timeout; exceeding it fails closed (pdp_unreachable). */
+        @WithDefault("PT0.5S")
+        fun timeout(): Duration
+    }
 }

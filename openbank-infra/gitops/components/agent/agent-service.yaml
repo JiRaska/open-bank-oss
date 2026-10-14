@@ -190,6 +190,16 @@ spec:
               value: http://interest-service.interest.svc:8125
             - name: QUARKUS_REST_CLIENT_DISPUTE_SERVICE_URL
               value: http://dispute-service.dispute.svc:8135
+            # ADR-0031 phase 3 "recorded human merge" (DOCUMENTATION ONLY — no pod env here).
+            # The CI producer (.github/workflows/record-agent-merge.yml) POSTs merge records to
+            # POST /api/v1/agent-merge-records on this service (ROLE_ADMIN-protected). It consumes:
+            #   * repo variable AGENT_SERVICE_URL — base URL of this service as reachable from the
+            #     CI runner (in-cluster runners can use http://agent-service.platform.svc:8109;
+            #     the admin-ui pod already consumes the same name for its MCP route);
+            #   * repo secret AGENT_MERGE_RECORDER_TOKEN — bearer token accepted by the
+            #     ROLE_ADMIN-protected endpoint.
+            # Both are GitHub repo settings, NOT workload env; they are documented here so the
+            # endpoint's credential/URL contract lives next to the service that enforces it.
             # Observability stack (anonymous in-cluster read) — query.observability.readonly tools.
             - name: QUARKUS_REST_CLIENT_PROMETHEUS_URL
               value: http://kube-prometheus-stack-prometheus.observability.svc:9090

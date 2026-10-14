@@ -125,3 +125,12 @@ openbank:
     # .github/scripts/*.sh CI guard scripts, and */build/test-results/test/*.xml JUnit reports
     # from (TestScanPort).
     repo-root: ${FLAKY_TEST_HUNTER_REPO_ROOT:.}
+    # ADR-0031 D9 phase 3: policy pre-flight gate on the rare gh.pr.open write path. Deny-by-
+    # default — in-process charter re-check against the packaged agents.yaml, then an OPA sidecar
+    # query; ANY OPA connectivity/parse error denies with reason pdp_unreachable (fail closed,
+    # unlike the agent-service MCP read gate's advisory degradation: a write path must not open
+    # a PR on the word of a PDP that cannot answer).
+    policy-gate:
+      enabled: ${FLAKY_TEST_HUNTER_POLICY_GATE_ENABLED:true}
+      opa-url: ${OPA_SIDECAR_URL:http://localhost:8181}
+      timeout: ${FLAKY_TEST_HUNTER_POLICY_GATE_TIMEOUT:PT0.5S}
