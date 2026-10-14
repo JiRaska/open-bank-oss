@@ -30,6 +30,9 @@ quarkus:
     password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
     reactive:
       url: postgresql://localhost:5432/openbank_documents
+      idle-timeout: 5M
+      max-lifetime: 30M
+      max-size: 20
     jdbc:
       url: jdbc:postgresql://localhost:5432/openbank_documents
   flyway:
@@ -69,6 +72,8 @@ quarkus:
   rest-client:
     sca-service:
       url: ${SCA_SERVICE_URL:http://localhost:8121}
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
     product-catalog-api:
       url: ${PRODUCT_CATALOG_SERVICE_URL:http://localhost:8104}

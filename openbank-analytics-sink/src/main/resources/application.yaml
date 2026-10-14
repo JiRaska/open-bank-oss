@@ -63,6 +63,8 @@ quarkus:
       # made every ownership lookup time out — so the local default is written correctly here rather
       # than relying on the deployed override to hide it.
       url: ${ACCOUNT_SERVICE_URL:http://localhost:8100}
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
 
   oidc:

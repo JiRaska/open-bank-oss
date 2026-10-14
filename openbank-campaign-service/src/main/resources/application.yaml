@@ -9,6 +9,9 @@ quarkus:
     db-kind: postgresql
     reactive:
       url: postgresql://localhost:5432/openbank_campaigns
+      idle-timeout: 5M
+      max-lifetime: 30M
+      max-size: 20
     jdbc:
       url: jdbc:postgresql://localhost:5432/openbank_campaigns
     username: ${DB_USER:campaign}

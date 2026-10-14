@@ -32,6 +32,9 @@ quarkus:
     password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
     reactive:
       url: vertx-reactive:postgresql://localhost:5432/openbank_pension
+      idle-timeout: 5M
+      max-lifetime: 30M
+      max-size: 20
     # A LITERAL jdbc url, not only an env expression: Flyway migrates the DEFAULT (Agroal/JDBC)
     # datasource, and a service that boots only because the environment supplied one cannot start
     # from this repo alone (check-flyway-default-datasource.py, #3080).
@@ -125,6 +128,9 @@ authz:
     datasource:
       reactive:
         url: vertx-reactive:postgresql://localhost:5433/openbank_pension_test
+        idle-timeout: 5M
+        max-lifetime: 30M
+        max-size: 20
     management:
       enabled: false
     oidc:
