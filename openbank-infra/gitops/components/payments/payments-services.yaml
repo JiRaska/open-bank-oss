@@ -42,7 +42,7 @@ spec:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-transaction-opa-bundle.sh via the trailing marker comment
         # (do not hand-edit, do not drop the marker).
-        openbank.tech/policy-checksum: "5970736121ac956d" # transaction-opa-bundle
+        openbank.tech/policy-checksum: "1b0deba8f1fcaff8" # transaction-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -437,7 +437,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-sepa-payment-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "1f292d6a74809852"
+        openbank.tech/policy-checksum: "501f8be0bfe8035b"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -816,6 +816,8 @@ kind: Rollout
 metadata:
   name: domestic-payment
   namespace: payments
+  annotations:
+    openbank.io/port-scoped-ingress: "true"
   labels:
     app.kubernetes.io/name: domestic-payment
     app.kubernetes.io/part-of: payments
@@ -838,7 +840,7 @@ spec:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-domestic-payment-opa-bundle.sh via the trailing marker
         # comment (do not hand-edit, do not drop the marker).
-        openbank.tech/policy-checksum: "a52fbfbadaedfea3" # domestic-payment-opa-bundle
+        openbank.tech/policy-checksum: "7cebb6bd21dd1281" # domestic-payment-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -857,9 +859,23 @@ spec:
           ports:
             - name: http
               containerPort: 8116
+            - name: https
+              containerPort: 8443
             - name: management
               containerPort: 8085
           env:
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
+              value: "/mnt/internal-tls/tls.crt"
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
+              value: "/mnt/internal-tls/tls.key"
+            - name: QUARKUS_HTTP_SSL_PORT
+              value: "8443"
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_TRUST_STORE_FILES
+              value: "/mnt/internal-tls/ca.crt"
+            - name: QUARKUS_HTTP_SSL_CLIENT_AUTH
+              value: "REQUIRED"
+            - name: QUARKUS_HTTP_SSL_PROTOCOLS
+              value: "TLSv1.3"
             - name: QUARKUS_DATASOURCE_JDBC_URL
               value: jdbc:postgresql://domestic-payment-db-rw.payments.svc:5432/openbank_domestic_payment
             - name: QUARKUS_DATASOURCE_REACTIVE_URL
@@ -997,6 +1013,9 @@ spec:
               drop:
                 - ALL
           volumeMounts:
+            - name: internal-server-tls
+              mountPath: /mnt/internal-tls
+              readOnly: true
             - name: document-tls
               mountPath: /mnt/document-tls
               readOnly: true
@@ -1094,6 +1113,9 @@ spec:
               cpu: 100m
               memory: 64Mi
       volumes:
+        - name: internal-server-tls
+          secret:
+            secretName: domestic-payment-server-tls
         - name: aml-tls
           secret:
             secretName: domestic-payment-internal-tls
@@ -1157,6 +1179,9 @@ spec:
     - name: http
       port: 8116
       targetPort: http
+    - name: https
+      port: 8443
+      targetPort: https
 ---
 apiVersion: v1
 kind: Service
@@ -1174,6 +1199,9 @@ spec:
     - name: http
       port: 8116
       targetPort: http
+    - name: https
+      port: 8443
+      targetPort: https
 ---
 # ─────────────────────────────────────────────────────────────────────────────
 # sepa-instant  (port 8127)
@@ -1207,7 +1235,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-sepa-instant-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "f93e9aab0782add9"
+        openbank.tech/policy-checksum: "bed99d635d6fec33"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -1548,7 +1576,7 @@ spec:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-clearing-opa-bundle.sh via the trailing marker comment
         # (do not hand-edit, do not drop the marker).
-        openbank.tech/policy-checksum: "6b9292678b6ebd23" # clearing-opa-bundle
+        openbank.tech/policy-checksum: "27a93076ec29d499" # clearing-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -1847,6 +1875,8 @@ kind: Deployment
 metadata:
   name: standing-order-service
   namespace: payments
+  annotations:
+    openbank.io/port-scoped-ingress: "true"
   labels:
     app.kubernetes.io/name: standing-order-service
     app.kubernetes.io/part-of: payments
@@ -1872,7 +1902,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes (ADR-0034). Value is stamped by
         # gen-standing-order-opa-bundle.sh — do not hand-edit.
-        openbank.tech/policy-checksum: "bb6bd356a52aa3a5" # standing-order-opa-bundle
+        openbank.tech/policy-checksum: "888f8824890e7c62" # standing-order-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -1888,9 +1918,23 @@ spec:
           ports:
             - name: http
               containerPort: 8121
+            - name: https
+              containerPort: 8443
             - name: management
               containerPort: 8085
           env:
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
+              value: "/mnt/internal-tls/tls.crt"
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
+              value: "/mnt/internal-tls/tls.key"
+            - name: QUARKUS_HTTP_SSL_PORT
+              value: "8443"
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_TRUST_STORE_FILES
+              value: "/mnt/internal-tls/ca.crt"
+            - name: QUARKUS_HTTP_SSL_CLIENT_AUTH
+              value: "REQUIRED"
+            - name: QUARKUS_HTTP_SSL_PROTOCOLS
+              value: "TLSv1.3"
             - name: QUARKUS_DATASOURCE_JDBC_URL
               value: jdbc:postgresql://standing-order-db-rw.payments.svc:5432/openbank_standing_orders
             - name: QUARKUS_DATASOURCE_REACTIVE_URL
@@ -2006,6 +2050,9 @@ spec:
               drop:
                 - ALL
           volumeMounts:
+            - name: internal-server-tls
+              mountPath: /mnt/internal-tls
+              readOnly: true
             - name: tmp
               mountPath: /tmp
             - name: kafka-keystore
@@ -2093,6 +2140,9 @@ spec:
               cpu: 100m
               memory: 64Mi
       volumes:
+        - name: internal-server-tls
+          secret:
+            secretName: standing-order-service-server-tls
         - name: tmp
           emptyDir: {}
         - name: kafka-keystore
@@ -2121,6 +2171,9 @@ spec:
     - name: http
       port: 8121
       targetPort: http
+    - name: https
+      port: 8443
+      targetPort: https
 ---
 # ─────────────────────────────────────────────────────────────────────────────
 # card-issuance-service  (port 8118)
@@ -2164,7 +2217,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-card-issuance-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "6601d0c9f07e67b4"
+        openbank.tech/policy-checksum: "8480b3f3e5f866ee"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -2458,7 +2511,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-card-processing-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "6b136fe1a5220a16"
+        openbank.tech/policy-checksum: "5628741e8e4c0061"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -2721,7 +2774,7 @@ spec:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-settlement-opa-bundle.sh via the trailing marker comment
         # (do not hand-edit, do not drop the marker).
-        openbank.tech/policy-checksum: "a057407d3804b6b6" # settlement-opa-bundle
+        openbank.tech/policy-checksum: "599ebb6be913c11b" # settlement-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -3185,7 +3238,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-swift-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "91c6fc8f3dc42f97"
+        openbank.tech/policy-checksum: "b2b465f9be0683e8"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -3509,7 +3562,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-vop-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "d46b8ac4481b1a62"
+        openbank.tech/policy-checksum: "98bdec9a2e2a804d"
     spec:
       securityContext:
         runAsNonRoot: true
