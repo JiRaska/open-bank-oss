@@ -175,8 +175,8 @@ jobs:
   # (AuthorizeInterceptor scope derivation + OPA PDP call) is the fleet's security-critical
   # decision code — a surviving mutant there is an authorization check no test could tell
   # from its negation. The package is small (3 files, ~40s), so a blocking lane costs
-  # nothing. Threshold 63 = measured baseline (2026-09-05: 174 mutations, 110 detected);
-  # raise it as surviving mutants get killed — the lane is a ratchet, never lowered.
+  # nothing. Threshold 70 = measured baseline (2026-10-14: 419 mutations, 316 killed + 8 timed
+  # out); raise it as surviving mutants get killed — the lane is a ratchet, never lowered.
   # pitest is applied by init script, NOT the plugins DSL: any external versioned plugin
   # in openbank-libs-runtime's plugins{} block splits the classloaders and kordamp jandex
   # loads twice (Banner$Inject_ ClassCastException) — see the init script header.
@@ -202,11 +202,11 @@ jobs:
       - name: Validate Gradle wrapper
         uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
 
-      - name: Run pitest on the authz package (threshold 63 enforced)
+      - name: Run pitest on the authz package (threshold 70 enforced)
         run: |
           ./gradlew -I .github/scripts/pitest-authz.init.gradle \
             :openbank-libs-runtime:pitest \
-            -Ppitest.mutationThreshold=63
+            -Ppitest.mutationThreshold=70
         env:
           GRADLE_OPTS: "-Dorg.gradle.daemon=false -Xmx2g"
 
