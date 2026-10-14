@@ -3188,6 +3188,27 @@ gates:
     run: |
       python3 .github/scripts/gen-ai-governance-snapshot.py --check
 
+  - id: agent-merge-recorder-selftest
+    name: "agent-merge recorder maps agent PRs to merge evidence and fails soft (ADR-0031 phase 3, enforced)"
+    group: registry
+    mode: enforced
+    selftest_exempt: >-
+      is-a-test-suite — the run: below IS test-record-agent-merge.py, a 16-case unittest suite
+      covering the agent/ and codex/ branch mappings, declared-agent author mapping, non-agent
+      no-op exit 0, payload shape, unreachable endpoint -> exit 0 with ::warning::, and the
+      workflow wiring (SHA pin, read-only permissions, concurrency). Its red is reachable by
+      construction: every case drives the real script against stub events/servers.
+    budget_seconds: 60   # local HTTP stubs only, no network; ~2s observed
+    rationale: >-
+      ADR-0031 phase 3's "recorded human merge" evidence is produced by this CI-side recorder;
+      an untested mapping silently attributes merges to the wrong agent (or records nothing),
+      which is worse than no record — it is false provenance in an audit store.
+    review_after: "2027-10-14"
+    # Subjects are test cases, not files: the floor drops the day someone deletes a case.
+    min_subjects: 16
+    run: |
+      python3 .github/scripts/test-record-agent-merge.py
+
   # ==== kotlin =========================================================
   # ADR-0160 mechanism 1 / rules.yaml: change_requirements.event_consumer_liveness.
   # Fleet-wide scan (not diff-scoped): every Kafka topic a service publishes must have a
