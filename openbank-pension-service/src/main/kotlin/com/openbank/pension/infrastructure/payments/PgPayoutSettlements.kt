@@ -12,12 +12,14 @@ import io.vertx.mutiny.sqlclient.Pool
 import io.vertx.mutiny.sqlclient.Tuple
 import jakarta.inject.Singleton
 import java.time.Clock
+import java.time.Instant
 import java.time.ZoneOffset
 
 /**
  * Settlement read/write on `pension_payment_instructions` over the plain reactive pool: the caller
  * is a Kafka consumer, where no Hibernate session exists. The status guard is in the UPDATE itself
- * (`status = ANY($4)`), so two redeliveries racing each other change the row once.
+ * (`status = ANY($6)`), so two redeliveries racing each other change the row once. The persisted
+ * domestic settlement time is stored on SETTLED; an earlier rejection cannot overturn it.
  */
 @Singleton
 class PgPayoutSettlements(private val client: Pool, private val clock: Clock) : PayoutSettlementRepository {
@@ -44,19 +46,38 @@ class PgPayoutSettlements(private val client: Pool, private val clock: Clock) : 
         paymentRef: String,
         from: Set<InstructionStatus>,
         to: InstructionStatus,
+        occurredAt: Instant,
+        settledAt: Instant?,
+        aggregateRevision: Long?,
     ): Boolean = client.preparedQuery(
         """
-            UPDATE pension_payment_instructions SET status = $1, updated_at = $2
-            WHERE payment_ref = $3 AND status = ANY($4)
+            UPDATE pension_payment_instructions
+               SET status = $1,
+                   updated_at = CASE WHEN status = 'SETTLED' AND $1 = 'SETTLED' THEN updated_at ELSE $2 END,
+                   settled_at = CASE WHEN $1 = 'SETTLED' THEN $3::timestamptz ELSE NULL END,
+                   settlement_event_revision = CASE WHEN $1 = 'SETTLED' THEN $4::bigint ELSE NULL END
+             WHERE payment_ref = $6 AND (
+                   (status = ANY($7)
+                    AND (status <> 'SETTLED' OR $1 <> 'REJECTED' OR settled_at IS NULL
+                         OR $5::timestamptz >= settled_at))
+                   OR ($1 = 'SETTLED' AND status = 'SETTLED' AND settled_at IS NULL
+                       AND $3::timestamptz IS NOT NULL AND $4::bigint IS NOT NULL
+                       AND settlement_event_revision = $4::bigint)
+               )
         """.trimIndent(),
     ).execute(
-        Tuple.of(
-            to.name,
-            clock.instant().atOffset(ZoneOffset.UTC),
-            paymentRef,
-            from.map {
-                it.name
-            }.toTypedArray(),
+        Tuple.from(
+            listOf(
+                to.name,
+                clock.instant().atOffset(ZoneOffset.UTC),
+                settledAt?.atOffset(ZoneOffset.UTC),
+                aggregateRevision,
+                occurredAt.atOffset(ZoneOffset.UTC),
+                paymentRef,
+                from.map {
+                    it.name
+                }.toTypedArray(),
+            ),
         ),
     ).awaitSuspending().rowCount() > 0
 }
