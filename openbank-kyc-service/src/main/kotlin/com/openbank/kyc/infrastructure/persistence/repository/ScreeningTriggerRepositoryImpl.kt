@@ -35,20 +35,31 @@ class ScreeningTriggerRepositoryImpl(private val outboxRepository: KycOutboxRepo
     @Inject
     lateinit var objectMapper: ObjectMapper
 
-    override suspend fun insertIfAbsent(trigger: ScreeningTrigger): Boolean = Panache.withTransaction {
-        Panache.getSession().flatMap { session ->
-            session.createNativeQuery<Any>(INSERT_IF_ABSENT)
-                .setParameter("triggerId", trigger.triggerId)
-                .setParameter("partyId", trigger.partyId)
-                .setParameter("triggerType", ScreeningTrigger.TRIGGER_TYPE_SANCTIONS_LIST_CHANGED)
-                .setParameter("publicationId", trigger.publicationId)
-                .setParameter("chunkIndex", trigger.chunkIndex)
-                .setParameter("listType", trigger.listType)
-                .setParameter("diff", objectMapper.writeValueAsString(trigger.diff))
-                .setParameter("state", ScreeningTriggerState.PENDING.name)
-                .executeUpdate()
+    override suspend fun insertIfAbsent(trigger: ScreeningTrigger): Boolean {
+        require(
+            trigger.state == ScreeningTriggerState.PENDING &&
+                trigger.attempts == 1 &&
+                trigger.nextAttemptAt?.isAfter(trigger.createdAt) == true,
+        ) {
+            "A pending screening trigger requires an initial lease"
         }
-    }.awaitSuspending() == 1
+        return Panache.withTransaction {
+            Panache.getSession().flatMap { session ->
+                session.createNativeQuery<Any>(INSERT_IF_ABSENT)
+                    .setParameter("triggerId", trigger.triggerId)
+                    .setParameter("partyId", trigger.partyId)
+                    .setParameter("triggerType", ScreeningTrigger.TRIGGER_TYPE_SANCTIONS_LIST_CHANGED)
+                    .setParameter("publicationId", trigger.publicationId)
+                    .setParameter("chunkIndex", trigger.chunkIndex)
+                    .setParameter("listType", trigger.listType)
+                    .setParameter("diff", objectMapper.writeValueAsString(trigger.diff))
+                    .setParameter("state", ScreeningTriggerState.PENDING.name)
+                    .setParameter("attempts", trigger.attempts)
+                    .setParameter("leaseUntil", trigger.nextAttemptAt)
+                    .executeUpdate()
+            }
+        }.awaitSuspending() == 1
+    }
 
     override suspend fun recordOpened(trigger: ScreeningTrigger, coordinatorCaseId: String?, at: Instant) {
         Panache.withTransaction {
@@ -57,7 +68,9 @@ class ScreeningTriggerRepositoryImpl(private val outboxRepository: KycOutboxRepo
                     .setParameter("coordinatorCaseId", coordinatorCaseId)
                     .setParameter("resolvedAt", at)
                     .setParameter("triggerId", trigger.triggerId)
-                    .executeUpdate()
+                    .setParameter("claimedAttempts", trigger.attempts)
+                    .setParameter("leaseUntil", trigger.nextAttemptAt)
+                    .executeUpdate().invoke { changed -> check(changed == 1) { "Screening trigger lease lost" } }
             }
         }.awaitSuspending()
     }
@@ -82,7 +95,9 @@ class ScreeningTriggerRepositoryImpl(private val outboxRepository: KycOutboxRepo
                     .setParameter("attempts", attempts)
                     .setParameter("nextAttemptAt", nextAttemptAt)
                     .setParameter("triggerId", trigger.triggerId)
-                    .executeUpdate()
+                    .setParameter("claimedAttempts", trigger.attempts)
+                    .setParameter("leaseUntil", trigger.nextAttemptAt)
+                    .executeUpdate().invoke { changed -> check(changed == 1) { "Screening trigger lease lost" } }
                     .flatMap {
                         val event = ScreeningTriggerEvents.coordinatorOpenFailed(
                             trigger.copy(
@@ -108,36 +123,66 @@ class ScreeningTriggerRepositoryImpl(private val outboxRepository: KycOutboxRepo
 
     override suspend fun findRetryable(now: Instant, limit: Int): List<ScreeningTrigger> = Panache.withSession {
         find(
-            "state = ?1 AND (nextAttemptAt IS NULL OR nextAttemptAt <= ?2) " +
-                "ORDER BY nextAttemptAt ASC NULLS FIRST, id ASC",
-            ScreeningTriggerState.OPEN_FAILED.name,
+            "state IN ?1 AND ((nextAttemptAt IS NOT NULL AND nextAttemptAt <= ?2) " +
+                "OR (state = 'PENDING' AND nextAttemptAt IS NULL AND createdAt <= ?3)) " +
+                "AND (state = 'PENDING' OR attempts < 5) " +
+                "ORDER BY nextAttemptAt ASC, id ASC",
+            listOf(ScreeningTriggerState.PENDING.name, ScreeningTriggerState.OPEN_FAILED.name),
             now,
+            now.minusSeconds(LEASE_SECONDS),
         ).page(0, limit).list()
     }.awaitSuspending().map { it.toDomain(objectMapper) }
+
+    override suspend fun claim(trigger: ScreeningTrigger, now: Instant, leaseUntil: Instant): Boolean =
+        Panache.withTransaction {
+            Panache.getSession().flatMap { session ->
+                session.createNativeQuery<Any>(CLAIM)
+                    .setParameter("triggerId", trigger.triggerId)
+                    .setParameter("attempts", trigger.attempts)
+                    .setParameter("now", now)
+                    .setParameter("legacyCutoff", now.minusSeconds(LEASE_SECONDS))
+                    .setParameter("leaseUntil", leaseUntil)
+                    .executeUpdate()
+            }
+        }.awaitSuspending() == 1
 
     override suspend fun findByTriggerId(triggerId: UUID): ScreeningTrigger? = Panache.withSession {
         find("triggerId", triggerId).firstResult()
     }.awaitSuspending()?.toDomain(objectMapper)
 
     private companion object {
+        const val LEASE_SECONDS = 600L
+
         const val INSERT_IF_ABSENT = """
             INSERT INTO kyc_screening_triggers
-                (trigger_id, party_id, trigger_type, publication_id, chunk_index, list_type, diff, state)
+                (trigger_id, party_id, trigger_type, publication_id, chunk_index, list_type, diff, state, attempts, next_attempt_at)
             VALUES
-                (:triggerId, :partyId, :triggerType, :publicationId, :chunkIndex, :listType, :diff, :state)
+                (:triggerId, :partyId, :triggerType, :publicationId, :chunkIndex, :listType, :diff, :state, :attempts, :leaseUntil)
             ON CONFLICT (publication_id, party_id) DO NOTHING
+        """
+
+        const val CLAIM = """
+            UPDATE kyc_screening_triggers
+            SET state = 'PENDING', attempts = attempts + 1, next_attempt_at = :leaseUntil
+            WHERE trigger_id = :triggerId AND attempts = :attempts
+                AND (state = 'PENDING' OR attempts < 5)
+                AND state IN ('PENDING', 'OPEN_FAILED')
+                AND ((next_attempt_at IS NOT NULL AND next_attempt_at <= :now)
+                    OR (state = 'PENDING' AND next_attempt_at IS NULL AND created_at <= :legacyCutoff))
         """
 
         const val MARK_OPENED = """
             UPDATE kyc_screening_triggers
             SET state = 'OPENED', coordinator_case_id = :coordinatorCaseId, resolved_at = :resolvedAt
-            WHERE trigger_id = :triggerId
+            WHERE trigger_id = :triggerId AND state = 'PENDING'
+                AND attempts = :claimedAttempts AND next_attempt_at = :leaseUntil
         """
 
         const val MARK_OPEN_FAILED = """
             UPDATE kyc_screening_triggers
             SET state = :state, failed_reason = :reason, attempts = :attempts, next_attempt_at = :nextAttemptAt
-            WHERE trigger_id = :triggerId
+            WHERE trigger_id = :triggerId AND state = 'PENDING'
+                AND attempts = :claimedAttempts AND next_attempt_at = :leaseUntil
         """
     }
 }

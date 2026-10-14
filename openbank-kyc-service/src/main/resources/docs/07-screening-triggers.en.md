@@ -30,3 +30,15 @@ The candidate set is **not** diff-scoped per entry: kyc-service persists no part
 - **A new Kafka channel is two deploys, not one** (.github/CLAUDE.md): the `sanctions-list-changes-in` group id / offset overrides land in the msg-override ConfigMap only after an image carrying the channel's `connector:` is deployed; until then the consumer runs on the fallback group id (`quarkus.application.name`), which the `kyc-service` KafkaUser is granted Read on.
 - The consumer's failure path rethrows to the connector so infrastructure failures dead-letter; coordinator-call failures are the row + outbox event's job, not Kafka's.
 - The `kyc_screening_triggers` table (Flyway V12) is append-audited: `state` transitions are updates, the diff columns are write-once.
+
+## Recovery ownership and duplicate scope
+
+Each new PENDING row carries an initial ten-minute lease and attempt number. A worker atomically claims only an expired lease; result updates compare the claimed attempt and lease in the same transaction as any failure outbox row. A stale worker cannot overwrite a newer result. Historical PENDING rows without a lease become eligible only after ten minutes from creation; new unleased inserts are rejected. Terminal OPEN_FAILED rows have no next-attempt timestamp and are never automatically retried.
+
+New leased work allows at most five coordinator calls; the attempt counter includes a call whose outcome was lost during a crash. Recovery after the fifth abandoned attempt takes a sixth fencing claim and records counter six in the parked row/event, without a sixth coordinator call. Operators must reconcile an ambiguous final attempt rather than blindly retry it.
+
+Coordinator calls retain the existing deterministic workflow id and Temporal REJECT_DUPLICATE policy. This protects redelivery while the workflow history remains retained; it is not a permanent exactly-once guarantee after Temporal history expires. No downstream idempotency API or retention policy is changed here.
+
+The candidate limit is a page size. Keyset continuation visits the complete active book, rather than silently truncating it to the first page. Rollback disables screening triggers; retain pending/failure rows for reconciliation instead of deleting them.
+
+The five-call budget applies to new leased inserts. Legacy rows with attempt zero and no lease do not establish whether an old coordinator call occurred; their historical side effects remain ambiguous and must be reconciled against coordinator history. Recovery does not prove that the total historical call count was at most five.

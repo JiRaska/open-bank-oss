@@ -260,9 +260,12 @@ class KycRepository(private val outboxRepository: KycOutboxRepository) :
         }.awaitSuspending()
     }
 
-    override suspend fun findActivePartyIds(limit: Int): List<UUID> = Panache.withSession {
+    override suspend fun findActivePartyIds(limit: Int, afterPartyId: UUID?): List<UUID> = Panache.withSession {
         Panache.getSession().flatMap { session ->
-            session.createQuery(ACTIVE_PARTY_IDS_HQL, UUID::class.java)
+            session.createQuery(
+                if (afterPartyId == null) ACTIVE_PARTY_IDS_HQL else ACTIVE_PARTY_IDS_AFTER_HQL,
+                UUID::class.java,
+            ).apply { if (afterPartyId != null) setParameter("after", afterPartyId) }
                 .setParameter("terminal", KycCaseStatus.TERMINAL_NAMES)
                 .setMaxResults(limit)
                 .resultList
@@ -314,6 +317,10 @@ class KycRepository(private val outboxRepository: KycOutboxRepository) :
         // hydrating a single KycCaseEntity (or parsing one checksJson).
         private const val ACTIVE_PARTY_IDS_HQL =
             "SELECT DISTINCT c.partyId FROM KycCaseEntity c WHERE c.status NOT IN :terminal ORDER BY c.partyId"
+
+        private const val ACTIVE_PARTY_IDS_AFTER_HQL =
+            "SELECT DISTINCT c.partyId FROM KycCaseEntity c " +
+                "WHERE c.status NOT IN :terminal AND c.partyId > :after ORDER BY c.partyId"
 
         internal fun anonymizeChecksJson(checksJson: String, objectMapper: ObjectMapper): String = try {
             val checks: List<KycCheck> = objectMapper.readValue(

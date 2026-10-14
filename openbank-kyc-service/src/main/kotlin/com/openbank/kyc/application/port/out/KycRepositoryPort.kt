@@ -116,7 +116,7 @@ interface KycCaseRepository {
      * so the per-entry diff cannot be reverse-joined here and the trigger is scoped to the
      * in-flight book instead. Bounded at [limit] so one chunk cannot load the register.
      */
-    suspend fun findActivePartyIds(limit: Int): List<UUID>
+    suspend fun findActivePartyIds(limit: Int, afterPartyId: UUID? = null): List<UUID>
 
     /** Deletes KYC cases whose PII was erased and the AML hold period ([cutoff]) has expired (ADR-0118 §5). */
     suspend fun deleteErasedCasesOlderThan(cutoff: Instant): Long

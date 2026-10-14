@@ -67,29 +67,37 @@ class ScreeningTriggerService(
             deactivatedExternalIds = change.deactivatedExternalIds,
             changeCount = change.changedExternalIds.size + change.deactivatedExternalIds.size,
         )
-        val candidates = kycCaseRepository.findActivePartyIds(candidateLimit)
+        require(candidateLimit > 0) { "candidate page size must be positive" }
+        var afterPartyId: UUID? = null
+        var candidateCount = 0
         var opened = 0
         var failed = 0
         var duplicates = 0
-        for (partyId in candidates) {
-            val trigger = ScreeningTrigger.pending(
-                partyId = partyId,
-                publicationId = change.publicationId,
-                chunkIndex = change.chunkIndex,
-                listType = change.listType,
-                diff = diff,
-                now = Instant.now(clock),
-            )
-            // Insert FIRST, durably and idempotently: whatever happens after (coordinator down,
-            // pod killed mid-chunk, Kafka redelivery), the (publication, party) row decides
-            // whether the open still owes work.
-            if (!triggerRepository.insertIfAbsent(trigger)) {
-                duplicates++
-                continue
+        while (true) {
+            val candidates = kycCaseRepository.findActivePartyIds(candidateLimit, afterPartyId)
+            candidateCount += candidates.size
+            for (partyId in candidates) {
+                val trigger = ScreeningTrigger.pending(
+                    partyId = partyId,
+                    publicationId = change.publicationId,
+                    chunkIndex = change.chunkIndex,
+                    listType = change.listType,
+                    diff = diff,
+                    now = Instant.now(clock),
+                ).copy(attempts = 1, nextAttemptAt = Instant.now(clock) + LEASE)
+                // Insert FIRST, durably and idempotently: whatever happens after (coordinator down,
+                // pod killed mid-chunk, Kafka redelivery), the (publication, party) row decides
+                // whether the open still owes work.
+                if (!triggerRepository.insertIfAbsent(trigger)) {
+                    duplicates++
+                    continue
+                }
+                if (openCaseForTrigger(trigger, attempts = 1)) opened++ else failed++
             }
-            if (openCaseForTrigger(trigger, attempts = 1)) opened++ else failed++
+            afterPartyId = candidates.lastOrNull()
+            if (candidates.size < candidateLimit) break
         }
-        return HandleResult(candidates.size, opened, failed, duplicates)
+        return HandleResult(candidateCount, opened, failed, duplicates)
     }
 
     /**
@@ -105,7 +113,18 @@ class ScreeningTriggerService(
         var opened = 0
         for (trigger in retryable) {
             try {
-                if (openCaseForTrigger(trigger, attempts = trigger.attempts + 1)) opened++
+                val leaseUntil = now + LEASE
+                if (!triggerRepository.claim(trigger, now, leaseUntil)) continue
+                val claimed = trigger.copy(
+                    state = ScreeningTriggerState.PENDING,
+                    attempts = trigger.attempts + 1,
+                    nextAttemptAt = leaseUntil,
+                )
+                if (claimed.attempts > MAX_ATTEMPTS) {
+                    parkOrReschedule(claimed, ScreeningTriggerFailure.COORDINATOR_UNAVAILABLE, claimed.attempts, now)
+                } else if (openCaseForTrigger(claimed, attempts = claimed.attempts)) {
+                    opened++
+                }
             } catch (e: Exception) {
                 log.errorf(e, "ADR-0256 retry: trigger %s could not be re-attempted", trigger.triggerId)
             }
@@ -161,16 +180,10 @@ class ScreeningTriggerService(
     ) {
         val exhausted = attempts >= MAX_ATTEMPTS
         val nextAttemptAt = if (exhausted) null else now + BACKOFF.multipliedBy(attempts.toLong())
-        val failedTrigger = trigger.copy(
-            state = ScreeningTriggerState.OPEN_FAILED,
-            attempts = attempts,
-            failedReason = reason,
-            nextAttemptAt = nextAttemptAt,
-        )
         // Terminal parking writes the KYC_COORDINATOR_OPEN_FAILED outbox row in the same
         // transaction (ScreeningTriggerRepository.recordOpenFailed) — the operator-visible
         // failure record the ADR-0256 contract requires; logging alone would not comply with D2.
-        triggerRepository.recordOpenFailed(failedTrigger, reason, attempts, nextAttemptAt, now)
+        triggerRepository.recordOpenFailed(trigger, reason, attempts, nextAttemptAt, now)
         if (exhausted) {
             log.errorf(
                 "ADR-0256: opening coordinator case for party %s FAILED permanently " +
@@ -196,5 +209,6 @@ class ScreeningTriggerService(
     private companion object {
         const val MAX_ATTEMPTS = 5
         val BACKOFF: Duration = Duration.ofMinutes(5)
+        val LEASE: Duration = Duration.ofMinutes(10)
     }
 }

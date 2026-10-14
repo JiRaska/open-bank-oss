@@ -47,7 +47,7 @@ class ScreeningTriggerServiceTest {
     fun `a changed chunk opens one coordinator case per candidate party`(): Unit = runBlocking {
         val partyA = UUID.randomUUID()
         val partyB = UUID.randomUUID()
-        coEvery { kycCaseRepository.findActivePartyIds(any()) } returns listOf(partyA, partyB)
+        coEvery { kycCaseRepository.findActivePartyIds(any(), any()) } returns listOf(partyA, partyB)
         coEvery { triggerRepository.insertIfAbsent(any()) } returns true
         coEvery { coordinatorPort.openAmlAlertCase(partyA) } returns CaseOpenOutcome.Opened("case-a")
         coEvery { coordinatorPort.openAmlAlertCase(partyB) } returns CaseOpenOutcome.Opened("case-b")
@@ -65,7 +65,7 @@ class ScreeningTriggerServiceTest {
     @Test
     fun `a 409 already-exists is an idempotent success and records no coordinator id`(): Unit = runBlocking {
         val party = UUID.randomUUID()
-        coEvery { kycCaseRepository.findActivePartyIds(any()) } returns listOf(party)
+        coEvery { kycCaseRepository.findActivePartyIds(any(), any()) } returns listOf(party)
         coEvery { triggerRepository.insertIfAbsent(any()) } returns true
         coEvery { coordinatorPort.openAmlAlertCase(party) } returns CaseOpenOutcome.AlreadyExists
 
@@ -78,7 +78,7 @@ class ScreeningTriggerServiceTest {
     @Test
     fun `a retryable coordinator failure is recorded durably and not rethrown`(): Unit = runBlocking {
         val party = UUID.randomUUID()
-        coEvery { kycCaseRepository.findActivePartyIds(any()) } returns listOf(party)
+        coEvery { kycCaseRepository.findActivePartyIds(any(), any()) } returns listOf(party)
         coEvery { triggerRepository.insertIfAbsent(any()) } returns true
         coEvery { coordinatorPort.openAmlAlertCase(party) } returns CaseOpenOutcome.Retryable("HTTP 503")
         var capturedReason: ScreeningTriggerFailure? = null
@@ -105,7 +105,7 @@ class ScreeningTriggerServiceTest {
     @Test
     fun `a deterministic rejection is parked immediately with attempts exhausted`(): Unit = runBlocking {
         val party = UUID.randomUUID()
-        coEvery { kycCaseRepository.findActivePartyIds(any()) } returns listOf(party)
+        coEvery { kycCaseRepository.findActivePartyIds(any(), any()) } returns listOf(party)
         coEvery { triggerRepository.insertIfAbsent(any()) } returns true
         coEvery { coordinatorPort.openAmlAlertCase(party) } returns
             CaseOpenOutcome.Rejected(ScreeningTriggerFailure.COORDINATOR_REJECTED, "HTTP 403")
@@ -126,7 +126,7 @@ class ScreeningTriggerServiceTest {
     @Test
     fun `a duplicate (publication, party) trigger never calls the coordinator`(): Unit = runBlocking {
         val party = UUID.randomUUID()
-        coEvery { kycCaseRepository.findActivePartyIds(any()) } returns listOf(party)
+        coEvery { kycCaseRepository.findActivePartyIds(any(), any()) } returns listOf(party)
         // Redelivery / a sibling chunk already owns this (publication, party) row.
         coEvery { triggerRepository.insertIfAbsent(any()) } returns false
 
@@ -145,6 +145,7 @@ class ScreeningTriggerServiceTest {
             .copy(nextAttemptAt = now.minusSeconds(60))
         // The backoff filter is the repository's job (ScreeningTriggerRepositoryIT); the service
         // re-attempts exactly the rows findRetryable hands it and counts the successes.
+        coEvery { triggerRepository.claim(any(), any(), any()) } returns true
         coEvery { triggerRepository.findRetryable(now, 100) } returns listOf(due, alsoDue)
         coEvery { coordinatorPort.openAmlAlertCase(due.partyId) } returns CaseOpenOutcome.Opened("case-retry")
         coEvery { coordinatorPort.openAmlAlertCase(alsoDue.partyId) } returns CaseOpenOutcome.AlreadyExists
@@ -152,8 +153,25 @@ class ScreeningTriggerServiceTest {
         val opened = service.retryFailedTriggers(now, limit = 100)
 
         assertThat(opened).isEqualTo(2)
-        coVerify(exactly = 1) { triggerRepository.recordOpened(due, "case-retry", any()) }
-        coVerify(exactly = 1) { triggerRepository.recordOpened(alsoDue, null, any()) }
+        coVerify(exactly = 1) {
+            triggerRepository.recordOpened(
+                match {
+                    it.triggerId == due.triggerId && it.attempts == 3
+                },
+                "case-retry",
+                any(),
+            )
+        }
+        coVerify(exactly = 1) {
+            triggerRepository.recordOpened(
+                match {
+                    it.triggerId == alsoDue.triggerId &&
+                        it.attempts == 2
+                },
+                null,
+                any(),
+            )
+        }
     }
 
     @Test
@@ -161,6 +179,7 @@ class ScreeningTriggerServiceTest {
         val now = fixedClock.instant()
         val broken = trigger(partyId = UUID.randomUUID(), attempts = 4)
         val fine = trigger(partyId = UUID.randomUUID(), attempts = 1)
+        coEvery { triggerRepository.claim(any(), any(), any()) } returns true
         coEvery { triggerRepository.findRetryable(now, 100) } returns listOf(broken, fine)
         coEvery { coordinatorPort.openAmlAlertCase(broken.partyId) } throws RuntimeException("db gone")
         coEvery { coordinatorPort.openAmlAlertCase(fine.partyId) } returns CaseOpenOutcome.AlreadyExists
@@ -168,7 +187,57 @@ class ScreeningTriggerServiceTest {
         val opened = service.retryFailedTriggers(now, limit = 100)
 
         assertThat(opened).isEqualTo(1)
-        coVerify(exactly = 1) { triggerRepository.recordOpened(fine, null, any()) }
+        coVerify(exactly = 1) {
+            triggerRepository.recordOpened(
+                match {
+                    it.triggerId == fine.triggerId &&
+                        it.attempts == 2
+                },
+                null,
+                any(),
+            )
+        }
+    }
+
+    @Test
+    fun `candidate page size does not truncate the book beyond five hundred parties`(): Unit = runBlocking {
+        val firstPage = (1L..500L).map { UUID(0, it) }
+        val lastParty = UUID(0, 501)
+        coEvery { kycCaseRepository.findActivePartyIds(500, null) } returns firstPage
+        coEvery { kycCaseRepository.findActivePartyIds(500, firstPage.last()) } returns listOf(lastParty)
+        coEvery { triggerRepository.insertIfAbsent(any()) } returns true
+        coEvery { coordinatorPort.openAmlAlertCase(any()) } returns CaseOpenOutcome.AlreadyExists
+
+        val result = service.handleListChange(change, 500)
+
+        assertThat(result.candidates).isEqualTo(501)
+        assertThat(result.opened).isEqualTo(501)
+        coVerify(exactly = 1) { coordinatorPort.openAmlAlertCase(lastParty) }
+        coVerify(exactly = 1) { kycCaseRepository.findActivePartyIds(500, firstPage.last()) }
+    }
+
+    @Test
+    fun `crash after final claim parks durable failure without another external call`(): Unit = runBlocking {
+        val now = fixedClock.instant()
+        val abandoned = trigger(UUID.randomUUID(), 5).copy(
+            state = com.openbank.kyc.domain.model.ScreeningTriggerState.PENDING,
+            nextAttemptAt = now.minusSeconds(1),
+        )
+        coEvery { triggerRepository.findRetryable(now, 100) } returns listOf(abandoned)
+        coEvery { triggerRepository.claim(any(), any(), any()) } returns true
+
+        assertThat(service.retryFailedTriggers(now, 100)).isZero()
+
+        coVerify(exactly = 0) { coordinatorPort.openAmlAlertCase(any()) }
+        coVerify(exactly = 1) {
+            triggerRepository.recordOpenFailed(
+                match { it.attempts == 6 },
+                ScreeningTriggerFailure.COORDINATOR_UNAVAILABLE,
+                6,
+                null,
+                now,
+            )
+        }
     }
 
     private fun trigger(partyId: UUID, attempts: Int) = ScreeningTrigger.pending(

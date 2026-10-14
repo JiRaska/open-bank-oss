@@ -77,7 +77,7 @@ class ScreeningTriggerRepositoryIT {
             changeCount = 3,
         ),
         now = now,
-    )
+    ).copy(attempts = 1, nextAttemptAt = now.plusSeconds(600))
 
     @Test
     fun `insertIfAbsent dedupes on publication and party`() {
@@ -141,7 +141,112 @@ class ScreeningTriggerRepositoryIT {
     }
 
     @Test
-    fun `findRetryable returns only failed rows whose backoff has elapsed, parked rows included`() {
+    fun `initial unleased pending is rejected and legacy null lease is safely reclaimable`() {
+        val trigger = pendingTrigger(UUID.randomUUID(), UUID.randomUUID())
+        org.junit.jupiter.api.assertThrows<IllegalArgumentException> {
+            insert(trigger.copy(attempts = 0, nextAttemptAt = null))
+        }
+        insert(trigger)
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "UPDATE kyc_screening_triggers SET attempts = 0, next_attempt_at = NULL WHERE trigger_id = ?",
+            ).use { statement ->
+                statement.setObject(1, trigger.triggerId)
+                assertThat(statement.executeUpdate()).isEqualTo(1)
+            }
+        }
+        val legacy = findTrigger(trigger.triggerId)
+        val recoveryTime = legacy.createdAt.plusSeconds(601)
+        assertThat(
+            onEventLoop { triggerRepository.findRetryable(recoveryTime, 500) }
+                .map { it.triggerId },
+        ).contains(trigger.triggerId)
+        assertThat(
+            onEventLoop {
+                triggerRepository.claim(legacy, recoveryTime, recoveryTime.plusSeconds(600))
+            },
+        ).isTrue()
+        assertThat(
+            onEventLoop {
+                triggerRepository.claim(legacy, recoveryTime, recoveryTime.plusSeconds(600))
+            },
+        ).isFalse()
+    }
+
+    @Test
+    fun `expired pending lease is recovered once and stale owner cannot overwrite it`() {
+        val abandoned = pendingTrigger(UUID.randomUUID(), UUID.randomUUID())
+        insert(abandoned)
+        val recoveryTime = now.plusSeconds(601)
+        val leaseUntil = recoveryTime.plusSeconds(600)
+        assertThat(
+            onEventLoop { triggerRepository.findRetryable(recoveryTime, 500) }
+                .map { it.triggerId },
+        ).contains(abandoned.triggerId)
+        assertThat(onEventLoop { triggerRepository.claim(abandoned, recoveryTime, leaseUntil) }).isTrue()
+        assertThat(onEventLoop { triggerRepository.claim(abandoned, recoveryTime, leaseUntil) }).isFalse()
+        org.junit.jupiter.api.assertThrows<Exception> {
+            onEventLoop { triggerRepository.recordOpened(abandoned, "stale-case", recoveryTime) }
+        }
+        val claimed = abandoned.copy(attempts = 2, nextAttemptAt = leaseUntil)
+        onEventLoop { triggerRepository.recordOpened(claimed, "recovered-case", recoveryTime) }
+        val recovered = onEventLoop { triggerRepository.findByTriggerId(abandoned.triggerId) }!!
+        assertThat(recovered.coordinatorCaseId).isEqualTo("recovered-case")
+        assertThat(recovered.state).isEqualTo(ScreeningTriggerState.OPENED)
+    }
+
+    @Test
+    fun `stale failure writer leaves newer owner unchanged and writes no outbox event`() {
+        val original = pendingTrigger(UUID.randomUUID(), UUID.randomUUID())
+        insert(original)
+        val recoveryTime = now.plusSeconds(601)
+        val newLease = recoveryTime.plusSeconds(600)
+        assertThat(onEventLoop { triggerRepository.claim(original, recoveryTime, newLease) }).isTrue()
+        org.junit.jupiter.api.assertThrows<Exception> {
+            onEventLoop {
+                triggerRepository.recordOpenFailed(
+                    original,
+                    ScreeningTriggerFailure.COORDINATOR_UNAVAILABLE,
+                    5,
+                    null,
+                    recoveryTime,
+                )
+            }
+        }
+        val current = findTrigger(original.triggerId)
+        assertThat(current.state).isEqualTo(ScreeningTriggerState.PENDING)
+        assertThat(current.attempts).isEqualTo(2)
+        assertThat(current.nextAttemptAt).isEqualTo(newLease)
+        assertThat(current.failedReason).isNull()
+        assertThat(outboxRows(original.triggerId)).isEmpty()
+    }
+
+    @Test
+    fun `real active party query keyset visits more than five hundred candidates without omission`() {
+        val expected = (1L..501L).map { UUID(0, it) }
+        val ownedCases = expected.map { caseFor(it, KycCaseStatus.OPEN) }
+        try {
+            for (case in ownedCases) {
+                onEventLoop { kycRepository.save(case) }
+            }
+            val visited = mutableListOf<UUID>()
+            var cursor: UUID? = null
+            while (true) {
+                val page = onEventLoop { kycRepository.findActivePartyIds(500, cursor) }
+                visited.addAll(page)
+                if (page.size < 500) break
+                cursor = page.last()
+            }
+            assertThat(visited).containsAll(expected)
+            assertThat(visited).doesNotHaveDuplicates()
+            assertThat(visited.filter { it in expected }).containsExactlyElementsOf(expected)
+        } finally {
+            deleteOwnedCases(ownedCases)
+        }
+    }
+
+    @Test
+    fun `findRetryable excludes parked exhausted and future rows`() {
         val publicationId = UUID.randomUUID()
         val due = pendingTrigger(UUID.randomUUID(), publicationId)
         val parked = pendingTrigger(UUID.randomUUID(), publicationId)
@@ -153,8 +258,8 @@ class ScreeningTriggerRepositoryIT {
             triggerRepository.recordOpenFailed(
                 due,
                 ScreeningTriggerFailure.COORDINATOR_UNAVAILABLE,
-                5,
-                null,
+                2,
+                now.minusSeconds(60),
                 now,
             )
         }
@@ -179,12 +284,9 @@ class ScreeningTriggerRepositoryIT {
 
         val retryable = findRetryable()
 
-        // `scheduled` is still backing off; `due` and `parked` are due now (null
-        // next_attempt_at sorts first). Rows owned by other tests never appear.
-        assertThat(retryable.map { it.triggerId }).contains(due.triggerId, parked.triggerId)
-        assertThat(retryable.map { it.triggerId }).doesNotContain(scheduled.triggerId)
-        assertThat(retryable.filter { it.nextAttemptAt == null }.map { it.triggerId })
-            .contains(due.triggerId, parked.triggerId)
+        assertThat(retryable.map { it.triggerId }).contains(due.triggerId)
+        assertThat(retryable.map { it.triggerId }).doesNotContain(scheduled.triggerId, parked.triggerId)
+        assertThat(retryable).allMatch { it.nextAttemptAt != null && it.attempts < 5 }
     }
 
     @Test
@@ -200,6 +302,18 @@ class ScreeningTriggerRepositoryIT {
 
         assertThat(candidates).contains(activeParty, underReviewParty)
         assertThat(candidates).doesNotContain(approvedParty)
+    }
+
+    private fun deleteOwnedCases(cases: List<KycCase>) {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement("DELETE FROM kyc_cases WHERE case_id = ?").use { statement ->
+                for (case in cases) {
+                    statement.setObject(1, case.id)
+                    statement.addBatch()
+                }
+                statement.executeBatch()
+            }
+        }
     }
 
     private fun insert(trigger: ScreeningTrigger): Boolean = onEventLoop { triggerRepository.insertIfAbsent(trigger) }

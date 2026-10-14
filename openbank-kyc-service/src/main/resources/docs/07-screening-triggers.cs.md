@@ -30,3 +30,15 @@ Kandidátní množina **není** rozsahovaná per položka diffu: kyc-service neu
 - **Nový Kafka kanál je dva deploye, ne jeden** (.github/CLAUDE.md): group id / offset override `sanctions-list-changes-in` přistanou v msg-override ConfigMap až poté, co je nasazen image nesoucí `connector:` kanálu; do té doby běží consumer na fallback group id (`quarkus.application.name`), na který má KafkaUser `kyc-service` udělen Read.
 - Selhávací cesta consumeru rethrowuje do connectoru, takže infrastrukturní selhání dead-letteruje; selhání volání coordinatoru je práce řádku + outbox události, ne Kafky.
 - Tabulka `kyc_screening_triggers` (Flyway V12) je append-audited: přechody `state` jsou updaty, diff sloupce se zapisují jednou.
+
+## Obnova práce a rozsah ochrany proti duplicitám
+
+Nový řádek PENDING má desetiminutový pronájem a číslo pokusu. Worker atomicky přebírá pouze vypršelý pronájem; zápis výsledku porovnává převzaté číslo pokusu i pronájem ve stejné transakci jako případný outbox záznam selhání. Starý worker nemůže přepsat novější výsledek. Historické PENDING řádky bez pronájmu lze převzít deset minut po vzniku; nové vložení bez pronájmu se odmítá. Terminální OPEN_FAILED řádky bez času dalšího pokusu se automaticky neopakují.
+
+Nová práce s pronájmem dovoluje nejvýše pět volání koordinátoru; čítač zahrnuje i volání, jehož výsledek se při pádu ztratil. Obnova po pátém opuštěném pokusu provede šesté převzetí pro zajištění výhradního zápisu a uloží čítač šest do zaparkovaného řádku a události, bez šestého volání koordinátoru. Operátor musí nejasný poslední výsledek rekoncilovat místo slepého opakování.
+
+Volání koordinátoru zachovává deterministické ID workflow a politiku Temporal REJECT_DUPLICATE. Ochrana platí během uchování historie workflow; po jejím vypršení nejde o trvalou záruku právě jednoho provedení. API idempotence ani retenční politika koordinátoru se nemění.
+
+Limit kandidátů určuje velikost stránky. Pokračování podle posledního klíče projde celý aktivní seznam místo tichého omezení na první stránku. Rollback vypíná screeningové triggery; čekající a selhané řádky se zachovávají pro rekonciliaci.
+
+Limit pěti volání platí pro nové řádky s pronájmem. Historický řádek s nulovým počtem pokusů a bez pronájmu nedokazuje, zda staré volání koordinátoru proběhlo; jeho historické vedlejší účinky zůstávají nejasné a musí se rekoncilovat s historií koordinátoru. Obnova nedokazuje, že celkový historický počet volání nepřekročil pět.

@@ -44,8 +44,11 @@ interface ScreeningTriggerRepository {
         at: Instant,
     )
 
-    /** OPEN_FAILED triggers whose backoff has elapsed, oldest first, capped at [limit]. */
+    /** Expired PENDING leases and nonterminal OPEN_FAILED retries, capped at [limit]. */
     suspend fun findRetryable(now: Instant, limit: Int): List<ScreeningTrigger>
+
+    /** Atomically claims a due row, returning false when another worker already owns it. */
+    suspend fun claim(trigger: ScreeningTrigger, now: Instant, leaseUntil: Instant): Boolean
 
     /** The trigger row, whatever its state — test and replay read-back. */
     suspend fun findByTriggerId(triggerId: UUID): ScreeningTrigger?
