@@ -60,6 +60,27 @@ spec:
           patternType: literal
         operations: [Write, Describe]
         host: "*"
+      # ADR-0256: consume the sanctions per-entry diff events that drive the re-screening
+      # trigger loop (group kyc-service-sanctions-list, set via the msg-override ConfigMap).
+      - resource:
+          type: topic
+          name: openbank.sanctions.screening.event
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: group
+          name: kyc-service-sanctions-list
+          patternType: literal
+        operations: [Read]
+        host: "*"
+      # Same #5745 DLQ wedge applies to the `sanctions-list-changes-in` channel.
+      - resource:
+          type: topic
+          name: openbank.dlq.kyc.sanctions-list-changes
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
 ---
 # ── ExternalSecret: kyc-service keystore ────────────────────────────────────
 # Projects the Strimzi-minted kyc-service Secret from `messaging` into `kyc`.

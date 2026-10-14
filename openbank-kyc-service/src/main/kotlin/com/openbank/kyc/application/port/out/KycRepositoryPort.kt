@@ -109,6 +109,15 @@ interface KycCaseRepository {
 
     suspend fun anonymizeByPartyId(partyId: UUID, now: Instant)
 
+    /**
+     * Distinct party ids with a **non-terminal** KYC case (the ADR-0256 re-screening candidate
+     * set). v1 granularity, documented in the ADR-0256 delivery note: kyc-service persists no
+     * party ↔ sanctions-list-external-id mapping (screening results record matched names only),
+     * so the per-entry diff cannot be reverse-joined here and the trigger is scoped to the
+     * in-flight book instead. Bounded at [limit] so one chunk cannot load the register.
+     */
+    suspend fun findActivePartyIds(limit: Int): List<UUID>
+
     /** Deletes KYC cases whose PII was erased and the AML hold period ([cutoff]) has expired (ADR-0118 §5). */
     suspend fun deleteErasedCasesOlderThan(cutoff: Instant): Long
 }

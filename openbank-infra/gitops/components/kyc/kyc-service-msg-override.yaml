@@ -50,3 +50,5 @@ data:
     config_ordinal=500
     mp.messaging.incoming.party-events-in.group.id=kyc-service-party
     mp.messaging.incoming.party-events-in.auto.offset.reset=earliest
+    mp.messaging.incoming.sanctions-list-changes-in.group.id=kyc-service-sanctions-list
+    mp.messaging.incoming.sanctions-list-changes-in.auto.offset.reset=earliest

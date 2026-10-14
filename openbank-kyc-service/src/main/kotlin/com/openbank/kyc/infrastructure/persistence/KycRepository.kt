@@ -260,6 +260,15 @@ class KycRepository(private val outboxRepository: KycOutboxRepository) :
         }.awaitSuspending()
     }
 
+    override suspend fun findActivePartyIds(limit: Int): List<UUID> = Panache.withSession {
+        Panache.getSession().flatMap { session ->
+            session.createQuery(ACTIVE_PARTY_IDS_HQL, UUID::class.java)
+                .setParameter("terminal", KycCaseStatus.TERMINAL_NAMES)
+                .setMaxResults(limit)
+                .resultList
+        }
+    }.awaitSuspending()
+
     override suspend fun deleteErasedCasesOlderThan(cutoff: Instant): Long = Panache.withTransaction {
         delete("erasedAt IS NOT NULL AND erasedAt < ?1", cutoff)
     }.awaitSuspending()
@@ -299,6 +308,12 @@ class KycRepository(private val outboxRepository: KycOutboxRepository) :
 
         private const val PARTY_IDS_WITH_CASE_HQL =
             "SELECT c.partyId FROM KycCaseEntity c WHERE c.partyId IN :ids"
+
+        // DISTINCT over the partial-active population: the trigger fan-out wants presence per
+        // party, not per case, and the (state, created_at) case index answers it without
+        // hydrating a single KycCaseEntity (or parsing one checksJson).
+        private const val ACTIVE_PARTY_IDS_HQL =
+            "SELECT DISTINCT c.partyId FROM KycCaseEntity c WHERE c.status NOT IN :terminal ORDER BY c.partyId"
 
         internal fun anonymizeChecksJson(checksJson: String, objectMapper: ObjectMapper): String = try {
             val checks: List<KycCheck> = objectMapper.readValue(
