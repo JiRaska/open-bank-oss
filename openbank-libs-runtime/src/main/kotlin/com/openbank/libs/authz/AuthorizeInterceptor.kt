@@ -251,12 +251,13 @@ class AuthorizeInterceptor {
      */
     private suspend fun decide(ctx: InvocationContext, annotation: Authorize) {
         val principalName = principalName(securityContext.get())
+        val principalSubject = principalSubject(identity.get())
         if (!pdp.isResolvable) {
             return onMissingPdp(ctx, annotation)
         }
         val decisionPoint = pdp.get()
 
-        val query = buildQuery(ctx, annotation, principalName)
+        val query = buildQuery(ctx, annotation, principalName, principalSubject)
         val decision: AuthzDecision = run {
             runCatching { decisionPoint.allow(query) }
                 .getOrElse { ex ->
@@ -458,13 +459,18 @@ class AuthorizeInterceptor {
         return httpHeaders.get().getRequestHeader(APPROVAL_ID_HEADER)?.firstOrNull()
     }
 
-    private fun buildQuery(ctx: InvocationContext, annotation: Authorize, principalName: String?): AuthzQuery {
+    private fun buildQuery(
+        ctx: InvocationContext,
+        annotation: Authorize,
+        principalName: String?,
+        principalSubject: String?,
+    ): AuthzQuery {
         // The machine flag comes from VERIFIED claims only, never from the name above.
         // A malformed or unreadable claim is never proof of a named client.
         val verifiedClient = runCatching { ServiceAccountIdentity.verifiedClientId(identity.get()) }.getOrNull()
         val principal = Principal(
             id = principalName ?: "anonymous",
-            type = principalType(principalName, identity.get()),
+            type = principalType(principalName, principalSubject),
             roles = identity.get().roles.toList(),
             // FAIL CLOSED: anything not positively verified as a person is a machine.
             serviceAccount = !ServiceAccountIdentity.isVerifiedPerson(identity.get()),
@@ -532,13 +538,12 @@ class AuthorizeInterceptor {
         return ResourceRef(type = type, id = resolvedValue.toString())
     }
 
-    private fun principalType(principalName: String?, authenticatedIdentity: SecurityIdentity): String {
+    private fun principalType(principalName: String?, subject: String?): String {
         // The agent convention is on the verified bearer token's `sub`, not on
         // SecurityContext.name (which may be a display/preferred username).
         // Keep the existing HUMAN policy type for service accounts; the approval
         // record separately preserves their SERVICE_ACCOUNT provenance.
         val name = principalName ?: return "ANONYMOUS"
-        val subject = (authenticatedIdentity.principal as? JsonWebToken)?.subject
         if (subject?.startsWith("agent:") == true) return "AI_AGENT"
         return if (name.startsWith("agent:") && subject == null) "UNKNOWN" else "HUMAN"
     }
@@ -553,6 +558,12 @@ private fun principalName(securityContext: SecurityContext): String? = try {
     securityContext.userPrincipal?.name
 } catch (ex: ClassCastException) {
     throw ForbiddenException("principal name has an invalid type", ex)
+}
+
+private fun principalSubject(authenticatedIdentity: SecurityIdentity): String? = try {
+    (authenticatedIdentity.principal as? JsonWebToken)?.subject
+} catch (ex: ClassCastException) {
+    throw ForbiddenException("principal subject has an invalid type", ex)
 }
 
 /**
