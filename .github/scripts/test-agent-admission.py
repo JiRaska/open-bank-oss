@@ -47,14 +47,14 @@ class AdmissionTest(unittest.TestCase):
     def test_proposed_exceptions_are_isolated_and_keep_queue_capacity(self):
         from datetime import datetime, timezone
         entries = admission.load_exceptions()
-        self.assertEqual({entry['pr'] for entry in entries}, {12587})
+        self.assertEqual({entry['pr'] for entry in entries}, {12587, 12551, 12636, 12647, 12717})
         targets = [pr(entry['pr'], entry['branch'], head={
             'ref': entry['branch'], 'repo': {'full_name': entry['repository']}
         }) for entry in entries]
         pages = [[pr(1), pr(2), pr(3), *targets, pr(12588, 'codex/other')]]
         now = datetime(2026, 10, 12, tzinfo=timezone.utc)
         expired = datetime(2026, 10, 17, tzinfo=timezone.utc)
-        self.assertEqual(admission.admit(pages, self.prefixes, self.limit), (False, 5))
+        self.assertEqual(admission.admit(pages, self.prefixes, self.limit), (False, 9))
         for target in targets:
             number = target['number']
             rank = sum(item['number'] <= number for item in pages[0])
@@ -70,7 +70,7 @@ class AdmissionTest(unittest.TestCase):
                     wrong = [dict(entry, **{field: value}) if entry['pr'] == number else entry for entry in entries]
                     self.assertEqual(admission.admit_current_pr(
                         pages, self.prefixes, self.limit, number, self.cutoff, wrong, now), (False, rank))
-        for number, rank in ((12509, 4), (12588, 5)):
+        for number, rank in ((12509, 4), (12588, 6)):
             # The support PR and unrelated later work cannot borrow this exception.
             candidate_pages = [[pr(1), pr(2), pr(3), pr(number, 'codex/other')]] if number == 12509 else pages
             self.assertEqual(admission.admit_current_pr(
