@@ -33,6 +33,17 @@ allowed_reasons contains "viewer-fx-read" if {
 	input.action in {"fx.read", "fx.list"}
 }
 
+# Synthetic journey fx-rates-read (ADR-0252, mirrors product-catalog-read #7324): the
+# journey's own Keycloak client `openbank-synthetic-fx-read` holds NO realm role. Its
+# FxScopeIdentityAugmentor derives FX_SCOPE_READ from the `fx:read` client scope — the
+# scope is the ONLY path to the role, so a token carrying FX_SCOPE_READ is by construction
+# the journey's read-only identity. Rate sheet reads only; fx.convert / fx.trigger stay
+# unreachable (absent from this rule and from the role's @RolesAllowed sites).
+allowed_reasons contains "synthetic-fx-read-journey" if {
+	"FX_SCOPE_READ" in input.principal.roles
+	input.action in {"fx.read", "fx.list"}
+}
+
 # Human FX-desk writes: operators, admins and the dedicated payments role may execute a
 # conversion (POST /convert) — ROLE_PAYMENTS is included because the resource's own
 # RBAC already treats it as an equal alternative to operator on that endpoint; enforcing

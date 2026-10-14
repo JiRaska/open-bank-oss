@@ -92,3 +92,34 @@ test_shared_no_operator_rule_on_trigger if {
 		with input as {"principal": shared, "action": "fx.trigger"}
 		with data.rules as rules_mock
 }
+
+# --- synthetic journey fx-rates-read: scope-derived role, rate sheet only (#12847) ---
+
+synthetic_fx := {"type": "HUMAN", "id": "service-account-openbank-synthetic-fx-read", "roles": ["FX_SCOPE_READ"]}
+
+synthetic_fx_no_scope := {"type": "HUMAN", "id": "service-account-openbank-synthetic-fx-read", "roles": []}
+
+test_synthetic_journey_lists_rates if {
+	rest.allow with input as {"principal": synthetic_fx, "action": "fx.list"}
+		with data.rules as rules_mock
+}
+
+test_synthetic_journey_reads_rate if {
+	rest.allow with input as {"principal": synthetic_fx, "action": "fx.read"}
+		with data.rules as rules_mock
+}
+
+test_synthetic_journey_denied_convert if {
+	not rest.allow with input as {"principal": synthetic_fx, "action": "fx.convert"}
+		with data.rules as rules_mock
+}
+
+test_synthetic_journey_denied_trigger if {
+	not rest.allow with input as {"principal": synthetic_fx, "action": "fx.trigger"}
+		with data.rules as rules_mock
+}
+
+test_synthetic_journey_role_absent_without_scope if {
+	not rest.allow with input as {"principal": synthetic_fx_no_scope, "action": "fx.list"}
+		with data.rules as rules_mock
+}

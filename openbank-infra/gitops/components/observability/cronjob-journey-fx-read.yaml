@@ -1,0 +1,181 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Journey: fx-rates-read (ADR-0252). It is intentionally non-mutating: the direct
+# in-cluster Service route exercises the deployed REST handler, its RBAC + OPA edge and
+# the rate projection without executing a conversion or ingesting a fixing.
+#
+# Identity (mirrors product-catalog-read, #7324): the read is authenticated as the
+# synthetic-only Keycloak client `openbank-synthetic-fx-read`. It holds NO realm role;
+# its only grant is the `fx:read` client scope, which fx-service's
+# FxScopeIdentityAugmentor turns into FX_SCOPE_READ — one of the roles
+# GET /api/v1/fx/rates admits — and fx_rest_ext.rego admits on fx.list/fx.read only.
+# The client secret arrives from the ExternalSecret journey-fx-read-oidc as an OPTIONAL
+# env ref: while the Vault KV entry is unseeded the pod still starts and the script fails
+# its checks with an explicit "credential absent" error. An unprovisioned identity is
+# therefore a red run, never a crash loop and never a green one.
+# Its availability verdict comes from the Job exit code through kube-state-metrics.
+# Like product-catalog-read it does not remote-write k6 trends: the in-cluster
+# Prometheus edge stays mTLS-gated.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: journey-fx-read-script
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+    app.kubernetes.io/component: journey
+    openbank.tech/journey: fx-rates-read
+data:
+  journey.js: |
+    import http from 'k6/http';
+    import { check } from 'k6';
+
+    export const options = {
+      vus: 1,
+      iterations: 1,
+      thresholds: {
+        checks: ['rate==1.0'],
+        http_req_duration: ['p(95)<1000'],
+      },
+      tags: { journey: 'fx-rates-read' },
+    };
+
+    // Read-only by construction: one token request for the synthetic client, one GET.
+    // Override the bases only for the documented falsification; the normal targets are
+    // the real sandbox Services.
+    const FX_BASE = __ENV.FX_BASE || 'http://fx-service.fx.svc:8119';
+    const TOKEN_URL = __ENV.TOKEN_URL || 'http://keycloak.iam.svc:8080/realms/openbank/protocol/openid-connect/token';
+    const CLIENT_ID = __ENV.FX_READ_CLIENT_ID || 'openbank-synthetic-fx-read';
+    const CLIENT_SECRET = __ENV.FX_READ_CLIENT_SECRET || '';
+
+    // Never log the secret, the token, request headers or any response body: retained Job
+    // logs must stay secret-free. Only status codes and content types are printed.
+    function fetchToken() {
+      if (!CLIENT_SECRET) {
+        console.error('fx-rates-read credential absent: FX_READ_CLIENT_SECRET is not set (ExternalSecret journey-fx-read-oidc not provisioned); refusing to probe unauthenticated');
+        return null;
+      }
+      const res = http.post(TOKEN_URL, {
+        grant_type: 'client_credentials',
+        client_id: CLIENT_ID,
+        client_secret: CLIENT_SECRET,
+      }, { tags: { endpoint: 'token', service: 'keycloak' } });
+      if (res.status !== 200) {
+        console.error(`fx-rates-read token request failed: status=${res.status}`);
+        return null;
+      }
+      let token = null;
+      try { token = res.json('access_token'); } catch (_) { /* reported below */ }
+      if (typeof token !== 'string' || token.length === 0) {
+        console.error('fx-rates-read token response carried no access_token');
+        return null;
+      }
+      return token;
+    }
+
+    export default function () {
+      const token = fetchToken();
+      if (token === null) {
+        // No identity means no functional evidence: fail both checks explicitly rather
+        // than sending an anonymous request whose 401 would only prove transport.
+        check(null, {
+          'fx rate sheet answers 200': () => false,
+          'fx rate sheet returns a JSON array': () => false,
+        });
+        return;
+      }
+      const response = http.get(`${FX_BASE}/api/v1/fx/rates`, {
+        headers: { Authorization: `Bearer ${token}` },
+        tags: { endpoint: 'fx-rates-list', service: 'fx-service' },
+      });
+      // A threshold exit proves the journey is red but does not say whether its first
+      // boundary was authentication, routing, or the service itself. Status and content
+      // type are operational metadata only: never log response bodies or request headers.
+      if (response.status !== 200) {
+        console.error(`fx-rates-read unexpected response: status=${response.status} content_type=${response.headers['Content-Type'] || 'absent'}`);
+      }
+      const contentType = response.headers['Content-Type'] || '';
+      let isArray = false;
+      try { isArray = Array.isArray(response.json()); } catch (_) { /* checked below */ }
+      check(response, {
+        'fx rate sheet answers 200': (r) => r.status === 200,
+        'fx rate sheet returns a JSON array': () => isArray,
+      });
+    }
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: journey-fx-rates-read
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+    app.kubernetes.io/component: journey
+    openbank.tech/journey: fx-rates-read
+spec:
+  schedule: "*/10 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 120
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      ttlSecondsAfterFinished: 172800
+      activeDeadlineSeconds: 180
+      backoffLimit: 0
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/component: journey
+            openbank.tech/journey: fx-rates-read
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 12345
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: k6
+              image: docker.io/grafana/k6:1.2.0@sha256:5301215b669b3758b1b3b1f43a25a91378c2bbb8cbb6b29d5b4a44be8064dedc
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              args:
+                - run
+                - --quiet
+                - /scripts/journey.js
+              env:
+                # Optional on purpose: an unseeded KV entry must yield a red run with an
+                # explicit "credential absent" error, not CreateContainerConfigError.
+                - name: FX_READ_CLIENT_SECRET
+                  valueFrom:
+                    secretKeyRef:
+                      name: journey-fx-read-oidc
+                      key: FX_READ_CLIENT_SECRET
+                      optional: true
+              volumeMounts:
+                - name: script
+                  mountPath: /scripts
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 250m
+                  memory: 192Mi
+          volumes:
+            - name: script
+              configMap:
+                name: journey-fx-read-script
+          nodeSelector:
+            workload: observability
+          tolerations:
+            - key: workload
+              operator: Equal
+              value: observability
+              effect: NoSchedule
