@@ -55,7 +55,13 @@ err() {
 # `contains <needle> <newline-separated haystack>`
 contains() {
   [ -n "$2" ] || return 1
-  printf '%s\n' "$2" | grep -qxF -- "$1"
+  # A herestring, not a pipeline: with `printf | grep -q`, grep -q closes the pipe the moment it
+  # matches and printf dies on SIGPIPE (exit 141); under `set -o pipefail` the pipeline then
+  # reports failure even though grep matched, and the caller's `|| err` fires on a pact that IS
+  # generated — a false "orphan pact" that fails the shard nondeterministically (observed on
+  # 2026-10-14: shard 1/4 red with `printf: write error: Broken pipe` while the identical shard
+  # passed on a sibling PR minutes later).
+  grep -qxF -- "$1" <<< "$2"
 }
 
 # Print pact filenames claimed by both runtimes. Without this check, the Gradle and Node tests can
