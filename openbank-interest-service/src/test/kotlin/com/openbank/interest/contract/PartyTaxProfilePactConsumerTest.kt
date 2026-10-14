@@ -125,6 +125,33 @@ class PartyTaxProfilePactConsumerTest {
         assertThat(PartyAmlProfileClientResponse::class.java.declaredFields.none { it.name == "tin" }).isTrue()
     }
 
+    // ADR-0279 #3: a contract that only covers success stays green when the provider stops
+    // enforcing authz — the residency read carries the 401 refusal too. The providerStates name
+    // is what both party provider-verification classes key their test-identity clearing on.
+    @Pact(consumer = CONSUMER, provider = PROVIDER)
+    fun amlProfileUnauthenticatedPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(NEGATIVE_AUTH_STATE)
+        .uponReceiving("GET the AML profile with no caller identity is refused")
+        .path(AML_PROFILE_PATH)
+        .method("GET")
+        .headers(mapOf("Accept" to "application/json"))
+        .willRespondWith()
+        .status(401)
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "amlProfileUnauthenticatedPact")
+    fun `an aml profile read with no caller identity is refused with 401`(server: MockServer) {
+        val response = HttpClient.newHttpClient().send(
+            HttpRequest.newBuilder(URI.create(server.getUrl() + AML_PROFILE_PATH))
+                .header("Accept", "application/json")
+                .GET()
+                .build(),
+            HttpResponse.BodyHandlers.discarding(),
+        )
+        assertThat(response.statusCode()).isEqualTo(401)
+    }
+
     private fun get(server: MockServer, path: String): String = HttpClient.newHttpClient().send(
         HttpRequest.newBuilder(URI.create(server.getUrl() + path))
             .header("Accept", "application/json")
@@ -153,6 +180,7 @@ class PartyTaxProfilePactConsumerTest {
         const val PROVIDER = "openbank-party-service"
         const val PARTY_ID = "61000000-0000-0000-0000-000000000061"
         const val STATE = "an INDIVIDUAL party owns the account"
+        const val NEGATIVE_AUTH_STATE = "no valid caller identity is presented"
         const val PARTY_PATH = "/api/v1/parties/$PARTY_ID"
         const val AML_PROFILE_PATH = "/api/v1/parties/$PARTY_ID/aml-profile"
     }

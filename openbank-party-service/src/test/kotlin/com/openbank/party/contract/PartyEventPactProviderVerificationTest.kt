@@ -43,6 +43,7 @@ import com.openbank.party.domain.model.TaxResidency
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.vertx.core.runtime.context.VertxContextSafetyToggle
 import io.vertx.core.Vertx
@@ -122,6 +123,9 @@ class PartyEventPactProviderVerificationTest {
     @Inject
     lateinit var vertx: Vertx
 
+    @Inject
+    lateinit var testIdentityAssociation: TestIdentityAssociation
+
     private val objectMapper = jacksonObjectMapper().registerModule(JavaTimeModule())
 
     /**
@@ -163,7 +167,29 @@ class PartyEventPactProviderVerificationTest {
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verifyPacts(context: PactVerificationContext?) {
         // context is null on the @IgnoreNoPactsToVerify dummy invocation — skip gracefully.
-        context?.verifyInteraction()
+        if (context == null) return
+        // Mirror of the git-pact twin: the 401 legs (VoP's anonymous interaction by description
+        // suffix, interest-service's ADR-0279 #3 leg by provider state) must be replayed WITHOUT
+        // the class-level @TestSecurity identity, or the provider never executes the refusal
+        // branch the contract asserts. QuarkusSecurityTestExtension re-applies @TestSecurity
+        // before the next invocation, so clearing here cannot leak into authenticated replays.
+        val anonymous = context.interaction.description.endsWith("no caller identity") ||
+            context.interaction.providerStates.any { it.name == NEGATIVE_AUTH_STATE }
+        if (anonymous) {
+            testIdentityAssociation.setTestIdentity(null)
+        }
+        context.verifyInteraction()
+    }
+
+    /**
+     * Mirror of the git-pact twin — serves interest-service's ADR-0279 #3 negative leg: the
+     * AML-profile read without caller identity must answer 401, and THIS class is the one whose
+     * result reaches the broker and `can-i-deploy` (the #9752 lesson: a MissingStateChangeMethod
+     * here publishes success=false and blocks the consumer's deploy).
+     */
+    @State(NEGATIVE_AUTH_STATE)
+    fun noValidCallerIdentityIsPresented() {
+        // Intentionally empty; verifyPacts clears the test identity for this interaction.
     }
 
     /**
@@ -467,6 +493,9 @@ class PartyEventPactProviderVerificationTest {
 
         /** Must match PartyTaxProfilePactConsumerTest.PARTY_ID (openbank-interest-service, ADR-0339 B). */
         private val TAX_PROFILE_PARTY_ID = UUID.fromString("61000000-0000-0000-0000-000000000061")
+
+        /** Must match PartyTaxProfilePactConsumerTest.NEGATIVE_AUTH_STATE (ADR-0279 #3 401 leg). */
+        private const val NEGATIVE_AUTH_STATE = "no valid caller identity is presented"
     }
 
     /**

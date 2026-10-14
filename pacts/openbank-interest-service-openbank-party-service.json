@@ -113,6 +113,24 @@
         },
         "status": 200
       }
+    },
+    {
+      "description": "GET the AML profile with no caller identity is refused",
+      "providerStates": [
+        {
+          "name": "no valid caller identity is presented"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v1/parties/61000000-0000-0000-0000-000000000061/aml-profile"
+      },
+      "response": {
+        "status": 401
+      }
     }
   ],
   "metadata": {

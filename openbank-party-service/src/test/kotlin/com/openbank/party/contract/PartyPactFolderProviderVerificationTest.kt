@@ -176,7 +176,11 @@ class PartyPactFolderProviderVerificationTest {
         // @TestSecurity identity, or the provider never executes the 401 branch the contract
         // asserts. QuarkusSecurityTestExtension re-applies @TestSecurity before the next
         // invocation, so clearing it here cannot leak into the authenticated interactions.
-        if (context.interaction.description.endsWith("no caller identity")) {
+        // ADR-0279 #3: interest-service's 401 leg keys on the provider state name instead of the
+        // description suffix — both shapes clear the identity the same way.
+        val anonymous = context.interaction.description.endsWith("no caller identity") ||
+            context.interaction.providerStates.any { it.name == NEGATIVE_AUTH_STATE }
+        if (anonymous) {
             testIdentityAssociation.setTestIdentity(null)
         }
         context.verifyInteraction()
@@ -472,6 +476,9 @@ class PartyPactFolderProviderVerificationTest {
 
         /** Must match PartyTaxProfilePactConsumerTest.PARTY_ID (openbank-interest-service, ADR-0339 B). */
         private val TAX_PROFILE_PARTY_ID = UUID.fromString("61000000-0000-0000-0000-000000000061")
+
+        /** Must match PartyTaxProfilePactConsumerTest.NEGATIVE_AUTH_STATE (ADR-0279 #3 401 leg). */
+        private const val NEGATIVE_AUTH_STATE = "no valid caller identity is presented"
     }
 
     /**
@@ -482,6 +489,17 @@ class PartyPactFolderProviderVerificationTest {
     @State("no party exists with the unknown id")
     fun noPartyWithUnknownId() {
         // Intentionally empty.
+    }
+
+    /**
+     * Serves interest-service's ADR-0279 #3 negative leg: the AML-profile read without any caller
+     * identity must answer 401. The absence IS the state — the providerStates name is what
+     * [verifyPacts] keys its test-identity clearing on — but a handler still has to exist,
+     * because pact-jvm fails on an unknown state string before it ever issues the request (#8889).
+     */
+    @State(NEGATIVE_AUTH_STATE)
+    fun noValidCallerIdentityIsPresented() {
+        // Intentionally empty; verifyPacts clears the test identity for this interaction.
     }
 
     /**

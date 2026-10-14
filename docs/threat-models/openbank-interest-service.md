@@ -33,7 +33,7 @@ money-path service, not adjacent.
 ```
 
 - **External entities:** scheduler (internal trigger, no external caller), admin-UI (ROLE_OPERATOR/ADMIN for read/ops endpoints).
-- **Trust boundaries:** service → ledger-service (mTLS + OIDC, fail-closed via `LedgerCallGuard`); service → transaction-service (mTLS + OIDC); service → product-catalog (OIDC, immutable published-revision lookup only); service → account-service (OIDC M2M, read-only account detail for tax-profile resolution); service → party-service (OIDC M2M, read-only: party record + declared residency countries, `party.amlProfile.read` only, identity-pinned in `party_rest_ext.rego`); service → Kafka (mTLS, consumer/producer ACLs).
+- **Trust boundaries:** service → ledger-service (mTLS + OIDC, fail-closed via `LedgerCallGuard`); service → transaction-service (mTLS + OIDC); service → product-catalog (OIDC, immutable published-revision lookup only); service → account-service (OIDC M2M, read-only account detail for tax-profile resolution); service → party-service (private-CA mTLS 8443 + OIDC M2M, read-only: party record + declared residency countries, `party.amlProfile.read` only, identity-pinned in `party_rest_ext.rego`); service → Kafka (mTLS, consumer/producer ACLs).
 - **Assets:** accrued/capitalized interest amounts, withholding tax rate and remittance amounts, account balances (indirectly, via the ledger postings this service issues).
 
 ## 3. Authn/Authz
@@ -68,7 +68,7 @@ money-path service, not adjacent.
 ## 6. Change log
 
 - **2026-10-14** — **Tax-profile resolution now reads party attributes** (ADR-0339 B, #12811). The
-  `DefaultTaxProfileProvider` constant stub is replaced by `PartyTaxProfileProvider`: account
+  constant-only tax-profile stub is replaced by `PartyTaxProfileProvider`: account
   detail → owning party → taxpayer type (`INDIVIDUAL` vs legal entities) → declared residency
   countries, over two new read-only OIDC M2M edges (`AccountServiceClient.getAccount`,
   `PartyServiceClient` against party-service, granted `party.amlProfile.read` only by an
@@ -190,9 +190,9 @@ money-path service, not adjacent.
   every attempt, including retries. The ledger idempotency key is amount-blind, so a retry after a
   crashed post replays the ORIGINAL journal (P1's amounts) while the withholding row was recomputed from
   a freshly-resolved profile (P2 if the account's tax attributes changed in between) — a row-vs-GL
-  divergence on the **tax** axis (the same class #1316 fixed for gross). Dormant while
-  `DefaultTaxProfileProvider` returned a constant; made reachable by the 2026-10-14 party-attribute
-  resolution below, which is why the snapshot replay is the load-bearing mitigation and the new
+  divergence on the **tax** axis (the same class #1316 fixed for gross). Dormant while the old
+  provider returned a constant for every account; made reachable by the 2026-10-14 party-attribute
+  resolution above, which is why the snapshot replay is the load-bearing mitigation and the new
   provider resolves once per claim. Fix: the resolved profile is now snapshotted with the claim (V13, five nullable columns
   on `interest_accruals`) and a retry replays it instead of re-resolving; a claim already in flight at
   deploy carries no snapshot and safely falls back to a fresh resolve while resolution is constant. No
