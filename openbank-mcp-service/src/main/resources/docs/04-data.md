@@ -59,3 +59,7 @@ This is invisible to a test that mocks the repository — the fleet has shipped 
 | `purpose` | potentially sensitive free text | operator-entered; may name a customer or a case, so treat as confidential |
 
 No customer identifiers, balances or payment data are stored here: this table describes **who may act**, never what they read. The data the session grants access to lives in the services the MCP tools call.
+
+## Authorization context sent to OPA
+
+The MCP tool catalog and audit decision pass `ConsentContext.serviceAccount` to the shared OPA principal as `service_account`. Agent contexts default to `true`. A staff on-behalf-of token is admitted only with positive evidence of an interactive client and a human username in the verified JWT, as well as the existing active-session, audience and bounded-role checks. Those admitted human contexts set the flag to `false`; every other OBO candidate is refused. This flag is an authorization input, not a field stored in `agent_session`. Current policy bundles do not read it; the separate policy rollout requires rebuilt service images and running-pod verification before changing decisions.

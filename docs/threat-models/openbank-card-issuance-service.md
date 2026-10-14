@@ -265,3 +265,7 @@ revisioned delegation producer.
   `openbank-libs-domain`, identical in behavior to the copy it replaces. **Risk class:** none — the
   admin resource's authorization checks and outbox-replay logic are unchanged; only the log-sanitizer
   helper's defining class moves. Rollback: restore the service-local `sanitizeForLog` copy.
+
+## Machine-caller identity binding (#12448)
+
+The ROLE_API card reads (`card.read` for delegation, `card.list` for party) name their machine callers. `requireNamedCardReader` recognises each one through `ServiceAccountIdentity` (openbank-libs-runtime): a verified JWT whose `azp` is the caller's client and whose `preferred_username` is `service-account-<azp>`. It never uses the principal name, which Quarkus takes from a username claim, so a token whose username matches a listed service account but was issued to another client is refused.

@@ -10,6 +10,8 @@ import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.module.kotlin.extensions.Extract
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
@@ -75,6 +77,13 @@ class PartyKycAmlConcurrencyIT {
 
     @Test
     @TestSecurity(user = "concurrency-it", roles = ["ROLE_ADMIN"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = "concurrency-it"),
+            Claim(key = "preferred_username", value = "concurrency-it"),
+        ],
+    )
     fun `concurrent KYC APPROVED and AML CLEARED always activate the party`() {
         val bootstrap = ConfigProvider.getConfig().getValue("kafka.bootstrap.servers", String::class.java)
         val pool = Executors.newFixedThreadPool(2)
