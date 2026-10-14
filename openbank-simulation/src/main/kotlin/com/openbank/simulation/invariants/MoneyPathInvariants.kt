@@ -8,6 +8,8 @@ import com.openbank.sepa.domain.model.SepaPaymentStatus
 import com.openbank.settlement.domain.model.SettlementStatus
 import com.openbank.simulation.model.AccountCurrency
 import com.openbank.simulation.runner.World
+import com.openbank.standingorder.domain.model.Frequency
+import com.openbank.standingorder.domain.model.StandingOrderStatus
 import com.openbank.transaction.domain.saga.SagaState
 import java.math.BigDecimal
 
@@ -241,6 +243,56 @@ object MoneyPathInvariants {
         }
     }
 
+    /**
+     * Issue #12839 follow-up (Refs #12830): the standing-order execution conservation laws, per
+     * order, checked once a step has fully settled (same "settled" semantics as
+     * [billingFeeConservation]):
+     *
+     * 1. `Σ posted == |confirmed dates| × order amount` — every confirmed execution date produced
+     *    exactly one payment journal of exactly the order amount, and no other execution did. A
+     *    replayed/duplicated due event, or a failure that moved money anyway, breaks the equality
+     *    (the standing-order analogue of ADR-0143's fee conservation);
+     * 2. ONCE discipline: a one-off order attempts at most ONE distinct execution date (its date
+     *    never advances), and once its single execution is confirmed the order must be COMPLETED
+     *    — the exact lifecycle the domain aggregate's `confirmExecution` guarantees and the
+     *    service layer regressed on in issue #12839 (a confirmed ONCE order left ACTIVE is
+     *    re-due forever). A failed-then-retried ONCE order stays within law 2 as long as the
+     *    retry replays the SAME date (idempotent) rather than minting a new one.
+     */
+    val standingOrderExecutionConservation = object : Invariant {
+        override val name = "standing-order-execution-conservation"
+        override fun check(world: World): Violation? {
+            world.standingOrders.all().forEach { order ->
+                val amount = BigDecimal(order.amountMinorUnits).movePointLeft(2)
+                val view = world.standingOrders.view(order.id)
+                val expected = amount.multiply(BigDecimal.valueOf(view.confirmedDates.size.toLong()))
+                if (view.postedAmount.compareTo(expected) != 0) {
+                    return Violation(
+                        name,
+                        "order ${order.id} posted=${view.postedAmount} but " +
+                            "${view.confirmedDates.size} confirmed executions of $amount",
+                    )
+                }
+                if (order.frequency == Frequency.ONCE) {
+                    if (view.attemptedDates.size > 1) {
+                        return Violation(
+                            name,
+                            "ONCE order ${order.id} attempted on more than one date: ${view.attemptedDates}",
+                        )
+                    }
+                    if (view.confirmedDates.isNotEmpty() && order.status != StandingOrderStatus.COMPLETED) {
+                        return Violation(
+                            name,
+                            "ONCE order ${order.id} confirmed its single execution but is ${order.status}, " +
+                                "expected COMPLETED",
+                        )
+                    }
+                }
+            }
+            return null
+        }
+    }
+
     /** All Layer-3 invariants, in check order. */
     val ALL: List<Invariant> = listOf(
         conservationOfMoney,
@@ -253,6 +305,7 @@ object MoneyPathInvariants {
         billingFeeConservation,
         interestCapitalizationConservation,
         statementCloseIntegrity,
+        standingOrderExecutionConservation,
     )
 
     /** A terminal-state guard used by the saga orchestrator. */

@@ -12,6 +12,7 @@ import com.openbank.simulation.scenario.FeeBillingScenario
 import com.openbank.simulation.scenario.InterestAccrualScenario
 import com.openbank.simulation.scenario.PaymentScenario
 import com.openbank.simulation.scenario.SepaSettlementScenario
+import com.openbank.simulation.scenario.StandingOrderExecutionScenario
 import com.openbank.simulation.scenario.StatementCloseScenario
 
 /**
@@ -69,6 +70,11 @@ class SimulationRunner(
             // only, posts nothing, so this drain is a no-op today but kept for the same
             // "settled before the invariant sweep" convention as every other scenario above.
             StatementCloseScenario.step(world)
+            context.scheduler.drain()
+            // Issue #12839 follow-up (Refs #12830): one simulated DAY of the standing-order
+            // sweep + execution path (the scenario advances the virtual clock itself), checked
+            // by the same invariant sweep every step.
+            StandingOrderExecutionScenario.step(world)
             context.scheduler.drain()
             invariants.forEach { invariant ->
                 val violation = invariant.check(world)
