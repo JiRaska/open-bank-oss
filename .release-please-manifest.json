@@ -15,7 +15,7 @@
   "openbank-communication-service": "1.0.0",
   "openbank-consent-service": "0.26.2",
   "openbank-control-liveness-sentinel": "0.7.6",
-  "openbank-copilot-service": "0.17.4",
+  "openbank-copilot-service": "0.17.5",
   "openbank-customer-edge": "0.90.2",
   "openbank-devops-agent": "0.8.3",
   "openbank-dispute-service": "0.11.2",
