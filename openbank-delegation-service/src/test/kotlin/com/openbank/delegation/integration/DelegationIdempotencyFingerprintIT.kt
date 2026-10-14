@@ -10,6 +10,8 @@ import com.openbank.libs.idempotency.IdempotencyStore
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.RestAssured
 import io.restassured.http.ContentType
 import jakarta.inject.Inject
@@ -52,6 +54,13 @@ class DelegationIdempotencyFingerprintIT {
 
     @Test
     @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "5f0c2a8e-7d1b-4c3e-9a6f-2b8d4e1c7a90"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `confirmRecertification refuses a key whose stored fingerprint does not match`() {
         val cycle = seedCycle()
         val key = UUID.randomUUID().toString()

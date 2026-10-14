@@ -46,6 +46,7 @@ dependencies {
 
     testImplementation(libs.quarkus.junit5)
     testImplementation(libs.quarkus.test.security)
+    testImplementation(libs.quarkus.test.security.oidc)
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     // Property-based testing of double-entry invariants (ADR-0011 L1 — Kotest property).

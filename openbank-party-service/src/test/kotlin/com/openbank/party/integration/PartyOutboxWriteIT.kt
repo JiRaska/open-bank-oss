@@ -10,6 +10,8 @@ import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.module.kotlin.extensions.Extract
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
@@ -102,6 +104,13 @@ class PartyOutboxWriteIT {
 
     @Test
     @TestSecurity(user = "outbox-it", roles = ["ROLE_ADMIN"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = "outbox-it"),
+            Claim(key = "preferred_username", value = "outbox-it"),
+        ],
+    )
     fun `creating a party writes PARTY_CREATED to the outbox in the same transaction as the row`() {
         val id = createParty("outbox-create-${UUID.randomUUID()}@example.cz")
 
@@ -137,6 +146,13 @@ class PartyOutboxWriteIT {
      */
     @Test
     @TestSecurity(user = "outbox-it", roles = ["ROLE_ADMIN", "ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = "outbox-it"),
+            Claim(key = "preferred_username", value = "outbox-it"),
+        ],
+    )
     fun `a material master-data edit is declared MATERIAL in the serialized outbox payload`() {
         val id = createParty("outbox-material-${UUID.randomUUID()}@example.cz")
 
@@ -154,6 +170,13 @@ class PartyOutboxWriteIT {
 
     @Test
     @TestSecurity(user = "outbox-it", roles = ["ROLE_ADMIN", "ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = "outbox-it"),
+            Claim(key = "preferred_username", value = "outbox-it"),
+        ],
+    )
     fun `a contact-only edit is declared NON_MATERIAL and is not a re-screening trigger`() {
         val id = createParty("outbox-nonmaterial-${UUID.randomUUID()}@example.cz")
 
@@ -166,6 +189,13 @@ class PartyOutboxWriteIT {
 
     @Test
     @TestSecurity(user = "outbox-it", roles = ["ROLE_ADMIN", "ROLE_KYC"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = "outbox-it"),
+            Claim(key = "preferred_username", value = "outbox-it"),
+        ],
+    )
     fun `a KYC status change writes KYC_STATUS_CHANGED alongside the updated row`() {
         val id = createParty("outbox-kyc-${UUID.randomUUID()}@example.cz")
 
