@@ -4,6 +4,15 @@ Consent and suppression endpoints are under `/api/v1/consents` and `/api/v1/supp
 
 > **Contract status:** an `openapi.yaml` ships with the service but is currently **partially stale** relative to the implemented resource (it predates the SCA-gated lifecycle — e.g. it shows `expiresAt`/`accountIds` and a `PENDING` status, whereas the code uses `validTo`/`accountIbans` and `PENDING_SCA`, and exposes `/activate` and `/reject`). The descriptions below are **derived from the actual `ConsentResource.kt`** and are authoritative; reconciling `openapi.yaml` to this is a tracked follow-up.
 
+## Production listener authentication
+
+`/api/*` requires an OIDC bearer token on both the plain HTTP listener and the
+mTLS listener. A trusted client certificate authenticates only the TLS
+connection; callers using mTLS must also send their bearer token. A trusted
+certificate without a bearer token receives 401. A missing trusted certificate
+fails the TLS handshake before HTTP. Endpoint roles, OPA decisions and the SCA
+requirements for consent activation still apply.
+
 ## Endpoints
 
 | Method | Path | Purpose | Success |

@@ -21,6 +21,16 @@ All endpoints require a **Keycloak Bearer token** (realm `openbank`, OIDC). Muta
 
 The decision endpoint additionally carries `@Authorize(action = "amlCase.updateDecision", resource = "#caseId")` — an OPA policy check via the sidecar PDP (ADR-0034). Authz is **advisory** by default (`authz.enforce=false`): denies are logged at WARN and the request still proceeds; flip with `AUTHZ_ENFORCE=true`.
 
+### Production mTLS listener
+
+The AML case API and its subpaths require OIDC bearer authentication on both the
+plain HTTP listener and the mTLS listener, even if a new route omits a role annotation.
+A trusted client certificate authenticates the TLS connection only; callers must
+also send their bearer token. A certificate without a bearer token receives 401,
+while a missing trusted certificate fails the TLS handshake before HTTP. Shared
+public build-info/config endpoints and management health remain reachable without a
+bearer. The endpoint roles and OPA authorization checks still apply.
+
 ## Idempotence
 
 `POST /api/v1/aml/cases` **requires** the header:
@@ -152,3 +162,9 @@ Events are **append-only**; corrections are made through a follow-up transition 
 - **API version in URL** (`/api/v1/...`). Breaking changes ⇒ `/api/v2/...`. The two version axes (release `version.txt` vs `openapi.yaml:info.version`) are independent (ADR-0048).
 - **Event version in the type suffix** (`...v1`). Schema evolution is additive (optional fields); breaking changes get a new version suffix.
 - **OpenAPI diff** in CI against `main` — but note the current spec drift above must be reconciled first.
+
+## AML case creation caller identity
+
+The `POST /api/v1/aml/cases` role gate admits `ROLE_API` for the named domestic-payment, SEPA-payment, SEPA-instant and FX service accounts. The resource then binds each machine caller to its verified JWT `azp`, subject and Keycloak service-account username; a role or username alone does not authorize case creation. Staff roles remain usable from verified interactive user sessions.
+
+HTTP authentication fixtures exercise interactive staff JWT claims alongside their roles. Negative unauthenticated Pact interactions remain in their separate provider test without a synthetic identity.

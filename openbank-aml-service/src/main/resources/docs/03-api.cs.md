@@ -21,6 +21,16 @@ Všechny endpointy vyžadují **Keycloak Bearer token** (realm `openbank`, OIDC)
 
 Decision endpoint navíc nese `@Authorize(action = "amlCase.updateDecision", resource = "#caseId")` — kontrola OPA politiky přes sidecar PDP (ADR-0034). Autorizace je ve výchozím stavu **advisory** (`authz.enforce=false`): zamítnutí se logují na WARN a požadavek přesto projde; přepne se přes `AUTHZ_ENFORCE=true`.
 
+### Produkční mTLS listener
+
+API AML případů a jeho podcesty vyžadují OIDC bearer autentizaci na běžném HTTP
+listeneru i na mTLS listeneru, i kdyby nová cesta postrádala anotaci role.
+Důvěryhodný klientský certifikát ověřuje pouze TLS spojení; volající musí poslat
+i bearer token. Požadavek s certifikátem bez bearer tokenu vrací 401, zatímco bez
+důvěryhodného certifikátu selže TLS handshake ještě před HTTP. Veřejné informační
+a konfigurační endpointy a zdravotní sondy zůstávají dostupné bez bearer tokenu.
+Požadavky na role endpointů a autorizační kontroly OPA platí i nadále.
+
 ## Idempotence
 
 `POST /api/v1/aml/cases` **vyžaduje** hlavičku:

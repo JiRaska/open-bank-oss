@@ -64,12 +64,14 @@ class OpaSidecarPolicyDecisionPoint(
     private fun AuthzQuery.toInput(): Map<String, Any?> = buildMap {
         put(
             "principal",
-            mapOf(
-                "id" to principal.id,
-                "type" to principal.type,
-                "roles" to principal.roles,
-                "attributes" to principal.attributes,
-            ),
+            buildMap {
+                put("id", principal.id)
+                put("type", principal.type)
+                put("roles", principal.roles)
+                put("attributes", principal.attributes)
+                put("service_account", principal.serviceAccount)
+                principal.clientId?.let { put("client_id", it) }
+            },
         )
         put("action", action)
         // `let` rather than a smart cast: AuthzQuery.resource is a public API property of

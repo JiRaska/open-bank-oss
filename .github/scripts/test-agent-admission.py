@@ -27,6 +27,66 @@ class AdmissionTest(unittest.TestCase):
     limit = 3
     cutoff = '2026-10-03T19:00:00Z'
 
+    def test_exception_is_identity_bound_expiring_and_does_not_create_capacity(self):
+        from datetime import datetime, timezone
+        entry = dict(pr=12587, repository='JiRaska/open-bank-oss',
+                     branch='codex/docs-fleet-ci', expires_at='2026-10-17T00:00:00Z', reason='approved')
+        target = pr(12587, entry['branch'])
+        target['head']['repo'] = {'full_name': entry['repository']}
+        pages = [[pr(1), pr(2), pr(3), target]]
+        now = datetime(2026, 10, 10, tzinfo=timezone.utc)
+        self.assertEqual(admission.admit_current_pr(pages, self.prefixes, 3, 12587, self.cutoff, [entry], now), (True, 4))
+        self.assertEqual(admission.admit(pages, self.prefixes, 3), (False, 4))
+        for field, value in [('pr', 12481), ('branch', 'codex/other'), ('repository', 'fork/open-bank-oss')]:
+            wrong = dict(entry, **{field: value})
+            self.assertEqual(admission.admit_current_pr(pages, self.prefixes, 3, 12587, self.cutoff, [wrong], now), (False, 4))
+        expired = datetime(2026, 10, 17, tzinfo=timezone.utc)
+        self.assertEqual(admission.admit_current_pr(pages, self.prefixes, 3, 12587, self.cutoff, [entry], expired), (False, 4))
+        self.assertEqual(admission.admit_current_pr(pages, self.prefixes, 3, 12587, self.cutoff, [], now), (False, 4))
+
+    def test_proposed_exceptions_are_isolated_and_keep_queue_capacity(self):
+        from datetime import datetime, timezone
+        entries = admission.load_exceptions()
+        self.assertEqual({entry['pr'] for entry in entries}, {12587, 12551, 12636, 12647, 12717})
+        targets = [pr(entry['pr'], entry['branch'], head={
+            'ref': entry['branch'], 'repo': {'full_name': entry['repository']}
+        }) for entry in entries]
+        pages = [[pr(1), pr(2), pr(3), *targets, pr(12588, 'codex/other')]]
+        now = datetime(2026, 10, 12, tzinfo=timezone.utc)
+        expired = datetime(2026, 10, 17, tzinfo=timezone.utc)
+        self.assertEqual(admission.admit(pages, self.prefixes, self.limit), (False, 9))
+        for target in targets:
+            number = target['number']
+            rank = sum(item['number'] <= number for item in pages[0])
+            with self.subTest(number=number):
+                self.assertEqual(admission.admit_current_pr(
+                    pages, self.prefixes, self.limit, number, self.cutoff, entries, now), (True, rank))
+                for policy in ([], [entry for entry in entries if entry['pr'] != number]):
+                    self.assertEqual(admission.admit_current_pr(
+                        pages, self.prefixes, self.limit, number, self.cutoff, policy, now), (False, rank))
+                self.assertEqual(admission.admit_current_pr(
+                    pages, self.prefixes, self.limit, number, self.cutoff, entries, expired), (False, rank))
+                for field, value in [('branch', 'codex/other'), ('repository', 'fork/open-bank-oss')]:
+                    wrong = [dict(entry, **{field: value}) if entry['pr'] == number else entry for entry in entries]
+                    self.assertEqual(admission.admit_current_pr(
+                        pages, self.prefixes, self.limit, number, self.cutoff, wrong, now), (False, rank))
+        for number, rank in ((12509, 4), (12588, 6)):
+            # The support PR and unrelated later work cannot borrow this exception.
+            candidate_pages = [[pr(1), pr(2), pr(3), pr(number, 'codex/other')]] if number == 12509 else pages
+            self.assertEqual(admission.admit_current_pr(
+                candidate_pages, self.prefixes, self.limit, number, self.cutoff, entries, now), (False, rank))
+
+    def test_malformed_exception_policy_fails_closed(self):
+        import tempfile
+        entries = [None, {}, [{'pr': True}], [dict(pr=12587, repository='x', branch='x',
+                   expires_at='bad', reason='approved')]]
+        for entry in entries:
+            with self.subTest(entry=entry), tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as rules:
+                yaml.safe_dump({'autonomous_agent_prs': {'one_time_wip_exceptions': entry}}, rules)
+                rules.flush()
+                with self.assertRaises(ValueError):
+                    admission.load_exceptions(rules.name)
+
     def test_review_events_use_the_same_ci_admission_as_pr_pushes(self):
         workflow = yaml.safe_load((Path(__file__).parents[1] / 'workflows/ci.yml').read_text())
         steps = workflow['jobs']['agent-admission']['steps']

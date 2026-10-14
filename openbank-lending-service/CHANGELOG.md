@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.41.1](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.41.0...lending-service-v0.41.1) (2026-10-14)
+
+
+### Security
+
+* **libs-runtime:** send OPA a verified service_account flag (phase 1 of 2) ([#12538](https://github.com/JiRaska/open-bank-oss/issues/12538)) ([3a8493a](https://github.com/JiRaska/open-bank-oss/commit/3a8493a7d8640b0baf252a879c1a908bd19587e2))
+
+## [0.41.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.40.3...lending-service-v0.41.0) (2026-10-13)
+
+
+### Features
+
+* **lending:** read the loan evidence bundle from the audit chain and let lending_outbox purge ([#11962](https://github.com/JiRaska/open-bank-oss/issues/11962)) ([08bf6d9](https://github.com/JiRaska/open-bank-oss/commit/08bf6d910755fc16f9d3b8ce8e02eb39b6805d7f))
+
+## [0.40.3](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.40.2...lending-service-v0.40.3) (2026-10-13)
+
+
+### Security
+
+* **lending:** authenticate the API by bearer only on the mTLS listener ([#12532](https://github.com/JiRaska/open-bank-oss/issues/12532)) ([a489ca6](https://github.com/JiRaska/open-bank-oss/commit/a489ca6571c59ea468baf6048c8c1097a38f662d))
+
 ## [0.40.2](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.40.1...lending-service-v0.40.2) (2026-10-07)
 
 
