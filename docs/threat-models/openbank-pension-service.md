@@ -141,6 +141,16 @@ quote moves NAV risk to the provider for the notice period (`navVariance` is rec
 charged to the participant). A death during a phased withdrawal stops the remaining installments;
 handing the unpaid remainder to the claim is a follow-up.
 
+The unit register these exits redeem from (pension-fund-service) is reachable over the network
+only from the `pension` namespace: its generated ingress NetworkPolicy admits `pension` (and the
+staff BFF in `admin-ui`) on the API ports, and customer-edge no longer declares a route to it, so
+the participant-facing edge cannot reach holdings or place orders even with a valid token. What
+remains is pension-service's own client: a compromised pension-service pod can read every
+contract's holdings and place redemptions within OPA's grant to
+`service-account-openbank-pension`. The app's participant valuation and unit transactions come
+from pension-service's own participant reads (`/contracts/{id}/valuation`, `/transactions`,
+ownership-checked there), relayed by the edge — never from the fund API.
+
 ## 4c. Integration (slice S8)
 
 S8 joins S1/S2/S3/S5 into one service and adds the routes customer-edge needs. New trust boundary:
@@ -190,6 +200,22 @@ pre-contractual documents are not yet attached to offers (docs/compliance/pensio
 legal review pending). Withholding tax already remitted on a premium returned to the contract is
 not reversed automatically.
 
+## 4e. Reporting read model (#12425)
+
+`GET /api/v2/pension/reporting/participant-aggregates` serves the participant aggregates
+tax-reporting-service assembles the ČNB returns from (PSP 31-04 and kin). New machine caller:
+tax-reporting-service's OWN client, `service-account-openbank-tax-reporting` (ROLE_API).
+
+| STRIDE | Threat | Mitigation |
+|---|---|---|
+| **Information disclosure** | The read model leaks participants (ids, birth dates, amounts per person) | Every statement in `PgParticipantReportingQueries` is an aggregate (COUNT/SUM ... GROUP BY); age leaves the database already in years and is banded before it leaves the service; `ParticipantReportingApiIT` asserts none of the six seeded contract ids appears in the payload |
+| **Elevation of privilege** | The shared service-account (HUMAN + ROLE_OPERATOR) or another service reads the aggregates through base `operator-read-any` | The action is `pension.reporting.aggregate` — deliberately not a `.read`/`.list` verb, which the generic rule grants to any operator-role principal; admitted only for real staff and the tax-reporting client (`pension_rest_ext.rego`), must-ALLOW/must-DENY in `opa test` and `opa eval` on the bundle; sabotage (dropping the principal-id condition) fails the must-DENY test |
+| **Tampering** | A closed period answers differently on each read | Intervals are closed on dates and timestamps are bucketed by UTC day, independent of the session time zone (the IT's 1 April 00:30Z instruction lands in April); a period booked in more than one currency is refused (409), never summed |
+
+Residual: contract status at period end is only knowable while the contract has not changed since
+— later changes are reported under `CHANGED_AFTER_PERIOD_END`, not guessed; there is no status
+history table.
+
 ## 5. Residual risks / assumptions
 
 - **(Resolved in S8)** S1's caller-valued surrender preview is retired; termination is S5's quote
@@ -211,6 +237,8 @@ not reversed automatically.
 - 2026-10-09 — S5 exits: termination, payout, death claims (§4b).
 - 2026-10-09 — S8 integration: fund REST client identity, onboarding-only activation, account-bound SCA, held account change, optimistic locking, POST replay (§4c).
 - 2026-10-09 — annuity partner integration: registry with four-eyes activation, adapter SPI, SCA-bound selection, premium/compensation flow (§4d, #12383).
+- 2026-10-10 — network reach of the unit register: only `pension` (plus the staff BFF) is admitted; customer-edge's direct route removed (§4b, #12359).
+- 2026-10-10 — reporting read model for the ČNB returns: aggregate-only route, tax-reporting client (§4e, #12425).
 
 ## Creation and strategy decision controls
 
