@@ -7,21 +7,31 @@ package openbank.rest_test
 import data.openbank.rest
 import rego.v1
 
-dealer := {"type": "HUMAN", "id": "dealer-1", "roles": ["ROLE_TREASURY_DEALER"]}
+dealer := {"type": "HUMAN", "id": "dealer-1", "service_account": false, "roles": ["ROLE_TREASURY_DEALER"]}
 
-approver := {"type": "HUMAN", "id": "approver-1", "roles": ["ROLE_TREASURY_APPROVER"]}
+approver := {"type": "HUMAN", "id": "approver-1", "service_account": false, "roles": ["ROLE_TREASURY_APPROVER"]}
 
-admin := {"type": "HUMAN", "id": "admin-1", "roles": ["ROLE_ADMIN"]}
+admin := {"type": "HUMAN", "id": "admin-1", "service_account": false, "roles": ["ROLE_ADMIN"]}
 
-senior := {"type": "HUMAN", "id": "senior-1", "roles": ["ROLE_TREASURY_SENIOR_APPROVER"]}
+senior := {"type": "HUMAN", "id": "senior-1", "service_account": false, "roles": ["ROLE_TREASURY_SENIOR_APPROVER"]}
 
-nobody := {"type": "HUMAN", "id": "teller-1", "roles": ["ROLE_CUSTOMER"]}
+nobody := {"type": "HUMAN", "id": "teller-1", "service_account": false, "roles": ["ROLE_CUSTOMER"]}
 
 # The shared backend client, given the approver role by mistake: still a machine, still denied.
 shared_sa := {
 	"type": "HUMAN",
 	"id": "service-account-openbank-services",
+	"service_account": true,
 	"roles": ["ROLE_TREASURY_APPROVER", "ROLE_TREASURY_DEALER", "ROLE_OPERATOR"],
+}
+
+# A machine with a mutable, human-looking username must still be denied even if granted a staff role.
+renamed_sa := {
+	"type": "HUMAN",
+	"id": "renamed-account",
+	"service_account": true,
+	"client_id": "openbank-services",
+	"roles": ["ROLE_TREASURY_APPROVER", "ROLE_TREASURY_DEALER"],
 }
 
 agent := {"type": "AI_AGENT", "id": "agent:treasury-drafter", "roles": ["ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER"]}
@@ -51,6 +61,16 @@ test_staff_may_read if {
 			allowed(p, a)
 		}
 	}
+}
+
+test_renamed_service_account_cannot_use_staff_grants if {
+	every a in (all_writes | reads) | {"treasury.deal.override-limit", "treasury.nostro.upload"} {
+		not allowed(renamed_sa, a)
+	}
+}
+
+test_missing_machine_verdict_fails_closed if {
+	not allowed({"type": "HUMAN", "id": "approver-1", "roles": ["ROLE_TREASURY_APPROVER"]}, "treasury.deal.approve")
 }
 
 test_unrelated_role_may_not_read if {

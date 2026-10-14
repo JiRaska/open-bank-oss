@@ -69,7 +69,7 @@ openbank:
     outbox:
       dispatch-enabled: false
     incentive:
-      customer-caller-principal: maker@openbank.test
+      customer-caller-principal: service-account-openbank-edge
   quarkus:
     management:
       enabled: false
