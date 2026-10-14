@@ -4,6 +4,7 @@
 
 package com.openbank.kyc.domain.model
 
+import com.openbank.libs.domain.identifiers.Ids
 import java.time.Instant
 import java.util.UUID
 
@@ -64,7 +65,7 @@ data class ScreeningTrigger(
             diff: ScreeningTriggerDiff,
             now: Instant,
         ) = ScreeningTrigger(
-            triggerId = UUID.randomUUID(),
+            triggerId = Ids.newId(),
             partyId = partyId,
             publicationId = publicationId,
             chunkIndex = chunkIndex,
