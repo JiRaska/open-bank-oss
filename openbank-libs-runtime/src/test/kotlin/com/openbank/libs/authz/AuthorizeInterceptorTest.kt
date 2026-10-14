@@ -254,6 +254,91 @@ class AuthorizeInterceptorTest {
     }
 
     @Test
+    fun `subject capture preserves human agent and anonymous query types`() {
+        every { identity.roles } returns emptySet()
+        val queries = mutableListOf<AuthzQuery>()
+        wirePdp(object : PolicyDecisionPoint {
+            override suspend fun allow(query: AuthzQuery): AuthzDecision {
+                queries += query
+                return AuthzDecision(allow = true)
+            }
+        })
+        val cases = listOf(
+            Triple("user-42", "human-subject", "HUMAN"),
+            Triple("Review Desk", "agent:reviewer", "AI_AGENT"),
+            Triple(null, "human-subject", "ANONYMOUS"),
+        )
+        for ((name, subjectValue, expectedType) in cases) {
+            every { sc.userPrincipal } returns name?.let { JavaPrincipal { it } }
+            every { identity.principal } returns mockk<JsonWebToken> {
+                every { subject } returns subjectValue
+                every { getClaim<Any?>(any<String>()) } returns null
+            }
+
+            interceptor.authorize(makeCtx(annotatedMethod))
+
+            assertThat(queries.last().principal.type).isEqualTo(expectedType)
+            assertThat(queries.last().principal.id).isEqualTo(name ?: "anonymous")
+        }
+    }
+
+    @Test
+    fun `valid subject is captured once before the missing PDP advisory shortcut`() {
+        interceptor.enforce = false
+        interceptor.pdp = mockk { every { isResolvable } returns false }
+        val principal = mockk<JsonWebToken> { every { subject } returns "human-subject" }
+        every { identity.principal } returns principal
+        val ctx = makeCtx(annotatedMethod)
+
+        assertThat(interceptor.authorize(ctx)).isEqualTo("ok")
+
+        io.mockk.verify(exactly = 1) { principal.subject }
+        io.mockk.verify(exactly = 1) { ctx.proceed() }
+    }
+
+    @Test
+    fun `malformed subject is forbidden before an advisory PDP allow`() {
+        assertMalformedSubjectForbidden(enforced = false, pdpPresent = true)
+    }
+
+    @Test
+    fun `malformed subject is forbidden before the missing PDP advisory shortcut`() {
+        assertMalformedSubjectForbidden(enforced = false, pdpPresent = false)
+    }
+
+    @Test
+    fun `malformed subject is forbidden before an enforced PDP allow`() {
+        assertMalformedSubjectForbidden(enforced = true, pdpPresent = true)
+    }
+
+    private fun assertMalformedSubjectForbidden(enforced: Boolean, pdpPresent: Boolean) {
+        interceptor.enforce = enforced
+        var pdpCalls = 0
+        val decisionPoint = object : PolicyDecisionPoint {
+            override suspend fun allow(query: AuthzQuery): AuthzDecision {
+                pdpCalls++
+                return AuthzDecision(allow = true)
+            }
+        }
+        interceptor.pdp = mockk {
+            every { isResolvable } returns pdpPresent
+            every { get() } returns decisionPoint
+        }
+        val malformedPrincipal = mockk<JsonWebToken> {
+            every { subject } throws ClassCastException("subject claim is not a string")
+        }
+        every { identity.principal } returns malformedPrincipal
+        val ctx = makeCtx(annotatedMethod)
+
+        val thrown = catchThrowableOfType(ForbiddenException::class.java) { interceptor.authorize(ctx) }
+
+        assertThat(thrown.response.status).isEqualTo(403)
+        assertThat(pdpCalls).isZero()
+        io.mockk.verify(exactly = 0) { ctx.proceed() }
+        io.mockk.verify(exactly = 1) { malformedPrincipal.subject }
+    }
+
+    @Test
     fun `JWT roles propagated into OPA query`() {
         every { identity.roles } returns setOf("ROLE_OPERATOR", "ROLE_ADMIN")
         val capturedQuery = mutableListOf<AuthzQuery>()
