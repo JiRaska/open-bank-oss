@@ -1,0 +1,119 @@
+# The dedicated test and publication tasks must land with this workflow.
+# Refs #12501. No caller-selected provider/consumer revisions or broker origins.
+# Manual dispatch only. After any ambiguous publication, investigate the previous
+# receipt before authorizing a new run; see .github/docs/finrep-historical-broker.md.
+name: Historical FINREP broker proof
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: finrep-historical-broker-main
+  cancel-in-progress: false
+
+jobs:
+  prove:
+    if: >-
+      github.repository == 'JiRaska/open-bank-oss' &&
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'workflow_dispatch' &&
+      github.run_attempt == 1
+    runs-on: openbank-build
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    env:
+      GRADLE_USER_HOME: ${{ runner.temp }}/finrep-gradle-${{ github.run_id }}-${{ github.run_attempt }}
+      FINREP_CHECKOUT_PROOF: ${{ runner.temp }}/finrep-proof-${{ github.run_id }}-${{ github.run_attempt }}/checkout.json
+      FINREP_ORIGINAL_PACT: ${{ runner.temp }}/finrep-proof-${{ github.run_id }}-${{ github.run_attempt }}/original-pact.json
+      FINREP_CONSUMER_SHA: 4c86c6f729c27fabcf5431d27ee5270116df06b2
+      FINREP_PROVIDER_SHA: ${{ github.sha }}
+      FINREP_ORIGINAL_SHA256: 5b9c5e7ea079626460d0634a78605d24f4ab50a345168c8af3139e68b3cb7d86
+      FINREP_INTERACTION_COUNT: '3'
+      FINREP_OUTCOMES: ${{ runner.temp }}/finrep-proof-${{ github.run_id }}-${{ github.run_attempt }}/outcomes.json
+      FINREP_FINAL_XML: ${{ github.workspace }}/openbank-ledger-service/build/test-results/hostedHistoricalFinrepPactTest/TEST-com.openbank.ledger.contract.LedgerHostedHistoricalFinrepProviderVerificationTest.xml
+      FINREP_POSTBUILD_PROOF: ${{ runner.temp }}/finrep-proof-${{ github.run_id }}-${{ github.run_attempt }}/postbuild.json
+      FINREP_PUBLICATION_ATTEMPT: ${{ runner.temp }}/finrep-publication-attempt-${{ github.run_id }}
+      FINREP_PUBLIC_EVIDENCE: ${{ github.workspace }}/openbank-ledger-service/build/finrep-historical-public-evidence.json
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          clean: true
+
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: |
+            21
+            25
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+
+      - name: Prove fresh trusted main checkout before any build
+        run: |
+          set -euo pipefail
+          case "$(git remote get-url origin)" in
+            https://github.com/JiRaska/open-bank-oss|https://github.com/JiRaska/open-bank-oss.git) ;;
+            *) exit 1 ;;
+          esac
+          git fetch --no-tags 'https://github.com/JiRaska/open-bank-oss.git' '+refs/heads/main:refs/remotes/origin/main'
+          test ! -e "$GRADLE_USER_HOME"
+          mkdir -p "$(dirname "$FINREP_CHECKOUT_PROOF")"
+          python3 .github/scripts/prove-finrep-historical-checkout.py > "$FINREP_CHECKOUT_PROOF"
+          git show '4c86c6f729c27fabcf5431d27ee5270116df06b2:pacts/openbank-finrep-service-openbank-ledger-service.json' > "$FINREP_ORIGINAL_PACT"
+
+      - name: Build all ledger production inputs without cached task outputs
+        run: |
+          set -euo pipefail
+          ./gradlew :openbank-ledger-service:clean :openbank-ledger-service:build --no-daemon --no-build-cache --no-configuration-cache --rerun-tasks
+
+      # Automatic Pact publication stays off; the second task cross-checks
+      # final zero-skip XML and accumulated outcomes before its single POST.
+      - name: Verify the independently pinned historical broker contract
+        env:
+          PACT_BROKER_URL: ${{ vars.PACT_BROKER_URL }}
+          PACT_BROKER_USERNAME: ${{ vars.PACT_BROKER_USERNAME }}
+          PACT_BROKER_PASSWORD: ${{ secrets.PACT_BROKER_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$PACT_BROKER_URL"
+          test -n "$PACT_BROKER_USERNAME"
+          test -n "$PACT_BROKER_PASSWORD"
+          ./gradlew :openbank-ledger-service:hostedHistoricalFinrepPactTest --no-daemon --no-build-cache --no-configuration-cache --rerun-tasks -Dpact.verifier.publishResults=false
+
+      - name: Revalidate checkout identity after build and verification
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/prove-finrep-historical-checkout.py --post-build > "$FINREP_POSTBUILD_PROOF"
+
+      - name: Publish once and verify exact broker receipt
+        env:
+          PACT_BROKER_URL: ${{ vars.PACT_BROKER_URL }}
+          PACT_BROKER_USERNAME: ${{ vars.PACT_BROKER_USERNAME }}
+          PACT_BROKER_PASSWORD: ${{ secrets.PACT_BROKER_PASSWORD }}
+          FINREP_PUBLICATION_ENABLED: 'true'
+        run: |
+          set -euo pipefail
+          test -n "$PACT_BROKER_URL"
+          test -n "$PACT_BROKER_USERNAME"
+          test -n "$PACT_BROKER_PASSWORD"
+          ./gradlew :openbank-ledger-service:hostedHistoricalFinrepPublish --no-daemon --no-build-cache --no-configuration-cache -Dpact.verifier.publishResults=false
+
+      # Never upload raw logs, broker HAL, credentials, or contract transport URLs.
+      # The task must create this allowlisted summary only after verified readback.
+      - name: Upload verified public evidence
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: finrep-historical-proof-${{ github.sha }}-${{ github.run_attempt }}
+          path: openbank-ledger-service/build/finrep-historical-public-evidence.json
+          if-no-files-found: error
+          retention-days: 30

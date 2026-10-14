@@ -20,11 +20,29 @@ import java.net.URISyntaxException
 import java.util.jar.JarFile
 
 /** Per-run transport. Credentials never enter Pact options, diagnostic messages or tracked artifacts. */
-internal class HistoricalFinrepBrokerTransport(private val origin: URI, private val bearerToken: String? = null) :
-    AutoCloseable {
+internal class HistoricalFinrepBrokerTransport(
+    private val origin: URI,
+    private val bearerToken: String? = null,
+    private val username: String? = null,
+    private val password: String? = null,
+) : AutoCloseable {
     init {
         HistoricalFinrepPactArtifact.publicationUri(origin, "0".repeat(40))
         require(origin.port == -1 || origin.port in 1..65535) { "Broker port is invalid" }
+        require((username == null) == (password == null) && (username == null || bearerToken == null)) {
+            "Broker authentication configuration is ambiguous"
+        }
+        require(
+            username == null ||
+                (
+                    origin.scheme == "https" &&
+                        username.isNotBlank() &&
+                        ':' !in username &&
+                        username.none { it.isISOControl() } &&
+                        password!!.isNotBlank() &&
+                        password.none { it.isISOControl() }
+                    ),
+        ) { "Basic credentials require a secure broker origin and valid values" }
         require(bearerToken == null || (origin.scheme == "https" && bearerToken.none { it.isISOControl() })) {
             "Credentials require a secure broker origin"
         }
@@ -83,6 +101,10 @@ internal class HistoricalFinrepBrokerTransport(private val origin: URI, private 
         }
         request.setHeader("Accept", "application/hal+json, application/json")
         bearerToken?.let { request.setHeader("Authorization", "Bearer $it") }
+        username?.let {
+            val encoded = java.util.Base64.getEncoder().encodeToString("$it:$password".toByteArray(Charsets.UTF_8))
+            request.setHeader("Authorization", "Basic $encoded")
+        }
         return try {
             client.execute(request) { response ->
                 require(response.code == if (payload == null) 200 else 201) { "Broker request was not accepted" }
