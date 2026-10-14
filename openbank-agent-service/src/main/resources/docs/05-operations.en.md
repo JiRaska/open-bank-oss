@@ -9,7 +9,7 @@
 
 - **Packaging:** fast-jar (never uber-jar — the runtime stage COPYs `quarkus-app/`). Generic build/push: `openbank-infra/scripts/build-push-service.sh openbank-agent-service` (host-side `quarkusBuild`, not in-Docker Gradle).
 - **Image:** see [`Dockerfile`](../../../../openbank-agent-service/Dockerfile) — fast-jar runtime stage.
-- **No DB:** there are no Flyway migrations to apply at startup, so the usual Flyway checksum/repair runbooks do not apply here.
+- **DB:** Flyway migrations `V1`–`V6` apply at startup (proposal queue, kill-switch, audit outbox, merge records — see [04 — Data](./04-data.md)); the usual Flyway checksum/repair runbooks apply like for any JDBC service.
 
 ## Configuration (environment)
 
@@ -31,7 +31,7 @@ The committed config ships only the **offline `mock-echo`** provider, so build a
 
 | Port | Purpose |
 |---|---|
-| 8109 | application HTTP (`/mcp`, `/agent/*`) |
+| 8109 | application HTTP (`/mcp`, `/agent/*`, `/api/v1/agent-merge-records`) |
 | 8085 | management — `/q/health/*`, `/q/metrics`, `/q/openapi`, `/q/openbank/docs` (root-path `/q`) |
 
 ## Health probes
@@ -50,7 +50,7 @@ The committed config ships only the **offline `mock-echo`** provider, so build a
 
 - Cloud-agnostic substrate, GitOps via ArgoCD, scale-to-zero by default for the lowest tier the service's trigger allows ([ADR-0057](../../../../docs/adr/0057-scale-to-zero-workload-tiers-and-finops-classifier.md)).
 - agent-service is **not** a money-path service, so it is **not** pinned to the always-on T0 tier. It is request-triggered (admin UI / MCP client) with no event-loop dependency, so it is a candidate for a **scale-to-zero** tier; the actual tier is **derived from measured traffic**, not hand-assigned, and the declared-vs-measured gate keeps it honest. (Exact tier: derived in CI — TBD here.)
-- Stateless + no DB ⇒ cold start is cheap and safe; there is no data to recover, so RPO is effectively N/A for this service.
+- Stateless reasoning layer + no banking state ⇒ cold start is cheap; the owned evidence tables ([04 — Data](./04-data.md)) are ordinary Postgres data with no domain state to reconcile after a restart.
 
 ## SLO (proposed)
 
@@ -79,9 +79,12 @@ Expected under `advisory` only if a tool is unmapped (deny-by-default) or no `X-
 ### Flip enforcement on
 Set `AGENT_POLICY_ENFORCEMENT=block` in the deployment env once an OPA sidecar is present in the target. No redeploy of code needed; the kill-switch / charter changes live in `agents.yaml` + OPA bundle.
 
+### Recorded human merge ingest (ADR-0031 phase 3)
+The `record-agent-merge` GitHub Actions workflow POSTs every merged agent PR to `POST /api/v1/agent-merge-records` with a `ROLE_ADMIN` service credential. Ingest is idempotent by `prNumber`: a redelivered webhook inserts nothing (`ON CONFLICT DO NOTHING`) and returns `200` with the original record and `inserted=false`, with **no second audit event**. If merges are missing from the evidence: check the workflow run log first (a rejected or unauthenticated POST fails loudly there), then the ingest credential's role and the service's Postgres reachability.
+
 ## Version & release
 
-Released component (`version.txt` present) — current `1.5.0`. Versioning is owned by release-please from Conventional Commits; do not hand-edit `version.txt` or `CHANGELOG.md`. API-contract bumps (`openapi.yaml: info.version`) are classified from the OpenAPI diff, independent of the release version (ADR-0048).
+Released component (`version.txt` present) — current `1.27.4`. Versioning is owned by release-please from Conventional Commits; do not hand-edit `version.txt` or `CHANGELOG.md`. API-contract bumps (`openapi.yaml: info.version`) are classified from the OpenAPI diff, independent of the release version (ADR-0048).
 
 ## AML service mTLS in production
 
