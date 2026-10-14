@@ -3790,11 +3790,55 @@ agent_case_capability_matrix:
 # blast radius without being money-path by that list's definition. The gate's SCOPE is not
 # hand-kept: an undeclared machine account fails the check rather than passing it.
 autonomous_agent_prs:
-  max_open_prs: 3
+  # Raised 3 -> 5 with owner general consent (2026-10-14), after the limit proved to be the
+  # bottleneck of the owner-directed ADR-completion batch (#12748): nine grandfathered or
+  # excepted codex/ PRs hold ranks 1-9, so any new PR was refused regardless of value, and
+  # the cascade also red-lit the Admin UI gate (changes-ui is gated on proceed). Review,
+  # CI, merge and money-path approvals are untouched by this number.
+  max_open_prs: 5
   grandfather_created_before: '2026-10-03T20:00:00Z'
   # Maintainer-adopted policy only; exact PR, repository, branch, and expiration are bound.
   # This does not authorize replacement PRs, autonomous work, or any other guard.
   one_time_wip_exceptions:
+    # Owner-directed ADR-completion batch 2026-10-14 (goal issue #12748): admit these seven
+    # PRs past the rank gate for their CI to run; admission only — review, CI, merge and
+    # money-path approvals (lending: 2 approvals + threat model) remain required. Expires
+    # 2026-10-24; the batch is expected to have drained well before that.
+    - pr: 12747
+      repository: JiRaska/open-bank-oss
+      branch: agent/adr-accept-shipped
+      expires_at: '2026-10-24T00:00:00Z'
+      reason: 'Owner-directed ADR-completion batch (#12748): accept verified-shipped ADR-0204 and ADR-0243; admission only, all review/CI/merge controls remain required.'
+    - pr: 12753
+      repository: JiRaska/open-bank-oss
+      branch: agent/adr-0253-evidence
+      expires_at: '2026-10-24T00:00:00Z'
+      reason: 'Owner-directed ADR-completion batch (#12748): ADR-0253 fraud-scoring silence alert + quarterly evidence sweep runbook; admission only, all review/CI/merge controls remain required.'
+    - pr: 12755
+      repository: JiRaska/open-bank-oss
+      branch: agent/adr-0209-closeout
+      expires_at: '2026-10-24T00:00:00Z'
+      reason: 'Owner-directed ADR-completion batch (#12748): ADR-0209 docs close-out (shipped slices, D2 superseded by ADR-0210); admission only, all review/CI/merge controls remain required.'
+    - pr: 12758
+      repository: JiRaska/open-bank-oss
+      branch: agent/adr-0284-accept-d10
+      expires_at: '2026-10-24T00:00:00Z'
+      reason: 'Owner-directed ADR-completion batch (#12748): ADR-0284 acceptance + D10 business segment filter; admission only, all review/CI/merge controls remain required.'
+    - pr: 12767
+      repository: JiRaska/open-bank-oss
+      branch: agent/adr-0256-trigger
+      expires_at: '2026-10-24T00:00:00Z'
+      reason: 'Owner-directed ADR-completion batch (#12748): ADR-0256 sanctions-list-changed trigger loop to case coordinator; admission only, all review/CI/merge controls remain required.'
+    - pr: 12768
+      repository: JiRaska/open-bank-oss
+      branch: agent/adr-0227-inbox-contract
+      expires_at: '2026-10-24T00:00:00Z'
+      reason: 'Owner-directed ADR-completion batch (#12748): ADR-0227 D1 ApprovalItem contract + D3 inbox filters; admission only, all review/CI/merge controls remain required.'
+    - pr: 12769
+      repository: JiRaska/open-bank-oss
+      branch: agent/adr-0211-origination-commands
+      expires_at: '2026-10-24T00:00:00Z'
+      reason: 'Owner-directed ADR-completion batch (#12748): ADR-0211 origination commands + timer branches + property tests; admission only, all review/CI/merge controls remain required.'
     # Owner-requested proposal on 2026-10-12; activation still needs separate trusted-base adoption.
     - pr: 12587
       repository: JiRaska/open-bank-oss
