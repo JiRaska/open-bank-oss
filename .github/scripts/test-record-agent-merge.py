@@ -252,4 +252,8 @@ class WorkflowWiringTest(unittest.TestCase):
 
 
 if __name__ == '__main__':
+    # SUBJECTS= for run-gates.py min_subjects floor: report the ACTUAL loaded test
+    # count so deleting cases drops the floor, not just the coverage.
+    suite = unittest.defaultTestLoader.loadTestsFromModule(sys.modules['__main__'])
+    print(f'SUBJECTS={suite.countTestCases()}')
     unittest.main()
