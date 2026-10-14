@@ -98,6 +98,20 @@ quarkus:
       connect-timeout: 2000
       read-timeout: 5000
       scope: jakarta.inject.Singleton
+    # ADR-0339 B: the withholding policy's tax-profile resolution (PartyTaxProfileProvider) —
+    # account→partyId via the account-service client above, then party-service for the party
+    # type and the AML profile's residency countries. A deployment MUST set PARTY_SERVICE_URL;
+    # until it does, every resolution fails safe to the CZ-resident-individual default
+    # (ADR-0033 §C) — loudly: each fail-safe is a warn log plus a fail_safe counter, never a
+    # skipped withholding. The named `ledger` oidc-client (Keycloak `openbank-interest`,
+    # ROLE_API only) authenticates this edge, same as the account-service client;
+    # party.amlProfile.read is granted to that principal by `service-interest-party-m2m`
+    # in party_rest_ext.rego.
+    party-service:
+      url: ${PARTY_SERVICE_URL:http://localhost:8111}
+      connect-timeout: 2000
+      read-timeout: 5000
+      scope: jakarta.inject.Singleton
     # Immutable catalog revision and durable event cursor used only by the reference-data
     # snapshotter. Accrual reads its own PostgreSQL snapshot/config rows and never resolves the
     # mutable "latest" catalog representation on the money path.

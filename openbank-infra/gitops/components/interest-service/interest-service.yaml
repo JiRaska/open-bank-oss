@@ -126,6 +126,13 @@ spec:
             # (GET /accounts/active) and reads their booked balance (GET /accounts/{id}/balance).
             - name: ACCOUNT_SERVICE_URL
               value: "http://account-service.accounts.svc:8100"
+            # ADR-0339 B: the withholding policy's tax-profile resolution
+            # (PartyTaxProfileProvider) reads the party record and the AML profile's residency
+            # countries. Plain cluster-internal HTTP, same as ACCOUNT_SERVICE_URL above; party
+            # enforces authn/authz at the app layer (named openbank-interest M2M identity,
+            # party.amlProfile.read via service-interest-party-m2m), not on the listener.
+            - name: PARTY_SERVICE_URL
+              value: "http://party-service.party.svc:8111"
             # CatalogInterestProfileSynchronizer, driven by CatalogInterestSnapshotScheduler,
             # reads product-catalog on every tick. Without this the app default (localhost:8104)
             # was dialled inside this pod and every sync failed (#10383). product-catalog's

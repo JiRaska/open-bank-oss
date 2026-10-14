@@ -1,0 +1,129 @@
+{
+  "consumer": {
+    "name": "openbank-interest-service"
+  },
+  "interactions": [
+    {
+      "description": "GET the AML profile's residency countries for withholding resolution",
+      "providerStates": [
+        {
+          "name": "an INDIVIDUAL party owns the account with a declared personal AML profile"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v1/parties/61000000-0000-0000-0000-000000000061/aml-profile"
+      },
+      "response": {
+        "body": {
+          "crsStatus": "REPORTABLE",
+          "declaredAt": "2027-01-01T00:00:00Z",
+          "eddRequired": false,
+          "fatcaStatus": "NON_US",
+          "partyId": "61000000-0000-0000-0000-000000000061",
+          "pepFlag": false,
+          "reviewStatus": "STANDARD",
+          "riskFactors": [
+
+          ],
+          "taxResidencies": [
+            "CZ",
+            "DE"
+          ],
+          "tin": {
+            "DE": "123456789"
+          },
+          "truthful": true,
+          "usPerson": false,
+          "version": 1
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.declaredAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.partyId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.version": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET the party record to decide the taxpayer type",
+      "providerStates": [
+        {
+          "name": "an INDIVIDUAL party owns the account"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v1/parties/61000000-0000-0000-0000-000000000061"
+      },
+      "response": {
+        "body": {
+          "id": "61000000-0000-0000-0000-000000000061",
+          "partyType": "INDIVIDUAL",
+          "status": "ACTIVE"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-party-service"
+  }
+}

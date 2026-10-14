@@ -16,21 +16,30 @@ import au.com.dius.pact.provider.junitsupport.loader.PactFolder
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.libs.testing.containers.PostgresRedpandaTestResource
+import com.openbank.party.application.port.`in`.DeclareAmlProfileCommand
 import com.openbank.party.application.port.`in`.GrantMandateCommand
+import com.openbank.party.application.port.`in`.PartyAmlProfileUseCase
 import com.openbank.party.application.port.`in`.PartyUseCase
 import com.openbank.party.application.port.out.PartyRepository
+import com.openbank.party.domain.model.AccountPurpose
+import com.openbank.party.domain.model.AmlProfileDeclaration
 import com.openbank.party.domain.model.AmlStatus
+import com.openbank.party.domain.model.ExpectedMonthlyTurnover
+import com.openbank.party.domain.model.IncomeSource
 import com.openbank.party.domain.model.KycStatus
 import com.openbank.party.domain.model.MandateAuthority
 import com.openbank.party.domain.model.MandateRole
 import com.openbank.party.domain.model.MandateSource
 import com.openbank.party.domain.model.MandateStatus
+import com.openbank.party.domain.model.Occupation
 import com.openbank.party.domain.model.Party
 import com.openbank.party.domain.model.PartyActor
 import com.openbank.party.domain.model.PartyEvents
 import com.openbank.party.domain.model.PartyMandate
 import com.openbank.party.domain.model.PartyStatus
 import com.openbank.party.domain.model.PartyType
+import com.openbank.party.domain.model.PepDeclaration
+import com.openbank.party.domain.model.TaxResidency
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
@@ -86,10 +95,11 @@ import java.util.concurrent.TimeUnit
  *
  * ## Both interaction kinds, one class
  *
- * Five HTTP interactions (onboarding-service ×4, vop-service ×1) and five message interactions
- * (account-service ×3, kyc-service ×2), so the target is chosen per interaction in
- * [configureTarget]. The [MessageTestTarget] is package-scoped: the default classpath-wide
- * ClassGraph scan throws on the JDK 25 toolchain.
+ * Five HTTP interactions were the original shape (onboarding-service ×4, vop-service ×1); the
+ * ADR-0339 B tax-profile legs added interest-service ×2 (party detail + AML profile read), and
+ * five message interactions (account-service ×3, kyc-service ×2) — so the target is chosen per
+ * interaction in [configureTarget]. The [MessageTestTarget] is package-scoped: the default
+ * classpath-wide ClassGraph scan throws on the JDK 25 toolchain.
  */
 @QuarkusTest
 @QuarkusTestResource(
@@ -110,6 +120,9 @@ class PartyPactFolderProviderVerificationTest {
 
     @Inject
     lateinit var partyUseCase: PartyUseCase
+
+    @Inject
+    lateinit var partyAmlProfileUseCase: PartyAmlProfileUseCase
 
     @Inject
     lateinit var vertx: Vertx
@@ -456,6 +469,9 @@ class PartyPactFolderProviderVerificationTest {
         private val DELEGATION_ACTOR_ID = UUID.fromString("d1d1d1d1-e2e2-4f4f-8a8a-b3b3b3b3b3b3")
         private val KYB_MANDATE_PRINCIPAL_ID = UUID.fromString("c1c1c1c1-d2d2-4e4e-8f8f-a1a1a1a1a1a1")
         private val KYB_MANDATE_AGENT_ID = UUID.fromString("d1d1d1d1-e2e2-4f4f-8a8a-b1b1b1b1b1b1")
+
+        /** Must match PartyTaxProfilePactConsumerTest.PARTY_ID (openbank-interest-service, ADR-0339 B). */
+        private val TAX_PROFILE_PARTY_ID = UUID.fromString("61000000-0000-0000-0000-000000000061")
     }
 
     /**
@@ -466,5 +482,77 @@ class PartyPactFolderProviderVerificationTest {
     @State("no party exists with the unknown id")
     fun noPartyWithUnknownId() {
         // Intentionally empty.
+    }
+
+    /**
+     * Seeds the INDIVIDUAL party whose record interest-service's ADR-0339 B tax-profile resolution
+     * reads to decide the taxpayer type (pact: "an INDIVIDUAL party owns the account"). The pact
+     * pins only id/partyType/status — what the consumer deserializes — so no AML profile is
+     * declared here; the derived facts have their own state below. Same findById guard as the
+     * states above: pact-jvm 4.7.3 invokes each @State setup twice per interaction.
+     */
+    @State("an INDIVIDUAL party owns the account")
+    fun individualPartyOwnsTheAccount() = runOnVertxContext {
+        seedTaxProfileParty()
+    }
+
+    /**
+     * The same party plus the declared personal AML profile the residency read pins: CZ+DE
+     * residencies with a DE TIN, no PEP/US/cash/high-turnover triggers — so riskFactors is empty,
+     * reviewStatus STANDARD, fatcaStatus NON_US, crsStatus REPORTABLE, exactly the values the pact
+     * binds. The declaration goes through [PartyAmlProfileUseCase.declareAmlProfile] (not a
+     * repository insert) so the derived party columns the party-detail endpoint also serves are
+     * updated by the same path production uses. Idempotent on the profile, not just the party:
+     * each @State setup runs twice per interaction, and a second declaration would bump the
+     * version to 2 and fail the pact's `version: 1`.
+     */
+    @State("an INDIVIDUAL party owns the account with a declared personal AML profile")
+    fun individualPartyWithDeclaredAmlProfile() = runOnVertxContext {
+        seedTaxProfileParty()
+        if (partyAmlProfileUseCase.getAmlProfile(TAX_PROFILE_PARTY_ID) != null) return@runOnVertxContext
+        partyAmlProfileUseCase.declareAmlProfile(
+            DeclareAmlProfileCommand(
+                partyId = TAX_PROFILE_PARTY_ID,
+                declaration = AmlProfileDeclaration(
+                    purposes = setOf(AccountPurpose.EVERYDAY_BANKING),
+                    purposeNote = null,
+                    incomeSources = setOf(IncomeSource.EMPLOYMENT),
+                    incomeNote = null,
+                    occupation = Occupation.EMPLOYED,
+                    occupationNote = null,
+                    expectedMonthlyTurnover = ExpectedMonthlyTurnover.UP_TO_30K,
+                    cashIntensive = false,
+                    pep = PepDeclaration(isPep = false, category = null, detail = null),
+                    taxResidencies = listOf(TaxResidency("CZ", null), TaxResidency("DE", "123456789")),
+                    usPerson = false,
+                    truthful = true,
+                ),
+                declaredBy = "pact-verifier",
+            ),
+        )
+    }
+
+    private suspend fun seedTaxProfileParty() {
+        if (partyRepository.findById(TAX_PROFILE_PARTY_ID) != null) return
+        partyRepository.save(
+            Party(
+                id = TAX_PROFILE_PARTY_ID,
+                partyType = PartyType.INDIVIDUAL,
+                status = PartyStatus.ACTIVE,
+                legalName = "Pact Taxperson",
+                tradingName = null,
+                dateOfBirth = null,
+                nationality = null,
+                taxId = null,
+                registrationNumber = null,
+                email = "pact-taxperson@pact.openbank.invalid",
+                phone = null,
+                address = null,
+                kycStatus = KycStatus.APPROVED,
+                createdAt = Instant.now(),
+                updatedAt = Instant.now(),
+                amlStatus = AmlStatus.CLEARED,
+            ),
+        )
     }
 }
