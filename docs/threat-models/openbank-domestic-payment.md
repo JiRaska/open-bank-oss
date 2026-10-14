@@ -684,6 +684,23 @@ Draft item replacement records the verified editing human alongside the company 
 replayed creation key is checked against its persisted fingerprint before item validation, so an
 altered parseable body cannot change a conflict into an unrelated validation response.
 
+## Pension integration boundary (ADR-0334/0335, #12435)
+
+**Pension payout initiation.** This integration adds the `pension` namespace to `domestic-payment-ingress-allow-list`.
+That grants namespace-wide network reachability to the selected provider pods; it does not
+restrict traffic to one workload and does not grant an application action. The pension REST
+client uses its own `openbank-pension` client-credentials identity for `POST /api/v1/domestic-payments`.
+
+**Threat and required controls.** A compromised caller can attempt beneficiary or amount substitution and duplicate payout initiation. Preserve provider-side account ownership and payment validation, and the Idempotency-Key replay/conflict rules; network admission is not payout approval.
+Compromise of any admitted namespace workload is therefore a network threat, while compromise
+of the pension client credential reaches whichever actions its provider authorization permits.
+Keep token validation, identity-scoped authorization and the provider's domain checks enabled.
+
+**Rollout dependency and proof limits.** The integration depends on #12419 for scoped downstream
+authorization; the allow-list change alone does not prove that grant is deployed or correct.
+Review the corresponding provider grant and negative caller/ownership tests before enabling
+this integration. Consumer contracts pin request/response shape; they do not prove a live token
+or account entitlement. No live deployment verification is claimed by this documentation update.
 ## 2026-10-09 — Scoped payment initiator: pension-service (ADR-0335 D5)
 
 **2026-10-11 identity hardening (#12448):** The scoped pension branch no longer trusts
@@ -731,6 +748,21 @@ during rollout. First publish a compatible signed provider image, then configure
 private-CA listener and certificate rotation, and finally switch pension callers to HTTPS.
 OIDC and policy checks continue to authorize business operations independently of TLS trust.
 Roll back caller URLs before removing the provider listener or reverting its image.
+
+## Parallel private-CA listener preparation
+
+The GitOps workload prepares an additional TLS 1.3 listener on port 8443 using a
+separate server-auth Certificate signed by `openbank-ca`, DNS SANs matching the
+Service name, and a read-only certificate/key/CA mount. Client certificates are
+required; existing OIDC and business authorization remain required independently.
+The HTTP listener remains for existing callers. Pension's HTTP URL is retained
+until the reviewed listener rollout and client configuration are verified, after
+which its HTTPS cutover must regenerate the port-scoped network policies. Current
+policy generation also admits the admin BFF on the
+new port; this does not grant a client certificate or bypass application policy.
+Certificate issuance must precede workload rollout. Rollback removes the parallel
+listener preparation while existing HTTP callers remain unchanged; after caller
+cutover, revert caller URLs and policies before removing the listener.
 
 ## Verified initiator identity (#12448, PR #12538)
 

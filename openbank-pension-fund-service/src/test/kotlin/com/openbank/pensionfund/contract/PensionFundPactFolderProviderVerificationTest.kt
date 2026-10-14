@@ -12,47 +12,41 @@ import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactFilter
 import au.com.dius.pact.provider.junitsupport.loader.PactFolder
-import com.openbank.pensionfund.application.port.PensionFundStore
 import com.openbank.pensionfund.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
-import io.vertx.core.Vertx
-import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.extension.ExtendWith
 
 /**
- * Git-pact provider replay for pension-fund-service (#12425): tax-reporting-service's consumer
- * pact for `GET /api/v1/reporting/funds/{fundId}/period-figures`, replayed on every PR. A consumer
- * pact cannot catch a wrong request path — only this replay can (#2269).
+ * PR-lane replay of pension-service's consumer pact (`pacts/openbank-pension-service-openbank-
+ * pension-fund-service.json`, ADR-0334, #12350): holdings priced and unpriced, transactions,
+ * strategies, SUBSCRIBE and REDEEM orders — every call pension-service's FundAdministrationPort
+ * makes. A wrong path in pension-service's client is red HERE and nowhere else: the consumer's
+ * mock server answers whatever it is asked.
  *
- * Replays AS tax-reporting's own client (`service-account-openbank-tax-reporting`, ROLE_API), the
- * identity the route admits in pension_fund_rest_ext.rego. The 401 interaction is replayed by
- * [PensionFundNegativeAuthProviderVerificationTest], which boots without an identity.
- *
- * The broker-sourced twin, [PensionFundPactBrokerProviderVerificationTest], publishes the result
- * on main-push; both share [PensionFundPactStates].
+ * Replayed as pension-service's own principal (`service-account-openbank-pension`, ROLE_API), the
+ * identity this service admits for holdings and orders. The two missing-identity HTTP 401
+ * interactions are replayed by [PensionFundNegativeAuthProviderVerificationTest], which boots without
+ * `@TestSecurity`. Counterpart: [PensionFundPactBrokerProviderVerificationTest] (main-push,
+ * publishes the result `can-i-deploy` reads). Every `@State` here exists there too.
  */
 @QuarkusTest
 @QuarkusTestResource(PostgresTestResource::class)
-@TestSecurity(user = "service-account-openbank-tax-reporting", roles = ["ROLE_API"])
+@TestSecurity(user = "service-account-openbank-pension", roles = ["ROLE_API"])
 @Provider("openbank-pension-fund-service")
 @PactFolder("../pacts")
-@PactFilter("^(?!" + PensionFundPactStates.NEGATIVE_AUTH_STATE + "\$).*\$")
+@PactFilter(
+    "^(?!" + NEGATIVE_AUTH_STATE + "\$|" + TaxReportingPensionFundPactStates.FUND_STATE + "\$).*\$",
+)
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
 class PensionFundPactFolderProviderVerificationTest {
 
     @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
     lateinit var testPort: String
-
-    @Inject
-    lateinit var store: PensionFundStore
-
-    @Inject
-    lateinit var vertx: Vertx
 
     @BeforeEach
     fun configureTarget(context: PactVerificationContext?) {
@@ -66,6 +60,9 @@ class PensionFundPactFolderProviderVerificationTest {
         context?.verifyInteraction()
     }
 
-    @State(PensionFundPactStates.FUND_STATE)
-    fun fundWithSeptemberNav() = PensionFundPactStates.fundWithSeptemberNav(vertx, store)
+    @State(PRICED_STATE)
+    fun pricedHoldings(): Unit = PensionFundPactStates.pricedHoldings()
+
+    @State(UNPUBLISHED_STATE)
+    fun unpublishedNavHoldings(): Unit = PensionFundPactStates.unpublishedNavHoldings()
 }
