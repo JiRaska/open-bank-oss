@@ -195,6 +195,71 @@ class AuthorizeInterceptorTest {
         )
 
     @Test
+    fun `principal name is read once for the query id and type`() {
+        every { identity.roles } returns emptySet()
+        var nameReads = 0
+        every { sc.userPrincipal } returns JavaPrincipal {
+            nameReads++
+            "user-42"
+        }
+        val queries = mutableListOf<AuthzQuery>()
+        wirePdp(object : PolicyDecisionPoint {
+            override suspend fun allow(query: AuthzQuery): AuthzDecision {
+                queries += query
+                return AuthzDecision(allow = true)
+            }
+        })
+
+        interceptor.authorize(makeCtx(annotatedMethod))
+
+        assertThat(nameReads).isEqualTo(1)
+        assertThat(queries.single().principal.id).isEqualTo("user-42")
+        assertThat(queries.single().principal.type).isEqualTo("HUMAN")
+    }
+
+    @Test
+    fun `malformed principal name is forbidden before an advisory PDP allow`() {
+        assertMalformedPrincipalForbidden(enforced = false, pdpPresent = true)
+    }
+
+    @Test
+    fun `malformed principal name is forbidden before the missing PDP advisory shortcut`() {
+        assertMalformedPrincipalForbidden(enforced = false, pdpPresent = false)
+    }
+
+    @Test
+    fun `malformed principal name is forbidden before an enforced PDP allow`() {
+        assertMalformedPrincipalForbidden(enforced = true, pdpPresent = true)
+    }
+
+    private fun assertMalformedPrincipalForbidden(enforced: Boolean, pdpPresent: Boolean) {
+        interceptor.enforce = enforced
+        var pdpCalls = 0
+        val decisionPoint = object : PolicyDecisionPoint {
+            override suspend fun allow(query: AuthzQuery): AuthzDecision {
+                pdpCalls++
+                return AuthzDecision(allow = true)
+            }
+        }
+        interceptor.pdp = mockk {
+            every { isResolvable } returns pdpPresent
+            every { get() } returns decisionPoint
+        }
+        val malformedPrincipal = mockk<JavaPrincipal> {
+            every { name } throws ClassCastException("name claim is not a string")
+        }
+        every { sc.userPrincipal } returns malformedPrincipal
+        val ctx = makeCtx(annotatedMethod)
+
+        val thrown = catchThrowableOfType(ForbiddenException::class.java) { interceptor.authorize(ctx) }
+
+        assertThat(thrown.response.status).isEqualTo(403)
+        assertThat(pdpCalls).isZero()
+        io.mockk.verify(exactly = 0) { ctx.proceed() }
+        io.mockk.verify(exactly = 1) { malformedPrincipal.name }
+    }
+
+    @Test
     fun `JWT roles propagated into OPA query`() {
         every { identity.roles } returns setOf("ROLE_OPERATOR", "ROLE_ADMIN")
         val capturedQuery = mutableListOf<AuthzQuery>()
@@ -571,6 +636,105 @@ class AuthorizeInterceptorTest {
         interceptor.authorize(makeCtx(annotatedMethod))
         assertThat(capturedQuery[0].principal.type).isEqualTo("ANONYMOUS")
         assertThat(capturedQuery[0].principal.id).isEqualTo("anonymous")
+    }
+
+    private fun capturePrincipalFor(claims: Map<String, String>, name: String): Principal {
+        every { sc.userPrincipal } returns JavaPrincipal { name }
+        every { identity.principal } returns mockk<JsonWebToken> {
+            every { subject } returns "5f0c2a8e"
+            every { getClaim<Any?>(any<String>()) } answers { claims[firstArg<String>()] }
+        }
+        every { identity.roles } returns setOf("ROLE_OPERATOR")
+        val captured = mutableListOf<AuthzQuery>()
+        interceptor.pdp = mockk {
+            every { isResolvable } returns true
+            every { get() } returns object : PolicyDecisionPoint {
+                override suspend fun allow(query: AuthzQuery): AuthzDecision {
+                    captured += query
+                    return AuthzDecision(allow = true, reason = "ok", policyVersion = "test")
+                }
+            }
+        }
+        interceptor.authorize(makeCtx(annotatedMethod))
+        return captured.single().principal
+    }
+
+    @Test
+    fun `a client_id-only machine token whose name is not service-account- is flagged service_account`() {
+        val p = capturePrincipalFor(mapOf("client_id" to "openbank-batch", "azp" to "openbank-batch"), "batch-bot")
+        assertThat(p.id).isEqualTo("batch-bot")
+        assertThat(p.serviceAccount).isTrue()
+        assertThat(p.clientId).isNull()
+    }
+
+    @Test
+    fun `a renamed service-account is flagged service_account`() {
+        val p = capturePrincipalFor(
+            mapOf("client_id" to "openbank-edge", "azp" to "openbank-edge", "preferred_username" to "alice"),
+            "alice",
+        )
+        assertThat(p.serviceAccount).isTrue()
+        assertThat(p.clientId).isNull()
+    }
+
+    @Test
+    fun `a conventional service account binds its client without the optional client_id note`() {
+        val p = capturePrincipalFor(
+            mapOf("azp" to "openbank-edge", "preferred_username" to "service-account-openbank-edge"),
+            "service-account-openbank-edge",
+        )
+        assertThat(p.serviceAccount).isTrue()
+        assertThat(p.clientId).isEqualTo("openbank-edge")
+    }
+
+    @Test
+    fun `a client_id note cannot impersonate a different azp service account`() {
+        val p = capturePrincipalFor(
+            mapOf(
+                "client_id" to "openbank-edge",
+                "azp" to "openbank-unrelated",
+                "preferred_username" to "service-account-openbank-edge",
+            ),
+            "service-account-openbank-edge",
+        )
+        assertThat(p.serviceAccount).isTrue()
+        assertThat(p.clientId).isNull()
+    }
+
+    @Test
+    fun `a service-account name without preferred_username cannot claim a named client`() {
+        val p = capturePrincipalFor(
+            mapOf("client_id" to "openbank-edge", "azp" to "openbank-edge"),
+            "service-account-openbank-edge",
+        )
+        assertThat(p.serviceAccount).isTrue()
+        assertThat(p.clientId).isNull()
+    }
+
+    @Test
+    fun `a human staff token is not flagged service_account`() {
+        val p = capturePrincipalFor(mapOf("azp" to "openbank-admin-ui", "preferred_username" to "alice"), "alice")
+        assertThat(p.serviceAccount).isFalse()
+        assertThat(p.clientId).isNull()
+    }
+
+    @Test
+    fun `a non-JWT identity is sent as a machine (fail closed)`() {
+        every { sc.userPrincipal } returns JavaPrincipal { "alice" }
+        every { identity.principal } returns JavaPrincipal { "alice" }
+        every { identity.roles } returns setOf("ROLE_OPERATOR")
+        val captured = mutableListOf<AuthzQuery>()
+        interceptor.pdp = mockk {
+            every { isResolvable } returns true
+            every { get() } returns object : PolicyDecisionPoint {
+                override suspend fun allow(query: AuthzQuery): AuthzDecision {
+                    captured += query
+                    return AuthzDecision(allow = true, reason = "ok", policyVersion = "test")
+                }
+            }
+        }
+        interceptor.authorize(makeCtx(annotatedMethod))
+        assertThat(captured.single().principal.serviceAccount).isTrue()
     }
 
     @Test
