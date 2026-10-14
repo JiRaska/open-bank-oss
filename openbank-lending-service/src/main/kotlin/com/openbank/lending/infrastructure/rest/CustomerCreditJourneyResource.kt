@@ -6,6 +6,7 @@ package com.openbank.lending.infrastructure.rest
 
 import com.openbank.lending.application.port.out.LoanApplicationRepository
 import com.openbank.lending.domain.model.LoanApplication
+import com.openbank.lending.domain.model.WithdrawApplicationRequest
 import com.openbank.lending.infrastructure.intake.CustomerIntakeConfig
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.authz.ServiceAccountIdentity
@@ -18,6 +19,7 @@ import io.smallrye.mutiny.Uni
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
+import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
@@ -54,6 +56,7 @@ import java.util.UUID
 @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
 class CustomerCreditJourneyResource(
     private val applications: LoanApplicationRepository,
+    private val apply: com.openbank.lending.application.port.`in`.ApplyForLoanUseCase,
     private val config: CustomerIntakeConfig,
     private val identity: SecurityIdentity,
 ) {
@@ -86,6 +89,41 @@ class CustomerCreditJourneyResource(
             list.firstOrNull { it.id.value == applicationId }
                 ?.let { Response.ok(it.toJourneyDto()).build() }
                 ?: notFound()
+        }
+    }
+
+    /**
+     * The customer's own pre-disbursement withdrawal (ADR-0211 D1: any pre-DISBURSED state the
+     * graph permits → WITHDRAWN). The ownership check is the same owner-filtered read as `one`:
+     * a foreign application id must read as "not found", never as someone else's credit history
+     * — and the machine + CAS claim in the use case is what actually decides whether the state
+     * may still be abandoned. The actor recorded in evidence is the edge's vouched principal,
+     * the same attribution the intake POST uses.
+     */
+    @POST
+    @Path("/applications/{id}/withdraw")
+    @Authorize(action = "lending.intake", resource = "")
+    @Operation(summary = "Withdraw one of the caller's own applications before disbursement (edge only)")
+    fun withdraw(
+        @HeaderParam(CustomerIntakeResource.PARTY_HEADER) partyHeader: String?,
+        @PathParam("id") id: String,
+        request: WithdrawApplicationRequest,
+    ): Uni<Response> {
+        if (!callerIsPermitted()) return refusal()
+        val partyId = scopeOf(partyHeader) ?: return badParty()
+        val applicationId = runCatching { UUID.fromString(id) }.getOrNull()
+            ?: return Uni.createFrom().item(notFound())
+        return applications.findByParty(partyId).flatMap { list ->
+            val owned = list.firstOrNull { it.id.value == applicationId }
+                ?: return@flatMap Uni.createFrom().item(notFound())
+            apply.withdraw(owned.id, request, identity.principal?.name.orEmpty())
+                .map { Response.ok(it.toJourneyDto()).build() }
+                .onFailure(IllegalStateException::class.java)
+                .recoverWithItem { e ->
+                    // The machine refused (terminal, or SIGNED and later): the customer's honest
+                    // answer is "this can no longer be withdrawn", keyed like the other refusals.
+                    Response.status(HTTP_UNPROCESSABLE).entity(mapOf("error" to e.message)).build()
+                }
         }
     }
 
@@ -136,6 +174,7 @@ class CustomerCreditJourneyResource(
         private const val HTTP_BAD_REQUEST = 400
         private const val HTTP_FORBIDDEN = 403
         private const val HTTP_NOT_FOUND = 404
+        private const val HTTP_UNPROCESSABLE = 422
     }
 }
 

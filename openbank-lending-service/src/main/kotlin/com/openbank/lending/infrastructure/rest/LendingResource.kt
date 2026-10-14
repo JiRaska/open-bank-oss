@@ -21,6 +21,9 @@ import com.openbank.lending.domain.model.LoanApplication
 import com.openbank.lending.domain.model.LoanApplicationRequest
 import com.openbank.lending.domain.model.LoanStateSummary
 import com.openbank.lending.domain.model.RescheduleRequest
+import com.openbank.lending.domain.model.SignApplicationRequest
+import com.openbank.lending.domain.model.SubmitDocumentsRequest
+import com.openbank.lending.domain.model.WithdrawApplicationRequest
 import com.openbank.lending.domain.model.WriteOffRequest
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.domain.identifiers.CollateralId
@@ -294,6 +297,55 @@ class LendingResource(
             .onFailure(OriginationRefusedException::class.java)
             .recoverWithItem { e -> refused(e as OriginationRefusedException) }
             .onFailure().recoverWithItem { e -> Response.status(409).entity(mapOf("error" to e.message)).build() }
+
+    @POST
+    @Path("/applications/{id}/withdraw")
+    @Operation(
+        summary = "Withdraw an application before disbursement (operator; the customer withdraws " +
+            "through the customer-edge intake route)",
+    )
+    @Authorize(action = "lending.withdraw", resource = "#id")
+    fun withdrawApplication(@PathParam("id") id: UUID, request: WithdrawApplicationRequest): Uni<Response> =
+        apply.withdraw(LoanApplicationId(id), request, actor())
+            .map { Response.ok(it).build() }
+            .onFailure(IllegalArgumentException::class.java)
+            .recoverWithItem { e -> Response.status(HTTP_NOT_FOUND).entity(mapOf("error" to e.message)).build() }
+            .onFailure(OriginationRefusedException::class.java)
+            .recoverWithItem { e -> refused(e as OriginationRefusedException) }
+            // The policy graph is the authority on which states may still be abandoned: the
+            // machine's refusal (e.g. SIGNED or later, or a terminal state) answers 422.
+            .onFailure(IllegalStateException::class.java)
+            .recoverWithItem { e -> Response.status(HTTP_UNPROCESSABLE).entity(mapOf("error" to e.message)).build() }
+
+    @POST
+    @Path("/applications/{id}/submit-documents")
+    @Operation(summary = "Record document submission for an application in DOCS_REQUIRED")
+    @Authorize(action = "lending.submitDocuments", resource = "#id")
+    fun submitDocuments(@PathParam("id") id: UUID, request: SubmitDocumentsRequest): Uni<Response> =
+        apply.submitDocuments(LoanApplicationId(id), request, actor())
+            .map { Response.ok(it).build() }
+            .onFailure(IllegalArgumentException::class.java)
+            .recoverWithItem { e -> Response.status(HTTP_NOT_FOUND).entity(mapOf("error" to e.message)).build() }
+            .onFailure(OriginationRefusedException::class.java)
+            .recoverWithItem { e -> refused(e as OriginationRefusedException) }
+            .onFailure(IllegalStateException::class.java)
+            .recoverWithItem { e -> Response.status(HTTP_UNPROCESSABLE).entity(mapOf("error" to e.message)).build() }
+
+    @POST
+    @Path("/applications/{id}/sign")
+    @Operation(
+        summary = "Record the customer's signature on the offered contract; persists the artefact hash",
+    )
+    @Authorize(action = "lending.sign", resource = "#id")
+    fun sign(@PathParam("id") id: UUID, request: SignApplicationRequest): Uni<Response> =
+        apply.sign(LoanApplicationId(id), request, actor())
+            .map { Response.ok(it).build() }
+            .onFailure(IllegalArgumentException::class.java)
+            .recoverWithItem { e -> Response.status(HTTP_NOT_FOUND).entity(mapOf("error" to e.message)).build() }
+            .onFailure(OriginationRefusedException::class.java)
+            .recoverWithItem { e -> refused(e as OriginationRefusedException) }
+            .onFailure(IllegalStateException::class.java)
+            .recoverWithItem { e -> Response.status(HTTP_UNPROCESSABLE).entity(mapOf("error" to e.message)).build() }
 
     @GET
     @Path("/applications/{id}")

@@ -6,7 +6,12 @@ package com.openbank.lending.infrastructure.rest
 
 import com.openbank.lending.application.port.out.LoanApplicationRepository
 import com.openbank.lending.domain.model.ApplicationStateSummary
+import com.openbank.lending.domain.model.DecisionRequest
 import com.openbank.lending.domain.model.LoanApplication
+import com.openbank.lending.domain.model.LoanApplicationRequest
+import com.openbank.lending.domain.model.SignApplicationRequest
+import com.openbank.lending.domain.model.SubmitDocumentsRequest
+import com.openbank.lending.domain.model.WithdrawApplicationRequest
 import com.openbank.lending.infrastructure.intake.CustomerIntakeConfig
 import com.openbank.libs.domain.identifiers.LoanApplicationId
 import com.openbank.libs.domain.money.Money
@@ -98,7 +103,49 @@ class CustomerCreditJourneyResourceTest {
         principal: String = edge,
         who: SecurityIdentity = identity(principal),
         config: CustomerIntakeConfig = config(),
-    ) = CustomerCreditJourneyResource(StubRepository(rows), config, who)
+        apply: com.openbank.lending.application.port.`in`.ApplyForLoanUseCase = withdrawAlwaysSucceeds(),
+    ) = CustomerCreditJourneyResource(StubRepository(rows), apply, config, who)
+
+    /** The withdraw leg's happy path: records the command, answers with the withdrawn application. */
+    private fun withdrawAlwaysSucceeds(): com.openbank.lending.application.port.`in`.ApplyForLoanUseCase =
+        object : com.openbank.lending.application.port.`in`.ApplyForLoanUseCase {
+            override fun apply(request: LoanApplicationRequest, proposedBy: String): Uni<LoanApplication> =
+                Uni.createFrom().nullItem<LoanApplication>()
+            override fun decide(id: LoanApplicationId, decision: DecisionRequest, decidedBy: String) =
+                Uni.createFrom().nullItem<LoanApplication>()
+            override fun getApplication(id: LoanApplicationId): Uni<LoanApplication?> =
+                Uni.createFrom().nullItem<LoanApplication>()
+            override fun listApplications(partyId: UUID): Uni<List<LoanApplication>> =
+                Uni.createFrom().item(emptyList())
+            override fun listApplications(partyId: UUID, limit: Int): Uni<List<LoanApplication>> =
+                Uni.createFrom().item(emptyList())
+            override fun advance(id: LoanApplicationId, actor: String): Uni<LoanApplication> =
+                Uni.createFrom().nullItem<LoanApplication>()
+            override fun expireIfInState(id: LoanApplicationId, expectedState: String, actor: String) =
+                Uni.createFrom().nullItem<LoanApplication>()
+            override fun advanceIfInState(id: LoanApplicationId, expectedState: String, actor: String) =
+                Uni.createFrom().nullItem<LoanApplication>()
+            override fun withdraw(
+                id: LoanApplicationId,
+                request: WithdrawApplicationRequest,
+                withdrawnBy: String,
+            ): Uni<LoanApplication> = Uni.createFrom().item(
+                application(id = id.value).copy(status = OriginationState.WITHDRAWN),
+            )
+            override fun submitDocuments(
+                id: LoanApplicationId,
+                request: SubmitDocumentsRequest,
+                submittedBy: String,
+            ): Uni<LoanApplication> = Uni.createFrom().nullItem<LoanApplication>()
+            override fun sign(id: LoanApplicationId, request: SignApplicationRequest, signedBy: String) =
+                Uni.createFrom().nullItem<LoanApplication>()
+            override fun escalateFourEyesSlaIfPending(id: LoanApplicationId, actor: String) =
+                Uni.createFrom().item(false)
+            override fun listRecentApplications(status: String?, limit: Int): Uni<List<LoanApplication>> =
+                Uni.createFrom().item(emptyList())
+            override fun summariseApplications(): Uni<List<ApplicationStateSummary>> =
+                Uni.createFrom().item(emptyList())
+        }
 
     @Suppress("UNCHECKED_CAST")
     private fun bodyOf(response: jakarta.ws.rs.core.Response): List<CustomerCreditJourneyDto> =
@@ -222,6 +269,9 @@ class CustomerCreditJourneyResourceTest {
             decisionReason: String?,
             decidedAt: OffsetDateTime?,
         ): Uni<Int> = Uni.createFrom().item(0)
+
+        override fun compareAndSetSignature(application: LoanApplication, from: OriginationState): Uni<Int> =
+            Uni.createFrom().item(0)
     }
 
     // ── #12448: the edge is identified by its CLIENT, never by its principal name ─

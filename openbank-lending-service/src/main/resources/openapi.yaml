@@ -25,7 +25,12 @@ info:
   # 1.31.0 -> 1.32.0: additive optional limit on the loan-application list for bounded Customer 360 reads.
   # 1.35.0 -> 1.36.0 (#11588): additive verified makerActorKind on approval responses.
   # 1.36.0 -> 1.37.0 (#11900): additive loan evidence read from the audit chain.
-  version: 1.37.0
+  # 1.37.0 -> 1.38.0: additive — the ADR-0211 explicit origination commands:
+  # POST /applications/{id}/withdraw, /submit-documents, /sign (desk), and the customer-edge
+  # POST /intake/applications/{id}/withdraw; WithdrawApplicationRequest, SubmitDocumentsRequest
+  # and SignApplicationRequest schemas. Classified additive by the contract gate's oasdiff run,
+  # so MINOR is the required class.
+  version: 1.38.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
@@ -193,6 +198,41 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
         '404': { description: No such application for this caller }
+
+  /api/v1/lending/intake/applications/{id}/withdraw:
+    post:
+      tags: [Lending]
+      operationId: withdrawCustomerCreditJourney
+      summary: Withdraw one of the caller's own applications before disbursement (customer-edge only)
+      description: >-
+        ADR-0211 D1: the customer leg of the explicit pre-disbursement withdrawal. The party id
+        is taken from the X-Customer-Party-Id header set by customer-edge from the customer JWT;
+        an application belonging to another party answers 404, not 403 — a not-found and a
+        not-yours must be indistinguishable. Whether the state may still be abandoned is the
+        state machine's answer (422 when not, e.g. after signature or in a terminal state).
+        Only the configured customer-edge service principal may call it; any other caller is
+        refused 403.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - name: X-Customer-Party-Id
+          in: header
+          required: true
+          description: The applicant's party id, set by customer-edge from the customer JWT.
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WithdrawApplicationRequest'
+      responses:
+        '200': { description: Application withdrawn }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404': { description: No such application for this caller }
+        '422': { description: The current state no longer permits withdrawal }
 
   /api/v1/lending/intake/financial-health:
     get:
@@ -694,6 +734,86 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '409':
           $ref: '#/components/responses/Conflict'
+  /api/v1/lending/applications/{id}/withdraw:
+    post:
+      tags: [Lending]
+      operationId: withdrawApplication
+      summary: Withdraw an application before disbursement (operator leg)
+      description: >-
+        ADR-0211 D1: the explicit pre-disbursement withdrawal — any non-terminal state the
+        transition graph permits (DRAFT … AWAITING_SIGNATURE) moves to WITHDRAWN, validated by
+        the state machine, claimed with the conditional UPDATE, evidenced. The policy graph is
+        the authority on which states may still be abandoned: SIGNED and later have no WITHDRAWN
+        edge (a signed contract unwinds through the ADR-0215 exit paths) and answer 422. The
+        customer's own withdrawal is the customer-edge route
+        POST /api/v1/lending/intake/applications/{id}/withdraw. This is NOT the statutory CCD2
+        cooling-off withdrawal, which runs post-disbursement on the live loan
+        (POST /api/v1/lending/loans/{id}/withdrawal).
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WithdrawApplicationRequest'
+      responses:
+        '200': { description: Application withdrawn }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404': { description: Application not found }
+        '422': { description: The current state no longer permits withdrawal (e.g. SIGNED, terminal) }
+  /api/v1/lending/applications/{id}/submit-documents:
+    post:
+      tags: [Lending]
+      operationId: submitApplicationDocuments
+      summary: Record document submission for an application in DOCS_REQUIRED
+      description: >-
+        ADR-0211 D2: the explicit DOCS_REQUIRED → ASSESSMENT step. Only an application actually
+        sitting in DOCS_REQUIRED moves; anything else answers 422 with the state unchanged, and
+        the transition is evidenced like every other origination step.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitDocumentsRequest'
+      responses:
+        '200': { description: Documents accepted; application moved to ASSESSMENT }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404': { description: Application not found }
+        '422': { description: Application is not awaiting document submission }
+  /api/v1/lending/applications/{id}/sign:
+    post:
+      tags: [Lending]
+      operationId: signApplication
+      summary: Record the customer's signature on the offered contract
+      description: >-
+        ADR-0211 D1 + ADR-0214: the explicit AWAITING_SIGNATURE → SIGNED step, persisting the
+        signature artefact hash on the application row in the same conditional claim as the
+        transition (V27). The hash is the evidence anchor of the signature artefact and is never
+        a validate-and-discard. A SYSTEM actor can never drive this transition — the state
+        machine refuses non-human signers. Only an application actually in AWAITING_SIGNATURE
+        moves; anything else answers 422.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignApplicationRequest'
+      responses:
+        '200': { description: Application signed; artefact hash persisted }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404': { description: Application not found }
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422': { description: Application is not awaiting signature }
   /api/v1/lending/applications/{id}/disburse:
     post:
       tags: [Lending]
@@ -1978,6 +2098,38 @@ components:
       properties:
         approve: { type: boolean }
         reason: { type: string, nullable: true }
+    WithdrawApplicationRequest:
+      type: object
+      required: [reason]
+      description: >-
+        The withdrawal reason is recorded as the transition's evidentiary reason. This is the
+        pre-disbursement application withdrawal (ADR-0211), NOT the statutory post-disbursement
+        cooling-off withdrawal (that one is POST /loans/{id}/withdrawal and takes no body).
+      properties:
+        reason:
+          type: string
+          minLength: 10
+          description: Why the application is being withdrawn; minimum length per the house convention.
+    SubmitDocumentsRequest:
+      type: object
+      description: >-
+        The document-submission step carries no caller-supplied decision data: the transition
+        DOCS_REQUIRED → ASSESSMENT is a pure state step. The reason is optional free text for
+        the audit record.
+      properties:
+        reason: { type: string, nullable: true }
+    SignApplicationRequest:
+      type: object
+      required: [artefactHash]
+      description: >-
+        ADR-0214 evidence anchor of the signature artefact (rendered contract, SCA reference).
+        Persisted on the application row in the same conditional claim as the AWAITING_SIGNATURE
+        → SIGNED transition; written once, never updated.
+      properties:
+        artefactHash:
+          type: string
+          minLength: 1
+          maxLength: 64
     CollateralRequest:
       type: object
       required: [type, marketValue]
