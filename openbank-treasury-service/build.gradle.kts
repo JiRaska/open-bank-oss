@@ -88,7 +88,15 @@ kover {
 pitest {
     junit5PluginVersion = "1.2.3"
     targetClasses = setOf("com.openbank.treasury.domain.*")
-    targetTests = setOf("com.openbank.treasury.domain.*", "com.openbank.treasury.application.usecase.*")
+    // The nostro reconciliation suite (Mt940Parser, NostroMatcher, NostroBreakBook, ...) lives
+    // under com.openbank.treasury.nostro — plain JUnit, no Quarkus boot. Excluding it made
+    // every nostro mutant NO_COVERAGE by construction (~300 of 769, score 43% on run
+    // 38107714931): the tests covering them were never allowed into the mutation run.
+    targetTests = setOf(
+        "com.openbank.treasury.domain.*",
+        "com.openbank.treasury.application.usecase.*",
+        "com.openbank.treasury.nostro.*",
+    )
     // Advisory (ADR-0063): pitest.yml reports the score and warns below 70%; the Gradle task itself
     // must not fail the run, so the threshold is 0 until the score is measured and sustained.
     mutationThreshold = 0
