@@ -20,7 +20,15 @@ Práh pokrytí (kover): LINE ≥ 40 (money-path baseline; ratchet-only, cíl 70)
 | Port | Účel |
 |---|---|
 | 8110 | aplikační HTTP (`/api/v1/sca/**`) |
+| 8443 | produkční HTTPS s povinným klientským certifikátem |
 | 8085 | management — health, metriky, docs (`root-path /q`) |
+
+Produkční HTTPS vyžaduje důvěryhodný klientský certifikát pro navázání TLS spojení. Na
+`/api/*` však certifikát neprokazuje identitu volajícího API: oprávnění `bearer-only` vyžaduje
+platný OIDC bearer token na HTTPS i HTTP. Certifikát bez tokenu musí po navázání TLS dostat HTTP
+401; klient bez certifikátu nedokončí HTTPS handshake. Kontrola rolí příslušné operace platí dál;
+rozhodnutí OPA se vynucují pouze při `AUTHZ_ENFORCE=true`. Test `ScaListenerAuthParityIT` tyto
+případy ověřuje na obou portech s produkčním nastavením listeneru a autentizace.
 
 ## Health probes
 

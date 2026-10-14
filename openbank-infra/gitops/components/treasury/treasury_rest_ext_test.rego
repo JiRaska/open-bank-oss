@@ -19,11 +19,21 @@ nobody := {"service_account": false, "type": "HUMAN", "id": "teller-1", "roles":
 
 # The shared backend client, given the approver role by mistake: still a machine, still denied.
 shared_sa := {
-	"service_account": true,
 	"type": "HUMAN",
 	"id": "service-account-openbank-services",
+	"service_account": true,
 	"roles": ["ROLE_TREASURY_APPROVER", "ROLE_TREASURY_DEALER", "ROLE_OPERATOR"],
 }
+
+# A machine with a mutable, human-looking username must still be denied even if granted a staff role.
+renamed_sa := {
+	"type": "HUMAN",
+	"id": "renamed-account",
+	"service_account": true,
+	"client_id": "openbank-services",
+	"roles": ["ROLE_TREASURY_APPROVER", "ROLE_TREASURY_DEALER"],
+}
+
 
 agent := {"service_account": false, "type": "AI_AGENT", "id": "agent:treasury-drafter", "roles": ["ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER"]}
 
@@ -52,6 +62,16 @@ test_staff_may_read if {
 			allowed(p, a)
 		}
 	}
+}
+
+test_renamed_service_account_cannot_use_staff_grants if {
+	every a in (all_writes | reads) | {"treasury.deal.override-limit", "treasury.nostro.upload"} {
+		not allowed(renamed_sa, a)
+	}
+}
+
+test_missing_machine_verdict_fails_closed if {
+	not allowed({"type": "HUMAN", "id": "approver-1", "roles": ["ROLE_TREASURY_APPROVER"]}, "treasury.deal.approve")
 }
 
 test_unrelated_role_may_not_read if {

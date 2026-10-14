@@ -64,7 +64,7 @@
 # ===========================================================================
 
 # ghcr.io/actions/actions-runner:latest @ 2026-06-01 (multi-arch index digest).
-FROM ghcr.io/actions/actions-runner@sha256:e5496277be5d09bc968b3d64911b74e219ac4a3f2edce956a3ecf9271bea1ef4
+FROM ghcr.io/actions/actions-runner@sha256:4ffadc0002b2581327e06101fc8c06cd189232baf79fe561fac9caeb76f5e807
 
 # Build-time tool installation; the actions-runner entrypoint drops to the runner user.
 # Service images are held to the no-root rule; this is the one documented exception,

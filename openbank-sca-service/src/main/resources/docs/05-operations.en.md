@@ -20,7 +20,16 @@ Coverage floor (kover): LINE ≥ 40 (money-path baseline; ratchet-only, target 7
 | Port | Purpose |
 |---|---|
 | 8110 | application HTTP (`/api/v1/sca/**`) |
+| 8443 | production HTTPS listener with required client certificate |
 | 8085 | management — health, metrics, docs (`root-path /q`) |
+
+The production HTTPS listener requires a trusted client certificate for the TLS connection. For
+`/api/*`, the certificate does not authenticate the API caller: the `bearer-only` HTTP permission
+requires a valid OIDC bearer token on both HTTPS and HTTP listeners. A certificate with no bearer
+must receive HTTP 401 after TLS negotiation; a client with no certificate cannot complete the HTTPS
+handshake. Route roles still apply; OPA decisions are enforced only when `AUTHZ_ENFORCE=true`. The
+`ScaListenerAuthParityIT` test exercises these cases against both listeners using the production
+listener and authentication settings.
 
 ## Health probes
 
