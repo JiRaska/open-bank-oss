@@ -30,6 +30,9 @@ quarkus:
     password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
     reactive:
       url: postgresql://localhost:5432/openbank_notifications
+      idle-timeout: 5M
+      max-lifetime: 30M
+      max-size: 20
     jdbc:
       url: jdbc:postgresql://localhost:5432/openbank_notifications
   flyway:
@@ -309,6 +312,9 @@ authz:
       password: openbank_secret
       reactive:
         url: vertx-reactive:postgresql://localhost:5432/openbank_notification_it
+        idle-timeout: 5M
+        max-lifetime: 30M
+        max-size: 20
       jdbc:
         url: jdbc:postgresql://localhost:5432/openbank_notification_it
     devservices:
@@ -339,6 +345,9 @@ authz:
       password: openbank_secret
       reactive:
         url: vertx-reactive:postgresql://localhost:5432/openbank_notification_it
+        idle-timeout: 5M
+        max-lifetime: 30M
+        max-size: 20
       jdbc:
         url: jdbc:postgresql://localhost:5432/openbank_notification_it
     devservices:

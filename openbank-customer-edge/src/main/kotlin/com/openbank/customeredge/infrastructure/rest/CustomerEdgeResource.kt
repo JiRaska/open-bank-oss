@@ -497,6 +497,13 @@ class CustomerEdgeResource(
      * price and "not priced" is not.
      *
      * `type` narrows the list; omitted, every discoverable type comes back.
+     *
+     * ADR-0284 D10: under an `X-Acting-For` business profile the list is further narrowed to
+     * products whose `eligibilitySegments` include BUSINESS (or ALL — the catalogue's
+     * segment-agnostic default); in the personal profile BUSINESS-only products are excluded.
+     * A product the profile cannot take is invisible rather than greyed out, exactly like a
+     * withdrawn one. The catalogue is not changed; the edge filters on the segments the
+     * catalogue response already carries.
      */
     @GET
     @Path("/products")
@@ -518,9 +525,11 @@ class CustomerEdgeResource(
         val catalog = upstream.get("$productCatalogUrl/api/v1/products$query", customer.partyId.toString())
         if (catalog.status != 200) return productCatalogueUnavailable()
         val products = parseJson(catalog)?.takeIf { it.isArray } ?: return productCatalogueUnavailable()
+        val businessProfile = customer.actingFor != null
         val today = LocalDate.now(clock)
         val offers = objectMapper.createArrayNode()
-        products.forEach { product -> productOffer(product, today)?.let(offers::add) }
+        products.filter { isEligibleForProfile(it, businessProfile) }
+            .forEach { product -> productOffer(product, today)?.let(offers::add) }
         return Response.ok(objectMapper.createObjectNode().set<ArrayNode>("items", offers)).build()
     }
 
@@ -536,8 +545,10 @@ class CustomerEdgeResource(
         )
         if (catalog.status != 200) return termDepositCatalogueUnavailable()
         val products = parseJson(catalog)?.takeIf { it.isArray } ?: return termDepositCatalogueUnavailable()
+        val businessProfile = customer.actingFor != null
         val offers = objectMapper.createArrayNode()
-        products.forEach { product -> termDepositOffer(product)?.let(offers::add) }
+        products.filter { isEligibleForProfile(it, businessProfile) }
+            .forEach { product -> termDepositOffer(product)?.let(offers::add) }
         return Response.ok(objectMapper.createObjectNode().set<ArrayNode>("items", offers)).build()
     }
 
@@ -5471,7 +5482,13 @@ class CustomerEdgeResource(
         val catalog = upstream.get("$productCatalogUrl/api/v1/products/$productId", customer.partyId.toString())
         if (catalog.status == 404) return TermDepositResolution.NotFound
         if (catalog.status != 200) return TermDepositResolution.Unavailable
-        return parseJson(catalog)?.let(::termDepositOffer)?.let(TermDepositResolution::Found)
+        // ADR-0284 D10: a single-offer fetch must apply the same segment gate as the list —
+        // otherwise a personal-only offer stays reachable by id under a business profile (and
+        // vice versa) and the list filter is decorative.
+        return parseJson(catalog)
+            ?.takeIf { isEligibleForProfile(it, customer.actingFor != null) }
+            ?.let(::termDepositOffer)
+            ?.let(TermDepositResolution::Found)
             ?: TermDepositResolution.NotFound
     }
 
@@ -5662,6 +5679,28 @@ class CustomerEdgeResource(
             product.path("id").asText().isNotBlank() &&
             product.path("currency").asText().isNotBlank()
 
+    /**
+     * ADR-0284 D10 — the eligibility-segment gate applied on top of discoverability.
+     *
+     * Under a business profile (`X-Acting-For` resolved to an entity) only products whose
+     * `eligibilitySegments` include BUSINESS — or ALL, the catalogue's segment-agnostic default —
+     * are visible; a retail-only product must not leak into the company context. In the personal
+     * profile the mirror rule holds: a BUSINESS-only product is not offered to a natural person.
+     * A missing or empty `eligibilitySegments` reads as ALL, matching the catalogue domain
+     * default, so legacy catalogue entries stay visible in every profile.
+     */
+    private fun isEligibleForProfile(product: JsonNode, businessProfile: Boolean): Boolean {
+        val segments = product.path("eligibilitySegments").takeIf { it.isArray }
+            ?.mapNotNull { segment -> segment.takeIf { it.isTextual }?.asText() }
+            ?.ifEmpty { listOf(ELIGIBILITY_SEGMENT_ALL) }
+            ?: listOf(ELIGIBILITY_SEGMENT_ALL)
+        return if (businessProfile) {
+            ELIGIBILITY_SEGMENT_BUSINESS in segments || ELIGIBILITY_SEGMENT_ALL in segments
+        } else {
+            segments != listOf(ELIGIBILITY_SEGMENT_BUSINESS)
+        }
+    }
+
     private fun productCatalogueUnavailable(): Response = Response.status(Response.Status.SERVICE_UNAVAILABLE)
         .entity(mapOf("error" to "Product catalogue unavailable"))
         .build()
@@ -5723,6 +5762,10 @@ class CustomerEdgeResource(
          * to take it. A new type becomes customer-visible by being added here, on purpose.
          */
         internal val CUSTOMER_PRODUCT_TYPES = setOf("CURRENT", "SAVINGS", "TERM_DEPOSIT")
+
+        /** EligibilitySegment names as the catalogue serialises them (ADR-0284 D10 gate). */
+        private const val ELIGIBILITY_SEGMENT_ALL = "ALL"
+        private const val ELIGIBILITY_SEGMENT_BUSINESS = "BUSINESS"
 
         /**
          * The ADR-0269 credit consents, as the app's field name → the consent-service scope.

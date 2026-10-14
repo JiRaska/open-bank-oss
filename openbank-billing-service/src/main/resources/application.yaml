@@ -80,12 +80,20 @@ quarkus:
   rest-client:
     product-catalog:
       url: ${PRODUCT_CATALOG_SERVICE_URL:http://localhost:8104}
+      connect-timeout: 2000
+      read-timeout: 5000
     account-service:
       url: ${ACCOUNT_SERVICE_URL:http://localhost:8100}
+      connect-timeout: 2000
+      read-timeout: 5000
     balance-service:
       url: ${BALANCE_SERVICE_URL:http://localhost:8103}
+      connect-timeout: 2000
+      read-timeout: 5000
     ledger-service:
       url: ${LEDGER_SERVICE_URL:http://localhost:8101}
+      connect-timeout: 2000
+      read-timeout: 5000
 
   # Persistence (ADR-0143 phase 2c): billing_cycle_assessment / assessed_fee / billing_outbox.
   datasource:
@@ -244,6 +252,9 @@ openbank:
       password: openbank_secret
       reactive:
         url: postgresql://localhost:5432/openbank_billing_it
+        idle-timeout: 5M
+        max-lifetime: 30M
+        max-size: 20
       jdbc:
         url: jdbc:postgresql://localhost:5432/openbank_billing_it
     devservices:
