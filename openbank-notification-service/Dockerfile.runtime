@@ -13,7 +13,10 @@
 # The FROM below is the fleet runtime base and is checked against
 # .github/workflows/Dockerfile.deploy by
 # .github/scripts/check-dockerfile-no-build-stage.py (#3354).
-FROM eclipse-temurin:25-jre@sha256:fcd7fd7b387f94bb2ac461478a7436ad8e349924c374ea8313919624dceae636
+FROM eclipse-temurin:25-jre@sha256:fd4b1c02c64eef378212e23656fc0b0caa41a357876fa0b60e51ceda94a3db64
+
+# Pebble is unused by this Java runtime; remove its vulnerable embedded Go runtime.
+RUN rm /usr/bin/pebble
 WORKDIR /app
 # Explicit numeric UID/GID so a pod with runAsNonRoot can verify non-root without
 # a runAsUser override (kubelet cannot resolve a named user from the image).

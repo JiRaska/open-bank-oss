@@ -17,7 +17,10 @@
 # .github/scripts/check-dockerfile-no-build-stage.py, which also fails if the FROM above
 # drifts from Dockerfile.deploy — the runtime base is stated in exactly one place (#3354).
 
-FROM eclipse-temurin:25-jre@sha256:fcd7fd7b387f94bb2ac461478a7436ad8e349924c374ea8313919624dceae636
+FROM eclipse-temurin:25-jre@sha256:fd4b1c02c64eef378212e23656fc0b0caa41a357876fa0b60e51ceda94a3db64
+
+# Pebble is unused by this Java runtime; remove its vulnerable embedded Go runtime.
+RUN rm /usr/bin/pebble
 WORKDIR /app
 RUN groupadd --system --gid 101 openbank \
  && useradd --system --uid 100 --gid 101 --no-create-home --shell /usr/sbin/nologin openbank

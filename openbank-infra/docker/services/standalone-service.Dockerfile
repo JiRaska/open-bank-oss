@@ -43,7 +43,10 @@ RUN chmod +x gradlew && \
 # NOTE for whoever bumps this: .github/scripts/verify-image-native-libs.py reads the base out of
 # Dockerfile.deploy ONLY, so it will not tell you whether this file drifted. The check is that
 # the two digests are equal.
-FROM eclipse-temurin:25-jre@sha256:fcd7fd7b387f94bb2ac461478a7436ad8e349924c374ea8313919624dceae636
+FROM eclipse-temurin:25-jre@sha256:fd4b1c02c64eef378212e23656fc0b0caa41a357876fa0b60e51ceda94a3db64
+
+# Pebble is unused by this Java runtime; remove its vulnerable embedded Go runtime.
+RUN rm /usr/bin/pebble
 WORKDIR /app
 
 # groupadd/useradd, not busybox `adduser -S` — the glibc base has no busybox. uid 100 / gid 101
