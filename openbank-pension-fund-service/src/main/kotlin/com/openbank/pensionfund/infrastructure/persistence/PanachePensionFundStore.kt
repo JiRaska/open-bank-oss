@@ -91,7 +91,7 @@ class PanachePensionFundStore(
                         if (c.status == ClassificationCorrectionStatus.PROPOSED) {
                             session.persist(c.toEntity())
                         } else {
-                            session.createQuery<Int>(
+                            session.createMutationQuery(
                                 "update PositionClassificationCorrectionEntity set status = :status, " +
                                     "decidedBy = :actor, decidedAt = :at where id = :id and status = 'PROPOSED'",
                             )
