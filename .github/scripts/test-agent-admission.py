@@ -135,9 +135,11 @@ class AdmissionTest(unittest.TestCase):
                 admission.admit(pages, self.prefixes, self.limit)
 
     def test_rules_are_the_prefix_authority(self):
+        # 2026-10-14 (owner decision): the live branch-prefix scope is deliberately empty —
+        # no branch counts against the WIP ceiling anymore. The admission mechanics pinned in
+        # test_capacity_boundary still hold for whatever scope rules.yaml declares.
         prefixes, limit, cutoff = admission.load_policy()
-        self.assertIn('agent/', prefixes)
-        self.assertIn('codex/', prefixes)
+        self.assertEqual(prefixes, ())
         self.assertEqual(limit, 5)
         self.assertEqual(cutoff, '2026-10-03T20:00:00Z')
 
