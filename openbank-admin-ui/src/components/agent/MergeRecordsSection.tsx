@@ -127,7 +127,7 @@ export function MergeRecordsSection({ knownAgentIds }: MergeRecordsSectionProps)
                   <td style={{ padding: '10px 12px', fontWeight: 700, color: 'var(--text-primary)', whiteSpace: 'nowrap', verticalAlign: 'top' }}>
                     {agentLabel(r.agentId)}
                     {known.has(r.agentId) && (
-                      <div title={r.agentId} style={{ fontSize: '10px', color: 'var(--text-tertiary)', fontFamily: 'monospace', fontWeight: 400 }}>chartered agent</div>
+                      <div title={r.agentId} style={{ fontSize: '10px', color: 'var(--text-tertiary)', fontFamily: 'monospace', fontWeight: 400 }}>{t('Charterovaný agent', 'Chartered agent')}</div>
                     )}
                   </td>
                   <td style={{ padding: '10px 12px', verticalAlign: 'top', whiteSpace: 'nowrap' }}>
