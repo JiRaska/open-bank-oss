@@ -19,8 +19,8 @@ Tuto dokumentaci publikuje služba přímo na management endpointu `/q/openbank/
 
 - **Tech stack:** Kotlin / Quarkus 3 (RESTEasy Reactive) / JDK 21+ / Kotlin coroutines — PostgreSQL přes **čisté JDBC + Flyway**, **bez JPA**
 - **Port:** 8109 (app HTTP), 8085 (management — health, metriky, docs)
-- **Perzistence:** PostgreSQL ukládá HITL frontu `agent_proposal` (ADR-0031 D4) a odolný `agent_audit_outbox`; stav rate-limiteru je pouze **v paměti**
+- **Perzistence:** PostgreSQL ukládá HITL frontu `agent_proposal` (ADR-0031 D4), odolný `agent_audit_outbox` a důkazní `agent_merge_record` fáze 3; stav rate-limiteru je pouze **v paměti**
 - **Outbox:** `agent_audit_outbox` potvrdí AI-atribuovaný audit event před doručením do Kafky; runtime aktivace zůstává řízená do atestace
-- **Idempotence:** N/A — všechny operace jsou read-only / neměnící stav
+- **Idempotence:** ingest merge záznamů je idempotentní podle `prNumber` (`ON CONFLICT DO NOTHING` — znovu doručený webhook vrátí uložený záznam s `inserted=false`, bez druhého auditního řádku); volání asistenta/nástrojů jsou read-only a neměnící stav
 - **Auth:** Keycloak OIDC (resource server, realm `openbank`); odchozí MCP volání nesou `openbank-services` client-credentials Bearer (ADR-0031 / ADR-0034)
 - **Governance:** každé volání nástroje prochází OPA-backed **AgentPolicyGate** (deny-by-default), ohraničeno charterem `ui-assistant` v `agents.yaml`; vynucení je defaultně `advisory`, přepíná se na `block` (ADR-0031 D9)

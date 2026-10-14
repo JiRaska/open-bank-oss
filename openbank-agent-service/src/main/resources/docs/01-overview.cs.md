@@ -2,17 +2,18 @@
 
 ## Co služba dělá
 
-`openbank-agent-service` je **AI agentní vrstva** platformy OpenBank. Implementuje [ADR-0031 (governance a provoz AI agentů)](../../../../docs/adr/0031-ai-agent-governance-and-operations.md) a vystavuje dva povrchy:
+`openbank-agent-service` je **AI agentní vrstva** platformy OpenBank. Implementuje [ADR-0031 (governance a provoz AI agentů)](../../../../docs/adr/0031-ai-agent-governance-and-operations.md) a vystavuje tři povrchy:
 
 - **MCP server** (`POST /mcp`) — JSON-RPC server protokolu Model Context Protocol 2.0, který publikuje katalog **read-only** doménových operací OpenBank jako AI volatelné *nástroje* (`tools/list`, `tools/call`). Externí MCP klient (např. agent v IDE) je může vyjmenovat a vyvolat.
 - **Asistent admin-UI** (`POST /agent/chat`) — **serverová** smyčka uvažování. Volání modelu nikdy neprobíhá v prohlížeči: admin UI pošle konverzaci, služba vyřeší model přes provider-agnostickou **model gateway**, spustí ohraničenou smyčku model↔nástroj, každé volání nástroje protáhne přes **OPA policy gate** a vrátí odpověď plus transparentní záznam každého volání nástroje a zda jej policy povolila.
+- **Důkazní záznamy merge** (`/api/v1/agent-merge-records`) — ADR-0031 fáze 3: CI ingestovaný, dotazovatelný záznam toho, **kdo mergoval PR autora agentem**. Zapisuje jej výhradně GitHub Actions workflow `record-agent-merge` (nikdy jej agent nenahlašuje sám), čtou jej admin UI a oversight role.
 
 Asistent běží pod jednou pevnou identitou control-plane, **`ui-assistant`** (charter v `openbank-libs/governance/agents.yaml`): **pouze pro čtení, pouze návrhy, nikdy money-path nástroj**.
 
 ## Co služba **NEDĚLÁ**
 
 - ❌ Nedrží žádná bankovní data — nemá vlastní doménový agregát.
-- ❌ Nemění stav — **neexistuje zapisovací nástroj**; charter zakazuje `money.*`, `*.write`, `gh.pr.*`, `secrets.read.raw`.
+- ❌ Agent nikdy nemění stav — **neexistuje zapisovací nástroj**; charter zakazuje `money.*`, `*.write`, `gh.pr.*`, `secrets.read.raw`. (Jediné zápisy, které služba přijímá, jsou CI ingestované řádky merge důkazů, zapisované servisním credential `ROLE_ADMIN` — nikdy agentem.)
 - ❌ Neprovádí platby, neúčtuje do ledgeru ani nepřesouvá peníze — **není** v `rules.yaml: money_path_services`.
 - ❌ Nespouští LLM v prohlížeči — model se volá serverově, za hranicí důvěry gateway.
 - ❌ **Není** vystavena externím TPP přes API Gateway — je to interní služba.
