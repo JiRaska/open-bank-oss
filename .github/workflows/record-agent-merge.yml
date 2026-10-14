@@ -1,0 +1,76 @@
+# -----------------------------------------------------------------------------
+# Record "a human merged an agent's PR" — ADR-0031 phase 3 evidence.
+#
+# WHY. Phase 3 of ADR-0031 needs recorded evidence that a HUMAN merged an agent-authored
+# PR, kept out-of-band of the agent's own telemetry (an agent self-reporting "a human
+# merged me" proves nothing). This workflow is the CI-side producer: on every PR closed
+# (merged) against main, .github/scripts/record-agent-merge.py decides whether the PR was
+# agent-authored (head branch under agent/ or codex/, or author declared in rules.yaml
+# autonomous_agent_prs.agent_accounts) and POSTs the record — mergedBy, merge commit,
+# head branch, title — to POST /api/v1/agent-merge-records in openbank-agent-service
+# (ROLE_ADMIN-protected, ADR-0031 phase 3 backend).
+#
+# REQUIRED REPO CONFIGURATION (one-time, manual — this workflow fails SOFT until done):
+#   * Repository variable AGENT_SERVICE_URL — base URL of openbank-agent-service, e.g.
+#     the in-cluster service URL a self-hosted runner can reach. When unset the run
+#     prints a ::warning:: and records nothing (never blocks the merge).
+#   * Repository secret AGENT_MERGE_RECORDER_TOKEN — bearer token accepted by the
+#     ROLE_ADMIN-protected endpoint (minted per the agent-service phase-3 docs). When
+#     unset the run prints a ::warning:: and records nothing.
+#
+# FAIL-SOFT BY DESIGN. Merge recording must never block a merge: an unreachable endpoint
+# or a missing token/variable degrades to a ::warning:: + exit 0. The only hard failure
+# is a malformed pull_request event, which is a CI wiring bug.
+#
+# Like record-deployment-on-merge.yml: `pull_request` (not `_target`) keeps same-repo
+# secrets; a fork PR gets no secrets and simply records nothing (soft warning).
+# -----------------------------------------------------------------------------
+name: Record agent PR merge
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  # One record per PR; a reopened/closed churn supersedes the earlier run.
+  group: record-agent-merge-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  record:
+    name: record-agent-merge
+    # The workflow fires on every closed PR; only a MERGED one can produce a merge
+    # record, and the agent-authorship decision itself lives in the script (testable
+    # Python, thin YAML — repo convention).
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      # Base URL of openbank-agent-service; the script appends
+      # /api/v1/agent-merge-records. Provision as a repository variable; unset ->
+      # warning + no record (fail-soft, see header).
+      AGENT_SERVICE_URL: ${{ vars.AGENT_SERVICE_URL }}
+      # Bearer token for the ROLE_ADMIN endpoint; provision as a repository secret
+      # (AGENT_MERGE_RECORDER_TOKEN, see header). Never log it.
+      AGENT_MERGE_RECORDER_TOKEN: ${{ secrets.AGENT_MERGE_RECORDER_TOKEN }}
+      # Optional override for the record's proposalId; normally the script reads a
+      # `Proposal-Id:` line from the PR body instead.
+      AGENT_MERGE_PROPOSAL_ID: ""
+      # Untrusted event data is passed as a FILE ($GITHUB_EVENT_PATH, set by the
+      # runner), never interpolated into the script.
+      GITHUB_EVENT_PATH: ${{ github.event_path }}
+    steps:
+      # The script and the rules.yaml it reads agent_accounts from. SHALLOW on purpose:
+      # nothing here needs history.
+      - name: Check out the recorder script and governance rules
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Record the human merge of an agent PR
+        run: python3 .github/scripts/record-agent-merge.py

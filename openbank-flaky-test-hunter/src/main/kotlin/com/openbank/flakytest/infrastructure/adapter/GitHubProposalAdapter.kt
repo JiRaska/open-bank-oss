@@ -7,6 +7,7 @@ package com.openbank.flakytest.infrastructure.adapter
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.flakytest.application.port.out.GitHubProposalPort
+import com.openbank.flakytest.application.port.out.GitHubProposalPort.Companion.prBranchFor
 import com.openbank.flakytest.domain.model.FlakyTestCheckType
 import com.openbank.flakytest.domain.model.FlakyTestFinding
 import com.openbank.flakytest.infrastructure.config.FlakyTestHunterConfig
@@ -75,7 +76,7 @@ class GitHubProposalAdapter(private val config: FlakyTestHunterConfig) : GitHubP
                     return@withContext null
                 }
                 val baseSha = getMainSha() ?: return@withContext null
-                val branch = "flaky-test-hunter/unit-return-${finding.id.take(SHORT_ID_LENGTH)}"
+                val branch = prBranchFor(finding.id)
                 if (!createBranch(branch, baseSha)) return@withContext null
                 val title = "fix(flaky-test-hunter): restore JUnit test execution"
                 if (!commitFile(finding.filePath, branch, title, amended, source.sha)) return@withContext null
@@ -179,7 +180,6 @@ class GitHubProposalAdapter(private val config: FlakyTestHunterConfig) : GitHubP
 
     private companion object {
         const val ADD_EXPLICIT_UNIT_RETURN_TYPE = "add-explicit-unit-return-type"
-        const val SHORT_ID_LENGTH = 8
         const val CONNECT_TIMEOUT_SECONDS = 10L
         const val REQUEST_TIMEOUT_SECONDS = 30L
         val OK_RANGE = 200..299

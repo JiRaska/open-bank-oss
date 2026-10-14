@@ -102,7 +102,7 @@
       "id": "D9",
       "title": "Phasing (blast radius grows with controls)",
       "status": "partial",
-      "detail": "Phase 1 controls live and ENFORCING (deny-by-default + block); the phase-2 HITL proposal queue is shipped. HolmesGPT (rca-investigator, ADR-0091) investigates only on operator request; an authorized operator may persist its finding into an ADR-0271 SHADOW case, but it never remediates or changes banking state. The customer-facing copilot (ADR-0089) runs in its own SCA-gated regime (proposes; the bank disposes). No agent takes autonomous business action. Phases 3–5 (dev agent → money-path → tamper-evidence) follow."
+      "detail": "Phase 1 controls live and ENFORCING (deny-by-default + block); the phase-2 HITL proposal queue is shipped. HolmesGPT (rca-investigator, ADR-0091) investigates only on operator request; an authorized operator may persist its finding into an ADR-0271 SHADOW case, but it never remediates or changes banking state. The customer-facing copilot (ADR-0089) runs in its own SCA-gated regime (proposes; the bank disposes). No agent takes autonomous business action. Phases 3–5 (dev agent → money-path → tamper-evidence) follow. Phase-3 mechanism (built, evidence pending): flaky-test-hunter's GitHub PR path is now policy-gated — an in-process charter check (deny-by-default, packaged agents.yaml) plus an OPA sidecar query fail CLOSED on any PDP outage before any branch or PR is created (write path: advisory degradation is not acceptable there; every decision is audited as agent.github.pr_open with policy_decision). The recorded-human-merge pipeline is live: record-agent-merge workflow → POST /api/v1/agent-merge-records → agent_merge_record (V6) + agent.pr.merged audit (actorType=HUMAN, out-of-band of agent telemetry). Phase stays 2/5 until the criteria are independently verified: a first real merge recorded through this pipeline plus deployment attestation."
     }
   ],
   "decisionSummary": {
@@ -172,6 +172,8 @@
       "Tool-call decisions audited (agent.mcp.tool_call)",
       "Tool-execution outcomes audited (agent.mcp.tool_exec)",
       "Model completions audited (agent.model.complete)",
+      "PR-path policy decisions audited (agent.github.pr_open; fail-closed on PDP outage)",
+      "Human merge recording (agent.pr.merged → agent_merge_record, out-of-band of agent telemetry)",
       "Audit envelope + Kafka pipeline",
       "Hash-chain (record_hash/prev_hash, V5)",
       "Externally-signed anchors (V6; AWS KMS signer configured in sandbox)"
@@ -456,7 +458,7 @@
     "provenance": {
       "curated": {
         "source": "openbank-libs/governance/ai-rollout.yaml",
-        "sha256": "b4ddd769c30c0212"
+        "sha256": "882e4cf762a178e1"
       },
       "generatedBy": ".github/scripts/gen-ai-governance-snapshot.py"
     }

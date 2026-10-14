@@ -11,6 +11,9 @@ import com.openbank.flakytest.application.port.out.LlmDiagnosisPort
 import com.openbank.flakytest.domain.model.FindingStatus
 import com.openbank.flakytest.domain.model.FlakyTestFinding
 import com.openbank.flakytest.infrastructure.config.FlakyTestHunterConfig
+import com.openbank.flakytest.infrastructure.policy.PrPathDecision
+import com.openbank.flakytest.infrastructure.policy.PrPathGateVocabulary
+import com.openbank.flakytest.infrastructure.policy.PrPathPolicyGate
 import com.openbank.libs.audit.AuditEvent
 import com.openbank.libs.audit.AuditEventPublisher
 import com.openbank.libs.audit.AuditResult
@@ -29,7 +32,11 @@ import java.time.Instant
  * AI-attributed audit (D5) before returning. `actorType = AI_AGENT` and `policy_decision` mirror
  * the same envelope shape `AgentPolicyGate` uses for MCP tool calls; this activity is the
  * equivalent enforcement point for the Temporal-workflow action surface, since flaky-test-hunter
- * never calls MCP tools directly.
+ * never calls MCP tools directly. Phase 3 adds the real policy gate: when the LLM proposes the
+ * one mechanical fix, [PrPathPolicyGate] runs BEFORE [GitHubProposalPort.openProposalPr] — a
+ * Denied decision vetoes the entire PR-opening operation (no branch, no commit, no PR), the
+ * finding falls back to the human ticket path, and the audit payload records the disposition as
+ * policy-blocked (`policy_blocked: true`, `policy_denial_reason`).
  */
 @ApplicationScoped
 open class DiagnoseAndProposeActivityImpl(
@@ -38,6 +45,7 @@ open class DiagnoseAndProposeActivityImpl(
     private val findingRepository: FindingRepository,
     private val auditPublisher: AuditEventPublisher,
     private val config: FlakyTestHunterConfig,
+    private val prPathGate: PrPathPolicyGate,
 ) : DiagnoseAndProposeActivity {
 
     private val log = Logger.getLogger(DiagnoseAndProposeActivityImpl::class.java)
@@ -55,8 +63,11 @@ open class DiagnoseAndProposeActivityImpl(
         }
 
     // A flaky or silently-skipped test is a human triage decision except for the narrow phase-3
-    // mechanical repair described by LlmDiagnosisPort. A failed or unconfigured PR attempt falls
-    // back to the ticket path; it never fabricates a pending-PR URL.
+    // mechanical repair described by LlmDiagnosisPort. When a mechanical fix exists, the ADR-0031
+    // phase-3 policy gate runs first and a Denied decision vetoes the entire PR-opening
+    // operation — the GitHub port is never invoked; the finding falls back to the ticket path
+    // and the audit payload records the policy-blocked disposition. A failed or unconfigured PR
+    // attempt likewise falls back; it never fabricates a pending-PR URL.
     override fun propose(finding: FlakyTestFinding): FlakyTestFinding = runOnVertxContext {
         log.infof(
             "Proposing disposition for finding %s (%s) on %s",
@@ -67,7 +78,17 @@ open class DiagnoseAndProposeActivityImpl(
         val rootCause = finding.rootCause
             ?: error("Cannot propose without a diagnosis for finding ${finding.id}")
         val fixDiff = llm.proposeFixDiff(finding, rootCause)
-        val prUrl = fixDiff?.let { githubProposal.openProposalPr(finding, it) }
+        val gateDecision = fixDiff?.let { prPathGate.decide(finding) }
+        if (gateDecision is PrPathDecision.Denied) {
+            log.warnf(
+                "Policy gate denied the PR path for finding %s (%s) — falling back to the ticket path",
+                finding.id,
+                gateDecision.reason,
+            )
+        }
+        val prUrl = fixDiff
+            ?.takeIf { gateDecision is PrPathDecision.Allowed }
+            ?.let { githubProposal.openProposalPr(finding, it) }
         val proposed = if (prUrl != null) {
             finding.copy(
                 proposedFixDiff = fixDiff,
@@ -82,21 +103,31 @@ open class DiagnoseAndProposeActivityImpl(
                 proposedAt = Instant.now(),
             )
         }
-        auditProposal(finding, fixDiff, proposed.proposalUrl)
+        auditProposal(finding, fixDiff, proposed.proposalUrl, gateDecision)
         findingRepository.update(proposed)
     }
 
     /**
      * One AI-attributed [AuditEvent] per disposition, regardless of outcome — a refusal is exactly
-     * as auditable as an opened PR (D5, ADR-0031). `policy_decision` is `ALLOW` only when this
-     * capability's own fail-closed write path (`GitHubProposalPort.openProposalPr`) actually
-     * produced a PR; every other outcome — no mechanical fix, a missing/invalid token, an
-     * ineligible finding, or a GitHub API failure — is `DENY` and falls back to the ticket-only
-     * path. No human approver is known yet at proposal time (that is [FindingStatus.APPROVED],
-     * recorded separately once a human disposes the finding through the HITL queue).
+     * as auditable as an opened PR (D5, ADR-0031). `policy_decision` is `ALLOW` only when the
+     * policy gate ALLOWED the PR path and the fail-closed write path
+     * ([GitHubProposalPort.openProposalPr]) actually produced a PR; every other outcome — no
+     * mechanical fix, a gate denial (`policy_blocked: true` with `policy_denial_reason`, e.g.
+     * `pdp_unreachable`), a missing/invalid token, an ineligible finding, or a GitHub API
+     * failure — is `DENY` and falls back to the ticket-only path. The policy payload names the
+     * exact tool, resource, and branch the gate evaluated, so the audit trail answers "what
+     * would this ALLOW have touched" without a second lookup. No human approver is known yet at
+     * proposal time (that is [FindingStatus.APPROVED], recorded separately once a human disposes
+     * the finding through the HITL queue).
      */
-    private suspend fun auditProposal(finding: FlakyTestFinding, fixDiff: String?, proposalUrl: String?) {
+    private suspend fun auditProposal(
+        finding: FlakyTestFinding,
+        fixDiff: String?,
+        proposalUrl: String?,
+        gateDecision: PrPathDecision?,
+    ) {
         val prOpened = fixDiff != null && proposalUrl != null
+        val gateDenied = gateDecision is PrPathDecision.Denied
         auditPublisher.publish(
             AuditEvent(
                 actorId = AGENT_ID,
@@ -109,6 +140,11 @@ open class DiagnoseAndProposeActivityImpl(
                     "model_id" to config.modelId(),
                     "flaky_test_check_type_impacted" to finding.checkType.name,
                     "policy_decision" to if (prOpened) "ALLOW" else "DENY",
+                    "policy_denial_reason" to (gateDecision as? PrPathDecision.Denied)?.reason,
+                    "policy_blocked" to (fixDiff != null && gateDenied),
+                    "tool" to if (fixDiff != null) PrPathGateVocabulary.TOOL_GH_PR_OPEN else null,
+                    "resource" to if (fixDiff != null) PrPathGateVocabulary.RESOURCE_GITHUB_PR else null,
+                    "pr_branch" to if (fixDiff != null) GitHubProposalPort.prBranchFor(finding.id) else null,
                     "proposal_url" to proposalUrl,
                     "human_approved_by" to null,
                 ),
