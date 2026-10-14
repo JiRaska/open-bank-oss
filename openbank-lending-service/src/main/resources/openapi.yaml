@@ -219,6 +219,7 @@ paths:
           required: true
           description: The applicant's party id, set by customer-edge from the customer JWT.
           schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -232,6 +233,8 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
         '404': { description: No such application for this caller }
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
         '422': { description: The current state no longer permits withdrawal }
 
   /api/v1/lending/intake/financial-health:
@@ -751,6 +754,7 @@ paths:
         (POST /api/v1/lending/loans/{id}/withdrawal).
       parameters:
         - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -759,9 +763,13 @@ paths:
               $ref: '#/components/schemas/WithdrawApplicationRequest'
       responses:
         '200': { description: Application withdrawn }
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404': { description: Application not found }
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
         '422': { description: The current state no longer permits withdrawal (e.g. SIGNED, terminal) }
   /api/v1/lending/applications/{id}/submit-documents:
     post:
@@ -774,6 +782,7 @@ paths:
         the transition is evidenced like every other origination step.
       parameters:
         - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: false
         content:
@@ -782,9 +791,13 @@ paths:
               $ref: '#/components/schemas/SubmitDocumentsRequest'
       responses:
         '200': { description: Documents accepted; application moved to ASSESSMENT }
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404': { description: Application not found }
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
         '422': { description: Application is not awaiting document submission }
   /api/v1/lending/applications/{id}/sign:
     post:
@@ -800,6 +813,7 @@ paths:
         moves; anything else answers 422.
       parameters:
         - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -808,11 +822,13 @@ paths:
               $ref: '#/components/schemas/SignApplicationRequest'
       responses:
         '200': { description: Application signed; artefact hash persisted }
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404': { description: Application not found }
         '409':
-          $ref: '#/components/responses/Conflict'
+          $ref: '#/components/responses/IdempotencyConflict'
         '422': { description: Application is not awaiting signature }
   /api/v1/lending/applications/{id}/disburse:
     post:
@@ -1565,6 +1581,16 @@ components:
       in: path
       required: true
       schema: { type: string, format: uuid }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: >-
+        REQUIRED caller-supplied replay key (#8351): a retry carrying the same key replays the
+        stored 200 with X-Idempotency-Replayed: true instead of re-running a transition the
+        state machine would now refuse (money-path POST). The same key with a different body
+        answers 409 IDEMPOTENCY_KEY_REUSED.
+      schema: { type: string }
   responses:
     IdempotencyConflict:
       description: >-

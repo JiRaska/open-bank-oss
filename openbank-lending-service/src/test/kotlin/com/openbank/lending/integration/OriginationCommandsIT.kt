@@ -28,12 +28,17 @@ import javax.sql.DataSource
  * The ADR-0211 explicit origination commands over real HTTP and a real database:
  *
  *  - withdraw: desk leg, pre-disbursement; the reason minimum length is enforced, the stored row
- *    and the outbox evidence agree, a second withdrawal of the terminal row is refused;
+ *    and the outbox evidence agree, a keyed retry replays the stored outcome (no second
+ *    transition, X-Idempotency-Replayed: true), and a second withdrawal under a fresh key of the
+ *    terminal row is refused;
  *  - submitDocuments: refused outside DOCS_REQUIRED (the default pack skips that state, so the
  *    happy path is a pack-mandated case — unit-covered in OriginationCommandsTest);
  *  - sign: drives AWAITING_SIGNATURE → SIGNED, persists the artefact hash in the SAME claim as
  *    the transition (JDBC read), and after SIGNED neither a second sign nor a withdrawal is
  *    possible — the signed contract is no longer abandonable.
+ *
+ * The four commands take a REQUIRED Idempotency-Key (#8351): every post below carries one, fresh
+ * per call unless a replay is the thing under test.
  */
 @QuarkusTest
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -125,6 +130,7 @@ class OriginationCommandsIT {
         withdrawApplicationId = apply()
         Given {
             contentType("application/json")
+            header("Idempotency-Key", UUID.randomUUID().toString())
             body("""{"reason":"short"}""")
         } When {
             post("/api/v1/lending/applications/$withdrawApplicationId/withdraw")
@@ -137,10 +143,13 @@ class OriginationCommandsIT {
     @Test
     @Order(2)
     @TestSecurity(user = PROPOSER, roles = ["ROLE_LENDING_OFFICER", "ROLE_ADMIN"])
-    fun `2 - withdrawal moves SUBMITTED to WITHDRAWN and the evidence agrees`() {
+    fun `2 - withdrawal moves SUBMITTED to WITHDRAWN and a keyed retry replays it`() {
+        val key = UUID.randomUUID().toString()
+        val body = """{"reason":"applicant no longer needs the loan"}"""
         Given {
             contentType("application/json")
-            body("""{"reason":"applicant no longer needs the loan"}""")
+            header("Idempotency-Key", key)
+            this.body(body)
         } When {
             post("/api/v1/lending/applications/$withdrawApplicationId/withdraw")
         } Then {
@@ -148,14 +157,27 @@ class OriginationCommandsIT {
         }
         assertThat(storedStatus(withdrawApplicationId)).isEqualTo("WITHDRAWN")
         assertThat(transitionsTo(withdrawApplicationId, "WITHDRAWN")).isEqualTo(1)
+
+        // #8351: the same key + body replays the stored outcome — no second transition, no 422
+        // from a machine that has already moved on.
+        val replay = io.restassured.RestAssured.given()
+            .contentType("application/json")
+            .header("Idempotency-Key", key)
+            .body(body)
+            .post("/api/v1/lending/applications/$withdrawApplicationId/withdraw")
+        assertThat(replay.statusCode).isEqualTo(200)
+        assertThat(replay.header("X-Idempotency-Replayed")).isEqualTo("true")
+        assertThat(storedStatus(withdrawApplicationId)).isEqualTo("WITHDRAWN")
+        assertThat(transitionsTo(withdrawApplicationId, "WITHDRAWN")).isEqualTo(1)
     }
 
     @Test
     @Order(3)
     @TestSecurity(user = PROPOSER, roles = ["ROLE_LENDING_OFFICER", "ROLE_ADMIN"])
-    fun `3 - a terminal WITHDRAWN row refuses a second withdrawal`() {
+    fun `3 - a terminal WITHDRAWN row refuses a second withdrawal under a fresh key`() {
         Given {
             contentType("application/json")
+            header("Idempotency-Key", UUID.randomUUID().toString())
             body("""{"reason":"applicant changed their mind again"}""")
         } When {
             post("/api/v1/lending/applications/$withdrawApplicationId/withdraw")
@@ -176,6 +198,7 @@ class OriginationCommandsIT {
 
         Given {
             contentType("application/json")
+            header("Idempotency-Key", UUID.randomUUID().toString())
             body("""{"reason":"all documents attached"}""")
         } When {
             post("/api/v1/lending/applications/$signatureApplicationId/submit-documents")
@@ -207,6 +230,7 @@ class OriginationCommandsIT {
     fun `6 - sign moves to SIGNED and persists the artefact hash in the same claim`() {
         Given {
             contentType("application/json")
+            header("Idempotency-Key", UUID.randomUUID().toString())
             body("""{"artefactHash":"$ARTEFACT_HASH"}""")
         } When {
             post("/api/v1/lending/applications/$signatureApplicationId/sign")
@@ -224,6 +248,7 @@ class OriginationCommandsIT {
     fun `7 - a signed application can be neither re-signed nor withdrawn`() {
         Given {
             contentType("application/json")
+            header("Idempotency-Key", UUID.randomUUID().toString())
             body("""{"artefactHash":"$ARTEFACT_HASH"}""")
         } When {
             post("/api/v1/lending/applications/$signatureApplicationId/sign")
@@ -232,6 +257,7 @@ class OriginationCommandsIT {
         }
         Given {
             contentType("application/json")
+            header("Idempotency-Key", UUID.randomUUID().toString())
             body("""{"reason":"applicant got cold feet"}""")
         } When {
             post("/api/v1/lending/applications/$signatureApplicationId/withdraw")

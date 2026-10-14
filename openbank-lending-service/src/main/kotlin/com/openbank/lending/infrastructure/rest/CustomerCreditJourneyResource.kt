@@ -4,18 +4,22 @@
 
 package com.openbank.lending.infrastructure.rest
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.lending.application.port.out.LoanApplicationRepository
 import com.openbank.lending.domain.model.LoanApplication
 import com.openbank.lending.domain.model.WithdrawApplicationRequest
 import com.openbank.lending.infrastructure.intake.CustomerIntakeConfig
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.authz.ServiceAccountIdentity
+import com.openbank.libs.idempotency.IdempotencyStore
+import com.openbank.libs.idempotency.RequestFingerprints
 import com.openbank.libs.lending.origination.CreditJourneyProjection
 import com.openbank.libs.lending.origination.CreditJourneyView
 import com.openbank.libs.lending.origination.CreditRequirement
 import com.openbank.libs.lending.origination.OriginationState
 import io.quarkus.security.identity.SecurityIdentity
 import io.smallrye.mutiny.Uni
+import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
@@ -25,6 +29,7 @@ import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
+import kotlinx.coroutines.CancellationException
 import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import java.util.UUID
@@ -59,14 +64,16 @@ class CustomerCreditJourneyResource(
     private val apply: com.openbank.lending.application.port.`in`.ApplyForLoanUseCase,
     private val config: CustomerIntakeConfig,
     private val identity: SecurityIdentity,
+    private val idempotencyStore: IdempotencyStore,
+    private val objectMapper: ObjectMapper,
 ) {
     @GET
     @Path("/applications")
     @Authorize(action = "lending.intake", resource = "")
     @Operation(summary = "The caller's own credit applications as customer-readable journeys (edge only)")
     fun list(@HeaderParam(CustomerIntakeResource.PARTY_HEADER) partyHeader: String?): Uni<Response> {
-        if (!callerIsPermitted()) return refusal()
-        val partyId = scopeOf(partyHeader) ?: return badParty()
+        if (!callerIsPermitted()) return Uni.createFrom().item(refusal())
+        val partyId = scopeOf(partyHeader) ?: return Uni.createFrom().item(badParty())
         return applications.findByParty(partyId)
             .map { list -> Response.ok(list.map { it.toJourneyDto() }).build() }
     }
@@ -79,8 +86,8 @@ class CustomerCreditJourneyResource(
         @HeaderParam(CustomerIntakeResource.PARTY_HEADER) partyHeader: String?,
         @PathParam("id") id: String,
     ): Uni<Response> {
-        if (!callerIsPermitted()) return refusal()
-        val partyId = scopeOf(partyHeader) ?: return badParty()
+        if (!callerIsPermitted()) return Uni.createFrom().item(refusal())
+        val partyId = scopeOf(partyHeader) ?: return Uni.createFrom().item(badParty())
         val applicationId = runCatching { UUID.fromString(id) }.getOrNull()
             ?: return Uni.createFrom().item(notFound())
         return applications.findByParty(partyId).map { list ->
@@ -104,26 +111,45 @@ class CustomerCreditJourneyResource(
     @Path("/applications/{id}/withdraw")
     @Authorize(action = "lending.intake", resource = "")
     @Operation(summary = "Withdraw one of the caller's own applications before disbursement (edge only)")
-    fun withdraw(
+    suspend fun withdraw(
         @HeaderParam(CustomerIntakeResource.PARTY_HEADER) partyHeader: String?,
         @PathParam("id") id: String,
         request: WithdrawApplicationRequest,
-    ): Uni<Response> {
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+    ): Response {
         if (!callerIsPermitted()) return refusal()
         val partyId = scopeOf(partyHeader) ?: return badParty()
-        val applicationId = runCatching { UUID.fromString(id) }.getOrNull()
-            ?: return Uni.createFrom().item(notFound())
-        return applications.findByParty(partyId).flatMap { list ->
-            val owned = list.firstOrNull { it.id.value == applicationId }
-                ?: return@flatMap Uni.createFrom().item(notFound())
-            apply.withdraw(owned.id, request, identity.principal?.name.orEmpty())
-                .map { Response.ok(it.toJourneyDto()).build() }
-                .onFailure(IllegalStateException::class.java)
-                .recoverWithItem { e ->
-                    // The machine refused (terminal, or SIGNED and later): the customer's honest
-                    // answer is "this can no longer be withdrawn", keyed like the other refusals.
-                    Response.status(HTTP_UNPROCESSABLE).entity(mapOf("error" to e.message)).build()
-                }
+        // #8351 money-path POST: the replay key is REQUIRED; libs-runtime maps the
+        // IllegalArgumentException to 400. A keyed retry replays the stored outcome instead of
+        // re-running a transition the machine would now refuse (the edge contract differs from
+        // the optional-key intake POST, where a second application is a legitimate call).
+        require(!idempotencyKey.isNullOrBlank()) { "Idempotency-Key header is required" }
+        val applicationId = runCatching { UUID.fromString(id) }.getOrNull() ?: return notFound()
+        val requestHash = RequestFingerprints.of(
+            objectMapper,
+            "POST",
+            "/api/v1/lending/intake/applications/$id/withdraw",
+            request,
+        )
+        return idempotencyStore.submitOnce(
+            "lending:intake-withdraw:$applicationId:${identity.principal?.name.orEmpty()}:$idempotencyKey",
+            requestHash,
+            INTAKE_WITHDRAW_KEY_TTL_SECONDS,
+        ) {
+            val owned = applications.findByParty(partyId).awaitSuspending()
+                .firstOrNull { it.id.value == applicationId }
+                ?: return@submitOnce notFound()
+            try {
+                val withdrawn = apply.withdraw(owned.id, request, identity.principal?.name.orEmpty()).awaitSuspending()
+                Response.ok(objectMapper.writeValueAsString(withdrawn.toJourneyDto()))
+                    .type(MediaType.APPLICATION_JSON).build()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: IllegalStateException) {
+                // The machine refused (terminal, or SIGNED and later): the customer's honest
+                // answer is "this can no longer be withdrawn", keyed like the other refusals.
+                Response.status(HTTP_UNPROCESSABLE).entity(mapOf("error" to e.message)).build()
+            }
         }
     }
 
@@ -150,21 +176,18 @@ class CustomerCreditJourneyResource(
     private fun scopeOf(partyHeader: String?): UUID? =
         partyHeader?.let { runCatching { UUID.fromString(it) }.getOrNull() }?.takeIf { it != ZERO_UUID }
 
-    private fun refusal(): Uni<Response> = Uni.createFrom().item(
+    private fun refusal(): Response =
         Response.status(HTTP_FORBIDDEN).entity(mapOf("error" to "caller is not the customer-edge intake principal"))
-            .build(),
-    )
+            .build()
 
     /**
      * A missing or malformed party header from an ALREADY-AUTHORISED caller is a bad request, not a
      * 403: the caller is permitted, the request is not well-formed. Keeping the two apart also
      * keeps the 403 meaning exactly one thing — "you are not the edge".
      */
-    private fun badParty(): Uni<Response> = Uni.createFrom().item(
-        Response.status(HTTP_BAD_REQUEST)
-            .entity(mapOf("error" to "${'$'}{CustomerIntakeResource.PARTY_HEADER} is missing or not a UUID"))
-            .build(),
-    )
+    private fun badParty(): Response = Response.status(HTTP_BAD_REQUEST)
+        .entity(mapOf("error" to "${'$'}{CustomerIntakeResource.PARTY_HEADER} is missing or not a UUID"))
+        .build()
 
     private fun notFound(): Response =
         Response.status(HTTP_NOT_FOUND).entity(mapOf("error" to "application not found")).build()
@@ -175,6 +198,7 @@ class CustomerCreditJourneyResource(
         private const val HTTP_FORBIDDEN = 403
         private const val HTTP_NOT_FOUND = 404
         private const val HTTP_UNPROCESSABLE = 422
+        private const val INTAKE_WITHDRAW_KEY_TTL_SECONDS = 300L
     }
 }
 
