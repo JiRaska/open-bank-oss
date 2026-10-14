@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.45.0](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.44.0...tax-reporting-service-v0.45.0) (2026-10-13)
+
+
+### Features
+
+* **tax-reporting:** source the pension company's own returns from its ledger (ADR-0337) ([#12496](https://github.com/JiRaska/open-bank-oss/issues/12496)) ([d84709d](https://github.com/JiRaska/open-bank-oss/commit/d84709d92221a3e98a91d0fc66c8808f33021f2c))
+
 ## [0.44.0](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.43.1...tax-reporting-service-v0.44.0) (2026-10-13)
 
 
