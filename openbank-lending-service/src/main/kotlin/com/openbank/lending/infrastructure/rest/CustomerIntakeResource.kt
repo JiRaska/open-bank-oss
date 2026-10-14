@@ -9,6 +9,7 @@ import com.openbank.lending.application.port.`in`.ApplyForLoanUseCase
 import com.openbank.lending.domain.model.LoanApplicationRequest
 import com.openbank.lending.infrastructure.intake.CustomerIntakeConfig
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.authz.ServiceAccountIdentity
 import com.openbank.libs.domain.money.CurrencyCode
 import com.openbank.libs.domain.money.Money
 import com.openbank.libs.idempotency.IdempotencyStore
@@ -127,7 +128,7 @@ class CustomerIntakeResource(
         val permitted = config.callerPrincipal.orElse("")
         // Blank config refuses everything. The alternative — "unset means allow any operator" — is
         // exactly the over-grant this endpoint exists to avoid, and it would arrive by omission.
-        if (permitted.isBlank() || identity.principal?.name != permitted) {
+        if (!ServiceAccountIdentity.isPrincipal(identity, permitted)) {
             return error(HTTP_FORBIDDEN, "caller is not the customer-edge intake principal")
         }
         val partyId = partyHeader?.let { runCatching { UUID.fromString(it) }.getOrNull() }
