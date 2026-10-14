@@ -6,6 +6,10 @@ plugins {
     id("openbank.quarkus-service")
 }
 
+kotlin.sourceSets.named("consumerPactTest") {
+    kotlin.include("com/openbank/pension/infrastructure/fund/InMemoryFundOrderPlans.kt")
+}
+
 dependencies {
     implementation(enforcedPlatform(libs.quarkus.bom))
 
