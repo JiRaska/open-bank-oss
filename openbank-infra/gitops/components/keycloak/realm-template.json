@@ -884,6 +884,7 @@
         "roles"
       ],
       "optionalClientScopes": [
+        "catalog:read",
         "pension:legal-approve",
         "pension:product-approve"
       ],
