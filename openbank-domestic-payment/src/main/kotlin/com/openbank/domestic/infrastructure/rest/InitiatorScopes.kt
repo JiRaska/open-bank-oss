@@ -29,7 +29,10 @@ class InitiatorScopes(
                 ?.let { runCatching { UUID.fromString(it) }.getOrNull() }
             return InitiatorScope.Scoped(PENSION_PRINCIPAL, account)
         }
-        return if (STAFF_ROLES.any { identity.hasRole(it) }) InitiatorScope.General else InitiatorScope.Undeclared
+        val staff = STAFF_ROLES.any(identity::hasRole) && ServiceAccountIdentity.isHumanStaff(identity)
+        val edge = identity.hasRole("ROLE_OPERATOR") &&
+            ServiceAccountIdentity.isPrincipal(identity, "service-account-openbank-edge")
+        return if (staff || edge) InitiatorScope.General else InitiatorScope.Undeclared
     }
 
     companion object {

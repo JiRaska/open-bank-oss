@@ -19,6 +19,8 @@ All endpoints require a **Keycloak Bearer token** (realm `openbank`, RS256 JWT).
 | `GET /domestic-payments` | `ROLE_VIEWER`, `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_PAYMENTS`, `ROLE_API` |
 | `PATCH /domestic-payments/{paymentId}/status` | `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_PAYMENTS` + `@Authorize(action="domesticPayment.transitionStatus")` (OPA, ADR-0034) |
 
+For payment creation, the role/OPA check is followed by an initiator-scope check (ADR-0335 D5). The pension client service account is recognized only from a verified JWT with a non-empty subject, `azp` matching that client, and `preferred_username` matching `service-account-<azp>`; it may debit only the configured pension account. The edge client service account also requires `ROLE_OPERATOR` for general scope. A staff token gets general scope only with an allowed staff role and verified interactive-user claims. A role alone, a username that merely looks like a service account, or an unknown machine client does not grant general payment creation.
+
 OIDC is disabled only in `%dev` and `%test` profiles.
 
 ## Idempotence

@@ -32,6 +32,8 @@ object ServiceAccountIdentity {
 
     private const val CLAIM_AZP = "azp"
     private const val CLAIM_PREFERRED_USERNAME = "preferred_username"
+    private const val CLAIM_CLIENT_ID = "client_id"
+    private const val CLAIM_CLIENT_ID_LEGACY = "clientId"
 
     /** Interactive clients in the realm templates; none issues client-credentials tokens. */
     private val HUMAN_CLIENT_IDS = setOf("openbank-admin-ui", "openbank-ops-cli", "admin-cli")
@@ -48,15 +50,78 @@ object ServiceAccountIdentity {
             jwt.name == username
     }
 
+    /**
+     * MCP OBO requires positive evidence of an interactive staff token before assigning a human
+     * principal. Absence of machine indicators alone is insufficient: an unfamiliar client with
+     * a non-service-account username must not acquire staff policy grants through a live session.
+     */
+    fun isInteractiveHumanToken(principal: Principal?): Boolean {
+        val jwt = principal as? JsonWebToken ?: return false
+        return runCatching {
+            val clientId = jwt.claimString(CLAIM_AZP)
+            val username = jwt.claimString(CLAIM_PREFERRED_USERNAME)
+            clientId in HUMAN_CLIENT_IDS &&
+                !jwt.subject.isNullOrBlank() &&
+                !username.isNullOrBlank() &&
+                !username.startsWith(PRINCIPAL_PREFIX) &&
+                machineClientId(jwt) == null
+        }.getOrDefault(false)
+    }
+
     /** The client id whose OWN service-account issued this token, or `null` if it is not one. */
     fun verifiedClientId(identity: SecurityIdentity?): String? = verifiedClientId(identity?.principal)
 
     /** JAX-RS filters can verify a JWT principal without injecting [SecurityIdentity]. */
     fun verifiedClientId(principal: Principal?): String? {
         val jwt = principal as? JsonWebToken ?: return null
-        if (jwt.subject.isNullOrBlank()) return null
-        val clientId = jwt.claimString(CLAIM_AZP)?.takeIf { it.isNotBlank() } ?: return null
-        return clientId.takeIf { jwt.claimString(CLAIM_PREFERRED_USERNAME) == PRINCIPAL_PREFIX + it }
+        return try {
+            if (jwt.subject.isNullOrBlank()) return null
+            val clientId = jwt.claimString(CLAIM_AZP)?.takeIf { it.isNotBlank() } ?: return null
+            clientId.takeIf { jwt.claimString(CLAIM_PREFERRED_USERNAME) == PRINCIPAL_PREFIX + it }
+        } catch (_: RuntimeException) {
+            // An unreadable claim must never grant a named-client identity or break a request filter.
+            null
+        }
+    }
+
+    /**
+     * FAIL CLOSED: `true` only when the principal is a verified JWT whose claims positively say
+     * person ([machineClientId] is `null`). Anything else — no identity, anonymous, a non-JWT
+     * principal, unreadable claims — is a machine. This is the value of
+     * `input.principal.service_account`, negated.
+     */
+    fun isVerifiedPerson(identity: SecurityIdentity?): Boolean =
+        identity?.principal is JsonWebToken && machineClientId(identity.principal) == null
+
+    /**
+     * The client hinted by a MACHINE token, or `null` when the token is not one. This broad
+     * classifier drives `input.principal.service_account`; it is NOT safe to use as the
+     * `input.principal.client_id` proof for a named-client grant. That value must come from
+     * [verifiedClientId], which binds `azp` to the service-account username.
+     *
+     * Broader than [verifiedClientId] on purpose: that one answers "is this exactly client C's own
+     * service-account" (for granting a SPECIFIC client), this one answers "is this a machine at
+     * all" (for keeping machines OUT), so it must fail towards `machine`. A JWT is a machine token
+     * when ANY holds:
+     *  - it carries `client_id` (or legacy `clientId`), the session note Keycloak sets only for a
+     *    client-credentials grant; a user login never carries it;
+     *  - `preferred_username` starts with `service-account-`;
+     *  - `preferred_username` is absent or blank: no username means no human to attribute to.
+     * None of these reads the principal NAME Quarkus derives (`upn` first), so a renamed user, a
+     * client_id-only token or name-mapper drift cannot make a machine look human.
+     * A non-JWT identity returns `null` here; [isVerifiedPerson] still classifies it as a machine.
+     * Returns `""` for a machine token that names no client.
+     */
+    fun machineClientId(principal: Principal?): String? {
+        val jwt = principal as? JsonWebToken ?: return null
+        // A claim that cannot be read is not evidence of a human: fail towards machine.
+        return runCatching {
+            val noted = (jwt.claimString(CLAIM_CLIENT_ID) ?: jwt.claimString(CLAIM_CLIENT_ID_LEGACY))
+                ?.takeIf { it.isNotBlank() }
+            val username = jwt.claimString(CLAIM_PREFERRED_USERNAME)
+            val machine = noted != null || username.isNullOrBlank() || username.startsWith(PRINCIPAL_PREFIX)
+            if (!machine) null else noted ?: jwt.claimString(CLAIM_AZP)?.takeIf { it.isNotBlank() } ?: ""
+        }.getOrDefault("")
     }
 
     /** The verified service-account principal name (`service-account-<azp>`), or `null`. */
@@ -74,6 +139,6 @@ object ServiceAccountIdentity {
     /** True iff the caller is the service-account of a client whose CLIENT ID is in [allowedClientIds]. */
     fun isClient(identity: SecurityIdentity?, allowedClientIds: Collection<String>): Boolean =
         verifiedClientId(identity)?.let { it in allowedClientIds } ?: false
-
-    private fun JsonWebToken.claimString(name: String): String? = getClaim<Any?>(name) as? String
 }
+
+private fun JsonWebToken.claimString(name: String): String? = getClaim<Any?>(name) as? String

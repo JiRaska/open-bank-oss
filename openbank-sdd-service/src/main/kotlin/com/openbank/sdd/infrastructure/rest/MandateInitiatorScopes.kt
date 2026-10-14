@@ -20,20 +20,20 @@ class MandateInitiatorScopes(
     @ConfigProperty(name = PENSION_CREDITOR_KEY)
     private val pensionCreditor: Optional<String>,
 ) {
-    fun of(identity: SecurityIdentity): MandateInitiatorScope {
-        val principal = identity.principal?.name ?: return MandateInitiatorScope.Denied
-        // Positive matches bind to the verified client (azp), never the principal NAME (#12448).
-        return when {
-            ServiceAccountIdentity.isPrincipal(identity, PENSION_PRINCIPAL) -> MandateInitiatorScope.Scoped(
-                PENSION_PRINCIPAL,
-                pensionCreditor.orElse("").trim().ifEmpty { null },
-            )
-            ServiceAccountIdentity.isPrincipal(identity, EDGE_PRINCIPAL) -> MandateInitiatorScope.General
-            principal.startsWith("service-account-") -> MandateInitiatorScope.Denied
-            principal.isNotBlank() && (identity.hasRole("ROLE_OPERATOR") || identity.hasRole("ROLE_ADMIN")) ->
-                MandateInitiatorScope.General
-            else -> MandateInitiatorScope.Denied
-        }
+    // Positive matches bind to the verified client (azp), never the principal NAME (#12448).
+    fun of(identity: SecurityIdentity): MandateInitiatorScope = when {
+        ServiceAccountIdentity.isPrincipal(identity, PENSION_PRINCIPAL) -> MandateInitiatorScope.Scoped(
+            PENSION_PRINCIPAL,
+            pensionCreditor.orElse("").trim().ifEmpty { null },
+        )
+        ServiceAccountIdentity.isPrincipal(
+            identity,
+            EDGE_PRINCIPAL,
+        ) -> MandateInitiatorScope.General
+        ServiceAccountIdentity.isHumanStaff(identity) &&
+            (identity.hasRole("ROLE_OPERATOR") || identity.hasRole("ROLE_ADMIN")) ->
+            MandateInitiatorScope.General
+        else -> MandateInitiatorScope.Denied
     }
 
     companion object {
