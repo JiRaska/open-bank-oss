@@ -115,6 +115,7 @@ class PanacheReferralRefereeLookup : ReferralRefereeLookup {
             expiresAt = e.expiresAt,
             idempotencyKey = e.idempotencyKey,
             attributedAt = e.attributedAt,
+            referralLink = e.referralLink,
         )
     }
 
