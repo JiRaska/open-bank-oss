@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.0.0...customer-edge-v1.1.0) (2026-10-14)
+
+
+### Features
+
+* **customer-edge:** filter products and offers by business eligibility segment under X-Acting-For (ADR-0284 D10) ([#12758](https://github.com/JiRaska/open-bank-oss/issues/12758)) ([69dffb4](https://github.com/JiRaska/open-bank-oss/commit/69dffb49e5d72fa14ec018fd1a6d9aad7eb0c6be))
+
 ## [1.0.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.90.2...customer-edge-v1.0.0) (2026-10-14)
 
 
