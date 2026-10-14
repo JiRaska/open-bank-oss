@@ -108,7 +108,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: customer-edge
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-customer-edge:sandbox-d5383951
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-customer-edge:sandbox-542d3aa3
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -183,6 +183,16 @@ spec:
               value: http://keycloak.iam.svc:8080/realms/openbank-customers
             - name: OIDC_CLIENT_ID
               value: openbank-edge
+            # Declare these callers for derived NetworkPolicies; defaults alone are invisible to the generator.
+            - name: AUDIT_SERVICE_URL
+              value: https://audit-service.audit.svc:8443
+            # Pension lifecycle (ADR-0334 S6) over pension-service's internal-TLS listener only.
+            # Its 8443 does not request a client certificate (bearer-only: the openbank-edge
+            # client_credentials token is the identity), so the edge verifies the server against the
+            # openbank-ca chain already mounted at /mnt/campaign-tls and the JDK client's hostname
+            # check (dnsNames pension-service.pension.svc). Cleartext 8171 is not used.
+            - name: PENSION_SERVICE_URL
+              value: https://pension-service.pension.svc:8443
             - name: ACCOUNT_SERVICE_URL
               value: http://account-service.accounts.svc:8100
             # ADR-0104 P2 currency pockets: the edge queries product-catalog (accounts ns,
@@ -296,6 +306,10 @@ spec:
               value: https://campaign-service.campaign.svc:8443
             - name: OPENBANK_UPSTREAM_TLS_TRUST_CERTIFICATE_FILE
               value: /mnt/campaign-tls/ca.crt
+            - name: OPENBANK_UPSTREAM_TLS_CLIENT_CERTIFICATE_FILE
+              value: /mnt/upstream-client-tls/tls.crt
+            - name: OPENBANK_UPSTREAM_TLS_CLIENT_KEY_FILE
+              value: /mnt/upstream-client-tls/tls.key
             # Member-get-member for the app (CustomerReferralResource). referral-service serves
             # HTTPS on 8443 with a cert from the same openbank-ca ClusterIssuer as campaign, so the
             # trust file above covers it. Declared here so gen-network-policies.py opens the
@@ -380,9 +394,11 @@ spec:
             - name: kafka-truststore
               mountPath: /mnt/kafka-truststore
               readOnly: true
+            - name: upstream-client-tls
+              mountPath: /mnt/upstream-client-tls
+              readOnly: true
             - name: campaign-tls-trust
-              mountPath: /mnt/campaign-tls/ca.crt
-              subPath: ca.crt
+              mountPath: /mnt/campaign-tls
               readOnly: true
           readinessProbe:
             httpGet:
@@ -493,9 +509,16 @@ spec:
         - name: kafka-truststore
           secret:
             secretName: kafka-cluster-ca-truststore
+        - name: upstream-client-tls
+          secret:
+            secretName: customer-edge-upstream-client-tls
+            optional: false
         - name: campaign-tls-trust
           secret:
             secretName: customer-edge-internal-tls
+            items:
+              - key: ca.crt
+                path: ca.crt
 ---
 # A node drain (Karpenter consolidation, drift, spot interruption) evicts through this budget, so
 # it can never take both replicas at once. maxUnavailable rather than minAvailable: during a

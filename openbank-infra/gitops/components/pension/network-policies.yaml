@@ -48,6 +48,14 @@ spec:
       ports:
         - protocol: TCP
           port: 8171
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: customer-edge
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: admin-ui
+      ports:
         - protocol: TCP
           port: 8443
     - from:
