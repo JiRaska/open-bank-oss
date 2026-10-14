@@ -189,6 +189,71 @@ class AuthorizeInterceptorTest {
         )
 
     @Test
+    fun `principal name is read once for the query id and type`() {
+        every { identity.roles } returns emptySet()
+        var nameReads = 0
+        every { sc.userPrincipal } returns JavaPrincipal {
+            nameReads++
+            "user-42"
+        }
+        val queries = mutableListOf<AuthzQuery>()
+        wirePdp(object : PolicyDecisionPoint {
+            override suspend fun allow(query: AuthzQuery): AuthzDecision {
+                queries += query
+                return AuthzDecision(allow = true)
+            }
+        })
+
+        interceptor.authorize(makeCtx(annotatedMethod))
+
+        assertThat(nameReads).isEqualTo(1)
+        assertThat(queries.single().principal.id).isEqualTo("user-42")
+        assertThat(queries.single().principal.type).isEqualTo("HUMAN")
+    }
+
+    @Test
+    fun `malformed principal name is forbidden before an advisory PDP allow`() {
+        assertMalformedPrincipalForbidden(enforced = false, pdpPresent = true)
+    }
+
+    @Test
+    fun `malformed principal name is forbidden before the missing PDP advisory shortcut`() {
+        assertMalformedPrincipalForbidden(enforced = false, pdpPresent = false)
+    }
+
+    @Test
+    fun `malformed principal name is forbidden before an enforced PDP allow`() {
+        assertMalformedPrincipalForbidden(enforced = true, pdpPresent = true)
+    }
+
+    private fun assertMalformedPrincipalForbidden(enforced: Boolean, pdpPresent: Boolean) {
+        interceptor.enforce = enforced
+        var pdpCalls = 0
+        val decisionPoint = object : PolicyDecisionPoint {
+            override suspend fun allow(query: AuthzQuery): AuthzDecision {
+                pdpCalls++
+                return AuthzDecision(allow = true)
+            }
+        }
+        interceptor.pdp = mockk {
+            every { isResolvable } returns pdpPresent
+            every { get() } returns decisionPoint
+        }
+        val malformedPrincipal = mockk<JavaPrincipal> {
+            every { name } throws ClassCastException("name claim is not a string")
+        }
+        every { sc.userPrincipal } returns malformedPrincipal
+        val ctx = makeCtx(annotatedMethod)
+
+        val thrown = catchThrowableOfType(ForbiddenException::class.java) { interceptor.authorize(ctx) }
+
+        assertThat(thrown.response.status).isEqualTo(403)
+        assertThat(pdpCalls).isZero()
+        io.mockk.verify(exactly = 0) { ctx.proceed() }
+        io.mockk.verify(exactly = 1) { malformedPrincipal.name }
+    }
+
+    @Test
     fun `JWT roles propagated into OPA query`() {
         every { identity.roles } returns setOf("ROLE_OPERATOR", "ROLE_ADMIN")
         val capturedQuery = mutableListOf<AuthzQuery>()
