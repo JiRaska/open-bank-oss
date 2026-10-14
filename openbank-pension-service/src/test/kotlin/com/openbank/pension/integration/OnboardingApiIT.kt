@@ -86,6 +86,24 @@ class OnboardingApiIT {
     }
 
     @Test
+    @TestSecurity(user = "service-account-pension-provider-P2", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "foreign-provider-subject"),
+            Claim(key = "azp", value = "foreign-provider"),
+            Claim(key = "preferred_username", value = "service-account-pension-provider-P2"),
+        ],
+    )
+    fun `a matching provider username from another client is forbidden`() {
+        call(
+            "POST",
+            "/api/v2/pension/provider/transfers/out",
+            """{"contractId":"${UUID.randomUUID()}","receivingProviderId":"P2","receivingProviderName":"Other","receivingContractNumber":"C-1"}""",
+            asParty = null,
+        ).statusCode(403)
+    }
+
+    @Test
     @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
     @OidcSecurity(
         claims = [
