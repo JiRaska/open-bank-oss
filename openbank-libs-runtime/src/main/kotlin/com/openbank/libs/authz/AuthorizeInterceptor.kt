@@ -17,6 +17,7 @@ import jakarta.inject.Inject
 import jakarta.interceptor.AroundInvoke
 import jakarta.interceptor.Interceptor
 import jakarta.interceptor.InvocationContext
+import jakarta.ws.rs.ForbiddenException
 import jakarta.ws.rs.WebApplicationException
 import jakarta.ws.rs.core.HttpHeaders
 import jakarta.ws.rs.core.MediaType
@@ -249,12 +250,13 @@ class AuthorizeInterceptor {
      * serve both a blocking and a suspending call path with no branch duplicated.
      */
     private suspend fun decide(ctx: InvocationContext, annotation: Authorize) {
+        val principalName = securityContext.get().principalNameOrDeny()
         if (!pdp.isResolvable) {
             return onMissingPdp(ctx, annotation)
         }
         val decisionPoint = pdp.get()
 
-        val query = buildQuery(ctx, annotation)
+        val query = buildQuery(ctx, annotation, principalName)
         val decision: AuthzDecision = run {
             runCatching { decisionPoint.allow(query) }
                 .getOrElse { ex ->
@@ -456,11 +458,10 @@ class AuthorizeInterceptor {
         return httpHeaders.get().getRequestHeader(APPROVAL_ID_HEADER)?.firstOrNull()
     }
 
-    private fun buildQuery(ctx: InvocationContext, annotation: Authorize): AuthzQuery {
-        val sc = securityContext.get()
+    private fun buildQuery(ctx: InvocationContext, annotation: Authorize, principalName: String?): AuthzQuery {
         val principal = Principal(
-            id = sc.userPrincipal?.name ?: "anonymous",
-            type = principalType(sc, identity.get()),
+            id = principalName ?: "anonymous",
+            type = principalType(principalName, identity.get()),
             roles = identity.get().roles.toList(),
         )
         val resource = annotation.resource.takeIf { it.isNotEmpty() }?.let { expr ->
@@ -514,12 +515,12 @@ class AuthorizeInterceptor {
         return ResourceRef(type = type, id = resolvedValue.toString())
     }
 
-    private fun principalType(sc: SecurityContext, authenticatedIdentity: SecurityIdentity): String {
+    private fun principalType(name: String?, authenticatedIdentity: SecurityIdentity): String {
         // The agent convention is on the verified bearer token's `sub`, not on
         // SecurityContext.name (which may be a display/preferred username).
         // Keep the existing HUMAN policy type for service accounts; the approval
         // record separately preserves their SERVICE_ACCOUNT provenance.
-        val name = sc.userPrincipal?.name ?: return "ANONYMOUS"
+        if (name == null) return "ANONYMOUS"
         val subject = (authenticatedIdentity.principal as? JsonWebToken)?.subject
         if (subject?.startsWith("agent:") == true) return "AI_AGENT"
         return if (name.startsWith("agent:") && subject == null) "UNKNOWN" else "HUMAN"
@@ -529,6 +530,13 @@ class AuthorizeInterceptor {
         const val APPROVAL_ID_HEADER = "X-Approval-Id"
         const val PENDING_APPROVAL_STATUS = 202
     }
+}
+
+private fun SecurityContext.principalNameOrDeny(): String? = try {
+    userPrincipal?.name
+} catch (_: ClassCastException) {
+    // A malformed signed identity claim must deny before the advisory PDP path.
+    throw ForbiddenException("Invalid principal identity")
 }
 
 /**
