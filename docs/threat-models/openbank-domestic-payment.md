@@ -663,6 +663,17 @@ its Ingress and NetworkPolicy peer remain until Phase 5.
 
 ## 2026-10-09 — Scoped payment initiator: pension-service (ADR-0335 D5)
 
+**2026-10-11 identity hardening (#12448):** The scoped pension branch no longer trusts
+`SecurityIdentity.principal.name` by itself. `ServiceAccountIdentity.isPrincipal` requires a
+Quarkus-verified JWT principal with nonblank subject, `azp=openbank-pension`, and
+`preferred_username=service-account-openbank-pension`; a forged matching username with a
+different or absent `azp` cannot select the pension debtor account. **STRIDE S/E:** this narrows
+the inbound caller trust boundary without changing the configured account, OPA action or
+downstream payment checks. Existing staff-role handling is separate. Residual: compromise of
+the actual pension client credential still permits the scoped payout path; account restriction,
+screening and idempotency remain necessary. Rollback of this hardening would reintroduce the
+username-only impersonation path and is not a safe operational fallback.
+
 `POST /api/v1/domestic-payments` now admits `ROLE_API` in `@RolesAllowed`. That change on its own
 would let any machine holding `ROLE_API` reach the money path, so the domain confines every
 ROLE_API-only caller:
@@ -697,3 +708,15 @@ during rollout. First publish a compatible signed provider image, then configure
 private-CA listener and certificate rotation, and finally switch pension callers to HTTPS.
 OIDC and policy checks continue to authorize business operations independently of TLS trust.
 Roll back caller URLs before removing the provider listener or reverting its image.
+
+## Verified initiator identity (#12448, PR #12538)
+
+- **Spoofing / Elevation of privilege:** `InitiatorScopes` no longer trusts the principal NAME,
+  which Quarkus derives from a username claim. The pension scoped initiator is recognised only
+  through `ServiceAccountIdentity.isPrincipal` (verified JWT, `azp` = the client,
+  `preferred_username` = `service-account-<azp>`); customer-edge's general initiation is
+  admitted only for that verified edge service-account with `ROLE_OPERATOR`.
+- Staff roles (`ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_PAYMENTS`) grant general initiation only
+  with a verified interactive human token (`ServiceAccountIdentity.isHumanStaff`). A machine
+  token that holds a staff role in some realm resolves to `Undeclared` and fails closed.
+- **Rollback:** reverting the class restores name-based matching; no schema or data change.
