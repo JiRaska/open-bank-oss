@@ -48,12 +48,14 @@ class CorporateRegisterApiIT {
 
     private fun propose(fact: String, value: String, effective: String) = given().contentType("application/json")
         .body(
-            """{"entityId":"company","fact":"$fact","value":$value,"effectiveFrom":"$effective",
+            """{"entityId":"${PensionProvidersStub.COMPANY}","fact":"$fact","value":$value,"effectiveFrom":"$effective",
                 "reason":"annual update","evidence":"general meeting minutes 2025-04-30"}""",
         ).post(PATH)
 
     private fun assemble(code: String, period: String) = given().contentType("application/json")
-        .body("""{"catalogueId":"cz-pension-cnb","returnCode":"$code","entityId":"company","period":"$period"}""")
+        .body(
+            """{"catalogueId":"cz-pension-cnb","returnCode":"$code","entityId":"${PensionProvidersStub.COMPANY}","period":"$period"}""",
+        )
         .post("/api/v1/statutory-returns/assemble")
 
     private fun datapoints(code: String, period: String): Map<String, BigDecimal> {
@@ -91,7 +93,9 @@ class CorporateRegisterApiIT {
         // Validation: a negative figure and a fractional count are 422; a missing field 400; a foreign entity 422.
         propose("SHARE_CAPITAL", "-1", "2009-01-01").then().statusCode(422)
         propose("EMPLOYEES_COUNT", "1.5", "2009-01-01").then().statusCode(422)
-        given().contentType("application/json").body("""{"entityId":"company"}""").post(PATH).then().statusCode(400)
+        given().contentType(
+            "application/json",
+        ).body("""{"entityId":"${PensionProvidersStub.COMPANY}"}""").post(PATH).then().statusCode(400)
         given().contentType("application/json").body(
             """{"entityId":"other","fact":"SHARE_CAPITAL","value":1,"effectiveFrom":"2009-01-01","reason":"r","evidence":"e"}""",
         ).post(PATH).then().statusCode(422)
@@ -126,7 +130,9 @@ class CorporateRegisterApiIT {
         assertThat(risk.getValue("payouts_paid_year")).isEqualByComparingTo("125000.00")
 
         // A dividend effective in 2009 is not 2010's: that year has none approved.
-        given().get("$PATH/effective?entityId=company&periodStart=2010-01-01&periodEnd=2010-12-31").then()
+        given().get(
+            "$PATH/effective?entityId=${PensionProvidersStub.COMPANY}&periodStart=2010-01-01&periodEnd=2010-12-31",
+        ).then()
             .statusCode(200).body("DIVIDEND_PAID_OR_PLANNED", equalTo(null))
             .body("SHARE_CAPITAL", equalTo(50000000.0f))
     }
@@ -135,7 +141,7 @@ class CorporateRegisterApiIT {
     @Order(3)
     @TestSecurity(user = "auditor", roles = ["ROLE_AUDITOR"])
     fun `an auditor reads the trail, cannot write, and the database refuses to rewrite a decided row`() {
-        given().get("$PATH?entityId=company").then().statusCode(200)
+        given().get("$PATH?entityId=${PensionProvidersStub.COMPANY}").then().statusCode(200)
             .body("size()", equalTo(9))
             .body("find { it.id == '$superseded' }.proposedBy", equalTo("maker"))
             .body("find { it.id == '$superseded' }.decidedBy", equalTo("checker"))
@@ -159,7 +165,8 @@ class CorporateRegisterApiIT {
                     it.executeUpdate(
                         "insert into corporate_register_entry (id, entity_id, fact, value, effective_from, version, " +
                             "reason, evidence, proposed_by, proposed_at, status, decided_by, decided_at) values " +
-                            "('${UUID.randomUUID()}', 'company', 'SHARE_CAPITAL', 1, '2009-01-01', 9, 'r', 'e', " +
+                            "('${UUID.randomUUID()}', '${PensionProvidersStub.COMPANY}', " +
+                            "'SHARE_CAPITAL', 1, '2009-01-01', 9, 'r', 'e', " +
                             "'same', now(), 'APPROVED', 'same', now())",
                     )
                 }

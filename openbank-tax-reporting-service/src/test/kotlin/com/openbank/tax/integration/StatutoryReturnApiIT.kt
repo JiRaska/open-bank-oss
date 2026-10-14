@@ -29,7 +29,7 @@ class StatutoryReturnApiIT {
     private val assembleBody = """{
         "catalogueId":"cz-pension-cnb",
         "returnCode":"PSP10-12-PS",
-        "entityId":"company",
+        "entityId":"${PensionProvidersStub.COMPANY}",
         "period":"2025-01"
     }"""
 
@@ -91,13 +91,15 @@ class StatutoryReturnApiIT {
             statusCode(503)
             body("error", containsString("company-books.opened"))
         }
-        // PSP 31-04 is sourced from pension-service, which is not running in this test: 503, not 500.
+        // PSP 31-04 lacks a verified beneficiary stock methodology.
         Given {
             contentType("application/json")
-            body("""{"catalogueId":"cz-pension-cnb","returnCode":"PSP31-04","entityId":"company","period":"2025-Q1"}""")
+            body(
+                """{"catalogueId":"cz-pension-cnb","returnCode":"PSP31-04","entityId":"${PensionProvidersStub.COMPANY}","period":"2025-Q1"}""",
+            )
         } When { post("$path/assemble") } Then {
             statusCode(503)
-            body("error", containsString("pension-service"))
+            body("error", containsString("verified as-of beneficiary source"))
         }
     }
 }

@@ -9,6 +9,8 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.tax.application.port.out.StatutoryReturnRepository
 import com.openbank.tax.domain.model.TaxConflictException
+import com.openbank.tax.domain.returns.FundCloseLineage
+import com.openbank.tax.domain.returns.ParticipantCloseLineage
 import com.openbank.tax.domain.returns.Periodicity
 import com.openbank.tax.domain.returns.ReportingPeriod
 import com.openbank.tax.domain.returns.ReturnStatus
@@ -64,6 +66,21 @@ class StatutoryReturnEntity : PanacheEntityBase {
     @Column(name = "content_hash", nullable = false)
     var contentHash: String = ""
 
+    @Column(name = "content_hash_version", nullable = false)
+    var contentHashVersion: Int = 1
+
+    @Column(name = "participant_close_lineage_json")
+    var participantCloseLineageJson: String? = null
+
+    @Column(name = "fund_close_lineage_json")
+    var fundCloseLineageJson: String? = null
+
+    @Column(name = "source_assembly_key_hash")
+    var sourceAssemblyKeyHash: String? = null
+
+    @Column(name = "source_assembly_request_hash")
+    var sourceAssemblyRequestHash: String? = null
+
     @Column(name = "due_date", nullable = false)
     var dueDate: LocalDate = LocalDate.EPOCH
 
@@ -106,6 +123,10 @@ class PanacheStatutoryReturnRepository(private val objectMapper: ObjectMapper) :
 
     override suspend fun findReturn(id: UUID): StatutoryReturn? = Panache.withSession {
         find("id = ?1", id).firstResult()
+    }.awaitSuspending()?.toDomain()
+
+    override suspend fun findSourceAssembly(keyHash: String): StatutoryReturn? = Panache.withSession {
+        find("sourceAssemblyKeyHash = ?1", keyHash).firstResult()
     }.awaitSuspending()?.toDomain()
 
     override suspend fun latestRevision(
@@ -166,6 +187,11 @@ class PanacheStatutoryReturnRepository(private val objectMapper: ObjectMapper) :
         it.status = status.name
         it.datapointsJson = objectMapper.writeValueAsString(datapoints.mapValues { (_, v) -> v.toPlainString() })
         it.contentHash = contentHash
+        it.contentHashVersion = contentHashVersion
+        it.participantCloseLineageJson = participantCloseLineage?.let(objectMapper::writeValueAsString)
+        it.fundCloseLineageJson = fundCloseLineage?.let(objectMapper::writeValueAsString)
+        it.sourceAssemblyKeyHash = sourceAssemblyKeyHash
+        it.sourceAssemblyRequestHash = sourceAssemblyRequestHash
         it.dueDate = dueDate
         it.assembledBy = assembledBy
         it.assembledAt = assembledAt
@@ -193,6 +219,15 @@ class PanacheStatutoryReturnRepository(private val objectMapper: ObjectMapper) :
             BigDecimal(v)
         }.toSortedMap(),
         contentHash = contentHash,
+        contentHashVersion = contentHashVersion,
+        participantCloseLineage = participantCloseLineageJson?.let {
+            objectMapper.readValue(it, ParticipantCloseLineage::class.java)
+        },
+        fundCloseLineage = fundCloseLineageJson?.let {
+            objectMapper.readValue(it, FundCloseLineage::class.java)
+        },
+        sourceAssemblyKeyHash = sourceAssemblyKeyHash,
+        sourceAssemblyRequestHash = sourceAssemblyRequestHash,
         dueDate = dueDate,
         assembledBy = assembledBy,
         assembledAt = requireNotNull(assembledAt) { "statutory_return $id has no assembled_at" },

@@ -4,6 +4,8 @@
 
 package com.openbank.tax.application.port.out
 
+import com.openbank.tax.domain.returns.FundCloseLineage
+import com.openbank.tax.domain.returns.ParticipantCloseLineage
 import com.openbank.tax.domain.returns.ReportingPeriod
 import com.openbank.tax.domain.returns.ReturnCatalogue
 import com.openbank.tax.domain.returns.ReturnDefinition
@@ -41,6 +43,31 @@ interface ReturnDataPort {
     ): Map<String, BigDecimal>
 }
 
+/** Verified source snapshot for the additive, source-aware assembly command. */
+data class ReturnExtraction(val values: Map<String, BigDecimal>, val participantCloseLineage: ParticipantCloseLineage)
+
+interface ParticipantCloseDataPort {
+    suspend fun fetchClosed(
+        catalogue: ReturnCatalogue,
+        definition: ReturnDefinition,
+        companyId: UUID,
+        period: ReportingPeriod,
+        sourceIdempotencyKey: String,
+    ): ReturnExtraction
+}
+
+data class FundReturnExtraction(val values: Map<String, BigDecimal>, val fundCloseLineage: FundCloseLineage)
+
+interface FundCloseDataPort {
+    suspend fun fetchClosedFund(
+        catalogue: ReturnCatalogue,
+        definition: ReturnDefinition,
+        fundId: UUID,
+        period: ReportingPeriod,
+        closeId: UUID,
+    ): FundReturnExtraction
+}
+
 /**
  * Renders a return in the regulator's wire format. Unbound in this increment: the cell-level data
  * dictionary was not verified (catalogue `wireFormatVerified=false`), and a plausible guess at a
@@ -57,6 +84,8 @@ interface StatutoryReturnRepository {
     suspend fun insert(statutoryReturn: StatutoryReturn): StatutoryReturn
 
     suspend fun findReturn(id: UUID): StatutoryReturn?
+
+    suspend fun findSourceAssembly(keyHash: String): StatutoryReturn?
 
     /** Highest revision for (catalogue, return, entity, period), or null if never assembled. */
     suspend fun latestRevision(

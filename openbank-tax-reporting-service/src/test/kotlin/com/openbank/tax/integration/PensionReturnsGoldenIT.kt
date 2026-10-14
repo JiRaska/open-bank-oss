@@ -4,7 +4,9 @@
 
 package com.openbank.tax.integration
 
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.libs.testing.containers.PostgresTestResource
+import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
@@ -19,7 +21,13 @@ import org.hamcrest.Matchers.containsString
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.net.InetSocketAddress
+import java.security.MessageDigest
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Golden end to end (#12425): the ČNB PSP 10-12 / 20-12 / 30-12 / 34-12, PEF 12-04 / 14-04 /
@@ -136,15 +144,9 @@ class PensionReturnsGoldenIT {
 
     @Test
     @TestSecurity(user = "filer", roles = ["ROLE_OPERATOR"])
-    fun `PSP 31-04 assembles from the recorded participant month and its contributions add up`() {
-        val flows = assembled("PSP31-04", "company", "2009-Q1")
-        assertThat(flows.v("contributions_participant_ytd")).isEqualByComparingTo("2300.00")
-        assertThat(flows.v("contributions_employer_ytd")).isEqualByComparingTo("500.00")
-        assertThat(flows.v("contributions_state_ytd")).isEqualByComparingTo("230.00")
-        assertThat(flows.v("contributions_total_ytd")).isEqualByComparingTo("3030.00")
-        assertThat(flows.v("payouts_total_ytd")).isEqualByComparingTo("125000.00")
-        assertThat(flows.v("payout_cases_ytd")).isEqualByComparingTo("2")
-        assertThat(flows.v("pensioners_count")).isEqualByComparingTo("1")
+    fun `PSP 31-04 refuses participant flows without verified beneficiary stock`() {
+        assemble("PSP31-04", PensionProvidersStub.COMPANY, "2009-Q1").then().statusCode(503)
+            .body(containsString("verified as-of beneficiary source"))
     }
 
     @Test
@@ -170,9 +172,139 @@ class PensionReturnsGoldenIT {
 /** Serves the recorded provider responses; anything else is a 409, which the adapter must surface as 503. */
 class PensionProvidersStub : QuarkusTestResourceLifecycleManager {
     private lateinit var server: HttpServer
+    private lateinit var executor: ExecutorService
+    private val concurrentCaptures = CountDownLatch(2)
 
     override fun start(): Map<String, String> {
         server = HttpServer.create(InetSocketAddress("localhost", 0), 0)
+        executor = Executors.newFixedThreadPool(4)
+        server.executor = executor
+        snapshotRoutes()
+        sealedFundRoute()
+        aggregateRoutes()
+        server.start()
+        val url = "http://localhost:${server.address.port}"
+        return mapOf(
+            "quarkus.rest-client.pension-fund-service.url" to url,
+            "quarkus.rest-client.pension-service.url" to url,
+            "openbank.statutory-returns.fund-ids" to "$FUND,$FUND2",
+            "tax.source-test.stub-base" to url,
+        )
+    }
+
+    private fun snapshotRoutes() {
+        server.createContext("/api/v2/pension/reporting/participant-snapshots") { exchange ->
+            val rootPath = "/api/v2/pension/reporting/participant-snapshots"
+            val requestBody =
+                if (exchange.requestMethod == "POST") exchange.requestBody.bufferedReader().readText() else ""
+            val is2013 = exchange.requestURI.path == "$rootPath/$RACE_SNAPSHOT_ID" ||
+                requestBody.contains("\"periodStart\":\"2013-01-01\"") &&
+                requestBody.contains("\"periodEnd\":\"2013-12-31\"")
+            val snapshotId = if (is2013) RACE_SNAPSHOT_ID else SNAPSHOT_ID
+            val periodStart = if (is2013) "2013-01-01" else "2011-01-01"
+            val periodEnd = if (is2013) "2013-12-31" else "2011-12-31"
+            val payload = if (is2013) RACE_SOURCE_PAYLOAD else SOURCE_PAYLOAD
+            val sha = if (is2013) RACE_SOURCE_SHA else SOURCE_SHA
+            val receipt = mapOf(
+                "snapshotId" to snapshotId,
+                "companyId" to COMPANY,
+                "periodStart" to periodStart,
+                "periodEnd" to periodEnd,
+                "revision" to 1,
+                "payloadSchemaVersion" to "participant-period-aggregates/2.0",
+                "sha256" to sha,
+            )
+            val (status, response) = when {
+                acceptsCapture(exchange, rootPath, requestBody, periodStart, periodEnd) -> {
+                    captureCount.incrementAndGet()
+                    captureResponse(is2013, mapper.writeValueAsString(receipt))
+                }
+                acceptsSnapshotRead(exchange, rootPath, snapshotId) ->
+                    200 to mapper.writeValueAsString(mapOf("receipt" to receipt, "payloadJson" to payload))
+                else -> 404 to "{}"
+            }
+            val bytes = response.toByteArray(Charsets.UTF_8)
+            exchange.responseHeaders.add("Content-Type", "application/json")
+            exchange.sendResponseHeaders(status, bytes.size.toLong())
+            exchange.responseBody.use { it.write(bytes) }
+        }
+        server.createContext("/__stats") { exchange ->
+            val bytes = captureCount.get().toString().toByteArray(Charsets.UTF_8)
+            exchange.sendResponseHeaders(200, bytes.size.toLong())
+            exchange.responseBody.use { it.write(bytes) }
+        }
+    }
+
+    private fun sealedFundRoute() {
+        val path = "/api/v1/reporting/funds/$FUND/period-closes/$FUND_CLOSE_ID"
+        server.createContext(path) { exchange ->
+            val valid = exchange.requestMethod == "GET" &&
+                exchange.requestURI.path == path &&
+                exchange.requestURI.rawQuery == null
+            val bytes = if (valid) FUND_CLOSE_PAYLOAD.toByteArray(Charsets.UTF_8) else "{}".toByteArray()
+            if (valid) {
+                fundCloseReads.incrementAndGet()
+                exchange.responseHeaders.add("X-Reporting-Close-Id", FUND_CLOSE_ID)
+                exchange.responseHeaders.add("X-Reporting-Close-Revision", "1")
+                exchange.responseHeaders.add("X-Reporting-Payload-Schema-Version", "1.3.0")
+                exchange.responseHeaders.add("X-Reporting-Payload-SHA256", FUND_CLOSE_SHA)
+            }
+            exchange.responseHeaders.add("Content-Type", "application/json")
+            exchange.sendResponseHeaders(if (valid) 200 else 404, bytes.size.toLong())
+            exchange.responseBody.use { it.write(bytes) }
+        }
+        server.createContext("/__fund-stats") { exchange ->
+            val bytes = fundCloseReads.get().toString().toByteArray(Charsets.UTF_8)
+            exchange.sendResponseHeaders(200, bytes.size.toLong())
+            exchange.responseBody.use { it.write(bytes) }
+        }
+        val tamperedPath = "/api/v1/reporting/funds/$FUND/period-closes/$BAD_FUND_CLOSE_ID"
+        server.createContext(tamperedPath) { exchange ->
+            val valid = exchange.requestMethod == "GET" &&
+                exchange.requestURI.path == tamperedPath &&
+                exchange.requestURI.rawQuery == null
+            val bytes = if (valid) {
+                FUND_CLOSE_PAYLOAD.replace("CZK", "EUR").toByteArray(Charsets.UTF_8)
+            } else {
+                "{}".toByteArray()
+            }
+            if (valid) {
+                exchange.responseHeaders.add("X-Reporting-Close-Id", BAD_FUND_CLOSE_ID)
+                exchange.responseHeaders.add("X-Reporting-Close-Revision", "1")
+                exchange.responseHeaders.add("X-Reporting-Payload-Schema-Version", "1.3.0")
+                exchange.responseHeaders.add("X-Reporting-Payload-SHA256", FUND_CLOSE_SHA)
+            }
+            exchange.responseHeaders.add("Content-Type", "application/json")
+            exchange.sendResponseHeaders(if (valid) 200 else 404, bytes.size.toLong())
+            exchange.responseBody.use { it.write(bytes) }
+        }
+    }
+
+    private fun acceptsCapture(
+        exchange: HttpExchange,
+        rootPath: String,
+        body: String,
+        from: String,
+        to: String,
+    ): Boolean = exchange.requestMethod == "POST" &&
+        exchange.requestURI.path == rootPath &&
+        exchange.requestHeaders.getFirst("Idempotency-Key")?.isNotBlank() == true &&
+        body.contains("\"companyId\":\"$COMPANY\"") &&
+        body.contains("\"periodStart\":\"$from\"") &&
+        body.contains("\"periodEnd\":\"$to\"")
+
+    private fun acceptsSnapshotRead(exchange: HttpExchange, rootPath: String, snapshotId: String): Boolean =
+        exchange.requestMethod == "GET" &&
+            exchange.requestURI.path == "$rootPath/$snapshotId" &&
+            exchange.requestURI.query == "companyId=$COMPANY"
+
+    private fun captureResponse(is2013: Boolean, receiptJson: String): Pair<Int, String> {
+        if (!is2013) return 200 to receiptJson
+        concurrentCaptures.countDown()
+        return if (concurrentCaptures.await(10, TimeUnit.SECONDS)) 200 to receiptJson else 503 to "{}"
+    }
+
+    private fun aggregateRoutes() {
         server.createContext("/") { exchange ->
             val target = exchange.requestURI.toString()
             requests += target
@@ -188,17 +320,11 @@ class PensionProvidersStub : QuarkusTestResourceLifecycleManager {
             exchange.sendResponseHeaders(status, bytes.size.toLong())
             exchange.responseBody.use { it.write(bytes) }
         }
-        server.start()
-        val url = "http://localhost:${server.address.port}"
-        return mapOf(
-            "quarkus.rest-client.pension-fund-service.url" to url,
-            "quarkus.rest-client.pension-service.url" to url,
-            "openbank.statutory-returns.fund-ids" to "$FUND,$FUND2",
-        )
     }
 
     override fun stop() {
         if (this::server.isInitialized) server.stop(0)
+        if (this::executor.isInitialized) executor.shutdownNow()
     }
 
     /** The October answer re-dated to November with one unit lost from the closing balance. */
@@ -211,11 +337,39 @@ class PensionProvidersStub : QuarkusTestResourceLifecycleManager {
             .bufferedReader().readText()
 
     companion object {
+        const val COMPANY = "00000000-0000-4000-8000-000000000001"
+        const val SNAPSHOT_ID = "d45ca8df-f9dc-4573-bb7b-513219f33a96"
+        const val RACE_SNAPSHOT_ID = "d45ca8df-f9dc-4573-bb7b-513219f33a97"
+        val captureCount = AtomicInteger()
+        val fundCloseReads = AtomicInteger()
+        private val mapper = jacksonObjectMapper()
+
+        // Technical source-command fixture only. The recorded 2009 golden responses below are unchanged;
+        // this reserved 2011 period exercises transport, hash and DB isolation, not regulator truth.
+        private val SOURCE_PAYLOAD = PensionProvidersStub::class.java.classLoader
+            .getResourceAsStream("pension-golden/participants-2009-year.json")!!.bufferedReader().readText()
+            .replace("2009-01-01", "2011-01-01")
+            .replace("2009-12-31", "2011-12-31")
+        val SOURCE_SHA = MessageDigest.getInstance("SHA-256")
+            .digest(SOURCE_PAYLOAD.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+        private val RACE_SOURCE_PAYLOAD = SOURCE_PAYLOAD
+            .replace("2011-01-01", "2013-01-01")
+            .replace("2011-12-31", "2013-12-31")
+        private val RACE_SOURCE_SHA = MessageDigest.getInstance("SHA-256")
+            .digest(RACE_SOURCE_PAYLOAD.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+
         /** The fund id the provider golden test assigned; recorded with the fixtures. */
         const val FUND = "0f0f2425-0000-4000-8000-000000002025"
         const val FUND2 = "0f0f2425-0000-4000-8000-000000002026"
+        const val FUND_CLOSE_ID = "d53c2305-0875-4e7a-a245-c24516ca0d75"
+        const val BAD_FUND_CLOSE_ID = "d53c2305-0875-4e7a-a245-c24516ca0d76"
+        private val FUND_CLOSE_PAYLOAD = PensionProvidersStub::class.java.classLoader
+            .getResourceAsStream("pension-golden/sealed-fund-year-2014.json")!!.bufferedReader().readText()
+        val FUND_CLOSE_SHA = MessageDigest.getInstance("SHA-256")
+            .digest(FUND_CLOSE_PAYLOAD.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
         val requests = CopyOnWriteArrayList<String>()
         private const val FUNDS = "/api/v1/reporting/funds/$FUND/period-figures"
+        private const val PARTICIPANTS = "/api/v2/pension/reporting/participant-aggregates"
         private val ROUTES = mapOf(
             "$FUNDS?periodStart=2025-10-01&periodEnd=2025-10-31" to "fund-month-2025-10.json",
             "$FUNDS?periodStart=2025-11-01&periodEnd=2025-11-30" to "fund-month-2025-10.json",
@@ -225,11 +379,11 @@ class PensionProvidersStub : QuarkusTestResourceLifecycleManager {
             "$FUNDS?periodStart=2025-01-01&periodEnd=2025-03-31" to "fund-loss-quarter-2025-q1.json",
             "/api/v1/reporting/funds/$FUND2/period-figures?periodStart=2025-01-01&periodEnd=2025-03-31" to
                 "fund-unclassified-quarter-2025-q1.json",
-            "/api/v2/pension/reporting/participant-aggregates?periodStart=2009-01-01&periodEnd=2009-03-31" to
+            "$PARTICIPANTS?companyId=$COMPANY&periodStart=2009-01-01&periodEnd=2009-03-31" to
                 "participants-2009-q1.json",
             // pension-service's ParticipantReportingApiIT books nothing after March 2009, so the
             // year answer is the same YTD figures re-dated to the year end (PSP 40-01).
-            "/api/v2/pension/reporting/participant-aggregates?periodStart=2009-01-01&periodEnd=2009-12-31" to
+            "$PARTICIPANTS?companyId=$COMPANY&periodStart=2009-01-01&periodEnd=2009-12-31" to
                 "participants-2009-year.json",
         )
     }
