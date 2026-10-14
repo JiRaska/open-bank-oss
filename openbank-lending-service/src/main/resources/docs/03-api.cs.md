@@ -62,7 +62,10 @@ historie nepovažoval za provedený přechod.
 - **DecisionRequest** — `approve` (bool, povinné), `reason` (string, nullable). **Žádné `decidedBy`** — checker je JWT subjekt.
 - **CollateralRequest** — `type` (string), `description` (nullable), `marketValue` (Money), `haircut` (number, výchozí 0, validováno na `[0,1]`).
 - **WriteOffRequest** — `reason` (string, nullable). Jednající principal je JWT subjekt.
-- **Money** — `{ amount: number, currency: ISO-4217 }`.
+- **Money v požadavku** — publikované schéma zůstává `{ amount: number, currency: ISO-4217 }`. Čtečka zachovává také kompatibilitu s desetinným řetězcem a starším vnořeným tvarem měny.
+- **Money v odpovědi** — dosavadní tvar je `{ amount: number, currency: { code: "EUR", defaultFractionDigits: 2 }, isNonNegative: boolean, isZero: boolean, isNegative: boolean, isPositive: boolean }`. Schéma OpenAPI `MoneyResponse` jej popisuje samostatně, aby generovaný klient nepovažoval vstupní řetězec měny za zaručený tvar odpovědi.
+- **Splátkový kalendář a výsledek splátky** — `LoanInstallment` používá stejný tvar `MoneyResponse` pro počáteční zůstatek, jistinu, úrok, splátku a konečný zůstatek.
+- **Další peněžní odpovědi** — nabídka předčasného splacení obsahuje pět polí `MoneyResponse`; zajištění takto vrací `marketValue`. Přechody stavu úvěru vracejí `Loan` s jistinou `MoneyResponse` a postup či rozhodnutí o žádosti vrací `LoanApplicationResponse` s požadovanou částkou.
 
 Validace (aplikační služba): požadovaná částka musí být kladná, term ≥ 1 období, nominální sazba ≥ 0, identita navrhovatele neprázdná, haircut v `[0,1]`.
 
