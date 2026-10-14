@@ -420,6 +420,7 @@ gates:
     name: "proposed ADRs must not sit undecided for more than 90 days (advisory)"
     group: gitops
     mode: advisory
+    budget_seconds: 90  # real git history walk; measured 9s locally
     verified: "2026-10-14 — 4 findings (0141, 0142, 0155, 0170) confirmed as genuinely open proposals from 2026-06/07; clock semantics validated against real sweep history"
     rationale: >-
       decision-status is front-matter prose read once at authoring time; without a clock the
@@ -2912,6 +2913,7 @@ gates:
     name: "every url-carrying rest-client declares connect/read timeouts (enforced)"
     group: kotlin
     mode: enforced
+    budget_seconds: 30  # indentation parse over ~30 yaml files; measured 0.2s locally
     rationale: >-
       An unbounded wait on a money-path call is a defect in itself, whatever the upstream does.
       The check is indentation-based text parsing, NOT a YAML round-trip, because these files
@@ -2933,6 +2935,7 @@ gates:
     name: "every reactive datasource pool declares idle-timeout/max-lifetime/max-size (enforced)"
     group: kotlin
     mode: enforced
+    budget_seconds: 30  # indentation parse over ~30 yaml files; measured 0.1s locally
     rationale: >-
       Three distinct jobs (billing's own comment): idle-timeout evicts a dead idle connection
       within the cleaner period; max-lifetime is the hard ceiling on how long any wedge can

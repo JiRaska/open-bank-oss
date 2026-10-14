@@ -170,7 +170,6 @@ def self_test() -> int:
     pinned via GIT_AUTHOR_DATE/GIT_COMMITTER_DATE and --today is a fixed constant."""
     fails: list[str] = []
     today = datetime.date(2026, 10, 14)
-    created = today - datetime.timedelta(days=120)
 
     def adr(status: str, extra_front_matter: str = "") -> str:
         return (
