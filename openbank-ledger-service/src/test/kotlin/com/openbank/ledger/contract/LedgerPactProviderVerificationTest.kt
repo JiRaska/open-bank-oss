@@ -89,7 +89,13 @@ class LedgerPactProviderVerificationTest {
      * which still satisfies the contract shape (type matchers, not value matchers).
      */
     @State("ledger has frozen monthly trial balance for the reporting date")
-    fun stateWithFrozenMonthlyTrialBalance() = FinrepFrozenMonthPactSeed.seed(dataSource)
+    fun stateWithFrozenMonthlyTrialBalance(parameters: Map<String, Any>) {
+        FinrepFrozenMonthPactSeed.validateStateParameters(
+            FinrepFrozenMonthPactSeed.REPORTING_MONTH to true,
+            parameters,
+        )
+        FinrepFrozenMonthPactSeed.seed(dataSource)
+    }
 
     /**
      * Backward-compatible state for balance-service's live `/journals/trial-balance` pact.
