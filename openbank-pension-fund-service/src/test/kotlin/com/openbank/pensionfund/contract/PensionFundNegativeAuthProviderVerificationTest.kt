@@ -21,16 +21,16 @@ import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.extension.ExtendWith
 
 /**
- * Replays the consumers' missing-identity interactions: a reporting read with no M2M identity must
- * answer 401 before the handler runs. A second class because the positive replay carries a
- * class-level `@TestSecurity`, under which a recorded 401 could never verify; the two classes'
- * `@PactFilter`s are disjoint, so nothing is replayed twice or skipped.
+ * Replays the consumers' missing-identity interactions (ADR-0279 #3): holdings and order placement
+ * with no M2M identity must answer 401 before any handler runs. A separate class because
+ * [PensionFundPactFolderProviderVerificationTest] carries a class-level `@TestSecurity`, under
+ * which a recorded 401 could never verify; the two classes' `@PactFilter`s are disjoint.
  */
 @QuarkusTest
 @QuarkusTestResource(PostgresTestResource::class)
 @Provider("openbank-pension-fund-service")
 @PactFolder("../pacts")
-@PactFilter(PensionFundPactStates.NEGATIVE_AUTH_STATE)
+@PactFilter(NEGATIVE_AUTH_STATE)
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
 class PensionFundNegativeAuthProviderVerificationTest {
 
@@ -50,8 +50,9 @@ class PensionFundNegativeAuthProviderVerificationTest {
         context?.verifyInteraction()
     }
 
-    @State(PensionFundPactStates.NEGATIVE_AUTH_STATE)
+    @State(NEGATIVE_AUTH_STATE)
     fun stateNoValidM2mIdentity() {
-        // Intentionally empty: the state IS the absence of an authenticated identity.
+        // Intentionally empty: the state IS the absence of an identity, which this class provides
+        // by not declaring @TestSecurity. pact-jvm fails an interaction whose state has no handler.
     }
 }
