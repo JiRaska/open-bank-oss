@@ -11,7 +11,10 @@ import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactBroker
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.pensionfund.application.port.PensionFundStore
+import com.openbank.pensionfund.application.usecase.FundReportingService
+import com.openbank.pensionfund.infrastructure.persistence.FundReportingCloseRepository
 import com.openbank.pensionfund.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
@@ -47,6 +50,15 @@ class PensionFundPactBrokerProviderVerificationTest {
     lateinit var store: PensionFundStore
 
     @Inject
+    lateinit var reporting: FundReportingService
+
+    @Inject
+    lateinit var closes: FundReportingCloseRepository
+
+    @Inject
+    lateinit var mapper: ObjectMapper
+
+    @Inject
     lateinit var vertx: Vertx
 
     @Inject
@@ -72,6 +84,9 @@ class PensionFundPactBrokerProviderVerificationTest {
 
     @State(PensionFundPactStates.FUND_STATE)
     fun fundWithSeptemberNav() = PensionFundPactStates.fundWithSeptemberNav(vertx, store)
+
+    @State(PensionFundPactStates.SEALED_FUND_STATE)
+    fun fundWithMarch2014Seal() = PensionFundPactStates.fundWithMarch2014Seal(vertx, store, reporting, closes, mapper)
 
     @State(PensionFundPactStates.NEGATIVE_AUTH_STATE)
     fun noValidM2mIdentity() {

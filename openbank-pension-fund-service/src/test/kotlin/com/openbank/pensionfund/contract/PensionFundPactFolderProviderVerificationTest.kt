@@ -12,7 +12,10 @@ import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactFilter
 import au.com.dius.pact.provider.junitsupport.loader.PactFolder
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.pensionfund.application.port.PensionFundStore
+import com.openbank.pensionfund.application.usecase.FundReportingService
+import com.openbank.pensionfund.infrastructure.persistence.FundReportingCloseRepository
 import com.openbank.pensionfund.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
@@ -52,6 +55,15 @@ class PensionFundPactFolderProviderVerificationTest {
     lateinit var store: PensionFundStore
 
     @Inject
+    lateinit var reporting: FundReportingService
+
+    @Inject
+    lateinit var closes: FundReportingCloseRepository
+
+    @Inject
+    lateinit var mapper: ObjectMapper
+
+    @Inject
     lateinit var vertx: Vertx
 
     @BeforeEach
@@ -68,4 +80,7 @@ class PensionFundPactFolderProviderVerificationTest {
 
     @State(PensionFundPactStates.FUND_STATE)
     fun fundWithSeptemberNav() = PensionFundPactStates.fundWithSeptemberNav(vertx, store)
+
+    @State(PensionFundPactStates.SEALED_FUND_STATE)
+    fun fundWithMarch2014Seal() = PensionFundPactStates.fundWithMarch2014Seal(vertx, store, reporting, closes, mapper)
 }

@@ -56,8 +56,10 @@ tasks.withType<Test> {
     maxHeapSize = "2g"
     val opaBundle = rootProject.file("openbank-infra/gitops/components/pension-fund/pension-fund-opa-bundle.yaml")
     val deployment = rootProject.file("openbank-infra/gitops/components/pension-fund/pension-fund-service.yaml")
+    val taxPact = rootProject.file("pacts/openbank-tax-reporting-service-openbank-pension-fund-service.json")
     inputs.file(opaBundle).withPropertyName("pensionFundOpaBundle").withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.file(deployment).withPropertyName("pensionFundDeployment").withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.file(taxPact).withPropertyName("pensionFundTaxPact").withPathSensitivity(PathSensitivity.RELATIVE)
     systemProperty("openbank.test.pension-fund-opa-bundle", opaBundle.absolutePath)
     systemProperty("openbank.test.pension-fund-deployment", deployment.absolutePath)
 }
