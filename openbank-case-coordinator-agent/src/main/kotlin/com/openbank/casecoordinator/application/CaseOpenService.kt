@@ -19,6 +19,7 @@ import io.temporal.client.WorkflowOptions
 import io.temporal.client.WorkflowServiceException
 import jakarta.enterprise.context.ApplicationScoped
 import org.jboss.logging.Logger
+import java.security.MessageDigest
 import java.time.Clock
 
 /** Result of a case-open attempt — mapped to HTTP statuses by the REST layer, no exceptions. */
@@ -119,16 +120,11 @@ class CaseOpenService(
         val stub = workflowClient.newUntypedWorkflowStub(WORKFLOW_TYPE, options)
         return try {
             stub.start(start)
-            // openedBy is sanitised, workflowId is not, and the asymmetry is the point (#4215):
-            // workflowIdFor already strips everything outside [A-Za-z0-9_-], so it cannot carry a
-            // newline, while openedBy arrives verbatim from the request body. CodeQL flagged both
-            // arguments on this line; only this one was ever injectable.
-            // Both identities on the record: the agent the call CLAIMS to act as, and the
-            // principal that actually authenticated. Attribution that names only the claim cannot
-            // answer "who did this" when the two diverge (#4834).
+            // Correlate operational outcomes without copying the subject-bearing workflow ID.
+            // This stable digest is pseudonymous, not anonymous; caller attribution is retained.
             log.infof(
                 "case opened: %s claimed-by %s principal %s (class %s)",
-                workflowId,
+                workflowId.logCorrelation(),
                 openedBy.sanitizeForLog(),
                 callerPrincipal.sanitizeForLog(),
                 caseClass,
@@ -136,11 +132,15 @@ class CaseOpenService(
             CaseOpenResult.Opened(workflowId)
         } catch (e: WorkflowExecutionAlreadyStarted) {
             refundOpenQuota(callerPrincipal, now)
-            log.debugf(e, "case open dedup: %s already running on the server", workflowId)
+            log.debugf(
+                "case open dedup: %s already running on the server (%s)",
+                workflowId.logCorrelation(),
+                e.javaClass.simpleName,
+            )
             CaseOpenResult.Duplicate
         } catch (e: WorkflowServiceException) {
             refundOpenQuota(callerPrincipal, now)
-            log.warnf(e, "Temporal start failed for %s", workflowId)
+            log.warnf("Temporal start failed for %s (%s)", workflowId.logCorrelation(), e.javaClass.simpleName)
             CaseOpenResult.Unavailable
         }
     }
@@ -177,6 +177,9 @@ class CaseOpenService(
     private companion object {
         const val WORKFLOW_TYPE = "CaseWorkflow"
         const val OPEN_WINDOW_MS = 3_600_000L
+
+        private fun String.logCorrelation(): String = MessageDigest.getInstance("SHA-256")
+            .digest(toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
 
         /**
          * The fleet's log-injection guard (13 services carry the same idiom): CR/LF out, so a
