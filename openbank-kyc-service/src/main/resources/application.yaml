@@ -30,6 +30,9 @@ quarkus:
     password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
     reactive:
       url: postgresql://localhost:5432/openbank_kyc
+      idle-timeout: 5M
+      max-lifetime: 30M
+      max-size: 20
     jdbc:
       url: jdbc:postgresql://localhost:5432/openbank_kyc
   flyway:
@@ -59,10 +62,14 @@ quarkus:
   rest-client:
     sanctions-service:
       url: ${SANCTIONS_SERVICE_URL:http://localhost:8123}
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
     # Party register enumeration for the #5698 orphaned-party reconciliation (read-only).
     party-service:
       url: ${PARTY_SERVICE_URL:http://localhost:8111}
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
     # ADR-0256: case-coordinator case-open authority. The Optional adapter guard reads
     # openbank.kyc.case-coordinator.url (same CASE_COORDINATOR_URL env var); when the env is

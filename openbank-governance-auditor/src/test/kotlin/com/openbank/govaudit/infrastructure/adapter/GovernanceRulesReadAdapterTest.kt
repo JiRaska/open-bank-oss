@@ -11,6 +11,10 @@ import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.io.TempDir
+import java.nio.file.Files
+import java.nio.file.Path
+import java.util.Optional
 
 /**
  * The money-path set is parsed out of ONE comma-separated config string, and every service name in
@@ -24,14 +28,20 @@ class GovernanceRulesReadAdapterTest {
         moneyPathServices: String,
         defaultApprovals: Int = 1,
         moneyPathApprovals: Int = 2,
+        rulesYamlPath: String = "",
+        rulesYamlUrl: String = "",
     ): GovernanceRulesReadAdapter {
         val config = mockk<GovernanceAuditorConfig> {
             every { moneyPathServices() } returns moneyPathServices
             every { defaultApprovals() } returns defaultApprovals
             every { moneyPathApprovals() } returns moneyPathApprovals
+            every { rulesYamlPath() } returns rulesYamlPath.asOptional()
+            every { rulesYamlUrl() } returns rulesYamlUrl.asOptional()
         }
         return GovernanceRulesReadAdapter(config)
     }
+
+    private fun String.asOptional(): Optional<String> = if (isBlank()) Optional.empty() else Optional.of(this)
 
     @Test
     fun `whitespace around a service name is trimmed, so the name still matches a changed service`(): Unit =
@@ -70,5 +80,48 @@ class GovernanceRulesReadAdapterTest {
         assertThat(adapter.defaultApprovals()).isEqualTo(1)
         assertThat(adapter.moneyPathApprovals()).isEqualTo(2)
         assertThat(adapter.moneyPathApprovals()).isGreaterThan(adapter.defaultApprovals())
+    }
+
+    @Test
+    fun `a mounted rules yaml wins over the config mirror`(@TempDir dir: Path): Unit = runBlocking {
+        val rules = dir.resolve("rules.yaml")
+        Files.writeString(
+            rules,
+            """
+            money_path_services:
+              - openbank-ledger-service
+              - openbank-fx-service
+            review:
+              default_approvals: 3
+              money_path_approvals: 4
+            """.trimIndent(),
+        )
+        // The mirror disagrees on purpose: the live document must win, no matter what the
+        // scaffolded mirror says.
+        val adapter = adapterFor(
+            moneyPathServices = "openbank-stale-service",
+            defaultApprovals = 1,
+            moneyPathApprovals = 2,
+            rulesYamlPath = rules.toString(),
+        )
+
+        assertThat(
+            adapter.moneyPathServices(),
+        ).containsExactlyInAnyOrder("openbank-ledger-service", "openbank-fx-service")
+        assertThat(adapter.defaultApprovals()).isEqualTo(3)
+        assertThat(adapter.moneyPathApprovals()).isEqualTo(4)
+    }
+
+    @Test
+    fun `when no live source is reachable the config mirror is the fallback`(): Unit = runBlocking {
+        val adapter = adapterFor(
+            moneyPathServices = "openbank-ledger-service",
+            rulesYamlPath = "/nonexistent/rules.yaml",
+            rulesYamlUrl = "",
+        )
+
+        assertThat(adapter.moneyPathServices()).containsExactly("openbank-ledger-service")
+        assertThat(adapter.defaultApprovals()).isEqualTo(1)
+        assertThat(adapter.moneyPathApprovals()).isEqualTo(2)
     }
 }

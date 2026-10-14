@@ -96,41 +96,77 @@ quarkus:
   rest-client:
     account-service:
       url: http://localhost:8100
+      connect-timeout: 2000
+      read-timeout: 5000
     opa:
       url: http://localhost:8181
+      connect-timeout: 2000
+      read-timeout: 5000
     transaction-service:
       url: http://localhost:8102
+      connect-timeout: 2000
+      read-timeout: 5000
     balance-service:
       url: http://localhost:8103
+      connect-timeout: 2000
+      read-timeout: 5000
     consent-service:
       url: http://localhost:8106
+      connect-timeout: 2000
+      read-timeout: 5000
     psd2-service:
       url: http://localhost:8107
+      connect-timeout: 2000
+      read-timeout: 5000
     product-catalog:
       url: http://localhost:8104
+      connect-timeout: 2000
+      read-timeout: 5000
     ledger-service:
       url: http://localhost:8101
+      connect-timeout: 2000
+      read-timeout: 5000
     aml-service:
       url: http://localhost:8117
+      connect-timeout: 2000
+      read-timeout: 5000
     sanctions-service:
       url: http://localhost:8118
+      connect-timeout: 2000
+      read-timeout: 5000
     fx-service:
       url: http://localhost:8119
+      connect-timeout: 2000
+      read-timeout: 5000
     clearing-service:
       url: http://localhost:8124
+      connect-timeout: 2000
+      read-timeout: 5000
     interest-service:
       url: http://localhost:8125
+      connect-timeout: 2000
+      read-timeout: 5000
     dispute-service:
       url: http://localhost:8135
+      connect-timeout: 2000
+      read-timeout: 5000
     sepa-instant-service:
       url: http://localhost:8127
+      connect-timeout: 2000
+      read-timeout: 5000
     # Observability stack (anonymous in-cluster read; no OIDC filter on these clients).
     prometheus:
       url: http://localhost:9090
+      connect-timeout: 2000
+      read-timeout: 5000
     loki:
       url: http://localhost:3100
+      connect-timeout: 2000
+      read-timeout: 5000
     alertmanager:
       url: http://localhost:9093
+      connect-timeout: 2000
+      read-timeout: 5000
 
   # Proposals store (ADR-0031 D4 HITL approval queue). The agent is otherwise stateless;
   # this is its only table. In-cluster the URL/credentials come from the agent-db CNPG
