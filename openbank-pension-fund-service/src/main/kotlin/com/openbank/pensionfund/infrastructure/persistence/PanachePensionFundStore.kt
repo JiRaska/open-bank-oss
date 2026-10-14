@@ -7,6 +7,7 @@ package com.openbank.pensionfund.infrastructure.persistence
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import com.openbank.pensionfund.application.port.ClassificationReceipt
+import com.openbank.pensionfund.application.port.FundReportingSnapshot
 import com.openbank.pensionfund.application.port.PensionFundStore
 import com.openbank.pensionfund.application.port.StoreChanges
 import com.openbank.pensionfund.domain.model.AllocationTarget
@@ -193,6 +194,100 @@ class PanachePensionFundStore(
             upTo,
         ).list()
     }.map { it.toDomain() }
+
+    /**
+     * Every row behind one return comes from the same PostgreSQL MVCC snapshot.
+     * Call without an active transaction: isolation must be set before its first SQL statement.
+     */
+    override suspend fun reportingSnapshot(
+        fundId: UUID,
+        periodStart: LocalDate,
+        periodEnd: LocalDate,
+    ): FundReportingSnapshot = reportingSnapshotAfterNavs(fundId, periodStart, periodEnd) {
+        Uni.createFrom().voidItem()
+    }
+
+    /** Interleave hook used only by the real-DB correction-race test. */
+    internal suspend fun reportingSnapshotAfterNavs(
+        fundId: UUID,
+        periodStart: LocalDate,
+        periodEnd: LocalDate,
+        afterNavs: () -> Uni<Void>,
+    ): FundReportingSnapshot {
+        require(!periodEnd.isBefore(periodStart)) { "periodEnd must not be before periodStart" }
+        return Panache.withTransaction {
+            Panache.getSession().flatMap { session ->
+                // This must be the transaction's first statement, before even the fund lookup.
+                session.createNativeQuery<Int>("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ").executeUpdate()
+                    .flatMap { funds.findById(fundId) }
+                    .flatMap { fundRow ->
+                        if (fundRow == null) {
+                            Uni.createFrom().item(
+                                FundReportingSnapshot(
+                                    null,
+                                    emptyList(),
+                                    emptyList(),
+                                    emptyList(),
+                                    emptyList(),
+                                    emptyList(),
+                                ),
+                            )
+                        } else {
+                            navs.find(
+                                "fundId = ?1 and status = ?2 and valuationDate <= ?3 order by valuationDate",
+                                fundId,
+                                NavStatus.PUBLISHED.name,
+                                periodEnd,
+                            ).list().flatMap { navRows ->
+                                afterNavs().flatMap {
+                                    reportingRows(fundRow.toDomain(), navRows.map { it.toDomain() }, periodEnd)
+                                }
+                            }
+                        }
+                    }
+            }
+        }.awaitSuspending()
+    }
+
+    private fun reportingRows(fund: Fund, navRows: List<NavRecord>, periodEnd: LocalDate): Uni<FundReportingSnapshot> {
+        val navIds = navRows.map { it.id }
+        val txRows = if (navIds.isEmpty()) {
+            Uni.createFrom().item(emptyList<UnitTransactionEntity>())
+        } else {
+            transactions.find("navId in ?1", navIds).list()
+        }
+        return txRows.flatMap { transactionRows ->
+            val yearStart = LocalDate.of(periodEnd.year, 1, 1)
+            val firstNeeded = navRows.lastOrNull { it.valuationDate.isBefore(yearStart) }?.valuationDate ?: yearStart
+            val closing = navRows.lastOrNull { it.valuationDate == periodEnd }
+            val positionNavIds = navRows.filter {
+                it.positionsRecorded && (!it.valuationDate.isBefore(firstNeeded) || it.id == closing?.id)
+            }.map { it.id }
+            val positionRows = if (positionNavIds.isEmpty()) {
+                Uni.createFrom().item(emptyList<FundNavPositionEntity>())
+            } else {
+                positions.find("navId in ?1 order by instrumentId", positionNavIds).list()
+            }
+            positionRows.flatMap { rows ->
+                val positionIds = rows.map { it.id }
+                val correctionRows = if (positionIds.isEmpty()) {
+                    Uni.createFrom().item(emptyList<PositionClassificationCorrectionEntity>())
+                } else {
+                    classifications.find("positionId in ?1 order by proposedAt", positionIds).list()
+                }
+                correctionRows.map { corrections ->
+                    FundReportingSnapshot(
+                        fund,
+                        navRows,
+                        transactionRows.map { it.toDomain() },
+                        positionNavIds,
+                        rows.map { it.toDomain() },
+                        corrections.map { it.toDomain() },
+                    )
+                }
+            }
+        }
+    }
 
     override suspend fun transactionsPricedAtAny(navIds: Collection<UUID>): List<UnitTransaction> =
         if (navIds.isEmpty()) {

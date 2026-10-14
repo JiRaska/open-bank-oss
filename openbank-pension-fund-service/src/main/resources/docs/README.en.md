@@ -70,6 +70,9 @@ calculated NAVs. For older NAVs without recorded positions, portfolio figures
 are unknown rather than an empty portfolio. Basis NAV identifiers and a
 fingerprint identify the report inputs. This read model supplies figures;
 it does not submit a statutory return to the regulator.
+The existing live projection uses the latest published NAV in the requested period. The new
+explicit technical seal requires a published NAV dated exactly at the period end and returns 409
+otherwise. No statutory business-day substitution rule is implied.
 
 ### Reporting P&L and position classification
 

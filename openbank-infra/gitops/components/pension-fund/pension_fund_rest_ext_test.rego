@@ -229,3 +229,33 @@ test_tax_reporting_id_without_role_api_is_denied if {
 	}
 		with data.rules as reporting_excluded
 }
+
+# An explicit technical source seal is a staff write, not a tax service action.
+test_staff_can_seal_fund_reporting_source if {
+	every role in {"ROLE_OPERATOR", "ROLE_ADMIN"} {
+		rest.allow with input as {
+			"principal": {"type": "HUMAN", "id": "fund-officer", "roles": [role]},
+			"action": "pension-fund.reporting.seal",
+		}
+	}
+}
+
+test_services_agents_and_unprivileged_cannot_seal_fund_reporting_source if {
+	every principal in [
+		tax_reporting,
+		{"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API"]},
+		{"type": "HUMAN", "id": "service-account-openbank-pension", "roles": ["ROLE_OPERATOR"]},
+		{"type": "AI_AGENT", "id": "fund-officer", "roles": ["ROLE_OPERATOR", "ROLE_ADMIN"]},
+		{"type": "HUMAN", "id": "fund-auditor", "roles": ["ROLE_AUDITOR", "ROLE_COMPLIANCE"]},
+		{"type": "HUMAN", "id": "cust-1", "roles": ["ROLE_CUSTOMER"]},
+	] {
+		not rest.allow with input as {
+			"principal": principal,
+			"action": "pension-fund.reporting.seal",
+		}
+	}
+}
+
+test_anonymous_cannot_seal_fund_reporting_source if {
+	not rest.allow with input as {"action": "pension-fund.reporting.seal"}
+}

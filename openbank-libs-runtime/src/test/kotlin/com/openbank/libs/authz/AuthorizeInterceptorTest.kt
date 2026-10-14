@@ -17,6 +17,7 @@ import com.openbank.libs.security.SecurityTelemetry
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.interceptor.InvocationContext
 import jakarta.ws.rs.ForbiddenException
@@ -355,6 +356,41 @@ class AuthorizeInterceptorTest {
             every { isResolvable } returns true
             every { get() } returns pdp
         }
+    }
+
+    @Test
+    fun `malformed principal name denies before advisory policy evaluation`() {
+        interceptor.enforce = false
+        every { sc.userPrincipal } returns JavaPrincipal { throw ClassCastException("invalid identity claim") }
+        var policyCalled = false
+        wirePdp(
+            object : PolicyDecisionPoint {
+                override suspend fun allow(query: AuthzQuery): AuthzDecision {
+                    policyCalled = true
+                    return AuthzDecision(allow = true, reason = "ok", policyVersion = "test")
+                }
+            },
+        )
+
+        assertThatThrownBy { interceptor.authorize(makeCtx(annotatedMethod)) }
+            .isInstanceOf(ForbiddenException::class.java)
+            .extracting { (it as ForbiddenException).response.status }
+            .isEqualTo(403)
+        assertThat(policyCalled).isFalse()
+    }
+
+    @Test
+    fun `malformed principal name denies when advisory policy point is absent`() {
+        interceptor.enforce = false
+        every { sc.userPrincipal } returns JavaPrincipal { throw ClassCastException("invalid identity claim") }
+        interceptor.pdp = mockk { every { isResolvable } returns false }
+        val ctx = makeCtx(annotatedMethod)
+
+        assertThatThrownBy { interceptor.authorize(ctx) }
+            .isInstanceOf(ForbiddenException::class.java)
+            .extracting { (it as ForbiddenException).response.status }
+            .isEqualTo(403)
+        verify(exactly = 0) { ctx.proceed() }
     }
 
     @Test
