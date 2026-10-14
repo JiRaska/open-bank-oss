@@ -443,7 +443,7 @@ tests:
               origin: manifest
             exp_annotations:
               summary: "CNPG cluster accounts/accounts-db is deployed but NOT scraped"
-              description: "This cluster is DEPLOYED (its namespace exists) and Prometheus has no scrape target for it, so every Postgres alert -- PostgresNoRecoveryPoint, PostgresBackupStale, PostgresWALArchiveFailing and even PostgresInstanceDown -- is structurally incapable of firing for it. Its backup state is unknown, not healthy. Set spec.monitoring.enablePodMonitor: true on the Cluster, or declare it in NOT_SCRAPED in .github/scripts/check-cnpg-scrape-coverage.py with a reason."
+              description: "This cluster is DEPLOYED (its namespace exists) and Prometheus has no scrape target for it, so every Postgres alert -- PostgresNoRecoveryPoint, PostgresBackupStale, PostgresWALArchiveFailing and even PostgresInstanceDown -- is structurally incapable of firing for it. Its backup state is unknown, not healthy. Add a PodMonitor selecting cnpg.io/cluster=<name> on port metrics next to the Cluster, or declare it in NOT_SCRAPED in .github/scripts/check-cnpg-scrape-coverage.py with a reason."
       # MIRROR: the namespace exists, so the not-deployed half must stay silent. Both
       # directions, or the split is untested.
       - eval_time: 40m
@@ -2594,7 +2594,7 @@ tests:
               origin: manifest
             exp_annotations:
               summary: "CNPG cluster ai-platform/langfuse-db is deployed but NOT scraped"
-              description: "This cluster is DEPLOYED (its namespace exists) and Prometheus has no scrape target for it, so every Postgres alert -- PostgresNoRecoveryPoint, PostgresBackupStale, PostgresWALArchiveFailing and even PostgresInstanceDown -- is structurally incapable of firing for it. Its backup state is unknown, not healthy. Set spec.monitoring.enablePodMonitor: true on the Cluster, or declare it in NOT_SCRAPED in .github/scripts/check-cnpg-scrape-coverage.py with a reason."
+              description: "This cluster is DEPLOYED (its namespace exists) and Prometheus has no scrape target for it, so every Postgres alert -- PostgresNoRecoveryPoint, PostgresBackupStale, PostgresWALArchiveFailing and even PostgresInstanceDown -- is structurally incapable of firing for it. Its backup state is unknown, not healthy. Add a PodMonitor selecting cnpg.io/cluster=<name> on port metrics next to the Cluster, or declare it in NOT_SCRAPED in .github/scripts/check-cnpg-scrape-coverage.py with a reason."
       - eval_time: 40m
         alertname: PostgresClusterDeclaredNotDeployed
         exp_alerts:

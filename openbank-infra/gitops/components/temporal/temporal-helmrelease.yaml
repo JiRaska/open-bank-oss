@@ -226,25 +226,6 @@ metadata:
   name: temporal-db
   namespace: temporal
 spec:
-  monitoring:
-    enablePodMonitor: true
-    # FinOps/observability: cnpg_pg_settings_setting is one series per Postgres GUC per
-    # instance — 24 963 series on 2026-09-12, the largest metric name in a 645 k-series
-    # Prometheus (12 h retention, no long-term store). Exactly ONE of those GUCs is read
-    # by anything here: `max_connections`, by the PostgresConnectionsSaturated alert
-    # (prometheus-rules-db.yaml) and by dashboard-openbank-postgres. Everything else is
-    # static configuration whose authoritative copy is this manifest, so it is dropped at
-    # scrape. RE2 has no negative lookahead, hence mark-then-drop rather than one regex.
-    podMonitorMetricRelabelings:
-      - sourceLabels: [__name__, name]
-        regex: cnpg_pg_settings_setting;max_connections
-        targetLabel: __tmp_cnpg_keep
-        replacement: "1"
-      - sourceLabels: [__name__, __tmp_cnpg_keep]
-        regex: cnpg_pg_settings_setting;
-        action: drop
-      - regex: __tmp_cnpg_keep
-        action: labeldrop
   # HA (ADR-0159, ADR-0325): a platform database money-path services depend on
   # (rules.yaml: money_path_platform_databases). Temporal persists every payment saga's workflow state here; with it down no
   # saga can start, advance or compensate, so it gets
@@ -351,3 +332,39 @@ spec:
       remoteRef:
         key: temporal/db
         property: DB_PASSWORD
+---
+# Owned replacement for the CNPG-generated PodMonitor: spec.monitoring.enablePodMonitor and
+# podMonitorMetricRelabelings are deprecated since CNPG 1.30. Same selector, port and
+# relabelling the operator generated; named -metrics so the operator, which deletes only a
+# PodMonitor named after the Cluster AND owned by it, never touches this one.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: temporal-db-metrics
+  namespace: temporal
+  labels:
+    cnpg.io/cluster: temporal-db
+spec:
+  selector:
+    matchLabels:
+      cnpg.io/cluster: temporal-db
+      cnpg.io/podRole: instance
+  podMetricsEndpoints:
+    - port: metrics
+      # FinOps/observability: cnpg_pg_settings_setting is one series per Postgres GUC per
+      # instance — 24 963 series on 2026-09-12, the largest metric name in a 645 k-series
+      # Prometheus (12 h retention, no long-term store). Exactly ONE of those GUCs is read
+      # by anything here: `max_connections`, by the PostgresConnectionsSaturated alert
+      # (prometheus-rules-db.yaml) and by dashboard-openbank-postgres. Everything else is
+      # static configuration whose authoritative copy is this manifest, so it is dropped at
+      # scrape. RE2 has no negative lookahead, hence mark-then-drop rather than one regex.
+      metricRelabelings:
+        - sourceLabels: [__name__, name]
+          regex: cnpg_pg_settings_setting;max_connections
+          targetLabel: __tmp_cnpg_keep
+          replacement: "1"
+        - sourceLabels: [__name__, __tmp_cnpg_keep]
+          regex: cnpg_pg_settings_setting;
+          action: drop
+        - regex: __tmp_cnpg_keep
+          action: labeldrop

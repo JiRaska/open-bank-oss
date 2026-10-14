@@ -16,7 +16,7 @@ series the cluster itself must produce:
 `PostgresInstanceDown` already documents, at length, that `cnpg_collector_up` cannot report its
 own exporter's death and that `up` survives because Prometheus writes it per TARGET. That fix is
 correct and it stops one level short: `up` only exists for a target Prometheus was TOLD to scrape.
-A CNPG `Cluster` with `spec.monitoring.enablePodMonitor` unset creates no PodMonitor, so there is
+A CNPG `Cluster` that no PodMonitor selects is not a target, so there is
 no target, so there is no `up` series either — and every alert in the file, `PostgresInstanceDown`
 included, matches nothing. Absent is not zero, and a threshold cannot distinguish "healthy" from
 "never observed".
@@ -37,6 +37,15 @@ WHAT THIS DOES
    absent from Prometheus then produces a POSITIVE series and pages, rather than producing nothing.
    The generated file is checked for drift, so the alert's coverage set cannot fall behind the
    manifests without going red.
+
+WHAT COUNTS AS SCRAPED
+---------------------
+CNPG 1.30 deprecated `spec.monitoring.enablePodMonitor` / `podMonitorMetricRelabelings`; the repo
+now owns one explicit `PodMonitor` per Cluster (`<cluster>-metrics`, next to the Cluster). A
+cluster is scraped iff a PodMonitor in ITS namespace selects `cnpg.io/cluster: <name>` (and, if it
+narrows by role, `cnpg.io/podRole: instance`) on the `metrics` port. The deprecated flag is not
+accepted as coverage any more: a Cluster that still sets `enablePodMonitor: true` is itself a
+finding, so the deprecated shape cannot creep back in.
 
 Exemptions live in NOT_SCRAPED, need a reason, and go stale in BOTH directions: an entry for a
 cluster that is now scraped fails, and an entry for a cluster that no longer exists fails. A new
@@ -97,8 +106,8 @@ UNSCRAPED_DESC = (
     "This cluster is DEPLOYED (its namespace exists) and Prometheus has no scrape target for it, "
     "so every Postgres alert -- PostgresNoRecoveryPoint, PostgresBackupStale, "
     "PostgresWALArchiveFailing and even PostgresInstanceDown -- is structurally incapable of "
-    "firing for it. Its backup state is unknown, not healthy. Set "
-    "spec.monitoring.enablePodMonitor: true on the Cluster, or declare it in NOT_SCRAPED in "
+    "firing for it. Its backup state is unknown, not healthy. Add a PodMonitor "
+    "selecting cnpg.io/cluster=<name> on port metrics next to the Cluster, or declare it in NOT_SCRAPED in "
     ".github/scripts/check-cnpg-scrape-coverage.py with a reason."
 )
 
@@ -163,6 +172,7 @@ def discover_clusters() -> tuple[dict[str, dict], list[str]]:
     """Return {namespace/name: {...}} for every CNPG Cluster declared in gitops."""
     found: dict[str, dict] = {}
     errors: list[str] = []
+    monitors: list[tuple[str, dict]] = []  # (namespace, spec) of every PodMonitor in gitops
     for path in sorted(gatelib.rglob(REPO / GITOPS, "*.yaml")):
         # The network-policy generator writes an atomic .network-policies-*.yaml in this tree.
         # Parallel gates may enumerate it just before the generator replaces/removes it.
@@ -183,6 +193,11 @@ def discover_clusters() -> tuple[dict[str, dict], list[str]]:
         for doc in docs:
             if not isinstance(doc, dict):
                 continue
+            if doc.get("kind") == "PodMonitor":
+                pm_ns = (doc.get("metadata") or {}).get("namespace") or _namespace_from_kustomization(path)
+                if pm_ns:
+                    monitors.append((str(pm_ns), doc.get("spec") or {}))
+                continue
             if doc.get("kind") != "Cluster":
                 continue
             if "cnpg.io" not in str(doc.get("apiVersion", "")):
@@ -197,15 +212,42 @@ def discover_clusters() -> tuple[dict[str, dict], list[str]]:
                 continue
             spec = doc.get("spec") or {}
             monitoring = spec.get("monitoring") or {}
+            for field in ("enablePodMonitor", "podMonitorMetricRelabelings", "podMonitorRelabelings"):
+                if field in monitoring and monitoring.get(field) not in (False, None, []):
+                    errors.append(
+                        f"{rel}: Cluster/{name} sets spec.monitoring.{field}, deprecated since CNPG "
+                        f"1.30 -- declare an owned PodMonitor ({name}-metrics) instead."
+                    )
             found[_cluster_key(ns, name)] = {
                 "namespace": ns,
                 "name": name,
                 "path": str(rel),
-                "scraped": monitoring.get("enablePodMonitor") is True,
+                "scraped": False,
                 "backed_up": bool((spec.get("backup") or {}).get("barmanObjectStore")),
                 "instances": int(spec.get("instances") or 1),
             }
+    for c in found.values():
+        c["scraped"] = any(_selects(c["namespace"], c["name"], ns, spec) for ns, spec in monitors)
     return found, errors
+
+
+def _selects(cluster_ns: str, cluster: str, pm_ns: str, spec: dict) -> bool:
+    """True iff this PodMonitor scrapes the instance pods of `cluster` on the exporter port.
+
+    Deliberately narrow: same namespace (an explicit namespaceSelector is not modelled, so a
+    cross-namespace monitor reads as NOT scraping -- the safe direction), a matchLabels selector
+    naming the cluster, no podRole other than `instance`, and a `metrics` port endpoint.
+    """
+    if pm_ns != cluster_ns or spec.get("namespaceSelector"):
+        return False
+    labels = ((spec.get("selector") or {}).get("matchLabels")) or {}
+    if labels.get("cnpg.io/cluster") != cluster:
+        return False
+    if labels.get("cnpg.io/podRole", "instance") != "instance":
+        return False
+    if set(labels) - {"cnpg.io/cluster", "cnpg.io/podRole"}:
+        return False
+    return any((ep or {}).get("port") == "metrics" for ep in spec.get("podMetricsEndpoints") or [])
 
 
 def _namespace_from_kustomization(path: Path) -> str | None:
@@ -602,7 +644,7 @@ def build(strict: bool = True) -> tuple[dict[str, dict], list[str]]:
             continue
         why = " It has a barmanObjectStore, so its backup state is what goes unwatched." if c["backed_up"] else ""
         gaps.append(
-            f"{key}: spec.monitoring.enablePodMonitor is not true ({c['path']}), so nothing "
+            f"{key}: no PodMonitor selects it ({c['path']}), so nothing "
             f"scrapes it and every Postgres alert is blind to it.{why}"
         )
 
@@ -680,7 +722,11 @@ def self_test() -> int:
         good = (
             "apiVersion: postgresql.cnpg.io/v1\nkind: Cluster\n"
             "metadata:\n  name: good-db\n  namespace: st\n"
-            "spec:\n  instances: 1\n  monitoring:\n    enablePodMonitor: true\n"
+            "spec:\n  instances: 1\n"
+            "---\napiVersion: monitoring.coreos.com/v1\nkind: PodMonitor\n"
+            "metadata:\n  name: good-db-metrics\n  namespace: st\n"
+            "spec:\n  selector:\n    matchLabels:\n      cnpg.io/cluster: good-db\n"
+            "      cnpg.io/podRole: instance\n  podMetricsEndpoints:\n    - port: metrics\n"
         )
         bad = (
             "apiVersion: postgresql.cnpg.io/v1\nkind: Cluster\n"
@@ -698,6 +744,34 @@ def self_test() -> int:
             print("SELF-TEST FAIL: an unscraped cluster was not reported"); ok = False
         if any("good-db" in e for e in errors):
             print("SELF-TEST FAIL: a scraped cluster was reported"); ok = False
+
+        # 1b. the shapes that LOOK like coverage and are not: the deprecated flag alone, a
+        # PodMonitor for another cluster, one in another namespace, one on the wrong port.
+        decoys = {
+            "flag.yaml": "apiVersion: postgresql.cnpg.io/v1\nkind: Cluster\nmetadata:\n  name: flag-db\n"
+                         "  namespace: st\nspec:\n  instances: 1\n  monitoring:\n    enablePodMonitor: true\n",
+            "other.yaml": "apiVersion: postgresql.cnpg.io/v1\nkind: Cluster\nmetadata:\n  name: other-db\n"
+                          "  namespace: st\nspec:\n  instances: 1\n---\n"
+                          "apiVersion: monitoring.coreos.com/v1\nkind: PodMonitor\nmetadata:\n"
+                          "  name: x\n  namespace: elsewhere\nspec:\n  selector:\n    matchLabels:\n"
+                          "      cnpg.io/cluster: other-db\n  podMetricsEndpoints:\n    - port: metrics\n"
+                          "---\napiVersion: monitoring.coreos.com/v1\nkind: PodMonitor\nmetadata:\n"
+                          "  name: y\n  namespace: st\nspec:\n  selector:\n    matchLabels:\n"
+                          "      cnpg.io/cluster: other-db\n  podMetricsEndpoints:\n    - port: http\n"
+                          "---\napiVersion: monitoring.coreos.com/v1\nkind: PodMonitor\nmetadata:\n"
+                          "  name: z\n  namespace: st\nspec:\n  selector:\n    matchLabels:\n"
+                          "      cnpg.io/cluster: good-db-2\n  podMetricsEndpoints:\n    - port: metrics\n",
+        }
+        for fn, body in decoys.items():
+            (d / fn).write_text(body)
+        gatelib.clear()
+        _, errors = build()
+        for want in ("st/flag-db: no PodMonitor", "Cluster/flag-db sets spec.monitoring.enablePodMonitor",
+                     "st/other-db: no PodMonitor"):
+            if not any(want in e for e in errors):
+                print(f"SELF-TEST FAIL: expected a finding containing {want!r}"); ok = False
+        for fn in decoys:
+            (d / fn).unlink()
 
         # 2. remove the offender: the gate must go quiet (it is not vacuously red)
         (d / "bad.yaml").unlink()

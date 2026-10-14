@@ -38,25 +38,6 @@ spec:
   # DB-layer observability: CNPG's built-in Prometheus exporter on :9187 plus a PodMonitor the
   # operator owns (selected cluster-wide), so cnpg_* metrics appear with no app change. Note this
   # is a different scrape path from the fleet PodMonitor, which selects on a `management` port.
-  monitoring:
-    enablePodMonitor: true
-    # FinOps/observability: cnpg_pg_settings_setting is one series per Postgres GUC per
-    # instance — 24 963 series on 2026-09-12, the largest metric name in a 645 k-series
-    # Prometheus (12 h retention, no long-term store). Exactly ONE of those GUCs is read
-    # by anything here: `max_connections`, by the PostgresConnectionsSaturated alert
-    # (prometheus-rules-db.yaml) and by dashboard-openbank-postgres. Everything else is
-    # static configuration whose authoritative copy is this manifest, so it is dropped at
-    # scrape. RE2 has no negative lookahead, hence mark-then-drop rather than one regex.
-    podMonitorMetricRelabelings:
-      - sourceLabels: [__name__, name]
-        regex: cnpg_pg_settings_setting;max_connections
-        targetLabel: __tmp_cnpg_keep
-        replacement: "1"
-      - sourceLabels: [__name__, __tmp_cnpg_keep]
-        regex: cnpg_pg_settings_setting;
-        action: drop
-      - regex: __tmp_cnpg_keep
-        action: labeldrop
   instances: 2
   # ADR-0325: an update (image bump, config change) promotes the already-updated
   # standby first and only then restarts the old primary. CNPG's default,
@@ -130,3 +111,39 @@ spec:
   backupOwnerReference: self
   cluster:
     name: litellm-db
+---
+# Owned replacement for the CNPG-generated PodMonitor: spec.monitoring.enablePodMonitor and
+# podMonitorMetricRelabelings are deprecated since CNPG 1.30. Same selector, port and
+# relabelling the operator generated; named -metrics so the operator, which deletes only a
+# PodMonitor named after the Cluster AND owned by it, never touches this one.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: litellm-db-metrics
+  namespace: ai-platform
+  labels:
+    cnpg.io/cluster: litellm-db
+spec:
+  selector:
+    matchLabels:
+      cnpg.io/cluster: litellm-db
+      cnpg.io/podRole: instance
+  podMetricsEndpoints:
+    - port: metrics
+      # FinOps/observability: cnpg_pg_settings_setting is one series per Postgres GUC per
+      # instance — 24 963 series on 2026-09-12, the largest metric name in a 645 k-series
+      # Prometheus (12 h retention, no long-term store). Exactly ONE of those GUCs is read
+      # by anything here: `max_connections`, by the PostgresConnectionsSaturated alert
+      # (prometheus-rules-db.yaml) and by dashboard-openbank-postgres. Everything else is
+      # static configuration whose authoritative copy is this manifest, so it is dropped at
+      # scrape. RE2 has no negative lookahead, hence mark-then-drop rather than one regex.
+      metricRelabelings:
+        - sourceLabels: [__name__, name]
+          regex: cnpg_pg_settings_setting;max_connections
+          targetLabel: __tmp_cnpg_keep
+          replacement: "1"
+        - sourceLabels: [__name__, __tmp_cnpg_keep]
+          regex: cnpg_pg_settings_setting;
+          action: drop
+        - regex: __tmp_cnpg_keep
+          action: labeldrop

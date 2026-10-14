@@ -4,8 +4,6 @@ metadata:
   name: context-db
   namespace: context
 spec:
-  monitoring:
-    enablePodMonitor: true
   instances: 2
   # ADR-0325: an update (image bump, config change) promotes the already-updated
   # standby first and only then restarts the old primary. CNPG's default,
@@ -62,3 +60,22 @@ spec:
   backupOwnerReference: self
   cluster:
     name: context-db
+---
+# Owned replacement for the CNPG-generated PodMonitor: spec.monitoring.enablePodMonitor and
+# podMonitorMetricRelabelings are deprecated since CNPG 1.30. Same selector, port and
+# relabelling the operator generated; named -metrics so the operator, which deletes only a
+# PodMonitor named after the Cluster AND owned by it, never touches this one.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: context-db-metrics
+  namespace: context
+  labels:
+    cnpg.io/cluster: context-db
+spec:
+  selector:
+    matchLabels:
+      cnpg.io/cluster: context-db
+      cnpg.io/podRole: instance
+  podMetricsEndpoints:
+    - port: metrics
