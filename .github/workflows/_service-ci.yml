@@ -703,7 +703,7 @@ jobs:
       # service's actual consumer-pact set would be silently wrong. No continue-on-error, no
       # if: always() — a failure here fails the job.
       - name: Download build's consumer-pact artifact
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v6.2.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: consumer-pacts-${{ inputs.service }}
           path: pact-handoff

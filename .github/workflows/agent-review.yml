@@ -126,7 +126,7 @@ jobs:
           echo "Out of ADR-0251 scope (${{ steps.scope.outputs.why }}): money-path scopes, the"
           echo "security type, and the governance scope only. No review, and no claim of one."
 
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v5.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: steps.scope.outputs.in_scope == 'true'
         with:
           node-version: '22'

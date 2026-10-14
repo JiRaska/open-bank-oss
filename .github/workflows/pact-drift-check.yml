@@ -180,7 +180,7 @@ jobs:
           .github/scripts/derive-pact-drift-scope.sh --uncovered > "${RUNNER_TEMP}/pact-uncovered.txt"
           python3 .github/scripts/pact-js-contracts.py --tests > "${RUNNER_TEMP}/pact-js-tests.txt"
 
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v6.2.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: jvm-pacts-*
           merge-multiple: true
@@ -313,7 +313,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v6.2.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: admin-ui-pacts-${{ github.sha }}
           path: ${{ runner.temp }}/admin-ui-pact-handoff
