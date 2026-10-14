@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: party-service
     app.kubernetes.io/part-of: party
   annotations:
-    openbank.tech/policy-checksum: "daea6db71867d7e5"
+    openbank.tech/policy-checksum: "02d86b98b0821c39"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -681,6 +681,8 @@ data:
     # would over-grant these actions to any operator session.
     #
     #   - customer-edge (client-id "openbank-edge" -> principal.id "service-account-openbank-edge"):
+    #       party.create — creates the customer's individual party during onboarding
+    #         (OnboardingResource -> UpstreamClient.postAnonymous).
     #       party.consent.update — the app's Profile-screen marketing-consent toggle is forwarded to
     #         party-service through the edge's own M2M token (CustomerEdgeResource, PATCH
     #         /api/v1/parties/{id}/consent).
@@ -694,6 +696,7 @@ data:
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-edge"
     	input.action in {
+            "party.create",
     		"party.consent.update",
     		"party:resolve",
     	}

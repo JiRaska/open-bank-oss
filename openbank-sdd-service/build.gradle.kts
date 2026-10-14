@@ -46,6 +46,7 @@ dependencies {
     // both behind @RolesAllowed on SddResource. The module's existing ITs only hit unsecured routes
     // (health, /api/v1/info) and the dispatcher directly, so nothing pulled this in before.
     testImplementation(libs.quarkus.test.security)
+    testImplementation(libs.quarkus.test.security.oidc)
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.smallrye.reactive.messaging.inmemory)

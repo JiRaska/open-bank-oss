@@ -3801,6 +3801,30 @@ autonomous_agent_prs:
       branch: codex/docs-fleet-ci
       expires_at: '2026-10-17T00:00:00Z'
       reason: 'Owner-requested admission for service documentation verification; admission only, all review, CI, merge and deployment approvals remain required.'
+    # Proposal only: requires explicit owner approval and separate maintainer adoption.
+    - pr: 12636
+      repository: JiRaska/open-bank-oss
+      branch: codex/copilot-log-privacy-20261012
+      expires_at: '2026-10-17T00:00:00Z'
+      reason: 'Owner-authorized time-limited admission; admission only, all owner/review/CI/merge/deployment controls remain required.'
+    # Proposal only: requires explicit owner approval and separate maintainer adoption.
+    - pr: 12717
+      repository: JiRaska/open-bank-oss
+      branch: codex/log-privacy-505-506-358-combined
+      expires_at: '2026-10-17T00:00:00Z'
+      reason: 'Owner-authorized time-limited admission; admission only, all owner/review/CI/merge/deployment controls remain required.'
+    # Proposal only: requires explicit owner approval and separate maintainer adoption.
+    - pr: 12551
+      repository: JiRaska/open-bank-oss
+      branch: codex/katex-trust-security-split
+      expires_at: '2026-10-17T00:00:00Z'
+      reason: 'Owner-authorized time-limited admission; admission only, all owner/review/CI/merge/deployment controls remain required.'
+    # Proposal only: requires explicit owner approval and separate maintainer adoption.
+    - pr: 12647
+      repository: JiRaska/open-bank-oss
+      branch: codex/temurin-rescan-main-6717
+      expires_at: '2026-10-17T00:00:00Z'
+      reason: 'Owner-authorized time-limited admission; admission only, all owner/review/CI/merge/deployment controls remain required.'
   detect:
     - 'any pull_request whose author is a declared agent account, or whose head branch carries a declared agent prefix'
   require:
@@ -4010,6 +4034,7 @@ security_sensitive_paths:
     cardholder: []
   openbank-domestic-payment:
     auth_crypto_payment:
+      - "src/main/kotlin/**/BusinessPaymentBatchDraftResource.kt"
       - "src/main/kotlin/**/ApprovalResource.kt"
       - "src/main/kotlin/**/approval/**"
       - "src/main/kotlin/**/security/**"
@@ -4046,6 +4071,8 @@ security_sensitive_paths:
       - "src/main/kotlin/**/*Kyc*.kt"
       - "src/main/kotlin/**/*Address*.kt"
       - "src/main/kotlin/**/*Contact*.kt"
+      - "src/main/kotlin/**/BusinessPaymentBatchDraftResource.kt"
+      - "src/main/kotlin/**/BusinessPaymentBatchDraftEntity.kt"
     cardholder: []
   openbank-account-service:
     auth_crypto_payment:

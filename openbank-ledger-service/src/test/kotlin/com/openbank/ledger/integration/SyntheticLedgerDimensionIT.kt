@@ -10,6 +10,8 @@ import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
@@ -70,6 +72,13 @@ class SyntheticLedgerDimensionIT {
 
     @Test
     @TestSecurity(user = CANARY_PRINCIPAL, roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-synthetic-canary"),
+            Claim(key = "preferred_username", value = CANARY_PRINCIPAL),
+            Claim(key = "sub", value = "synthetic-canary-subject"),
+        ],
+    )
     fun `a synthetic posting is recorded on the journal and excluded from the default trial balance`() {
         val realBefore = netFor(scope = null)
         val syntheticBefore = netFor(scope = "SYNTHETIC_ONLY")
@@ -100,6 +109,13 @@ class SyntheticLedgerDimensionIT {
 
     @Test
     @TestSecurity(user = CANARY_PRINCIPAL, roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-synthetic-canary"),
+            Claim(key = "preferred_username", value = CANARY_PRINCIPAL),
+            Claim(key = "sub", value = "synthetic-canary-subject"),
+        ],
+    )
     fun `every scope stays balanced and names itself`() {
         // Excluding a journal must remove BOTH its legs. A per-line filter would keep one and leave
         // the GL unbalanced in that scope while still being green on any single-account assertion.
@@ -114,6 +130,13 @@ class SyntheticLedgerDimensionIT {
 
     @Test
     @TestSecurity(user = CANARY_PRINCIPAL, roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-synthetic-canary"),
+            Claim(key = "preferred_username", value = CANARY_PRINCIPAL),
+            Claim(key = "sub", value = "synthetic-canary-subject"),
+        ],
+    )
     fun `an unrecognised scope is refused rather than silently answered as real`() {
         Given {
             queryParam("scope", "rael")
@@ -145,7 +168,7 @@ class SyntheticLedgerDimensionIT {
               "entryDate": "$date",
               "valueDate": "$date",
               "description": "ADR-0252 dimension IT (tainted=$tainted)",
-              "createdBy": "$CANARY_PRINCIPAL",
+              "createdBy": "$CANARY_ACTOR_ID",
               "lines": [
                 {
                   "glAccountId": "$DEBIT_ACCOUNT",
@@ -220,7 +243,10 @@ class SyntheticLedgerDimensionIT {
 
     companion object {
         /** The canary service account. Trusted only because [TrustedCanaryProfile] names it. */
-        const val CANARY_PRINCIPAL = "00000000-0000-0000-0000-000000000252"
+        const val CANARY_PRINCIPAL = "service-account-openbank-synthetic-canary"
+
+        // The journal author is a UUID; the authenticated service-account name is not.
+        const val CANARY_ACTOR_ID = "00000000-0000-0000-0000-000000000252"
 
         // Two single-currency USD leaf accounts no other IT in this module posts to. The deltas
         // below make that a convenience rather than a dependency.
