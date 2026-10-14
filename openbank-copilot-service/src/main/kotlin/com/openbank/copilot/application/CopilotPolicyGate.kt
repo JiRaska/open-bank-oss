@@ -48,7 +48,7 @@ class CopilotPolicyGate(
             else -> "not-permitted (deny-by-default)"
         }
         if (!whitelisted) {
-            log.warnf("policy denied tool=%s capability=%s reason=%s", tool, capability, whitelistReason)
+            log.warn("policy denied by capability whitelist")
             audit(customerId, tool, capability, AuditResult.DENIED, whitelistReason, opaVerdict = null)
             return Decision(allow = false, reason = whitelistReason)
         }
@@ -61,23 +61,12 @@ class CopilotPolicyGate(
         val opaVerdict = if (opa.allow) "allow" else "deny"
         if (!opa.allow) {
             if (opaEnforce) {
-                log.warnf(
-                    "OPA gate denied tool=%s customer=%s reason=%s (enforce mode)",
-                    tool,
-                    customerId,
-                    opa.reason,
-                )
+                log.warn("OPA policy denied tool authorization (enforce mode)")
                 audit(customerId, tool, capability, AuditResult.DENIED, opa.reason, opaVerdict = "deny")
                 return Decision(allow = false, reason = opa.reason)
             } else {
                 // Advisory mode: log and pass through.
-                log.warnf(
-                    "OPA advisory-denied (allowing) tool=%s cust=%s reason=%s — " +
-                        "flip copilot.opa.enforce=true to block",
-                    tool,
-                    customerId,
-                    opa.reason,
-                )
+                log.warn("OPA policy denied tool authorization; allowing in advisory mode")
             }
         }
 

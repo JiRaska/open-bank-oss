@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.5](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.17.4...copilot-service-v0.17.5) (2026-10-14)
+
+
+### Bug Fixes
+
+* **copilot-service:** omit private proposal fields from logs ([#12636](https://github.com/JiRaska/open-bank-oss/issues/12636)) ([8aea7fa](https://github.com/JiRaska/open-bank-oss/commit/8aea7fae486e962a8d9543acaab0af66a90ea234))
+
 ## [0.17.4](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.17.3...copilot-service-v0.17.4) (2026-10-04)
 
 
