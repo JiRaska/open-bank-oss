@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: notification-service
     app.kubernetes.io/part-of: notifications
   annotations:
-    openbank.tech/policy-checksum: "28d68e10273dcada"
+    openbank.tech/policy-checksum: "999bd694680dc083"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -98,8 +98,9 @@ data:
     # (ServiceAccountIdentity.machineClientId) and, when known, `input.principal.client_id`.
     #
     # Rules that keep machines OUT test `not principal_is_machine`; rules that grant ONE client test
-    # `machine_named("service-account-<client>")` (the id still names WHICH client, the flag proves
-    # it is one). Never write a bare id-prefix check.
+    # `machine_named("service-account-<client>")`. The id must match the fixed name AND a present
+    # machine marker must carry the matching client_id derived from verified JWT claims. Never write
+    # a bare id-prefix check for a named grant.
     #
     # FAIL CLOSED: only an explicit `service_account == false` from the PEP makes a principal a
     # person. An absent field (an old or broken PEP, a hand-built input) is a machine, so it
@@ -107,10 +108,10 @@ data:
     # ---------------------------------------------------------------------------------------
     principal_is_machine if not input.principal.service_account == false
 
-    # Grants TO machines (a named client, or any machine). The verified flag decides; only while the
-    # field is ABSENT (a PEP not yet rebuilt on the phase-1 libs-runtime) does the legacy name prefix
-    # stand in, so a named-client or any-machine path that works today keeps working mid-rollout. An
-    # absent field never grants a STAFF rule (principal_is_machine above). Remove the second body once
+    # Grants TO machines. Generic machine grants trust the marker; only while the field is ABSENT (a
+    # PEP not yet rebuilt on phase-1 libs-runtime) does the legacy name prefix stand in. Named grants
+    # use machine_named below and additionally bind client_id when the marker is present. An absent
+    # field never grants a STAFF rule (principal_is_machine above). Remove legacy bodies once
     # check-pdp-flag-rollout.sh --live reports the whole fleet current.
     machine_grant_ok if input.principal.service_account == true
 
@@ -121,6 +122,19 @@ data:
 
     machine_named(name) if {
     	input.principal.id == name
+    	machine_grant_ok
+    	# A present PEP marker is current ABI: bind the fixed name to the client id that the
+    	# interceptor derived from azp + preferred_username. A renamed machine remains classified as
+    	# a machine, but cannot borrow another client's named grant.
+    	input.principal.service_account == true
+    	input.principal.client_id == trim_prefix(name, "service-account-")
+    }
+
+    machine_named(name) if {
+    	input.principal.id == name
+    	# Phase-1 PEPs do not send these fields; keep their historical name-based grant only while
+    	# the marker is absent. A present marker with missing client_id must deny.
+    	object.get(input.principal, "service_account", null) == null
     	machine_grant_ok
     }
 
@@ -405,8 +419,7 @@ data:
     # ceremony's signers, so this grant cannot sign on someone else's behalf.
     allowed_reasons contains "edge-service-notification" if {
     	input.principal.type == "HUMAN"
-    	input.principal.id == "service-account-openbank-edge"
-    	machine_grant_ok
+    	machine_named("service-account-openbank-edge")
     	some family in {"notification.", "device.", "document.", "signatureCeremony."}
     	startswith(input.action, family)
     }
@@ -422,8 +435,7 @@ data:
     # edge principal (least privilege; the edge exposes no route for those anyway).
     allowed_reasons contains "edge-service-consent" if {
     	input.principal.type == "HUMAN"
-    	input.principal.id == "service-account-openbank-edge"
-    	machine_grant_ok
+    	machine_named("service-account-openbank-edge")
     	input.action in {"consent.list", "consent.revoke"}
     }
 
@@ -435,8 +447,7 @@ data:
     # NOT an `engagement.` family — least privilege, matching edge-service-consent's shape.
     allowed_reasons contains "edge-service-engagement" if {
     	input.principal.type == "HUMAN"
-    	input.principal.id == "service-account-openbank-edge"
-    	machine_grant_ok
+    	machine_named("service-account-openbank-edge")
     	input.action in {"engagement.surface.read", "engagement.surface.recordEvent"}
     }
 
@@ -458,8 +469,7 @@ data:
     # through a different client, so their preferred_username is never "service-account-*".
     allowed_reasons contains "edge-service-audit-customer" if {
     	input.principal.type == "HUMAN"
-    	input.principal.id == "service-account-openbank-edge"
-    	machine_grant_ok
+    	machine_named("service-account-openbank-edge")
     	input.action == "audit.customerRead"
     }
 

@@ -44,9 +44,9 @@ operator := {"service_account": false, "type": "HUMAN", "id": "u-op", "roles": [
 
 supervisor := {"service_account": false, "type": "HUMAN", "id": "u-sup", "roles": ["ROLE_SUPERVISOR"]}
 
-edge := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]}
+edge := {"service_account": true, "client_id": "openbank-edge", "type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]}
 
-services_m2m := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
+services_m2m := {"service_account": true, "client_id": "openbank-services", "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
 
 # --- the regressions this file exists to prevent ---
 
@@ -156,11 +156,11 @@ test_extension_is_loaded if {
 
 # --- #10486 batch 2: transaction-service and settlement-service own identities (ROLE_API only) ---
 
-transaction_m2m := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-transaction", "roles": ["ROLE_API"]}
+transaction_m2m := {"service_account": true, "client_id": "openbank-transaction", "type": "HUMAN", "id": "service-account-openbank-transaction", "roles": ["ROLE_API"]}
 
-settlement_m2m := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-settlement", "roles": ["ROLE_API"]}
+settlement_m2m := {"service_account": true, "client_id": "openbank-settlement", "type": "HUMAN", "id": "service-account-openbank-settlement", "roles": ["ROLE_API"]}
 
-other_role_api_sa := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-mcp-service", "roles": ["ROLE_API"]}
+other_role_api_sa := {"service_account": true, "client_id": "openbank-mcp-service", "type": "HUMAN", "id": "service-account-openbank-mcp-service", "roles": ["ROLE_API"]}
 
 balance_actions := {
 	"balance.read", "balance.hold", "balance.holdRelease", "balance.credit", "balance.debit",
@@ -227,7 +227,7 @@ test_batch2_balance_rules_do_not_admit_the_shared_client if {
 
 test_settlement_cover_rejects_wrong_principal_type if {
 	rest.allow == false with input as {
-		"principal": {"service_account": true, "type": "AGENT", "id": "service-account-openbank-settlement", "roles": ["ROLE_API"]},
+		"principal": {"service_account": true, "client_id": "openbank-settlement", "type": "AGENT", "id": "service-account-openbank-settlement", "roles": ["ROLE_API"]},
 		"action": "balance.hold",
 	}
 		with data.rules as rules_mock

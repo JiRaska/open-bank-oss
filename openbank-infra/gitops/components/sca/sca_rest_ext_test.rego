@@ -39,9 +39,9 @@ rules_mock := {
 
 operator := {"service_account": false, "type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
 
-edge := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]}
+edge := {"service_account": true, "client_id": "openbank-edge", "type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]}
 
-services_m2m := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
+services_m2m := {"service_account": true, "client_id": "openbank-services", "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
 
 # --- the regressions this file exists to prevent ---
 
@@ -163,7 +163,7 @@ test_customer_device_revocation_requires_four_eyes if {
 
 test_service_principal_cannot_revoke_customer_device_via_self_rule if {
 	not rest.allow with input as {
-		"principal": {"service_account": true, "id": "service-account-openbank-services", "type": "HUMAN", "roles": ["ROLE_API"]},
+		"principal": {"service_account": true, "client_id": "openbank-services", "id": "service-account-openbank-services", "type": "HUMAN", "roles": ["ROLE_API"]},
 		"action": "device.revoke",
 		"resource": {"id": "party-owner"},
 	}

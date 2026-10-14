@@ -55,8 +55,7 @@ allowed_reasons contains "operator-risk-curve-set-create" if {
 # grant reaches this one machine and nothing that happens to share a role; reads only.
 allowed_reasons contains "finrep-m2m-risk-snapshot-read" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-finrep"
-	machine_grant_ok
+	machine_named("service-account-openbank-finrep")
 	input.action == "risk.snapshot.read"
 }
 
@@ -65,7 +64,6 @@ allowed_reasons contains "finrep-m2m-risk-snapshot-read" if {
 # ledger). Keyed by principal id, never by role; curve-set reads only — no snapshot, no create.
 allowed_reasons contains "treasury-m2m-risk-curve-set-read" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-treasury"
-	machine_grant_ok
+	machine_named("service-account-openbank-treasury")
 	input.action == "risk.curve-set.read"
 }

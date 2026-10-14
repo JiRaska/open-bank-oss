@@ -25,12 +25,12 @@ admin := {"service_account": false, "type": "HUMAN", "id": "u-admin", "roles": [
 
 viewer := {"service_account": false, "type": "HUMAN", "id": "u-view", "roles": ["ROLE_VIEWER"]}
 
-edge := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_API"]}
+edge := {"service_account": true, "client_id": "openbank-edge", "type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_API"]}
 
 # The shared backend identity: classified HUMAN and carrying ROLE_OPERATOR in the realm. This is
 # the principal the whole file is shaped around — a role-only write rule would hand it the power
 # to register, amend or cancel a direct-debit mandate on any account.
-services_m2m := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
+services_m2m := {"service_account": true, "client_id": "openbank-services", "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
 
 # --- staff: back-office mandate lifecycle ---
 

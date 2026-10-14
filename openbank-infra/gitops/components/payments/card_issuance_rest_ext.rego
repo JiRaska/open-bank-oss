@@ -78,14 +78,12 @@ allowed_reasons contains "compliance-card-block" if {
 #   party-service      CardServiceRestClient.listByParty GET /cards/party/{partyId} card.list
 allowed_reasons contains "service-delegation-card-read" if {
 	input.principal.type == "HUMAN"
-	input.principal.id in {"service-account-openbank-delegation"}
-	machine_grant_ok
+	machine_named("service-account-openbank-delegation")
 	input.action == "card.read"
 }
 
 allowed_reasons contains "service-party-card-list" if {
 	input.principal.type == "HUMAN"
-	input.principal.id in {"service-account-openbank-party"}
-	machine_grant_ok
+	machine_named("service-account-openbank-party")
 	input.action == "card.list"
 }

@@ -66,8 +66,7 @@ allowed_reasons contains "operator-sdd-write" if {
 #     reachable on a customer-facing principal.
 allowed_reasons contains "edge-service-sdd" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-edge"
-	machine_grant_ok
+	machine_named("service-account-openbank-edge")
 	input.action in {
 		"sdd.create",
 		"sdd.read",

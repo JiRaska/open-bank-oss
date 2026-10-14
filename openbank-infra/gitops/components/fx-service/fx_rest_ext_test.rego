@@ -15,9 +15,9 @@ operator := {"service_account": false, "type": "HUMAN", "id": "u-op", "roles": [
 
 payments_desk := {"service_account": false, "type": "HUMAN", "id": "u-pay", "roles": ["ROLE_PAYMENTS"]}
 
-edge := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]}
+edge := {"service_account": true, "client_id": "openbank-edge", "type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]}
 
-shared := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
+shared := {"service_account": true, "client_id": "openbank-services", "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
 
 # The matrix grants ROLE_OPERATOR fx.{convert, list, read} — convert is the only fx write in the
 # grant, and the only one needing a veto beyond the exclusion. Shape mirrors

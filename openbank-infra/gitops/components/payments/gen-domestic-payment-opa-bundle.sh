@@ -93,8 +93,7 @@ allowed_reasons contains "service-scoped-payment-initiator" if {
 
 allowed_reasons contains "service-domestic-payment-m2m" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-edge"
-	machine_grant_ok
+	machine_named("service-account-openbank-edge")
 	input.action in {
 		"domestic-payment.create",
 		"domestic-payment.read",

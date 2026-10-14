@@ -86,8 +86,7 @@ allowed_reasons contains "operator-sca-write" if {
 # base rest.rego — not duplicated here.
 allowed_reasons contains "service-sca-edge-m2m" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-edge"
-	machine_grant_ok
+	machine_named("service-account-openbank-edge")
 	input.action in {
 		"scaChallenge.initiate",
 		"scaChallenge.read",
@@ -98,8 +97,7 @@ allowed_reasons contains "service-sca-edge-m2m" if {
 
 allowed_reasons contains "service-sca-shared-client-m2m" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-services"
-	machine_grant_ok
+	machine_named("service-account-openbank-services")
 	input.action in {"scaChallenge.read", "scaChallenge.consume"}
 }
 

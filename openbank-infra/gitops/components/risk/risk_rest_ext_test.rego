@@ -33,6 +33,7 @@ test_shared_service_account_is_denied_create if {
 	not rest.allow with input as {
 		"principal": {
 			"service_account": true,
+			"client_id": "openbank-services",
 			"type": "HUMAN",
 			"id": "service-account-openbank-services",
 			"roles": ["ROLE_OPERATOR", "ROLE_API"],
@@ -73,6 +74,7 @@ test_shared_service_account_is_denied_curve_set_upload if {
 	not rest.allow with input as {
 		"principal": {
 			"service_account": true,
+			"client_id": "openbank-services",
 			"type": "HUMAN",
 			"id": "service-account-openbank-services",
 			"roles": ["ROLE_OPERATOR", "ROLE_API"],
@@ -140,7 +142,7 @@ test_finance_is_denied_risk_writes if {
 test_service_account_with_risk_role_is_denied_writes if {
 	every action in ["risk.snapshot.create", "risk.curve-set.create"] {
 		not rest.allow with input as {
-			"principal": {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_RISK"]},
+			"principal": {"service_account": true, "client_id": "openbank-services", "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_RISK"]},
 			"action": action,
 		}
 			with data.rules as dept_rules
@@ -157,7 +159,7 @@ test_treasury_roles_grant_nothing_in_risk if {
 	}
 }
 
-finrep_m2m := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-finrep", "roles": ["ROLE_API"]}
+finrep_m2m := {"service_account": true, "client_id": "openbank-finrep", "type": "HUMAN", "id": "service-account-openbank-finrep", "roles": ["ROLE_API"]}
 
 test_finrep_m2m_may_read_a_snapshot if {
 	rest.allow with input as {"principal": finrep_m2m, "action": "risk.snapshot.read"}
@@ -174,13 +176,13 @@ test_finrep_m2m_is_denied_curve_set_create if {
 # Same ROLE_API, different machine: the grant is by identity, not by role.
 test_other_api_service_account_is_denied_read if {
 	not rest.allow with input as {
-		"principal": {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-treasury", "roles": ["ROLE_API"]},
+		"principal": {"service_account": true, "client_id": "openbank-treasury", "type": "HUMAN", "id": "service-account-openbank-treasury", "roles": ["ROLE_API"]},
 		"action": "risk.snapshot.read",
 	}
 }
 
 # ADR-0315 D9: treasury's own identity reads curve sets for the simulated quotes — and nothing else.
-treasury_m2m := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-treasury", "roles": ["ROLE_API"]}
+treasury_m2m := {"service_account": true, "client_id": "openbank-treasury", "type": "HUMAN", "id": "service-account-openbank-treasury", "roles": ["ROLE_API"]}
 
 test_treasury_m2m_may_read_curve_sets if {
 	rest.allow with input as {"principal": treasury_m2m, "action": "risk.curve-set.read"}

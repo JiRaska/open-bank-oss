@@ -30,6 +30,7 @@ test_pause_denied_for_shared_service_account if {
 	count(rest.allowed_reasons) == 0 with input as {
 		"principal": {
 			"service_account": true,
+			"client_id": "openbank-services",
 			"type": "HUMAN",
 			"id": "service-account-openbank-services",
 			"roles": ["ROLE_OPERATOR", "ROLE_ADMIN"],
@@ -44,6 +45,7 @@ test_pause_denied_for_unrelated_service_account if {
 	count(rest.allowed_reasons) == 0 with input as {
 		"principal": {
 			"service_account": true,
+			"client_id": "openbank-mcp-service",
 			"type": "HUMAN",
 			"id": "service-account-openbank-mcp-service",
 			"roles": ["ROLE_OPERATOR"],
@@ -60,6 +62,7 @@ test_edge_service_account_keeps_m2m_reason_only if {
 	rest.allowed_reasons == {"m2m-standing-order-pause"} with input as {
 		"principal": {
 			"service_account": true,
+			"client_id": "openbank-edge",
 			"type": "HUMAN",
 			"id": "service-account-openbank-edge",
 			"roles": ["ROLE_OPERATOR"],
@@ -74,6 +77,7 @@ test_edge_service_account_gets_nothing_for_other_actions if {
 	count(rest.allowed_reasons) == 0 with input as {
 		"principal": {
 			"service_account": true,
+			"client_id": "openbank-edge",
 			"type": "HUMAN",
 			"id": "service-account-openbank-edge",
 			"roles": ["ROLE_OPERATOR"],

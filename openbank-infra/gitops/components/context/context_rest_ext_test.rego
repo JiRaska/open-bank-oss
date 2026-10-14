@@ -87,6 +87,7 @@ test_context_assignment_denies_service_account_even_with_admin if {
 	not rest.allow with input as {
 		"principal": {
 			"service_account": true,
+			"client_id": "openbank-services",
 			"id": "service-account-openbank-services",
 			"type": "HUMAN",
 			"roles": ["ROLE_ADMIN", "ROLE_OPERATOR"],
@@ -135,7 +136,7 @@ test_context_incident_read_denies_unscoped_assignment_even_for_admin if {
 
 test_context_incident_read_denies_service_account_even_with_assignment if {
 	not rest.allow with input as {
-		"principal": {"service_account": true, "id": "service-account-openbank-services", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": true, "client_id": "openbank-services", "id": "service-account-openbank-services", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "context.incident.aggregate.read",
 		"attributes": {"assignmentVerified": true, "purpose": "INCIDENT_IMPACT"},
 	}

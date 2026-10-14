@@ -40,14 +40,14 @@ test_viewer_may_not_file if {
 
 test_service_account_with_operator_may_not_file if {
 	not rest.allow with input as {
-		"principal": {"type": "HUMAN", "service_account": true, "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR", "ROLE_API"]},
+		"principal": {"type": "HUMAN", "service_account": true, "client_id": "openbank-services", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR", "ROLE_API"]},
 		"action": "tax.filing.file",
 	}
 }
 
 test_service_account_with_operator_may_not_assemble if {
 	not rest.allow with input as {
-		"principal": {"type": "HUMAN", "service_account": true, "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR", "ROLE_API"]},
+		"principal": {"type": "HUMAN", "service_account": true, "client_id": "openbank-services", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR", "ROLE_API"]},
 		"action": "tax.filing.assemble",
 	}
 }
@@ -66,7 +66,7 @@ test_legacy_staff_can_read_while_old_image_drains if {
 test_legacy_read_is_denied_to_shared_service_account_with_staff_roles if {
 	every role in ["ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE", "ROLE_AUDITOR", "ROLE_VIEWER"] {
 		not rest.allow with data.rules.authz.operator_read_any_excluded_actions as data.authz.operator_read_any_excluded_actions with input as {
-			"principal": {"type": "HUMAN", "service_account": true, "id": "service-account-openbank-services", "roles": ["ROLE_API", role]},
+			"principal": {"type": "HUMAN", "service_account": true, "client_id": "openbank-services", "id": "service-account-openbank-services", "roles": ["ROLE_API", role]},
 			"action": "tax.filing.read",
 		}
 	}
@@ -75,7 +75,7 @@ test_legacy_read_is_denied_to_shared_service_account_with_staff_roles if {
 test_legacy_read_is_denied_to_shared_service_account_with_all_staff_roles if {
 	not rest.allow with data.rules.authz.operator_read_any_excluded_actions as data.authz.operator_read_any_excluded_actions with input as {
 		"principal": {
-			"type": "HUMAN", "service_account": true, "id": "service-account-openbank-services",
+			"type": "HUMAN", "service_account": true, "client_id": "openbank-services", "id": "service-account-openbank-services",
 			"roles": ["ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE", "ROLE_AUDITOR"],
 		},
 		"action": "tax.filing.read",
@@ -85,7 +85,7 @@ test_legacy_read_is_denied_to_shared_service_account_with_all_staff_roles if {
 test_shared_service_account_may_not_inspect_with_any_staff_role if {
 	every role in ["ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE", "ROLE_AUDITOR", "ROLE_VIEWER"] {
 		not rest.allow with input as {
-			"principal": {"type": "HUMAN", "service_account": true, "id": "service-account-openbank-services", "roles": ["ROLE_API", role]},
+			"principal": {"type": "HUMAN", "service_account": true, "client_id": "openbank-services", "id": "service-account-openbank-services", "roles": ["ROLE_API", role]},
 			"action": "tax.filing.inspect",
 		}
 	}
@@ -94,7 +94,7 @@ test_shared_service_account_may_not_inspect_with_any_staff_role if {
 test_shared_service_account_with_every_role_may_not_inspect if {
 	not rest.allow with input as {
 		"principal": {
-			"type": "HUMAN", "service_account": true, "id": "service-account-openbank-services",
+			"type": "HUMAN", "service_account": true, "client_id": "openbank-services", "id": "service-account-openbank-services",
 			"roles": ["ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE", "ROLE_AUDITOR"],
 		},
 		"action": "tax.filing.inspect",
@@ -103,7 +103,7 @@ test_shared_service_account_with_every_role_may_not_inspect if {
 
 test_another_service_account_may_not_inspect if {
 	not rest.allow with input as {
-		"principal": {"type": "HUMAN", "service_account": true, "id": "service-account-openbank-ledger", "roles": ["ROLE_COMPLIANCE", "ROLE_OPERATOR"]},
+		"principal": {"type": "HUMAN", "service_account": true, "client_id": "openbank-ledger", "id": "service-account-openbank-ledger", "roles": ["ROLE_COMPLIANCE", "ROLE_OPERATOR"]},
 		"action": "tax.filing.inspect",
 	}
 }

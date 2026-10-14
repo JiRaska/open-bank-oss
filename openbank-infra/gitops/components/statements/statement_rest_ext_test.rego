@@ -21,7 +21,7 @@ viewer := {"service_account": false, "type": "HUMAN", "id": "u-view", "roles": [
 auditor := {"service_account": false, "type": "HUMAN", "id": "u-aud", "roles": ["ROLE_AUDITOR"]}
 
 # The customer-edge M2M identity — classified HUMAN, carries ROLE_OPERATOR (see caller audit).
-edge_m2m := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]}
+edge_m2m := {"service_account": true, "client_id": "openbank-edge", "type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]}
 
 # --- close-run telemetry reads: viewer/auditor allowed (the gap base rest.rego leaves) ---
 

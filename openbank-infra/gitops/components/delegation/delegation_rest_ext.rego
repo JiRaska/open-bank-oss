@@ -85,8 +85,7 @@ prohibited if {
 # bank-side acts and must not be reachable on the edge principal, which has no route for them.
 allowed_reasons contains "edge-service-delegation" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-edge"
-	machine_grant_ok
+	machine_named("service-account-openbank-edge")
 	input.action in {
 		"delegation.offer",
         "delegation.preview",
@@ -142,8 +141,7 @@ prohibited if {
 # round IS the multi-person control here, enforced in the service, not by the four-eyes verb set.
 allowed_reasons contains "edge-service-business-signing" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-edge"
-	machine_grant_ok
+	machine_named("service-account-openbank-edge")
 	input.action in {
 		"delegation.signing.evaluate",
 		"delegation.signing.policy.read",

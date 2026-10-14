@@ -136,8 +136,7 @@ allowed_reasons contains "compliance-lending-desk" if {
 # refuses when it is unset. This rule states the intent, and narrows the day the blanket
 # operator grant is tightened.
 allowed_reasons contains "edge-customer-intake" if {
-	input.principal.id == "service-account-openbank-edge"
-	machine_grant_ok
+	machine_named("service-account-openbank-edge")
 	input.action == "lending.intake"
 }
 
@@ -153,8 +152,7 @@ allowed_reasons contains "edge-customer-intake" if {
 # Read-only by construction — the action has no write counterpart to be confused with, which is
 # why it needs no entry in the `prohibited` veto below.
 allowed_reasons contains "service-credit-offer-eligibility" if {
-	input.principal.id == "service-account-openbank-services"
-	machine_grant_ok
+	machine_named("service-account-openbank-services")
 	input.action == "lending.creditOffer.eligibility"
 }
 
@@ -167,8 +165,7 @@ allowed_reasons contains "service-credit-offer-eligibility" if {
 # through OPA, and any other ROLE_API holder is still denied (lending_rest_ext_test.rego).
 allowed_reasons contains "service-risk-loan-book-read" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-services"
-	machine_grant_ok
+	machine_named("service-account-openbank-services")
 	input.action == "lending.book.read"
 }
 
@@ -188,8 +185,7 @@ allowed_reasons contains "service-risk-loan-book-read" if {
 # CustomerEdgeResource.applyForLoan). The remaining ~12 lending writes not in the matrix grant
 # (acceleration.execute, advance, default.mark, ...) are closed by the exclusion alone.
 prohibited if {
-	input.principal.id == "service-account-openbank-edge"
-	machine_grant_ok
+	machine_named("service-account-openbank-edge")
 	input.action in {
 		"lending.approve",
 		"lending.collateralDecide",

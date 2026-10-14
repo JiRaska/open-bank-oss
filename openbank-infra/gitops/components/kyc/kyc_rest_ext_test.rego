@@ -19,7 +19,7 @@ compliance := {"service_account": false, "type": "HUMAN", "id": "u-comp", "roles
 operator := {"service_account": false, "type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
 
 # An M2M identity carrying a KYC role must still be excluded.
-service_m2m := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-onboarding", "roles": ["ROLE_KYC_REVIEWER"]}
+service_m2m := {"service_account": true, "client_id": "openbank-onboarding", "type": "HUMAN", "id": "service-account-openbank-onboarding", "roles": ["ROLE_KYC_REVIEWER"]}
 
 # --- updateCheck: admin / opener allowed; reviewer NOT (not in the role set) ---
 

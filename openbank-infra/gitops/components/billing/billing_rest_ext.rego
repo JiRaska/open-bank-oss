@@ -47,8 +47,7 @@ allowed_reasons contains "operator-billing-write" if {
 # exclusion closes the role-only path and this veto closes the matrix path for the edge (base
 # rest.rego gates its allow head on `not prohibited`).
 prohibited if {
-	input.principal.id == "service-account-openbank-edge"
-	machine_grant_ok
+	machine_named("service-account-openbank-edge")
 	input.action in {
 		"billing.post",
 		"billing.reverse",

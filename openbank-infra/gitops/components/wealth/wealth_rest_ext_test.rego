@@ -11,14 +11,14 @@ edge := "service-account-openbank-edge"
 
 test_edge_may_declare_for_the_customer if {
 	rest.allow with input as {
-		"principal": {"service_account": true, "type": "HUMAN", "id": edge, "roles": ["ROLE_API"]},
+		"principal": {"service_account": true, "client_id": "openbank-edge", "type": "HUMAN", "id": edge, "roles": ["ROLE_API"]},
 		"action": "wealth.holding.declare",
 	}
 }
 
 test_edge_may_read if {
 	rest.allow with input as {
-		"principal": {"service_account": true, "type": "HUMAN", "id": edge, "roles": ["ROLE_API"]},
+		"principal": {"service_account": true, "client_id": "openbank-edge", "type": "HUMAN", "id": edge, "roles": ["ROLE_API"]},
 		"action": "wealth.holding.read",
 	}
 }
@@ -58,6 +58,7 @@ test_shared_service_account_can_read_via_the_base_operator_rule if {
 	rest.allow with input as {
 		"principal": {
 			"service_account": true,
+			"client_id": "openbank-services",
 			"type": "HUMAN",
 			"id": "service-account-openbank-services",
 			"roles": ["ROLE_OPERATOR", "ROLE_API"],
@@ -72,6 +73,7 @@ test_shared_service_account_is_denied_declare if {
 	not rest.allow with input as {
 		"principal": {
 			"service_account": true,
+			"client_id": "openbank-services",
 			"type": "HUMAN",
 			"id": "service-account-openbank-services",
 			"roles": ["ROLE_OPERATOR", "ROLE_API"],
@@ -84,6 +86,7 @@ test_shared_service_account_is_denied_withdraw if {
 	not rest.allow with input as {
 		"principal": {
 			"service_account": true,
+			"client_id": "openbank-services",
 			"type": "HUMAN",
 			"id": "service-account-openbank-services",
 			"roles": ["ROLE_OPERATOR", "ROLE_API"],

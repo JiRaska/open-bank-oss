@@ -81,15 +81,13 @@ allowed_reasons contains "operator-fx-trigger" if {
 #     inline.
 allowed_reasons contains "service-fx-edge-m2m" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-edge"
-	machine_grant_ok
+	machine_named("service-account-openbank-edge")
 	input.action in {"fx.read", "fx.list"}
 }
 
 allowed_reasons contains "service-fx-shared-client-m2m" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-services"
-	machine_grant_ok
+	machine_named("service-account-openbank-services")
 	input.action in {"fx.read", "fx.list"}
 }
 
@@ -112,8 +110,7 @@ allowed_reasons contains "operator-fx-approval-decide" if {
 # (base rest.rego gates its allow head on `not prohibited`); fx.trigger / fx.approval.decide
 # need no veto — absent from the matrix grant, the exclusion closes them outright.
 prohibited if {
-	input.principal.id == "service-account-openbank-edge"
-	machine_grant_ok
+	machine_named("service-account-openbank-edge")
 	input.action == "fx.convert"
 }
 

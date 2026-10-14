@@ -97,8 +97,7 @@ allowed_reasons contains "viewer-auditor-ledger-read" if {
 # unsafe (real operator/admin staff also carry ROLE_OPERATOR); gate on identity instead.
 allowed_reasons contains "service-ledger-read" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-services"
-	machine_grant_ok
+	machine_named("service-account-openbank-services")
 	some verb in {"list", "read"}
 	endswith(input.action, sprintf(".%v", [verb]))
 }
@@ -120,7 +119,7 @@ allowed_reasons contains "ledger-close-inspect-read" if {
 
 allowed_reasons contains "service-ledger-close-inspect" if {
     input.principal.type == "HUMAN"
-    input.principal.id == "service-account-openbank-services"
+    machine_named("service-account-openbank-services")
     input.action == "ledger.close.inspect"
 }
 
@@ -181,8 +180,7 @@ allowed_reasons contains "operator-year-close-attest" if {
 # risk").
 allowed_reasons contains "service-ledger-post" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-services"
-	machine_grant_ok
+	machine_named("service-account-openbank-services")
 	input.action == "ledger.create"
 }
 
@@ -197,8 +195,7 @@ allowed_reasons contains "service-ledger-post" if {
 # (ledger_rest_ext_test.rego: test_other_role_api_service_account_may_not_create).
 allowed_reasons contains "service-interest-ledger-post" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-interest"
-	machine_grant_ok
+	machine_named("service-account-openbank-interest")
 	input.action == "ledger.create"
 }
 
@@ -209,15 +206,13 @@ allowed_reasons contains "service-interest-ledger-post" if {
 #   clearing-service (ClearingLedgerRestClient, named oidc-client `m2m`): ADR-0281 net settlement
 allowed_reasons contains "service-lending-ledger-post" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-lending"
-	machine_grant_ok
+	machine_named("service-account-openbank-lending")
 	input.action == "ledger.create"
 }
 
 allowed_reasons contains "service-clearing-ledger-post" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-clearing"
-	machine_grant_ok
+	machine_named("service-account-openbank-clearing")
 	input.action == "ledger.create"
 }
 
@@ -231,15 +226,13 @@ allowed_reasons contains "service-clearing-ledger-post" if {
 #     already-posted check) -> ledger.create + ledger.read. Never reverse.
 allowed_reasons contains "service-transaction-ledger-write" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-transaction"
-	machine_grant_ok
+	machine_named("service-account-openbank-transaction")
 	input.action in {"ledger.create", "ledger.reverse"}
 }
 
 allowed_reasons contains "service-settlement-ledger-post" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-settlement"
-	machine_grant_ok
+	machine_named("service-account-openbank-settlement")
 	input.action in {"ledger.create", "ledger.read"}
 }
 
@@ -249,8 +242,7 @@ allowed_reasons contains "service-settlement-ledger-post" if {
 # (idempotency key treasury:<dealId>:reversed), so it never needs ledger.reverse.
 allowed_reasons contains "service-treasury-ledger-post" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-treasury"
-	machine_grant_ok
+	machine_named("service-account-openbank-treasury")
 	input.action == "ledger.create"
 }
 
@@ -260,8 +252,7 @@ allowed_reasons contains "service-treasury-ledger-post" if {
 # never posts a reconciling entry.
 allowed_reasons contains "service-treasury-ledger-read" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-treasury"
-	machine_grant_ok
+	machine_named("service-account-openbank-treasury")
 	input.action in {"ledger.list", "ledger.read"}
 }
 
@@ -276,8 +267,7 @@ allowed_reasons contains "service-treasury-ledger-read" if {
 # PR "Residual risk").
 allowed_reasons contains "service-ledger-reverse" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-services"
-	machine_grant_ok
+	machine_named("service-account-openbank-services")
 	input.action == "ledger.reverse"
 }
 
@@ -288,7 +278,6 @@ allowed_reasons contains "service-ledger-reverse" if {
 # un-mapped SERVICE call to either 403s, by design (deny-by-default, no rule added).
 
 prohibited if {
-	input.principal.id == "service-account-openbank-edge"
-	machine_grant_ok
+	machine_named("service-account-openbank-edge")
     input.action in {"ledger.create", "ledger.reverse", "ledger.trigger", "ledger.replay", "ledger.approve", "ledger.close.draft"}
 }

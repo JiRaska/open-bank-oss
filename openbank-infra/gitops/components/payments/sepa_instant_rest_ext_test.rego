@@ -20,7 +20,7 @@ rules_mock := {
 	"shared_m2m_write_prohibition": {"reasons": []},
 }
 
-sa(name) := {"service_account": true, "type": "HUMAN", "id": sprintf("service-account-openbank-%v", [name]), "roles": ["ROLE_API"]}
+sa(name) := {"service_account": true, "client_id": sprintf("openbank-%v", [name]), "type": "HUMAN", "id": sprintf("service-account-openbank-%v", [name]), "roles": ["ROLE_API"]}
 
 all_actions := {"sctInstPayment.create", "sctInstPayment.read", "sctInstPayment.list", "sctInstPayment.recall"}
 

@@ -177,7 +177,6 @@ allowed_reasons contains "dispute-staff-write" if {
 # (ROLE_API only), and this rule is that principal's whole grant here: the read verbs, never a write.
 allowed_reasons contains "service-agent-dispute-read" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-agent"
-	machine_grant_ok
+	machine_named("service-account-openbank-agent")
 	input.action in {"dispute.list", "dispute.read"}
 }

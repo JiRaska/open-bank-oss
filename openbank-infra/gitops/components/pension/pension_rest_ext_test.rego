@@ -10,14 +10,14 @@ pension_edge := "service-account-openbank-edge"
 
 test_edge_may_create_a_contract if {
 	rest.allow with input as {
-		"principal": {"service_account": true, "type": "HUMAN", "id": pension_edge, "roles": ["ROLE_API"]},
+		"principal": {"service_account": true, "client_id": "openbank-edge", "type": "HUMAN", "id": pension_edge, "roles": ["ROLE_API"]},
 		"action": "pension.contract.create",
 	}
 }
 
 test_edge_may_terminate if {
 	rest.allow with input as {
-		"principal": {"service_account": true, "type": "HUMAN", "id": pension_edge, "roles": ["ROLE_API"]},
+		"principal": {"service_account": true, "client_id": "openbank-edge", "type": "HUMAN", "id": pension_edge, "roles": ["ROLE_API"]},
 		"action": "pension.contract.terminate",
 	}
 }
@@ -45,7 +45,7 @@ test_operator_may_not_change_strategy if {
 
 test_other_service_account_may_not_create if {
 	not rest.allow with input as {
-		"principal": {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR", "ROLE_API"]},
+		"principal": {"service_account": true, "client_id": "openbank-services", "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR", "ROLE_API"]},
 		"action": "pension.contract.create",
 	}
 }

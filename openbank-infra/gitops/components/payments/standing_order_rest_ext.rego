@@ -66,7 +66,6 @@ allowed_reasons contains "operator-standing-order-pause" if {
 # StandingOrderResource enforces the party match. OPA grants the action class only.
 allowed_reasons contains "m2m-standing-order-pause" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-edge"
-	machine_grant_ok
+	machine_named("service-account-openbank-edge")
 	input.action == "standingOrder.pause"
 }

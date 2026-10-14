@@ -50,8 +50,7 @@ allowed_reasons contains "operator-kyb-review" if {
 # edge principal, which has no route for them.
 allowed_reasons contains "edge-service-kyb" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-edge"
-	machine_grant_ok
+	machine_named("service-account-openbank-edge")
 	input.action in {
 		"kyb.lookup",
 		"kyb.case.start",

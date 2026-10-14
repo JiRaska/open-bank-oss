@@ -38,7 +38,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-ledger-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "bc38dbd615cf9dbb"
+        openbank.tech/policy-checksum: "ca2574dbe65f0c52"
     spec:
       securityContext:
         runAsNonRoot: true

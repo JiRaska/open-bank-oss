@@ -30,6 +30,7 @@ test_anacredit_create_denied_for_shared_service_account if {
 	count(rest.allowed_reasons) == 0 with input as {
 		"principal": {
 			"service_account": true,
+			"client_id": "openbank-services",
 			"type": "HUMAN",
 			"id": "service-account-openbank-services",
 			"roles": ["ROLE_OPERATOR", "ROLE_ADMIN"],
@@ -44,6 +45,7 @@ test_anacredit_create_denied_for_edge_service_account if {
 	count(rest.allowed_reasons) == 0 with input as {
 		"principal": {
 			"service_account": true,
+			"client_id": "openbank-edge",
 			"type": "HUMAN",
 			"id": "service-account-openbank-edge",
 			"roles": ["ROLE_OPERATOR"],

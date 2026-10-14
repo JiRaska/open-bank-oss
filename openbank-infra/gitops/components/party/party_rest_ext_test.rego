@@ -10,11 +10,11 @@ package openbank.rest
 
 import rego.v1
 
-kyb := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-kyb", "roles": ["ROLE_API"]}
+kyb := {"service_account": true, "client_id": "openbank-kyb", "type": "HUMAN", "id": "service-account-openbank-kyb", "roles": ["ROLE_API"]}
 
-other_api_sa := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-mcp-service", "roles": ["ROLE_API"]}
+other_api_sa := {"service_account": true, "client_id": "openbank-mcp-service", "type": "HUMAN", "id": "service-account-openbank-mcp-service", "roles": ["ROLE_API"]}
 
-shared_api_only := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_API"]}
+shared_api_only := {"service_account": true, "client_id": "openbank-services", "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_API"]}
 
 kyc_analyst := {"service_account": false, "type": "HUMAN", "id": "u-kyc", "roles": ["ROLE_KYC"]}
 
@@ -70,15 +70,15 @@ test_viewer_may_not_create_party if {
 # --- customer-edge is also a named party creator for individual onboarding ---
 
 test_edge_creates_party if {
-	"service-edge-party-m2m" in allowed_reasons with input as {"principal": {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_API"]}, "action": "party.create"}
+	"service-edge-party-m2m" in allowed_reasons with input as {"principal": {"service_account": true, "client_id": "openbank-edge", "type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_API"]}, "action": "party.create"}
 }
 
 test_edge_keeps_consent_update if {
-	"service-edge-party-m2m" in allowed_reasons with input as {"principal": {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_API"]}, "action": "party.consent.update"}
+	"service-edge-party-m2m" in allowed_reasons with input as {"principal": {"service_account": true, "client_id": "openbank-edge", "type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_API"]}, "action": "party.consent.update"}
 }
 
 # #10486 batch 8
-b8deleg_sa(id) := {"service_account": true, "type": "HUMAN", "id": id, "roles": ["ROLE_API"]}
+b8deleg_sa(id) := {"service_account": true, "client_id": trim_prefix(id, "service-account-"), "type": "HUMAN", "id": id, "roles": ["ROLE_API"]}
 
 test_b8deleg_own_identity_reads if {
 	every action in {"party.mandate.read"} {

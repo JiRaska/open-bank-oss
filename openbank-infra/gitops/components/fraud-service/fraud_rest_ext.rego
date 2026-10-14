@@ -62,8 +62,7 @@ allowed_reasons contains "operator-fraud-write" if {
 # service sharing the client would also match this rule for fraud.score.
 allowed_reasons contains "service-fraud-scoring" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-services"
-	machine_grant_ok
+	machine_named("service-account-openbank-services")
 	input.action == "fraud.score"
 }
 
@@ -76,7 +75,6 @@ allowed_reasons contains "service-fraud-scoring" if {
 # legitimate scoring caller (service-fraud-scoring above) — interest (#3698) could
 # prohibit every service-account because no M2M writer exists there; fraud cannot.
 prohibited if {
-	input.principal.id == "service-account-openbank-edge"
-	machine_grant_ok
+	machine_named("service-account-openbank-edge")
 	input.action == "fraud.score"
 }

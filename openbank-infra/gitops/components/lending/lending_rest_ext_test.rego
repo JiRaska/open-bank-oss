@@ -13,9 +13,9 @@ import data.openbank.rest
 
 operator := {"service_account": false, "type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
 
-edge := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]}
+edge := {"service_account": true, "client_id": "openbank-edge", "type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]}
 
-shared := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
+shared := {"service_account": true, "client_id": "openbank-services", "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
 
 # The matrix grants ROLE_OPERATOR eight lending writes (+ reads) — this is what matrix-allows
 # re-admits to the edge without the veto. Shape mirrors
@@ -154,9 +154,9 @@ test_edge_does_not_inherit_the_eligibility_rule if {
 
 # --- ADR-0314 D4: the risk engine's loan-book read ---
 
-risk_engine := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_API"]}
+risk_engine := {"service_account": true, "client_id": "openbank-services", "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_API"]}
 
-other_api_client := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-interest", "roles": ["ROLE_API"]}
+other_api_client := {"service_account": true, "client_id": "openbank-interest", "type": "HUMAN", "id": "service-account-openbank-interest", "roles": ["ROLE_API"]}
 
 credit_risk := {"service_account": false, "type": "HUMAN", "id": "u-cr", "roles": ["ROLE_CREDIT_RISK"]}
 
@@ -189,7 +189,7 @@ test_edge_denied_loan_book if {
 
 admin := {"service_account": false, "type": "HUMAN", "id": "u-admin", "roles": ["ROLE_ADMIN"]}
 
-shared_admin := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_ADMIN", "ROLE_OPERATOR"]}
+shared_admin := {"service_account": true, "client_id": "openbank-services", "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_ADMIN", "ROLE_OPERATOR"]}
 
 backfill_actions := [
 	"lending.ledgerBackfill.read",
@@ -252,7 +252,7 @@ test_finance_may_run_every_backfill_action if {
 test_service_account_with_finance_role_denied_every_backfill_action if {
 	every action in backfill_actions {
 		not rest.allow with input as {
-			"principal": {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_FINANCE"]},
+			"principal": {"service_account": true, "client_id": "openbank-services", "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_FINANCE"]},
 			"action": action,
 		}
 			with data.rules as rules_mock

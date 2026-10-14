@@ -10,7 +10,7 @@ package openbank.rest_test
 import data.openbank.rest
 import rego.v1
 
-operator := {"service_account": true, "type": "HUMAN", "roles": ["ROLE_OPERATOR"], "id": "service-account-openbank-services"}
+operator := {"service_account": true, "client_id": "openbank-services", "type": "HUMAN", "roles": ["ROLE_OPERATOR"], "id": "service-account-openbank-services"}
 
 admin := {"service_account": false, "type": "HUMAN", "roles": ["ROLE_ADMIN"], "id": "admin@openbank.local"}
 

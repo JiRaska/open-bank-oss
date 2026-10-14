@@ -41,8 +41,7 @@ allowed_reasons contains "operator-wealth-read" if {
 # edge the day it is written.
 allowed_reasons contains "edge-service-wealth" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-edge"
-	machine_grant_ok
+	machine_named("service-account-openbank-edge")
 	input.action in {
 		"wealth.holding.read",
 		"wealth.holding.declare",

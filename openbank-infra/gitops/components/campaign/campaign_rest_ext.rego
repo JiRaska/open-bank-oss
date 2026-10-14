@@ -63,7 +63,6 @@ allowed_reasons contains "campaign-auditor-read" if {
 # granting the edge the latter would expose the entire operator campaign plane.
 allowed_reasons contains "edge-campaign-interaction-validation" if {
     input.principal.type == "HUMAN"
-    input.principal.id == "service-account-openbank-edge"
-    machine_grant_ok
+    machine_named("service-account-openbank-edge")
     input.action == "campaign.interaction.validate"
 }

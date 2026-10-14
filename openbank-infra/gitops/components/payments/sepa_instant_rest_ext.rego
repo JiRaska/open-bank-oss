@@ -59,7 +59,6 @@ allowed_reasons contains "operator-sepa-instant-write" if {
 # (sepa_instant_rest_ext_test.rego).
 allowed_reasons contains "service-agent-sct-inst-read" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-agent"
-	machine_grant_ok
+	machine_named("service-account-openbank-agent")
 	input.action in {"sctInstPayment.list", "sctInstPayment.read"}
 }

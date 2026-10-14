@@ -33,6 +33,7 @@ tenant_a_quoter := {
 
 service_account := {
 	"service_account": true,
+	"client_id": "openbank-services",
 	"type": "HUMAN",
 	"id": "service-account-openbank-services",
 	"attributes": {"tenant": "tenant-A", "scopes": ["pricing.deal.read"]},

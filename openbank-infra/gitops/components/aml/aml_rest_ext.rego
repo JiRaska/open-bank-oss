@@ -78,13 +78,13 @@ allowed_reasons contains "operator-aml-case-create" if {
 # enforce flip will rely on.
 allowed_reasons contains "service-aml-case-create-m2m" if {
 	input.principal.type == "HUMAN"
-	input.principal.id in {
+	some named_client in {
 		"service-account-openbank-domestic-payment",
 		"service-account-openbank-sepa-payment",
 		"service-account-openbank-sepa-instant",
 		"service-account-openbank-fx",
 	}
-	machine_grant_ok
+	machine_named(named_client)
 	input.action == "amlCase.create"
 }
 
@@ -93,7 +93,6 @@ allowed_reasons contains "service-aml-case-create-m2m" if {
 # (ROLE_API only), and this rule is that principal's whole grant here: the read verbs, never a write.
 allowed_reasons contains "service-agent-aml-case-read" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-agent"
-	machine_grant_ok
+	machine_named("service-account-openbank-agent")
 	input.action in {"amlCase.list", "amlCase.read"}
 }

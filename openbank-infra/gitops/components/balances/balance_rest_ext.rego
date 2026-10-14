@@ -149,8 +149,7 @@ allowed_reasons contains "viewer-balance-read" if {
 # this PR.
 allowed_reasons contains "service-balance-m2m" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-services"
-	machine_grant_ok
+	machine_named("service-account-openbank-services")
 	input.action in {
 		"balance.read",
 		"balance.hold",
@@ -182,15 +181,13 @@ allowed_reasons contains "service-balance-m2m" if {
 #     reserves cover -> balance.hold. Never directly release a hold on an unknown journal outcome.
 allowed_reasons contains "service-transaction-balance-hold" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-transaction"
-	machine_grant_ok
+	machine_named("service-account-openbank-transaction")
 	input.action in {"balance.hold", "balance.holdRelease"}
 }
 
 allowed_reasons contains "service-settlement-balance-move" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-settlement"
-	machine_grant_ok
+	machine_named("service-account-openbank-settlement")
 	input.action in {"balance.debit", "balance.credit"}
 }
 
@@ -198,14 +195,12 @@ allowed_reasons contains "service-settlement-balance-move" if {
 # projection consumes that reservation; settlement cannot directly release it after a timeout.
 allowed_reasons contains "service-settlement-balance-cover" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-settlement"
-	machine_grant_ok
+	machine_named("service-account-openbank-settlement")
 	input.action == "balance.hold"
 }
 
 prohibited if {
-	input.principal.id == "service-account-openbank-edge"
-	machine_grant_ok
+	machine_named("service-account-openbank-edge")
 	input.action in {
 		"balance.hold",
 		"balance.holdRelease",

@@ -38,8 +38,7 @@ allowed_reasons contains "operator-pension-read" if {
 # prefix, so a future provider-side action is not reachable from the edge the day it is written.
 allowed_reasons contains "edge-service-pension" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-edge"
-	machine_grant_ok
+	machine_named("service-account-openbank-edge")
 	input.action in {
 		"pension.contract.read",
 		"pension.contract.create",

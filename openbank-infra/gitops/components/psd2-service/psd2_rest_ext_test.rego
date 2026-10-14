@@ -29,7 +29,7 @@ viewer := {"service_account": false, "type": "HUMAN", "id": "u-view", "roles": [
 
 # The shared M2M identity — classified HUMAN, carries ROLE_OPERATOR. No such caller exists for
 # psd2-service today; these are regression guards that none is accidentally admitted.
-services_m2m := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
+services_m2m := {"service_account": true, "client_id": "openbank-services", "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
 
 # --- the TPP plane: all five actions the 21 annotated endpoints use ---
 

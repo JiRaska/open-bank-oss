@@ -76,8 +76,7 @@ allowed_reasons contains "operator-account-write" if {
 # (a real @RegisterRestClient / client method + call site), not speculatively.
 allowed_reasons contains "service-edge-account-m2m" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-edge"
-	machine_grant_ok
+	machine_named("service-account-openbank-edge")
 	input.action in {
 		"account.create",
 		"account.update",
@@ -86,8 +85,7 @@ allowed_reasons contains "service-edge-account-m2m" if {
 
 allowed_reasons contains "service-backend-account-m2m" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-services"
-	machine_grant_ok
+	machine_named("service-account-openbank-services")
 	input.action == "account.read"
 }
 
@@ -101,8 +99,7 @@ allowed_reasons contains "service-backend-account-m2m" if {
 # service-edge-account-m2m. Reads ({read,list,search}) are out of scope here — the M2M read
 # over-grant is tracked fleet-wide in #3734.
 prohibited if {
-	input.principal.id == "service-account-openbank-edge"
-	machine_grant_ok
+	machine_named("service-account-openbank-edge")
 	input.action in {
 		"account.close",
 		"account.freeze",
@@ -128,43 +125,37 @@ prohibited if {
 # active book), so each grant is a real PII read and each identity is named individually.
 allowed_reasons contains "service-analytics-sink-account-read" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-analytics-sink"
-	machine_grant_ok
+	machine_named("service-account-openbank-analytics-sink")
 	input.action == "account.list"
 }
 
 allowed_reasons contains "service-billing-account-read" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-billing"
-	machine_grant_ok
+	machine_named("service-account-openbank-billing")
 	input.action in {"account.list", "account.read"}
 }
 
 allowed_reasons contains "service-interest-account-read" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-interest"
-	machine_grant_ok
+	machine_named("service-account-openbank-interest")
 	input.action in {"account.list", "account.read"}
 }
 
 allowed_reasons contains "service-document-account-read" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-document"
-	machine_grant_ok
+	machine_named("service-account-openbank-document")
 	input.action == "account.list"
 }
 
 allowed_reasons contains "service-lending-account-read" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-lending"
-	machine_grant_ok
+	machine_named("service-account-openbank-lending")
 	input.action == "account.list"
 }
 
 allowed_reasons contains "service-party-account-read" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-party"
-	machine_grant_ok
+	machine_named("service-account-openbank-party")
 	input.action == "account.list"
 }
 
@@ -176,9 +167,10 @@ allowed_reasons contains "service-party-account-read" if {
 # need is added to this set with its own evidence, never by granting it account.read.
 allowed_reasons contains "service-account-verify-ownership" if {
 	input.principal.type == "HUMAN"
-	input.principal.id in {
+	some caller in {
 		"service-account-openbank-pension", # payout / own-account checks (#12385)
 		"service-account-openbank-sdd", # debtor-party check for a scoped mandate initiator (#12387)
 	}
+	machine_named(caller)
 	input.action == "account.verifyOwnership"
 }

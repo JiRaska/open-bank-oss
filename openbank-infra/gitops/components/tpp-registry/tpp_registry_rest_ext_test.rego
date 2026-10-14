@@ -19,7 +19,7 @@ admin := {"service_account": false, "type": "HUMAN", "id": "u-admin", "roles": [
 viewer := {"service_account": false, "type": "HUMAN", "id": "u-view", "roles": ["ROLE_VIEWER"]}
 
 # An M2M identity — classified HUMAN, carries ROLE_OPERATOR — must be kept out by the exclusion.
-service_m2m := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-psd2", "roles": ["ROLE_OPERATOR"]}
+service_m2m := {"service_account": true, "client_id": "openbank-psd2", "type": "HUMAN", "id": "service-account-openbank-psd2", "roles": ["ROLE_OPERATOR"]}
 
 # --- tppRegistry.blacklist: operator/admin allowed ---
 

@@ -94,7 +94,6 @@ allowed_reasons contains "customer-eudi-request" if {
 #   delegation-service PidServiceRestClient.getParty GET /parties/{id} party.read
 allowed_reasons contains "service-delegation-party-read" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-delegation"
-	machine_grant_ok
+	machine_named("service-account-openbank-delegation")
 	input.action == "party.read"
 }

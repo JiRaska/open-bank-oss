@@ -30,6 +30,7 @@ test_operator_vop_verify_denied_for_shared_service_account if {
 	not "operator-vop-verify" in rest.allowed_reasons with input as {
 		"principal": {
 			"service_account": true,
+			"client_id": "openbank-services",
 			"type": "HUMAN",
 			"id": "service-account-openbank-services",
 			"roles": ["ROLE_OPERATOR"],
@@ -44,6 +45,7 @@ test_operator_vop_verify_denied_for_edge_service_account if {
 	not "operator-vop-verify" in rest.allowed_reasons with input as {
 		"principal": {
 			"service_account": true,
+			"client_id": "openbank-edge",
 			"type": "HUMAN",
 			"id": "service-account-openbank-edge",
 			"roles": ["ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS", "ROLE_VIEWER"],
@@ -59,6 +61,7 @@ test_service_account_keeps_m2m_reason_only if {
 	rest.allowed_reasons == {"m2m-vop-verify"} with input as {
 		"principal": {
 			"service_account": true,
+			"client_id": "openbank-sepa-payment",
 			"type": "HUMAN",
 			"id": "service-account-openbank-sepa-payment",
 			"roles": ["ROLE_OPERATOR"],
@@ -144,6 +147,7 @@ test_other_vop_action_not_granted_for_service_account if {
 	count(rest.allowed_reasons) == 0 with input as {
 		"principal": {
 			"service_account": true,
+			"client_id": "openbank-services",
 			"type": "HUMAN",
 			"id": "service-account-openbank-services",
 			"roles": ["ROLE_OPERATOR"],

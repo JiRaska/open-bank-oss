@@ -14,6 +14,7 @@ import data.openbank.rest
 
 disclosure_exporter := {
 	"service_account": true,
+	"client_id": "openbank-delegation-disclosure",
 	"type": "HUMAN",
 	"id": "service-account-openbank-delegation-disclosure",
 	"roles": ["ROLE_API"],
@@ -21,6 +22,7 @@ disclosure_exporter := {
 
 shared_backend := {
 	"service_account": true,
+	"client_id": "openbank-services",
 	"type": "HUMAN",
 	"id": "service-account-openbank-services",
 	"roles": ["ROLE_OPERATOR", "ROLE_API"],
@@ -28,6 +30,7 @@ shared_backend := {
 
 customer_edge := {
 	"service_account": true,
+	"client_id": "openbank-edge",
 	"type": "HUMAN",
 	"id": "service-account-openbank-edge",
 	"roles": ["ROLE_OPERATOR"],
@@ -74,9 +77,9 @@ rules_mock := {
 }
 
 # The deployed realm gives the shared client ROLE_API only — the case this rule exists for.
-services_m2m := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_API"]}
+services_m2m := {"service_account": true, "client_id": "openbank-services", "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_API"]}
 
-edge := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]}
+edge := {"service_account": true, "client_id": "openbank-edge", "type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]}
 
 customer := {"service_account": false, "type": "HUMAN", "id": "11111111-1111-4111-8111-111111111111", "roles": ["ROLE_CUSTOMER"]}
 
@@ -120,7 +123,7 @@ test_edge_still_reads_document_content if {
 }
 
 test_other_service_account_denied if {
-	other := {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-reporting", "roles": ["ROLE_API"]}
+	other := {"service_account": true, "client_id": "openbank-reporting", "type": "HUMAN", "id": "service-account-openbank-reporting", "roles": ["ROLE_API"]}
 	not decision(other, "document.business-agreement.ensure").allow
 	not decision(other, "document.business-agreement.read").allow
 }

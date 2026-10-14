@@ -28,7 +28,7 @@ rules_mock := {
 	"shared_m2m_write_prohibition": {"reasons": []},
 }
 
-sa(name) := {"service_account": true, "type": "HUMAN", "id": sprintf("service-account-openbank-%v", [name]), "roles": ["ROLE_API"]}
+sa(name) := {"service_account": true, "client_id": sprintf("openbank-%v", [name]), "type": "HUMAN", "id": sprintf("service-account-openbank-%v", [name]), "roles": ["ROLE_API"]}
 
 # caller -> (reason, actions it may perform). The ONLY grants the batch-1/2 identities hold here.
 grants := {
@@ -109,7 +109,7 @@ test_operator_path_unchanged if {
 	decision := rest.allow with input as {"principal": {"service_account": false, "type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}, "action": "transaction.create"}
 		with data.rules as rules_mock
 	decision.allow == true
-	"operator-transaction-write" in rest.allowed_reasons with input as {"principal": {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}, "action": "transaction.create"}
+	"operator-transaction-write" in rest.allowed_reasons with input as {"principal": {"service_account": true, "client_id": "openbank-services", "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}, "action": "transaction.create"}
 		with data.rules as rules_mock
 }
 

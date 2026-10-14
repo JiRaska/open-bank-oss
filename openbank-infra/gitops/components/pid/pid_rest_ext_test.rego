@@ -31,6 +31,7 @@ test_party_status_denied_for_shared_service_account if {
 	not "operator-party-status" in rest.allowed_reasons with input as {
 		"principal": {
 			"service_account": true,
+			"client_id": "openbank-services",
 			"type": "HUMAN",
 			"id": "service-account-openbank-services",
 			"roles": ["ROLE_OPERATOR", "ROLE_ADMIN"],
@@ -45,6 +46,7 @@ test_party_status_denied_for_edge_service_account if {
 	not "operator-party-status" in rest.allowed_reasons with input as {
 		"principal": {
 			"service_account": true,
+			"client_id": "openbank-edge",
 			"type": "HUMAN",
 			"id": "service-account-openbank-edge",
 			"roles": ["ROLE_OPERATOR"],
@@ -143,7 +145,7 @@ test_pid_ext_denied_for_ai_agent if {
 
 # --- #10486 batch 6: party.read by named machine identity (ROLE_API only) ---
 
-b6_pid_sa(name) := {"service_account": true, "type": "HUMAN", "id": sprintf("service-account-openbank-%v", [name]), "roles": ["ROLE_API"]}
+b6_pid_sa(name) := {"service_account": true, "client_id": sprintf("openbank-%v", [name]), "type": "HUMAN", "id": sprintf("service-account-openbank-%v", [name]), "roles": ["ROLE_API"]}
 
 b6_pid_rules := {
 	"authz": {"role_action_matrix": {}},
