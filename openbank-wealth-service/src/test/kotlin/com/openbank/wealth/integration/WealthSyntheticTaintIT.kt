@@ -12,6 +12,8 @@ import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.RestAssured.given
 import io.restassured.specification.RequestSpecification
 import io.smallrye.reactive.messaging.memory.InMemoryConnector
@@ -55,6 +57,13 @@ class WealthSyntheticTaintIT {
 
     @Test
     @TestSecurity(user = CANARY, roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-synthetic-canary"),
+            Claim(key = "preferred_username", value = CANARY),
+            Claim(key = "sub", value = "synthetic-canary-subject"),
+        ],
+    )
     fun `a trusted canary's holding is synthetic on the row and on every event, revalue included`() {
         val id = declare(given().header(SyntheticTaint.KAFKA_HEADER, "true"))
 
@@ -74,6 +83,13 @@ class WealthSyntheticTaintIT {
 
     @Test
     @TestSecurity(user = CANARY, roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-synthetic-canary"),
+            Claim(key = "preferred_username", value = CANARY),
+            Claim(key = "sub", value = "synthetic-canary-subject"),
+        ],
+    )
     fun `a trusted principal without the header declares a real holding`() {
         val id = declare(given())
 

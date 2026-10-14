@@ -8,6 +8,7 @@ import com.openbank.lending.application.port.out.LoanApplicationRepository
 import com.openbank.lending.domain.model.LoanApplication
 import com.openbank.lending.infrastructure.intake.CustomerIntakeConfig
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.authz.ServiceAccountIdentity
 import com.openbank.libs.lending.origination.CreditJourneyProjection
 import com.openbank.libs.lending.origination.CreditJourneyView
 import com.openbank.libs.lending.origination.CreditRequirement
@@ -101,8 +102,7 @@ class CustomerCreditJourneyResource(
      */
     private fun callerIsPermitted(): Boolean {
         if (!config.enabled) return false
-        val permitted = config.callerPrincipal.orElse("")
-        return permitted.isNotBlank() && identity.principal?.name == permitted
+        return ServiceAccountIdentity.isPrincipal(identity, config.callerPrincipal.orElse(""))
     }
 
     /**
