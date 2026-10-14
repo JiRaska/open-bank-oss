@@ -252,11 +252,11 @@ jobs:
           # 62% while PIT displays 63%.
           SCORE=$(( (DETECTED * 100 + TOTAL / 2) / TOTAL ))
           echo "Mutation score: ${SCORE}% (${DETECTED}/${TOTAL} detected)"
-          if [ "$SCORE" -lt "63" ]; then
-            echo "::error::Mutation score ${SCORE}% is below the 63% enforced threshold for the authz decision path"
+          if [ "$SCORE" -lt "70" ]; then
+            echo "::error::Mutation score ${SCORE}% is below the 70% enforced threshold for the authz decision path"
             exit 1
           fi
-          echo "::notice::Mutation score ${SCORE}% — OK (enforced floor 63%)"
+          echo "::notice::Mutation score ${SCORE}% — OK (enforced floor 70%)"
 
   # Advisory mutation testing over the shared libs modules (ADR-0063 gap): money, idempotency,
   # audit and outbox logic lives in openbank-libs-domain / openbank-libs-runtime and previously
