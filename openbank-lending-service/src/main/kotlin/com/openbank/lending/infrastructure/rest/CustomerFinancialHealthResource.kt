@@ -11,6 +11,7 @@ import com.openbank.lending.domain.model.LoanStatus
 import com.openbank.lending.infrastructure.client.CreditProfileClient
 import com.openbank.lending.infrastructure.intake.CustomerIntakeConfig
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.authz.ServiceAccountIdentity
 import com.openbank.libs.lending.FinancialHealth
 import com.openbank.libs.lending.FinancialHealthInputs
 import com.openbank.libs.lending.HealthPillar
@@ -125,8 +126,7 @@ class CustomerFinancialHealthResource(
 
     private fun callerIsPermitted(): Boolean {
         if (!config.enabled) return false
-        val permitted = config.callerPrincipal.orElse("")
-        return permitted.isNotBlank() && identity.principal?.name == permitted
+        return ServiceAccountIdentity.isPrincipal(identity, config.callerPrincipal.orElse(""))
     }
 
     private fun scopeOf(partyHeader: String?): UUID? =

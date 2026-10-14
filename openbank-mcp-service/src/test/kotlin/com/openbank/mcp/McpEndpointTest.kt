@@ -242,6 +242,27 @@ class McpEndpointTest {
         }
     }
 
+    @Test
+    fun `an OBO token from a noninteractive or machine client cannot receive staff policy grants`() {
+        val candidates = listOf(
+            staffClaims + ("azp" to "openbank-edge"),
+            staffClaims + ("client_id" to "openbank-edge"),
+            staffClaims + ("preferred_username" to "service-account-openbank-admin-ui"),
+            staffClaims - "preferred_username",
+        )
+        candidates.forEach { claims ->
+            val pdp = RecordingPdp()
+            val response = body(
+                endpoint(pdp, jwt = TestJsonWebToken(claims), oboEnabled = true).handle(
+                    rpc("tools/call", mapOf("name" to "list_accounts", "arguments" to emptyMap<String, Any>())),
+                ).entity,
+            )
+            assertThat(response.path("result").path("content").first().path("text").asText())
+                .isEqualTo("Authorization unavailable")
+            assertThat(pdp.queries).isEmpty()
+        }
+    }
+
     private val staffSessionId = "3f2a9c41-7b5e-4c8d-9e0f-1a2b3c4d5e6f"
 
     /** Keycloak's `sub`: an immutable UUID, and what a session is keyed on (#3182). */
