@@ -89,6 +89,26 @@ assert "run.skill denied when skill not chartered" \
 assert "unknown agent denied by default" \
 	'{"agent":"ghost","tool":"read.catalog","resource":null}' false
 
+# AP2 stays closed until a separately reviewed OAuth agent charter is onboarded. Assert the
+# REAL projected data has no charter pattern that could grant verify.mandate with ANY resource
+# or attributes. Test fixtures may allow it to exercise the verifier, but the published policy
+# must not. This structural check covers exact and glob grants without guessing PDP inputs.
+ap2_query='count([a.id | some a in data.agents.agents; some pattern in a.tools.allow; is_string(pattern); glob.match(pattern, ["."], "verify.mandate")])'
+# Prove the assertion can fail: a synthetic charter with a wildcard grant must count as one.
+ap2_positive="$(opa eval -b "$STAGE" --format=raw \
+	"$ap2_query with data.agents as {\"agents\":[{\"id\":\"future\",\"tools\":{\"allow\":[\"verify.*\"],\"deny\":[]}}],\"tool_tiers\":{\"deny\":[]}}" 2>/dev/null || true)"
+if [ "$ap2_positive" != 1 ]; then
+	echo "  FAIL AP2 charter-grant assertion self-test: expected 1, got ${ap2_positive:-<undefined>}"
+	fail=1
+fi
+ap2_grants="$(opa eval -b "$STAGE" --format=raw "$ap2_query" 2>/dev/null || true)"
+if [ "$ap2_grants" = 0 ]; then
+	echo "  ok   AP2 has no provisioned verify.mandate agent"
+else
+	echo "  FAIL AP2 pre-onboarding closure: expected 0 charter grants, got ${ap2_grants:-<undefined>}"
+	fail=1
+fi
+
 # REST PEP decision assertions against the REAL rules.yaml (ADR-0034 / issue #419). These would
 # all silently pass-as-undefined if rules.yaml were not staged into data.rules — the drift guard
 # that catches the latent "four_eyes never fires in prod" bug.
@@ -129,6 +149,11 @@ rassert "REST bridge forwards attributes: chartered run.skill granted via rest.a
 	allow.allow '{"principal":{"id":"agent:ledger-domain-engineer","type":"AI_AGENT","roles":[]},"action":"run.skill","resource":null,"attributes":{"skill":"ship-check"}}' true
 rassert "REST bridge forwards attributes: unchartered skill denied via rest.allow" \
 	allow.allow '{"principal":{"id":"agent:ledger-domain-engineer","type":"AI_AGENT","roles":[]},"action":"run.skill","resource":null,"attributes":{"skill":"deploy-prod"}}' false
+
+rassert "AP2 retired demo agent is denied by the real charter policy" \
+	allow.allow '{"principal":{"id":"agent:ap2-anonymous","type":"AI_AGENT","roles":[]},"action":"verify.mandate","resource":null,"attributes":{"mandateKind":"PAYMENT"}}' false
+rassert "AP2 unprovisioned agent is denied by the real charter policy" \
+	allow.allow '{"principal":{"id":"agent:unprovisioned","type":"AI_AGENT","roles":[]},"action":"verify.mandate","resource":null,"attributes":{"mandateKind":"PAYMENT"}}' false
 
 # ADR-0315 D10 (#10896): the treasury-dealing-assistant charter, through the REAL REST bridge. The
 # agent's only treasury grant is this charter (treasury_rest_ext.rego grants an agent nothing), so

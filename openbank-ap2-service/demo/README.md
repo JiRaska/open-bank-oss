@@ -8,6 +8,9 @@ presented payment; a **human-in-the-loop (HITL)** threshold decides auto-eligibl
 step-up. **No funds move** — the verifier returns *authorization evidence* only (ADR-0193):
 a valid verdict is an input to the SCA/payment decision, never a payment.
 
+The bank-owned endpoint is `POST /api/v2/ap2/verify`. The earlier unversioned
+`/ap2/verify` route is retired before any real agent onboarding.
+
 > Complements the MCP server (ADR-0181): **MCP = the agent talks to the bank; AP2 = the
 > agent pays *through* the bank.**
 
@@ -52,18 +55,20 @@ python3 ap2-mandate-demo.py --print-trust
 # 1) port-forward the live sandbox service (separate shell):
 kubectl port-forward -n platform svc/ap2-service 8151:8151
 
-# 2) run the demo:
+# 2) after a real agent is onboarded with a charter allowing verify.mandate, provide its
+#    audience-bound OAuth bearer token without writing it to a file:
 pip install cryptography            # if needed
-AP2_URL=http://localhost:8151 python3 ap2-mandate-demo.py
+AP2_BEARER_TOKEN="$AP2_BEARER_TOKEN" AP2_URL=http://localhost:8151 python3 ap2-mandate-demo.py
 
 # HITL threshold is configurable (minor units):
-HITL_THRESHOLD_MINOR=50000 AP2_URL=http://localhost:8151 python3 ap2-mandate-demo.py
+HITL_THRESHOLD_MINOR=50000 AP2_BEARER_TOKEN="$AP2_BEARER_TOKEN" AP2_URL=http://localhost:8151 python3 ap2-mandate-demo.py
 ```
 
-## Phase-1 caveat
+## Agent onboarding required
 
-Until the **OPA sidecar** is deployed (ADR-0193 §5 follow-up), every `/ap2/verify` call
-returns **HTTP 503 "authorization unavailable"** — the shared ADR-0034 PDP is unreachable
-and the surface **fails closed** (the intended posture for an agent-facing money-adjacent
-endpoint). Once the sidecar + `agents.yaml` charter land and the trust list is configured,
-the demo returns the verdicts in the table above.
+The phase-1 `ap2-anonymous` charter and `X-Agent-Id` acting-identity header are retired.
+There is currently no onboarded AP2 demo agent. The verifier requires an OAuth bearer token
+whose validated subject is `agent:<id>` and audience is `openbank-ap2-service`; the shared PDP
+also requires a separate charter for that exact agent with `verify.mandate` capability. The
+script exits before making requests when no token is supplied. An authenticated caller without
+a matching charter is denied; unavailable PDP also fails closed.

@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: tax-reporting-service
     app.kubernetes.io/part-of: tax-reporting
   annotations:
-    openbank.tech/policy-checksum: "70a29d5a085cab19"
+    openbank.tech/policy-checksum: "e479159893c7bde7"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1002,15 +1002,6 @@ data:
         - query.transaction.readonly
         - query.consent.readonly
         - propose.payment
-        deny:
-        - money.*
-        - gh.pr.*
-        - '*.write'
-        - secrets.read.raw
-    - id: ap2-anonymous
-      tools:
-        allow:
-        - verify.mandate
         deny:
         - money.*
         - gh.pr.*
