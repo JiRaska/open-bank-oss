@@ -19,6 +19,8 @@ Všechny endpointy vyžadují **Keycloak Bearer token** (realm `openbank`, RS256
 | `GET /domestic-payments` | `ROLE_VIEWER`, `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_PAYMENTS`, `ROLE_API` |
 | `PATCH /domestic-payments/{paymentId}/status` | `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_PAYMENTS` + `@Authorize(action="domesticPayment.transitionStatus")` (OPA, ADR-0034) |
 
+Při vytvoření platby následuje po kontrole role a OPA kontrola rozsahu iniciátora (ADR-0335 D5). Účet služby penzijního klienta se rozpozná pouze z ověřeného JWT s neprázdným subjektem, `azp` odpovídajícím tomuto klientovi a `preferred_username` odpovídajícím `service-account-<azp>`; smí odepisovat jen z nakonfigurovaného penzijního účtu. Účet služby edge klienta potřebuje pro obecný rozsah také `ROLE_OPERATOR`. Zaměstnanecký token získá obecný rozsah jen s povolenou rolí a ověřenými údaji interaktivního uživatele. Samotná role, uživatelské jméno podobné účtu služby ani neznámý strojový klient obecné vytvoření platby nepovolují.
+
 OIDC je vypnuté pouze v profilech `%dev` a `%test`.
 
 ## Idempotence
@@ -166,6 +168,15 @@ Sloupec `amount` zůstává `NUMERIC(20,6)`; služba jej načítá do kernel `Mo
 měny. Odpovědi, události `domestic.payment.*` i potvrzení platby proto nesou `100.50` tam, kde dříve
 ukazovaly škálu sloupce (`100.500000`) nebo zápis z požadavku (`100.5`). Hodnoty jsou číselně shodné;
 mění se jen textová podoba.
+
+## Ověření identity penzijního iniciátora platby (#12448)
+
+Penzijní volající získá oprávnění k vymezenému účtu plátce jen tehdy, když ověřený JWT patří
+servisnímu účtu klienta `openbank-pension`: obsahuje `sub`, jeho `azp` označuje tohoto klienta
+a `preferred_username` odpovídá `service-account-openbank-pension`. JWT předtím ověřuje
+Quarkus OIDC. Samotná shoda jména principalu toto oprávnění nezakládá. Chybějící nebo neplatná
+konfigurace účtu nepovolí žádnou platbu v tomto vymezeném rozsahu. Dosavadní rozhodování podle
+rolí personálu zůstává oddělené; běžný volající s `ROLE_API` tento rozsah nezíská.
 
 ## Události
 
