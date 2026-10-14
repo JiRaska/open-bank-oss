@@ -25,6 +25,13 @@ spec:
       releaseName: temporal
       values: |
         server:
+          # 1.31.0 (chart 1.2.0's default) never closes its cached internode gRPC connection to
+          # a peer that left the ring: after any pod churn the surviving matching pod redials the
+          # departed IP every 20 s, indefinitely ("network dial error ... i/o timeout", ~360/h on
+          # 2026-10-14). Fixed upstream in 1.31.1 ("Close stale gRPC connections in downstream
+          # client caches", temporalio/temporal#10601). Patch release: no schema change.
+          image:
+            tag: 1.31.4
           replicaCount: 1
           resources:
             requests:
