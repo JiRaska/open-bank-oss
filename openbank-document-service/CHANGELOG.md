@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.0.0](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.17.1...document-service-v1.0.0) (2026-10-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* **pension:** pension-service API moves to /api/v2; POST /api/v1/pension/contracts/{id}/activate and /early-termination are removed, and PUT .../strategy requires SCA.
+
+### Features
+
+* **pension:** final integration of follow-ups F1-F7 (ADR-0334 final integration) ([#12435](https://github.com/JiRaska/open-bank-oss/issues/12435)) ([1a7bd7e](https://github.com/JiRaska/open-bank-oss/commit/1a7bd7e31b28ed2c938abbb95cf4a73757c26eed))
+
 ## [0.17.1](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.17.0...document-service-v0.17.1) (2026-10-12)
 
 
