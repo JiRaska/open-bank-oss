@@ -7,6 +7,7 @@ import os
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parent
@@ -18,6 +19,11 @@ WORKFLOW = (SCRIPTS.parent / 'workflows/auto-deploy.yml').read_text()
 
 class PublicationTest(unittest.TestCase):
     def setUp(self):
+        # Gate runners provide a scratch index for the checkout; fixtures need their own.
+        clean_env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        isolated = patch.dict(os.environ, clean_env, clear=True)
+        isolated.start()
+        self.addCleanup(isolated.stop)
         self.tmp = tempfile.TemporaryDirectory()
         self.previous = Path.cwd()
         os.chdir(self.tmp.name)
@@ -35,7 +41,10 @@ class PublicationTest(unittest.TestCase):
         self.tip = self.commit()
 
     def git(self, *args):
-        return subprocess.check_output(['git', *args], stderr=subprocess.DEVNULL).decode().strip()
+        result = subprocess.run(['git', *args], capture_output=True, text=True, check=False)
+        if result.returncode:
+            raise RuntimeError(f'fixture git {args!r} failed: {result.stderr or result.stdout}')
+        return result.stdout.strip()
 
     def write(self, path, value):
         Path(path).parent.mkdir(parents=True, exist_ok=True)
