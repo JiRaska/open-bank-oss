@@ -296,6 +296,40 @@ class FundReportingCloseIT {
             Claim(key = "preferred_username", value = "reporter"),
         ],
     )
+    fun `missing close request body is rejected without rows`() {
+        val fundId = UUID.randomUUID()
+        seed(fundId, UUID.randomUUID(), LocalDate.parse("2026-09-30"))
+        given().header("Idempotency-Key", "missing-body").contentType("application/json")
+            .`when`().post("/api/v1/reporting/funds/$fundId/period-closes").then().statusCode(400)
+        assertThat(closeCounts(fundId)).containsExactly(0L, 0L)
+    }
+
+    @Test
+    @TestSecurity(user = "reporter", roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "iss", value = "https://issuer.test.invalid"),
+            Claim(key = "sub", value = "reporter"),
+            Claim(key = "preferred_username", value = "reporter"),
+        ],
+    )
+    fun `null close request body is rejected without rows`() {
+        val fundId = UUID.randomUUID()
+        seed(fundId, UUID.randomUUID(), LocalDate.parse("2026-09-30"))
+        given().header("Idempotency-Key", "null-body").contentType("application/json").body("null")
+            .`when`().post("/api/v1/reporting/funds/$fundId/period-closes").then().statusCode(400)
+        assertThat(closeCounts(fundId)).containsExactly(0L, 0L)
+    }
+
+    @Test
+    @TestSecurity(user = "reporter", roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "iss", value = "https://issuer.test.invalid"),
+            Claim(key = "sub", value = "reporter"),
+            Claim(key = "preferred_username", value = "reporter"),
+        ],
+    )
     fun `explicit close replays identical bytes and a correction creates a new revision`() {
         val fundId = UUID.randomUUID()
         val date = LocalDate.parse("2026-09-30")
